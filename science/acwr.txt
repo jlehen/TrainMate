@@ -1,7 +1,7 @@
 ACUTE:CHRONIC WORKLOAD RATIO (ACWR) GUIDELINES
 ==============================================
 
-The Acute:Chronic Workload Ratio (ACWR) is a model used to monitor an athlete's training load and
+The Acute:Chronic Workload Ratio (ACWR) is a model used to monitor an athlete's training load in endurance sports and
 predict injury risk. It compares the amount of training performed in the short term (acute
 workload) to the amount of training performed in the long term (chronic workload).
 

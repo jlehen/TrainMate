@@ -6,7 +6,7 @@ macrocycles, mesocycles, and microcycles.
 
 1. Macrocycle (The Goal Plan):
    - The overall timeline leading up to the target objective/race (typically 3 to 12 months).
-   - Structured into sequential phases: Base building, Build (specific prep), Peak/Taper, and
+   - Structured into sequential phases: Strength, Base building, Build (specific prep), Peak/Taper, and
      Race/Event phase.
    - TrainMate focuses on the *next chronological goal* for active scheduling.
 
