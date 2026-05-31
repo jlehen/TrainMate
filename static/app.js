@@ -339,6 +339,12 @@ async function fetchWorkouts() {
                 iconGlyph = "fa-dumbbell";
             } else if (w.sport_type === "running") {
                 iconClass += " running";
+            } else if (w.sport_type === "yoga") {
+                iconClass += " yoga";
+                iconGlyph = "fa-spa";
+            } else if (w.sport_type === "ski_touring") {
+                iconClass += " ski_touring";
+                iconGlyph = "fa-person-skiing-nordic";
             } else {
                 iconClass += " rest";
                 iconGlyph = "fa-bed";

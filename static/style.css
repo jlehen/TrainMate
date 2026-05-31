@@ -689,6 +689,8 @@ header {
 .workout-sport-icon.road_biking { color: var(--accent-purple); background: rgba(139, 92, 246, 0.1); }
 .workout-sport-icon.hiking { color: var(--accent-green); background: rgba(16, 185, 129, 0.1); }
 .workout-sport-icon.strength_training { color: var(--accent-gold); background: rgba(245, 158, 11, 0.1); }
+.workout-sport-icon.yoga { color: var(--accent-blue); background: rgba(59, 130, 246, 0.1); }
+.workout-sport-icon.ski_touring { color: #38bdf8; background: rgba(56, 189, 248, 0.1); }
 .workout-sport-icon.rest { color: var(--text-muted); background: rgba(255,255,255,0.02); }
 
 /* --- CONSOLE LOG CARD --- */

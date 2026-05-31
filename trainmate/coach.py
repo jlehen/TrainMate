@@ -97,7 +97,7 @@ You MUST respond with a JSON object containing:
   "workouts": [
     {
       "date": "YYYY-MM-DD",
-      "sport_type": "running" | "road_biking" | "hiking" | "strength_training" | "rest",
+      "sport_type": "running" | "road_biking" | "hiking" | "strength_training" | "yoga" | "ski_touring" | "rest",
       "title": "Workout Title (e.g., Tempo Run, Long Ride, Rest Day)",
       "description": "Detailed description of intensity, duration, heart rate zones, and goals."
     }

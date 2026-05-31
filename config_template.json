@@ -10,6 +10,6 @@
     "max_hr": 185,
     "lthr": 165,
     "weekly_target_hours": 6.0,
-    "sport_preferences": ["running", "road_biking", "hiking", "strength_training"]
+    "sport_preferences": ["running", "road_biking", "hiking", "strength_training", "yoga", "ski_touring"]
   }
 }
