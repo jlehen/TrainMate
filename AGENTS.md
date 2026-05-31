@@ -12,7 +12,9 @@
   """
 
 # Code style
-  - Try to reduce indented code, unless it's very trivial (1-2 lines). For instance, instead of:
+- Code lines should not be longer than 100 characters.
+- Comments should be wrapped at 100 characters.
+- Try to reduce indented code, unless it's very trivial (1-2 lines). For instance, instead of:
 
     for filename in file_list;
         if filename.endswith(".txt"):
