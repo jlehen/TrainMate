@@ -27,27 +27,46 @@ class CoachEngine:
         science_guidelines = self.load_science_guidelines()
         
         # Load memory
-        strategy = db.get_coach_memory("training_strategy") or "Not established yet. Establish an endurance-focused training strategy based on goals."
-        learnings = db.get_coach_memory("athlete_learnings") or "No observations yet. Over time, observe the athlete's responses to training volume and intensity."
+        strategy = db.get_coach_memory("training_strategy") or (
+            "Not established yet. Establish an endurance-focused training strategy "
+            "based on goals."
+        )
+        learnings = db.get_coach_memory("athlete_learnings") or (
+            "No observations yet. Over time, observe the athlete's responses to "
+            "training volume and intensity."
+        )
 
         # Serialize objectives
         obj_text = ""
         for o in objectives:
-            obj_text += f"- Goal: {o['title']} | Date: {o['target_date']} | Sport: {o['sport_type']} | Details: {o.get('description', '')}\n"
+            details = o.get('description', '')
+            obj_text += (
+                f"- Goal: {o['title']} | Date: {o['target_date']} | "
+                f"Sport: {o['sport_type']} | Details: {details}\n"
+            )
 
         # Serialize constraints
         c_text = ""
         for c in constraints:
-            c_text += f"- Constraint: {c['title']} | Start: {c['start_date']} | End: {c['end_date']} | Type: {c['event_type']} | Impact: {c.get('impact_description', '')}\n"
+            impact = c.get('impact_description', '')
+            c_text += (
+                f"- Constraint: {c['title']} | Start: {c['start_date']} | "
+                f"End: {c['end_date']} | Type: {c['event_type']} | Impact: {impact}\n"
+            )
 
         system_prompt = f"""You are TrainMate Coach, an advanced AI sports science training coach.
-You design and adapt personalized training plans for endurance athletes using sports science principles.
+You design and adapt personalized training plans for endurance athletes using sports science
+principles.
 
 COACHING ROLE AND OBJECTIVES:
 1. Design periodized training plans (macro, meso, micro cycles) leading up to the target goals.
-2. Focus scheduling on the NEXT CHRONOLOGICAL GOAL only. If there are multiple goals, identify synergies between them (e.g. general base building phases) but focus the actual micro/meso cycles on the next goal.
-3. Dynamically adjust training plans based on recent Garmin metrics ( Resting HR, HRV, Sleep, ACWR) to optimize recovery and prevent injury.
-4. Shift or scale training volume and intensity around constraints (injury, vacation, parties) to manage fatigue.
+2. Focus scheduling on the NEXT CHRONOLOGICAL GOAL only. If there are multiple goals, identify
+   synergies between them (e.g. general base building phases) but focus the actual micro/meso
+   cycles on the next goal.
+3. Dynamically adjust training plans based on recent Garmin metrics ( Resting HR, HRV, Sleep,
+   ACWR) to optimize recovery and prevent injury.
+4. Shift or scale training volume and intensity around constraints (injury, vacation, parties)
+   to manage fatigue.
 
 SPORTS SCIENCE GUIDELINES:
 {science_guidelines}
@@ -86,12 +105,14 @@ UPCOMING CONSTRAINTS (LIFE EVENTS):
         custom_task = """
 TASK:
 Generate a training schedule for the next 4 weeks (28 days) starting from today. 
-Identify high-level synergies between all active goals at the start, but focus the daily/weekly scheduling exclusively on the next goal.
-Incorporate deload weeks and schedule around constraints (injury = rest/cross-training, vacation = maintain fitness, party = easy workouts next day).
+Identify high-level synergies between all active goals at the start, but focus the
+daily/weekly scheduling exclusively on the next goal.
+Incorporate deload weeks and schedule around constraints (injury = rest/cross-training,
+vacation = maintain fitness, party = easy workouts next day).
 
 You MUST respond with a JSON object containing:
 {
-  "reasoning": "Explain the plan, periodization block, goal synergies, and how constraints are managed.",
+  "reasoning": "Explain the plan, periodization block, goal synergies, and constraints.",
   "training_strategy": "Establish or update the overall training strategy philosophy text blob.",
   "athlete_learnings": "Update athlete observations text blob based on metrics or status if any.",
   "workouts": [
@@ -153,7 +174,10 @@ You MUST respond with a JSON object containing:
         baseline = db.get_baseline(target_date_str)
         if not baseline:
             # Fallback to no-baseline mode
-            baseline_str = "No baseline data available yet. Use absolute values (e.g. HRV, Sleep Score) to assess fatigue."
+            baseline_str = (
+                "No baseline data available yet. Use absolute values (e.g. HRV, Sleep Score) "
+                "to assess fatigue."
+            )
         else:
             baseline_str = f"""
 Resting HR baseline: Mean = {baseline['rhr_baseline_mean']:.1f}, StdDev = {baseline['rhr_baseline_std']:.2f}
@@ -166,9 +190,13 @@ Sleep Score baseline: Mean = {baseline['sleep_baseline_mean']:.1f}, StdDev = {ba
 
         custom_task = """
 TASK:
-Evaluate today's Garmin metrics against the rolling baseline and determine if today's planned workout needs to be adapted for safety, recovery, or overload.
-If the athlete shows signs of high fatigue (e.g., elevated Resting HR, low Sleep Score, or dropped HRV), modify the workout to be easier (recovery, reduced duration, lower intensity) or change it to rest.
-If you adjust the workout, generate the adapted title and description, explaining the sports science reason.
+Evaluate today's Garmin metrics against the rolling baseline and determine if today's planned
+workout needs to be adapted for safety, recovery, or overload.
+If the athlete shows signs of high fatigue (e.g., elevated Resting HR, low Sleep Score, or dropped
+HRV), modify the workout to be easier (recovery, reduced duration, lower intensity) or change it
+to rest.
+If you adjust the workout, generate the adapted title and description, explaining the sports
+science reason.
 
 You MUST respond with a JSON object containing:
 {
@@ -177,7 +205,10 @@ You MUST respond with a JSON object containing:
   "adapted_title": "Workout Title (only if change_needed is true)",
   "adapted_description": "Workout Description (only if change_needed is true)",
   "training_strategy": "Optionally update training strategy philosophy based on response.",
-  "athlete_learnings": "Optionally update athlete observations (e.g. athlete responds poorly to consecutive hard days)."
+  "athlete_learnings": (
+        "Optionally update athlete observations (e.g. athlete responds poorly to consecutive "
+        "hard days)."
+  )
 }
 """
         system_prompt = self.get_coach_system_prompt(objectives, constraints, custom_task)
