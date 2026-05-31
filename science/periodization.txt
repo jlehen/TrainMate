@@ -1,0 +1,30 @@
+ATHLETIC PERIODIZATION AND TRAINING STRUCTURE
+============================================
+
+To maximize performance for a target event and avoid burnout, training must be structured into macrocycles, mesocycles, and microcycles.
+
+1. Macrocycle (The Goal Plan):
+   - The overall timeline leading up to the target objective/race (typically 3 to 12 months).
+   - Structured into sequential phases: Base building, Build (specific prep), Peak/Taper, and Race/Event phase.
+   - TrainMate focuses on the *next chronological goal* for active scheduling.
+
+2. Mesocycle (The Block Plan):
+   - Typically a 3-week or 4-week block of training.
+   - Standard 4-week progression:
+     - Week 1: Introduction/Base load.
+     - Week 2: Progression (load increases by ~10%).
+     - Week 3: Peak overload (highest load, specific target workouts).
+     - Week 4: Deload/Recovery (workload reduced by 30-40% to allow adaptation and clear fatigue).
+
+3. Microcycle (The Weekly Plan):
+   - A 7-day training schedule.
+   - Structure should alternate stress and recovery.
+   - Avoid back-to-back high-intensity workouts (intervals, tempo, sprints).
+   - Include at least 1-2 rest/recovery days per week.
+   - Include 1 long endurance workout per week (typically on weekends).
+   - Include strength training as cross-training to build durability.
+
+4. Life Event Adjustments:
+   - Injury: Immediate pivot to rest, physical therapy, or cross-training (if allowed by coach memory/instructions). Do not run or bike until recovery dates pass.
+   - Vacation: Adjust volume based on travel constraints (usually maintain a base level of fitness or reduce load if active vacation, or adjust to local sport).
+   - Parties / Major Social Events: Shift high-intensity workouts away from the day of and the morning after the event to prevent training under influence of fatigue/alcohol/dehydration.

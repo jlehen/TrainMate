@@ -1,0 +1,20 @@
+ACUTE:CHRONIC WORKLOAD RATIO (ACWR) GUIDELINES
+==============================================
+
+The Acute:Chronic Workload Ratio (ACWR) is a model used to monitor an athlete's training load and predict injury risk. It compares the amount of training performed in the short term (acute workload) to the amount of training performed in the long term (chronic workload).
+
+1. Calculations:
+   - Acute Workload: Typically calculated as the sum of training workload over the past 7 days.
+   - Chronic Workload: Typically calculated as the average weekly training workload over the past 28 days (total load over 28 days divided by 4).
+   - Workload metric can be calculated as: Duration (hours) * Average Heart Rate, or by Garmin's custom Training Load score.
+   - ACWR = Acute Workload / Chronic Workload
+
+2. Workload Ranges and Interpretation:
+   - ACWR < 0.8: Under-training. Represents an increased risk of injury if training volume is spiked suddenly, as fitness levels are declining or low.
+   - ACWR 0.8 - 1.3: The "Sweet Spot". Training load is safely building or being maintained. Injury risk is minimized.
+   - ACWR 1.3 - 1.5: The "Danger Zone". Athlete is reaching elevated fatigue. Caution is advised.
+   - ACWR > 1.5: The "Injury Threshold". Training load has spiked too fast (acute load is 1.5x greater than average chronic load). High risk of injury. Workloads should be reduced immediately to allow recovery and adaptation.
+
+3. Coaching Directives:
+   - When ACWR rises above 1.3, keep subsequent workouts at low intensity or reduce planned volume to prevent crossing 1.5.
+   - When ACWR drops below 0.8, build workload gradually (no more than a 10-15% increase in weekly volume) to safely raise fitness.

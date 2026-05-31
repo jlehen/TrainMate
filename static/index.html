@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TrainMate - AI Athletic Coach</title>
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=Plus+Jakarta+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <!-- FontAwesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Custom Stylesheet -->
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="glass-bg"></div>
+    
+    <div class="container">
+        <!-- HEADER -->
+        <header>
+            <div class="logo">
+                <i class="fa-solid fa-bolt-lightning logo-icon"></i>
+                <div class="logo-text">
+                    <h1>TrainMate</h1>
+                    <span>AI Athletic Coach & Planner</span>
+                </div>
+            </div>
+            
+            <div class="status-summary" id="next-goal-card">
+                <div class="summary-label">Next Objective</div>
+                <div class="summary-title" id="header-goal-title">Loading goal...</div>
+                <div class="summary-countdown" id="header-goal-countdown">-- days remaining</div>
+            </div>
+        </header>
+
+        <!-- MAIN LAYOUT -->
+        <main class="dashboard-grid">
+            <!-- LEFT COLUMN: INPUTS & COACH STATE -->
+            <section class="left-column">
+                
+                <!-- COACH CONTROLS & ACTIONS -->
+                <div class="card control-card">
+                    <h2><i class="fa-solid fa-sliders"></i> Coaching Engine Actions</h2>
+                    <div class="action-grid">
+                        <button id="btn-sync-sheets" class="btn btn-secondary">
+                            <i class="fa-solid fa-cloud-arrow-down"></i> Sync Garmin Sheet
+                        </button>
+                        <button id="btn-replan" class="btn btn-primary">
+                            <i class="fa-solid fa-wand-magic-sparkles"></i> Ask Coach to Replan
+                        </button>
+                        <button id="btn-adapt" class="btn btn-warning">
+                            <i class="fa-solid fa-shield-heart"></i> Run Daily Adapt Check
+                        </button>
+                        <button id="btn-sync-calendar" class="btn btn-success">
+                            <i class="fa-solid fa-calendar-check"></i> Commit to Calendar
+                        </button>
+                    </div>
+                </div>
+
+                <!-- ATHLETE METRICS CARD -->
+                <div class="card metrics-card">
+                    <h2><i class="fa-solid fa-heart-pulse"></i> Recovery & Training Load</h2>
+                    <div class="metrics-grid">
+                        <div class="metric-box" id="metric-hrv">
+                            <div class="metric-header">
+                                <span class="metric-title">HRV (Overnight)</span>
+                                <i class="fa-solid fa-wave-square metric-icon blue"></i>
+                            </div>
+                            <div class="metric-value">-- <span class="unit">ms</span></div>
+                            <div class="metric-baseline">baseline: -- ms</div>
+                            <span class="status-badge" id="hrv-badge">Unknown</span>
+                        </div>
+                        
+                        <div class="metric-box" id="metric-rhr">
+                            <div class="metric-header">
+                                <span class="metric-title">Resting HR</span>
+                                <i class="fa-solid fa-heartbeat metric-icon red"></i>
+                            </div>
+                            <div class="metric-value">-- <span class="unit">bpm</span></div>
+                            <div class="metric-baseline">baseline: -- bpm</div>
+                            <span class="status-badge" id="rhr-badge">Unknown</span>
+                        </div>
+                        
+                        <div class="metric-box" id="metric-sleep">
+                            <div class="metric-header">
+                                <span class="metric-title">Sleep Score</span>
+                                <i class="fa-solid fa-moon metric-icon purple"></i>
+                            </div>
+                            <div class="metric-value">-- <span class="unit">/100</span></div>
+                            <div class="metric-baseline">baseline: --</div>
+                            <span class="status-badge" id="sleep-badge">Unknown</span>
+                        </div>
+                        
+                        <div class="metric-box" id="metric-acwr">
+                            <div class="metric-header">
+                                <span class="metric-title">ACWR (7:28d)</span>
+                                <i class="fa-solid fa-chart-line metric-icon gold"></i>
+                            </div>
+                            <div class="metric-value">--</div>
+                            <div class="metric-baseline">acute: -- | chronic: --</div>
+                            <span class="status-badge" id="acwr-badge">Unknown</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- COACH MEMORY CARD -->
+                <div class="card memory-card">
+                    <h2><i class="fa-solid fa-brain"></i> Coach Long-Term Memory</h2>
+                    <div class="memory-block">
+                        <label>Active Training Strategy & Philosophy</label>
+                        <div class="memory-text" id="memory-strategy">Not established yet. Run "Ask Coach to Replan" to let the AI evaluate guidelines and goals.</div>
+                    </div>
+                    <div class="memory-block">
+                        <label>Athlete Observations & Learnings</label>
+                        <div class="memory-text" id="memory-learnings">No observations cached yet. The coach will build observations based on your daily adaptations.</div>
+                    </div>
+                </div>
+
+                <!-- GOALS & LIFE EVENTS ACCORDIONS -->
+                <div class="card accordion-card">
+                    <div class="tabs-header">
+                        <button class="tab-btn active" onclick="switchTab('tab-goals')"><i class="fa-solid fa-trophy"></i> Objectives</button>
+                        <button class="tab-btn" onclick="switchTab('tab-events')"><i class="fa-solid fa-plane-departure"></i> Life Events</button>
+                    </div>
+                    
+                    <!-- GOALS TAB -->
+                    <div id="tab-goals" class="tab-content active">
+                        <div class="list-container" id="goals-list">
+                            <!-- Populated dynamically -->
+                        </div>
+                        <form id="form-add-goal" class="add-form">
+                            <h3>Add Training Goal</h3>
+                            <div class="form-row">
+                                <input type="text" id="goal-title" placeholder="e.g. Zurich Marathon" required>
+                                <input type="date" id="goal-date" required>
+                            </div>
+                            <div class="form-row">
+                                <select id="goal-sport" required>
+                                    <option value="" disabled selected>Select Sport</option>
+                                    <option value="running">Running</option>
+                                    <option value="road_biking">Cycling</option>
+                                    <option value="hiking">Hiking</option>
+                                    <option value="strength_training">Strength</option>
+                                </select>
+                                <input type="number" id="goal-priority" placeholder="Priority (1-5)" min="1" max="5" value="1">
+                            </div>
+                            <input type="text" id="goal-desc" placeholder="Goal details or target time (optional)">
+                            <button type="submit" class="btn btn-primary btn-sm"><i class="fa-solid fa-plus"></i> Add Goal</button>
+                        </form>
+                    </div>
+                    
+                    <!-- LIFE EVENTS TAB -->
+                    <div id="tab-events" class="tab-content">
+                        <div class="list-container" id="events-list">
+                            <!-- Populated dynamically -->
+                        </div>
+                        <form id="form-add-event" class="add-form">
+                            <h3>Log Life Event</h3>
+                            <div class="form-row">
+                                <input type="text" id="event-title" placeholder="e.g. Summer Vacation" required>
+                                <select id="event-type" required>
+                                    <option value="" disabled selected>Type</option>
+                                    <option value="vacation">Vacation</option>
+                                    <option value="injury">Injury</option>
+                                    <option value="party">Big Party/Social</option>
+                                    <option value="other">Other</option>
+                                </select>
+                            </div>
+                            <div class="form-row">
+                                <div class="date-input-group">
+                                    <label>Start</label>
+                                    <input type="date" id="event-start" required>
+                                </div>
+                                <div class="date-input-group">
+                                    <label>End</label>
+                                    <input type="date" id="event-end" required>
+                                </div>
+                            </div>
+                            <input type="text" id="event-desc" placeholder="Impact on training (optional)">
+                            <button type="submit" class="btn btn-warning btn-sm"><i class="fa-solid fa-calendar-plus"></i> Log Event</button>
+                        </form>
+                    </div>
+                </div>
+
+            </section>
+
+            <!-- RIGHT COLUMN: SCHEDULE & LOGS -->
+            <section class="right-column">
+                
+                <!-- WORKOUTS CALENDAR -->
+                <div class="card schedule-card">
+                    <div class="schedule-header">
+                        <h2><i class="fa-solid fa-calendar-days"></i> Training Plan & Schedule</h2>
+                        <span class="workout-count-badge" id="workout-count">0 workouts planned</span>
+                    </div>
+                    
+                    <div class="workout-list" id="workouts-list-container">
+                        <!-- Populated dynamically -->
+                    </div>
+                </div>
+
+                <!-- COACH SYSTEM LOGS -->
+                <div class="card log-card">
+                    <div class="log-header">
+                        <h2><i class="fa-solid fa-terminal"></i> Coach Reasoning & System Logs</h2>
+                        <button id="btn-clear-logs" class="btn btn-icon-only" title="Clear Logs"><i class="fa-solid fa-trash-can"></i></button>
+                    </div>
+                    <div class="console-log" id="console-logs">
+                        <div class="log-line system">[SYSTEM] TrainMate Dashboard initialized. Fetching status...</div>
+                    </div>
+                </div>
+
+            </section>
+        </main>
+    </div>
+
+    <!-- Script assets -->
+    <script src="app.js"></script>
+</body>
+</html>

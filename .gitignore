@@ -1,0 +1,18 @@
+# Virtual environment
+venv/
+.venv/
+
+# Credentials & configs
+config.json
+service_account.json
+
+# Local database
+trainmate.db
+
+# Python caches
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.ipynb_checkpoints/
