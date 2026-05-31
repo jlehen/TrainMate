@@ -2,6 +2,7 @@ import json
 from datetime import datetime, timedelta
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
+from googleapiclient.errors import HttpError
 from trainmate.config import config
 from trainmate.db import db
 
@@ -78,9 +79,16 @@ class CalendarSyncer:
                     google_event_id=google_event_id
                 )
                 return google_event_id
+            except HttpError as e:
+                if e.resp.status in (404, 410):
+                    print(f"Warning: Calendar event {google_event_id} was deleted on Google Calendar. Re-creating a new one...")
+                    # Fall through to insert new event
+                else:
+                    print(f"Error updating Google Calendar event: {e}")
+                    raise e
             except Exception as e:
-                print(f"Warning: Failed to update event {google_event_id}, creating a new one: {e}")
-                # Fall through to insert new event if update failed (e.g. event deleted on calendar)
+                print(f"Error updating Google Calendar event: {e}")
+                raise e
 
         # Create a new event
         try:
