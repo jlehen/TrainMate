@@ -101,35 +101,35 @@ def main():
             sys.exit(1)
         sub = args.subcommand.lower()
         if sub == "add":
-            run_add_goal(args)
+            run_goal_add(args)
         elif sub == "rm":
-            run_rm_goal(args)
+            run_goal_rm(args)
         elif sub == "list":
-            run_list_goals()
+            run_goal_list()
     elif cmd == "constraint":
         if not args.subcommand:
             constraint_parser.print_help()
             sys.exit(1)
         sub = args.subcommand.lower()
         if sub == "add":
-            run_add_constraint(args)
+            run_constraint_add(args)
         elif sub == "rm":
-            run_rm_constraint(args)
+            run_constraint_rm(args)
         elif sub == "list":
-            run_list_constraints()
+            run_constraint_list()
     elif cmd == "workout":
         if not args.subcommand:
             workout_parser.print_help()
             sys.exit(1)
         sub = args.subcommand.lower()
         if sub == "list":
-            run_list_workouts()
+            run_workout_list()
         elif sub == "rm":
-            run_rm_workout(args)
+            run_workout_rm(args)
         elif sub == "plan":
-            run_plan()
+            run_workout_plan()
         elif sub == "adapt":
-            run_adapt(args)
+            run_workout_adapt(args)
     else:
         print(f"Unknown command: '{cmd}'")
         parser.print_help()
@@ -179,7 +179,7 @@ def run_status():
     print(f"- Learnings : {learnings or 'None yet'}")
     print("\n================================")
 
-def run_plan():
+def run_workout_plan():
     # Make sure we have latest metrics cached
     metrics = db.get_metrics_cache()
     if not metrics:
@@ -195,7 +195,7 @@ def run_plan():
     except Exception as e:
         print(f"Error during plan generation: {e}")
 
-def run_adapt(args):
+def run_workout_adapt(args):
     date_str = args.date or datetime.now(timezone.utc).strftime("%Y-%m-%d")
     print(f"Evaluating daily Garmin metrics adaptation for {date_str}...")
     
@@ -230,7 +230,7 @@ def run_sync_sheets():
     except Exception as e:
         print(f"Error syncing Google Sheets: {e}")
 
-def run_add_goal(args):
+def run_goal_add(args):
     db.add_objective(
         title=args.title,
         target_date=args.date,
@@ -241,11 +241,11 @@ def run_add_goal(args):
     )
     print(f"Goal '{args.title}' added successfully. Run 'workout plan' to generate training cycles.")
 
-def run_rm_goal(args):
+def run_goal_rm(args):
     db.delete_objective(args.id)
     print(f"Goal with ID {args.id} removed successfully.")
 
-def run_add_constraint(args):
+def run_constraint_add(args):
     db.add_constraint(
         title=args.title,
         start_date=args.start,
@@ -255,11 +255,11 @@ def run_add_constraint(args):
     )
     print(f"Constraint '{args.title}' logged. This will be factored in when running 'workout plan' or 'workout adapt'.")
 
-def run_rm_constraint(args):
+def run_constraint_rm(args):
     db.delete_constraint(args.id)
     print(f"Constraint with ID {args.id} removed successfully.")
 
-def run_list_goals():
+def run_goal_list():
     goals = db.get_objectives()
     print("=== TRAINING OBJECTIVES / GOALS ===")
     for g in goals:
@@ -267,7 +267,7 @@ def run_list_goals():
         if g.get('description'):
             print(f"  Description: {g['description']}")
 
-def run_list_constraints():
+def run_constraint_list():
     events = db.get_constraints()
     print("=== ATHLETE CONSTRAINTS ===")
     for e in events:
@@ -275,7 +275,7 @@ def run_list_constraints():
         if e.get('impact_description'):
             print(f"  Impact: {e['impact_description']}")
 
-def run_rm_workout(args):
+def run_workout_rm(args):
     workout = db.get_workout_by_id(args.id)
     if not workout:
         print(f"Workout with ID {args.id} not found.")
@@ -288,7 +288,7 @@ def run_rm_workout(args):
     db.delete_workout_by_id(args.id)
     print(f"Workout with ID {args.id} ('{workout['title']}') removed successfully.")
 
-def run_list_workouts():
+def run_workout_list():
     workouts = db.get_workouts()
     print("=== WORKOUT SCHEDULE ===")
     for w in workouts:
