@@ -30,17 +30,26 @@ class Database:
                 )
             """)
             
-            # Life events table
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS life_events (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    title TEXT NOT NULL,
-                    start_date TEXT NOT NULL,
-                    end_date TEXT NOT NULL,
-                    event_type TEXT NOT NULL, -- 'injury', 'vacation', 'party', 'other'
-                    impact_description TEXT
-                )
-            """)
+            # Check if old table 'life_events' exists and new 'constraints' does not
+            cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='life_events'")
+            old_exists = cursor.fetchone()
+            cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='constraints'")
+            new_exists = cursor.fetchone()
+            
+            if old_exists and not new_exists:
+                cursor.execute("ALTER TABLE life_events RENAME TO constraints")
+            else:
+                # Constraints table
+                cursor.execute("""
+                    CREATE TABLE IF NOT EXISTS constraints (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        title TEXT NOT NULL,
+                        start_date TEXT NOT NULL,
+                        end_date TEXT NOT NULL,
+                        event_type TEXT NOT NULL, -- 'injury', 'vacation', 'party', 'other'
+                        impact_description TEXT
+                    )
+                """)
             
             # Workouts table
             cursor.execute("""
@@ -129,29 +138,29 @@ class Database:
             conn.cursor().execute("DELETE FROM objectives WHERE id = ?", (obj_id,))
             conn.commit()
 
-    # --- Life Events CRUD ---
-    def add_life_event(self, title, start_date, end_date, event_type, impact_description=""):
+    # --- Constraints CRUD ---
+    def add_constraint(self, title, start_date, end_date, event_type, impact_description=""):
         with self._get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("""
-                INSERT INTO life_events (title, start_date, end_date, event_type, impact_description)
+                INSERT INTO constraints (title, start_date, end_date, event_type, impact_description)
                 VALUES (?, ?, ?, ?, ?)
             """, (title, start_date, end_date, event_type, impact_description))
             conn.commit()
             return cursor.lastrowid
 
-    def get_life_events(self, start_after=None):
+    def get_constraints(self, start_after=None):
         with self._get_connection() as conn:
             cursor = conn.cursor()
             if start_after:
-                cursor.execute("SELECT * FROM life_events WHERE end_date >= ? ORDER BY start_date ASC", (start_after,))
+                cursor.execute("SELECT * FROM constraints WHERE end_date >= ? ORDER BY start_date ASC", (start_after,))
             else:
-                cursor.execute("SELECT * FROM life_events ORDER BY start_date ASC")
+                cursor.execute("SELECT * FROM constraints ORDER BY start_date ASC")
             return [dict(row) for row in cursor.fetchall()]
 
-    def delete_life_event(self, event_id):
+    def delete_constraint(self, constraint_id):
         with self._get_connection() as conn:
-            conn.cursor().execute("DELETE FROM life_events WHERE id = ?", (event_id,))
+            conn.cursor().execute("DELETE FROM constraints WHERE id = ?", (constraint_id,))
             conn.commit()
 
     # --- Workouts CRUD ---

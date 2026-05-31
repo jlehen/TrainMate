@@ -43,7 +43,7 @@ class TestTrainMateCLI(unittest.TestCase):
         # Clear all tables to start each test on a clean slate
         with test_db._get_connection() as conn:
             conn.execute("DELETE FROM objectives")
-            conn.execute("DELETE FROM life_events")
+            conn.execute("DELETE FROM constraints")
             conn.execute("DELETE FROM workouts")
             conn.execute("DELETE FROM athlete_metrics_cache")
             conn.execute("DELETE FROM athlete_baselines")
@@ -68,7 +68,7 @@ class TestTrainMateCLI(unittest.TestCase):
         self.assertEqual(exit_code, 0)
         self.assertIn("TrainMate - Local Training Coach CLI", stdout)
         self.assertIn("goal", stdout)
-        self.assertIn("event", stdout)
+        self.assertIn("constraint", stdout)
         self.assertIn("workout", stdout)
         self.assertIn("status", stdout)
         self.assertIn("sync", stdout)
@@ -112,16 +112,16 @@ class TestTrainMateCLI(unittest.TestCase):
         self.assertEqual(exit_code, 0)
         self.assertNotIn("Zurich Marathon", stdout)
 
-    def test_event_commands(self):
-        # 1. List events when empty
-        exit_code, stdout, stderr = self.run_cli(['event', 'list'])
+    def test_constraint_commands(self):
+        # 1. List constraints when empty
+        exit_code, stdout, stderr = self.run_cli(['constraint', 'list'])
         self.assertEqual(exit_code, 0)
-        self.assertIn("=== ATHLETE LIFE EVENTS ===", stdout)
+        self.assertIn("=== ATHLETE CONSTRAINTS ===", stdout)
         self.assertNotIn("ID:", stdout)
 
-        # 2. Add event
+        # 2. Add constraint
         exit_code, stdout, stderr = self.run_cli([
-            'event', 'add',
+            'constraint', 'add',
             '--title', 'Ibiza Vacation',
             '--start', '2026-07-01',
             '--end', '2026-07-08',
@@ -129,22 +129,22 @@ class TestTrainMateCLI(unittest.TestCase):
             '--desc', '50% intensity'
         ])
         self.assertEqual(exit_code, 0)
-        self.assertIn("Life event 'Ibiza Vacation' logged", stdout)
+        self.assertIn("Constraint 'Ibiza Vacation' logged", stdout)
 
-        # 3. List events again
-        exit_code, stdout, stderr = self.run_cli(['event', 'list'])
+        # 3. List constraints again
+        exit_code, stdout, stderr = self.run_cli(['constraint', 'list'])
         self.assertEqual(exit_code, 0)
         self.assertIn("Ibiza Vacation", stdout)
         self.assertIn("vacation", stdout)
         self.assertIn("ID: 1", stdout)
 
-        # 4. Remove event
-        exit_code, stdout, stderr = self.run_cli(['event', 'rm', '1'])
+        # 4. Remove constraint
+        exit_code, stdout, stderr = self.run_cli(['constraint', 'rm', '1'])
         self.assertEqual(exit_code, 0)
-        self.assertIn("Life event with ID 1 removed successfully", stdout)
+        self.assertIn("Constraint with ID 1 removed successfully", stdout)
 
         # 5. Verify removal
-        exit_code, stdout, stderr = self.run_cli(['event', 'list'])
+        exit_code, stdout, stderr = self.run_cli(['constraint', 'list'])
         self.assertEqual(exit_code, 0)
         self.assertNotIn("Ibiza Vacation", stdout)
 

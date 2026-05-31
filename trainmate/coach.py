@@ -22,7 +22,7 @@ class CoachEngine:
                         print(f"Error reading science guideline {filename}: {e}")
         return "\n\n".join(texts)
 
-    def get_coach_system_prompt(self, objectives, life_events, custom_task=""):
+    def get_coach_system_prompt(self, objectives, constraints, custom_task=""):
         """Constructs the static prefix system prompt including guidelines, goals, and memory."""
         science_guidelines = self.load_science_guidelines()
         
@@ -35,10 +35,10 @@ class CoachEngine:
         for o in objectives:
             obj_text += f"- Goal: {o['title']} | Date: {o['target_date']} | Sport: {o['sport_type']} | Details: {o.get('description', '')}\n"
 
-        # Serialize life events
-        le_text = ""
-        for le in life_events:
-            le_text += f"- Event: {le['title']} | Start: {le['start_date']} | End: {le['end_date']} | Type: {le['event_type']} | Impact: {le.get('impact_description', '')}\n"
+        # Serialize constraints
+        c_text = ""
+        for c in constraints:
+            c_text += f"- Constraint: {c['title']} | Start: {c['start_date']} | End: {c['end_date']} | Type: {c['event_type']} | Impact: {c.get('impact_description', '')}\n"
 
         system_prompt = f"""You are TrainMate Coach, an advanced AI sports science training coach.
 You design and adapt personalized training plans for endurance athletes using sports science principles.
@@ -47,7 +47,7 @@ COACHING ROLE AND OBJECTIVES:
 1. Design periodized training plans (macro, meso, micro cycles) leading up to the target goals.
 2. Focus scheduling on the NEXT CHRONOLOGICAL GOAL only. If there are multiple goals, identify synergies between them (e.g. general base building phases) but focus the actual micro/meso cycles on the next goal.
 3. Dynamically adjust training plans based on recent Garmin metrics ( Resting HR, HRV, Sleep, ACWR) to optimize recovery and prevent injury.
-4. Shift or scale training volume and intensity around major life events (injury, vacation, parties) to manage fatigue.
+4. Shift or scale training volume and intensity around constraints (injury, vacation, parties) to manage fatigue.
 
 SPORTS SCIENCE GUIDELINES:
 {science_guidelines}
@@ -61,15 +61,15 @@ COACH MEMORY (PREVIOUSLY LEARNED PHILSOPHY & OBSERVATIONS):
 ACTIVE ATHLETE GOALS (CHRONOLOGICAL):
 {obj_text if obj_text else "No active goals."}
 
-UPCOMING LIFE EVENTS:
-{le_text if le_text else "No upcoming life events."}
+UPCOMING CONSTRAINTS (LIFE EVENTS):
+{c_text if c_text else "No upcoming constraints."}
 
 {custom_task}
 """
         return system_prompt
 
     def replan(self):
-        """Generates or adapts the training plan from today onwards based on goals and events."""
+        """Generates or adapts the training plan from today onwards based on goals and constraints."""
         objectives = db.get_objectives(status='active')
         if not objectives:
             return "No active goals found. TrainMate needs at least one objective to start planning.", []
@@ -78,20 +78,20 @@ UPCOMING LIFE EVENTS:
         objectives.sort(key=lambda x: x['target_date'])
         next_goal = objectives[0]
         
-        # Get future life events
+        # Get future constraints
         today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-        life_events = db.get_life_events(start_after=today_str)
+        constraints = db.get_constraints(start_after=today_str)
 
         # Custom replanning instructions
         custom_task = """
 TASK:
 Generate a training schedule for the next 4 weeks (28 days) starting from today. 
 Identify high-level synergies between all active goals at the start, but focus the daily/weekly scheduling exclusively on the next goal.
-Incorporate deload weeks and schedule around life events (injury = rest/cross-training, vacation = maintain fitness, party = easy workouts next day).
+Incorporate deload weeks and schedule around constraints (injury = rest/cross-training, vacation = maintain fitness, party = easy workouts next day).
 
 You MUST respond with a JSON object containing:
 {
-  "reasoning": "Explain the plan, periodization block, goal synergies, and how life events are managed.",
+  "reasoning": "Explain the plan, periodization block, goal synergies, and how constraints are managed.",
   "training_strategy": "Establish or update the overall training strategy philosophy text blob.",
   "athlete_learnings": "Update athlete observations text blob based on metrics or status if any.",
   "workouts": [
@@ -104,7 +104,7 @@ You MUST respond with a JSON object containing:
   ]
 }
 """
-        system_prompt = self.get_coach_system_prompt(objectives, life_events, custom_task)
+        system_prompt = self.get_coach_system_prompt(objectives, constraints, custom_task)
         user_content = f"Today's date is {today_str}. Please generate the training plan starting today."
 
         print("Querying OpenRouter to generate training plan...")
@@ -162,7 +162,7 @@ Sleep Score baseline: Mean = {baseline['sleep_baseline_mean']:.1f}, StdDev = {ba
 """
 
         objectives = db.get_objectives(status='active')
-        life_events = db.get_life_events(start_after=target_date_str)
+        constraints = db.get_constraints(start_after=target_date_str)
 
         custom_task = """
 TASK:
@@ -180,7 +180,7 @@ You MUST respond with a JSON object containing:
   "athlete_learnings": "Optionally update athlete observations (e.g. athlete responds poorly to consecutive hard days)."
 }
 """
-        system_prompt = self.get_coach_system_prompt(objectives, life_events, custom_task)
+        system_prompt = self.get_coach_system_prompt(objectives, constraints, custom_task)
 
         # Build user message with daily data
         workout_text = ""

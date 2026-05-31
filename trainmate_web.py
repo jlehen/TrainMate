@@ -82,23 +82,23 @@ def manage_life_events():
         if not data or not data.get("title") or not data.get("start_date") or not data.get("end_date") or not data.get("event_type"):
             return jsonify({"error": "Missing title, start_date, end_date, or event_type"}), 400
             
-        event_id = db.add_life_event(
+        event_id = db.add_constraint(
             title=data["title"],
             start_date=data["start_date"],
             end_date=data["end_date"],
             event_type=data["event_type"],
             impact_description=data.get("impact_description", "")
         )
-        return jsonify({"id": event_id, "message": "Life event logged successfully."}), 201
+        return jsonify({"id": event_id, "message": "Constraint logged successfully."}), 201
         
     # GET method
     today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-    return jsonify(db.get_life_events(start_after=today_str))
+    return jsonify(db.get_constraints(start_after=today_str))
 
 @app.route("/api/life-events/<int:event_id>", methods=["DELETE"])
 def delete_life_event(event_id):
-    db.delete_life_event(event_id)
-    return jsonify({"message": "Life event deleted."})
+    db.delete_constraint(event_id)
+    return jsonify({"message": "Constraint deleted."})
 
 @app.route("/api/workouts", methods=["GET"])
 def get_workouts():
