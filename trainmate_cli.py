@@ -10,50 +10,120 @@ from trainmate.config import config
 def main():
     parser = argparse.ArgumentParser(
         description="TrainMate - Local Training Coach CLI",
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="""
-Commands:
-  status         Show current athlete status, active goals, recent metrics, and coach memories.
-  plan           Generate or adapt the 4-week periodized training plan (saves locally).
-  adapt          Run the daily Garmin check for today (syncs adapted workouts to Calendar).
-  sync           Commit all local planned workouts to Google Calendar.
-  sync-sheets    Fetch latest activities and daily metrics from Google Sheets.
-  add-goal       Add a new training objective/goal.
-  add-event      Add a new major life event (vacation, injury, party).
-  list-goals     Show all training objectives.
-  list-events    Show all logged life events.
-  list-workouts  Show all planned workouts.
-"""
+        formatter_class=argparse.RawDescriptionHelpFormatter
     )
-    parser.add_argument("command", nargs="?", help="Command to execute")
-    args, command_args = parser.parse_known_args()
-
+    
+    subparsers = parser.add_subparsers(dest="command", help="Available commands")
+    
+    # status command
+    subparsers.add_parser("status", help="Show current athlete status, active goals, recent metrics, and coach memories")
+    
+    # sync command
+    subparsers.add_parser("sync", help="Commit all local planned workouts to Google Calendar")
+    
+    # sync-sheets command
+    subparsers.add_parser("sync-sheets", help="Fetch latest activities and daily metrics from Google Sheets")
+    
+    # goal command & subparsers
+    goal_parser = subparsers.add_parser("goal", help="Manage training objectives / goals")
+    goal_subparsers = goal_parser.add_subparsers(dest="subcommand", help="Goal sub-commands")
+    
+    # goal add
+    g_add = goal_subparsers.add_parser("add", help="Add a new training objective/goal")
+    g_add.add_argument("--title", required=True, help="Goal title (e.g. Marathon)")
+    g_add.add_argument("--date", required=True, help="Target event date (YYYY-MM-DD)")
+    g_add.add_argument("--sport", required=True, choices=["running", "road_biking", "hiking", "strength_training"], help="Sport type")
+    g_add.add_argument("--desc", default="", help="Description")
+    g_add.add_argument("--priority", type=int, default=1, help="Goal priority (1 = highest)")
+    
+    # goal rm
+    g_rm = goal_subparsers.add_parser("rm", help="Remove a goal by ID")
+    g_rm.add_argument("id", type=int, help="Goal ID to remove")
+    
+    # goal list
+    goal_subparsers.add_parser("list", help="Show all training objectives")
+    
+    # event command & subparsers
+    event_parser = subparsers.add_parser("event", help="Manage life events")
+    event_subparsers = event_parser.add_subparsers(dest="subcommand", help="Event sub-commands")
+    
+    # event add
+    e_add = event_subparsers.add_parser("add", help="Add a new major life event")
+    e_add.add_argument("--title", required=True, help="Event title (e.g. Vacation to Spain)")
+    e_add.add_argument("--start", required=True, help="Start date (YYYY-MM-DD)")
+    e_add.add_argument("--end", required=True, help="End date (YYYY-MM-DD)")
+    e_add.add_argument("--type", required=True, choices=["injury", "vacation", "party", "other"], help="Event type")
+    e_add.add_argument("--desc", default="", help="Description/Impact description")
+    
+    # event rm
+    e_rm = event_subparsers.add_parser("rm", help="Remove a life event by ID")
+    e_rm.add_argument("id", type=int, help="Event ID to remove")
+    
+    # event list
+    event_subparsers.add_parser("list", help="Show all logged life events")
+    
+    # workout command & subparsers
+    workout_parser = subparsers.add_parser("workout", help="Manage workouts")
+    workout_subparsers = workout_parser.add_subparsers(dest="subcommand", help="Workout sub-commands")
+    
+    # workout list
+    workout_subparsers.add_parser("list", help="Show all planned workouts")
+    
+    # workout plan
+    workout_subparsers.add_parser("plan", help="Generate or adapt the 4-week periodized training plan (saves locally)")
+    
+    # workout adapt
+    w_adapt = workout_subparsers.add_parser("adapt", help="Run the daily Garmin check for today (syncs adapted workouts to Calendar)")
+    w_adapt.add_argument("--date", help="Date in YYYY-MM-DD format (defaults to UTC today)")
+    
+    # Parse the arguments
+    args = parser.parse_args()
+    
     if not args.command:
         parser.print_help()
         sys.exit(1)
-
+        
     cmd = args.command.lower()
     
     if cmd == "status":
         run_status()
-    elif cmd == "plan":
-        run_plan()
-    elif cmd == "adapt":
-        run_adapt(command_args)
     elif cmd == "sync":
         run_sync()
     elif cmd == "sync-sheets":
         run_sync_sheets()
-    elif cmd == "add-goal":
-        run_add_goal(command_args)
-    elif cmd == "add-event":
-        run_add_event(command_args)
-    elif cmd == "list-goals":
-        run_list_goals()
-    elif cmd == "list-events":
-        run_list_events()
-    elif cmd == "list-workouts":
-        run_list_workouts()
+    elif cmd == "goal":
+        if not args.subcommand:
+            goal_parser.print_help()
+            sys.exit(1)
+        sub = args.subcommand.lower()
+        if sub == "add":
+            run_add_goal(args)
+        elif sub == "rm":
+            run_rm_goal(args)
+        elif sub == "list":
+            run_list_goals()
+    elif cmd == "event":
+        if not args.subcommand:
+            event_parser.print_help()
+            sys.exit(1)
+        sub = args.subcommand.lower()
+        if sub == "add":
+            run_add_event(args)
+        elif sub == "rm":
+            run_rm_event(args)
+        elif sub == "list":
+            run_list_events()
+    elif cmd == "workout":
+        if not args.subcommand:
+            workout_parser.print_help()
+            sys.exit(1)
+        sub = args.subcommand.lower()
+        if sub == "list":
+            run_list_workouts()
+        elif sub == "plan":
+            run_plan()
+        elif sub == "adapt":
+            run_adapt(args)
     else:
         print(f"Unknown command: '{cmd}'")
         parser.print_help()
@@ -120,12 +190,7 @@ def run_plan():
         print(f"Error during plan generation: {e}")
 
 def run_adapt(args):
-    # Optional date argument
-    parser = argparse.ArgumentParser(description="Run daily metrics adaptation")
-    parser.add_argument("--date", help="Date in YYYY-MM-DD format (defaults to UTC today)")
-    parsed = parser.parse_args(args)
-    
-    date_str = parsed.date or datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    date_str = args.date or datetime.now(timezone.utc).strftime("%Y-%m-%d")
     print(f"Evaluating daily Garmin metrics adaptation for {date_str}...")
     
     try:
@@ -143,7 +208,7 @@ def run_sync():
     unsynced = [w for w in planned_workouts if w['status'] in ('planned', 'modified')]
     
     if not unsynced:
-        print("No new or modified workouts to sync. Run 'plan' to generate a schedule.")
+        print("No new or modified workouts to sync. Run 'workout plan' to generate a schedule.")
         return
         
     print(f"Syncing {len(unsynced)} workouts to Google Calendar...")
@@ -160,41 +225,33 @@ def run_sync_sheets():
         print(f"Error syncing Google Sheets: {e}")
 
 def run_add_goal(args):
-    parser = argparse.ArgumentParser(description="Add active training goal")
-    parser.add_argument("--title", required=True, help="Goal title (e.g. Marathon)")
-    parser.add_argument("--date", required=True, help="Target event date (YYYY-MM-DD)")
-    parser.add_argument("--sport", required=True, choices=["running", "road_biking", "hiking", "strength_training"], help="Sport type")
-    parser.add_argument("--desc", default="", help="Description")
-    parser.add_argument("--priority", type=int, default=1, help="Goal priority (1 = highest)")
-    parsed = parser.parse_args(args)
-    
     db.add_objective(
-        title=parsed.title,
-        target_date=parsed.date,
-        sport_type=parsed.sport,
-        description=parsed.desc,
-        priority=parsed.priority,
+        title=args.title,
+        target_date=args.date,
+        sport_type=args.sport,
+        description=args.desc,
+        priority=args.priority,
         status='active'
     )
-    print(f"Goal '{parsed.title}' added successfully. Run 'plan' to generate training cycles.")
+    print(f"Goal '{args.title}' added successfully. Run 'workout plan' to generate training cycles.")
+
+def run_rm_goal(args):
+    db.delete_objective(args.id)
+    print(f"Goal with ID {args.id} removed successfully.")
 
 def run_add_event(args):
-    parser = argparse.ArgumentParser(description="Add major life event")
-    parser.add_argument("--title", required=True, help="Event title (e.g. Vacation to Spain)")
-    parser.add_argument("--start", required=True, help="Start date (YYYY-MM-DD)")
-    parser.add_argument("--end", required=True, help="End date (YYYY-MM-DD)")
-    parser.add_argument("--type", required=True, choices=["injury", "vacation", "party", "other"], help="Event type")
-    parser.add_argument("--desc", default="", help="Description/Impact description")
-    parsed = parser.parse_args(args)
-    
     db.add_life_event(
-        title=parsed.title,
-        start_date=parsed.start,
-        end_date=parsed.end,
-        event_type=parsed.type,
-        impact_description=parsed.desc
+        title=args.title,
+        start_date=args.start,
+        end_date=args.end,
+        event_type=args.type,
+        impact_description=args.desc
     )
-    print(f"Life event '{parsed.title}' logged. This will be factored in when running 'plan' or 'adapt'.")
+    print(f"Life event '{args.title}' logged. This will be factored in when running 'workout plan' or 'workout adapt'.")
+
+def run_rm_event(args):
+    db.delete_life_event(args.id)
+    print(f"Life event with ID {args.id} removed successfully.")
 
 def run_list_goals():
     goals = db.get_objectives()
