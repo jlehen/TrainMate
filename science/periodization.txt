@@ -1,11 +1,13 @@
 ATHLETIC PERIODIZATION AND TRAINING STRUCTURE
 ============================================
 
-To maximize performance for a target event and avoid burnout, training must be structured into macrocycles, mesocycles, and microcycles.
+To maximize performance for a target event and avoid burnout, training must be structured into
+macrocycles, mesocycles, and microcycles.
 
 1. Macrocycle (The Goal Plan):
    - The overall timeline leading up to the target objective/race (typically 3 to 12 months).
-   - Structured into sequential phases: Base building, Build (specific prep), Peak/Taper, and Race/Event phase.
+   - Structured into sequential phases: Base building, Build (specific prep), Peak/Taper, and
+     Race/Event phase.
    - TrainMate focuses on the *next chronological goal* for active scheduling.
 
 2. Mesocycle (The Block Plan):
@@ -25,6 +27,9 @@ To maximize performance for a target event and avoid burnout, training must be s
    - Include strength training as cross-training to build durability.
 
 4. Life Event Adjustments:
-   - Injury: Immediate pivot to rest, physical therapy, or cross-training (if allowed by coach memory/instructions). Do not run or bike until recovery dates pass.
-   - Vacation: Adjust volume based on travel constraints (usually maintain a base level of fitness or reduce load if active vacation, or adjust to local sport).
-   - Parties / Major Social Events: Shift high-intensity workouts away from the day of and the morning after the event to prevent training under influence of fatigue/alcohol/dehydration.
+   - Injury: Immediate pivot to rest, physical therapy, or cross-training (if allowed by coach
+     memory/instructions). Do not run or bike until recovery dates pass.
+   - Vacation: Adjust volume based on travel constraints (usually maintain a base level of fitness
+     or reduce load if active vacation, or adjust to local sport).
+   - Parties / Major Social Events: Shift high-intensity workouts away from the day of and the
+     morning after the event to prevent training under influence of fatigue/alcohol/dehydration.
