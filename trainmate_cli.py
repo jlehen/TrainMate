@@ -72,6 +72,10 @@ def main():
     # workout plan
     workout_subparsers.add_parser("plan", help="Generate or adapt the 4-week periodized training plan (saves locally)")
     
+    # workout rm
+    w_rm = workout_subparsers.add_parser("rm", help="Remove a workout by ID")
+    w_rm.add_argument("id", type=int, help="Workout ID to remove")
+    
     # workout adapt
     w_adapt = workout_subparsers.add_parser("adapt", help="Run the daily Garmin check for today (syncs adapted workouts to Calendar)")
     w_adapt.add_argument("--date", help="Date in YYYY-MM-DD format (defaults to UTC today)")
@@ -120,6 +124,8 @@ def main():
         sub = args.subcommand.lower()
         if sub == "list":
             run_list_workouts()
+        elif sub == "rm":
+            run_rm_workout(args)
         elif sub == "plan":
             run_plan()
         elif sub == "adapt":
@@ -269,13 +275,26 @@ def run_list_constraints():
         if e.get('impact_description'):
             print(f"  Impact: {e['impact_description']}")
 
+def run_rm_workout(args):
+    workout = db.get_workout_by_id(args.id)
+    if not workout:
+        print(f"Workout with ID {args.id} not found.")
+        return
+        
+    if workout.get('google_event_id') and workout.get('status') == 'synced':
+        print(f"Workout is synced to Google Calendar. Attempting to delete calendar event...")
+        calendar_syncer.delete_workout_event(workout['google_event_id'])
+        
+    db.delete_workout_by_id(args.id)
+    print(f"Workout with ID {args.id} ('{workout['title']}') removed successfully.")
+
 def run_list_workouts():
     workouts = db.get_workouts()
     print("=== WORKOUT SCHEDULE ===")
     for w in workouts:
         mod_marker = " [ADAPTED]" if w['status'] == 'modified' or w['modification_reason'] else ""
         sync_marker = " [SYNCED]" if w['status'] == 'synced' else ""
-        print(f"{w['date']} | {w['sport_type'].upper()} | {w['title']}{mod_marker}{sync_marker}")
+        print(f"ID: {w['id']} | {w['date']} | {w['sport_type'].upper()} | {w['title']}{mod_marker}{sync_marker}")
         print(f"  Description: {w['description']}")
         if w.get('modification_reason'):
             print(f"  Reason: {w['modification_reason']}")

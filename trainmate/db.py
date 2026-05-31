@@ -211,6 +211,18 @@ class Database:
             conn.cursor().execute("DELETE FROM workouts WHERE date >= ? AND status != 'synced'", (from_date,))
             conn.commit()
 
+    def get_workout_by_id(self, workout_id):
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM workouts WHERE id = ?", (workout_id,))
+            row = cursor.fetchone()
+            return dict(row) if row else None
+
+    def delete_workout_by_id(self, workout_id):
+        with self._get_connection() as conn:
+            conn.cursor().execute("DELETE FROM workouts WHERE id = ?", (workout_id,))
+            conn.commit()
+
     # --- Athlete Metrics Cache ---
     def save_metric_cache(self, date, rhr, hrv, sleep_score, stress, acute_workload=None, chronic_workload=None, acwr=None):
         with self._get_connection() as conn:

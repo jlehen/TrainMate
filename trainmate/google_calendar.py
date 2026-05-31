@@ -115,5 +115,16 @@ class CalendarSyncer:
             synced_ids.append(eid)
         return synced_ids
 
+    def delete_workout_event(self, google_event_id):
+        """Deletes a workout event from Google Calendar."""
+        try:
+            self.service.events().delete(
+                calendarId=self.calendar_id,
+                eventId=google_event_id
+            ).execute()
+            print(f"Deleted Google Calendar event {google_event_id}.")
+        except Exception as e:
+            print(f"Warning: Failed to delete Google Calendar event {google_event_id}: {e}")
+
 # Singleton instance
 calendar_syncer = CalendarSyncer()

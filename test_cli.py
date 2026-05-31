@@ -176,6 +176,18 @@ class TestTrainMateCLI(unittest.TestCase):
         self.assertIn("Adapted Workout Synced to Calendar: Steady Ride", stdout)
         mock_coach.daily_adapt.assert_called_once()
 
+        # 4. Remove workout
+        w_id = test_db.save_workout(
+            date="2026-06-02",
+            sport_type="running",
+            title="Interval Session",
+            description="5x800m",
+            status="planned"
+        )
+        exit_code, stdout, stderr = self.run_cli(['workout', 'rm', str(w_id)])
+        self.assertEqual(exit_code, 0)
+        self.assertIn(f"Workout with ID {w_id} ('Interval Session') removed successfully", stdout)
+
     def test_status_command(self):
         # Seed test metrics
         test_db.save_metric_cache(
@@ -251,6 +263,22 @@ class TestTrainMateCLI(unittest.TestCase):
         exit_code, stdout, stderr = self.run_cli(['invalidcmd'])
         self.assertEqual(exit_code, 2)
         self.assertIn("invalid choice: 'invalidcmd'", stderr)
+
+    @patch('trainmate_cli.calendar_syncer')
+    def test_workout_rm_synced(self, mock_calendar):
+        w_id = test_db.save_workout(
+            date="2026-06-02",
+            sport_type="running",
+            title="Synced Run",
+            description="30 mins",
+            status="synced",
+            google_event_id="mock_event_123"
+        )
+        exit_code, stdout, stderr = self.run_cli(['workout', 'rm', str(w_id)])
+        self.assertEqual(exit_code, 0)
+        self.assertIn("Workout is synced to Google Calendar. Attempting to delete calendar event", stdout)
+        self.assertIn(f"Workout with ID {w_id} ('Synced Run') removed successfully", stdout)
+        mock_calendar.delete_workout_event.assert_called_once_with("mock_event_123")
 
 if __name__ == "__main__":
     unittest.main()
