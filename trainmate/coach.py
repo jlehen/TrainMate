@@ -39,7 +39,10 @@ class CoachEngine:
                 strategy = macrocycle['strategy']
                 mesocycles = db.get_mesocycles_for_macrocycle(macrocycle['id'])
                 for m in mesocycles:
-                    meso_text += f"  - {m['name']} ({m['start_date']} to {m['end_date']}): {m['focus']}\n"
+                    meso_text += (
+                        f"  - {m['name']} ({m['start_date']} to "
+                        f"{m['end_date']}): {m['focus']}\n"
+                    )
 
         if not strategy:
             strategy = db.get_coach_memory("training_strategy") or (
@@ -136,23 +139,32 @@ UPCOMING CONSTRAINTS (LIFE EVENTS):
         serialized = json.dumps(cleaned, sort_keys=True)
         return hashlib.sha256(serialized.encode('utf-8')).hexdigest()
 
-    def _generate_macrocycle_strategy(self, next_goal, objectives, constraints, today_str):
-        """Queries OpenRouter to determine the overall macrocycle strategy and mesocycle blocks."""
+    def _generate_macrocycle_strategy(
+        self, next_goal, objectives, constraints, today_str
+    ):
+        """Queries LLM to determine the overall macrocycle strategy and mesocycle blocks."""
         custom_task = f"""
 TASK:
-Determine the overall periodization strategy (macrocycle) from today ({today_str}) until the next chronological goal ({next_goal['target_date']}).
-Divide this timeframe into contiguous, sequential mesocycles (typically blocks of 3-4 weeks, though the final peak/taper/race block or very short periods can be shorter).
-Make sure there are no gaps between the end date of one mesocycle and the start date of the next. The first mesocycle must start on today's date ({today_str}) and the last mesocycle must end on or around the goal date ({next_goal['target_date']}).
+Determine the overall periodization strategy (macrocycle) from today ({today_str}) until the next
+chronological goal ({next_goal['target_date']}).
+Divide this timeframe into contiguous, sequential mesocycles (typically blocks of 3-4 weeks,
+though the final peak/taper/race block or very short periods can be shorter).
+Make sure there are no gaps between the end date of one mesocycle and the start date of the next.
+The first mesocycle must start on today's date ({today_str}) and the last mesocycle must end on or
+around the goal date ({next_goal['target_date']}).
 
 You MUST respond with a JSON object containing:
 {{
-  "strategy": "Explain the overall training strategy philosophy and periodization strategy until the goal.",
+  "strategy": "Explain the overall training strategy philosophy and periodization strategy
+    until the goal.",
   "mesocycles": [
     {{
-      "name": "Phase Name (e.g., Base Building, Specific Preparation, Build, Peak & Taper, Race/Event)",
+      "name": "Phase Name (e.g., Base Building, Specific Preparation, Build,
+        Peak & Taper, Race/Event)",
       "start_date": "YYYY-MM-DD",
       "end_date": "YYYY-MM-DD",
-      "focus": "Key focus and description of this block (e.g., volume progression, aerobic threshold, rest, peak load, etc.)"
+      "focus": "Key focus and description of this block (e.g., volume progression,
+        aerobic threshold, rest, peak load, etc.)"
     }}
   ]
 }}
@@ -189,17 +201,27 @@ UPCOMING CONSTRAINTS (LIFE EVENTS):
 
 {custom_task}
 """
-        user_content = f"Today's date is {today_str}. The next chronological goal is '{next_goal['title']}' on {next_goal['target_date']}. Please determine the macrocycle and mesocycle blocks starting from {today_str}."
+        user_content = (
+            f"Today's date is {today_str}. The next chronological goal is "
+            f"'{next_goal['title']}' on {next_goal['target_date']}. "
+            f"Please determine the macrocycle and mesocycle blocks starting from {today_str}."
+        )
 
         print("Querying OpenRouter to generate macrocycle and mesocycles periodization strategy...")
         result = openrouter_client.complete(system_prompt, user_content)
         return result
 
     def replan(self, force=False):
-        """Generates or adapts the training plan from today onwards based on goals and constraints."""
+        """Generates or adapts the training plan from today onwards based on goals and
+        constraints.
+        """
         objectives = db.get_objectives(status='active')
         if not objectives:
-            return "No active goals found. TrainMate needs at least one objective to start planning.", []
+            return (
+                "No active goals found. TrainMate needs at least one objective to "
+                "start planning.",
+                []
+            )
 
         # Sort objectives by target date to identify the next goal
         objectives.sort(key=lambda x: x['target_date'])
@@ -218,16 +240,23 @@ UPCOMING CONSTRAINTS (LIFE EVENTS):
         
         reused = False
         if existing_macro and not force:
-            if existing_macro['goals_hash'] == goals_hash and existing_macro['constraints_hash'] == constraints_hash:
+            if (
+                existing_macro['goals_hash'] == goals_hash
+                and existing_macro['constraints_hash'] == constraints_hash
+            ):
                 reused = True
                 strategy = existing_macro['strategy']
                 mesocycles = db.get_mesocycles_for_macrocycle(existing_macro['id'])
-                print("Reusing existing periodization strategy (macrocycle and mesocycles) from database.")
+                print("Reusing existing periodization strategy (macrocycle and mesocycles) "
+                      "from database.")
 
         if not reused:
             # Generate new macrocycle strategy and mesocycles
-            print("Goals or constraints have changed, or force generation requested. Determining new overall periodization strategy...")
-            macro_data = self._generate_macrocycle_strategy(next_goal, objectives, constraints, today_str)
+            print("Goals or constraints have changed, or force generation requested. "
+                  "Determining new overall periodization strategy...")
+            macro_data = self._generate_macrocycle_strategy(
+                next_goal, objectives, constraints, today_str
+            )
             strategy = macro_data.get("strategy", "Endurance preparation strategy.")
             mesocycles = macro_data.get("mesocycles", [])
             
@@ -250,26 +279,34 @@ UPCOMING CONSTRAINTS (LIFE EVENTS):
         custom_task = """
 TASK:
 Generate a training schedule for the next 4 weeks (28 days) starting from today. 
-Ensure the weekly schedules/microcycles are designed specifically to match the focus, target volume, and intensity of the active mesocycle block(s) the athlete is in during this period.
+Ensure the weekly schedules/microcycles are designed specifically to match the focus, target
+volume, and intensity of the active mesocycle block(s) the athlete is in during this period.
 Incorporate deload weeks and schedule around constraints (injury = rest/cross-training,
 vacation = maintain fitness, party = easy workouts next day).
 
 You MUST respond with a JSON object containing:
 {
-  "reasoning": "Explain the microcycle design, detailing how workouts align with the active mesocycle focus.",
-  "athlete_learnings": "Update athlete observations text blob based on metrics or status if any.",
+  "reasoning": "Explain the microcycle design, detailing how workouts align with the active
+    mesocycle focus.",
+  "athlete_learnings": "Update athlete observations text blob based on metrics or status
+    if any.",
   "workouts": [
     {
       "date": "YYYY-MM-DD",
-      "sport_type": "running" | "road_biking" | "hiking" | "strength_training" | "yoga" | "ski_touring" | "rest",
+      "sport_type": "running" | "road_biking" | "hiking" | "strength_training" | "yoga" |
+        "ski_touring" | "rest",
       "title": "Workout Title (e.g., Tempo Run, Long Ride, Rest Day)",
-      "description": "Detailed description of intensity, duration, heart rate zones, and goals."
+      "description": "Detailed description of intensity, duration, heart rate zones, and
+        goals."
     }
   ]
 }
 """
         system_prompt = self._get_coach_system_prompt(objectives, constraints, custom_task)
-        user_content = f"Today's date is {today_str}. Please generate the 4-week microcycles (workouts) starting today."
+        user_content = (
+            f"Today's date is {today_str}. "
+            "Please generate the 4-week microcycles (workouts) starting today."
+        )
 
         print("Querying OpenRouter to generate training workouts (microcycles)...")
         plan_data = openrouter_client.complete(system_prompt, user_content)
@@ -321,9 +358,12 @@ You MUST respond with a JSON object containing:
             )
         else:
             baseline_str = f"""
-Resting HR baseline: Mean = {baseline['rhr_baseline_mean']:.1f}, StdDev = {baseline['rhr_baseline_std']:.2f}
-HRV baseline: Mean = {baseline['hrv_baseline_mean']:.1f}, StdDev = {baseline['hrv_baseline_std']:.2f}
-Sleep Score baseline: Mean = {baseline['sleep_baseline_mean']:.1f}, StdDev = {baseline['sleep_baseline_std']:.2f}
+Resting HR baseline: Mean = {baseline['rhr_baseline_mean']:.1f},
+StdDev = {baseline['rhr_baseline_std']:.2f}
+HRV baseline: Mean = {baseline['hrv_baseline_mean']:.1f},
+StdDev = {baseline['hrv_baseline_std']:.2f}
+Sleep Score baseline: Mean = {baseline['sleep_baseline_mean']:.1f},
+StdDev = {baseline['sleep_baseline_std']:.2f}
 """
 
         objectives = db.get_objectives(status='active')
@@ -357,7 +397,10 @@ You MUST respond with a JSON object containing:
         # Build user message with daily data
         workout_text = ""
         for w in workouts:
-            workout_text += f"- Sport: {w['sport_type']} | Title: {w['title']} | Description: {w['description']}\n"
+            workout_text += (
+                f"- Sport: {w['sport_type']} | Title: {w['title']} | "
+                f"Description: {w['description']}\n"
+            )
 
         user_content = f"""
 Today's Date: {target_date_str}
@@ -408,7 +451,10 @@ Planned Workout to Evaluate:
                 # Automatically sync to Google Calendar!
                 calendar_syncer.sync_workout(adapted_workout)
         else:
-            print(f"No workout adaptation needed for {target_date_str}. Reason: {decision.get('reason')}")
+            print(
+                f"No workout adaptation needed for {target_date_str}. "
+                f"Reason: {decision.get('reason')}"
+            )
 
         return decision.get("reason", "No adaptation needed."), adapted_workout
 
