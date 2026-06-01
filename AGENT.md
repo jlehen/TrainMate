@@ -37,3 +37,6 @@
           do_something(filename)
         except Exception as e:
           print(f"Error reading science guideline {filename}: {e}")
+
+# Test
+- Use "unittest" module.
