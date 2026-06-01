@@ -8,7 +8,7 @@ from trainmate.openrouter import openrouter_client
 from trainmate.google_calendar import calendar_syncer
 
 class CoachEngine:
-    def load_science_guidelines(self):
+    def _load_science_guidelines(self):
         """Loads and concatenates all text files in the science directory."""
         science_dir = config.science_dir
         texts = []
@@ -23,9 +23,9 @@ class CoachEngine:
                         print(f"Error reading science guideline {filename}: {e}")
         return "\n\n".join(texts)
 
-    def get_coach_system_prompt(self, objectives, constraints, custom_task=""):
+    def _get_coach_system_prompt(self, objectives, constraints, custom_task=""):
         """Constructs the static prefix system prompt including guidelines, goals, and memory."""
-        science_guidelines = self.load_science_guidelines()
+        science_guidelines = self._load_science_guidelines()
         
         # Load active macrocycle and mesocycles if available
         strategy = None
@@ -136,7 +136,7 @@ UPCOMING CONSTRAINTS (LIFE EVENTS):
         serialized = json.dumps(cleaned, sort_keys=True)
         return hashlib.sha256(serialized.encode('utf-8')).hexdigest()
 
-    def generate_macrocycle_strategy(self, next_goal, objectives, constraints, today_str):
+    def _generate_macrocycle_strategy(self, next_goal, objectives, constraints, today_str):
         """Queries OpenRouter to determine the overall macrocycle strategy and mesocycle blocks."""
         custom_task = f"""
 TASK:
@@ -157,7 +157,7 @@ You MUST respond with a JSON object containing:
   ]
 }}
 """
-        science_guidelines = self.load_science_guidelines()
+        science_guidelines = self._load_science_guidelines()
         
         obj_text = ""
         for o in objectives:
@@ -227,7 +227,7 @@ UPCOMING CONSTRAINTS (LIFE EVENTS):
         if not reused:
             # Generate new macrocycle strategy and mesocycles
             print("Goals or constraints have changed, or force generation requested. Determining new overall periodization strategy...")
-            macro_data = self.generate_macrocycle_strategy(next_goal, objectives, constraints, today_str)
+            macro_data = self._generate_macrocycle_strategy(next_goal, objectives, constraints, today_str)
             strategy = macro_data.get("strategy", "Endurance preparation strategy.")
             mesocycles = macro_data.get("mesocycles", [])
             
@@ -268,7 +268,7 @@ You MUST respond with a JSON object containing:
   ]
 }
 """
-        system_prompt = self.get_coach_system_prompt(objectives, constraints, custom_task)
+        system_prompt = self._get_coach_system_prompt(objectives, constraints, custom_task)
         user_content = f"Today's date is {today_str}. Please generate the 4-week microcycles (workouts) starting today."
 
         print("Querying OpenRouter to generate training workouts (microcycles)...")
@@ -352,7 +352,7 @@ You MUST respond with a JSON object containing:
   )
 }
 """
-        system_prompt = self.get_coach_system_prompt(objectives, constraints, custom_task)
+        system_prompt = self._get_coach_system_prompt(objectives, constraints, custom_task)
 
         # Build user message with daily data
         workout_text = ""

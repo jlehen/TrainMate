@@ -235,7 +235,7 @@ class TestPeriodization(unittest.TestCase):
         
         # Get active objectives
         objs = test_db.get_objectives(status='active')
-        prompt = coach_engine.get_coach_system_prompt(objs, [])
+        prompt = coach_engine._get_coach_system_prompt(objs, [])
         
         self.assertIn("Run long and slow", prompt)
         self.assertIn("Base Building (2026-06-01 to 2026-06-28): Zone 2 runs", prompt)
