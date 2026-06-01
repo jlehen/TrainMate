@@ -10,6 +10,7 @@ class Database:
 
     def _get_connection(self):
         conn = sqlite3.connect(self.db_path)
+        conn.execute("PRAGMA foreign_keys = ON")
         conn.row_factory = sqlite3.Row
         return conn
 
@@ -99,6 +100,32 @@ class Database:
                     key TEXT PRIMARY KEY,
                     value TEXT,
                     updated_at TEXT
+                )
+            """)
+
+            # Macrocycles table
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS macrocycles (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    objective_id INTEGER NOT NULL,
+                    strategy TEXT NOT NULL,
+                    goals_hash TEXT NOT NULL,
+                    constraints_hash TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    FOREIGN KEY (objective_id) REFERENCES objectives(id) ON DELETE CASCADE
+                )
+            """)
+            
+            # Mesocycles table
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS mesocycles (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    macrocycle_id INTEGER NOT NULL,
+                    name TEXT NOT NULL,
+                    start_date TEXT NOT NULL,
+                    end_date TEXT NOT NULL,
+                    focus TEXT NOT NULL,
+                    FOREIGN KEY (macrocycle_id) REFERENCES macrocycles(id) ON DELETE CASCADE
                 )
             """)
             
@@ -296,6 +323,42 @@ class Database:
             cursor.execute("SELECT value FROM coach_memory WHERE key = ?", (key,))
             row = cursor.fetchone()
             return row['value'] if row else None
+
+    # --- Macrocycles & Mesocycles ---
+    def get_macrocycle_for_objective(self, objective_id):
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM macrocycles WHERE objective_id = ? ORDER BY id DESC LIMIT 1", (objective_id,))
+            row = cursor.fetchone()
+            return dict(row) if row else None
+
+    def get_mesocycles_for_macrocycle(self, macrocycle_id):
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM mesocycles WHERE macrocycle_id = ? ORDER BY start_date ASC", (macrocycle_id,))
+            return [dict(row) for row in cursor.fetchall()]
+
+    def save_macrocycle(self, objective_id, strategy, goals_hash, constraints_hash, mesocycles):
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            # Delete any existing macrocycles for this objective (cascade will delete mesocycles)
+            cursor.execute("DELETE FROM macrocycles WHERE objective_id = ?", (objective_id,))
+            
+            created_at = datetime.now(timezone.utc).isoformat()
+            cursor.execute("""
+                INSERT INTO macrocycles (objective_id, strategy, goals_hash, constraints_hash, created_at)
+                VALUES (?, ?, ?, ?, ?)
+            """, (objective_id, strategy, goals_hash, constraints_hash, created_at))
+            macrocycle_id = cursor.lastrowid
+            
+            for meso in mesocycles:
+                cursor.execute("""
+                    INSERT INTO mesocycles (macrocycle_id, name, start_date, end_date, focus)
+                    VALUES (?, ?, ?, ?, ?)
+                """, (macrocycle_id, meso['name'], meso['start_date'], meso['end_date'], meso['focus']))
+            
+            conn.commit()
+            return macrocycle_id
 
 # Singleton instance
 db = Database()
