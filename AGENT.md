@@ -5,11 +5,16 @@
 - Commit message format:
 
   """
-  One line summary of the change, less than 80-100 characters if possible.
+  <file>: One line summary of the change, less than 80-100 characters if possible.
 
   Longer description and details. The lines should be less than 80-100
   characters.
   """
+
+  "<file>" is present only if the change mostly affects a single file, in that
+  case, use the basename of the filename.  Otherwise, don't just it.
+
+  Example: [coach] Improve prompt.
 
 # Code style
 - Code lines should not be longer than 100 characters.
