@@ -70,9 +70,9 @@ class CoachEngine:
         general_equipment = profile.get("equipment")
         if general_equipment:
             if isinstance(general_equipment, list):
-                lines.append(f"- General Equipment: {', '.join(general_equipment)}")
+                lines.append(f"- General Equipment (always available): {', '.join(general_equipment)}")
             else:
-                lines.append(f"- General Equipment: {general_equipment}")
+                lines.append(f"- General Equipment (always available): {general_equipment}")
 
         weekly_schedule = profile.get("weekly_schedule")
         if weekly_schedule:
