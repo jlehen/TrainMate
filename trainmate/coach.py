@@ -2,14 +2,22 @@ import os
 import json
 import hashlib
 from datetime import datetime, timedelta, timezone
+from typing import Any, List, Optional, Tuple, Dict
 from trainmate.config import config
 from trainmate.db import db
 from trainmate.openrouter import openrouter_client
 from trainmate.google_calendar import calendar_syncer
+from trainmate.types import Objective, Constraint, Workout
 
 class CoachEngine:
-    def _load_science_guidelines(self):
-        """Loads and concatenates all text files in the science directory."""
+    """Orchestrates sports science coaching, macro/meso planning, and daily adaptations."""
+
+    def _load_science_guidelines(self) -> str:
+        """Loads and concatenates all text files in the science directory.
+
+        Returns:
+            A string containing all training science guidelines.
+        """
         science_dir = config.science_dir
         texts = []
         if os.path.exists(science_dir):
@@ -23,8 +31,22 @@ class CoachEngine:
                         print(f"Error reading science guideline {filename}: {e}")
         return "\n\n".join(texts)
 
-    def _get_coach_system_prompt(self, objectives, constraints, custom_task=""):
-        """Constructs the static prefix system prompt including guidelines, goals, and memory."""
+    def _get_coach_system_prompt(
+        self, objectives: List[Objective], constraints: List[Constraint],
+        custom_task: str = ""
+    ) -> str:
+        """Constructs the static prefix system prompt.
+
+        Includes guidelines, goals, and coach memory.
+
+        Args:
+            objectives: List of active athlete objectives.
+            constraints: List of upcoming logged constraints.
+            custom_task: Specific task context to append.
+
+        Returns:
+            The constructed system prompt string.
+        """
         science_guidelines = self._load_science_guidelines()
         
         # Load active macrocycle and mesocycles if available
@@ -32,17 +54,18 @@ class CoachEngine:
         meso_text = ""
         if objectives:
             # Sort objectives to find the next goal
-            sorted_objs = sorted(objectives, key=lambda x: x['target_date'])
+            sorted_objs = sorted(objectives, key=lambda x: str(x['target_date']))
             next_goal = sorted_objs[0]
-            macrocycle = db.get_macrocycle_for_objective(next_goal['id'])
-            if macrocycle:
-                strategy = macrocycle['strategy']
-                mesocycles = db.get_mesocycles_for_macrocycle(macrocycle['id'])
-                for m in mesocycles:
-                    meso_text += (
-                        f"  - {m['name']} ({m['start_date']} to "
-                        f"{m['end_date']}): {m['focus']}\n"
-                    )
+            if next_goal['id'] is not None:
+                macrocycle = db.get_macrocycle_for_objective(next_goal['id'])
+                if macrocycle:
+                    strategy = macrocycle['strategy']
+                    mesocycles = db.get_mesocycles_for_macrocycle(macrocycle['id'])
+                    for m in mesocycles:
+                        meso_text += (
+                            f"  - {m['name']} ({m['start_date']} to "
+                            f"{m['end_date']}): {m['focus']}\n"
+                        )
 
         if not strategy:
             strategy = db.get_coach_memory("training_strategy") or (
@@ -108,7 +131,8 @@ UPCOMING CONSTRAINTS (LIFE EVENTS):
 """
         return system_prompt
 
-    def _get_goals_hash(self, objectives):
+    def _get_goals_hash(self, objectives: List[Objective]) -> str:
+        """Computes a hash representation of objectives list to check for updates."""
         cleaned = []
         for o in objectives:
             cleaned.append({
@@ -120,11 +144,12 @@ UPCOMING CONSTRAINTS (LIFE EVENTS):
                 'priority': o.get('priority'),
                 'status': o.get('status')
             })
-        cleaned.sort(key=lambda x: (x['target_date'], x['id'] or 0))
+        cleaned.sort(key=lambda x: (str(x['target_date']), x['id'] or 0))
         serialized = json.dumps(cleaned, sort_keys=True)
         return hashlib.sha256(serialized.encode('utf-8')).hexdigest()
 
-    def _get_constraints_hash(self, constraints):
+    def _get_constraints_hash(self, constraints: List[Constraint]) -> str:
+        """Computes a hash representation of constraints list to check for updates."""
         cleaned = []
         for c in constraints:
             cleaned.append({
@@ -135,14 +160,15 @@ UPCOMING CONSTRAINTS (LIFE EVENTS):
                 'event_type': c.get('event_type'),
                 'impact_description': c.get('impact_description')
             })
-        cleaned.sort(key=lambda x: (x['start_date'], x['id'] or 0))
+        cleaned.sort(key=lambda x: (str(x['start_date']), x['id'] or 0))
         serialized = json.dumps(cleaned, sort_keys=True)
         return hashlib.sha256(serialized.encode('utf-8')).hexdigest()
 
     def _generate_macrocycle_strategy(
-        self, next_goal, objectives, constraints, today_str,
-        previous_strategy_text=None
-    ):
+        self, next_goal: Objective, objectives: List[Objective],
+        constraints: List[Constraint], today_str: str,
+        previous_strategy_text: Optional[str] = None
+    ) -> Dict[str, Any]:
         """Queries LLM to determine the overall macrocycle strategy and mesocycle blocks."""
         custom_task = f"""
 TASK:
@@ -227,9 +253,14 @@ You MUST respond with a JSON object containing:
         result = openrouter_client.complete(system_prompt, user_content)
         return result
 
-    def replan(self, force=False):
-        """Generates or adapts the training plan from today onwards based on goals and
-        constraints.
+    def replan(self, force: bool = False) -> Tuple[str, List[Workout]]:
+        """Generates or adapts the training plan from today onwards.
+
+        Args:
+            force: Force regeneration of macro/meso plan.
+
+        Returns:
+            A tuple of (reasoning string, list of generated Workouts).
         """
         objectives = db.get_objectives(status='active')
         if not objectives:
@@ -240,7 +271,7 @@ You MUST respond with a JSON object containing:
             )
 
         # Sort objectives by target date to identify the next goal
-        objectives.sort(key=lambda x: x['target_date'])
+        objectives.sort(key=lambda x: str(x['target_date']))
         next_goal = objectives[0]
         
         # Get future constraints
@@ -252,7 +283,11 @@ You MUST respond with a JSON object containing:
         constraints_hash = self._get_constraints_hash(constraints)
 
         # Try to retrieve existing macrocycle
-        existing_macro = db.get_macrocycle_for_objective(next_goal['id'])
+        strategy = ""
+        mesocycles: List[Dict[str, Any]] = []
+        existing_macro = None
+        if next_goal['id'] is not None:
+            existing_macro = db.get_macrocycle_for_objective(next_goal['id'])
         
         reused = False
         if existing_macro and not force:
@@ -262,7 +297,7 @@ You MUST respond with a JSON object containing:
             ):
                 reused = True
                 strategy = existing_macro['strategy']
-                mesocycles = db.get_mesocycles_for_macrocycle(existing_macro['id'])
+                mesocycles = db.get_mesocycles_for_macrocycle(existing_macro['id'])  # type: ignore
                 print("Reusing existing periodization strategy (macrocycle and mesocycles) "
                       "from database.")
 
@@ -301,13 +336,14 @@ You MUST respond with a JSON object containing:
             mesocycles = macro_data.get("mesocycles", [])
             
             # Save it
-            db.save_macrocycle(
-                objective_id=next_goal['id'],
-                strategy=strategy,
-                goals_hash=goals_hash,
-                constraints_hash=constraints_hash,
-                mesocycles=mesocycles
-            )
+            if next_goal['id'] is not None:
+                db.save_macrocycle(
+                    objective_id=next_goal['id'],
+                    strategy=strategy,
+                    goals_hash=goals_hash,
+                    constraints_hash=constraints_hash,
+                    mesocycles=mesocycles
+                )
             print("\n=== NEW PERIODIZATION STRATEGY (MACROCYCLE) ===")
             print(f"Overall Strategy:\n{strategy}\n")
             print("Mesocycle Blocks:")
@@ -361,20 +397,39 @@ You MUST respond with a JSON object containing:
         # Clear future unsynced workouts to prevent overlapping plans
         db.clear_future_workouts(today_str)
         
+        saved_workouts: List[Workout] = []
         for w in workouts:
-            db.save_workout(
+            wid = db.save_workout(
                 date=w['date'],
                 sport_type=w['sport_type'],
                 title=w['title'],
                 description=w['description'],
                 status='planned'
             )
+            saved_workouts.append({
+                'id': wid,
+                'date': w['date'],
+                'sport_type': w['sport_type'],
+                'title': w['title'],
+                'description': w['description'],
+                'original_description': w['description'],
+                'status': 'planned',
+                'modification_reason': None,
+                'google_event_id': None
+            })
 
         print(f"Generated {len(workouts)} workouts.")
-        return plan_data.get("reasoning", "Plan generated."), workouts
+        return plan_data.get("reasoning", "Plan generated."), saved_workouts
 
-    def adapt(self, target_date_str=None):
-        """Runs the daily check to adapt today's planned workout based on Garmin metrics."""
+    def adapt(self, target_date_str: Optional[str] = None) -> Tuple[str, Optional[Workout]]:
+        """Runs the daily check to adapt today's planned workout based on Garmin metrics.
+
+        Args:
+            target_date_str: The target date string YYYY-MM-DD. Defaults to today.
+
+        Returns:
+            A tuple of (adaptation explanation string, adapted Workout or None).
+        """
         if not target_date_str:
             target_date_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
@@ -489,7 +544,8 @@ Planned Workout to Evaluate:
                 adapted_workout = db.get_workout(target_date_str, w['sport_type'])
                 
                 # Automatically sync to Google Calendar!
-                calendar_syncer.sync_workout(adapted_workout)
+                if adapted_workout:
+                    calendar_syncer.sync_workout(adapted_workout)
         else:
             print(
                 f"No workout adaptation needed for {target_date_str}. "

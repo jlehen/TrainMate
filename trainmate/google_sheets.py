@@ -1,20 +1,27 @@
 import json
 from datetime import datetime, timedelta
 import math
+from typing import Any, List, Optional, Tuple, Dict
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from trainmate.config import config
 from trainmate.db import db
 
 class GarminSheetsReader:
-    def __init__(self):
-        self.scopes = ['https://www.googleapis.com/auth/spreadsheets.readonly']
-        self.creds = service_account.Credentials.from_service_account_file(
-            config.service_account_file, scopes=self.scopes)
-        self.service = build('sheets', 'v4', credentials=self.creds)
-        self.spreadsheet_id = config.google_sheet_id
+    """Reads Garmin daily metrics and activities data from Google Sheets."""
 
-    def sync_data(self):
+    def __init__(self) -> None:
+        """Initializes sheets API service using service account credentials."""
+        self.scopes: List[str] = ['https://www.googleapis.com/auth/spreadsheets.readonly']
+        self.creds: service_account.Credentials = (
+            service_account.Credentials.from_service_account_file(
+                config.service_account_file, scopes=self.scopes
+            )
+        )
+        self.service: Any = build('sheets', 'v4', credentials=self.creds)
+        self.spreadsheet_id: Optional[str] = config.google_sheet_id
+
+    def sync_data(self) -> None:
         """Fetches data from Google Sheets, caches it in DB, and computes baselines."""
         print("Fetching Garmin Daily Metrics and Activities from Google Sheets...")
         
@@ -28,13 +35,18 @@ class GarminSheetsReader:
         
         # 2. Fetch Activities
         activity_values = self._get_sheet_values("Activities!A1:Z5000")
-        activity_rows = activity_values[1:] if activity_values and len(activity_values) > 1 else []
-        activity_headers = [h.strip() for h in activity_values[0]] if activity_values else []
+        activity_rows = (
+            activity_values[1:] if activity_values and len(activity_values) > 1 else []
+        )
+        activity_headers = (
+            [h.strip() for h in activity_values[0]] if activity_values else []
+        )
 
         print(f"Loaded {len(daily_rows)} daily metric rows and {len(activity_rows)} activities.")
 
         # Parse Daily Metrics
-        # Headers: Date, Resting HR (RHR), Overnight HRV Average, Sleep Score, Body Battery Start, Body Battery End, Steps, Calories Burned, Average Stress
+        # Headers: Date, Resting HR (RHR), Overnight HRV Average, Sleep Score,
+        # Body Battery Start, Body Battery End, Steps, Calories Burned, Average Stress
         parsed_daily = []
         for row in daily_rows:
             if not row or not row[0]:
@@ -51,9 +63,9 @@ class GarminSheetsReader:
             date_str = row_dict.get('Date')
             try:
                 # Validate date format (YYYY-MM-DD)
-                datetime.strptime(date_str, "%Y-%m-%d")
+                datetime.strptime(str(date_str), "%Y-%m-%d")
             except ValueError:
-                continue # Skip invalid date rows
+                continue  # Skip invalid date rows
                 
             rhr = self._safe_int(row_dict.get('Resting HR (RHR)'))
             hrv = self._safe_int(row_dict.get('Overnight HRV Average'))
@@ -69,8 +81,10 @@ class GarminSheetsReader:
             })
 
         # Parse Activities to compute training workload
-        # Headers: Activity ID, Date, Start Time, Activity Name, Type, Duration (sec), Duration (Formatted), Distance (km), Elevation Gain (m), Avg HR, Max HR
-        daily_activity_load = {} # Map date string -> total training load
+        # Headers: Activity ID, Date, Start Time, Activity Name, Type,
+        # Duration (sec), Duration (Formatted), Distance (km), Elevation Gain (m),
+        # Avg HR, Max HR
+        daily_activity_load: Dict[str, float] = {}  # Map date string -> total training load
         
         for row in activity_rows:
             if not row or not row[1]:
@@ -84,11 +98,11 @@ class GarminSheetsReader:
                     
             date_str = row_dict.get('Date')
             try:
-                datetime.strptime(date_str, "%Y-%m-%d")
+                datetime.strptime(str(date_str), "%Y-%m-%d")
             except ValueError:
                 continue
                 
-            duration_str = row_dict.get('Duration (sec)', '0').replace(',', '')
+            duration_str = str(row_dict.get('Duration (sec)', '0')).replace(',', '')
             duration_sec = self._safe_float(duration_str)
             avg_hr = self._safe_int(row_dict.get('Avg HR'))
             
@@ -99,14 +113,16 @@ class GarminSheetsReader:
             # Workload calculation: Duration in hours * Avg HR
             workload = (duration_sec / 3600.0) * avg_hr
             
-            daily_activity_load[date_str] = daily_activity_load.get(date_str, 0.0) + workload
+            daily_activity_load[str(date_str)] = (
+                daily_activity_load.get(str(date_str), 0.0) + workload
+            )
 
         # Sort daily metrics chronologically
-        parsed_daily.sort(key=lambda x: x['date'])
+        parsed_daily.sort(key=lambda x: str(x['date']))
         
         # Save raw daily metrics and compute baselines
         for idx, day in enumerate(parsed_daily):
-            date_str = day['date']
+            date_str = str(day['date'])
             date_obj = datetime.strptime(date_str, "%Y-%m-%d")
             
             # Calculate workloads for this date
@@ -123,14 +139,14 @@ class GarminSheetsReader:
             for d in range(28):
                 check_date = (date_obj - timedelta(days=d)).strftime("%Y-%m-%d")
                 total_28_day_load += daily_activity_load.get(check_date, 0.0)
-            chronic_load = total_28_day_load / 4.0 # Average weekly load
+            chronic_load = total_28_day_load / 4.0  # Average weekly load
             
             acwr = 1.0
             if chronic_load > 0.0:
                 acwr = acute_load / chronic_load
             elif acute_load > 0.0:
-                acwr = 2.0 # Elevated ratio if acute exists but chronic is 0
-
+                acwr = 2.0  # Elevated ratio if acute exists but chronic is 0
+ 
             # Save metrics cache
             db.save_metric_cache(
                 date=date_str,
@@ -153,11 +169,14 @@ class GarminSheetsReader:
                 # Look up in already parsed list (safer since sorted chronologically)
                 prev_day = next((x for x in parsed_daily if x['date'] == prev_date), None)
                 if prev_day:
-                    if prev_day['rhr']: rhr_values.append(prev_day['rhr'])
-                    if prev_day['hrv']: hrv_values.append(prev_day['hrv'])
-                    if prev_day['sleep_score']: sleep_values.append(prev_day['sleep_score'])
+                    if prev_day['rhr'] is not None:
+                        rhr_values.append(prev_day['rhr'])
+                    if prev_day['hrv'] is not None:
+                        hrv_values.append(prev_day['hrv'])
+                    if prev_day['sleep_score'] is not None:
+                        sleep_values.append(prev_day['sleep_score'])
             
-            # If we have enough data (at least 7 points in the 28-day window to establish a baseline)
+            # If we have enough data (at least 7 points in 28-day window)
             if len(rhr_values) >= 7 or len(hrv_values) >= 7 or len(sleep_values) >= 7:
                 rhr_mean, rhr_std = self._mean_std(rhr_values)
                 hrv_mean, hrv_std = self._mean_std(hrv_values)
@@ -175,16 +194,25 @@ class GarminSheetsReader:
 
         print("Google Sheets synchronization completed successfully.")
 
-    def _get_sheet_values(self, sheet_range):
+    def _get_sheet_values(self, sheet_range: str) -> List[List[Any]]:
+        """Queries Google Sheets API for values in the given range.
+
+        Args:
+            sheet_range: The sheet range (e.g. 'Daily Metrics!A1:Z5000').
+
+        Returns:
+            A list of lists containing sheet cell values.
+        """
         try:
             result = self.service.spreadsheets().values().get(
                 spreadsheetId=self.spreadsheet_id, range=sheet_range).execute()
-            return result.get('values', [])
+            return result.get('values', [])  # type: ignore
         except Exception as e:
             print(f"Error fetching sheet range {sheet_range}: {e}")
             return []
 
-    def _safe_int(self, val):
+    def _safe_int(self, val: Any) -> Optional[int]:
+        """Safely parses a cell value to integer."""
         if val is None:
             return None
         try:
@@ -192,7 +220,8 @@ class GarminSheetsReader:
         except ValueError:
             return None
 
-    def _safe_float(self, val):
+    def _safe_float(self, val: Any) -> float:
+        """Safely parses a cell value to float."""
         if val is None:
             return 0.0
         try:
@@ -200,7 +229,15 @@ class GarminSheetsReader:
         except ValueError:
             return 0.0
 
-    def _mean_std(self, values):
+    def _mean_std(self, values: List[float]) -> Tuple[float, float]:
+        """Calculates the mean and sample standard deviation of a list of floats.
+
+        Args:
+            values: A list of numeric values.
+
+        Returns:
+            A tuple of (mean, standard_deviation).
+        """
         if not values:
             return 0.0, 0.0
         n = len(values)

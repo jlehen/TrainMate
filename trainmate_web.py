@@ -1,6 +1,7 @@
 import os
 from flask import Flask, jsonify, request, send_from_directory
 from datetime import datetime, timezone
+from typing import Any, Dict
 from trainmate.db import db
 from trainmate.google_sheets import sheets_reader
 from trainmate.google_calendar import calendar_syncer
@@ -11,17 +12,19 @@ app = Flask(__name__, static_folder="static", static_url_path="")
 
 # --- Static Routes ---
 @app.route("/")
-def index():
+def index() -> Any:
+    """Serves the front-end dashboard index.html page."""
     return send_from_directory("static", "index.html")
 
 # --- API Routes ---
 
 @app.route("/api/status", methods=["GET"])
-def get_status():
+def get_status() -> Any:
+    """API endpoint to retrieve overall athlete status, memories, and metrics."""
     objectives = db.get_objectives(status='active')
     next_goal = None
     if objectives:
-        objectives.sort(key=lambda x: x['target_date'])
+        objectives.sort(key=lambda x: str(x['target_date']))
         next_goal = objectives[0]
         
     metrics = db.get_metrics_cache()
@@ -44,16 +47,23 @@ def get_status():
     })
 
 @app.route("/api/objectives", methods=["GET", "POST"])
-def manage_objectives():
+def manage_objectives() -> Any:
+    """API endpoint to list or create objectives."""
     if request.method == "POST":
         data = request.json
-        if not data or not data.get("title") or not data.get("target_date") or not data.get("sport_type"):
+        if not data:
+            return jsonify({"error": "Missing payload"}), 400
+            
+        title = data.get("title")
+        t_date = data.get("target_date")
+        s_type = data.get("sport_type")
+        if not title or not t_date or not s_type:
             return jsonify({"error": "Missing title, target_date, or sport_type"}), 400
             
         obj_id = db.add_objective(
-            title=data["title"],
-            target_date=data["target_date"],
-            sport_type=data["sport_type"],
+            title=title,
+            target_date=t_date,
+            sport_type=s_type,
             description=data.get("description", ""),
             priority=int(data.get("priority", 1)),
             status=data.get("status", "active")
@@ -64,7 +74,8 @@ def manage_objectives():
     return jsonify(db.get_objectives())
 
 @app.route("/api/objectives/<int:obj_id>", methods=["DELETE", "PUT"])
-def single_objective(obj_id):
+def single_objective(obj_id: int) -> Any:
+    """API endpoint to update or delete a specific objective."""
     if request.method == "DELETE":
         db.delete_objective(obj_id)
         return jsonify({"message": "Objective deleted."})
@@ -76,17 +87,25 @@ def single_objective(obj_id):
         return jsonify({"message": "Objective updated."})
 
 @app.route("/api/life-events", methods=["GET", "POST"])
-def manage_life_events():
+def manage_life_events() -> Any:
+    """API endpoint to list active constraints or add a new constraint."""
     if request.method == "POST":
         data = request.json
-        if not data or not data.get("title") or not data.get("start_date") or not data.get("end_date") or not data.get("event_type"):
+        if not data:
+            return jsonify({"error": "Missing payload"}), 400
+            
+        title = data.get("title")
+        start = data.get("start_date")
+        end = data.get("end_date")
+        e_type = data.get("event_type")
+        if not title or not start or not end or not e_type:
             return jsonify({"error": "Missing title, start_date, end_date, or event_type"}), 400
             
         event_id = db.add_constraint(
-            title=data["title"],
-            start_date=data["start_date"],
-            end_date=data["end_date"],
-            event_type=data["event_type"],
+            title=title,
+            start_date=start,
+            end_date=end,
+            event_type=e_type,
             impact_description=data.get("impact_description", "")
         )
         return jsonify({"id": event_id, "message": "Constraint logged successfully."}), 201
@@ -96,18 +115,21 @@ def manage_life_events():
     return jsonify(db.get_constraints(start_after=today_str))
 
 @app.route("/api/life-events/<int:event_id>", methods=["DELETE"])
-def delete_life_event(event_id):
+def delete_life_event(event_id: int) -> Any:
+    """API endpoint to delete a specific constraint."""
     db.delete_constraint(event_id)
     return jsonify({"message": "Constraint deleted."})
 
 @app.route("/api/workouts", methods=["GET"])
-def get_workouts():
+def get_workouts() -> Any:
+    """API endpoint to list workouts within an optional date range."""
     start_date = request.args.get("start_date")
     end_date = request.args.get("end_date")
     return jsonify(db.get_workouts(start_date=start_date, end_date=end_date))
 
 @app.route("/api/plan", methods=["POST"])
-def generate_plan():
+def generate_plan() -> Any:
+    """API endpoint to generate the training plan (macro/meso strategy + micro workouts)."""
     try:
         reasoning, workouts = coach_engine.replan()
         return jsonify({
@@ -119,7 +141,8 @@ def generate_plan():
         return jsonify({"error": str(e)}), 500
 
 @app.route("/api/adapt", methods=["POST"])
-def adapt():
+def adapt() -> Any:
+    """API endpoint to run daily Garmin fatigue checks and adapt workouts."""
     data = request.json or {}
     date_str = data.get("date") or datetime.now(timezone.utc).strftime("%Y-%m-%d")
     try:
@@ -134,14 +157,18 @@ def adapt():
         return jsonify({"error": str(e)}), 500
 
 @app.route("/api/sync", methods=["POST"])
-def sync_calendar():
+def sync_calendar() -> Any:
+    """API endpoint to synchronize planned and adapted workouts with Google Calendar."""
     today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     planned_workouts = db.get_workouts(start_date=today_str)
     # Get unsynced workouts
     unsynced = [w for w in planned_workouts if w['status'] in ('planned', 'modified')]
     
     if not unsynced:
-        return jsonify({"message": "No planned or modified workouts to sync.", "synced_count": 0})
+        return jsonify({
+            "message": "No planned or modified workouts to sync.",
+            "synced_count": 0
+        })
         
     try:
         calendar_syncer.sync_multiple(unsynced)
@@ -153,7 +180,8 @@ def sync_calendar():
         return jsonify({"error": str(e)}), 500
 
 @app.route("/api/sync-sheets", methods=["POST"])
-def sync_sheets():
+def sync_sheets() -> Any:
+    """API endpoint to fetch Garmin daily metrics from Google Sheets."""
     try:
         sheets_reader.sync_data()
         return jsonify({"message": "Garmin metrics synchronized from Google Sheets."})
@@ -161,7 +189,8 @@ def sync_sheets():
         return jsonify({"error": str(e)}), 500
 
 @app.route("/api/metrics", methods=["GET"])
-def get_metrics():
+def get_metrics() -> Any:
+    """API endpoint to fetch the last 30 days of cached Garmin metrics."""
     # Return last 30 days of metrics for visualization
     metrics = db.get_metrics_cache()
     return jsonify(metrics[-30:] if metrics else [])

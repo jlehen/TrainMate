@@ -1,21 +1,39 @@
 import json
 from datetime import datetime, timedelta
+from typing import Any, List, Optional
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 from trainmate.config import config
 from trainmate.db import db
+from trainmate.types import Workout
 
 class CalendarSyncer:
-    def __init__(self):
-        self.scopes = ['https://www.googleapis.com/auth/calendar']
-        self.creds = service_account.Credentials.from_service_account_file(
-            config.service_account_file, scopes=self.scopes)
-        self.service = build('calendar', 'v3', credentials=self.creds)
-        self.calendar_id = config.google_calendar_id
+    """Synchronizes planned and adapted workouts to Google Calendar as all-day events."""
 
-    def sync_workout(self, workout):
-        """Syncs a single workout to Google Calendar (creating or updating)."""
+    def __init__(self) -> None:
+        """Initializes Google API calendar service using configured service account."""
+        self.scopes: List[str] = ['https://www.googleapis.com/auth/calendar']
+        self.creds: service_account.Credentials = (
+            service_account.Credentials.from_service_account_file(
+                config.service_account_file, scopes=self.scopes
+            )
+        )
+        self.service: Any = build('calendar', 'v3', credentials=self.creds)
+        self.calendar_id: Optional[str] = config.google_calendar_id
+
+    def sync_workout(self, workout: Workout) -> Optional[str]:
+        """Syncs a single workout to Google Calendar (creating or updating).
+
+        Args:
+            workout: The Workout details to synchronize.
+
+        Returns:
+            The Google Calendar event ID if sync was successful, or None.
+
+        Raises:
+            HttpError: If API call fails.
+        """
         date_str = workout['date']
         sport_type = workout['sport_type']
         title = workout['title']
@@ -34,10 +52,14 @@ class CalendarSyncer:
         is_modified = status == 'modified' or bool(mod_reason)
         if is_modified:
             summary = f"[Adapted] {title}"
-            event_description = f"Originally:\n{orig_description}\n\nAdapted:\n{description}\n\nReason:\n{mod_reason}"
+            event_description = (
+                f"Originally:\n{orig_description}\n\n"
+                f"Adapted:\n{description}\n\n"
+                f"Reason:\n{mod_reason}"
+            )
         else:
             summary = title
-            event_description = description
+            event_description = description or ""
 
         event_body = {
             'summary': summary,
@@ -65,14 +87,17 @@ class CalendarSyncer:
                     eventId=google_event_id,
                     body=event_body
                 ).execute()
-                print(f"Updated existing calendar event for {date_str} ({sport_type}): {updated_event.get('htmlLink')}")
+                print(
+                    f"Updated existing calendar event for {date_str} ({sport_type}): "
+                    f"{updated_event.get('htmlLink')}"
+                )
                 
                 # Mark as synced in DB
                 db.save_workout(
                     date=date_str,
                     sport_type=sport_type,
                     title=title,
-                    description=description,
+                    description=description or "",
                     original_description=orig_description,
                     status='synced',
                     modification_reason=mod_reason,
@@ -81,7 +106,10 @@ class CalendarSyncer:
                 return google_event_id
             except HttpError as e:
                 if e.resp.status in (404, 410):
-                    print(f"Warning: Calendar event {google_event_id} was deleted on Google Calendar. Re-creating a new one...")
+                    print(
+                        f"Warning: Calendar event {google_event_id} was deleted on Google "
+                        f"Calendar. Re-creating a new one..."
+                    )
                     # Fall through to insert new event
                 else:
                     print(f"Error updating Google Calendar event: {e}")
@@ -97,34 +125,48 @@ class CalendarSyncer:
                 body=event_body
             ).execute()
             new_event_id = created_event.get('id')
-            print(f"Created new calendar event for {date_str} ({sport_type}): {created_event.get('htmlLink')}")
+            print(
+                f"Created new calendar event for {date_str} ({sport_type}): "
+                f"{created_event.get('htmlLink')}"
+            )
             
             # Save the new event ID and mark as synced in DB
             db.save_workout(
                 date=date_str,
                 sport_type=sport_type,
                 title=title,
-                description=description,
+                description=description or "",
                 original_description=orig_description,
                 status='synced',
                 modification_reason=mod_reason,
                 google_event_id=new_event_id
             )
-            return new_event_id
+            return str(new_event_id)
         except Exception as e:
             print(f"Error inserting event to Google Calendar: {e}")
             raise e
 
-    def sync_multiple(self, workouts):
-        """Syncs a list of workouts sequentially."""
+    def sync_multiple(self, workouts: List[Workout]) -> List[Optional[str]]:
+        """Syncs a list of workouts sequentially.
+
+        Args:
+            workouts: List of Workout objects to sync.
+
+        Returns:
+            A list of event IDs synced.
+        """
         synced_ids = []
         for w in workouts:
             eid = self.sync_workout(w)
             synced_ids.append(eid)
         return synced_ids
 
-    def delete_workout_event(self, google_event_id):
-        """Deletes a workout event from Google Calendar."""
+    def delete_workout_event(self, google_event_id: str) -> None:
+        """Deletes a workout event from Google Calendar.
+
+        Args:
+            google_event_id: The event ID to delete.
+        """
         try:
             self.service.events().delete(
                 calendarId=self.calendar_id,

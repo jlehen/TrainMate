@@ -1,18 +1,39 @@
 import requests
 import json
 import os
+from typing import Any
 from trainmate.config import config
 
 class OpenRouterClient:
-    def __init__(self):
-        self.api_url = "https://openrouter.ai/api/v1/chat/completions"
-        self.model = config.openrouter_model
+    """Client for communicating with the OpenRouter LLM API."""
 
-    def complete(self, system_content, user_content):
-        """Sends a request to OpenRouter using Gemini 3.5 Flash with structured JSON output."""
+    def __init__(self) -> None:
+        """Initializes API endpoint and model from configuration."""
+        self.api_url: str = "https://openrouter.ai/api/v1/chat/completions"
+        self.model: str = config.openrouter_model
+
+    def complete(self, system_content: str, user_content: str) -> dict[str, Any]:
+        """Sends a request to OpenRouter with system and user prompts.
+
+        Expects a structured JSON object response from the LLM.
+
+        Args:
+            system_content: Large context / rules placed in system role prompt.
+            user_content: Immediate instruction or data payload for the LLM.
+
+        Returns:
+            The parsed JSON response dictionary from the model.
+
+        Raises:
+            ValueError: If the OpenRouter API Key is missing or response is empty.
+            requests.exceptions.HTTPError: If HTTP error occurs during requests.
+        """
         api_key = config.openrouter_api_key
         if not api_key:
-            raise ValueError("OpenRouter API key is not configured. Please set the OPENROUTER_API_KEY env variable or update config.json.")
+            raise ValueError(
+                "OpenRouter API key is not configured. Please set the "
+                "OPENROUTER_API_KEY env variable or update config.json."
+            )
 
         headers = {
             "Authorization": f"Bearer {api_key}",
@@ -40,7 +61,11 @@ class OpenRouterClient:
             
             # Print token usage details for prompt caching verification
             usage = resp_data.get("usage", {})
-            print(f"OpenRouter Tokens - Prompt: {usage.get('prompt_tokens')}, Completion: {usage.get('completion_tokens')}, Total: {usage.get('total_tokens')}")
+            print(
+                f"OpenRouter Tokens - Prompt: {usage.get('prompt_tokens')}, "
+                f"Completion: {usage.get('completion_tokens')}, "
+                f"Total: {usage.get('total_tokens')}"
+            )
             
             choices = resp_data.get("choices", [])
             if not choices:

@@ -1,0 +1,71 @@
+from typing import TypedDict, Optional
+
+class Objective(TypedDict):
+    """Represents a training goal or target event."""
+    id: Optional[int]
+    title: str
+    target_date: str
+    sport_type: str
+    description: Optional[str]
+    priority: int
+    status: str  # 'active', 'completed', 'archived'
+
+class Constraint(TypedDict):
+    """Represents a life event constraint that impacts training availability."""
+    id: Optional[int]
+    title: str
+    start_date: str
+    end_date: str
+    event_type: str  # 'injury', 'vacation', 'party', 'other'
+    impact_description: Optional[str]
+
+class Workout(TypedDict):
+    """Represents a single planned or synced workout."""
+    id: Optional[int]
+    date: str
+    sport_type: str
+    title: str
+    description: Optional[str]
+    original_description: Optional[str]
+    status: str  # 'planned', 'modified', 'synced'
+    modification_reason: Optional[str]
+    google_event_id: Optional[str]
+
+class AthleteMetric(TypedDict):
+    """Represents Garmin health/performance metrics cached for a specific day."""
+    date: str
+    rhr: Optional[int]
+    hrv: Optional[int]
+    sleep_score: Optional[int]
+    stress: Optional[int]
+    acute_workload: Optional[float]
+    chronic_workload: Optional[float]
+    acwr: Optional[float]
+
+class AthleteBaseline(TypedDict):
+    """Represents rolling baseline stats calculated for an athlete."""
+    date: str
+    rhr_baseline_mean: float
+    rhr_baseline_std: float
+    hrv_baseline_mean: float
+    hrv_baseline_std: float
+    sleep_baseline_mean: float
+    sleep_baseline_std: float
+
+class Macrocycle(TypedDict):
+    """Represents a high-level periodized training macrocycle."""
+    id: Optional[int]
+    objective_id: int
+    strategy: str
+    goals_hash: str
+    constraints_hash: str
+    created_at: str
+
+class Mesocycle(TypedDict):
+    """Represents a specific block/phase of training within a macrocycle."""
+    id: Optional[int]
+    macrocycle_id: int
+    name: str
+    start_date: str
+    end_date: str
+    focus: str

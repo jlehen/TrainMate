@@ -1,20 +1,29 @@
 import sqlite3
 import os
 from datetime import datetime, timezone
+from typing import Any, Optional, List, Dict
 from trainmate.config import config
+from trainmate.types import (
+    Objective, Constraint, Workout, AthleteMetric, AthleteBaseline, Macrocycle, Mesocycle
+)
 
 class Database:
-    def __init__(self, db_path=None):
-        self.db_path = db_path or config.db_path
+    """Handles all database schema setups and operations using SQLite."""
+
+    def __init__(self, db_path: Optional[str] = None) -> None:
+        """Initializes database path and sets up tables."""
+        self.db_path: str = db_path or config.db_path
         self._init_db()
 
-    def _get_connection(self):
+    def _get_connection(self) -> sqlite3.Connection:
+        """Creates and returns a connection to SQLite database with constraints enabled."""
         conn = sqlite3.connect(self.db_path)
         conn.execute("PRAGMA foreign_keys = ON")
         conn.row_factory = sqlite3.Row
         return conn
 
-    def _init_db(self):
+    def _init_db(self) -> None:
+        """Initializes tables in database if they do not exist."""
         with self._get_connection() as conn:
             cursor = conn.cursor()
             
@@ -32,9 +41,13 @@ class Database:
             """)
             
             # Check if old table 'life_events' exists and new 'constraints' does not
-            cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='life_events'")
+            cursor.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name='life_events'"
+            )
             old_exists = cursor.fetchone()
-            cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='constraints'")
+            cursor.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name='constraints'"
+            )
             new_exists = cursor.fetchone()
             
             if old_exists and not new_exists:
@@ -132,7 +145,11 @@ class Database:
             conn.commit()
 
     # --- Objectives CRUD ---
-    def add_objective(self, title, target_date, sport_type, description="", priority=1, status='active'):
+    def add_objective(
+        self, title: str, target_date: str, sport_type: str,
+        description: str = "", priority: int = 1, status: str = 'active'
+    ) -> int:
+        """Adds a new objective to the database and returns its ID."""
         with self._get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("""
@@ -140,18 +157,22 @@ class Database:
                 VALUES (?, ?, ?, ?, ?, ?)
             """, (title, target_date, sport_type, description, priority, status))
             conn.commit()
-            return cursor.lastrowid
+            return int(cursor.lastrowid)
 
-    def get_objectives(self, status=None):
+    def get_objectives(self, status: Optional[str] = None) -> List[Objective]:
+        """Fetches objectives from the database, filtered by status."""
         with self._get_connection() as conn:
             cursor = conn.cursor()
             if status:
-                cursor.execute("SELECT * FROM objectives WHERE status = ? ORDER BY target_date ASC", (status,))
+                cursor.execute(
+                    "SELECT * FROM objectives WHERE status = ? ORDER BY target_date ASC", (status,)
+                )
             else:
                 cursor.execute("SELECT * FROM objectives ORDER BY target_date ASC")
-            return [dict(row) for row in cursor.fetchall()]
+            return [dict(row) for row in cursor.fetchall()]  # type: ignore
 
-    def update_objective(self, obj_id, **kwargs):
+    def update_objective(self, obj_id: int, **kwargs: Any) -> None:
+        """Updates objective properties in the database."""
         if not kwargs:
             return
         fields = ", ".join([f"{k} = ?" for k in kwargs.keys()])
@@ -160,13 +181,18 @@ class Database:
             conn.cursor().execute(f"UPDATE objectives SET {fields} WHERE id = ?", values)
             conn.commit()
 
-    def delete_objective(self, obj_id):
+    def delete_objective(self, obj_id: int) -> None:
+        """Deletes an objective by ID."""
         with self._get_connection() as conn:
             conn.cursor().execute("DELETE FROM objectives WHERE id = ?", (obj_id,))
             conn.commit()
 
     # --- Constraints CRUD ---
-    def add_constraint(self, title, start_date, end_date, event_type, impact_description=""):
+    def add_constraint(
+        self, title: str, start_date: str, end_date: str, event_type: str,
+        impact_description: str = ""
+    ) -> int:
+        """Adds a new constraint and returns its ID."""
         with self._get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("""
@@ -174,88 +200,121 @@ class Database:
                 VALUES (?, ?, ?, ?, ?)
             """, (title, start_date, end_date, event_type, impact_description))
             conn.commit()
-            return cursor.lastrowid
+            return int(cursor.lastrowid)
 
-    def get_constraints(self, start_after=None):
+    def get_constraints(self, start_after: Optional[str] = None) -> List[Constraint]:
+        """Fetches all constraints, optionally active on or after a date."""
         with self._get_connection() as conn:
             cursor = conn.cursor()
             if start_after:
-                cursor.execute("SELECT * FROM constraints WHERE end_date >= ? ORDER BY start_date ASC", (start_after,))
+                cursor.execute(
+                    "SELECT * FROM constraints WHERE end_date >= ? ORDER BY start_date ASC",
+                    (start_after,)
+                )
             else:
                 cursor.execute("SELECT * FROM constraints ORDER BY start_date ASC")
-            return [dict(row) for row in cursor.fetchall()]
+            return [dict(row) for row in cursor.fetchall()]  # type: ignore
 
-    def delete_constraint(self, constraint_id):
+    def delete_constraint(self, constraint_id: int) -> None:
+        """Deletes a constraint by ID."""
         with self._get_connection() as conn:
             conn.cursor().execute("DELETE FROM constraints WHERE id = ?", (constraint_id,))
             conn.commit()
 
     # --- Workouts CRUD ---
-    def save_workout(self, date, sport_type, title, description, original_description=None, status='planned', modification_reason=None, google_event_id=None):
+    def save_workout(
+        self, date: str, sport_type: str, title: str, description: str,
+        original_description: Optional[str] = None, status: str = 'planned',
+        modification_reason: Optional[str] = None, google_event_id: Optional[str] = None
+    ) -> int:
+        """Saves a workout, updating it if it already exists for the date/sport_type."""
         with self._get_connection() as conn:
             cursor = conn.cursor()
-            # Check if workout already exists for this date and sport_type
-            cursor.execute("SELECT id, google_event_id FROM workouts WHERE date = ? AND sport_type = ?", (date, sport_type))
+            cursor.execute(
+                "SELECT id, google_event_id FROM workouts WHERE date = ? AND sport_type = ?",
+                (date, sport_type)
+            )
             row = cursor.fetchone()
             if row:
                 workout_id = row['id']
-                # Keep existing google_event_id if not provided
                 ge_id = google_event_id if google_event_id is not None else row['google_event_id']
                 cursor.execute("""
                     UPDATE workouts
-                    SET title = ?, description = ?, original_description = COALESCE(?, original_description), status = ?, modification_reason = ?, google_event_id = ?
+                    SET title = ?, description = ?, original_description = COALESCE(?, original_description),
+                        status = ?, modification_reason = ?, google_event_id = ?
                     WHERE id = ?
                 """, (title, description, original_description, status, modification_reason, ge_id, workout_id))
             else:
                 cursor.execute("""
-                    INSERT INTO workouts (date, sport_type, title, description, original_description, status, modification_reason, google_event_id)
+                    INSERT INTO workouts (date, sport_type, title, description, original_description,
+                                         status, modification_reason, google_event_id)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                """, (date, sport_type, title, description, original_description or description, status, modification_reason, google_event_id))
+                """, (date, sport_type, title, description, original_description or description,
+                      status, modification_reason, google_event_id))
                 workout_id = cursor.lastrowid
             conn.commit()
-            return workout_id
+            return int(workout_id)
 
-    def get_workout(self, date, sport_type):
+    def get_workout(self, date: str, sport_type: str) -> Optional[Workout]:
+        """Fetches a workout by date and sport type."""
         with self._get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("SELECT * FROM workouts WHERE date = ? AND sport_type = ?", (date, sport_type))
             row = cursor.fetchone()
-            return dict(row) if row else None
+            return dict(row) if row else None  # type: ignore
 
-    def get_workouts(self, start_date=None, end_date=None):
+    def get_workouts(
+        self, start_date: Optional[str] = None, end_date: Optional[str] = None
+    ) -> List[Workout]:
+        """Fetches workouts ordered by date, optionally within a range."""
         with self._get_connection() as conn:
             cursor = conn.cursor()
             if start_date and end_date:
-                cursor.execute("SELECT * FROM workouts WHERE date >= ? AND date <= ? ORDER BY date ASC", (start_date, end_date))
+                cursor.execute(
+                    "SELECT * FROM workouts WHERE date >= ? AND date <= ? ORDER BY date ASC",
+                    (start_date, end_date)
+                )
             elif start_date:
                 cursor.execute("SELECT * FROM workouts WHERE date >= ? ORDER BY date ASC", (start_date,))
             else:
                 cursor.execute("SELECT * FROM workouts ORDER BY date ASC")
-            return [dict(row) for row in cursor.fetchall()]
+            return [dict(row) for row in cursor.fetchall()]  # type: ignore
 
-    def clear_future_workouts(self, from_date):
+    def clear_future_workouts(self, from_date: str) -> None:
+        """Deletes future workouts that are not already synced with Google Calendar."""
         with self._get_connection() as conn:
-            conn.cursor().execute("DELETE FROM workouts WHERE date >= ? AND status != 'synced'", (from_date,))
+            conn.cursor().execute(
+                "DELETE FROM workouts WHERE date >= ? AND status != 'synced'", (from_date,)
+            )
             conn.commit()
 
-    def get_workout_by_id(self, workout_id):
+    def get_workout_by_id(self, workout_id: int) -> Optional[Workout]:
+        """Fetches a workout by its unique ID."""
         with self._get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("SELECT * FROM workouts WHERE id = ?", (workout_id,))
             row = cursor.fetchone()
-            return dict(row) if row else None
+            return dict(row) if row else None  # type: ignore
 
-    def delete_workout_by_id(self, workout_id):
+    def delete_workout_by_id(self, workout_id: int) -> None:
+        """Deletes a workout by ID."""
         with self._get_connection() as conn:
             conn.cursor().execute("DELETE FROM workouts WHERE id = ?", (workout_id,))
             conn.commit()
 
     # --- Athlete Metrics Cache ---
-    def save_metric_cache(self, date, rhr, hrv, sleep_score, stress, acute_workload=None, chronic_workload=None, acwr=None):
+    def save_metric_cache(
+        self, date: str, rhr: Optional[int], hrv: Optional[int],
+        sleep_score: Optional[int], stress: Optional[int],
+        acute_workload: Optional[float] = None, chronic_workload: Optional[float] = None,
+        acwr: Optional[float] = None
+    ) -> None:
+        """Caches daily athlete metrics in the database, updating on conflict."""
         with self._get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("""
-                INSERT INTO athlete_metrics_cache (date, rhr, hrv, sleep_score, stress, acute_workload, chronic_workload, acwr)
+                INSERT INTO athlete_metrics_cache (date, rhr, hrv, sleep_score, stress, acute_workload,
+                                                  chronic_workload, acwr)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(date) DO UPDATE SET
                     rhr=excluded.rhr,
@@ -268,23 +327,36 @@ class Database:
             """, (date, rhr, hrv, sleep_score, stress, acute_workload, chronic_workload, acwr))
             conn.commit()
 
-    def get_metrics_cache(self, start_date=None, end_date=None):
+    def get_metrics_cache(
+        self, start_date: Optional[str] = None, end_date: Optional[str] = None
+    ) -> List[AthleteMetric]:
+        """Fetches cached metrics, optionally in a range."""
         with self._get_connection() as conn:
             cursor = conn.cursor()
             if start_date and end_date:
-                cursor.execute("SELECT * FROM athlete_metrics_cache WHERE date >= ? AND date <= ? ORDER BY date ASC", (start_date, end_date))
+                cursor.execute(
+                    "SELECT * FROM athlete_metrics_cache WHERE date >= ? AND date <= ? ORDER BY date ASC",
+                    (start_date, end_date)
+                )
             elif start_date:
-                cursor.execute("SELECT * FROM athlete_metrics_cache WHERE date >= ? ORDER BY date ASC", (start_date,))
+                cursor.execute(
+                    "SELECT * FROM athlete_metrics_cache WHERE date >= ? ORDER BY date ASC", (start_date,)
+                )
             else:
                 cursor.execute("SELECT * FROM athlete_metrics_cache ORDER BY date ASC")
-            return [dict(row) for row in cursor.fetchall()]
+            return [dict(row) for row in cursor.fetchall()]  # type: ignore
 
     # --- Athlete Baselines ---
-    def save_baseline(self, date, rhr_mean, rhr_std, hrv_mean, hrv_std, sleep_mean, sleep_std):
+    def save_baseline(
+        self, date: str, rhr_mean: float, rhr_std: float, hrv_mean: float,
+        hrv_std: float, sleep_mean: float, sleep_std: float
+    ) -> None:
+        """Saves calculated athlete baseline values."""
         with self._get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("""
-                INSERT INTO athlete_baselines (date, rhr_baseline_mean, rhr_baseline_std, hrv_baseline_mean, hrv_baseline_std, sleep_baseline_mean, sleep_baseline_std)
+                INSERT INTO athlete_baselines (date, rhr_baseline_mean, rhr_baseline_std, hrv_baseline_mean,
+                                              hrv_baseline_std, sleep_baseline_mean, sleep_baseline_std)
                 VALUES (?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(date) DO UPDATE SET
                     rhr_baseline_mean=excluded.rhr_baseline_mean,
@@ -296,15 +368,17 @@ class Database:
             """, (date, rhr_mean, rhr_std, hrv_mean, hrv_std, sleep_mean, sleep_std))
             conn.commit()
 
-    def get_baseline(self, date):
+    def get_baseline(self, date: str) -> Optional[AthleteBaseline]:
+        """Fetches baseline valid on or closest prior to the date."""
         with self._get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("SELECT * FROM athlete_baselines WHERE date <= ? ORDER BY date DESC LIMIT 1", (date,))
             row = cursor.fetchone()
-            return dict(row) if row else None
+            return dict(row) if row else None  # type: ignore
 
     # --- Coach Memory ---
-    def save_coach_memory(self, key, value):
+    def save_coach_memory(self, key: str, value: str) -> None:
+        """Saves or updates coach observations/philosophy memories."""
         updated_at = datetime.now(timezone.utc).isoformat()
         with self._get_connection() as conn:
             cursor = conn.cursor()
@@ -317,7 +391,8 @@ class Database:
             """, (key, value, updated_at))
             conn.commit()
 
-    def get_coach_memory(self, key):
+    def get_coach_memory(self, key: str) -> Optional[str]:
+        """Fetches a specific memory value by its key name."""
         with self._get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("SELECT value FROM coach_memory WHERE key = ?", (key,))
@@ -325,7 +400,8 @@ class Database:
             return row['value'] if row else None
 
     # --- Macrocycles & Mesocycles ---
-    def get_macrocycle_for_objective(self, objective_id):
+    def get_macrocycle_for_objective(self, objective_id: int) -> Optional[Macrocycle]:
+        """Fetches the latest macrocycle created for a specific objective."""
         with self._get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute(
@@ -334,25 +410,34 @@ class Database:
                 (objective_id,)
             )
             row = cursor.fetchone()
-            return dict(row) if row else None
+            return dict(row) if row else None  # type: ignore
 
-    def get_last_macrocycle(self):
+    def get_last_macrocycle(self) -> Optional[Macrocycle]:
+        """Fetches the absolute latest macrocycle created."""
         with self._get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("SELECT * FROM macrocycles ORDER BY id DESC LIMIT 1")
             row = cursor.fetchone()
-            return dict(row) if row else None
+            return dict(row) if row else None  # type: ignore
 
-    def get_mesocycles_for_macrocycle(self, macrocycle_id):
+    def get_mesocycles_for_macrocycle(self, macrocycle_id: int) -> List[Mesocycle]:
+        """Fetches all mesocycles in chronological order belonging to a macrocycle."""
         with self._get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute("SELECT * FROM mesocycles WHERE macrocycle_id = ? ORDER BY start_date ASC", (macrocycle_id,))
-            return [dict(row) for row in cursor.fetchall()]
+            cursor.execute(
+                "SELECT * FROM mesocycles WHERE macrocycle_id = ? ORDER BY start_date ASC",
+                (macrocycle_id,)
+            )
+            return [dict(row) for row in cursor.fetchall()]  # type: ignore
 
-    def save_macrocycle(self, objective_id, strategy, goals_hash, constraints_hash, mesocycles):
+    def save_macrocycle(
+        self, objective_id: int, strategy: str, goals_hash: str,
+        constraints_hash: str, mesocycles: List[Dict[str, Any]]
+    ) -> int:
+        """Saves a macrocycle and its nested mesocycles, cleaning old macrocycles for the objective."""
         with self._get_connection() as conn:
             cursor = conn.cursor()
-            # Delete any existing macrocycles for this objective (cascade will delete mesocycles)
+            # Delete any existing macrocycles for this objective (cascade deletes mesocycles)
             cursor.execute("DELETE FROM macrocycles WHERE objective_id = ?", (objective_id,))
             
             created_at = datetime.now(timezone.utc).isoformat()
@@ -369,7 +454,7 @@ class Database:
                 """, (macrocycle_id, meso['name'], meso['start_date'], meso['end_date'], meso['focus']))
             
             conn.commit()
-            return macrocycle_id
+            return int(macrocycle_id)
 
 # Singleton instance
 db = Database()

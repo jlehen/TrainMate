@@ -7,7 +7,8 @@ from trainmate.google_calendar import calendar_syncer
 from trainmate.coach import coach_engine
 from trainmate.config import config
 
-def main():
+def main() -> None:
+    """Entry point for the TrainMate Command Line Interface."""
     parser = argparse.ArgumentParser(
         description="TrainMate - Local Training Coach CLI",
         formatter_class=argparse.RawDescriptionHelpFormatter
@@ -16,13 +17,16 @@ def main():
     subparsers = parser.add_subparsers(dest="command", help="Available commands")
     
     # status command
-    subparsers.add_parser("status", help="Show current athlete status, active goals, recent metrics, and coach memories")
+    subparsers.add_parser(
+        "status",
+        help="Show current athlete status, active goals, recent metrics, and memories"
+    )
     
     # sync command
     subparsers.add_parser("sync", help="Commit all local planned workouts to Google Calendar")
     
     # sync-sheets command
-    subparsers.add_parser("sync-sheets", help="Fetch latest activities and daily metrics from Google Sheets")
+    subparsers.add_parser("sync-sheets", help="Fetch latest activities and metrics from Sheets")
     
     # goal command & subparsers
     goal_parser = subparsers.add_parser("goal", help="Manage training objectives / goals")
@@ -32,7 +36,11 @@ def main():
     g_add = goal_subparsers.add_parser("add", help="Add a new training objective/goal")
     g_add.add_argument("--title", required=True, help="Goal title (e.g. Marathon)")
     g_add.add_argument("--date", required=True, help="Target event date (YYYY-MM-DD)")
-    g_add.add_argument("--sport", required=True, choices=["running", "road_biking", "hiking", "strength_training", "yoga", "ski_touring"], help="Sport type")
+    g_add.add_argument(
+        "--sport", required=True,
+        choices=["running", "road_biking", "hiking", "strength_training", "yoga", "ski_touring"],
+        help="Sport type"
+    )
     g_add.add_argument("--desc", default="", help="Description")
     g_add.add_argument("--priority", type=int, default=1, help="Goal priority (1 = highest)")
     
@@ -45,14 +53,19 @@ def main():
     
     # constraint command & subparsers
     constraint_parser = subparsers.add_parser("constraint", help="Manage constraints (life events)")
-    constraint_subparsers = constraint_parser.add_subparsers(dest="subcommand", help="Constraint sub-commands")
+    constraint_subparsers = constraint_parser.add_subparsers(
+        dest="subcommand", help="Constraint sub-commands"
+    )
     
     # constraint add
     c_add = constraint_subparsers.add_parser("add", help="Add a new constraint (life event)")
     c_add.add_argument("--title", required=True, help="Constraint title (e.g. Vacation to Spain)")
     c_add.add_argument("--start", required=True, help="Start date (YYYY-MM-DD)")
     c_add.add_argument("--end", required=True, help="End date (YYYY-MM-DD)")
-    c_add.add_argument("--type", required=True, choices=["injury", "vacation", "party", "other"], help="Constraint type")
+    c_add.add_argument(
+        "--type", required=True, choices=["injury", "vacation", "party", "other"],
+        help="Constraint type"
+    )
     c_add.add_argument("--desc", default="", help="Description/Impact description")
     
     # constraint rm
@@ -64,21 +77,32 @@ def main():
     
     # workout command & subparsers
     workout_parser = subparsers.add_parser("workout", help="Manage workouts")
-    workout_subparsers = workout_parser.add_subparsers(dest="subcommand", help="Workout sub-commands")
+    workout_subparsers = workout_parser.add_subparsers(
+        dest="subcommand", help="Workout sub-commands"
+    )
     
     # workout list
     workout_subparsers.add_parser("list", help="Show all planned workouts")
     
     # workout plan
-    w_plan = workout_subparsers.add_parser("plan", help="Generate or adapt the 4-week periodized training plan (saves locally)")
-    w_plan.add_argument("-f", "--force", action="store_true", help="Force regeneration of the macrocycle/mesocycle strategy")
+    w_plan = workout_subparsers.add_parser(
+        "plan",
+        help="Generate or adapt the 4-week periodized training plan (saves locally)"
+    )
+    w_plan.add_argument(
+        "-f", "--force", action="store_true",
+        help="Force regeneration of the macrocycle/mesocycle strategy"
+    )
     
     # workout rm
     w_rm = workout_subparsers.add_parser("rm", help="Remove a workout by ID")
     w_rm.add_argument("id", type=int, help="Workout ID to remove")
     
     # workout adapt
-    w_adapt = workout_subparsers.add_parser("adapt", help="Run the daily Garmin check for today (syncs adapted workouts to Calendar)")
+    w_adapt = workout_subparsers.add_parser(
+        "adapt",
+        help="Run the daily Garmin check for today (syncs adapted workouts to Calendar)"
+    )
     w_adapt.add_argument("--date", help="Date in YYYY-MM-DD format (defaults to UTC today)")
     
     # Parse the arguments
@@ -136,22 +160,23 @@ def main():
         parser.print_help()
         sys.exit(1)
 
-def run_status():
+def run_status() -> None:
+    """Displays current athlete goals, Garmin metrics, baselines, and memories."""
     print("=== TRAINMATE ATHLETE STATUS ===")
     
     # Active Goal
     objectives = db.get_objectives(status='active')
     if objectives:
-        objectives.sort(key=lambda x: x['target_date'])
+        objectives.sort(key=lambda x: str(x['target_date']))
         next_goal = objectives[0]
-        print(f"\nNext Objective: {next_goal['title']} ({next_goal['sport_type'].upper()})")
+        sport_str = next_goal['sport_type'].upper()
+        print(f"\nNext Objective: {next_goal['title']} ({sport_str})")
         print(f"Target Date   : {next_goal['target_date']}")
         print(f"Description   : {next_goal.get('description', '')}")
     else:
         print("\nNext Objective: None (TrainMate needs at least one goal to start planning)")
 
     # Recent Garmin metrics
-    today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     metrics = db.get_metrics_cache()
     if metrics:
         last_metrics = metrics[-1]
@@ -160,27 +185,41 @@ def run_status():
         print(f"- Overnight HRV: {last_metrics['hrv']} ms")
         print(f"- Sleep Score: {last_metrics['sleep_score']}")
         print(f"- Stress     : {last_metrics['stress']}")
-        print(f"- ACWR       : {last_metrics['acwr']:.2f} (Acute: {last_metrics['acute_workload']:.1f}, Chronic: {last_metrics['chronic_workload']:.1f})")
+        
+        acute = last_metrics['acute_workload'] or 0.0
+        chronic = last_metrics['chronic_workload'] or 0.0
+        acwr = last_metrics['acwr'] or 0.0
+        print(f"- ACWR       : {acwr:.2f} (Acute: {acute:.1f}, Chronic: {chronic:.1f})")
         
         # Baselines
         baseline = db.get_baseline(last_metrics['date'])
         if baseline:
-            print(f"Baselines (28-day):")
-            print(f"- RHR Mean   : {baseline['rhr_baseline_mean']:.1f} (std: {baseline['rhr_baseline_std']:.2f})")
-            print(f"- HRV Mean   : {baseline['hrv_baseline_mean']:.1f} (std: {baseline['hrv_baseline_std']:.2f})")
-            print(f"- Sleep Mean : {baseline['sleep_baseline_mean']:.1f} (std: {baseline['sleep_baseline_std']:.2f})")
+            print("Baselines (28-day):")
+            print(
+                f"- RHR Mean   : {baseline['rhr_baseline_mean']:.1f} "
+                f"(std: {baseline['rhr_baseline_std']:.2f})"
+            )
+            print(
+                f"- HRV Mean   : {baseline['hrv_baseline_mean']:.1f} "
+                f"(std: {baseline['hrv_baseline_std']:.2f})"
+            )
+            print(
+                f"- Sleep Mean : {baseline['sleep_baseline_mean']:.1f} "
+                f"(std: {baseline['sleep_baseline_std']:.2f})"
+            )
     else:
         print("\nRecent Garmin Metrics: No cached metrics. Run 'sync-sheets' first.")
 
     # Coach Memory
     strategy = db.get_coach_memory("training_strategy")
     learnings = db.get_coach_memory("athlete_learnings")
-    print(f"\nCoach Memory:")
+    print("\nCoach Memory:")
     print(f"- Strategy  : {strategy or 'Not established'}")
     print(f"- Learnings : {learnings or 'None yet'}")
     print("\n================================")
 
-def run_workout_plan(args):
+def run_workout_plan(args: argparse.Namespace) -> None:
+    """Executes the AI replanning workout scheduler command."""
     # Make sure we have latest metrics cached
     metrics = db.get_metrics_cache()
     if not metrics:
@@ -188,7 +227,7 @@ def run_workout_plan(args):
         sheets_reader.sync_data()
         
     try:
-        reasoning, workouts = coach_engine.replan(force=args.force)
+        reasoning, workouts = coach_engine.replan(force=bool(args.force))
         print("\n=== PLAN GENERATED BY COACH ===")
         print(f"Reasoning:\n{reasoning}\n")
         print(f"Generated {len(workouts)} workouts starting from today. Save complete.")
@@ -196,7 +235,8 @@ def run_workout_plan(args):
     except Exception as e:
         print(f"Error during plan generation: {e}")
 
-def run_workout_adapt(args):
+def run_workout_adapt(args: argparse.Namespace) -> None:
+    """Executes the daily workout Garmin adaptation checks command."""
     date_str = args.date or datetime.now(timezone.utc).strftime("%Y-%m-%d")
     print(f"Evaluating daily Garmin metrics adaptation for {date_str}...")
     
@@ -208,7 +248,8 @@ def run_workout_adapt(args):
     except Exception as e:
         print(f"Error executing daily adaptation: {e}")
 
-def run_sync():
+def run_sync() -> None:
+    """Synchronizes planned workouts with Google Calendar."""
     today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     planned_workouts = db.get_workouts(start_date=today_str)
     # Filter to only unsynced/planned ones
@@ -225,13 +266,15 @@ def run_sync():
     except Exception as e:
         print(f"Error syncing to Google Calendar: {e}")
 
-def run_sync_sheets():
+def run_sync_sheets() -> None:
+    """Pulls athlete metrics and activities from Google Sheets."""
     try:
         sheets_reader.sync_data()
     except Exception as e:
         print(f"Error syncing Google Sheets: {e}")
 
-def run_goal_add(args):
+def run_goal_add(args: argparse.Namespace) -> None:
+    """Creates a new objective goal via command line."""
     db.add_objective(
         title=args.title,
         target_date=args.date,
@@ -240,13 +283,18 @@ def run_goal_add(args):
         priority=args.priority,
         status='active'
     )
-    print(f"Goal '{args.title}' added successfully. Run 'workout plan' to generate training cycles.")
+    print(
+        f"Goal '{args.title}' added successfully. "
+        f"Run 'workout plan' to generate training cycles."
+    )
 
-def run_goal_rm(args):
+def run_goal_rm(args: argparse.Namespace) -> None:
+    """Deletes an objective goal by ID."""
     db.delete_objective(args.id)
     print(f"Goal with ID {args.id} removed successfully.")
 
-def run_constraint_add(args):
+def run_constraint_add(args: argparse.Namespace) -> None:
+    """Creates a new constraint via command line."""
     db.add_constraint(
         title=args.title,
         start_date=args.start,
@@ -254,48 +302,67 @@ def run_constraint_add(args):
         event_type=args.type,
         impact_description=args.desc
     )
-    print(f"Constraint '{args.title}' logged. This will be factored in when running 'workout plan' or 'workout adapt'.")
+    print(
+        f"Constraint '{args.title}' logged. "
+        f"This will be factored in when running 'workout plan' or 'workout adapt'."
+    )
 
-def run_constraint_rm(args):
+def run_constraint_rm(args: argparse.Namespace) -> None:
+    """Deletes a constraint by ID."""
     db.delete_constraint(args.id)
     print(f"Constraint with ID {args.id} removed successfully.")
 
-def run_goal_list():
+def run_goal_list() -> None:
+    """Lists all active and past training objective goals."""
     goals = db.get_objectives()
     print("=== TRAINING OBJECTIVES / GOALS ===")
     for g in goals:
-        print(f"[{g['status'].upper()}] ID: {g['id']} | {g['title']} ({g['sport_type']}) on {g['target_date']} (Priority: {g['priority']})")
+        sport_str = g['sport_type']
+        print(
+            f"[{g['status'].upper()}] ID: {g['id']} | {g['title']} "
+            f"({sport_str}) on {g['target_date']} (Priority: {g['priority']})"
+        )
         if g.get('description'):
             print(f"  Description: {g['description']}")
 
-def run_constraint_list():
+def run_constraint_list() -> None:
+    """Lists all logged training constraints."""
     events = db.get_constraints()
     print("=== ATHLETE CONSTRAINTS ===")
     for e in events:
-        print(f"ID: {e['id']} | {e['title']} ({e['event_type']}): {e['start_date']} to {e['end_date']}")
+        print(
+            f"ID: {e['id']} | {e['title']} ({e['event_type']}): "
+            f"{e['start_date']} to {e['end_date']}"
+        )
         if e.get('impact_description'):
             print(f"  Impact: {e['impact_description']}")
 
-def run_workout_rm(args):
+def run_workout_rm(args: argparse.Namespace) -> None:
+    """Deletes a planned workout by its database ID."""
     workout = db.get_workout_by_id(args.id)
     if not workout:
         print(f"Workout with ID {args.id} not found.")
         return
         
     if workout.get('google_event_id') and workout.get('status') == 'synced':
-        print(f"Workout is synced to Google Calendar. Attempting to delete calendar event...")
-        calendar_syncer.delete_workout_event(workout['google_event_id'])
+        print("Workout is synced to Google Calendar. Attempting to delete calendar event...")
+        if workout['google_event_id'] is not None:
+            calendar_syncer.delete_workout_event(workout['google_event_id'])
         
     db.delete_workout_by_id(args.id)
     print(f"Workout with ID {args.id} ('{workout['title']}') removed successfully.")
 
-def run_workout_list():
+def run_workout_list() -> None:
+    """Lists all stored workouts chronologically."""
     workouts = db.get_workouts()
     print("=== WORKOUT SCHEDULE ===")
     for w in workouts:
         mod_marker = " [ADAPTED]" if w['status'] == 'modified' or w['modification_reason'] else ""
         sync_marker = " [SYNCED]" if w['status'] == 'synced' else ""
-        print(f"ID: {w['id']} | {w['date']} | {w['sport_type'].upper()} | {w['title']}{mod_marker}{sync_marker}")
+        print(
+            f"ID: {w['id']} | {w['date']} | {w['sport_type'].upper()} | "
+            f"{w['title']}{mod_marker}{sync_marker}"
+        )
         print(f"  Description: {w['description']}")
         if w.get('modification_reason'):
             print(f"  Reason: {w['modification_reason']}")
