@@ -119,11 +119,11 @@ def generate_plan():
         return jsonify({"error": str(e)}), 500
 
 @app.route("/api/adapt", methods=["POST"])
-def daily_adapt():
+def adapt():
     data = request.json or {}
     date_str = data.get("date") or datetime.now(timezone.utc).strftime("%Y-%m-%d")
     try:
-        reason, adapted_workout = coach_engine.daily_adapt(date_str)
+        reason, adapted_workout = coach_engine.adapt(date_str)
         return jsonify({
             "message": "Daily adaptation check finished.",
             "reason": reason,

@@ -165,7 +165,7 @@ class TestTrainMateCLI(unittest.TestCase):
     def test_workout_commands(self, mock_coach, mock_sheets_reader):
         # Mock responses
         mock_coach.replan.return_value = ("Test coaching plan reasoning", [{"title": "Test Workout"}])
-        mock_coach.daily_adapt.return_value = ("Metrics are green", {"title": "Steady Ride"})
+        mock_coach.adapt.return_value = ("Metrics are green", {"title": "Steady Ride"})
 
         # 1. List workouts when empty
         exit_code, stdout, stderr = self.run_cli(['workout', 'list'])
@@ -197,7 +197,7 @@ class TestTrainMateCLI(unittest.TestCase):
         self.assertIn("Evaluating daily Garmin metrics adaptation", stdout)
         self.assertIn("Metrics are green", stdout)
         self.assertIn("Adapted Workout Synced to Calendar: Steady Ride", stdout)
-        mock_coach.daily_adapt.assert_called_once()
+        mock_coach.adapt.assert_called_once()
 
         # 4. Remove workout
         w_id = test_db.save_workout(

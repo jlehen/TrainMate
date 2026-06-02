@@ -333,7 +333,7 @@ You MUST respond with a JSON object containing:
         print(f"Generated {len(workouts)} workouts.")
         return plan_data.get("reasoning", "Plan generated."), workouts
 
-    def daily_adapt(self, target_date_str=None):
+    def adapt(self, target_date_str=None):
         """Runs the daily check to adapt today's planned workout based on Garmin metrics."""
         if not target_date_str:
             target_date_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")

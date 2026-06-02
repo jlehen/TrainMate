@@ -201,7 +201,7 @@ def run_workout_adapt(args):
     print(f"Evaluating daily Garmin metrics adaptation for {date_str}...")
     
     try:
-        reason, adapted_workout = coach_engine.daily_adapt(date_str)
+        reason, adapted_workout = coach_engine.adapt(date_str)
         print(f"\nDecision Summary:\n{reason}")
         if adapted_workout:
             print(f"\nAdapted Workout Synced to Calendar: {adapted_workout['title']}")
