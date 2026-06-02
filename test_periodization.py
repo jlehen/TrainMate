@@ -242,5 +242,76 @@ class TestPeriodization(unittest.TestCase):
         self.assertIn("Peak & Taper (2026-06-29 to 2026-07-05): Tapering", prompt)
         self.assertIn("COACH MEMORY & ACTIVE PERIODIZATION STRATEGY:", prompt)
 
+    @patch('trainmate.coach.openrouter_client')
+    def test_replan_provides_previous_strategy_context_to_llm(self, mock_client):
+        # 1. Seed initial objective and macrocycle strategy
+        obj_id = test_db.add_objective(
+            title="Zurich Marathon",
+            target_date="2026-10-15",
+            sport_type="running",
+            priority=1
+        )
+        mesos = [
+            {
+                "name": "Base Building",
+                "start_date": "2026-06-01",
+                "end_date": "2026-06-28",
+                "focus": "Aerobic conditioning"
+            }
+        ]
+        test_db.save_macrocycle(
+            objective_id=obj_id,
+            strategy="Keep heart rate low",
+            goals_hash="old_goals_hash",
+            constraints_hash="old_constraints_hash",
+            mesocycles=mesos
+        )
+
+        # Mock LLM response for macrocycle and workouts
+        mock_macro_response = {
+            "strategy": "New strategy building on previous",
+            "mesocycles": [
+                {
+                    "name": "Specific Prep",
+                    "start_date": "2026-06-01",
+                    "end_date": "2026-06-28",
+                    "focus": "Faster runs"
+                }
+            ]
+        }
+        mock_workouts_response = {
+            "reasoning": "Reasoning",
+            "workouts": []
+        }
+        mock_client.complete.side_effect = [mock_macro_response, mock_workouts_response]
+
+        # 2. Add a constraint to trigger replanning (reused will be False)
+        test_db.add_constraint(
+            title="Business Trip",
+            start_date="2026-06-10",
+            end_date="2026-06-12",
+            event_type="other",
+            impact_description="limited training time"
+        )
+
+        # 3. Trigger replanning
+        coach_engine.replan(force=False)
+
+        # 4. Verify that OpenRouter was called with the previous strategy in context
+        self.assertEqual(mock_client.complete.call_count, 2)
+        system_prompt_arg = mock_client.complete.call_args_list[0][0][0]
+
+        # Assert context is included in system prompt
+        self.assertIn("PREVIOUS PERIODIZATION STRATEGY (FOR CONTEXT):", system_prompt_arg)
+        self.assertIn("Keep heart rate low", system_prompt_arg)
+        self.assertIn(
+            "Base Building (2026-06-01 to 2026-06-28): Aerobic conditioning",
+            system_prompt_arg
+        )
+        self.assertIn(
+            "For context, the PREVIOUS periodization strategy that was in place",
+            system_prompt_arg
+        )
+
 if __name__ == '__main__':
     unittest.main()

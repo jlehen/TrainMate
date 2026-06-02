@@ -140,7 +140,8 @@ UPCOMING CONSTRAINTS (LIFE EVENTS):
         return hashlib.sha256(serialized.encode('utf-8')).hexdigest()
 
     def _generate_macrocycle_strategy(
-        self, next_goal, objectives, constraints, today_str
+        self, next_goal, objectives, constraints, today_str,
+        previous_strategy_text=None
     ):
         """Queries LLM to determine the overall macrocycle strategy and mesocycle blocks."""
         custom_task = f"""
@@ -152,7 +153,15 @@ though the final peak/taper/race block or very short periods can be shorter).
 Make sure there are no gaps between the end date of one mesocycle and the start date of the next.
 The first mesocycle must start on today's date ({today_str}) and the last mesocycle must end on or
 around the goal date ({next_goal['target_date']}).
+"""
 
+        if previous_strategy_text:
+            custom_task += """
+For context, the PREVIOUS periodization strategy that was in place before this replanning is provided below.
+Please take it into account to ensure continuity in the athlete's training, adapting or building on top of what has been planned or done so far, rather than starting completely from scratch, unless a complete reset is warranted by major changes.
+"""
+
+        custom_task += f"""
 You MUST respond with a JSON object containing:
 {{
   "strategy": "Explain the overall training strategy philosophy and periodization strategy
@@ -187,20 +196,24 @@ You MUST respond with a JSON object containing:
                 f"End: {c['end_date']} | Type: {c['event_type']} | Impact: {impact}\n"
             )
 
-        system_prompt = f"""You are TrainMate Coach, an advanced AI sports science training coach.
-You design periodized training plans (macro, meso, micro cycles) leading up to target goals.
+        system_prompt = (
+            "You are TrainMate Coach, an advanced AI sports science training coach.\n"
+            "You design periodized training plans (macro, meso, micro cycles) leading up "
+            "to target goals.\n\n"
+            f"SPORTS SCIENCE GUIDELINES:\n{science_guidelines}\n"
+        )
+        
+        if previous_strategy_text:
+            system_prompt += f"\n{previous_strategy_text}\n"
+            
+        system_prompt += (
+            f"\nACTIVE ATHLETE GOALS (CHRONOLOGICAL):\n"
+            f"{obj_text if obj_text else 'No active goals.'}\n\n"
+            f"UPCOMING CONSTRAINTS (LIFE EVENTS):\n"
+            f"{c_text if c_text else 'No upcoming constraints.'}\n\n"
+            f"{custom_task}\n"
+        )
 
-SPORTS SCIENCE GUIDELINES:
-{science_guidelines}
-
-ACTIVE ATHLETE GOALS (CHRONOLOGICAL):
-{obj_text if obj_text else "No active goals."}
-
-UPCOMING CONSTRAINTS (LIFE EVENTS):
-{c_text if c_text else "No upcoming constraints."}
-
-{custom_task}
-"""
         user_content = (
             f"Today's date is {today_str}. The next chronological goal is "
             f"'{next_goal['title']}' on {next_goal['target_date']}. "
@@ -251,11 +264,35 @@ UPCOMING CONSTRAINTS (LIFE EVENTS):
                       "from database.")
 
         if not reused:
+            # Get the previous strategy for context
+            prev_macro = existing_macro
+            if not prev_macro:
+                prev_macro = db.get_last_macrocycle()
+
+            prev_strategy_text = None
+            if prev_macro:
+                prev_mesos = db.get_mesocycles_for_macrocycle(prev_macro['id'])
+                prev_meso_text = ""
+                for m in prev_mesos:
+                    prev_meso_text += (
+                        f"  - {m['name']} ({m['start_date']} to {m['end_date']}): "
+                        f"{m['focus']}\n"
+                    )
+                prev_strategy_text = (
+                    "PREVIOUS PERIODIZATION STRATEGY (FOR CONTEXT):\n"
+                    f"- Overall Strategy: {prev_macro['strategy']}\n"
+                    f"- Mesocycles:\n{prev_meso_text or '  - None\n'}"
+                )
+
             # Generate new macrocycle strategy and mesocycles
             print("Goals or constraints have changed, or force generation requested. "
                   "Determining new overall periodization strategy...")
             macro_data = self._generate_macrocycle_strategy(
-                next_goal, objectives, constraints, today_str
+                next_goal,
+                objectives,
+                constraints,
+                today_str,
+                previous_strategy_text=prev_strategy_text
             )
             strategy = macro_data.get("strategy", "Endurance preparation strategy.")
             mesocycles = macro_data.get("mesocycles", [])

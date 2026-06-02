@@ -261,8 +261,10 @@ class TestTrainMateCLI(unittest.TestCase):
         mock_calendar.sync_multiple.assert_not_called()
 
         # 2. Add a workout to db
+        from datetime import datetime, timezone
+        today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
         test_db.save_workout(
-            date="2026-06-01",
+            date=today_str,
             sport_type="running",
             title="Tempo Run",
             description="30 mins fast",

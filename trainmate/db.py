@@ -328,7 +328,18 @@ class Database:
     def get_macrocycle_for_objective(self, objective_id):
         with self._get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute("SELECT * FROM macrocycles WHERE objective_id = ? ORDER BY id DESC LIMIT 1", (objective_id,))
+            cursor.execute(
+                "SELECT * FROM macrocycles WHERE objective_id = ? "
+                "ORDER BY id DESC LIMIT 1",
+                (objective_id,)
+            )
+            row = cursor.fetchone()
+            return dict(row) if row else None
+
+    def get_last_macrocycle(self):
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM macrocycles ORDER BY id DESC LIMIT 1")
             row = cursor.fetchone()
             return dict(row) if row else None
 
