@@ -31,6 +31,72 @@ class CoachEngine:
                         print(f"Error reading science guideline {filename}: {e}")
         return "\n\n".join(texts)
 
+    def _format_athlete_profile(self) -> str:
+        """Formats the athlete's user profile (from config) into a readable prompt segment."""
+        profile = config.user_profile
+        if not profile:
+            return "No athlete profile configured."
+
+        lines = []
+        if "name" in profile:
+            lines.append(f"- Name: {profile['name']}")
+        if "birth_year" in profile:
+            current_year = datetime.now(timezone.utc).year
+            age = current_year - profile['birth_year']
+            lines.append(f"- Birth Year: {profile['birth_year']} (Age: {age})")
+        if "max_hr" in profile:
+            lines.append(f"- Max Heart Rate: {profile['max_hr']} bpm")
+        if "lthr" in profile:
+            lines.append(f"- Lactate Threshold HR (LTHR): {profile['lthr']} bpm")
+        if "weekly_target_hours" in profile:
+            lines.append(f"- Weekly Target Hours: {profile['weekly_target_hours']} hours")
+        if "sport_preferences" in profile:
+            lines.append(f"- Sport Preferences: {', '.join(profile['sport_preferences'])}")
+
+        chronic_injuries = profile.get("chronic_injuries")
+        if chronic_injuries:
+            if isinstance(chronic_injuries, list):
+                lines.append(f"- Chronic Injuries: {', '.join(chronic_injuries)}")
+            else:
+                lines.append(f"- Chronic Injuries: {chronic_injuries}")
+
+        preferences = profile.get("preferences")
+        if preferences:
+            if isinstance(preferences, list):
+                lines.append(f"- Preferences / Static Constraints: {', '.join(preferences)}")
+            else:
+                lines.append(f"- Preferences / Static Constraints: {preferences}")
+
+        general_equipment = profile.get("equipment")
+        if general_equipment:
+            if isinstance(general_equipment, list):
+                lines.append(f"- General Equipment: {', '.join(general_equipment)}")
+            else:
+                lines.append(f"- General Equipment: {general_equipment}")
+
+        weekly_schedule = profile.get("weekly_schedule")
+        if weekly_schedule:
+            lines.append("- Weekly Availability & Equipment:")
+            days_order = [
+                "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"
+            ]
+            for day in days_order:
+                day_key = next((k for k in weekly_schedule if k.lower() == day.lower()), None)
+                if not day_key:
+                    lines.append(f"  * {day}: No availability configured")
+                    continue
+                day_data = weekly_schedule[day_key]
+                if isinstance(day_data, dict):
+                    hours = day_data.get("available_hours", 0.0)
+                    cert = day_data.get("certainty_percent", 100)
+                    equip = day_data.get("equipment", [])
+                    equip_str = f" (Equipment: {', '.join(equip)})" if equip else ""
+                    lines.append(f"  * {day}: {hours} hours | Certainty: {cert}%{equip_str}")
+                else:
+                    lines.append(f"  * {day}: {day_data} hours")
+
+        return "\n".join(lines)
+
     def _get_coach_system_prompt(
         self, objectives: List[Objective], constraints: List[Constraint],
         custom_task: str = ""
@@ -97,6 +163,7 @@ class CoachEngine:
                 f"End: {c['end_date']} | Type: {c['event_type']} | Impact: {impact}\n"
             )
 
+        athlete_profile = self._format_athlete_profile()
         system_prompt = f"""You are TrainMate Coach, an advanced AI sports science training coach.
 You design and adapt personalized training plans for endurance athletes using sports science
 principles.
@@ -109,6 +176,10 @@ COACHING ROLE AND OBJECTIVES:
    ACWR) to optimize recovery and prevent injury.
 4. Shift or scale training volume and intensity around constraints (injury, vacation, parties)
    to manage fatigue.
+5. Adhere to the day-by-day weekly availability schedule and day-dependent equipment access
+   (e.g., do not schedule gym workouts on home-only days; do not schedule workouts on rest days;
+   do not exceed daily availability). Respect certainty percentages (higher values indicate more
+   rigid constraints; lower values allow flexibility).
 
 SPORTS SCIENCE GUIDELINES:
 {science_guidelines}
@@ -120,6 +191,9 @@ COACH MEMORY & ACTIVE PERIODIZATION STRATEGY:
 {meso_text}
 - Athlete-Specific Observations:
 {learnings}
+
+ATHLETE PROFILE & PREFERENCES:
+{athlete_profile}
 
 ACTIVE ATHLETE GOALS (CHRONOLOGICAL):
 {obj_text if obj_text else "No active goals."}
@@ -225,6 +299,7 @@ You MUST respond with a JSON object containing:
                 f"End: {c['end_date']} | Type: {c['event_type']} | Impact: {impact}\n"
             )
 
+        athlete_profile = self._format_athlete_profile()
         system_prompt = (
             "You are TrainMate Coach, an advanced AI sports science training coach.\n"
             "You design periodized training plans (macro, meso, micro cycles) leading up "
@@ -236,6 +311,7 @@ You MUST respond with a JSON object containing:
             system_prompt += f"\n{previous_strategy_text}\n"
             
         system_prompt += (
+            f"\nATHLETE PROFILE & PREFERENCES:\n{athlete_profile}\n"
             f"\nACTIVE ATHLETE GOALS (CHRONOLOGICAL):\n"
             f"{obj_text if obj_text else 'No active goals.'}\n\n"
             f"UPCOMING CONSTRAINTS (LIFE EVENTS):\n"

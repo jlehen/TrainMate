@@ -313,5 +313,39 @@ class TestPeriodization(unittest.TestCase):
             system_prompt_arg
         )
 
+    def test_system_prompt_inserts_athlete_profile(self):
+        test_profile = {
+            "name": "Jane Doe",
+            "birth_year": 1990,
+            "max_hr": 190,
+            "lthr": 170,
+            "weekly_target_hours": 8.0,
+            "sport_preferences": ["running", "yoga"],
+            "chronic_injuries": "Tendency for runner's knee.",
+            "preferences": "Enjoys morning runs.",
+            "equipment": ["Garmin Watch", "Yoga Mat"],
+            "weekly_schedule": {
+                "Monday": {
+                    "available_hours": 1.5,
+                    "certainty_percent": 95,
+                    "equipment": ["treadmill"]
+                },
+                "Wednesday": 0.0
+            }
+        }
+        with patch.dict(trainmate.coach.config.data, {"user_profile": test_profile}):
+            # Get prompt
+            prompt = coach_engine._get_coach_system_prompt([], [])
+            self.assertIn("Jane Doe", prompt)
+            self.assertIn("Birth Year: 1990", prompt)
+            self.assertIn("Tendency for runner's knee.", prompt)
+            self.assertIn("Enjoys morning runs.", prompt)
+            self.assertIn("Garmin Watch, Yoga Mat", prompt)
+            self.assertIn(
+                "Monday: 1.5 hours | Certainty: 95% (Equipment: treadmill)",
+                prompt
+            )
+            self.assertIn("Wednesday: 0.0 hours", prompt)
+
 if __name__ == '__main__':
     unittest.main()
