@@ -157,8 +157,11 @@ around the goal date ({next_goal['target_date']}).
 
         if previous_strategy_text:
             custom_task += """
-For context, the PREVIOUS periodization strategy that was in place before this replanning is provided below.
-Please take it into account to ensure continuity in the athlete's training, adapting or building on top of what has been planned or done so far, rather than starting completely from scratch, unless a complete reset is warranted by major changes.
+For context, the PREVIOUS periodization strategy that was in place before this
+replanning is provided below. Please take it into account to ensure continuity
+in the athlete's training, adapting or building on top of what has been planned
+or done so far, rather than starting completely from scratch, unless a complete
+reset is warranted by major changes.
 """
 
         custom_task += f"""
