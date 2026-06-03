@@ -1,5 +1,6 @@
 import argparse
 import sys
+import textwrap
 from datetime import datetime, timezone
 from trainmate.db import db
 from trainmate.google_sheets import sheets_reader
@@ -75,6 +76,30 @@ def main() -> None:
     # constraint list
     constraint_subparsers.add_parser("list", help="Show all logged constraints")
     
+    # plan command & subparsers
+    plan_parser = subparsers.add_parser(
+        "plan", help="Manage and consult the periodized training plan"
+    )
+    plan_subparsers = plan_parser.add_subparsers(
+        dest="subcommand", help="Plan sub-commands"
+    )
+    
+    # plan generate
+    p_gen = plan_subparsers.add_parser(
+        "generate",
+        help="Generate or adapt the 4-week periodized training plan (saves locally)"
+    )
+    p_gen.add_argument(
+        "-f", "--force", action="store_true",
+        help="Force regeneration of the macrocycle/mesocycle strategy"
+    )
+    
+    # plan show
+    plan_subparsers.add_parser(
+        "show",
+        help="Show the active macrocycle and mesocycles periodization strategy"
+    )
+    
     # workout command & subparsers
     workout_parser = subparsers.add_parser("workout", help="Manage workouts")
     workout_subparsers = workout_parser.add_subparsers(
@@ -83,16 +108,6 @@ def main() -> None:
     
     # workout list
     workout_subparsers.add_parser("list", help="Show all planned workouts")
-    
-    # workout plan
-    w_plan = workout_subparsers.add_parser(
-        "plan",
-        help="Generate or adapt the 4-week periodized training plan (saves locally)"
-    )
-    w_plan.add_argument(
-        "-f", "--force", action="store_true",
-        help="Force regeneration of the macrocycle/mesocycle strategy"
-    )
     
     # workout rm
     w_rm = workout_subparsers.add_parser("rm", help="Remove a workout by ID")
@@ -151,10 +166,17 @@ def main() -> None:
             run_workout_list()
         elif sub == "rm":
             run_workout_rm(args)
-        elif sub == "plan":
-            run_workout_plan(args)
         elif sub == "adapt":
             run_workout_adapt(args)
+    elif cmd == "plan":
+        if not args.subcommand:
+            plan_parser.print_help()
+            sys.exit(1)
+        sub = args.subcommand.lower()
+        if sub == "generate":
+            run_plan_generate(args)
+        elif sub == "show":
+            run_plan_show()
     else:
         print(f"Unknown command: '{cmd}'")
         parser.print_help()
@@ -164,15 +186,43 @@ def run_status() -> None:
     """Displays current athlete goals, Garmin metrics, baselines, and memories."""
     print("=== TRAINMATE ATHLETE STATUS ===")
     
-    # Active Goal
+    # Active Goal & Periodization Strategy
     objectives = db.get_objectives(status='active')
     if objectives:
         objectives.sort(key=lambda x: str(x['target_date']))
         next_goal = objectives[0]
         sport_str = next_goal['sport_type'].upper()
+        
+        # Calculate days remaining
+        today = datetime.now(timezone.utc).date()
+        target_date = datetime.strptime(next_goal['target_date'], "%Y-%m-%d").date()
+        days_rem = (target_date - today).days
+        days_rem_str = f" ({days_rem} days remaining)" if days_rem >= 0 else ""
+        
         print(f"\nNext Objective: {next_goal['title']} ({sport_str})")
-        print(f"Target Date   : {next_goal['target_date']}")
+        print(f"Target Date   : {next_goal['target_date']}{days_rem_str}")
         print(f"Description   : {next_goal.get('description', '')}")
+        
+        # Query active mesocycle
+        macro = db.get_macrocycle_for_objective(next_goal['id'])
+        if macro:
+            mesos = db.get_mesocycles_for_macrocycle(macro['id'])
+            active_meso = None
+            for m in mesos:
+                start = datetime.strptime(m['start_date'], "%Y-%m-%d").date()
+                end = datetime.strptime(m['end_date'], "%Y-%m-%d").date()
+                if start <= today <= end:
+                    active_meso = m
+                    break
+            
+            if active_meso:
+                print(f"Active Cycle  : {active_meso['name']} ({active_meso['start_date']} to "
+                      f"{active_meso['end_date']})")
+                print(f"Cycle Focus   : {active_meso['focus']}")
+            else:
+                print("Active Cycle  : None active today (outside mesocycle boundaries)")
+        else:
+            print("Active Cycle  : No periodization strategy established. Run 'plan generate' first.")
     else:
         print("\nNext Objective: None (TrainMate needs at least one goal to start planning)")
 
@@ -218,7 +268,7 @@ def run_status() -> None:
     print(f"- Learnings : {learnings or 'None yet'}")
     print("\n================================")
 
-def run_workout_plan(args: argparse.Namespace) -> None:
+def run_plan_generate(args: argparse.Namespace) -> None:
     """Executes the AI replanning workout scheduler command."""
     # Make sure we have latest metrics cached
     metrics = db.get_metrics_cache()
@@ -234,6 +284,76 @@ def run_workout_plan(args: argparse.Namespace) -> None:
         print("Run 'sync' to commit this plan to Google Calendar.")
     except Exception as e:
         print(f"Error during plan generation: {e}")
+
+def run_plan_show() -> None:
+    """Displays the active training macrocycle and mesocycles periodization timeline."""
+    objectives = db.get_objectives(status='active')
+    if not objectives:
+        print("No active goals found. TrainMate needs at least one objective.")
+        return
+        
+    objectives.sort(key=lambda x: str(x['target_date']))
+    next_goal = objectives[0]
+    
+    macrocycle = db.get_macrocycle_for_objective(next_goal['id'])
+    if not macrocycle:
+        print(f"No active periodization strategy found for goal '{next_goal['title']}'.")
+        print("Run 'plan generate' to create one.")
+        return
+        
+    mesocycles = db.get_mesocycles_for_macrocycle(macrocycle['id'])
+    
+    print("\n=== ACTIVE PERIODIZATION STRATEGY ===")
+    sport_str = next_goal['sport_type'].upper()
+    print(f"Objective: {next_goal['title']} ({sport_str}) on {next_goal['target_date']}")
+    print(f"Overall Strategy:\n{macrocycle['strategy']}\n")
+    print("Periodization Timeline:")
+    
+    today = datetime.now(timezone.utc).date()
+    
+    for m in mesocycles:
+        start = datetime.strptime(m['start_date'], "%Y-%m-%d").date()
+        end = datetime.strptime(m['end_date'], "%Y-%m-%d").date()
+        
+        total_days = (end - start).days + 1
+        if total_days <= 0:
+            total_days = 1
+            
+        bar_length = 20
+        if end < today:
+            status_str = "[DONE]  "
+            bar = "=" * bar_length
+            extra = ""
+        elif start <= today <= end:
+            status_str = "[ACTIVE]"
+            days_passed = (today - start).days + 1
+            days_passed = max(1, min(days_passed, total_days))
+            filled = round(bar_length * days_passed / total_days)
+            filled = max(0, min(filled, bar_length))
+            bar = "=" * filled + "." * (bar_length - filled)
+            extra = f" (Day {days_passed}/{total_days})"
+        else:
+            status_str = "[FUTURE]"
+            bar = "." * bar_length
+            extra = ""
+            
+        if total_days >= 7:
+            weeks = total_days / 7
+            if weeks.is_integer():
+                duration_desc = f"({int(weeks)} weeks)"
+            else:
+                duration_desc = f"({weeks:.1f} weeks)"
+        else:
+            duration_desc = f"({total_days} days)"
+            
+        prefix = "|->" if status_str == "[ACTIVE]" else "|--"
+        print(f"{prefix} {status_str} {m['name']:<15} ({m['start_date']} -> {m['end_date']}) "
+              f"[{bar}]{extra} {duration_desc}")
+              
+        focus_lines = textwrap.wrap(m['focus'], width=80)
+        for line in focus_lines:
+            print(f"            {line}")
+        print("            " + "-" * 40)
 
 def run_workout_adapt(args: argparse.Namespace) -> None:
     """Executes the daily workout Garmin adaptation checks command."""
@@ -256,7 +376,7 @@ def run_sync() -> None:
     unsynced = [w for w in planned_workouts if w['status'] in ('planned', 'modified')]
     
     if not unsynced:
-        print("No new or modified workouts to sync. Run 'workout plan' to generate a schedule.")
+        print("No new or modified workouts to sync. Run 'plan generate' to generate a schedule.")
         return
         
     print(f"Syncing {len(unsynced)} workouts to Google Calendar...")
@@ -285,7 +405,7 @@ def run_goal_add(args: argparse.Namespace) -> None:
     )
     print(
         f"Goal '{args.title}' added successfully. "
-        f"Run 'workout plan' to generate training cycles."
+        f"Run 'plan generate' to generate training cycles."
     )
 
 def run_goal_rm(args: argparse.Namespace) -> None:
@@ -304,7 +424,7 @@ def run_constraint_add(args: argparse.Namespace) -> None:
     )
     print(
         f"Constraint '{args.title}' logged. "
-        f"This will be factored in when running 'workout plan' or 'workout adapt'."
+        f"This will be factored in when running 'plan generate' or 'workout adapt'."
     )
 
 def run_constraint_rm(args: argparse.Namespace) -> None:

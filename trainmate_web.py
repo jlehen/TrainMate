@@ -36,6 +36,13 @@ def get_status() -> Any:
     strategy = db.get_coach_memory("training_strategy")
     learnings = db.get_coach_memory("athlete_learnings")
     
+    macrocycle = None
+    mesocycles = []
+    if next_goal and next_goal['id'] is not None:
+        macrocycle = db.get_macrocycle_for_objective(next_goal['id'])
+        if macrocycle:
+            mesocycles = db.get_mesocycles_for_macrocycle(macrocycle['id'])
+            
     return jsonify({
         "next_goal": next_goal,
         "last_metrics": last_metrics,
@@ -43,7 +50,9 @@ def get_status() -> Any:
         "coach_memory": {
             "strategy": strategy,
             "learnings": learnings
-        }
+        },
+        "macrocycle": macrocycle,
+        "mesocycles": mesocycles
     })
 
 @app.route("/api/objectives", methods=["GET", "POST"])

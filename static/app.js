@@ -73,8 +73,97 @@ async function fetchStatus() {
         strategyEl.innerText = data.coach_memory.strategy || "No strategy established yet. Replan to generate one.";
         learningsEl.innerText = data.coach_memory.learnings || "No observations cached yet.";
         
+        // Update Strategy Card
+        const strategyCard = document.getElementById("strategy-card");
+        if (data.macrocycle && data.mesocycles && data.mesocycles.length > 0) {
+            strategyCard.style.display = "block";
+            document.getElementById("strategy-philosophy").innerText = data.macrocycle.strategy;
+            renderTimeline(data.mesocycles);
+        } else {
+            strategyCard.style.display = "none";
+        }
+        
     } catch (e) {
         logConsole(`Error fetching status: ${e.message}`, "error");
+    }
+}
+
+function parseLocalDate(dateStr) {
+    const parts = dateStr.split("-");
+    return new Date(parts[0], parts[1] - 1, parts[2]);
+}
+
+function renderTimeline(mesocycles) {
+    const container = document.getElementById("web-timeline-container");
+    if (!container) return;
+    container.innerHTML = "";
+    
+    const detailsBox = document.getElementById("cycle-details-box");
+    const detailsName = document.getElementById("cycle-details-name");
+    const detailsDates = document.getElementById("cycle-details-dates");
+    const detailsFocus = document.getElementById("cycle-details-focus");
+    
+    if (!mesocycles || mesocycles.length === 0) {
+        detailsBox.style.display = "none";
+        return;
+    }
+    
+    // Sort mesocycles chronologically
+    mesocycles.sort((a, b) => parseLocalDate(a.start_date) - parseLocalDate(b.start_date));
+    
+    // Calculate total duration in days
+    const overallStart = parseLocalDate(mesocycles[0].start_date);
+    const overallEnd = parseLocalDate(mesocycles[mesocycles.length - 1].end_date);
+    const totalDays = Math.ceil((overallEnd - overallStart) / (1000 * 60 * 60 * 24)) + 1;
+    
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    
+    let activeBlockEl = null;
+    
+    mesocycles.forEach(m => {
+        const start = parseLocalDate(m.start_date);
+        const end = parseLocalDate(m.end_date);
+        
+        const duration = Math.ceil((end - start) / (1000 * 60 * 60 * 24)) + 1;
+        const widthPct = totalDays > 0 ? (duration / totalDays) * 100 : 100;
+        
+        const block = document.createElement("div");
+        block.className = "cycle-block";
+        block.style.width = `${widthPct}%`;
+        block.innerText = m.name;
+        block.title = `${m.name} (${m.start_date} to ${m.end_date})`;
+        
+        // Determine cycle status
+        let status = "future";
+        if (end < today) {
+            status = "done";
+        } else if (start <= today && today <= end) {
+            status = "active";
+        }
+        block.classList.add(status);
+        
+        block.addEventListener("click", () => {
+            document.querySelectorAll(".cycle-block").forEach(el => el.classList.remove("selected"));
+            block.classList.add("selected");
+            
+            detailsBox.style.display = "block";
+            detailsName.innerText = m.name;
+            detailsDates.innerText = `${m.start_date} to ${m.end_date} (${duration} days)`;
+            detailsFocus.innerText = m.focus;
+        });
+        
+        container.appendChild(block);
+        
+        if (status === "active") {
+            activeBlockEl = block;
+        }
+    });
+    
+    // Auto-select active or first block
+    const defaultSelect = activeBlockEl || container.firstElementChild;
+    if (defaultSelect) {
+        defaultSelect.click();
     }
 }
 
