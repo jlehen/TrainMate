@@ -75,5 +75,10 @@ class Config:
         """Gets the user profile information dict."""
         return self.get("user_profile", {})
 
+    @property
+    def metrics_history_days(self) -> int:
+        """Gets the number of days of metrics history to look at, defaulting to 5."""
+        return self.get("metrics_history_days", 5)
+
 # Singleton instance
 config = Config()

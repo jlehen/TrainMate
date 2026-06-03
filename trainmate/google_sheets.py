@@ -102,16 +102,44 @@ class GarminSheetsReader:
             except ValueError:
                 continue
                 
+            activity_id = str(row_dict.get('Activity ID'))
+            start_time = row_dict.get('Start Time')
+            activity_name = row_dict.get('Activity Name')
+            activity_type = str(row_dict.get('Type'))
+            
             duration_str = str(row_dict.get('Duration (sec)', '0')).replace(',', '')
             duration_sec = self._safe_float(duration_str)
-            avg_hr = self._safe_int(row_dict.get('Avg HR'))
             
-            # Default average heart rate if missing or zero
-            if not avg_hr or avg_hr <= 0:
-                avg_hr = 120
-                
-            # Workload calculation: Duration in hours * Avg HR
-            workload = (duration_sec / 3600.0) * avg_hr
+            distance_str = str(row_dict.get('Distance (km)', '0')).replace(',', '')
+            distance_km = self._safe_float(distance_str)
+            
+            elevation_str = str(row_dict.get('Elevation Gain (m)', '0')).replace(',', '')
+            elevation_gain_m = self._safe_float(elevation_str)
+            
+            avg_hr = self._safe_int(row_dict.get('Avg HR'))
+            max_hr = self._safe_int(row_dict.get('Max HR'))
+            
+            # Calculate/estimate rpe and tss
+            rpe, tss = self._estimate_activity_metrics(activity_type, duration_sec, avg_hr)
+            
+            # Save completed activity to DB
+            db.save_completed_activity(
+                activity_id=activity_id,
+                date=str(date_str),
+                start_time=start_time,
+                activity_name=activity_name,
+                activity_type=activity_type,
+                duration_sec=duration_sec,
+                distance_km=distance_km,
+                elevation_gain_m=elevation_gain_m,
+                avg_hr=avg_hr,
+                max_hr=max_hr,
+                rpe=rpe,
+                tss=tss
+            )
+            
+            # Workload calculation: TSS + RPE * Duration (hours)
+            workload = tss + rpe * (duration_sec / 3600.0)
             
             daily_activity_load[str(date_str)] = (
                 daily_activity_load.get(str(date_str), 0.0) + workload
@@ -210,6 +238,45 @@ class GarminSheetsReader:
         except Exception as e:
             print(f"Error fetching sheet range {sheet_range}: {e}")
             return []
+
+    def _estimate_activity_metrics(
+        self, sport_type: str, duration_sec: float, avg_hr: Optional[int]
+    ) -> Tuple[int, float]:
+        """Estimates RPE and TSS for a completed activity based on heart rate.
+
+        Args:
+            sport_type: Type of sport (e.g. running, road_biking).
+            duration_sec: Duration of activity in seconds.
+            avg_hr: Average heart rate during the activity.
+
+        Returns:
+            A tuple of (estimated_rpe, estimated_tss).
+        """
+        duration_hours = duration_sec / 3600.0
+        profile = config.user_profile or {}
+        lthr = profile.get("lthr", 165)
+        
+        sport = (sport_type or "").lower().replace("_", " ")
+        
+        if not avg_hr or avg_hr <= 0:
+            if "yoga" in sport:
+                return 2, duration_hours * 15.0
+            elif "strength" in sport:
+                return 5, duration_hours * 45.0
+            elif "rest" in sport:
+                return 0, 0.0
+            else:
+                return 3, duration_hours * 30.0
+                
+        intensity_ratio = avg_hr / lthr
+        
+        # Estimate RPE on 2-10 scale
+        rpe = int(round(intensity_ratio * 8.0))
+        rpe = max(2, min(rpe, 10))
+        
+        # Estimate TSS: duration * intensity_ratio^2 * 100
+        tss = duration_hours * (intensity_ratio ** 2) * 100.0
+        return rpe, tss
 
     def _safe_int(self, val: Any) -> Optional[int]:
         """Safely parses a cell value to integer."""

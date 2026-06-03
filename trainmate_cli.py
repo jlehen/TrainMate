@@ -1,7 +1,7 @@
 import argparse
 import sys
 import textwrap
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from trainmate.db import db
 from trainmate.google_sheets import sheets_reader
 from trainmate.google_calendar import calendar_syncer
@@ -113,6 +113,10 @@ def main() -> None:
         help="Run the daily Garmin check for today (syncs adapted workouts to Calendar)"
     )
     w_adapt.add_argument("--date", help="Date in YYYY-MM-DD format (defaults to UTC today)")
+    w_adapt.add_argument(
+        "-y", "--yes", "--auto", action="store_true", dest="auto",
+        help="Apply proposed adaptations automatically without prompting"
+    )
     
     # workout push
     workout_subparsers.add_parser(
@@ -375,13 +379,104 @@ def run_plan_show() -> None:
 def run_workout_adapt(args: argparse.Namespace) -> None:
     """Executes the daily workout Garmin adaptation checks command."""
     date_str = args.date or datetime.now(timezone.utc).strftime("%Y-%m-%d")
-    print(f"Evaluating daily Garmin metrics adaptation for {date_str}...")
-    
+    print(f"Syncing latest metrics from Google Sheets first...")
     try:
-        reason, adapted_workout = coach_engine.adapt(date_str)
+        sheets_reader.sync_data()
+    except Exception as e:
+        print(f"Warning: Failed to sync latest Google Sheets data: {e}")
+
+    # Display rolling trajectory
+    try:
+        history_days = config.metrics_history_days
+        date_obj = datetime.strptime(date_str, "%Y-%m-%d").date()
+        start_date = (date_obj - timedelta(days=history_days - 1)).strftime("%Y-%m-%d")
+        metrics_history = db.get_metrics_cache(start_date=start_date, end_date=date_str)
+        
+        print("\n=== METRICS TRAJECTORY (PAST 5 DAYS) ===")
+        print(f"{'Date':<12} | {'HRV (ms)':<8} | {'RHR (bpm)':<9} | {'Sleep':<5} | {'ACWR':<5}")
+        print("-" * 50)
+        for m in metrics_history:
+            base = db.get_baseline(m['date'])
+            hrv_marker = ""
+            rhr_marker = ""
+            sleep_marker = ""
+            
+            if base:
+                if m['hrv'] is not None and base['hrv_baseline_mean'] is not None:
+                    sd = base['hrv_baseline_std'] or 1.0
+                    if m['hrv'] < (base['hrv_baseline_mean'] - sd):
+                        hrv_marker = " (v)"
+                if m['rhr'] is not None and base['rhr_baseline_mean'] is not None:
+                    sd = base['rhr_baseline_std'] or 1.0
+                    if m['rhr'] > (base['rhr_baseline_mean'] + max(3.0, sd)):
+                        rhr_marker = " (^)"
+                if m['sleep_score'] is not None and m['sleep_score'] < 60:
+                    sleep_marker = " (v)"
+                    
+            hrv_str = f"{m['hrv'] or 'N/A'}{hrv_marker}"
+            rhr_str = f"{m['rhr'] or 'N/A'}{rhr_marker}"
+            sleep_str = f"{m['sleep_score'] or 'N/A'}{sleep_marker}"
+            acwr_str = f"{m['acwr']:.2f}" if m['acwr'] is not None else "N/A"
+            print(f"{m['date']:<12} | {hrv_str:<8} | {rhr_str:<9} | {sleep_str:<5} | {acwr_str:<5}")
+        print("((v) suppressed/poor, (^) elevated compared to baseline)\n")
+    except Exception as e:
+        print(f"Warning: Could not display metrics trajectory: {e}")
+
+    print(f"Evaluating daily Garmin metrics adaptation for {date_str}...")
+    try:
+        reason, proposed_workouts = coach_engine.adapt(date_str)
         print(f"\nDecision Summary:\n{reason}")
-        if adapted_workout:
-            print(f"\nAdapted Workout Synced to Calendar: {adapted_workout['title']}")
+        
+        if not proposed_workouts:
+            print("\nAll metrics are green and workout plan is on track. No changes recommended.")
+            return
+
+        print("\nPROPOSED WORKOUT ADAPTATIONS:")
+        print(
+            f"{'Date':<12} | {'Sport':<12} | {'Original Workout':<25} | "
+            f"{'Adapted Workout':<25} | {'Duration/RPE/TSS':<16}"
+        )
+        print("-" * 100)
+        for pw in proposed_workouts:
+            existing = db.get_workout(pw['date'], pw['sport_type'])
+            orig_title = existing['title'] if existing else "[None]"
+            orig_stats = ""
+            if existing:
+                orig_stats = (
+                    f"{existing.get('duration_minutes') or 0}m/"
+                    f"RPE{existing.get('rpe') or 0}/"
+                    f"TSS{existing.get('tss') or 0}"
+                )
+            new_stats = (
+                f"{pw.get('duration_minutes') or 0}m/"
+                f"RPE{pw.get('rpe') or 0}/"
+                f"TSS{pw.get('tss') or 0}"
+            )
+            stats_diff = f"{orig_stats} -> {new_stats}" if orig_stats else new_stats
+            print(
+                f"{pw['date']:<12} | {pw['sport_type'].upper():<12} | {orig_title:<25} | "
+                f"{pw['title']:<25} | {stats_diff:<16}"
+            )
+
+        if args.auto:
+            confirm = "y"
+        else:
+            confirm = input(
+                "\nApply these adaptations to your training plan and sync to Calendar? [y/N]: "
+            ).strip().lower()
+
+        if confirm == 'y':
+            print("\nApplying adaptations...")
+            all_dates = [pw['date'] for pw in proposed_workouts]
+            start_date_adapt = min(all_dates)
+            end_date_adapt = max(all_dates)
+            coach_engine.apply_adaptations(
+                proposed_workouts, reason, start_date_adapt, end_date_adapt
+            )
+            print("Adaptations applied and synced to calendar successfully.")
+        else:
+            print("\nAdaptations discarded.")
+
     except Exception as e:
         print(f"Error executing daily adaptation: {e}")
 

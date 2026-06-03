@@ -7,7 +7,7 @@ from trainmate.config import config
 from trainmate.db import db
 from trainmate.openrouter import openrouter_client
 from trainmate.google_calendar import calendar_syncer
-from trainmate.types import Objective, Constraint, Workout
+from trainmate.types import Objective, Constraint, Workout, CompletedActivity
 
 class CoachEngine:
     """Orchestrates sports science coaching, macro/meso planning, and daily adaptations."""
@@ -449,7 +449,10 @@ You MUST respond with a JSON object containing:
         "ski_touring" | "rest",
       "title": "Workout Title (e.g., Tempo Run, Long Ride, Rest Day)",
       "description": "Detailed description of intensity, duration, heart rate zones, and
-        goals."
+        goals.",
+      "duration_minutes": 60, (Estimated workout duration in minutes, integer. Use 0 for rest days)
+      "rpe": 6, (Expected Rate of Perceived Exertion, integer 1-10. Use 0 for rest days)
+      "tss": 45.0 (Expected Training Stress Score, float/integer. Use 0 for rest days)
     }
   ]
 }
@@ -480,7 +483,10 @@ You MUST respond with a JSON object containing:
                 sport_type=w['sport_type'],
                 title=w['title'],
                 description=w['description'],
-                status='planned'
+                status='planned',
+                duration_minutes=w.get('duration_minutes'),
+                rpe=w.get('rpe'),
+                tss=w.get('tss')
             )
             saved_workouts.append({
                 'id': wid,
@@ -491,144 +497,378 @@ You MUST respond with a JSON object containing:
                 'original_description': w['description'],
                 'status': 'planned',
                 'modification_reason': None,
-                'google_event_id': None
+                'google_event_id': None,
+                'duration_minutes': w.get('duration_minutes'),
+                'rpe': w.get('rpe'),
+                'tss': w.get('tss')
             })
 
         print(f"Generated {len(workouts)} workouts.")
         return plan_data.get("reasoning", "Plan generated."), saved_workouts
 
-    def adapt(self, target_date_str: Optional[str] = None) -> Tuple[str, Optional[Workout]]:
-        """Runs the daily check to adapt today's planned workout based on Garmin metrics.
-
-        Args:
-            target_date_str: The target date string YYYY-MM-DD. Defaults to today.
-
-        Returns:
-            A tuple of (adaptation explanation string, adapted Workout or None).
-        """
+    def adapt(self, target_date_str: Optional[str] = None) -> Tuple[str, List[Workout]]:
+        """Evaluates metrics/activities over a rolling window and adapts mesocycle if needed."""
         if not target_date_str:
             target_date_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
-        # Fetch workouts for this date
-        workouts = db.get_workouts(start_date=target_date_str, end_date=target_date_str)
-        if not workouts:
-            return f"No workouts planned for {target_date_str}.", None
+        target_date_obj = datetime.strptime(target_date_str, "%Y-%m-%d").date()
 
-        # Fetch Garmin metrics and baseline for this date
-        metrics = db.get_metrics_cache(start_date=target_date_str, end_date=target_date_str)
-        if not metrics:
-            return f"No Garmin metrics found for {target_date_str} to evaluate adaptation.", None
-        
-        today_metrics = metrics[0]
+        # 1. Fetch metrics history window
+        history_days = config.metrics_history_days
+        start_date_obj = target_date_obj - timedelta(days=history_days - 1)
+        start_date_str = start_date_obj.strftime("%Y-%m-%d")
+
+        # Fetch metrics and baselines in window
+        metrics = db.get_metrics_cache(start_date=start_date_str, end_date=target_date_str)
+        completed_activities = db.get_completed_activities(
+            start_date=start_date_str, end_date=target_date_str
+        )
+        planned_workouts = db.get_workouts(start_date=start_date_str, end_date=target_date_str)
+
+        # Retrieve baseline for reference
         baseline = db.get_baseline(target_date_str)
         if not baseline:
-            # Fallback to no-baseline mode
-            baseline_str = (
-                "No baseline data available yet. Use absolute values (e.g. HRV, Sleep Score) "
-                "to assess fatigue."
-            )
+            baseline_str = "No baseline data available."
         else:
-            baseline_str = f"""
-Resting HR baseline: Mean = {baseline['rhr_baseline_mean']:.1f},
-StdDev = {baseline['rhr_baseline_std']:.2f}
-HRV baseline: Mean = {baseline['hrv_baseline_mean']:.1f},
-StdDev = {baseline['hrv_baseline_std']:.2f}
-Sleep Score baseline: Mean = {baseline['sleep_baseline_mean']:.1f},
-StdDev = {baseline['sleep_baseline_std']:.2f}
-"""
+            baseline_str = (
+                f"Resting HR: Mean = {baseline['rhr_baseline_mean']:.1f}, "
+                f"StdDev = {baseline['rhr_baseline_std']:.2f}\n"
+                f"HRV: Mean = {baseline['hrv_baseline_mean']:.1f}, "
+                f"StdDev = {baseline['hrv_baseline_std']:.2f}\n"
+                f"Sleep Score: Mean = {baseline['sleep_baseline_mean']:.1f}, "
+                f"StdDev = {baseline['sleep_baseline_std']:.2f}"
+            )
 
+        # 2. Match planned workouts vs completed activities and compute discrepancies
+        SPORT_MAPPING = {
+            "running": ["running", "indoor_running", "trail_running", "treadmill_running"],
+            "road_biking": [
+                "road_biking", "indoor_cycling", "cycling", "virtual_cycling", "biking"
+            ],
+            "hiking": ["hiking", "walking"],
+            "strength_training": ["strength_training", "strength", "indoor_cardio", "fitness"],
+            "yoga": ["yoga", "stretching", "pilates"],
+            "ski_touring": ["ski_touring", "backcountry_skiing", "nordic_skiing", "skiing"]
+        }
+
+        matching_results = []
+        discrepancies = []
+        
+        # Group by date
+        activities_by_date: Dict[str, List[Any]] = {}
+        for act in completed_activities:
+            activities_by_date.setdefault(act['date'], []).append(act)
+
+        workouts_by_date: Dict[str, List[Any]] = {}
+        for w in planned_workouts:
+            workouts_by_date.setdefault(w['date'], []).append(w)
+
+        # Process each day in the window
+        for d in range(history_days):
+            date_curr = (start_date_obj + timedelta(days=d)).strftime("%Y-%m-%d")
+            day_acts = activities_by_date.get(date_curr, [])
+            day_workouts = workouts_by_date.get(date_curr, [])
+
+            # Sort activities by workload descending
+            day_acts = sorted(
+                day_acts,
+                key=lambda x: (
+                    (x.get('tss') or 0.0)
+                    + (x.get('rpe') or 0) * ((x.get('duration_sec') or 0.0) / 3600.0)
+                ),
+                reverse=True
+            )
+
+            used_act_ids = set()
+
+            for w in day_workouts:
+                w_sport = w['sport_type']
+                matched_act = None
+
+                if w_sport == "rest":
+                    # Check for rest day violation: any activity with significant workload
+                    for act in day_acts:
+                        act_load = (
+                            (act.get('tss') or 0.0)
+                            + (act.get('rpe') or 0) * (act['duration_sec'] / 3600.0)
+                        )
+                        if act_load > 10.0 and act['activity_id'] not in used_act_ids:
+                            matched_act = act
+                            used_act_ids.add(act['activity_id'])
+                            discrepancies.append(
+                                f"- {date_curr}: Rest Day Violation! Performed "
+                                f"'{act['activity_name']}' ({act['activity_type']}) with "
+                                f"workload {act_load:.1f} when Rest was planned."
+                            )
+                            break
+                else:
+                    # Find a matching completed activity
+                    allowed_types = SPORT_MAPPING.get(w_sport, [w_sport])
+                    for act in day_acts:
+                        if act['activity_id'] in used_act_ids:
+                            continue
+                        act_type = act['activity_type'].lower()
+                        if act_type in allowed_types or any(t in act_type for t in allowed_types):
+                            matched_act = act
+                            used_act_ids.add(act['activity_id'])
+                            break
+
+                    if matched_act:
+                        act_duration_min = matched_act['duration_sec'] / 60.0
+                        act_load = (
+                            (matched_act.get('tss') or 0.0)
+                            + (matched_act.get('rpe') or 0) * (matched_act['duration_sec'] / 3600.0)
+                        )
+                        
+                        p_duration = w.get('duration_minutes') or 0
+                        p_rpe = w.get('rpe') or 0
+                        p_tss = w.get('tss') or 0
+                        exp_load = p_tss + p_rpe * (p_duration / 60.0)
+
+                        disc_reasons = []
+                        if p_duration > 0 and (abs(act_duration_min - p_duration) / p_duration) > 0.30:
+                            disc_reasons.append(
+                                f"duration mismatch +/-30% (planned {p_duration:.0f}m, "
+                                f"actual {act_duration_min:.0f}m)"
+                            )
+                        
+                        if exp_load > 0 and (abs(act_load - exp_load) / exp_load) > 0.30:
+                            disc_reasons.append(
+                                f"workload mismatch +/-30% (planned load {exp_load:.1f}, "
+                                f"actual load {act_load:.1f})"
+                            )
+
+                        if disc_reasons:
+                            discrepancies.append(
+                                f"- {date_curr}: Discrepancy in '{w['title']}' vs "
+                                f"'{matched_act['activity_name']}': {', '.join(disc_reasons)}."
+                            )
+                    else:
+                        # Complete miss
+                        discrepancies.append(
+                            f"- {date_curr}: Complete Miss! Missed planned workout '{w['title']}' "
+                            f"({w['sport_type']})."
+                        )
+
+                matching_results.append({
+                    "date": date_curr,
+                    "planned": w,
+                    "completed": matched_act
+                })
+
+            # Check for completed activities when nothing was planned
+            for act in day_acts:
+                if act['activity_id'] not in used_act_ids:
+                    act_load = (
+                        (act.get('tss') or 0.0)
+                        + (act.get('rpe') or 0) * (act['duration_sec'] / 3600.0)
+                    )
+                    if act_load > 10.0:
+                        discrepancies.append(
+                            f"- {date_curr}: Unplanned Activity! Performed "
+                            f"'{act['activity_name']}' ({act['activity_type']}) with "
+                            f"workload {act_load:.1f} on a day with no planned workouts."
+                        )
+
+        # 3. Determine mesocycle end date for adaptation range
+        meso_end_date_str = (target_date_obj + timedelta(days=6)).strftime("%Y-%m-%d")
+        active_meso = None
         objectives = db.get_objectives(status='active')
-        constraints = db.get_constraints(start_after=target_date_str)
+        if objectives:
+            objectives.sort(key=lambda x: str(x['target_date']))
+            next_goal = objectives[0]
+            macro = db.get_macrocycle_for_objective(next_goal['id'])
+            if macro:
+                mesos = db.get_mesocycles_for_macrocycle(macro['id'])
+                for m in mesos:
+                    start = datetime.strptime(m['start_date'], "%Y-%m-%d").date()
+                    end = datetime.strptime(m['end_date'], "%Y-%m-%d").date()
+                    if start <= target_date_obj <= end:
+                        active_meso = m
+                        meso_end_date_str = m['end_date']
+                        break
 
-        custom_task = """
+        # 4. Formulate LLM Prompt
+        custom_task = f"""
 TASK:
-Evaluate today's Garmin metrics against the rolling baseline and determine if today's planned
-workout needs to be adapted for safety, recovery, or overload.
-If the athlete shows signs of high fatigue (e.g., elevated Resting HR, low Sleep Score, or dropped
-HRV), modify the workout to be easier (recovery, reduced duration, lower intensity) or change it
-to rest.
-If you adjust the workout, generate the adapted title and description, explaining the sports
-science reason.
+Analyze the athlete's actual workout adherence and physiological metrics trajectory over the past {history_days} days.
+Review the list of completed activities compared to planned workouts and any calculated discrepancies (misses, workload/duration differences, rest violations).
+Also inspect the rolling baseline reference and the daily metrics sequence to see if the athlete shows signs of accumulated fatigue.
+
+Based on this, determine if we need to adapt the training plan for the remainder of the active mesocycle block (from {target_date_str} to {meso_end_date_str}).
+- If they are showing high fatigue or injury risk (e.g. elevated RHR, depressed HRV, poor sleep, or ACWR > 1.3), replace hard workouts with recovery or rest.
+- If they have missed key workouts, adjust the remaining workouts to safely build back volume without spiking the acute load too fast.
+- If they are fully recovered and on track, keep the plan as scheduled or make minor optimal adjustments.
 
 You MUST respond with a JSON object containing:
-{
+{{
   "change_needed": true | false,
-  "reason": "Detail the sports science explanation comparing metrics to baseline.",
-  "adapted_title": "Workout Title (only if change_needed is true)",
-  "adapted_description": "Workout Description (only if change_needed is true)",
-  "training_strategy": "Optionally update training strategy philosophy based on response.",
-  "athlete_learnings": (
-        "Optionally update athlete observations (e.g. athlete responds poorly to consecutive "
-        "hard days)."
-  )
-}
+  "reason": "Explain the physiological justification based on metrics trends and workout discrepancies.",
+  "adapted_workouts": [
+    {{
+      "date": "YYYY-MM-DD",
+      "sport_type": "running" | "road_biking" | "hiking" | "strength_training" | "yoga" | "ski_touring" | "rest",
+      "title": "Adapted Workout Title",
+      "description": "Adapted description of intensity, duration, heart rate zones, and goals.",
+      "duration_minutes": 45,
+      "rpe": 5,
+      "tss": 30.0
+    }}
+  ]
+}}
 """
-        system_prompt = self._get_coach_system_prompt(objectives, constraints, custom_task)
+        # Prepare system prompt
+        system_prompt = self._get_coach_system_prompt(
+            objectives, db.get_constraints(start_after=target_date_str), custom_task
+        )
 
-        # Build user message with daily data
-        workout_text = ""
-        for w in workouts:
-            workout_text += (
-                f"- Sport: {w['sport_type']} | Title: {w['title']} | "
-                f"Description: {w['description']}\n"
+        # Build user content containing trajectory metrics and discrepancies
+        metrics_lines = []
+        for m in metrics:
+            metrics_lines.append(
+                f"- {m['date']}: RHR={m['rhr']}bpm, HRV={m['hrv']}ms, Sleep={m['sleep_score']}, "
+                f"Stress={m['stress']}, ACWR={m['acwr']:.2f}"
             )
+        metrics_text = "\n".join(metrics_lines)
+
+        discrepancy_text = (
+            "\n".join(discrepancies) if discrepancies
+            else "No discrepancies detected (athlete fully on track)."
+        )
+
+        planned_list = []
+        for w in planned_workouts:
+            planned_list.append(
+                f"- {w['date']} ({w['sport_type'].upper()}): {w['title']} | "
+                f"Expected duration: {w.get('duration_minutes')}m, RPE: {w.get('rpe')}, "
+                f"TSS: {w.get('tss')}"
+            )
+        planned_text = "\n".join(planned_list)
+
+        completed_list = []
+        for act in completed_activities:
+            act_load = (
+                (act.get('tss') or 0.0)
+                + (act.get('rpe') or 0) * (act['duration_sec'] / 3600.0)
+            )
+            completed_list.append(
+                f"- {act['date']} ({act['activity_type'].upper()}): '{act['activity_name']}' | "
+                f"Duration: {act['duration_sec']/60:.0f}m, Avg HR: {act['avg_hr']}, "
+                f"Load: {act_load:.1f}"
+            )
+        completed_text = "\n".join(completed_list)
 
         user_content = f"""
-Today's Date: {target_date_str}
+Evaluation Date: {target_date_str}
+Adaptation Range: {target_date_str} to {meso_end_date_str}
 
-Athlete's Today Metrics:
-- Resting Heart Rate: {today_metrics['rhr']} bpm
-- HRV Overnight Average: {today_metrics['hrv']} ms
-- Sleep Score: {today_metrics['sleep_score']} (0-100)
-- Average Stress: {today_metrics['stress']}
-- Acute Workload: {today_metrics['acute_workload']:.1f}
-- Chronic Workload: {today_metrics['chronic_workload']:.1f}
-- ACWR (Acute:Chronic Workload Ratio): {today_metrics['acwr']:.2f}
+Athlete's Metrics History (Past {history_days} Days):
+{metrics_text}
 
-Athlete's Baseline Reference:
+Baseline Reference:
 {baseline_str}
 
-Planned Workout to Evaluate:
-{workout_text}
+Planned Workouts in Window:
+{planned_text}
+
+Actual Completed Garmin Activities in Window:
+{completed_text}
+
+Adherence Discrepancies & Violations:
+{discrepancy_text}
 """
-        print(f"Querying OpenRouter to evaluate daily adaptation for {target_date_str}...")
+        print(f"Querying OpenRouter to evaluate adaptation for the remainder of the mesocycle "
+              f"({target_date_str} -> {meso_end_date_str})...")
         decision = openrouter_client.complete(system_prompt, user_content)
 
-        # Update memories
+        # Update memories if present
         if "training_strategy" in decision and decision["training_strategy"]:
             db.save_coach_memory("training_strategy", decision["training_strategy"])
         if "athlete_learnings" in decision and decision["athlete_learnings"]:
             db.save_coach_memory("athlete_learnings", decision["athlete_learnings"])
 
-        adapted_workout = None
+        reason = decision.get("reason", "No adaptation needed.")
+        adapted = []
         if decision.get("change_needed"):
-            print(f"Adaptation recommended for {target_date_str}: {decision.get('reason')}")
-            for w in workouts:
-                # Update workout in DB to modified
-                db.save_workout(
-                    date=target_date_str,
-                    sport_type=w['sport_type'],
-                    title=decision.get("adapted_title", w['title']),
-                    description=decision.get("adapted_description", w['description']),
-                    original_description=w['original_description'] or w['description'],
-                    status='modified',
-                    modification_reason=decision.get("reason"),
-                    google_event_id=w.get('google_event_id')
-                )
-                
-                # Fetch updated workout from DB
-                adapted_workout = db.get_workout(target_date_str, w['sport_type'])
-                
-                # Automatically sync to Google Calendar!
-                if adapted_workout:
-                    calendar_syncer.sync_workout(adapted_workout)
-        else:
-            print(
-                f"No workout adaptation needed for {target_date_str}. "
-                f"Reason: {decision.get('reason')}"
-            )
+            adapted = decision.get("adapted_workouts", [])
 
-        return decision.get("reason", "No adaptation needed."), adapted_workout
+        # Filter and structure returned workouts
+        return reason, [
+            {
+                'id': None,
+                'date': w['date'],
+                'sport_type': w['sport_type'],
+                'title': w['title'],
+                'description': w['description'],
+                'original_description': w['description'],
+                'status': 'planned',
+                'modification_reason': reason,
+                'google_event_id': None,
+                'duration_minutes': w.get('duration_minutes'),
+                'rpe': w.get('rpe'),
+                'tss': w.get('tss')
+            } for w in adapted
+        ]
+
+    def apply_adaptations(
+        self, proposed_workouts: List[Dict[str, Any]], reason: str, start_date: str, end_date: str
+    ) -> None:
+        """Saves proposed adapted workouts, cleans up overridden ones, and syncs to Calendar."""
+        # 1. Fetch all existing workouts in the adaptation range
+        existing_workouts = db.get_workouts(start_date=start_date, end_date=end_date)
+        
+        # Group proposed workouts by date
+        proposed_by_date: Dict[str, List[Dict[str, Any]]] = {}
+        for pw in proposed_workouts:
+            proposed_by_date.setdefault(pw['date'], []).append(pw)
+            
+        # 2. Find and delete existing workouts that are being replaced or removed
+        for ew in existing_workouts:
+            ew_date = ew['date']
+            # If we have proposed workouts for this date
+            if ew_date in proposed_by_date:
+                # Check if this sport type is preserved in the proposed workouts
+                proposed_sports = [p['sport_type'] for p in proposed_by_date[ew_date]]
+                if ew['sport_type'] not in proposed_sports:
+                    print(f"Removing overridden workout: {ew['title']} ({ew['sport_type']}) "
+                          f"on {ew_date}")
+                    if ew.get('google_event_id') and ew['status'] == 'synced':
+                        try:
+                            calendar_syncer.delete_workout_event(ew['google_event_id'])
+                        except Exception as e:
+                            print(f"Error deleting Google Calendar event: {e}")
+                    db.delete_workout_by_id(ew['id'])
+                    
+        # 3. Save new adapted workouts and sync them
+        for w in proposed_workouts:
+            existing = db.get_workout(w['date'], w['sport_type'])
+            orig_desc = None
+            ge_id = None
+            if existing:
+                orig_desc = existing['original_description'] or existing['description']
+                ge_id = existing['google_event_id']
+                
+            db.save_workout(
+                date=w['date'],
+                sport_type=w['sport_type'],
+                title=w['title'],
+                description=w['description'],
+                original_description=orig_desc or w['description'],
+                status='modified',
+                modification_reason=reason,
+                google_event_id=ge_id,
+                duration_minutes=w.get('duration_minutes'),
+                rpe=w.get('rpe'),
+                tss=w.get('tss')
+            )
+            
+            # Sync to Google Calendar
+            updated = db.get_workout(w['date'], w['sport_type'])
+            if updated:
+                try:
+                    calendar_syncer.sync_workout(updated)
+                except Exception as e:
+                    print(f"Error syncing {w['title']} to Google Calendar: {e}")
 
 # Singleton instance
 coach_engine = CoachEngine()

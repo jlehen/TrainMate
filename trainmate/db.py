@@ -4,7 +4,8 @@ from datetime import datetime, timezone
 from typing import Any, Optional, List, Dict
 from trainmate.config import config
 from trainmate.types import (
-    Objective, Constraint, Workout, AthleteMetric, AthleteBaseline, Macrocycle, Mesocycle
+    Objective, Constraint, Workout, AthleteMetric, AthleteBaseline, Macrocycle, Mesocycle,
+    CompletedActivity
 )
 
 class Database:
@@ -77,6 +78,38 @@ class Database:
                     status TEXT DEFAULT 'planned', -- 'planned', 'modified', 'synced'
                     modification_reason TEXT,
                     google_event_id TEXT
+                )
+            """)
+
+            # Add new columns to workouts table if they don't exist
+            try:
+                cursor.execute("ALTER TABLE workouts ADD COLUMN duration_minutes INTEGER DEFAULT NULL")
+            except sqlite3.OperationalError:
+                pass
+            try:
+                cursor.execute("ALTER TABLE workouts ADD COLUMN rpe INTEGER DEFAULT NULL")
+            except sqlite3.OperationalError:
+                pass
+            try:
+                cursor.execute("ALTER TABLE workouts ADD COLUMN tss INTEGER DEFAULT NULL")
+            except sqlite3.OperationalError:
+                pass
+
+            # Completed activities table
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS completed_activities (
+                    activity_id TEXT PRIMARY KEY,
+                    date TEXT NOT NULL,
+                    start_time TEXT,
+                    activity_name TEXT,
+                    activity_type TEXT NOT NULL,
+                    duration_sec REAL,
+                    distance_km REAL,
+                    elevation_gain_m REAL,
+                    avg_hr INTEGER,
+                    max_hr INTEGER,
+                    rpe INTEGER,
+                    tss REAL
                 )
             """)
             
@@ -225,7 +258,9 @@ class Database:
     def save_workout(
         self, date: str, sport_type: str, title: str, description: str,
         original_description: Optional[str] = None, status: str = 'planned',
-        modification_reason: Optional[str] = None, google_event_id: Optional[str] = None
+        modification_reason: Optional[str] = None, google_event_id: Optional[str] = None,
+        duration_minutes: Optional[int] = None, rpe: Optional[int] = None,
+        tss: Optional[int] = None
     ) -> int:
         """Saves a workout, updating it if it already exists for the date/sport_type."""
         with self._get_connection() as conn:
@@ -241,16 +276,21 @@ class Database:
                 cursor.execute("""
                     UPDATE workouts
                     SET title = ?, description = ?, original_description = COALESCE(?, original_description),
-                        status = ?, modification_reason = ?, google_event_id = ?
+                        status = ?, modification_reason = ?, google_event_id = ?,
+                        duration_minutes = COALESCE(?, duration_minutes),
+                        rpe = COALESCE(?, rpe),
+                        tss = COALESCE(?, tss)
                     WHERE id = ?
-                """, (title, description, original_description, status, modification_reason, ge_id, workout_id))
+                """, (title, description, original_description, status, modification_reason, ge_id,
+                      duration_minutes, rpe, tss, workout_id))
             else:
                 cursor.execute("""
                     INSERT INTO workouts (date, sport_type, title, description, original_description,
-                                         status, modification_reason, google_event_id)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                                         status, modification_reason, google_event_id,
+                                         duration_minutes, rpe, tss)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (date, sport_type, title, description, original_description or description,
-                      status, modification_reason, google_event_id))
+                      status, modification_reason, google_event_id, duration_minutes, rpe, tss))
                 workout_id = cursor.lastrowid
             conn.commit()
             return int(workout_id)
@@ -301,6 +341,61 @@ class Database:
         with self._get_connection() as conn:
             conn.cursor().execute("DELETE FROM workouts WHERE id = ?", (workout_id,))
             conn.commit()
+
+    # --- Completed Activities ---
+    def save_completed_activity(
+        self, activity_id: str, date: str, start_time: Optional[str],
+        activity_name: Optional[str], activity_type: str, duration_sec: float,
+        distance_km: float, elevation_gain_m: float, avg_hr: Optional[int],
+        max_hr: Optional[int], rpe: int, tss: float
+    ) -> None:
+        """Saves a completed Garmin activity, updating it if it already exists."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                INSERT INTO completed_activities (
+                    activity_id, date, start_time, activity_name, activity_type,
+                    duration_sec, distance_km, elevation_gain_m, avg_hr, max_hr,
+                    rpe, tss
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(activity_id) DO UPDATE SET
+                    date=excluded.date,
+                    start_time=excluded.start_time,
+                    activity_name=excluded.activity_name,
+                    activity_type=excluded.activity_type,
+                    duration_sec=excluded.duration_sec,
+                    distance_km=excluded.distance_km,
+                    elevation_gain_m=excluded.elevation_gain_m,
+                    avg_hr=excluded.avg_hr,
+                    max_hr=excluded.max_hr,
+                    rpe=excluded.rpe,
+                    tss=excluded.tss
+            """, (activity_id, date, start_time, activity_name, activity_type,
+                  duration_sec, distance_km, elevation_gain_m, avg_hr, max_hr,
+                  rpe, tss))
+            conn.commit()
+
+    def get_completed_activities(
+        self, start_date: Optional[str] = None, end_date: Optional[str] = None
+    ) -> List[CompletedActivity]:
+        """Fetches completed activities, optionally within a date range."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            if start_date and end_date:
+                cursor.execute(
+                    "SELECT * FROM completed_activities WHERE date >= ? AND date <= ? "
+                    "ORDER BY date ASC, start_time ASC",
+                    (start_date, end_date)
+                )
+            elif start_date:
+                cursor.execute(
+                    "SELECT * FROM completed_activities WHERE date >= ? "
+                    "ORDER BY date ASC, start_time ASC",
+                    (start_date,)
+                )
+            else:
+                cursor.execute("SELECT * FROM completed_activities ORDER BY date ASC, start_time ASC")
+            return [dict(row) for row in cursor.fetchall()]  # type: ignore
 
     # --- Athlete Metrics Cache ---
     def save_metric_cache(

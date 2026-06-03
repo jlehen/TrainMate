@@ -30,6 +30,24 @@ class Workout(TypedDict):
     status: str  # 'planned', 'modified', 'synced'
     modification_reason: Optional[str]
     google_event_id: Optional[str]
+    duration_minutes: Optional[int]
+    rpe: Optional[int]
+    tss: Optional[int]
+
+class CompletedActivity(TypedDict):
+    """Represents a completed Garmin activity synced from Sheets."""
+    activity_id: str
+    date: str
+    start_time: Optional[str]
+    activity_name: Optional[str]
+    activity_type: str
+    duration_sec: float
+    distance_km: float
+    elevation_gain_m: float
+    avg_hr: Optional[int]
+    max_hr: Optional[int]
+    rpe: int
+    tss: float
 
 class AthleteMetric(TypedDict):
     """Represents Garmin health/performance metrics cached for a specific day."""

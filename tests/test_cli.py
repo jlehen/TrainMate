@@ -174,7 +174,17 @@ class TestTrainMateCLI(unittest.TestCase):
     @patch('trainmate_cli.coach_engine')
     def test_workout_commands(self, mock_coach, mock_sheets_reader):
         # Mock responses
-        mock_coach.adapt.return_value = ("Metrics are green", {"title": "Steady Ride"})
+        mock_coach.adapt.return_value = (
+            "Metrics are green",
+            [{
+                "date": "2026-06-03",
+                "sport_type": "running",
+                "title": "Steady Ride",
+                "duration_minutes": 60,
+                "rpe": 5,
+                "tss": 40.0
+            }]
+        )
  
         # 1. List workouts when empty
         exit_code, stdout, stderr = self.run_cli(['workout', 'list'])
@@ -183,11 +193,11 @@ class TestTrainMateCLI(unittest.TestCase):
         self.assertNotIn("Description:", stdout)
  
         # 2. Adapt workouts
-        exit_code, stdout, stderr = self.run_cli(['workout', 'adapt'])
+        exit_code, stdout, stderr = self.run_cli(['workout', 'adapt', '--auto'])
         self.assertEqual(exit_code, 0)
         self.assertIn("Evaluating daily Garmin metrics adaptation", stdout)
         self.assertIn("Metrics are green", stdout)
-        self.assertIn("Adapted Workout Synced to Calendar: Steady Ride", stdout)
+        self.assertIn("Adaptations applied and synced to calendar successfully.", stdout)
         mock_coach.adapt.assert_called_once()
  
         # 3. Remove workout
