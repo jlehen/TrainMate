@@ -478,19 +478,19 @@ async function fetchWorkouts() {
 
 // --- BUTTON TRIGGER FUNCTIONS ---
 
-document.getElementById("btn-sync-sheets").addEventListener("click", async () => {
-    logConsole("Syncing Garmin metrics from Google Sheets...", "system");
+document.getElementById("btn-pull-metrics").addEventListener("click", async () => {
+    logConsole("Pulling Garmin metrics from Google Sheets...", "system");
     try {
-        const res = await fetch(`${API_BASE}/api/sync-sheets`, { method: "POST" });
+        const res = await fetch(`${API_BASE}/api/metrics/pull`, { method: "POST" });
         const data = await res.json();
         if (res.ok) {
-            logConsole("Garmin sheets sync complete!");
+            logConsole("Garmin metrics pull complete!");
             fetchStatus();
         } else {
-            logConsole(`Sync sheets failed: ${data.error}`, "error");
+            logConsole(`Pull metrics failed: ${data.error}`, "error");
         }
     } catch (e) {
-        logConsole(`Sheets sync error: ${e.message}`, "error");
+        logConsole(`Pull metrics error: ${e.message}`, "error");
     }
 });
 
@@ -534,19 +534,19 @@ document.getElementById("btn-adapt").addEventListener("click", async () => {
     }
 });
 
-document.getElementById("btn-sync-calendar").addEventListener("click", async () => {
-    logConsole("Syncing planned training sessions to Google Calendar...", "system");
+document.getElementById("btn-push-workouts").addEventListener("click", async () => {
+    logConsole("Pushing planned training sessions to Google Calendar...", "system");
     try {
-        const res = await fetch(`${API_BASE}/api/sync`, { method: "POST" });
+        const res = await fetch(`${API_BASE}/api/workouts/push`, { method: "POST" });
         const data = await res.json();
         if (res.ok) {
-            logConsole(`Synced successfully! ${data.synced_count} workouts written to Google Calendar.`);
+            logConsole(`Pushed successfully! ${data.synced_count} workouts written to Google Calendar.`);
             fetchWorkouts();
         } else {
-            logConsole(`Calendar sync failed: ${data.error}`, "error");
+            logConsole(`Calendar push failed: ${data.error}`, "error");
         }
     } catch (e) {
-        logConsole(`Calendar Sync Error: ${e.message}`, "error");
+        logConsole(`Calendar Push Error: ${e.message}`, "error");
     }
 });
 

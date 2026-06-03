@@ -165,7 +165,7 @@ def adapt() -> Any:
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-@app.route("/api/sync", methods=["POST"])
+@app.route("/api/workouts/push", methods=["POST"])
 def sync_calendar() -> Any:
     """API endpoint to synchronize planned and adapted workouts with Google Calendar."""
     today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
@@ -188,7 +188,7 @@ def sync_calendar() -> Any:
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-@app.route("/api/sync-sheets", methods=["POST"])
+@app.route("/api/metrics/pull", methods=["POST"])
 def sync_sheets() -> Any:
     """API endpoint to fetch Garmin daily metrics from Google Sheets."""
     try:
