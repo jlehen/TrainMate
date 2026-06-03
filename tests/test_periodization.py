@@ -400,5 +400,42 @@ class TestPeriodization(unittest.TestCase):
         self.assertEqual(workouts[0]['title'], "Base Run")
         mock_client.complete.assert_called_once()
 
+    @patch('trainmate.coach.config')
+    def test_load_science_guidelines(self, mock_config):
+        import tempfile
+        import shutil
+
+        # Create temporary directories for testing
+        temp_app_dir = tempfile.mkdtemp()
+        temp_user_dir = tempfile.mkdtemp()
+
+        try:
+            # Set up mock paths
+            mock_config.app_science_dir = temp_app_dir
+            mock_config.science_dir = temp_user_dir
+
+            # Create sample files in app_science_dir
+            app_file = os.path.join(temp_app_dir, "app_science.txt")
+            with open(app_file, "w", encoding="utf-8") as f:
+                f.write("App guideline text")
+
+            # Create sample files in science_dir
+            user_file = os.path.join(temp_user_dir, "user_science.txt")
+            with open(user_file, "w", encoding="utf-8") as f:
+                f.write("User guideline text")
+
+            # Call _load_science_guidelines
+            guidelines = coach_engine._load_science_guidelines()
+
+            # Assert both contents are present
+            self.assertIn("=== Guidelines from app_science.txt ===", guidelines)
+            self.assertIn("App guideline text", guidelines)
+            self.assertIn("=== Guidelines from user_science.txt ===", guidelines)
+            self.assertIn("User guideline text", guidelines)
+
+        finally:
+            shutil.rmtree(temp_app_dir)
+            shutil.rmtree(temp_user_dir)
+
 if __name__ == '__main__':
     unittest.main()

@@ -13,22 +13,25 @@ class CoachEngine:
     """Orchestrates sports science coaching, macro/meso planning, and daily adaptations."""
 
     def _load_science_guidelines(self) -> str:
-        """Loads and concatenates all text files in the science directory.
+        """Loads and concatenates all text files in the app and user science directories.
 
         Returns:
             A string containing all training science guidelines.
         """
-        science_dir = config.science_dir
+        directories = [config.app_science_dir, config.science_dir]
         texts = []
-        if os.path.exists(science_dir):
-            for filename in sorted(os.listdir(science_dir)):
-                if filename.endswith(".txt"):
-                    filepath = os.path.join(science_dir, filename)
-                    try:
-                        with open(filepath, "r", encoding="utf-8") as f:
-                            texts.append(f"=== Guidelines from {filename} ===\n" + f.read())
-                    except Exception as e:
-                        print(f"Error reading science guideline {filename}: {e}")
+        for s_dir in directories:
+            if not os.path.exists(s_dir):
+                continue
+            for filename in sorted(os.listdir(s_dir)):
+                if not filename.endswith(".txt"):
+                    continue
+                filepath = os.path.join(s_dir, filename)
+                try:
+                    with open(filepath, "r", encoding="utf-8") as f:
+                        texts.append(f"=== Guidelines from {filename} ===\n" + f.read())
+                except Exception as e:
+                    print(f"Error reading science guideline {filename}: {e}")
         return "\n\n".join(texts)
 
     def _format_athlete_profile(self) -> str:

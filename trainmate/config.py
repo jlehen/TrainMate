@@ -71,6 +71,11 @@ class Config:
         return os.path.join(os.path.dirname(os.path.dirname(__file__)), "science")
 
     @property
+    def app_science_dir(self) -> str:
+        """Gets the internal application directory containing default sports science guidelines."""
+        return os.path.join(os.path.dirname(__file__), "science")
+
+    @property
     def user_profile(self) -> dict[str, Any]:
         """Gets the user profile information dict."""
         return self.get("user_profile", {})
