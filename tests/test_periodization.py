@@ -347,5 +347,58 @@ class TestPeriodization(unittest.TestCase):
             )
             self.assertIn("Wednesday: 0.0 hours", prompt)
 
+    @patch('trainmate.coach.openrouter_client')
+    def test_generate_plan_and_workouts_separately(self, mock_client):
+        # Seed active goal
+        obj_id = test_db.add_objective(
+            title="Zurich Marathon",
+            target_date="2026-10-15",
+            sport_type="running",
+            priority=1
+        )
+
+        mock_macro_response = {
+            "strategy": "Separate strategy philosophy",
+            "mesocycles": [
+                {
+                    "name": "Base Phase",
+                    "start_date": "2026-06-01",
+                    "end_date": "2026-06-28",
+                    "focus": "Base"
+                }
+            ]
+        }
+        mock_workouts_response = {
+            "reasoning": "Separate workout reasoning",
+            "workouts": [
+                {
+                    "date": "2026-06-01",
+                    "sport_type": "running",
+                    "title": "Base Run",
+                    "description": "30 mins"
+                }
+            ]
+        }
+
+        # Verify that generating workouts before plan raises ValueError
+        with self.assertRaises(ValueError):
+            coach_engine.generate_workouts()
+
+        # Generate plan strategy
+        mock_client.complete.return_value = mock_macro_response
+        strategy, mesos = coach_engine.generate_periodization_plan(force=False)
+        self.assertEqual(strategy, "Separate strategy philosophy")
+        self.assertEqual(len(mesos), 1)
+        mock_client.complete.assert_called_once()
+
+        # Generate workouts
+        mock_client.complete.reset_mock()
+        mock_client.complete.return_value = mock_workouts_response
+        reason, workouts = coach_engine.generate_workouts()
+        self.assertEqual(reason, "Separate workout reasoning")
+        self.assertEqual(len(workouts), 1)
+        self.assertEqual(workouts[0]['title'], "Base Run")
+        mock_client.complete.assert_called_once()
+
 if __name__ == '__main__':
     unittest.main()

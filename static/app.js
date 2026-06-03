@@ -494,21 +494,41 @@ document.getElementById("btn-pull-metrics").addEventListener("click", async () =
     }
 });
 
-document.getElementById("btn-replan").addEventListener("click", async () => {
-    logConsole("Requesting Coach to generate periodized plan...", "system");
+document.getElementById("btn-generate-plan").addEventListener("click", async () => {
+    logConsole("Requesting Coach to generate periodized plan strategy (macro/meso)...", "system");
     try {
         const res = await fetch(`${API_BASE}/api/plan`, { method: "POST" });
         const data = await res.json();
         if (res.ok) {
-            logConsole(`Plan generated! ${data.workouts_count} workouts scheduled.`);
-            logConsole(`Coach Reasoning:\n${data.reasoning}`, "system");
+            logConsole(`Periodization plan generated! ${data.mesocycles_count} mesocycles established.`);
+            if (data.strategy) {
+                logConsole(`Overall Strategy:\n${data.strategy}`, "system");
+            }
             fetchStatus();
-            fetchWorkouts();
         } else {
-            logConsole(`Coaching generation failed: ${data.error}`, "error");
+            logConsole(`Plan generation failed: ${data.error}`, "error");
         }
     } catch (e) {
-        logConsole(`AI Coaching Error: ${e.message}`, "error");
+        logConsole(`AI Planning Error: ${e.message}`, "error");
+    }
+});
+
+document.getElementById("btn-generate-workouts").addEventListener("click", async () => {
+    logConsole("Requesting Coach to generate workouts (microcycles)...", "system");
+    try {
+        const res = await fetch(`${API_BASE}/api/workouts/generate`, { method: "POST" });
+        const data = await res.json();
+        if (res.ok) {
+            logConsole(`Workouts generated! ${data.workouts_count} workouts scheduled.`);
+            if (data.reasoning) {
+                logConsole(`Coach Reasoning:\n${data.reasoning}`, "system");
+            }
+            fetchWorkouts();
+        } else {
+            logConsole(`Workout generation failed: ${data.error}`, "error");
+        }
+    } catch (e) {
+        logConsole(`AI Workout Generation Error: ${e.message}`, "error");
     }
 });
 

@@ -329,27 +329,23 @@ You MUST respond with a JSON object containing:
         result = openrouter_client.complete(system_prompt, user_content)
         return result
 
-    def replan(self, force: bool = False) -> Tuple[str, List[Workout]]:
-        """Generates or adapts the training plan from today onwards.
+    def generate_periodization_plan(self, force: bool = False) -> Tuple[str, List[Dict[str, Any]]]:
+        """Determines the macrocycle strategy and mesocycle blocks.
 
         Args:
-            force: Force regeneration of macro/meso plan.
+            force: Force regeneration of the periodization plan.
 
         Returns:
-            A tuple of (reasoning string, list of generated Workouts).
+            A tuple of (strategy text, list of mesocycles).
         """
         objectives = db.get_objectives(status='active')
         if not objectives:
-            return (
-                "No active goals found. TrainMate needs at least one objective to "
-                "start planning.",
-                []
-            )
+            return "No active goals found. TrainMate needs at least one objective.", []
 
         # Sort objectives by target date to identify the next goal
         objectives.sort(key=lambda x: str(x['target_date']))
         next_goal = objectives[0]
-        
+
         # Get future constraints
         today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
         constraints = db.get_constraints(start_after=today_str)
@@ -364,7 +360,7 @@ You MUST respond with a JSON object containing:
         existing_macro = None
         if next_goal['id'] is not None:
             existing_macro = db.get_macrocycle_for_objective(next_goal['id'])
-        
+
         reused = False
         if existing_macro and not force:
             if (
@@ -410,7 +406,7 @@ You MUST respond with a JSON object containing:
             )
             strategy = macro_data.get("strategy", "Endurance preparation strategy.")
             mesocycles = macro_data.get("mesocycles", [])
-            
+
             # Save it
             if next_goal['id'] is not None:
                 db.save_macrocycle(
@@ -427,7 +423,33 @@ You MUST respond with a JSON object containing:
                 print(f"- {m['name']} ({m['start_date']} to {m['end_date']}): {m['focus']}")
             print("==============================================\n")
 
-        # Now, plan the microcycles (the next 4 weeks / 28 days of workouts)
+        return strategy, mesocycles
+
+    def generate_workouts(self) -> Tuple[str, List[Workout]]:
+        """Generates the 4-week workouts (microcycles) based on the active strategy.
+
+        Returns:
+            A tuple of (reasoning text, list of generated workouts).
+        """
+        objectives = db.get_objectives(status='active')
+        if not objectives:
+            return "No active goals found. TrainMate needs at least one objective.", []
+
+        # Sort objectives by target date to identify the next goal
+        objectives.sort(key=lambda x: str(x['target_date']))
+        next_goal = objectives[0]
+
+        # Verify active periodization strategy exists
+        macrocycle = db.get_macrocycle_for_objective(next_goal['id'])
+        if not macrocycle:
+            raise ValueError(
+                "No active periodization strategy found. "
+                "Please generate a periodization plan first."
+            )
+
+        today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        constraints = db.get_constraints(start_after=today_str)
+
         custom_task = """
 TASK:
 Generate a training schedule for the next 4 weeks (28 days) starting from today. 
@@ -472,10 +494,10 @@ You MUST respond with a JSON object containing:
 
         # Save workouts to database
         workouts = plan_data.get("workouts", [])
-        
+
         # Clear future unsynced workouts to prevent overlapping plans
         db.clear_future_workouts(today_str)
-        
+
         saved_workouts: List[Workout] = []
         for w in workouts:
             wid = db.save_workout(
@@ -505,6 +527,26 @@ You MUST respond with a JSON object containing:
 
         print(f"Generated {len(workouts)} workouts.")
         return plan_data.get("reasoning", "Plan generated."), saved_workouts
+
+    def replan(self, force: bool = False) -> Tuple[str, List[Workout]]:
+        """Generates or adapts the training plan from today onwards.
+
+        Args:
+            force: Force regeneration of macro/meso plan.
+
+        Returns:
+            A tuple of (reasoning string, list of generated Workouts).
+        """
+        objectives = db.get_objectives(status='active')
+        if not objectives:
+            return (
+                "No active goals found. TrainMate needs at least one objective to "
+                "start planning.",
+                []
+            )
+
+        self.generate_periodization_plan(force=force)
+        return self.generate_workouts()
 
     def adapt(self, target_date_str: Optional[str] = None) -> Tuple[str, List[Workout]]:
         """Evaluates metrics/activities over a rolling window and adapts mesocycle if needed."""

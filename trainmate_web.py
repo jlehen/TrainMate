@@ -138,11 +138,24 @@ def get_workouts() -> Any:
 
 @app.route("/api/plan", methods=["POST"])
 def generate_plan() -> Any:
-    """API endpoint to generate the training plan (macro/meso strategy + micro workouts)."""
+    """API endpoint to generate the periodization plan (macro/meso strategy)."""
     try:
-        reasoning, workouts = coach_engine.replan()
+        strategy, mesocycles = coach_engine.generate_periodization_plan()
         return jsonify({
-            "message": "Plan generated and saved.",
+            "message": "Periodization plan generated and saved.",
+            "strategy": strategy,
+            "mesocycles_count": len(mesocycles)
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/api/workouts/generate", methods=["POST"])
+def generate_workouts() -> Any:
+    """API endpoint to generate workouts (microcycles) based on active strategy."""
+    try:
+        reasoning, workouts = coach_engine.generate_workouts()
+        return jsonify({
+            "message": "Workouts generated and saved.",
             "reasoning": reasoning,
             "workouts_count": len(workouts)
         })
