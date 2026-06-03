@@ -72,7 +72,7 @@ class TestTrainMateCLI(unittest.TestCase):
         self.assertIn("workout", stdout)
         self.assertIn("plan", stdout)
         self.assertIn("status", stdout)
-        self.assertIn("sync", stdout)
+        self.assertIn("sync-cal", stdout)
         self.assertIn("sync-sheets", stdout)
 
     def test_goal_commands(self):
@@ -301,7 +301,7 @@ class TestTrainMateCLI(unittest.TestCase):
     @patch('trainmate_cli.calendar_syncer')
     def test_sync_command(self, mock_calendar):
         # 1. Sync when no planned workouts
-        exit_code, stdout, stderr = self.run_cli(['sync'])
+        exit_code, stdout, stderr = self.run_cli(['sync-cal'])
         self.assertEqual(exit_code, 0)
         self.assertIn("No new or modified workouts to sync", stdout)
         mock_calendar.sync_multiple.assert_not_called()
@@ -318,7 +318,7 @@ class TestTrainMateCLI(unittest.TestCase):
         )
 
         # Sync again
-        exit_code, stdout, stderr = self.run_cli(['sync'])
+        exit_code, stdout, stderr = self.run_cli(['sync-cal'])
         self.assertEqual(exit_code, 0)
         self.assertIn("Syncing 1 workouts to Google Calendar", stdout)
         mock_calendar.sync_multiple.assert_called_once()
