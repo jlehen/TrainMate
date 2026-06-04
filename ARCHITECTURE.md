@@ -65,7 +65,7 @@ Stores life event dates which limit training availability.
 *   `title` (TEXT)
 *   `start_date` (TEXT - YYYY-MM-DD)
 *   `end_date` (TEXT - YYYY-MM-DD)
-*   `event_type` (TEXT - injury, vacation, party, other)
+*   `event_type` (TEXT - business_trip, vacation, party, other)
 *   `impact_description` (TEXT)
 
 ### workouts

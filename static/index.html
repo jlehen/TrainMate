@@ -34,6 +34,12 @@
             </div>
         </header>
 
+        <!-- CONFIG WARNING BANNER -->
+        <div id="config-warning-banner" style="display: none; margin-bottom: 1.5rem; padding: 0.75rem 1rem; border-radius: 12px; background: rgba(245, 158, 11, 0.1); border: 1px solid rgba(245, 158, 11, 0.25); font-size: 0.85rem; color: #fde047; display: flex; align-items: center; gap: 0.75rem;">
+            <i class="fa-solid fa-triangle-exclamation" style="font-size: 1.1rem; color: var(--accent-gold);"></i>
+            <span><strong>Configuration Changed:</strong> config.yaml has been updated since your periodization strategy was generated. Propose to regenerate your plan.</span>
+        </div>
+
         <!-- MAIN LAYOUT -->
         <main class="dashboard-grid">
             <!-- LEFT COLUMN: INPUTS & COACH STATE -->
@@ -169,7 +175,7 @@
                                 <select id="event-type" required>
                                     <option value="" disabled selected>Type</option>
                                     <option value="vacation">Vacation</option>
-                                    <option value="injury">Injury</option>
+                                    <option value="business_trip">Business Trip</option>
                                     <option value="party">Big Party/Social</option>
                                     <option value="other">Other</option>
                                 </select>

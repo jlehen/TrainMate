@@ -105,8 +105,10 @@ class TestPeriodization(unittest.TestCase):
         # Empty objectives & constraints hashes
         hash1 = coach_engine._get_goals_hash([])
         hash2 = coach_engine._get_lifeevents_hash([])
+        hash3 = coach_engine._get_config_hash()
         self.assertIsNotNone(hash1)
         self.assertIsNotNone(hash2)
+        self.assertIsNotNone(hash3)
         
         # Add objective
         obj = {
@@ -290,7 +292,7 @@ class TestPeriodization(unittest.TestCase):
             title="Business Trip",
             start_date="2026-06-10",
             end_date="2026-06-12",
-            event_type="other",
+            event_type="business_trip",
             impact_description="limited training time"
         )
 
@@ -436,6 +438,46 @@ class TestPeriodization(unittest.TestCase):
         finally:
             shutil.rmtree(temp_app_dir)
             shutil.rmtree(temp_user_dir)
+
+    def test_config_hash_logic(self):
+        # 1. Get initial config hash
+        initial_hash = coach_engine._get_config_hash()
+        self.assertIsNotNone(initial_hash)
+        
+        # 2. Mock a change to config.user_profile
+        original_profile = dict(trainmate.coach.config.data['user_profile'])
+        try:
+            trainmate.coach.config.data['user_profile']['weekly_target_hours'] = 20.0
+            new_hash = coach_engine._get_config_hash()
+            self.assertNotEqual(initial_hash, new_hash)
+        finally:
+            trainmate.coach.config.data['user_profile'] = original_profile
+
+    def test_db_config_hash_operations(self):
+        obj_id = test_db.add_objective(
+            title="Zurich Marathon",
+            target_date="2026-10-15",
+            sport_type="running",
+            priority=1
+        )
+        # Save macrocycle with a specific config_hash
+        macro_id = test_db.save_macrocycle(
+            objective_id=obj_id,
+            strategy="Long runs",
+            goals_hash="ghash",
+            lifeevents_hash="lehash",
+            config_hash="confhash123",
+            mesocycles=[]
+        )
+        
+        # Retrieve macrocycle
+        macro = test_db.get_macrocycle_for_objective(obj_id)
+        self.assertEqual(macro['config_hash'], "confhash123")
+        
+        # Update config_hash
+        test_db.update_macrocycle_config_hash(macro_id, "newconfhash456")
+        macro = test_db.get_macrocycle_for_objective(obj_id)
+        self.assertEqual(macro['config_hash'], "newconfhash456")
 
 if __name__ == '__main__':
     unittest.main()

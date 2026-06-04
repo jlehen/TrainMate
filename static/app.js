@@ -87,6 +87,21 @@ async function fetchStatus() {
             strategyCard.style.display = "none";
         }
         
+        // Update Config Mismatch Warning Banner
+        const banner = document.getElementById("config-warning-banner");
+        if (banner) {
+            if (data.config_mismatch) {
+                banner.style.display = "flex";
+                logConsole(
+                    "Warning: config.yaml has changed since the active " +
+                    "periodization plan was generated. Run 'Generate Plan' to update.",
+                    "warning"
+                );
+            } else {
+                banner.style.display = "none";
+            }
+        }
+        
     } catch (e) {
         logConsole(`Error fetching status: ${e.message}`, "error");
     }

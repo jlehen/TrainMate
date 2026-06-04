@@ -75,7 +75,7 @@ class Database:
                                 title TEXT NOT NULL,
                                 start_date TEXT NOT NULL,
                                 end_date TEXT NOT NULL,
-                                event_type TEXT NOT NULL, -- 'injury', 'vacation', 'party', 'other'
+                                event_type TEXT NOT NULL, -- 'business_trip', 'vacation', 'party', 'other'
                                 impact_description TEXT
                             )
                         """)
@@ -182,6 +182,7 @@ class Database:
                     strategy TEXT NOT NULL,
                     goals_hash TEXT NOT NULL,
                     lifeevents_hash TEXT NOT NULL,
+                    config_hash TEXT,
                     created_at TEXT NOT NULL,
                     FOREIGN KEY (objective_id) REFERENCES objectives(id) ON DELETE CASCADE
                 )
@@ -193,6 +194,10 @@ class Database:
             if 'constraints_hash' in columns and 'lifeevents_hash' not in columns:
                 cursor.execute(
                     "ALTER TABLE macrocycles RENAME COLUMN constraints_hash TO lifeevents_hash"
+                )
+            if 'config_hash' not in columns:
+                cursor.execute(
+                    "ALTER TABLE macrocycles ADD COLUMN config_hash TEXT"
                 )
             
             # Mesocycles table
@@ -560,9 +565,10 @@ class Database:
 
     def save_macrocycle(
         self, objective_id: int, strategy: str, goals_hash: str,
-        lifeevents_hash: str, mesocycles: List[Dict[str, Any]]
+        lifeevents_hash: str, mesocycles: List[Dict[str, Any]],
+        config_hash: str = ""
     ) -> int:
-        """Saves a macrocycle and its nested mesocycles, cleaning old macrocycles for the objective."""
+        """Saves a macrocycle and its nested mesocycles for the objective."""
         with self._get_connection() as conn:
             cursor = conn.cursor()
             # Delete any existing macrocycles for this objective (cascade deletes mesocycles)
@@ -570,19 +576,31 @@ class Database:
             
             created_at = datetime.now(timezone.utc).isoformat()
             cursor.execute("""
-                INSERT INTO macrocycles (objective_id, strategy, goals_hash, lifeevents_hash, created_at)
-                VALUES (?, ?, ?, ?, ?)
-            """, (objective_id, strategy, goals_hash, lifeevents_hash, created_at))
+                INSERT INTO macrocycles (
+                    objective_id, strategy, goals_hash, lifeevents_hash, config_hash, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?)
+            """, (objective_id, strategy, goals_hash, lifeevents_hash, config_hash, created_at))
             macrocycle_id = cursor.lastrowid
             
             for meso in mesocycles:
                 cursor.execute("""
                     INSERT INTO mesocycles (macrocycle_id, name, start_date, end_date, focus)
                     VALUES (?, ?, ?, ?, ?)
-                """, (macrocycle_id, meso['name'], meso['start_date'], meso['end_date'], meso['focus']))
+                """, (macrocycle_id, meso['name'], meso['start_date'], meso['end_date'],
+                      meso['focus']))
             
             conn.commit()
             return int(macrocycle_id)
+
+    def update_macrocycle_config_hash(self, macrocycle_id: int, config_hash: str) -> None:
+        """Updates the config hash for a specific macrocycle."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "UPDATE macrocycles SET config_hash = ? WHERE id = ?",
+                (config_hash, macrocycle_id)
+            )
+            conn.commit()
 
 # Singleton instance
 db = Database()

@@ -177,7 +177,7 @@ COACHING ROLE AND OBJECTIVES:
    synergies between them (e.g. general base or strength building phases).
 3. Dynamically adjust training plans based on recent Garmin metrics (Resting HR, HRV, Sleep,
    ACWR) to optimize recovery and prevent injury.
-4. Shift or scale training volume and intensity around life events (injury, vacation, parties)
+4. Shift or scale training volume and intensity around life events (business trip, vacation, parties)
    to manage fatigue.
 5. Adhere to the day-by-day weekly availability schedule and day-dependent equipment access
    (e.g., do not schedule gym workouts on home-only days; do not schedule workouts on rest days;
@@ -239,6 +239,15 @@ UPCOMING LIFE EVENTS:
             })
         cleaned.sort(key=lambda x: (str(x['start_date']), x['id'] or 0))
         serialized = json.dumps(cleaned, sort_keys=True)
+        return hashlib.sha256(serialized.encode('utf-8')).hexdigest()
+
+    def _get_config_hash(self) -> str:
+        """Computes a hash representation of the relevant user config to check for updates."""
+        data_to_hash = {
+            'user_profile': config.user_profile,
+            'metrics_history_days': config.metrics_history_days
+        }
+        serialized = json.dumps(data_to_hash, sort_keys=True)
         return hashlib.sha256(serialized.encode('utf-8')).hexdigest()
 
     def _generate_macrocycle_strategy(
@@ -358,6 +367,7 @@ You MUST respond with a JSON object containing:
         # Compute current hashes
         goals_hash = self._get_goals_hash(objectives)
         lifeevents_hash = self._get_lifeevents_hash(lifeevents)
+        config_hash = self._get_config_hash()
 
         # Try to retrieve existing macrocycle
         strategy = ""
@@ -371,6 +381,7 @@ You MUST respond with a JSON object containing:
             if (
                 existing_macro['goals_hash'] == goals_hash
                 and existing_macro['lifeevents_hash'] == lifeevents_hash
+                and existing_macro.get('config_hash') == config_hash
             ):
                 reused = True
                 strategy = existing_macro['strategy']
@@ -419,6 +430,7 @@ You MUST respond with a JSON object containing:
                     strategy=strategy,
                     goals_hash=goals_hash,
                     lifeevents_hash=lifeevents_hash,
+                    config_hash=config_hash,
                     mesocycles=mesocycles
                 )
             print("\n=== NEW PERIODIZATION STRATEGY (MACROCYCLE) ===")
@@ -460,8 +472,8 @@ TASK:
 Generate a training schedule for the next 4 weeks (28 days) starting from today. 
 Ensure the weekly schedules/microcycles are designed specifically to match the focus, target
 volume, and intensity of the active mesocycle block(s) the athlete is in during this period.
-Incorporate deload weeks and schedule around life events (injury = rest/cross-training,
-vacation = maintain fitness, party = easy workouts next day).
+Incorporate deload weeks and schedule around life events (business trip = maintain base/low-volume
+or rest on travel days, vacation = maintain fitness, party = easy workouts next day).
 
 You MUST respond with a JSON object containing:
 {

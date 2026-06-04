@@ -16,7 +16,7 @@ class LifeEvent(TypedDict):
     title: str
     start_date: str
     end_date: str
-    event_type: str  # 'injury', 'vacation', 'party', 'other'
+    event_type: str  # 'business_trip', 'vacation', 'party', 'other'
     impact_description: Optional[str]
 
 class Workout(TypedDict):

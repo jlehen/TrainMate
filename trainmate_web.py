@@ -38,10 +38,13 @@ def get_status() -> Any:
     
     macrocycle = None
     mesocycles = []
+    config_mismatch = False
     if next_goal and next_goal['id'] is not None:
         macrocycle = db.get_macrocycle_for_objective(next_goal['id'])
         if macrocycle:
             mesocycles = db.get_mesocycles_for_macrocycle(macrocycle['id'])
+            current_hash = coach_engine._get_config_hash()
+            config_mismatch = macrocycle.get('config_hash') != current_hash
             
     return jsonify({
         "next_goal": next_goal,
@@ -52,7 +55,8 @@ def get_status() -> Any:
             "learnings": learnings
         },
         "macrocycle": macrocycle,
-        "mesocycles": mesocycles
+        "mesocycles": mesocycles,
+        "config_mismatch": config_mismatch
     })
 
 @app.route("/api/objectives", methods=["GET", "POST"])
