@@ -169,7 +169,20 @@ def main() -> None:
         sys.exit(1)
         
     cmd = args.command.lower()
-    
+
+    if cmd in ("plan", "p", "workout", "w"):
+        metrics = db.get_metrics_cache()
+        if not metrics:
+            try:
+                confirm = input(
+                    "Garmin metrics have not been pulled yet. "
+                    "Would you like to pull them now? [y/N]: "
+                ).strip().lower()
+            except EOFError:
+                confirm = 'n'
+            if confirm in ('y', 'yes'):
+                run_metrics_pull()
+
     if cmd in ("status", "s"):
         run_status()
     elif cmd in ("goal", "g"):
@@ -326,8 +339,7 @@ def run_plan_generate(args: argparse.Namespace) -> None:
     # Make sure we have latest metrics cached
     metrics = db.get_metrics_cache()
     if not metrics:
-        print("Warning: Metrics cache is empty. Fetching from Google Sheets first...")
-        sheets_reader.sync_data()
+        print("Warning: Metrics cache is empty. Proceeding without Garmin metrics.")
         
     try:
         objectives = db.get_objectives(status='active')
@@ -365,8 +377,7 @@ def run_workout_generate() -> None:
     # Make sure we have latest metrics cached
     metrics = db.get_metrics_cache()
     if not metrics:
-        print("Warning: Metrics cache is empty. Fetching from Google Sheets first...")
-        sheets_reader.sync_data()
+        print("Warning: Metrics cache is empty. Proceeding without Garmin metrics.")
         
     try:
         objectives = db.get_objectives(status='active')
@@ -474,13 +485,15 @@ def run_plan_show() -> None:
         print("            " + "-" * 40)
 
 def run_workout_adapt(args: argparse.Namespace) -> None:
-    """Executes the daily workout Garmin adaptation checks command."""
+    # Executes the daily workout Garmin adaptation checks command.
     date_str = args.date or datetime.now(timezone.utc).strftime("%Y-%m-%d")
-    print(f"Syncing latest metrics from Google Sheets first...")
-    try:
-        sheets_reader.sync_data()
-    except Exception as e:
-        print(f"Warning: Failed to sync latest Google Sheets data: {e}")
+    
+    metrics = db.get_metrics_cache()
+    if not metrics:
+        print("Warning: Metrics cache is empty. Skipping Garmin metrics sync.")
+    else:
+        print("Syncing latest metrics from Google Sheets first...")
+        run_metrics_pull()
 
     # Display rolling trajectory
     try:

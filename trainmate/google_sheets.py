@@ -1,5 +1,5 @@
 import json
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import math
 from typing import Any, List, Optional, Tuple, Dict
 from google.oauth2 import service_account
@@ -219,6 +219,14 @@ class GarminSheetsReader:
                     sleep_mean=sleep_mean,
                     sleep_std=sleep_std
                 )
+
+        today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        today_metrics = next((day for day in parsed_daily if day['date'] == today_str), None)
+        if not today_metrics or (today_metrics['rhr'] is None and
+                                 today_metrics['hrv'] is None and
+                                 today_metrics['sleep_score'] is None and
+                                 today_metrics['stress'] is None):
+            print(f"Warning: Garmin metrics for the current date ({today_str}) are missing.")
 
         print("Google Sheets synchronization completed successfully.")
 

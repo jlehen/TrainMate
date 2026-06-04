@@ -50,12 +50,12 @@ class TestTrainMateCLI(unittest.TestCase):
             conn.execute("DELETE FROM coach_memory")
             conn.commit()
 
-    def run_cli(self, args):
+    def run_cli(self, args, input_value='n'):
         """Helper to invoke CLI main() with captured stdout/stderr and custom argv."""
         stdout = io.StringIO()
         stderr = io.StringIO()
         with patch.object(sys, 'argv', ['trainmate_cli.py'] + args):
-            with patch('sys.stdout', stdout), patch('sys.stderr', stderr):
+            with patch('sys.stdout', stdout), patch('sys.stderr', stderr), patch('builtins.input', return_value=input_value):
                 try:
                     trainmate_cli.main()
                     exit_code = 0
@@ -398,6 +398,33 @@ class TestTrainMateCLI(unittest.TestCase):
         self.assertIn("Workout is synced to Google Calendar. Attempting to delete calendar event", stdout)
         self.assertIn(f"Workout with ID {w_id} ('Synced Run') removed successfully", stdout)
         mock_calendar.delete_workout_event.assert_called_once_with("mock_event_123")
+
+    @patch('trainmate_cli.sheets_reader')
+    def test_plan_workout_metrics_pull_prompt(self, mock_sheets_reader):
+        # Case 1: Metrics are already pulled (not empty cache)
+        test_db.save_metric_cache(
+            date="2026-06-03", rhr=50, hrv=75, sleep_score=80, stress=20
+        )
+        with patch('builtins.input') as mock_input:
+            exit_code, stdout, stderr = self.run_cli(['plan', 'show'])
+            self.assertEqual(exit_code, 0)
+            mock_input.assert_not_called()
+            mock_sheets_reader.sync_data.assert_not_called()
+
+        # Clear metrics cache to trigger prompt
+        with test_db._get_connection() as conn:
+            conn.execute("DELETE FROM athlete_metrics_cache")
+            conn.commit()
+
+        # Case 2: Metrics cache is empty, user declines prompt ('n')
+        exit_code, stdout, stderr = self.run_cli(['plan', 'show'], input_value='n')
+        self.assertEqual(exit_code, 0)
+        mock_sheets_reader.sync_data.assert_not_called()
+
+        # Case 3: Metrics cache is empty, user accepts prompt ('y')
+        exit_code, stdout, stderr = self.run_cli(['plan', 'show'], input_value='y')
+        self.assertEqual(exit_code, 0)
+        mock_sheets_reader.sync_data.assert_called_once()
 
 if __name__ == "__main__":
     unittest.main()
