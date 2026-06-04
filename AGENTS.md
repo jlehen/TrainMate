@@ -40,4 +40,4 @@
 
 # Test
 - Use "unittest" module.
-- Run tests using: `python -m unittest discover -s tests -p "test_*.py"`
+- Run tests using: `venv/bin/python -m unittest discover -s tests -p "test_*.py"`
