@@ -8,6 +8,7 @@ from trainmate.db import db
 from trainmate.openrouter import openrouter_client
 from trainmate.google_calendar import calendar_syncer
 from trainmate.types import Objective, LifeEvent, Workout, CompletedActivity
+from trainmate.adherence import analyze_adherence
 
 class CoachEngine:
     """Orchestrates sports science coaching, macro/meso planning, and daily adaptations."""
@@ -601,135 +602,12 @@ You MUST respond with a JSON object containing:
             )
 
         # 2. Match planned workouts vs completed activities and compute discrepancies
-        SPORT_MAPPING = {
-            "running": ["running", "indoor_running", "trail_running", "treadmill_running"],
-            "road_biking": [
-                "road_biking", "indoor_cycling", "cycling", "virtual_cycling", "biking"
-            ],
-            "hiking": ["hiking", "walking"],
-            "strength_training": ["strength_training", "strength", "indoor_cardio", "fitness"],
-            "yoga": ["yoga", "stretching", "pilates"],
-            "ski_touring": ["ski_touring", "backcountry_skiing", "nordic_skiing", "skiing"]
-        }
-
-        matching_results = []
-        discrepancies = []
-        
-        # Group by date
-        activities_by_date: Dict[str, List[Any]] = {}
-        for act in completed_activities:
-            activities_by_date.setdefault(act['date'], []).append(act)
-
-        workouts_by_date: Dict[str, List[Any]] = {}
-        for w in planned_workouts:
-            workouts_by_date.setdefault(w['date'], []).append(w)
-
-        # Process each day in the window
-        for d in range(history_days):
-            date_curr = (start_date_obj + timedelta(days=d)).strftime("%Y-%m-%d")
-            day_acts = activities_by_date.get(date_curr, [])
-            day_workouts = workouts_by_date.get(date_curr, [])
-
-            # Sort activities by workload descending
-            day_acts = sorted(
-                day_acts,
-                key=lambda x: (
-                    (x.get('tss') or 0.0)
-                    + (x.get('rpe') or 0) * ((x.get('duration_sec') or 0.0) / 3600.0)
-                ),
-                reverse=True
-            )
-
-            used_act_ids = set()
-
-            for w in day_workouts:
-                w_sport = w['sport_type']
-                matched_act = None
-
-                if w_sport == "rest":
-                    # Check for rest day violation: any activity with significant workload
-                    for act in day_acts:
-                        act_load = (
-                            (act.get('tss') or 0.0)
-                            + (act.get('rpe') or 0) * (act['duration_sec'] / 3600.0)
-                        )
-                        if act_load > 10.0 and act['activity_id'] not in used_act_ids:
-                            matched_act = act
-                            used_act_ids.add(act['activity_id'])
-                            discrepancies.append(
-                                f"- {date_curr}: Rest Day Violation! Performed "
-                                f"'{act['activity_name']}' ({act['activity_type']}) with "
-                                f"workload {act_load:.1f} when Rest was planned."
-                            )
-                            break
-                else:
-                    # Find a matching completed activity
-                    allowed_types = SPORT_MAPPING.get(w_sport, [w_sport])
-                    for act in day_acts:
-                        if act['activity_id'] in used_act_ids:
-                            continue
-                        act_type = act['activity_type'].lower()
-                        if act_type in allowed_types or any(t in act_type for t in allowed_types):
-                            matched_act = act
-                            used_act_ids.add(act['activity_id'])
-                            break
-
-                    if matched_act:
-                        act_duration_min = matched_act['duration_sec'] / 60.0
-                        act_load = (
-                            (matched_act.get('tss') or 0.0)
-                            + (matched_act.get('rpe') or 0) * (matched_act['duration_sec'] / 3600.0)
-                        )
-                        
-                        p_duration = w.get('duration_minutes') or 0
-                        p_rpe = w.get('rpe') or 0
-                        p_tss = w.get('tss') or 0
-                        exp_load = p_tss + p_rpe * (p_duration / 60.0)
-
-                        disc_reasons = []
-                        if p_duration > 0 and (abs(act_duration_min - p_duration) / p_duration) > 0.30:
-                            disc_reasons.append(
-                                f"duration mismatch +/-30% (planned {p_duration:.0f}m, "
-                                f"actual {act_duration_min:.0f}m)"
-                            )
-                        
-                        if exp_load > 0 and (abs(act_load - exp_load) / exp_load) > 0.30:
-                            disc_reasons.append(
-                                f"workload mismatch +/-30% (planned load {exp_load:.1f}, "
-                                f"actual load {act_load:.1f})"
-                            )
-
-                        if disc_reasons:
-                            discrepancies.append(
-                                f"- {date_curr}: Discrepancy in '{w['title']}' vs "
-                                f"'{matched_act['activity_name']}': {', '.join(disc_reasons)}."
-                            )
-                    else:
-                        # Complete miss
-                        discrepancies.append(
-                            f"- {date_curr}: Complete Miss! Missed planned workout '{w['title']}' "
-                            f"({w['sport_type']})."
-                        )
-
-                matching_results.append({
-                    "date": date_curr,
-                    "planned": w,
-                    "completed": matched_act
-                })
-
-            # Check for completed activities when nothing was planned
-            for act in day_acts:
-                if act['activity_id'] not in used_act_ids:
-                    act_load = (
-                        (act.get('tss') or 0.0)
-                        + (act.get('rpe') or 0) * (act['duration_sec'] / 3600.0)
-                    )
-                    if act_load > 10.0:
-                        discrepancies.append(
-                            f"- {date_curr}: Unplanned Activity! Performed "
-                            f"'{act['activity_name']}' ({act['activity_type']}) with "
-                            f"workload {act_load:.1f} on a day with no planned workouts."
-                        )
+        discrepancies, matching_results = analyze_adherence(
+            planned_workouts=planned_workouts,
+            completed_activities=completed_activities,
+            start_date_obj=start_date_obj,
+            history_days=history_days
+        )
 
         # 3. Determine mesocycle end date for adaptation range
         meso_end_date_str = (target_date_obj + timedelta(days=6)).strftime("%Y-%m-%d")

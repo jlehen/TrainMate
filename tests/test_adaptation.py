@@ -210,5 +210,100 @@ class TestAdaptation(unittest.TestCase):
             self.assertIn("Complete Miss! Missed planned workout 'Interval Session'", prompt_user_content)
             self.assertIn("duration mismatch", prompt_user_content)
 
+    def test_analyze_adherence_direct(self):
+        from trainmate.adherence import analyze_adherence
+        from datetime import date
+
+        planned = [
+            {
+                "date": "2026-06-01",
+                "sport_type": "running",
+                "title": "Run",
+                "duration_minutes": 30,
+                "rpe": 5,
+                "tss": 25,
+            },
+            {
+                "date": "2026-06-02",
+                "sport_type": "rest",
+                "title": "Rest Day",
+                "duration_minutes": 0,
+                "rpe": 0,
+                "tss": 0,
+            },
+            {
+                "date": "2026-06-03",
+                "sport_type": "road_biking",
+                "title": "Ride",
+                "duration_minutes": 60,
+                "rpe": 6,
+                "tss": 40,
+            },
+        ]
+
+        completed = [
+            # June 1: workload mismatch
+            # planned load: 25 + 5 * 0.5 = 27.5
+            # actual load: 60 + 8 * 0.5 = 64
+            {
+                "date": "2026-06-01",
+                "activity_id": "act1",
+                "activity_name": "Hard Run",
+                "activity_type": "running",
+                "duration_sec": 1800,
+                "rpe": 8,
+                "tss": 60.0,
+            },
+            # June 2: rest day violation (workload = 15.0 > 10.0)
+            {
+                "date": "2026-06-02",
+                "activity_id": "act2",
+                "activity_name": "Lawn Mowing",
+                "activity_type": "walking",
+                "duration_sec": 3600,
+                "rpe": 5,
+                "tss": 10.0,
+            },
+            # June 4: unplanned activity (workload = 30.0 > 10.0)
+            {
+                "date": "2026-06-04",
+                "activity_id": "act4",
+                "activity_name": "Extra Run",
+                "activity_type": "running",
+                "duration_sec": 1800,
+                "rpe": 6,
+                "tss": 27.0,
+            },
+        ]
+
+        start_date = date(2026, 6, 1)
+        discrepancies, matching = analyze_adherence(
+            planned_workouts=planned,
+            completed_activities=completed,
+            start_date_obj=start_date,
+            history_days=4
+        )
+
+        # Check discrepancies
+        self.assertEqual(len(discrepancies), 4)
+
+        # 1. June 1 Workload mismatch
+        self.assertTrue(
+            any("workload mismatch" in d for d in discrepancies)
+        )
+        # 2. June 2 Rest day violation
+        self.assertTrue(
+            any("Rest Day Violation! Performed 'Lawn Mowing'" in d for d in discrepancies)
+        )
+        # 3. June 3 Complete miss
+        self.assertTrue(
+            any("Complete Miss! Missed planned workout 'Ride'" in d for d in discrepancies)
+        )
+        # 4. June 4 Unplanned activity
+        self.assertTrue(
+            any("Unplanned Activity! Performed 'Extra Run'" in d for d in discrepancies)
+        )
+
 if __name__ == '__main__':
     unittest.main()
+
