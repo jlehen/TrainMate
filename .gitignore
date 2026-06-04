@@ -3,11 +3,14 @@ venv/
 .venv/
 
 # Credentials & configs
-config.json
+config.yaml
 service_account.json
 
 # Local database
 trainmate.db
+
+# Logs
+logs
 
 # Python caches
 __pycache__/

@@ -1,21 +1,21 @@
 import os
-import json
+import yaml
 from typing import Any, Optional
 
-CONFIG_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "config.json")
+CONFIG_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "config.yaml")
 
 class Config:
-    """Manages application settings loaded from config.json and env variables."""
+    """Manages application settings loaded from config.yaml and env variables."""
 
     def __init__(self) -> None:
-        """Initializes the configuration store from config.json if it exists."""
+        """Initializes the configuration store from config.yaml if it exists."""
         self.data: dict[str, Any] = {}
         if os.path.exists(CONFIG_PATH):
             try:
                 with open(CONFIG_PATH, "r") as f:
-                    self.data = json.load(f)
+                    self.data = yaml.safe_load(f) or {}
             except Exception as e:
-                print(f"Warning: Failed to load config.json: {e}")
+                print(f"Warning: Failed to load config.yaml: {e}")
 
     def get(self, key: str, default: Any = None) -> Any:
         """Retrieves a configuration value by key with an optional default.

@@ -37,7 +37,7 @@ life constraints, and Garmin metrics.
 *   [trainmate_cli.py](file:///home/jlh/src/TrainMate/trainmate_cli.py): Console CLI interface. Dispatches commands to create goals, sync metrics, trigger plans, or run check-ins.
 *   [trainmate_web.py](file:///home/jlh/src/TrainMate/trainmate_web.py): Flask local server providing static assets and a REST API endpoint layer for the web UI.
 *   [trainmate/types.py](file:///home/jlh/src/TrainMate/trainmate/types.py): Central type repository holding standard TypedDicts for goals, workouts, metrics, and cycles.
-*   [trainmate/config.py](file:///home/jlh/src/TrainMate/trainmate/config.py): Config singleton parsing settings from `config.json` and system environment variables.
+*   [trainmate/config.py](file:///home/jlh/src/TrainMate/trainmate/config.py): Config singleton parsing settings from `config.yaml` and system environment variables.
 *   [trainmate/db.py](file:///home/jlh/src/TrainMate/trainmate/db.py): SQLite wrapper containing table creation and CRUD operations for domain objects.
 *   [trainmate/openrouter.py](file:///home/jlh/src/TrainMate/trainmate/openrouter.py): OpenRouter client using Gemini for planning and structured JSON response schemas.
 *   [trainmate/google_sheets.py](file:///home/jlh/src/TrainMate/trainmate/google_sheets.py): Syncs metrics and training workload activities from Google Sheets.

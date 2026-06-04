@@ -116,7 +116,7 @@ class OpenRouterClient:
         if not api_key:
             raise ValueError(
                 "OpenRouter API key is not configured. Please set the "
-                "OPENROUTER_API_KEY env variable or update config.json."
+                "OPENROUTER_API_KEY env variable or update config.yaml."
             )
 
         headers = {
