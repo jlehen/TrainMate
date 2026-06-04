@@ -1,9 +1,11 @@
 import os
+import sys
+from datetime import datetime, timedelta, timezone
 from trainmate.db import db
 from trainmate.google_calendar import calendar_syncer
-from datetime import datetime, timedelta, timezone
 
-def main():
+def main() -> None:
+    """Manually runs the calendar sync integration test with mocked/simulated database workouts."""
     print("=== STARTING INTEGRATION TESTS ===")
     
     # 1. Reset/Add mock objectives
@@ -35,7 +37,7 @@ def main():
     tomorrow_str = (datetime.now(timezone.utc) + timedelta(days=1)).strftime("%Y-%m-%d")
     
     # Workout 1: Standard Planned session
-    w1_id = db.save_workout(
+    db.save_workout(
         date=today_str,
         sport_type="running",
         title="Aerobic Base Run",
@@ -44,14 +46,14 @@ def main():
     )
     
     # Workout 2: Modified session
-    w2_id = db.save_workout(
+    db.save_workout(
         date=tomorrow_str,
         sport_type="road_biking",
         title="Active Recovery Spin",
         description="30 minutes of light cycling. Keep heart rate below 110 bpm.",
         original_description="90 minutes endurance road cycling with hill climbs.",
         status="modified",
-        modification_reason="HRV overnight average dropped 1.2 SD below chronic baseline."
+        modification_reason="HRV average dropped 1.2 SD below chronic baseline."
     )
     
     print("Workouts created in local SQLite database.")
@@ -69,10 +71,14 @@ def main():
         synced_workouts = db.get_workouts(start_date=today_str, end_date=tomorrow_str)
         print("Database verify sync status:")
         for w in synced_workouts:
-            print(f"- Date: {w['date']} | Status: {w['status']} | Google Event ID: {w['google_event_id']}")
+            print(
+                f"- Date: {w['date']} | Status: {w['status']} | "
+                f"Google Event ID: {w['google_event_id']}"
+            )
             
     except Exception as e:
         print(f"Google Calendar sync test FAILED: {e}")
+        sys.exit(1)
 
 if __name__ == "__main__":
     main()

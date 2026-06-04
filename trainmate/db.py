@@ -1,7 +1,8 @@
 import sqlite3
 import os
 from datetime import datetime, timezone
-from typing import Any, Optional, List, Dict
+from typing import Any, Optional, List, Dict, Generator
+from contextlib import contextmanager
 from trainmate.config import config
 from trainmate.types import (
     Objective, Constraint, Workout, AthleteMetric, AthleteBaseline, Macrocycle, Mesocycle,
@@ -16,12 +17,17 @@ class Database:
         self.db_path: str = db_path or config.db_path
         self._init_db()
 
-    def _get_connection(self) -> sqlite3.Connection:
+    @contextmanager
+    def _get_connection(self) -> Generator[sqlite3.Connection, None, None]:
         """Creates and returns a connection to SQLite database with constraints enabled."""
         conn = sqlite3.connect(self.db_path)
         conn.execute("PRAGMA foreign_keys = ON")
         conn.row_factory = sqlite3.Row
-        return conn
+        try:
+            with conn:
+                yield conn
+        finally:
+            conn.close()
 
     def _init_db(self) -> None:
         """Initializes tables in database if they do not exist."""
