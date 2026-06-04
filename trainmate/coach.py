@@ -246,8 +246,13 @@ COACHING ROLE AND OBJECTIVES:
    do not exceed daily availability). Respect certainty percentages (higher values indicate more
    rigid constraints; lower values allow flexibility).
 
-SPORTS SCIENCE GUIDELINES:
+================================================================================
+START OF SPORTS SCIENCE GUIDELINES
+================================================================================
 {guidelines}
+================================================================================
+END OF SPORTS SCIENCE GUIDELINES
+================================================================================
 
 COACH MEMORY & ACTIVE PERIODIZATION STRATEGY:
 - Established Training Strategy for the current macro-cycle:
@@ -376,7 +381,13 @@ You MUST respond with a JSON object containing:
             "You are TrainMate Coach, an advanced AI sports science training coach.\n"
             "You design periodized training plans (macro, meso, micro cycles) leading up "
             "to target goals.\n\n"
-            f"SPORTS SCIENCE GUIDELINES:\n{guidelines}\n"
+            "================================================================================\n"
+            "START OF SPORTS SCIENCE GUIDELINES\n"
+            "================================================================================\n"
+            f"{guidelines}\n"
+            "================================================================================\n"
+            "END OF SPORTS SCIENCE GUIDELINES\n"
+            "================================================================================\n"
         )
 
         if previous_strategy_text:
