@@ -346,6 +346,50 @@ class TestTrainMateCLI(unittest.TestCase):
         self.assertIn("Strategy  : Focus on aerobic base", stdout)
         self.assertIn("Learnings : Rest well on Fridays", stdout)
 
+        # Test verbose status with goals and lifeevents
+        test_db.add_lifeevent(
+            title="Ibiza Trip",
+            start_date="2026-07-01",
+            end_date="2026-07-08",
+            event_type="vacation",
+            impact_description="Rest weeks"
+        )
+
+        goals = test_db.get_objectives()
+        g_id = goals[0]['id']
+        events = test_db.get_lifeevents()
+        e_id = events[0]['id']
+
+        exit_code_v, stdout_v, stderr_v = self.run_cli(['status', '-v'])
+        self.assertEqual(exit_code_v, 0)
+        self.assertIn("Goals:", stdout_v)
+        self.assertIn(
+            f"- [ACTIVE] ID: {g_id} | London Marathon (running) on 2026-09-20 (Priority: 1)",
+            stdout_v
+        )
+        self.assertIn("Life Events:", stdout_v)
+        self.assertIn(
+            f"- ID: {e_id} | Ibiza Trip (vacation): 2026-07-01 to 2026-07-08",
+            stdout_v
+        )
+        self.assertIn("  Impact: Rest weeks", stdout_v)
+
+        exit_code_verbose, stdout_verbose, stderr_verbose = self.run_cli(
+            ['status', '--verbose']
+        )
+        self.assertEqual(exit_code_verbose, 0)
+        self.assertIn("Goals:", stdout_verbose)
+        self.assertIn(
+            f"- [ACTIVE] ID: {g_id} | London Marathon (running) on 2026-09-20 (Priority: 1)",
+            stdout_verbose
+        )
+        self.assertIn("Life Events:", stdout_verbose)
+        self.assertIn(
+            f"- ID: {e_id} | Ibiza Trip (vacation): 2026-07-01 to 2026-07-08",
+            stdout_verbose
+        )
+        self.assertIn("  Impact: Rest weeks", stdout_verbose)
+
     @patch('trainmate_cli.calendar_syncer')
     def test_workout_push_command(self, mock_calendar):
         # 1. Sync when no planned workouts

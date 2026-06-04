@@ -19,10 +19,14 @@ def main() -> None:
     subparsers = parser.add_subparsers(dest="command", help="Available commands")
     
     # status command
-    subparsers.add_parser(
+    status_parser = subparsers.add_parser(
         "status",
         aliases=["s"],
         help="Show current athlete status, active goals, recent metrics, and memories"
+    )
+    status_parser.add_argument(
+        "-v", "--verbose", action="store_true",
+        help="Show all training objectives/goals and life events"
     )
     
     # goal command & subparsers
@@ -208,7 +212,7 @@ def main() -> None:
                 run_metrics_pull()
 
     if cmd in ("status", "s"):
-        run_status()
+        run_status(verbose=args.verbose)
     elif cmd in ("goal", "g"):
         if not args.subcommand:
             goal_parser.print_help()
@@ -282,7 +286,7 @@ def main() -> None:
 # Status Command
 # ==============================================================================
 
-def run_status() -> None:
+def run_status(verbose: bool = False) -> None:
     """Displays current athlete goals, Garmin metrics, baselines, and memories."""
     print("=== TRAINMATE ATHLETE STATUS ===")
     
@@ -374,6 +378,33 @@ def run_status() -> None:
     print("\nCoach Memory:")
     print(f"- Strategy  : {strategy or 'Not established'}")
     print(f"- Learnings : {learnings or 'None yet'}")
+
+    if verbose:
+        goals = db.get_objectives()
+        print("\nGoals:")
+        if not goals:
+            print("- None")
+        for g in goals:
+            sport_str = g['sport_type']
+            print(
+                f"- [{g['status'].upper()}] ID: {g['id']} | {g['title']} "
+                f"({sport_str}) on {g['target_date']} (Priority: {g['priority']})"
+            )
+            if g.get('description'):
+                print(f"  Description: {g['description']}")
+
+        events = db.get_lifeevents()
+        print("\nLife Events:")
+        if not events:
+            print("- None")
+        for e in events:
+            print(
+                f"- ID: {e['id']} | {e['title']} ({e['event_type']}): "
+                f"{e['start_date']} to {e['end_date']}"
+            )
+            if e.get('impact_description'):
+                print(f"  Impact: {e['impact_description']}")
+
     print("\n================================")
 
 
