@@ -10,16 +10,116 @@ from trainmate.google_calendar import calendar_syncer
 from trainmate.types import Objective, LifeEvent, Workout, CompletedActivity
 from trainmate.adherence import analyze_adherence
 
-class CoachEngine:
-    """Orchestrates sports science coaching, macro/meso planning, and daily adaptations."""
 
-    def _load_science_guidelines(self) -> str:
-        """Loads and concatenates all text files in the app and user science directories.
+class CoachRepository:
+    """Handles I/O operations for the coach, database access, and calendar syncing."""
 
-        Returns:
-            A string containing all training science guidelines.
-        """
-        directories = [config.app_science_dir, config.science_dir]
+    def __init__(self, db_instance=None, calendar_syncer_instance=None):
+        self._db_instance = db_instance
+        self._calendar_syncer_instance = calendar_syncer_instance
+
+    @property
+    def db(self):
+        return self._db_instance or db
+
+    @property
+    def calendar_syncer(self):
+        return self._calendar_syncer_instance or calendar_syncer
+
+    def get_active_objectives(self) -> List[Objective]:
+        return self.db.get_objectives(status='active')
+
+    def get_upcoming_lifeevents(self, today_str: str) -> List[LifeEvent]:
+        return self.db.get_lifeevents(start_after=today_str)
+
+    def get_macrocycle_for_objective(self, objective_id: int) -> Optional[Dict[str, Any]]:
+        return self.db.get_macrocycle_for_objective(objective_id)
+
+    def get_mesocycles_for_macrocycle(self, macrocycle_id: int) -> List[Dict[str, Any]]:
+        return self.db.get_mesocycles_for_macrocycle(macrocycle_id)
+
+    def get_last_macrocycle(self) -> Optional[Dict[str, Any]]:
+        return self.db.get_last_macrocycle()
+
+    def get_coach_memory(self, key: str) -> Optional[str]:
+        return self.db.get_coach_memory(key)
+
+    def save_coach_memory(self, key: str, value: str) -> None:
+        self.db.save_coach_memory(key, value)
+
+    def save_macrocycle(
+        self, objective_id: int, strategy: str, goals_hash: str,
+        lifeevents_hash: str, config_hash: str, mesocycles: List[Dict[str, Any]]
+    ) -> int:
+        return self.db.save_macrocycle(
+            objective_id=objective_id,
+            strategy=strategy,
+            goals_hash=goals_hash,
+            lifeevents_hash=lifeevents_hash,
+            config_hash=config_hash,
+            mesocycles=mesocycles
+        )
+
+    def update_macrocycle_config_hash(self, macrocycle_id: int, config_hash: str) -> None:
+        self.db.update_macrocycle_config_hash(macrocycle_id, config_hash)
+
+    def clear_future_workouts(self, today_str: str) -> None:
+        self.db.clear_future_workouts(today_str)
+
+    def save_workout(
+        self, date: str, sport_type: str, title: str, description: str,
+        status: str, original_description: Optional[str] = None,
+        modification_reason: Optional[str] = None, google_event_id: Optional[str] = None,
+        duration_minutes: Optional[int] = None, rpe: Optional[int] = None,
+        tss: Optional[float] = None
+    ) -> int:
+        return self.db.save_workout(
+            date=date,
+            sport_type=sport_type,
+            title=title,
+            description=description,
+            status=status,
+            original_description=original_description,
+            modification_reason=modification_reason,
+            google_event_id=google_event_id,
+            duration_minutes=duration_minutes,
+            rpe=rpe,
+            tss=tss
+        )
+
+    def get_workout(self, date: str, sport_type: str) -> Optional[Workout]:
+        return self.db.get_workout(date, sport_type)
+
+    def get_workouts(
+        self, start_date: Optional[str] = None, end_date: Optional[str] = None
+    ) -> List[Workout]:
+        return self.db.get_workouts(start_date=start_date, end_date=end_date)
+
+    def get_completed_activities(
+        self, start_date: str, end_date: str
+    ) -> List[CompletedActivity]:
+        return self.db.get_completed_activities(start_date=start_date, end_date=end_date)
+
+    def get_metrics_cache(
+        self, start_date: Optional[str] = None, end_date: Optional[str] = None
+    ) -> List[Dict[str, Any]]:
+        return self.db.get_metrics_cache(start_date=start_date, end_date=end_date)
+
+    def get_baseline(self, date: str) -> Optional[Dict[str, Any]]:
+        return self.db.get_baseline(date)
+
+    def delete_workout_by_id(self, workout_id: int) -> None:
+        self.db.delete_workout_by_id(workout_id)
+
+    def delete_workout_calendar_event(self, google_event_id: str) -> None:
+        self.calendar_syncer.delete_workout_event(google_event_id)
+
+    def sync_workout_to_calendar(self, workout: Workout) -> None:
+        self.calendar_syncer.sync_workout(workout)
+
+    def load_science_guidelines(self, app_science_dir: str, science_dir: str) -> str:
+        """Loads and concatenates all text files in the app and user science directories."""
+        directories = [app_science_dir, science_dir]
         texts = []
         for s_dir in directories:
             if not os.path.exists(s_dir):
@@ -35,9 +135,12 @@ class CoachEngine:
                     print(f"Error reading science guideline {filename}: {e}")
         return "\n\n".join(texts)
 
-    def _format_athlete_profile(self) -> str:
-        """Formats the athlete's user profile (from config) into a readable prompt segment."""
-        profile = config.user_profile
+
+class CoachEngine:
+    """Pure business logic coach that builds prompts, computes hashes, and makes LLM calls."""
+
+    def _format_athlete_profile(self, profile: Optional[Dict[str, Any]]) -> str:
+        """Formats the athlete's user profile into a readable prompt segment."""
         if not profile:
             return "No athlete profile configured."
 
@@ -74,7 +177,9 @@ class CoachEngine:
         general_equipment = profile.get("equipment")
         if general_equipment:
             if isinstance(general_equipment, list):
-                lines.append(f"- General Equipment (always available): {', '.join(general_equipment)}")
+                lines.append(
+                    f"- General Equipment (always available): {', '.join(general_equipment)}"
+                )
             else:
                 lines.append(f"- General Equipment (always available): {general_equipment}")
 
@@ -101,55 +206,12 @@ class CoachEngine:
 
         return "\n".join(lines)
 
-    def _get_coach_system_prompt(
+    def build_system_prompt(
         self, objectives: List[Objective], lifeevents: List[LifeEvent],
-        custom_task: str = ""
+        guidelines: str, strategy: str, meso_text: str, learnings: str,
+        profile: Optional[Dict[str, Any]], custom_task: str = ""
     ) -> str:
-        """Constructs the static prefix system prompt.
-
-        Includes guidelines, goals, and coach memory.
-
-        Args:
-            objectives: List of active athlete objectives.
-            lifeevents: List of upcoming logged life events.
-            custom_task: Specific task context to append.
-
-        Returns:
-            The constructed system prompt string.
-        """
-        science_guidelines = self._load_science_guidelines()
-        
-        # Load active macrocycle and mesocycles if available
-        strategy = None
-        meso_text = ""
-        if objectives:
-            # Sort objectives to find the next goal
-            sorted_objs = sorted(objectives, key=lambda x: str(x['target_date']))
-            next_goal = sorted_objs[0]
-            if next_goal['id'] is not None:
-                macrocycle = db.get_macrocycle_for_objective(next_goal['id'])
-                if macrocycle:
-                    strategy = macrocycle['strategy']
-                    mesocycles = db.get_mesocycles_for_macrocycle(macrocycle['id'])
-                    for m in mesocycles:
-                        meso_text += (
-                            f"  - {m['name']} ({m['start_date']} to "
-                            f"{m['end_date']}): {m['focus']}\n"
-                        )
-
-        if not strategy:
-            strategy = db.get_coach_memory("training_strategy") or (
-                "Not established yet. Establish an endurance-focused training strategy "
-                "based on goals."
-            )
-            meso_text = "  - Not established yet."
-
-        learnings = db.get_coach_memory("athlete_learnings") or (
-            "No observations yet. Over time, observe the athlete's responses to "
-            "training volume and intensity."
-        )
-
-        # Serialize objectives
+        """Constructs the system prompt with sports science guidelines and athlete details."""
         obj_text = ""
         for o in objectives:
             details = o.get('description', '')
@@ -158,7 +220,6 @@ class CoachEngine:
                 f"Sport: {o['sport_type']} | Details: {details}\n"
             )
 
-        # Serialize life events
         c_text = ""
         for c in lifeevents:
             impact = c.get('impact_description', '')
@@ -167,7 +228,7 @@ class CoachEngine:
                 f"End: {c['end_date']} | Type: {c['event_type']} | Impact: {impact}\n"
             )
 
-        athlete_profile = self._format_athlete_profile()
+        athlete_profile = self._format_athlete_profile(profile)
         system_prompt = f"""You are TrainMate Coach, an advanced AI sports science training coach.
 You design and adapt personalized training plans for endurance athletes using sports science
 principles.
@@ -186,7 +247,7 @@ COACHING ROLE AND OBJECTIVES:
    rigid constraints; lower values allow flexibility).
 
 SPORTS SCIENCE GUIDELINES:
-{science_guidelines}
+{guidelines}
 
 COACH MEMORY & ACTIVE PERIODIZATION STRATEGY:
 - Established Training Strategy for the current macro-cycle:
@@ -251,10 +312,10 @@ UPCOMING LIFE EVENTS:
         serialized = json.dumps(data_to_hash, sort_keys=True)
         return hashlib.sha256(serialized.encode('utf-8')).hexdigest()
 
-    def _generate_macrocycle_strategy(
+    def generate_macrocycle_strategy(
         self, next_goal: Objective, objectives: List[Objective],
-        lifeevents: List[LifeEvent], today_str: str,
-        previous_strategy_text: Optional[str] = None
+        lifeevents: List[LifeEvent], today_str: str, guidelines: str,
+        profile: Optional[Dict[str, Any]], previous_strategy_text: Optional[str] = None
     ) -> Dict[str, Any]:
         """Queries LLM to determine the overall macrocycle strategy and mesocycle blocks."""
         custom_task = f"""
@@ -294,8 +355,6 @@ You MUST respond with a JSON object containing:
   ]
 }}
 """
-        science_guidelines = self._load_science_guidelines()
-        
         obj_text = ""
         for o in objectives:
             details = o.get('description', '')
@@ -312,17 +371,17 @@ You MUST respond with a JSON object containing:
                 f"End: {c['end_date']} | Type: {c['event_type']} | Impact: {impact}\n"
             )
 
-        athlete_profile = self._format_athlete_profile()
+        athlete_profile = self._format_athlete_profile(profile)
         system_prompt = (
             "You are TrainMate Coach, an advanced AI sports science training coach.\n"
             "You design periodized training plans (macro, meso, micro cycles) leading up "
             "to target goals.\n\n"
-            f"SPORTS SCIENCE GUIDELINES:\n{science_guidelines}\n"
+            f"SPORTS SCIENCE GUIDELINES:\n{guidelines}\n"
         )
-        
+
         if previous_strategy_text:
             system_prompt += f"\n{previous_strategy_text}\n"
-            
+
         system_prompt += (
             f"\nATHLETE PROFILE & PREFERENCES:\n{athlete_profile}\n"
             f"\nACTIVE ATHLETE GOALS (CHRONOLOGICAL):\n"
@@ -344,130 +403,12 @@ You MUST respond with a JSON object containing:
         )
         return result
 
-    def generate_periodization_plan(self, force: bool = False) -> Tuple[str, List[Dict[str, Any]]]:
-        """Determines the macrocycle strategy and mesocycle blocks.
-
-        Args:
-            force: Force regeneration of the periodization plan.
-
-        Returns:
-            A tuple of (strategy text, list of mesocycles).
-        """
-        objectives = db.get_objectives(status='active')
-        if not objectives:
-            return "No active goals found. TrainMate needs at least one objective.", []
-
-        # Sort objectives by target date to identify the next goal
-        objectives.sort(key=lambda x: str(x['target_date']))
-        next_goal = objectives[0]
-
-        # Get future life events
-        today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-        lifeevents = db.get_lifeevents(start_after=today_str)
-
-        # Compute current hashes
-        goals_hash = self._get_goals_hash(objectives)
-        lifeevents_hash = self._get_lifeevents_hash(lifeevents)
-        config_hash = self._get_config_hash()
-
-        # Try to retrieve existing macrocycle
-        strategy = ""
-        mesocycles: List[Dict[str, Any]] = []
-        existing_macro = None
-        if next_goal['id'] is not None:
-            existing_macro = db.get_macrocycle_for_objective(next_goal['id'])
-
-        reused = False
-        if existing_macro and not force:
-            if (
-                existing_macro['goals_hash'] == goals_hash
-                and existing_macro['lifeevents_hash'] == lifeevents_hash
-                and existing_macro.get('config_hash') == config_hash
-            ):
-                reused = True
-                strategy = existing_macro['strategy']
-                mesocycles = db.get_mesocycles_for_macrocycle(existing_macro['id'])  # type: ignore
-                print("Reusing existing periodization strategy (macrocycle and mesocycles) "
-                      "from database.")
-
-        if not reused:
-            # Get the previous strategy for context
-            prev_macro = existing_macro
-            if not prev_macro:
-                prev_macro = db.get_last_macrocycle()
-
-            prev_strategy_text = None
-            if prev_macro:
-                prev_mesos = db.get_mesocycles_for_macrocycle(prev_macro['id'])
-                prev_meso_text = ""
-                for m in prev_mesos:
-                    prev_meso_text += (
-                        f"  - {m['name']} ({m['start_date']} to {m['end_date']}): "
-                        f"{m['focus']}\n"
-                    )
-                prev_strategy_text = (
-                    "PREVIOUS PERIODIZATION STRATEGY (FOR CONTEXT):\n"
-                    f"- Overall Strategy: {prev_macro['strategy']}\n"
-                    f"- Mesocycles:\n{prev_meso_text or '  - None\n'}"
-                )
-
-            # Generate new macrocycle strategy and mesocycles
-            print("Goals or life events have changed, or force generation requested. "
-                  "Determining new overall periodization strategy...")
-            macro_data = self._generate_macrocycle_strategy(
-                next_goal,
-                objectives,
-                lifeevents,
-                today_str,
-                previous_strategy_text=prev_strategy_text
-            )
-            strategy = macro_data.get("strategy", "Endurance preparation strategy.")
-            mesocycles = macro_data.get("mesocycles", [])
-
-            # Save it
-            if next_goal['id'] is not None:
-                db.save_macrocycle(
-                    objective_id=next_goal['id'],
-                    strategy=strategy,
-                    goals_hash=goals_hash,
-                    lifeevents_hash=lifeevents_hash,
-                    config_hash=config_hash,
-                    mesocycles=mesocycles
-                )
-            print("\n=== NEW PERIODIZATION STRATEGY (MACROCYCLE) ===")
-            print(f"Overall Strategy:\n{strategy}\n")
-            print("Mesocycle Blocks:")
-            for m in mesocycles:
-                print(f"- {m['name']} ({m['start_date']} to {m['end_date']}): {m['focus']}")
-            print("==============================================\n")
-
-        return strategy, mesocycles
-
-    def generate_workouts(self) -> Tuple[str, List[Workout]]:
-        """Generates the 4-week workouts (microcycles) based on the active strategy.
-
-        Returns:
-            A tuple of (reasoning text, list of generated workouts).
-        """
-        objectives = db.get_objectives(status='active')
-        if not objectives:
-            return "No active goals found. TrainMate needs at least one objective.", []
-
-        # Sort objectives by target date to identify the next goal
-        objectives.sort(key=lambda x: str(x['target_date']))
-        next_goal = objectives[0]
-
-        # Verify active periodization strategy exists
-        macrocycle = db.get_macrocycle_for_objective(next_goal['id'])
-        if not macrocycle:
-            raise ValueError(
-                "No active periodization strategy found. "
-                "Please generate a periodization plan first."
-            )
-
-        today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-        lifeevents = db.get_lifeevents(start_after=today_str)
-
+    def generate_workouts_logic(
+        self, objectives: List[Objective], lifeevents: List[LifeEvent],
+        today_str: str, guidelines: str, profile: Optional[Dict[str, Any]],
+        strategy: str, meso_text: str, learnings: str
+    ) -> Dict[str, Any]:
+        """Queries LLM to generate the 4-week workouts based on active strategy details."""
         custom_task = """
 TASK:
 Generate a training schedule for the next 4 weeks (28 days) starting from today. 
@@ -497,7 +438,16 @@ You MUST respond with a JSON object containing:
   ]
 }
 """
-        system_prompt = self._get_coach_system_prompt(objectives, lifeevents, custom_task)
+        system_prompt = self.build_system_prompt(
+            objectives=objectives,
+            lifeevents=lifeevents,
+            guidelines=guidelines,
+            strategy=strategy,
+            meso_text=meso_text,
+            learnings=learnings,
+            profile=profile,
+            custom_task=custom_task
+        )
         user_content = (
             f"Today's date is {today_str}. "
             "Please generate the 4-week microcycles (workouts) starting today."
@@ -507,127 +457,17 @@ You MUST respond with a JSON object containing:
         plan_data = openrouter_client.complete(
             system_prompt, user_content, label="workout_generation"
         )
+        return plan_data
 
-        # Save learnings to memory
-        if "athlete_learnings" in plan_data:
-            db.save_coach_memory("athlete_learnings", plan_data["athlete_learnings"])
-
-        # Save workouts to database
-        workouts = plan_data.get("workouts", [])
-
-        # Clear future unsynced workouts to prevent overlapping plans
-        db.clear_future_workouts(today_str)
-
-        saved_workouts: List[Workout] = []
-        for w in workouts:
-            wid = db.save_workout(
-                date=w['date'],
-                sport_type=w['sport_type'],
-                title=w['title'],
-                description=w['description'],
-                status='planned',
-                duration_minutes=w.get('duration_minutes'),
-                rpe=w.get('rpe'),
-                tss=w.get('tss')
-            )
-            saved_workouts.append({
-                'id': wid,
-                'date': w['date'],
-                'sport_type': w['sport_type'],
-                'title': w['title'],
-                'description': w['description'],
-                'original_description': w['description'],
-                'status': 'planned',
-                'modification_reason': None,
-                'google_event_id': None,
-                'duration_minutes': w.get('duration_minutes'),
-                'rpe': w.get('rpe'),
-                'tss': w.get('tss')
-            })
-
-        print(f"Generated {len(workouts)} workouts.")
-        return plan_data.get("reasoning", "Plan generated."), saved_workouts
-
-    def replan(self, force: bool = False) -> Tuple[str, List[Workout]]:
-        """Generates or adapts the training plan from today onwards.
-
-        Args:
-            force: Force regeneration of macro/meso plan.
-
-        Returns:
-            A tuple of (reasoning string, list of generated Workouts).
-        """
-        objectives = db.get_objectives(status='active')
-        if not objectives:
-            return (
-                "No active goals found. TrainMate needs at least one objective to "
-                "start planning.",
-                []
-            )
-
-        self.generate_periodization_plan(force=force)
-        return self.generate_workouts()
-
-    def adapt(self, target_date_str: Optional[str] = None) -> Tuple[str, List[Workout]]:
-        """Evaluates metrics/activities over a rolling window and adapts mesocycle if needed."""
-        if not target_date_str:
-            target_date_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-
-        target_date_obj = datetime.strptime(target_date_str, "%Y-%m-%d").date()
-
-        # 1. Fetch metrics history window
-        history_days = config.metrics_history_days
-        start_date_obj = target_date_obj - timedelta(days=history_days - 1)
-        start_date_str = start_date_obj.strftime("%Y-%m-%d")
-
-        # Fetch metrics and baselines in window
-        metrics = db.get_metrics_cache(start_date=start_date_str, end_date=target_date_str)
-        completed_activities = db.get_completed_activities(
-            start_date=start_date_str, end_date=target_date_str
-        )
-        planned_workouts = db.get_workouts(start_date=start_date_str, end_date=target_date_str)
-
-        # Retrieve baseline for reference
-        baseline = db.get_baseline(target_date_str)
-        if not baseline:
-            baseline_str = "No baseline data available."
-        else:
-            baseline_str = (
-                f"Resting HR: Mean = {baseline['rhr_baseline_mean']:.1f}, "
-                f"StdDev = {baseline['rhr_baseline_std']:.2f}\n"
-                f"HRV: Mean = {baseline['hrv_baseline_mean']:.1f}, "
-                f"StdDev = {baseline['hrv_baseline_std']:.2f}\n"
-                f"Sleep Score: Mean = {baseline['sleep_baseline_mean']:.1f}, "
-                f"StdDev = {baseline['sleep_baseline_std']:.2f}"
-            )
-
-        # 2. Match planned workouts vs completed activities and compute discrepancies
-        discrepancies, matching_results = analyze_adherence(
-            planned_workouts=planned_workouts,
-            completed_activities=completed_activities,
-            start_date_obj=start_date_obj,
-            history_days=history_days
-        )
-
-        # 3. Determine mesocycle end date for adaptation range
-        meso_end_date_str = (target_date_obj + timedelta(days=6)).strftime("%Y-%m-%d")
-        active_meso = None
-        objectives = db.get_objectives(status='active')
-        if objectives:
-            objectives.sort(key=lambda x: str(x['target_date']))
-            next_goal = objectives[0]
-            macro = db.get_macrocycle_for_objective(next_goal['id'])
-            if macro:
-                mesos = db.get_mesocycles_for_macrocycle(macro['id'])
-                for m in mesos:
-                    start = datetime.strptime(m['start_date'], "%Y-%m-%d").date()
-                    end = datetime.strptime(m['end_date'], "%Y-%m-%d").date()
-                    if start <= target_date_obj <= end:
-                        active_meso = m
-                        meso_end_date_str = m['end_date']
-                        break
-
-        # 4. Formulate LLM Prompt
+    def adapt_logic(
+        self, target_date_str: str, history_days: int, start_date_str: str,
+        metrics: List[Dict[str, Any]], completed_activities: List[CompletedActivity],
+        planned_workouts: List[Workout], baseline_str: str,
+        meso_end_date_str: str, objectives: List[Objective], lifeevents: List[LifeEvent],
+        guidelines: str, profile: Optional[Dict[str, Any]], strategy: str,
+        meso_text: str, learnings: str, discrepancies: List[str]
+    ) -> Dict[str, Any]:
+        """Queries LLM to evaluate metrics/activities and adapt workouts if needed."""
         custom_task = f"""
 TASK:
 Analyze the athlete's actual workout adherence and physiological metrics trajectory over the past {history_days} days.
@@ -642,7 +482,7 @@ Based on this, determine if we need to adapt the training plan for the remainder
 You MUST respond with a JSON object containing:
 {{
   "change_needed": true | false,
-  "reason": "Explain the physiological justification based on metrics trends and workout discrepancies.",
+  "reason": "Swapping tempo run to rest.",
   "adapted_workouts": [
     {{
       "date": "YYYY-MM-DD",
@@ -657,8 +497,15 @@ You MUST respond with a JSON object containing:
 }}
 """
         # Prepare system prompt
-        system_prompt = self._get_coach_system_prompt(
-            objectives, db.get_lifeevents(start_after=target_date_str), custom_task
+        system_prompt = self.build_system_prompt(
+            objectives=objectives,
+            lifeevents=lifeevents,
+            guidelines=guidelines,
+            strategy=strategy,
+            meso_text=meso_text,
+            learnings=learnings,
+            profile=profile,
+            custom_task=custom_task
         )
 
         # Build user content containing trajectory metrics and discrepancies
@@ -721,12 +568,360 @@ Adherence Discrepancies & Violations:
         decision = openrouter_client.complete(
             system_prompt, user_content, label="workout_adaptation"
         )
+        return decision
+
+
+class CoachService:
+    """Orchestrates sports science coaching by coordinating data I/O and business logic."""
+
+    def __init__(self, repository: CoachRepository, engine: CoachEngine):
+        self.repository = repository
+        self.engine = engine
+
+    def _get_config_hash(self) -> str:
+        return self.engine._get_config_hash()
+
+    def _get_goals_hash(self, objectives: List[Objective]) -> str:
+        return self.engine._get_goals_hash(objectives)
+
+    def _get_lifeevents_hash(self, lifeevents: List[LifeEvent]) -> str:
+        return self.engine._get_lifeevents_hash(lifeevents)
+
+    def _load_science_guidelines(self) -> str:
+        return self.repository.load_science_guidelines(
+            config.app_science_dir, config.science_dir
+        )
+
+    def _get_active_strategy_and_meso_text(self, objectives: List[Objective]) -> Tuple[str, str]:
+        strategy = None
+        meso_text = ""
+        if objectives:
+            sorted_objs = sorted(objectives, key=lambda x: str(x['target_date']))
+            next_goal = sorted_objs[0]
+            if next_goal['id'] is not None:
+                macrocycle = self.repository.get_macrocycle_for_objective(next_goal['id'])
+                if macrocycle:
+                    strategy = macrocycle['strategy']
+                    mesocycles = self.repository.get_mesocycles_for_macrocycle(macrocycle['id'])
+                    for m in mesocycles:
+                        meso_text += (
+                            f"  - {m['name']} ({m['start_date']} to "
+                            f"{m['end_date']}): {m['focus']}\n"
+                        )
+        if not strategy:
+            strategy = self.repository.get_coach_memory("training_strategy") or (
+                "Not established yet. Establish an endurance-focused training strategy "
+                "based on goals."
+            )
+            meso_text = "  - Not established yet."
+        return strategy, meso_text
+
+    def _get_coach_system_prompt(
+        self, objectives: List[Objective], lifeevents: List[LifeEvent],
+        custom_task: str = ""
+    ) -> str:
+        guidelines = self._load_science_guidelines()
+        strategy, meso_text = self._get_active_strategy_and_meso_text(objectives)
+        learnings = self.repository.get_coach_memory("athlete_learnings") or (
+            "No observations yet. Over time, observe the athlete's responses to "
+            "training volume and intensity."
+        )
+        profile = config.user_profile
+        return self.engine.build_system_prompt(
+            objectives=objectives,
+            lifeevents=lifeevents,
+            guidelines=guidelines,
+            strategy=strategy,
+            meso_text=meso_text,
+            learnings=learnings,
+            profile=profile,
+            custom_task=custom_task
+        )
+
+    def generate_periodization_plan(self, force: bool = False) -> Tuple[str, List[Dict[str, Any]]]:
+        """Determines the macrocycle strategy and mesocycle blocks."""
+        objectives = self.repository.get_active_objectives()
+        if not objectives:
+            return "No active goals found. TrainMate needs at least one objective.", []
+
+        # Sort objectives by target date to identify the next goal
+        objectives.sort(key=lambda x: str(x['target_date']))
+        next_goal = objectives[0]
+
+        # Get future life events
+        today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        lifeevents = self.repository.get_upcoming_lifeevents(today_str)
+
+        # Compute current hashes
+        goals_hash = self.engine._get_goals_hash(objectives)
+        lifeevents_hash = self.engine._get_lifeevents_hash(lifeevents)
+        config_hash = self.engine._get_config_hash()
+
+        # Try to retrieve existing macrocycle
+        strategy = ""
+        mesocycles: List[Dict[str, Any]] = []
+        existing_macro = None
+        if next_goal['id'] is not None:
+            existing_macro = self.repository.get_macrocycle_for_objective(next_goal['id'])
+
+        reused = False
+        if existing_macro and not force:
+            if (
+                existing_macro['goals_hash'] == goals_hash
+                and existing_macro['lifeevents_hash'] == lifeevents_hash
+                and existing_macro.get('config_hash') == config_hash
+            ):
+                reused = True
+                strategy = existing_macro['strategy']
+                mesocycles = self.repository.get_mesocycles_for_macrocycle(existing_macro['id'])
+                print("Reusing existing periodization strategy (macrocycle and mesocycles) "
+                      "from database.")
+
+        if not reused:
+            # Get the previous strategy for context
+            prev_macro = existing_macro
+            if not prev_macro:
+                prev_macro = self.repository.get_last_macrocycle()
+
+            prev_strategy_text = None
+            if prev_macro:
+                prev_mesos = self.repository.get_mesocycles_for_macrocycle(prev_macro['id'])
+                prev_meso_text = ""
+                for m in prev_mesos:
+                    prev_meso_text += (
+                        f"  - {m['name']} ({m['start_date']} to {m['end_date']}): "
+                        f"{m['focus']}\n"
+                    )
+                prev_strategy_text = (
+                    "PREVIOUS PERIODIZATION STRATEGY (FOR CONTEXT):\n"
+                    f"- Overall Strategy: {prev_macro['strategy']}\n"
+                    f"- Mesocycles:\n{prev_meso_text or '  - None\n'}"
+                )
+
+            # Generate new macrocycle strategy and mesocycles
+            print("Goals or life events have changed, or force generation requested. "
+                  "Determining new overall periodization strategy...")
+            guidelines = self._load_science_guidelines()
+            profile = config.user_profile
+            macro_data = self.engine.generate_macrocycle_strategy(
+                next_goal=next_goal,
+                objectives=objectives,
+                lifeevents=lifeevents,
+                today_str=today_str,
+                guidelines=guidelines,
+                profile=profile,
+                previous_strategy_text=prev_strategy_text
+            )
+            strategy = macro_data.get("strategy", "Endurance preparation strategy.")
+            mesocycles = macro_data.get("mesocycles", [])
+
+            # Save it
+            if next_goal['id'] is not None:
+                self.repository.save_macrocycle(
+                    objective_id=next_goal['id'],
+                    strategy=strategy,
+                    goals_hash=goals_hash,
+                    lifeevents_hash=lifeevents_hash,
+                    config_hash=config_hash,
+                    mesocycles=mesocycles
+                )
+            print("\n=== NEW PERIODIZATION STRATEGY (MACROCYCLE) ===")
+            print(f"Overall Strategy:\n{strategy}\n")
+            print("Mesocycle Blocks:")
+            for m in mesocycles:
+                print(f"- {m['name']} ({m['start_date']} to {m['end_date']}): {m['focus']}")
+            print("==============================================\n")
+
+        return strategy, mesocycles
+
+    def generate_workouts(self) -> Tuple[str, List[Workout]]:
+        """Generates the 4-week workouts (microcycles) based on the active strategy."""
+        objectives = self.repository.get_active_objectives()
+        if not objectives:
+            return "No active goals found. TrainMate needs at least one objective.", []
+
+        # Sort objectives by target date to identify the next goal
+        objectives.sort(key=lambda x: str(x['target_date']))
+        next_goal = objectives[0]
+
+        # Verify active periodization strategy exists
+        macrocycle = self.repository.get_macrocycle_for_objective(next_goal['id'])
+        if not macrocycle:
+            raise ValueError(
+                "No active periodization strategy found. "
+                "Please generate a periodization plan first."
+            )
+
+        today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        lifeevents = self.repository.get_upcoming_lifeevents(today_str)
+        guidelines = self._load_science_guidelines()
+        profile = config.user_profile
+        strategy, meso_text = self._get_active_strategy_and_meso_text(objectives)
+        learnings = self.repository.get_coach_memory("athlete_learnings") or (
+            "No observations yet. Over time, observe the athlete's responses to "
+            "training volume and intensity."
+        )
+
+        plan_data = self.engine.generate_workouts_logic(
+            objectives=objectives,
+            lifeevents=lifeevents,
+            today_str=today_str,
+            guidelines=guidelines,
+            profile=profile,
+            strategy=strategy,
+            meso_text=meso_text,
+            learnings=learnings
+        )
+
+        # Save learnings to memory
+        if "athlete_learnings" in plan_data:
+            self.repository.save_coach_memory("athlete_learnings", plan_data["athlete_learnings"])
+
+        # Save workouts to database
+        workouts = plan_data.get("workouts", [])
+
+        # Clear future unsynced workouts to prevent overlapping plans
+        self.repository.clear_future_workouts(today_str)
+
+        saved_workouts: List[Workout] = []
+        for w in workouts:
+            wid = self.repository.save_workout(
+                date=w['date'],
+                sport_type=w['sport_type'],
+                title=w['title'],
+                description=w['description'],
+                status='planned',
+                duration_minutes=w.get('duration_minutes'),
+                rpe=w.get('rpe'),
+                tss=w.get('tss')
+            )
+            saved_workouts.append({
+                'id': wid,
+                'date': w['date'],
+                'sport_type': w['sport_type'],
+                'title': w['title'],
+                'description': w['description'],
+                'original_description': w['description'],
+                'status': 'planned',
+                'modification_reason': None,
+                'google_event_id': None,
+                'duration_minutes': w.get('duration_minutes'),
+                'rpe': w.get('rpe'),
+                'tss': w.get('tss')
+            })
+
+        print(f"Generated {len(workouts)} workouts.")
+        return plan_data.get("reasoning", "Plan generated."), saved_workouts
+
+    def replan(self, force: bool = False) -> Tuple[str, List[Workout]]:
+        """Generates or adapts the training plan from today onwards."""
+        objectives = self.repository.get_active_objectives()
+        if not objectives:
+            return (
+                "No active goals found. TrainMate needs at least one objective to "
+                "start planning.",
+                []
+            )
+
+        self.generate_periodization_plan(force=force)
+        return self.generate_workouts()
+
+    def adapt(self, target_date_str: Optional[str] = None) -> Tuple[str, List[Workout]]:
+        """Evaluates metrics/activities over a rolling window and adapts mesocycle if needed."""
+        if not target_date_str:
+            target_date_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+        target_date_obj = datetime.strptime(target_date_str, "%Y-%m-%d").date()
+
+        # Fetch metrics history window
+        history_days = config.metrics_history_days
+        start_date_obj = target_date_obj - timedelta(days=history_days - 1)
+        start_date_str = start_date_obj.strftime("%Y-%m-%d")
+
+        # Fetch metrics and baselines in window via repository
+        metrics = self.repository.get_metrics_cache(
+            start_date=start_date_str, end_date=target_date_str
+        )
+        completed_activities = self.repository.get_completed_activities(
+            start_date=start_date_str, end_date=target_date_str
+        )
+        planned_workouts = self.repository.get_workouts(
+            start_date=start_date_str, end_date=target_date_str
+        )
+
+        # Retrieve baseline for reference
+        baseline = self.repository.get_baseline(target_date_str)
+        if not baseline:
+            baseline_str = "No baseline data available."
+        else:
+            baseline_str = (
+                f"Resting HR: Mean = {baseline['rhr_baseline_mean']:.1f}, "
+                f"StdDev = {baseline['rhr_baseline_std']:.2f}\n"
+                f"HRV: Mean = {baseline['hrv_baseline_mean']:.1f}, "
+                f"StdDev = {baseline['hrv_baseline_std']:.2f}\n"
+                f"Sleep Score: Mean = {baseline['sleep_baseline_mean']:.1f}, "
+                f"StdDev = {baseline['sleep_baseline_std']:.2f}"
+            )
+
+        # Match planned workouts vs completed activities and compute discrepancies
+        discrepancies, matching_results = analyze_adherence(
+            planned_workouts=planned_workouts,
+            completed_activities=completed_activities,
+            start_date_obj=start_date_obj,
+            history_days=history_days
+        )
+
+        # Determine mesocycle end date for adaptation range
+        meso_end_date_str = (target_date_obj + timedelta(days=6)).strftime("%Y-%m-%d")
+        active_meso = None
+        objectives = self.repository.get_active_objectives()
+        if objectives:
+            objectives.sort(key=lambda x: str(x['target_date']))
+            next_goal = objectives[0]
+            macro = self.repository.get_macrocycle_for_objective(next_goal['id'])
+            if macro:
+                mesos = self.repository.get_mesocycles_for_macrocycle(macro['id'])
+                for m in mesos:
+                    start = datetime.strptime(m['start_date'], "%Y-%m-%d").date()
+                    end = datetime.strptime(m['end_date'], "%Y-%m-%d").date()
+                    if start <= target_date_obj <= end:
+                        active_meso = m
+                        meso_end_date_str = m['end_date']
+                        break
+
+        guidelines = self._load_science_guidelines()
+        profile = config.user_profile
+        strategy, meso_text = self._get_active_strategy_and_meso_text(objectives)
+        learnings = self.repository.get_coach_memory("athlete_learnings") or (
+            "No observations yet. Over time, observe the athlete's responses to "
+            "training volume and intensity."
+        )
+        lifeevents = self.repository.get_upcoming_lifeevents(target_date_str)
+
+        decision = self.engine.adapt_logic(
+            target_date_str=target_date_str,
+            history_days=history_days,
+            start_date_str=start_date_str,
+            metrics=metrics,
+            completed_activities=completed_activities,
+            planned_workouts=planned_workouts,
+            baseline_str=baseline_str,
+            meso_end_date_str=meso_end_date_str,
+            objectives=objectives,
+            lifeevents=lifeevents,
+            guidelines=guidelines,
+            profile=profile,
+            strategy=strategy,
+            meso_text=meso_text,
+            learnings=learnings,
+            discrepancies=discrepancies
+        )
 
         # Update memories if present
         if "training_strategy" in decision and decision["training_strategy"]:
-            db.save_coach_memory("training_strategy", decision["training_strategy"])
+            self.repository.save_coach_memory("training_strategy", decision["training_strategy"])
         if "athlete_learnings" in decision and decision["athlete_learnings"]:
-            db.save_coach_memory("athlete_learnings", decision["athlete_learnings"])
+            self.repository.save_coach_memory("athlete_learnings", decision["athlete_learnings"])
 
         reason = decision.get("reason", "No adaptation needed.")
         adapted = []
@@ -756,40 +951,38 @@ Adherence Discrepancies & Violations:
     ) -> None:
         """Saves proposed adapted workouts, cleans up overridden ones, and syncs to Calendar."""
         # 1. Fetch all existing workouts in the adaptation range
-        existing_workouts = db.get_workouts(start_date=start_date, end_date=end_date)
-        
+        existing_workouts = self.repository.get_workouts(start_date=start_date, end_date=end_date)
+
         # Group proposed workouts by date
         proposed_by_date: Dict[str, List[Dict[str, Any]]] = {}
         for pw in proposed_workouts:
             proposed_by_date.setdefault(pw['date'], []).append(pw)
-            
+
         # 2. Find and delete existing workouts that are being replaced or removed
         for ew in existing_workouts:
             ew_date = ew['date']
-            # If we have proposed workouts for this date
             if ew_date in proposed_by_date:
-                # Check if this sport type is preserved in the proposed workouts
                 proposed_sports = [p['sport_type'] for p in proposed_by_date[ew_date]]
                 if ew['sport_type'] not in proposed_sports:
                     print(f"Removing overridden workout: {ew['title']} ({ew['sport_type']}) "
                           f"on {ew_date}")
                     if ew.get('google_event_id') and ew['status'] == 'synced':
                         try:
-                            calendar_syncer.delete_workout_event(ew['google_event_id'])
+                            self.repository.delete_workout_calendar_event(ew['google_event_id'])
                         except Exception as e:
                             print(f"Error deleting Google Calendar event: {e}")
-                    db.delete_workout_by_id(ew['id'])
-                    
+                    self.repository.delete_workout_by_id(ew['id'])
+
         # 3. Save new adapted workouts and sync them
         for w in proposed_workouts:
-            existing = db.get_workout(w['date'], w['sport_type'])
+            existing = self.repository.get_workout(w['date'], w['sport_type'])
             orig_desc = None
             ge_id = None
             if existing:
                 orig_desc = existing['original_description'] or existing['description']
                 ge_id = existing['google_event_id']
-                
-            db.save_workout(
+
+            self.repository.save_workout(
                 date=w['date'],
                 sport_type=w['sport_type'],
                 title=w['title'],
@@ -802,14 +995,16 @@ Adherence Discrepancies & Violations:
                 rpe=w.get('rpe'),
                 tss=w.get('tss')
             )
-            
+
             # Sync to Google Calendar
-            updated = db.get_workout(w['date'], w['sport_type'])
+            updated = self.repository.get_workout(w['date'], w['sport_type'])
             if updated:
                 try:
-                    calendar_syncer.sync_workout(updated)
+                    self.repository.sync_workout_to_calendar(updated)
                 except Exception as e:
                     print(f"Error syncing {w['title']} to Google Calendar: {e}")
 
-# Singleton instance
-coach_engine = CoachEngine()
+
+# Singleton instance matching original variable name for integration compatibility
+coach_repository = CoachRepository()
+coach_engine = CoachService(repository=coach_repository, engine=CoachEngine())
