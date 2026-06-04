@@ -41,7 +41,7 @@ class TestPeriodization(unittest.TestCase):
         # Clear tables
         with test_db._get_connection() as conn:
             conn.execute("DELETE FROM objectives")
-            conn.execute("DELETE FROM constraints")
+            conn.execute("DELETE FROM lifeevents")
             conn.execute("DELETE FROM workouts")
             conn.execute("DELETE FROM coach_memory")
             conn.execute("DELETE FROM macrocycles")
@@ -70,7 +70,7 @@ class TestPeriodization(unittest.TestCase):
             objective_id=obj_id,
             strategy="aerobic focus plan",
             goals_hash="hashgoals123",
-            constraints_hash="hashconstraints456",
+            lifeevents_hash="hashconstraints456",
             mesocycles=mesos
         )
         self.assertIsNotNone(macro_id)
@@ -80,7 +80,7 @@ class TestPeriodization(unittest.TestCase):
         self.assertIsNotNone(macro)
         self.assertEqual(macro['strategy'], "aerobic focus plan")
         self.assertEqual(macro['goals_hash'], "hashgoals123")
-        self.assertEqual(macro['constraints_hash'], "hashconstraints456")
+        self.assertEqual(macro['lifeevents_hash'], "hashconstraints456")
         
         # Fetch mesocycles
         mesocycles = test_db.get_mesocycles_for_macrocycle(macro['id'])
@@ -104,7 +104,7 @@ class TestPeriodization(unittest.TestCase):
     def test_hashing_helpers(self):
         # Empty objectives & constraints hashes
         hash1 = coach_engine._get_goals_hash([])
-        hash2 = coach_engine._get_constraints_hash([])
+        hash2 = coach_engine._get_lifeevents_hash([])
         self.assertIsNotNone(hash1)
         self.assertIsNotNone(hash2)
         
@@ -135,7 +135,7 @@ class TestPeriodization(unittest.TestCase):
             'event_type': 'vacation',
             'impact_description': 'easy'
         }
-        hash2_with_c = coach_engine._get_constraints_hash([c])
+        hash2_with_c = coach_engine._get_lifeevents_hash([c])
         self.assertNotEqual(hash2, hash2_with_c)
 
     @patch('trainmate.coach.openrouter_client')
@@ -229,7 +229,7 @@ class TestPeriodization(unittest.TestCase):
             objective_id=obj_id,
             strategy="Run long and slow",
             goals_hash="hash1",
-            constraints_hash="hash2",
+            lifeevents_hash="hash2",
             mesocycles=mesos
         )
         
@@ -263,7 +263,7 @@ class TestPeriodization(unittest.TestCase):
             objective_id=obj_id,
             strategy="Keep heart rate low",
             goals_hash="old_goals_hash",
-            constraints_hash="old_constraints_hash",
+            lifeevents_hash="old_constraints_hash",
             mesocycles=mesos
         )
 
@@ -285,8 +285,8 @@ class TestPeriodization(unittest.TestCase):
         }
         mock_client.complete.side_effect = [mock_macro_response, mock_workouts_response]
 
-        # 2. Add a constraint to trigger replanning (reused will be False)
-        test_db.add_constraint(
+        # 2. Add a life event to trigger replanning (reused will be False)
+        test_db.add_lifeevent(
             title="Business Trip",
             start_date="2026-06-10",
             end_date="2026-06-12",

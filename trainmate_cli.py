@@ -46,29 +46,29 @@ def main() -> None:
     # goal list
     goal_subparsers.add_parser("list", help="Show all training objectives")
     
-    # constraint command & subparsers
-    constraint_parser = subparsers.add_parser("constraint", help="Manage constraints (life events)")
-    constraint_subparsers = constraint_parser.add_subparsers(
-        dest="subcommand", help="Constraint sub-commands"
+    # lifeevent command & subparsers
+    lifeevent_parser = subparsers.add_parser("lifeevent", help="Manage life events")
+    lifeevent_subparsers = lifeevent_parser.add_subparsers(
+        dest="subcommand", help="Life event sub-commands"
     )
     
-    # constraint add
-    c_add = constraint_subparsers.add_parser("add", help="Add a new constraint (life event)")
-    c_add.add_argument("--title", required=True, help="Constraint title (e.g. Vacation to Spain)")
+    # lifeevent add
+    c_add = lifeevent_subparsers.add_parser("add", help="Add a new life event")
+    c_add.add_argument("--title", required=True, help="Life event title (e.g. Vacation to Spain)")
     c_add.add_argument("--start", required=True, help="Start date (YYYY-MM-DD)")
     c_add.add_argument("--end", required=True, help="End date (YYYY-MM-DD)")
     c_add.add_argument(
         "--type", required=True, choices=["injury", "vacation", "party", "other"],
-        help="Constraint type"
+        help="Life event type"
     )
     c_add.add_argument("--desc", default="", help="Description/Impact description")
     
-    # constraint rm
-    c_rm = constraint_subparsers.add_parser("rm", help="Remove a constraint by ID")
-    c_rm.add_argument("id", type=int, help="Constraint ID to remove")
+    # lifeevent rm
+    c_rm = lifeevent_subparsers.add_parser("rm", help="Remove a life event by ID")
+    c_rm.add_argument("id", type=int, help="Life event ID to remove")
     
-    # constraint list
-    constraint_subparsers.add_parser("list", help="Show all logged constraints")
+    # lifeevent list
+    lifeevent_subparsers.add_parser("list", help="Show all logged life events")
     
     # plan command & subparsers
     plan_parser = subparsers.add_parser(
@@ -164,17 +164,17 @@ def main() -> None:
             run_goal_rm(args)
         elif sub == "list":
             run_goal_list()
-    elif cmd == "constraint":
+    elif cmd == "lifeevent":
         if not args.subcommand:
-            constraint_parser.print_help()
+            lifeevent_parser.print_help()
             sys.exit(1)
         sub = args.subcommand.lower()
         if sub == "add":
-            run_constraint_add(args)
+            run_lifeevent_add(args)
         elif sub == "rm":
-            run_constraint_rm(args)
+            run_lifeevent_rm(args)
         elif sub == "list":
-            run_constraint_list()
+            run_lifeevent_list()
     elif cmd == "workout":
         if not args.subcommand:
             workout_parser.print_help()
@@ -551,9 +551,9 @@ def run_goal_rm(args: argparse.Namespace) -> None:
     db.delete_objective(args.id)
     print(f"Goal with ID {args.id} removed successfully.")
 
-def run_constraint_add(args: argparse.Namespace) -> None:
-    """Creates a new constraint via command line."""
-    db.add_constraint(
+def run_lifeevent_add(args: argparse.Namespace) -> None:
+    """Creates a new life event via command line."""
+    db.add_lifeevent(
         title=args.title,
         start_date=args.start,
         end_date=args.end,
@@ -561,14 +561,14 @@ def run_constraint_add(args: argparse.Namespace) -> None:
         impact_description=args.desc
     )
     print(
-        f"Constraint '{args.title}' logged. "
+        f"Life event '{args.title}' logged. "
         f"This will be factored in when running 'plan generate' or 'workout adapt'."
     )
 
-def run_constraint_rm(args: argparse.Namespace) -> None:
-    """Deletes a constraint by ID."""
-    db.delete_constraint(args.id)
-    print(f"Constraint with ID {args.id} removed successfully.")
+def run_lifeevent_rm(args: argparse.Namespace) -> None:
+    """Deletes a life event by ID."""
+    db.delete_lifeevent(args.id)
+    print(f"Life event with ID {args.id} removed successfully.")
 
 def run_goal_list() -> None:
     """Lists all active and past training objective goals."""
@@ -583,10 +583,10 @@ def run_goal_list() -> None:
         if g.get('description'):
             print(f"  Description: {g['description']}")
 
-def run_constraint_list() -> None:
-    """Lists all logged training constraints."""
-    events = db.get_constraints()
-    print("=== ATHLETE CONSTRAINTS ===")
+def run_lifeevent_list() -> None:
+    """Lists all logged training life events."""
+    events = db.get_lifeevents()
+    print("=== ATHLETE LIFE EVENTS ===")
     for e in events:
         print(
             f"ID: {e['id']} | {e['title']} ({e['event_type']}): "

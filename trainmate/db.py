@@ -5,7 +5,7 @@ from typing import Any, Optional, List, Dict, Generator
 from contextlib import contextmanager
 from trainmate.config import config
 from trainmate.types import (
-    Objective, Constraint, Workout, AthleteMetric, AthleteBaseline, Macrocycle, Mesocycle,
+    Objective, LifeEvent, Workout, AthleteMetric, AthleteBaseline, Macrocycle, Mesocycle,
     CompletedActivity
 )
 
@@ -47,27 +47,46 @@ class Database:
                 )
             """)
             
-            # Check if old table 'life_events' exists and new 'constraints' does not
+            # Check for existing tables from oldest to newest
             cursor.execute(
-                "SELECT name FROM sqlite_master WHERE type='table' AND name='life_events'"
+                "SELECT name FROM sqlite_master WHERE type='table' AND name='lifeevents'"
             )
-            old_exists = cursor.fetchone()
-            cursor.execute(
-                "SELECT name FROM sqlite_master WHERE type='table' AND name='constraints'"
-            )
-            new_exists = cursor.fetchone()
+            lifeevents_exists = cursor.fetchone()
             
-            if old_exists and not new_exists:
-                cursor.execute("ALTER TABLE life_events RENAME TO constraints")
+            if not lifeevents_exists:
+                cursor.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table' AND name='constraints'"
+                )
+                constraints_exists = cursor.fetchone()
+                if constraints_exists:
+                    cursor.execute("ALTER TABLE constraints RENAME TO lifeevents")
+                else:
+                    cursor.execute(
+                        "SELECT name FROM sqlite_master WHERE type='table' AND name='life_events'"
+                    )
+                    life_events_exists = cursor.fetchone()
+                    if life_events_exists:
+                        cursor.execute("ALTER TABLE life_events RENAME TO lifeevents")
+                    else:
+                        # Create lifeevents table from scratch
+                        cursor.execute("""
+                            CREATE TABLE IF NOT EXISTS lifeevents (
+                                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                                title TEXT NOT NULL,
+                                start_date TEXT NOT NULL,
+                                end_date TEXT NOT NULL,
+                                event_type TEXT NOT NULL, -- 'injury', 'vacation', 'party', 'other'
+                                impact_description TEXT
+                            )
+                        """)
             else:
-                # Constraints table
                 cursor.execute("""
-                    CREATE TABLE IF NOT EXISTS constraints (
+                    CREATE TABLE IF NOT EXISTS lifeevents (
                         id INTEGER PRIMARY KEY AUTOINCREMENT,
                         title TEXT NOT NULL,
                         start_date TEXT NOT NULL,
                         end_date TEXT NOT NULL,
-                        event_type TEXT NOT NULL, -- 'injury', 'vacation', 'party', 'other'
+                        event_type TEXT NOT NULL,
                         impact_description TEXT
                     )
                 """)
@@ -162,11 +181,19 @@ class Database:
                     objective_id INTEGER NOT NULL,
                     strategy TEXT NOT NULL,
                     goals_hash TEXT NOT NULL,
-                    constraints_hash TEXT NOT NULL,
+                    lifeevents_hash TEXT NOT NULL,
                     created_at TEXT NOT NULL,
                     FOREIGN KEY (objective_id) REFERENCES objectives(id) ON DELETE CASCADE
                 )
             """)
+
+            # Migrate column constraints_hash to lifeevents_hash if constraints_hash exists
+            cursor.execute("PRAGMA table_info(macrocycles)")
+            columns = [row['name'] for row in cursor.fetchall()]
+            if 'constraints_hash' in columns and 'lifeevents_hash' not in columns:
+                cursor.execute(
+                    "ALTER TABLE macrocycles RENAME COLUMN constraints_hash TO lifeevents_hash"
+                )
             
             # Mesocycles table
             cursor.execute("""
@@ -226,38 +253,38 @@ class Database:
             conn.cursor().execute("DELETE FROM objectives WHERE id = ?", (obj_id,))
             conn.commit()
 
-    # --- Constraints CRUD ---
-    def add_constraint(
+    # --- LifeEvents CRUD ---
+    def add_lifeevent(
         self, title: str, start_date: str, end_date: str, event_type: str,
         impact_description: str = ""
     ) -> int:
-        """Adds a new constraint and returns its ID."""
+        """Adds a new life event and returns its ID."""
         with self._get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("""
-                INSERT INTO constraints (title, start_date, end_date, event_type, impact_description)
+                INSERT INTO lifeevents (title, start_date, end_date, event_type, impact_description)
                 VALUES (?, ?, ?, ?, ?)
             """, (title, start_date, end_date, event_type, impact_description))
             conn.commit()
             return int(cursor.lastrowid)
 
-    def get_constraints(self, start_after: Optional[str] = None) -> List[Constraint]:
-        """Fetches all constraints, optionally active on or after a date."""
+    def get_lifeevents(self, start_after: Optional[str] = None) -> List[LifeEvent]:
+        """Fetches all life events, optionally active on or after a date."""
         with self._get_connection() as conn:
             cursor = conn.cursor()
             if start_after:
                 cursor.execute(
-                    "SELECT * FROM constraints WHERE end_date >= ? ORDER BY start_date ASC",
+                    "SELECT * FROM lifeevents WHERE end_date >= ? ORDER BY start_date ASC",
                     (start_after,)
                 )
             else:
-                cursor.execute("SELECT * FROM constraints ORDER BY start_date ASC")
+                cursor.execute("SELECT * FROM lifeevents ORDER BY start_date ASC")
             return [dict(row) for row in cursor.fetchall()]  # type: ignore
 
-    def delete_constraint(self, constraint_id: int) -> None:
-        """Deletes a constraint by ID."""
+    def delete_lifeevent(self, lifeevent_id: int) -> None:
+        """Deletes a life event by ID."""
         with self._get_connection() as conn:
-            conn.cursor().execute("DELETE FROM constraints WHERE id = ?", (constraint_id,))
+            conn.cursor().execute("DELETE FROM lifeevents WHERE id = ?", (lifeevent_id,))
             conn.commit()
 
     # --- Workouts CRUD ---
@@ -533,7 +560,7 @@ class Database:
 
     def save_macrocycle(
         self, objective_id: int, strategy: str, goals_hash: str,
-        constraints_hash: str, mesocycles: List[Dict[str, Any]]
+        lifeevents_hash: str, mesocycles: List[Dict[str, Any]]
     ) -> int:
         """Saves a macrocycle and its nested mesocycles, cleaning old macrocycles for the objective."""
         with self._get_connection() as conn:
@@ -543,9 +570,9 @@ class Database:
             
             created_at = datetime.now(timezone.utc).isoformat()
             cursor.execute("""
-                INSERT INTO macrocycles (objective_id, strategy, goals_hash, constraints_hash, created_at)
+                INSERT INTO macrocycles (objective_id, strategy, goals_hash, lifeevents_hash, created_at)
                 VALUES (?, ?, ?, ?, ?)
-            """, (objective_id, strategy, goals_hash, constraints_hash, created_at))
+            """, (objective_id, strategy, goals_hash, lifeevents_hash, created_at))
             macrocycle_id = cursor.lastrowid
             
             for meso in mesocycles:

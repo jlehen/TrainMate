@@ -44,7 +44,7 @@ class TestAdaptation(unittest.TestCase):
         # Clear tables
         with test_db._get_connection() as conn:
             conn.execute("DELETE FROM objectives")
-            conn.execute("DELETE FROM constraints")
+            conn.execute("DELETE FROM lifeevents")
             conn.execute("DELETE FROM workouts")
             conn.execute("DELETE FROM completed_activities")
             conn.execute("DELETE FROM athlete_metrics_cache")

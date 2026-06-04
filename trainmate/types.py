@@ -10,8 +10,8 @@ class Objective(TypedDict):
     priority: int
     status: str  # 'active', 'completed', 'archived'
 
-class Constraint(TypedDict):
-    """Represents a life event constraint that impacts training availability."""
+class LifeEvent(TypedDict):
+    """Represents a life event that impacts training availability."""
     id: Optional[int]
     title: str
     start_date: str
@@ -76,7 +76,7 @@ class Macrocycle(TypedDict):
     objective_id: int
     strategy: str
     goals_hash: str
-    constraints_hash: str
+    lifeevents_hash: str
     created_at: str
 
 class Mesocycle(TypedDict):

@@ -21,16 +21,16 @@ def main() -> None:
     for g in goals:
         print(f"- Objective: {g['title']} on {g['target_date']}")
 
-    # 2. Add mock constraint
-    db.add_constraint(
+    # 2. Add mock life event
+    db.add_lifeevent(
         title="Ibiza Vacation",
         start_date="2026-07-01",
         end_date="2026-07-08",
         event_type="vacation",
         impact_description="Reduce volume by 50%"
     )
-    events = db.get_constraints()
-    print(f"Constraints test: Found {len(events)} constraints.")
+    events = db.get_lifeevents()
+    print(f"Life events test: Found {len(events)} life events.")
 
     # 3. Create simulated workouts (one normal, one adapted)
     today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")

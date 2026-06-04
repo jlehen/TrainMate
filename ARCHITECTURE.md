@@ -9,7 +9,7 @@ quickly build a mental model of the system.
 ## 1. System Overview & Module Map
 
 TrainMate is a local AI sports science coaching application that coordinates training objectives,
-life constraints, and Garmin metrics.
+life events, and Garmin metrics.
 
 ```
        +---------------------------------------------+
@@ -59,7 +59,7 @@ Stores target athlete objectives.
 *   `priority` (INTEGER)
 *   `status` (TEXT - active, completed, archived)
 
-### constraints
+### lifeevents
 Stores life event dates which limit training availability.
 *   `id` (INTEGER PRIMARY KEY)
 *   `title` (TEXT)
@@ -103,7 +103,7 @@ Active macro training cycles tied to target objectives.
 *   `id` (INTEGER PRIMARY KEY)
 *   `objective_id` (INTEGER, FOREIGN KEY to objectives.id)
 *   `strategy` (TEXT - overall coaching strategy)
-*   `goals_hash` / `constraints_hash` (TEXT - status tracking)
+*   `goals_hash` / `lifeevents_hash` (TEXT - status tracking)
 *   `created_at` (TEXT)
 
 ### mesocycles

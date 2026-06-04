@@ -7,7 +7,7 @@ from trainmate.config import config
 from trainmate.db import db
 from trainmate.openrouter import openrouter_client
 from trainmate.google_calendar import calendar_syncer
-from trainmate.types import Objective, Constraint, Workout, CompletedActivity
+from trainmate.types import Objective, LifeEvent, Workout, CompletedActivity
 
 class CoachEngine:
     """Orchestrates sports science coaching, macro/meso planning, and daily adaptations."""
@@ -101,7 +101,7 @@ class CoachEngine:
         return "\n".join(lines)
 
     def _get_coach_system_prompt(
-        self, objectives: List[Objective], constraints: List[Constraint],
+        self, objectives: List[Objective], lifeevents: List[LifeEvent],
         custom_task: str = ""
     ) -> str:
         """Constructs the static prefix system prompt.
@@ -110,7 +110,7 @@ class CoachEngine:
 
         Args:
             objectives: List of active athlete objectives.
-            constraints: List of upcoming logged constraints.
+            lifeevents: List of upcoming logged life events.
             custom_task: Specific task context to append.
 
         Returns:
@@ -157,12 +157,12 @@ class CoachEngine:
                 f"Sport: {o['sport_type']} | Details: {details}\n"
             )
 
-        # Serialize constraints
+        # Serialize life events
         c_text = ""
-        for c in constraints:
+        for c in lifeevents:
             impact = c.get('impact_description', '')
             c_text += (
-                f"- Constraint: {c['title']} | Start: {c['start_date']} | "
+                f"- Life Event: {c['title']} | Start: {c['start_date']} | "
                 f"End: {c['end_date']} | Type: {c['event_type']} | Impact: {impact}\n"
             )
 
@@ -177,7 +177,7 @@ COACHING ROLE AND OBJECTIVES:
    synergies between them (e.g. general base or strength building phases).
 3. Dynamically adjust training plans based on recent Garmin metrics (Resting HR, HRV, Sleep,
    ACWR) to optimize recovery and prevent injury.
-4. Shift or scale training volume and intensity around constraints (injury, vacation, parties)
+4. Shift or scale training volume and intensity around life events (injury, vacation, parties)
    to manage fatigue.
 5. Adhere to the day-by-day weekly availability schedule and day-dependent equipment access
    (e.g., do not schedule gym workouts on home-only days; do not schedule workouts on rest days;
@@ -201,8 +201,8 @@ ATHLETE PROFILE & PREFERENCES:
 ACTIVE ATHLETE GOALS (CHRONOLOGICAL):
 {obj_text if obj_text else "No active goals."}
 
-UPCOMING CONSTRAINTS (LIFE EVENTS):
-{c_text if c_text else "No upcoming constraints."}
+UPCOMING LIFE EVENTS:
+{c_text if c_text else "No upcoming life events."}
 
 {custom_task}
 """
@@ -225,10 +225,10 @@ UPCOMING CONSTRAINTS (LIFE EVENTS):
         serialized = json.dumps(cleaned, sort_keys=True)
         return hashlib.sha256(serialized.encode('utf-8')).hexdigest()
 
-    def _get_constraints_hash(self, constraints: List[Constraint]) -> str:
-        """Computes a hash representation of constraints list to check for updates."""
+    def _get_lifeevents_hash(self, lifeevents: List[LifeEvent]) -> str:
+        """Computes a hash representation of life events list to check for updates."""
         cleaned = []
-        for c in constraints:
+        for c in lifeevents:
             cleaned.append({
                 'id': c.get('id'),
                 'title': c.get('title'),
@@ -243,7 +243,7 @@ UPCOMING CONSTRAINTS (LIFE EVENTS):
 
     def _generate_macrocycle_strategy(
         self, next_goal: Objective, objectives: List[Objective],
-        constraints: List[Constraint], today_str: str,
+        lifeevents: List[LifeEvent], today_str: str,
         previous_strategy_text: Optional[str] = None
     ) -> Dict[str, Any]:
         """Queries LLM to determine the overall macrocycle strategy and mesocycle blocks."""
@@ -295,10 +295,10 @@ You MUST respond with a JSON object containing:
             )
 
         c_text = ""
-        for c in constraints:
+        for c in lifeevents:
             impact = c.get('impact_description', '')
             c_text += (
-                f"- Constraint: {c['title']} | Start: {c['start_date']} | "
+                f"- Life Event: {c['title']} | Start: {c['start_date']} | "
                 f"End: {c['end_date']} | Type: {c['event_type']} | Impact: {impact}\n"
             )
 
@@ -317,8 +317,8 @@ You MUST respond with a JSON object containing:
             f"\nATHLETE PROFILE & PREFERENCES:\n{athlete_profile}\n"
             f"\nACTIVE ATHLETE GOALS (CHRONOLOGICAL):\n"
             f"{obj_text if obj_text else 'No active goals.'}\n\n"
-            f"UPCOMING CONSTRAINTS (LIFE EVENTS):\n"
-            f"{c_text if c_text else 'No upcoming constraints.'}\n\n"
+            f"UPCOMING LIFE EVENTS:\n"
+            f"{c_text if c_text else 'No upcoming life events.'}\n\n"
             f"{custom_task}\n"
         )
 
@@ -351,13 +351,13 @@ You MUST respond with a JSON object containing:
         objectives.sort(key=lambda x: str(x['target_date']))
         next_goal = objectives[0]
 
-        # Get future constraints
+        # Get future life events
         today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-        constraints = db.get_constraints(start_after=today_str)
+        lifeevents = db.get_lifeevents(start_after=today_str)
 
         # Compute current hashes
         goals_hash = self._get_goals_hash(objectives)
-        constraints_hash = self._get_constraints_hash(constraints)
+        lifeevents_hash = self._get_lifeevents_hash(lifeevents)
 
         # Try to retrieve existing macrocycle
         strategy = ""
@@ -370,7 +370,7 @@ You MUST respond with a JSON object containing:
         if existing_macro and not force:
             if (
                 existing_macro['goals_hash'] == goals_hash
-                and existing_macro['constraints_hash'] == constraints_hash
+                and existing_macro['lifeevents_hash'] == lifeevents_hash
             ):
                 reused = True
                 strategy = existing_macro['strategy']
@@ -400,12 +400,12 @@ You MUST respond with a JSON object containing:
                 )
 
             # Generate new macrocycle strategy and mesocycles
-            print("Goals or constraints have changed, or force generation requested. "
+            print("Goals or life events have changed, or force generation requested. "
                   "Determining new overall periodization strategy...")
             macro_data = self._generate_macrocycle_strategy(
                 next_goal,
                 objectives,
-                constraints,
+                lifeevents,
                 today_str,
                 previous_strategy_text=prev_strategy_text
             )
@@ -418,7 +418,7 @@ You MUST respond with a JSON object containing:
                     objective_id=next_goal['id'],
                     strategy=strategy,
                     goals_hash=goals_hash,
-                    constraints_hash=constraints_hash,
+                    lifeevents_hash=lifeevents_hash,
                     mesocycles=mesocycles
                 )
             print("\n=== NEW PERIODIZATION STRATEGY (MACROCYCLE) ===")
@@ -453,14 +453,14 @@ You MUST respond with a JSON object containing:
             )
 
         today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-        constraints = db.get_constraints(start_after=today_str)
+        lifeevents = db.get_lifeevents(start_after=today_str)
 
         custom_task = """
 TASK:
 Generate a training schedule for the next 4 weeks (28 days) starting from today. 
 Ensure the weekly schedules/microcycles are designed specifically to match the focus, target
 volume, and intensity of the active mesocycle block(s) the athlete is in during this period.
-Incorporate deload weeks and schedule around constraints (injury = rest/cross-training,
+Incorporate deload weeks and schedule around life events (injury = rest/cross-training,
 vacation = maintain fitness, party = easy workouts next day).
 
 You MUST respond with a JSON object containing:
@@ -484,7 +484,7 @@ You MUST respond with a JSON object containing:
   ]
 }
 """
-        system_prompt = self._get_coach_system_prompt(objectives, constraints, custom_task)
+        system_prompt = self._get_coach_system_prompt(objectives, lifeevents, custom_task)
         user_content = (
             f"Today's date is {today_str}. "
             "Please generate the 4-week microcycles (workouts) starting today."
@@ -768,7 +768,7 @@ You MUST respond with a JSON object containing:
 """
         # Prepare system prompt
         system_prompt = self._get_coach_system_prompt(
-            objectives, db.get_constraints(start_after=target_date_str), custom_task
+            objectives, db.get_lifeevents(start_after=target_date_str), custom_task
         )
 
         # Build user content containing trajectory metrics and discrepancies

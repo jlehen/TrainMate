@@ -100,7 +100,7 @@ def single_objective(obj_id: int) -> Any:
 
 @app.route("/api/life-events", methods=["GET", "POST"])
 def manage_life_events() -> Any:
-    """API endpoint to list active constraints or add a new constraint."""
+    """API endpoint to list active life events or add a new life event."""
     if request.method == "POST":
         data = request.json
         if not data:
@@ -113,24 +113,24 @@ def manage_life_events() -> Any:
         if not title or not start or not end or not e_type:
             return jsonify({"error": "Missing title, start_date, end_date, or event_type"}), 400
             
-        event_id = db.add_constraint(
+        event_id = db.add_lifeevent(
             title=title,
             start_date=start,
             end_date=end,
             event_type=e_type,
             impact_description=data.get("impact_description", "")
         )
-        return jsonify({"id": event_id, "message": "Constraint logged successfully."}), 201
+        return jsonify({"id": event_id, "message": "Life event logged successfully."}), 201
         
     # GET method
     today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-    return jsonify(db.get_constraints(start_after=today_str))
+    return jsonify(db.get_lifeevents(start_after=today_str))
 
 @app.route("/api/life-events/<int:event_id>", methods=["DELETE"])
 def delete_life_event(event_id: int) -> Any:
-    """API endpoint to delete a specific constraint."""
-    db.delete_constraint(event_id)
-    return jsonify({"message": "Constraint deleted."})
+    """API endpoint to delete a specific life event."""
+    db.delete_lifeevent(event_id)
+    return jsonify({"message": "Life event deleted."})
 
 @app.route("/api/workouts", methods=["GET"])
 def get_workouts() -> Any:
