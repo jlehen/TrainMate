@@ -328,7 +328,10 @@ TASK:
 Determine the overall periodization strategy (macrocycle) from today ({today_str}) until the next
 chronological goal ({next_goal['target_date']}).
 Divide this timeframe into contiguous, sequential mesocycles (typically blocks of 3-4 weeks,
-though the final peak/taper/race block or very short periods can be shorter).
+though the final peak/taper/race block or very short periods can be shorter). When planning
+mesocycles, it is acceptable to shorten/extend a block by a few days to align transition or
+recovery periods with upcoming life events (e.g. extending a block to ensure a deload week aligns
+with a vacation or trip).
 Make sure there are no gaps between the end date of one mesocycle and the start date of the next.
 The first mesocycle must start on today's date ({today_str}) and the last mesocycle must end on or
 around the goal date ({next_goal['target_date']}).
