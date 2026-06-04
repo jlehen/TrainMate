@@ -138,19 +138,21 @@
                                 <input type="text" id="goal-title" placeholder="e.g. Zurich Marathon" required>
                                 <input type="date" id="goal-date" required>
                             </div>
-                            <div class="form-row">
-                                <select id="goal-sport" required>
-                                    <option value="" disabled selected>Select Sport</option>
-                                    <option value="running">Running</option>
-                                    <option value="road_biking">Cycling</option>
-                                    <option value="hiking">Hiking</option>
-                                    <option value="strength_training">Strength</option>
-                                    <option value="yoga">Yoga</option>
-                                    <option value="ski_touring">Ski Touring</option>
-                                </select>
-                                <input type="number" id="goal-priority" placeholder="Priority (1-5)" min="1" max="5" value="1">
+                            <div class="sport-chips-container">
+                                <span class="form-label">Target Sports</span>
+                                <div class="sport-chips" id="goal-sports-chips">
+                                    <div class="sport-chip" data-value="running"><i class="fa-solid fa-person-running"></i> Running</div>
+                                    <div class="sport-chip" data-value="road_biking"><i class="fa-solid fa-bicycle"></i> Cycling</div>
+                                    <div class="sport-chip" data-value="hiking"><i class="fa-solid fa-mountain-sun"></i> Hiking</div>
+                                    <div class="sport-chip" data-value="strength_training"><i class="fa-solid fa-dumbbell"></i> Strength</div>
+                                    <div class="sport-chip" data-value="yoga"><i class="fa-solid fa-spa"></i> Yoga</div>
+                                    <div class="sport-chip" data-value="ski_touring"><i class="fa-solid fa-person-skiing-nordic"></i> Ski Touring</div>
+                                </div>
                             </div>
-                            <input type="text" id="goal-desc" placeholder="Goal details or target time (optional)">
+                            <div class="form-row">
+                                <input type="number" id="goal-priority" placeholder="Priority (1-5)" min="1" max="5" value="1">
+                                <input type="text" id="goal-desc" placeholder="Goal details or target time (optional)">
+                            </div>
                             <button type="submit" class="btn btn-primary btn-sm"><i class="fa-solid fa-plus"></i> Add Goal</button>
                         </form>
                     </div>

@@ -32,9 +32,9 @@ def main() -> None:
     g_add.add_argument("--title", required=True, help="Goal title (e.g. Marathon)")
     g_add.add_argument("--date", required=True, help="Target event date (YYYY-MM-DD)")
     g_add.add_argument(
-        "--sport", required=True,
+        "--sport", required=True, nargs="+",
         choices=["running", "road_biking", "hiking", "strength_training", "yoga", "ski_touring"],
-        help="Sport type"
+        help="Sport types (one or more)"
     )
     g_add.add_argument("--desc", default="", help="Description")
     g_add.add_argument("--priority", type=int, default=1, help="Goal priority (1 = highest)")
@@ -532,10 +532,11 @@ def run_metrics_pull() -> None:
 
 def run_goal_add(args: argparse.Namespace) -> None:
     """Creates a new objective goal via command line."""
+    sports_str = ",".join(args.sport)
     db.add_objective(
         title=args.title,
         target_date=args.date,
-        sport_type=args.sport,
+        sport_type=sports_str,
         description=args.desc,
         priority=args.priority,
         status='active'

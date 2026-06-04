@@ -40,7 +40,11 @@ async function fetchStatus() {
         const goalTitleEl = document.getElementById("header-goal-title");
         const goalCountdownEl = document.getElementById("header-goal-countdown");
         if (data.next_goal) {
-            goalTitleEl.innerText = `${data.next_goal.title} (${data.next_goal.sport_type.replace('_', ' ').toUpperCase()})`;
+            const sportsList = data.next_goal.sport_type
+                .split(',')
+                .map(s => s.trim().replace('_', ' ').toUpperCase())
+                .join(', ');
+            goalTitleEl.innerText = `${data.next_goal.title} (${sportsList})`;
             
             // Calculate countdown
             const target = new Date(data.next_goal.target_date);
@@ -309,11 +313,15 @@ async function fetchObjectives() {
         }
         
         goals.forEach(g => {
+            const sportsList = g.sport_type
+                .split(',')
+                .map(s => s.trim().replace('_', ' '))
+                .join(', ');
             const item = document.createElement("div");
             item.className = "list-item";
             item.innerHTML = `
                 <div class="item-info">
-                    <span class="item-title">${g.title} (${g.sport_type.replace('_', ' ')})</span>
+                    <span class="item-title">${g.title} (${sportsList})</span>
                     <span class="item-meta">Target: ${g.target_date} | Priority: ${g.priority}</span>
                 </div>
                 <button class="btn-icon-only" onclick="deleteObjective(${g.id})"><i class="fa-solid fa-trash-can"></i></button>
@@ -575,7 +583,16 @@ document.getElementById("form-add-goal").addEventListener("submit", async (e) =>
     e.preventDefault();
     const title = document.getElementById("goal-title").value;
     const target_date = document.getElementById("goal-date").value;
-    const sport_type = document.getElementById("goal-sport").value;
+    
+    // Get selected sports from chips
+    const selectedChips = document.querySelectorAll("#goal-sports-chips .sport-chip.selected");
+    const sports = Array.from(selectedChips).map(c => c.dataset.value);
+    if (sports.length === 0) {
+        logConsole("Failed to add goal: Please select at least one sport.", "error");
+        alert("Please select at least one sport.");
+        return;
+    }
+    
     const priority = document.getElementById("goal-priority").value;
     const description = document.getElementById("goal-desc").value;
     
@@ -584,11 +601,12 @@ document.getElementById("form-add-goal").addEventListener("submit", async (e) =>
         const res = await fetch(`${API_BASE}/api/objectives`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ title, target_date, sport_type, priority, description })
+            body: JSON.stringify({ title, target_date, sport_type: sports, priority, description })
         });
         if (res.ok) {
             logConsole(`Goal '${title}' added!`);
             document.getElementById("form-add-goal").reset();
+            selectedChips.forEach(c => c.classList.remove("selected"));
             fetchObjectives();
             fetchStatus();
         } else {
@@ -635,6 +653,13 @@ document.getElementById("btn-clear-logs").addEventListener("click", () => {
 
 // --- INITIALIZATION ---
 document.addEventListener("DOMContentLoaded", () => {
+    // Setup interactive sport chips
+    document.querySelectorAll("#goal-sports-chips .sport-chip").forEach(chip => {
+        chip.addEventListener("click", () => {
+            chip.classList.toggle("selected");
+        });
+    });
+    
     fetchStatus();
     fetchObjectives();
     fetchEvents();

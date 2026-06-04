@@ -5,7 +5,7 @@ class Objective(TypedDict):
     id: Optional[int]
     title: str
     target_date: str
-    sport_type: str
+    sport_type: str  # Can be a single sport or comma-separated list of sports
     description: Optional[str]
     priority: int
     status: str  # 'active', 'completed', 'archived'

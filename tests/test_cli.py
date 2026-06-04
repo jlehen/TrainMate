@@ -115,6 +115,18 @@ class TestTrainMateCLI(unittest.TestCase):
         self.assertEqual(exit_code, 0)
         self.assertIn("Goal 'Morning Yoga Flow' added successfully", stdout)
 
+        # 2c. Add goal with multiple sports
+        exit_code, stdout, stderr = self.run_cli([
+            'goal', 'add',
+            '--title', 'Hybrid Strength Endurance',
+            '--date', '2026-11-30',
+            '--sport', 'road_biking', 'strength_training',
+            '--desc', 'Aging well routine',
+            '--priority', '3'
+        ])
+        self.assertEqual(exit_code, 0)
+        self.assertIn("Goal 'Hybrid Strength Endurance' added successfully", stdout)
+
         # 3. List goals again to check info
         exit_code, stdout, stderr = self.run_cli(['goal', 'list'])
         self.assertEqual(exit_code, 0)
@@ -123,6 +135,9 @@ class TestTrainMateCLI(unittest.TestCase):
         self.assertIn("2026-10-15", stdout)
         self.assertIn("Priority: 1", stdout)
         self.assertIn("ID: 1", stdout)
+        
+        self.assertIn("Hybrid Strength Endurance", stdout)
+        self.assertIn("road_biking,strength_training", stdout)
 
         # 4. Remove goal
         exit_code, stdout, stderr = self.run_cli(['goal', 'rm', '1'])

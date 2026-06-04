@@ -69,6 +69,9 @@ def manage_objectives() -> Any:
         if not title or not t_date or not s_type:
             return jsonify({"error": "Missing title, target_date, or sport_type"}), 400
             
+        if isinstance(s_type, list):
+            s_type = ",".join(s_type)
+            
         obj_id = db.add_objective(
             title=title,
             target_date=t_date,
