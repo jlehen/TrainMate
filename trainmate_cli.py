@@ -50,6 +50,10 @@ def main() -> None:
     
     # goal list
     goal_subparsers.add_parser("list", help="Show all training objectives")
+
+    # goal wipe
+    g_wipe = goal_subparsers.add_parser("wipe", help="Wipe all training objectives")
+    g_wipe.add_argument("-y", "--yes", action="store_true", help="Skip confirmation prompt")
     
     # lifeevent command & subparsers
     lifeevent_parser = subparsers.add_parser(
@@ -78,6 +82,10 @@ def main() -> None:
     
     # lifeevent list
     lifeevent_subparsers.add_parser("list", help="Show all logged life events")
+
+    # lifeevent wipe
+    le_wipe = lifeevent_subparsers.add_parser("wipe", help="Wipe all life events")
+    le_wipe.add_argument("-y", "--yes", action="store_true", help="Skip confirmation prompt")
     
     # plan command & subparsers
     plan_parser = subparsers.add_parser(
@@ -104,6 +112,10 @@ def main() -> None:
         "show",
         help="Show the active macrocycle and mesocycles periodization strategy"
     )
+
+    # plan wipe
+    p_wipe = plan_subparsers.add_parser("wipe", help="Wipe all periodization plans")
+    p_wipe.add_argument("-y", "--yes", action="store_true", help="Skip confirmation prompt")
     
     # workout command & subparsers
     workout_parser = subparsers.add_parser(
@@ -144,6 +156,13 @@ def main() -> None:
         "push",
         help="Commit all local planned workouts to Google Calendar"
     )
+
+    # workout wipe
+    w_wipe = workout_subparsers.add_parser(
+        "wipe",
+        help="Wipe all workouts from the database and Google Calendar"
+    )
+    w_wipe.add_argument("-y", "--yes", action="store_true", help="Skip confirmation prompt")
     
     # metrics command & subparsers
     metrics_parser = subparsers.add_parser(
@@ -160,6 +179,10 @@ def main() -> None:
         "pull",
         help="Fetch latest activities and metrics from Sheets"
     )
+
+    # metrics wipe
+    m_wipe = metrics_subparsers.add_parser("wipe", help="Wipe all metrics from the database")
+    m_wipe.add_argument("-y", "--yes", action="store_true", help="Skip confirmation prompt")
     
     # Parse the arguments
     args = parser.parse_args()
@@ -196,6 +219,8 @@ def main() -> None:
             run_goal_rm(args)
         elif sub == "list":
             run_goal_list()
+        elif sub == "wipe":
+            run_goal_wipe(args)
     elif cmd in ("lifeevent", "le", "e"):
         if not args.subcommand:
             lifeevent_parser.print_help()
@@ -207,6 +232,8 @@ def main() -> None:
             run_lifeevent_rm(args)
         elif sub == "list":
             run_lifeevent_list()
+        elif sub == "wipe":
+            run_lifeevent_wipe(args)
     elif cmd in ("workout", "w"):
         if not args.subcommand:
             workout_parser.print_help()
@@ -222,6 +249,8 @@ def main() -> None:
             run_workout_adapt(args)
         elif sub == "push":
             run_workout_push()
+        elif sub == "wipe":
+            run_workout_wipe(args)
     elif cmd in ("metrics", "m"):
         if not args.subcommand:
             metrics_parser.print_help()
@@ -229,6 +258,8 @@ def main() -> None:
         sub = args.subcommand.lower()
         if sub == "pull":
             run_metrics_pull()
+        elif sub == "wipe":
+            run_metrics_wipe(args)
     elif cmd in ("plan", "p"):
         if not args.subcommand:
             plan_parser.print_help()
@@ -238,6 +269,8 @@ def main() -> None:
             run_plan_generate(args)
         elif sub == "show":
             run_plan_show()
+        elif sub == "wipe":
+            run_plan_wipe(args)
     else:
         print(f"Unknown command: '{cmd}'")
         parser.print_help()
@@ -710,6 +743,99 @@ def run_workout_list() -> None:
         if w.get('modification_reason'):
             print(f"  Reason: {w['modification_reason']}")
         print("-" * 40)
+
+def run_goal_wipe(args: argparse.Namespace) -> None:
+    """Wipes all goals from the database after confirmation."""
+    if not args.yes:
+        try:
+            confirm = input(
+                "Are you sure you want to wipe all training objectives? [y/N]: "
+            ).strip().lower()
+        except EOFError:
+            confirm = 'n'
+        if confirm not in ('y', 'yes'):
+            print("Wipe cancelled.")
+            return
+
+    db.wipe_objectives()
+    print("All training objectives wiped successfully.")
+
+def run_lifeevent_wipe(args: argparse.Namespace) -> None:
+    """Wipes all life events from the database after confirmation."""
+    if not args.yes:
+        try:
+            confirm = input(
+                "Are you sure you want to wipe all life events? [y/N]: "
+            ).strip().lower()
+        except EOFError:
+            confirm = 'n'
+        if confirm not in ('y', 'yes'):
+            print("Wipe cancelled.")
+            return
+
+    db.wipe_lifeevents()
+    print("All life events wiped successfully.")
+
+def run_plan_wipe(args: argparse.Namespace) -> None:
+    """Wipes all plans from the database after confirmation."""
+    if not args.yes:
+        try:
+            confirm = input(
+                "Are you sure you want to wipe all periodization plans? [y/N]: "
+            ).strip().lower()
+        except EOFError:
+            confirm = 'n'
+        if confirm not in ('y', 'yes'):
+            print("Wipe cancelled.")
+            return
+
+    db.wipe_plans()
+    print("All periodization plans wiped successfully.")
+
+def run_workout_wipe(args: argparse.Namespace) -> None:
+    """Wipes all workouts from the database and Google Calendar after confirmation."""
+    if not args.yes:
+        try:
+            msg = (
+                "Are you sure you want to wipe all workouts "
+                "(including Google Calendar events)? [y/N]: "
+            )
+            confirm = input(msg).strip().lower()
+        except EOFError:
+            confirm = 'n'
+        if confirm not in ('y', 'yes'):
+            print("Wipe cancelled.")
+            return
+
+    workouts = db.get_workouts()
+    synced_workouts = [w for w in workouts if w.get('google_event_id')]
+    if synced_workouts:
+        print(f"Deleting {len(synced_workouts)} events from Google Calendar...")
+        for w in synced_workouts:
+            ge_id = w['google_event_id']
+            if ge_id:
+                calendar_syncer.delete_workout_event(ge_id)
+
+    db.wipe_workouts()
+    print("All workouts wiped successfully.")
+
+def run_metrics_wipe(args: argparse.Namespace) -> None:
+    """Wipes all metrics, baselines, and activities after confirmation."""
+    if not args.yes:
+        try:
+            msg = (
+                "Are you sure you want to wipe all metrics, baselines, "
+                "and completed activities? [y/N]: "
+            )
+            confirm = input(msg).strip().lower()
+        except EOFError:
+            confirm = 'n'
+        if confirm not in ('y', 'yes'):
+            print("Wipe cancelled.")
+            return
+
+    db.wipe_metrics()
+    print("All metrics, baselines, and completed activities wiped successfully.")
 
 if __name__ == "__main__":
     main()

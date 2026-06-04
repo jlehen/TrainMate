@@ -602,5 +602,40 @@ class Database:
             )
             conn.commit()
 
+    def wipe_objectives(self) -> None:
+        """Deletes all objectives from the database."""
+        with self._get_connection() as conn:
+            conn.cursor().execute("DELETE FROM objectives")
+            conn.commit()
+
+    def wipe_lifeevents(self) -> None:
+        """Deletes all life events from the database."""
+        with self._get_connection() as conn:
+            conn.cursor().execute("DELETE FROM lifeevents")
+            conn.commit()
+
+    def wipe_plans(self) -> None:
+        """Deletes all macrocycles and mesocycles from the database."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM mesocycles")
+            cursor.execute("DELETE FROM macrocycles")
+            conn.commit()
+
+    def wipe_workouts(self) -> None:
+        """Deletes all workouts from the database."""
+        with self._get_connection() as conn:
+            conn.cursor().execute("DELETE FROM workouts")
+            conn.commit()
+
+    def wipe_metrics(self) -> None:
+        """Deletes all metrics, baselines, and completed activities from the database."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM completed_activities")
+            cursor.execute("DELETE FROM athlete_metrics_cache")
+            cursor.execute("DELETE FROM athlete_baselines")
+            conn.commit()
+
 # Singleton instance
 db = Database()
