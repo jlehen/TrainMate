@@ -71,6 +71,11 @@ class Config:
         return os.path.join(os.path.dirname(os.path.dirname(__file__)), "science")
 
     @property
+    def llm_logs_dir(self) -> str:
+        """Gets the directory where LLM interaction logs are stored."""
+        return os.path.join(os.path.dirname(os.path.dirname(__file__)), "logs", "llm_exchanges")
+
+    @property
     def app_science_dir(self) -> str:
         """Gets the internal application directory containing default sports science guidelines."""
         return os.path.join(os.path.dirname(__file__), "science")

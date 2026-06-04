@@ -1,7 +1,8 @@
 import requests
 import json
 import os
-from typing import Any
+from datetime import datetime, timezone
+from typing import Any, Optional
 from trainmate.config import config
 
 class OpenRouterClient:
@@ -12,7 +13,89 @@ class OpenRouterClient:
         self.api_url: str = "https://openrouter.ai/api/v1/chat/completions"
         self.model: str = config.openrouter_model
 
-    def complete(self, system_content: str, user_content: str) -> dict[str, Any]:
+    def _log_exchange(
+        self,
+        label: str,
+        system_content: str,
+        user_content: str,
+        response_data: Optional[dict[str, Any]] = None,
+        error_msg: Optional[str] = None
+    ) -> None:
+        """Writes the LLM exchange to a markdown file in the logs directory."""
+        try:
+            logs_dir = config.llm_logs_dir
+            os.makedirs(logs_dir, exist_ok=True)
+            
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            filename = f"{timestamp}_{label}.md"
+            filepath = os.path.join(logs_dir, filename)
+            
+            usage_str = "N/A"
+            if response_data:
+                usage = response_data.get("usage", {})
+                if usage:
+                    usage_str = (
+                        f"Prompt: {usage.get('prompt_tokens')}, "
+                        f"Completion: {usage.get('completion_tokens')}, "
+                        f"Total: {usage.get('total_tokens')}"
+                    )
+            
+            content_str = ""
+            if response_data:
+                choices = response_data.get("choices", [])
+                if choices:
+                    content_str = choices[0].get("message", {}).get("content", "")
+            
+            lines = [
+                f"# LLM Exchange: {label.replace('_', ' ').title()}",
+                f"- **Timestamp**: {datetime.now(timezone.utc).isoformat()}",
+                f"- **Model**: {self.model}",
+                f"- **Token Usage**: {usage_str}",
+                ""
+            ]
+            
+            if error_msg:
+                lines.extend([
+                    "## ERROR STATUS",
+                    "```",
+                    error_msg,
+                    "```",
+                    ""
+                ])
+                
+            lines.extend([
+                "## System Prompt",
+                "<details>",
+                "<summary>Click to expand system prompt</summary>",
+                "",
+                system_content,
+                "</details>",
+                "",
+                "## User Content",
+                "```",
+                user_content,
+                "```",
+                ""
+            ])
+            
+            if content_str:
+                lines.extend([
+                    "## Raw Response (JSON)",
+                    "```json",
+                    content_str,
+                    "```"
+                ])
+                
+            with open(filepath, "w", encoding="utf-8") as f:
+                f.write("\n".join(lines))
+                
+            print(f"Logged LLM exchange to: {filepath}")
+        except Exception as e:
+            print(f"Warning: Failed to log LLM exchange: {e}")
+
+    def complete(
+        self, system_content: str, user_content: str, label: str = "exchange"
+    ) -> dict[str, Any]:
         """Sends a request to OpenRouter with system and user prompts.
 
         Expects a structured JSON object response from the LLM.
@@ -20,6 +103,7 @@ class OpenRouterClient:
         Args:
             system_content: Large context / rules placed in system role prompt.
             user_content: Immediate instruction or data payload for the LLM.
+            label: Descriptive name of the action being logged.
 
         Returns:
             The parsed JSON response dictionary from the model.
@@ -67,6 +151,9 @@ class OpenRouterClient:
                 f"Total: {usage.get('total_tokens')}"
             )
             
+            # Log successful exchange
+            self._log_exchange(label, system_content, user_content, response_data=resp_data)
+            
             choices = resp_data.get("choices", [])
             if not choices:
                 raise ValueError("Empty completion returned from OpenRouter.")
@@ -76,11 +163,15 @@ class OpenRouterClient:
             
         except requests.exceptions.HTTPError as he:
             print(f"HTTP Error calling OpenRouter: {he}")
-            if response is not None:
-                print(f"Response Body: {response.text}")
+            resp_text = response.text if response is not None else ""
+            if resp_text:
+                print(f"Response Body: {resp_text}")
+            err_msg = f"HTTP Error: {he}\nResponse: {resp_text}"
+            self._log_exchange(label, system_content, user_content, error_msg=err_msg)
             raise he
         except Exception as e:
             print(f"Error calling OpenRouter completions: {e}")
+            self._log_exchange(label, system_content, user_content, error_msg=str(e))
             raise e
 
 # Singleton instance

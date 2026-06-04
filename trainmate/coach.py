@@ -329,7 +329,9 @@ You MUST respond with a JSON object containing:
         )
 
         print("Querying OpenRouter to generate macrocycle and mesocycles periodization strategy...")
-        result = openrouter_client.complete(system_prompt, user_content)
+        result = openrouter_client.complete(
+            system_prompt, user_content, label="periodization_plan"
+        )
         return result
 
     def generate_periodization_plan(self, force: bool = False) -> Tuple[str, List[Dict[str, Any]]]:
@@ -489,7 +491,9 @@ You MUST respond with a JSON object containing:
         )
 
         print("Querying OpenRouter to generate training workouts (microcycles)...")
-        plan_data = openrouter_client.complete(system_prompt, user_content)
+        plan_data = openrouter_client.complete(
+            system_prompt, user_content, label="workout_generation"
+        )
 
         # Save learnings to memory
         if "athlete_learnings" in plan_data:
@@ -824,7 +828,9 @@ Adherence Discrepancies & Violations:
 """
         print(f"Querying OpenRouter to evaluate adaptation for the remainder of the mesocycle "
               f"({target_date_str} -> {meso_end_date_str})...")
-        decision = openrouter_client.complete(system_prompt, user_content)
+        decision = openrouter_client.complete(
+            system_prompt, user_content, label="workout_adaptation"
+        )
 
         # Update memories if present
         if "training_strategy" in decision and decision["training_strategy"]:
