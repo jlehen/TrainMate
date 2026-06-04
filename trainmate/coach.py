@@ -19,39 +19,39 @@ class CoachRepository:
         self._calendar_syncer_instance = calendar_syncer_instance
 
     @property
-    def db(self):
+    def _db(self):
         return self._db_instance or db
 
     @property
-    def calendar_syncer(self):
+    def _calendar_syncer(self):
         return self._calendar_syncer_instance or calendar_syncer
 
-    def get_active_objectives(self) -> List[Objective]:
-        return self.db.get_objectives(status='active')
+    def _get_active_objectives(self) -> List[Objective]:
+        return self._db.get_objectives(status='active')
 
-    def get_upcoming_lifeevents(self, today_str: str) -> List[LifeEvent]:
-        return self.db.get_lifeevents(start_after=today_str)
+    def _get_upcoming_lifeevents(self, today_str: str) -> List[LifeEvent]:
+        return self._db.get_lifeevents(start_after=today_str)
 
-    def get_macrocycle_for_objective(self, objective_id: int) -> Optional[Dict[str, Any]]:
-        return self.db.get_macrocycle_for_objective(objective_id)
+    def _get_macrocycle_for_objective(self, objective_id: int) -> Optional[Dict[str, Any]]:
+        return self._db.get_macrocycle_for_objective(objective_id)
 
-    def get_mesocycles_for_macrocycle(self, macrocycle_id: int) -> List[Dict[str, Any]]:
-        return self.db.get_mesocycles_for_macrocycle(macrocycle_id)
+    def _get_mesocycles_for_macrocycle(self, macrocycle_id: int) -> List[Dict[str, Any]]:
+        return self._db.get_mesocycles_for_macrocycle(macrocycle_id)
 
-    def get_last_macrocycle(self) -> Optional[Dict[str, Any]]:
-        return self.db.get_last_macrocycle()
+    def _get_last_macrocycle(self) -> Optional[Dict[str, Any]]:
+        return self._db.get_last_macrocycle()
 
-    def get_coach_memory(self, key: str) -> Optional[str]:
-        return self.db.get_coach_memory(key)
+    def _get_coach_memory(self, key: str) -> Optional[str]:
+        return self._db.get_coach_memory(key)
 
-    def save_coach_memory(self, key: str, value: str) -> None:
-        self.db.save_coach_memory(key, value)
+    def _save_coach_memory(self, key: str, value: str) -> None:
+        self._db.save_coach_memory(key, value)
 
-    def save_macrocycle(
+    def _save_macrocycle(
         self, objective_id: int, strategy: str, goals_hash: str,
         lifeevents_hash: str, config_hash: str, mesocycles: List[Dict[str, Any]]
     ) -> int:
-        return self.db.save_macrocycle(
+        return self._db.save_macrocycle(
             objective_id=objective_id,
             strategy=strategy,
             goals_hash=goals_hash,
@@ -60,20 +60,20 @@ class CoachRepository:
             mesocycles=mesocycles
         )
 
-    def update_macrocycle_config_hash(self, macrocycle_id: int, config_hash: str) -> None:
-        self.db.update_macrocycle_config_hash(macrocycle_id, config_hash)
+    def _update_macrocycle_config_hash(self, macrocycle_id: int, config_hash: str) -> None:
+        self._db.update_macrocycle_config_hash(macrocycle_id, config_hash)
 
-    def clear_future_workouts(self, today_str: str) -> None:
-        self.db.clear_future_workouts(today_str)
+    def _clear_future_workouts(self, today_str: str) -> None:
+        self._db.clear_future_workouts(today_str)
 
-    def save_workout(
+    def _save_workout(
         self, date: str, sport_type: str, title: str, description: str,
         status: str, original_description: Optional[str] = None,
         modification_reason: Optional[str] = None, google_event_id: Optional[str] = None,
         duration_minutes: Optional[int] = None, rpe: Optional[int] = None,
         tss: Optional[float] = None
     ) -> int:
-        return self.db.save_workout(
+        return self._db.save_workout(
             date=date,
             sport_type=sport_type,
             title=title,
@@ -87,37 +87,37 @@ class CoachRepository:
             tss=tss
         )
 
-    def get_workout(self, date: str, sport_type: str) -> Optional[Workout]:
-        return self.db.get_workout(date, sport_type)
+    def _get_workout(self, date: str, sport_type: str) -> Optional[Workout]:
+        return self._db.get_workout(date, sport_type)
 
-    def get_workouts(
+    def _get_workouts(
         self, start_date: Optional[str] = None, end_date: Optional[str] = None
     ) -> List[Workout]:
-        return self.db.get_workouts(start_date=start_date, end_date=end_date)
+        return self._db.get_workouts(start_date=start_date, end_date=end_date)
 
-    def get_completed_activities(
+    def _get_completed_activities(
         self, start_date: str, end_date: str
     ) -> List[CompletedActivity]:
-        return self.db.get_completed_activities(start_date=start_date, end_date=end_date)
+        return self._db.get_completed_activities(start_date=start_date, end_date=end_date)
 
-    def get_metrics_cache(
+    def _get_metrics_cache(
         self, start_date: Optional[str] = None, end_date: Optional[str] = None
     ) -> List[Dict[str, Any]]:
-        return self.db.get_metrics_cache(start_date=start_date, end_date=end_date)
+        return self._db.get_metrics_cache(start_date=start_date, end_date=end_date)
 
-    def get_baseline(self, date: str) -> Optional[Dict[str, Any]]:
-        return self.db.get_baseline(date)
+    def _get_baseline(self, date: str) -> Optional[Dict[str, Any]]:
+        return self._db.get_baseline(date)
 
-    def delete_workout_by_id(self, workout_id: int) -> None:
-        self.db.delete_workout_by_id(workout_id)
+    def _delete_workout_by_id(self, workout_id: int) -> None:
+        self._db.delete_workout_by_id(workout_id)
 
-    def delete_workout_calendar_event(self, google_event_id: str) -> None:
-        self.calendar_syncer.delete_workout_event(google_event_id)
+    def _delete_workout_calendar_event(self, google_event_id: str) -> None:
+        self._calendar_syncer.delete_workout_event(google_event_id)
 
-    def sync_workout_to_calendar(self, workout: Workout) -> None:
-        self.calendar_syncer.sync_workout(workout)
+    def _sync_workout_to_calendar(self, workout: Workout) -> None:
+        self._calendar_syncer.sync_workout(workout)
 
-    def load_science_guidelines(self, app_science_dir: str, science_dir: str) -> str:
+    def _load_science_guidelines(self, app_science_dir: str, science_dir: str) -> str:
         """Loads and concatenates all text files in the app and user science directories."""
         directories = [app_science_dir, science_dir]
         texts = []
@@ -206,7 +206,7 @@ class CoachEngine:
 
         return "\n".join(lines)
 
-    def build_system_prompt(
+    def _build_system_prompt(
         self, objectives: List[Objective], lifeevents: List[LifeEvent],
         guidelines: str, strategy: str, meso_text: str, learnings: str,
         profile: Optional[Dict[str, Any]], custom_task: str = ""
@@ -312,7 +312,7 @@ UPCOMING LIFE EVENTS:
         serialized = json.dumps(data_to_hash, sort_keys=True)
         return hashlib.sha256(serialized.encode('utf-8')).hexdigest()
 
-    def generate_macrocycle_strategy(
+    def _generate_macrocycle_strategy(
         self, next_goal: Objective, objectives: List[Objective],
         lifeevents: List[LifeEvent], today_str: str, guidelines: str,
         profile: Optional[Dict[str, Any]], previous_strategy_text: Optional[str] = None
@@ -403,7 +403,7 @@ You MUST respond with a JSON object containing:
         )
         return result
 
-    def generate_workouts_logic(
+    def _generate_workouts_logic(
         self, objectives: List[Objective], lifeevents: List[LifeEvent],
         today_str: str, guidelines: str, profile: Optional[Dict[str, Any]],
         strategy: str, meso_text: str, learnings: str
@@ -438,7 +438,7 @@ You MUST respond with a JSON object containing:
   ]
 }
 """
-        system_prompt = self.build_system_prompt(
+        system_prompt = self._build_system_prompt(
             objectives=objectives,
             lifeevents=lifeevents,
             guidelines=guidelines,
@@ -459,7 +459,7 @@ You MUST respond with a JSON object containing:
         )
         return plan_data
 
-    def adapt_logic(
+    def _adapt_logic(
         self, target_date_str: str, history_days: int, start_date_str: str,
         metrics: List[Dict[str, Any]], completed_activities: List[CompletedActivity],
         planned_workouts: List[Workout], baseline_str: str,
@@ -497,7 +497,7 @@ You MUST respond with a JSON object containing:
 }}
 """
         # Prepare system prompt
-        system_prompt = self.build_system_prompt(
+        system_prompt = self._build_system_prompt(
             objectives=objectives,
             lifeevents=lifeevents,
             guidelines=guidelines,
@@ -588,28 +588,30 @@ class CoachService:
         return self.engine._get_lifeevents_hash(lifeevents)
 
     def _load_science_guidelines(self) -> str:
-        return self.repository.load_science_guidelines(
+        return self.repository._load_science_guidelines(
             config.app_science_dir, config.science_dir
         )
 
-    def _get_active_strategy_and_meso_text(self, objectives: List[Objective]) -> Tuple[str, str]:
+    def _get_active_strategy_and_meso_text(
+        self, objectives: List[Objective]
+    ) -> Tuple[str, str]:
         strategy = None
         meso_text = ""
         if objectives:
             sorted_objs = sorted(objectives, key=lambda x: str(x['target_date']))
             next_goal = sorted_objs[0]
             if next_goal['id'] is not None:
-                macrocycle = self.repository.get_macrocycle_for_objective(next_goal['id'])
+                macrocycle = self.repository._get_macrocycle_for_objective(next_goal['id'])
                 if macrocycle:
                     strategy = macrocycle['strategy']
-                    mesocycles = self.repository.get_mesocycles_for_macrocycle(macrocycle['id'])
+                    mesocycles = self.repository._get_mesocycles_for_macrocycle(macrocycle['id'])
                     for m in mesocycles:
                         meso_text += (
                             f"  - {m['name']} ({m['start_date']} to "
                             f"{m['end_date']}): {m['focus']}\n"
                         )
         if not strategy:
-            strategy = self.repository.get_coach_memory("training_strategy") or (
+            strategy = self.repository._get_coach_memory("training_strategy") or (
                 "Not established yet. Establish an endurance-focused training strategy "
                 "based on goals."
             )
@@ -622,12 +624,12 @@ class CoachService:
     ) -> str:
         guidelines = self._load_science_guidelines()
         strategy, meso_text = self._get_active_strategy_and_meso_text(objectives)
-        learnings = self.repository.get_coach_memory("athlete_learnings") or (
+        learnings = self.repository._get_coach_memory("athlete_learnings") or (
             "No observations yet. Over time, observe the athlete's responses to "
             "training volume and intensity."
         )
         profile = config.user_profile
-        return self.engine.build_system_prompt(
+        return self.engine._build_system_prompt(
             objectives=objectives,
             lifeevents=lifeevents,
             guidelines=guidelines,
@@ -638,9 +640,11 @@ class CoachService:
             custom_task=custom_task
         )
 
-    def generate_periodization_plan(self, force: bool = False) -> Tuple[str, List[Dict[str, Any]]]:
+    def generate_periodization_plan(
+        self, force: bool = False
+    ) -> Tuple[str, List[Dict[str, Any]]]:
         """Determines the macrocycle strategy and mesocycle blocks."""
-        objectives = self.repository.get_active_objectives()
+        objectives = self.repository._get_active_objectives()
         if not objectives:
             return "No active goals found. TrainMate needs at least one objective.", []
 
@@ -650,7 +654,7 @@ class CoachService:
 
         # Get future life events
         today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-        lifeevents = self.repository.get_upcoming_lifeevents(today_str)
+        lifeevents = self.repository._get_upcoming_lifeevents(today_str)
 
         # Compute current hashes
         goals_hash = self.engine._get_goals_hash(objectives)
@@ -662,7 +666,7 @@ class CoachService:
         mesocycles: List[Dict[str, Any]] = []
         existing_macro = None
         if next_goal['id'] is not None:
-            existing_macro = self.repository.get_macrocycle_for_objective(next_goal['id'])
+            existing_macro = self.repository._get_macrocycle_for_objective(next_goal['id'])
 
         reused = False
         if existing_macro and not force:
@@ -673,7 +677,7 @@ class CoachService:
             ):
                 reused = True
                 strategy = existing_macro['strategy']
-                mesocycles = self.repository.get_mesocycles_for_macrocycle(existing_macro['id'])
+                mesocycles = self.repository._get_mesocycles_for_macrocycle(existing_macro['id'])
                 print("Reusing existing periodization strategy (macrocycle and mesocycles) "
                       "from database.")
 
@@ -681,11 +685,11 @@ class CoachService:
             # Get the previous strategy for context
             prev_macro = existing_macro
             if not prev_macro:
-                prev_macro = self.repository.get_last_macrocycle()
+                prev_macro = self.repository._get_last_macrocycle()
 
             prev_strategy_text = None
             if prev_macro:
-                prev_mesos = self.repository.get_mesocycles_for_macrocycle(prev_macro['id'])
+                prev_mesos = self.repository._get_mesocycles_for_macrocycle(prev_macro['id'])
                 prev_meso_text = ""
                 for m in prev_mesos:
                     prev_meso_text += (
@@ -703,7 +707,7 @@ class CoachService:
                   "Determining new overall periodization strategy...")
             guidelines = self._load_science_guidelines()
             profile = config.user_profile
-            macro_data = self.engine.generate_macrocycle_strategy(
+            macro_data = self.engine._generate_macrocycle_strategy(
                 next_goal=next_goal,
                 objectives=objectives,
                 lifeevents=lifeevents,
@@ -717,7 +721,7 @@ class CoachService:
 
             # Save it
             if next_goal['id'] is not None:
-                self.repository.save_macrocycle(
+                self.repository._save_macrocycle(
                     objective_id=next_goal['id'],
                     strategy=strategy,
                     goals_hash=goals_hash,
@@ -736,7 +740,7 @@ class CoachService:
 
     def generate_workouts(self) -> Tuple[str, List[Workout]]:
         """Generates the 4-week workouts (microcycles) based on the active strategy."""
-        objectives = self.repository.get_active_objectives()
+        objectives = self.repository._get_active_objectives()
         if not objectives:
             return "No active goals found. TrainMate needs at least one objective.", []
 
@@ -745,7 +749,7 @@ class CoachService:
         next_goal = objectives[0]
 
         # Verify active periodization strategy exists
-        macrocycle = self.repository.get_macrocycle_for_objective(next_goal['id'])
+        macrocycle = self.repository._get_macrocycle_for_objective(next_goal['id'])
         if not macrocycle:
             raise ValueError(
                 "No active periodization strategy found. "
@@ -753,16 +757,16 @@ class CoachService:
             )
 
         today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-        lifeevents = self.repository.get_upcoming_lifeevents(today_str)
+        lifeevents = self.repository._get_upcoming_lifeevents(today_str)
         guidelines = self._load_science_guidelines()
         profile = config.user_profile
         strategy, meso_text = self._get_active_strategy_and_meso_text(objectives)
-        learnings = self.repository.get_coach_memory("athlete_learnings") or (
+        learnings = self.repository._get_coach_memory("athlete_learnings") or (
             "No observations yet. Over time, observe the athlete's responses to "
             "training volume and intensity."
         )
 
-        plan_data = self.engine.generate_workouts_logic(
+        plan_data = self.engine._generate_workouts_logic(
             objectives=objectives,
             lifeevents=lifeevents,
             today_str=today_str,
@@ -775,17 +779,19 @@ class CoachService:
 
         # Save learnings to memory
         if "athlete_learnings" in plan_data:
-            self.repository.save_coach_memory("athlete_learnings", plan_data["athlete_learnings"])
+            self.repository._save_coach_memory(
+                "athlete_learnings", plan_data["athlete_learnings"]
+            )
 
         # Save workouts to database
         workouts = plan_data.get("workouts", [])
 
         # Clear future unsynced workouts to prevent overlapping plans
-        self.repository.clear_future_workouts(today_str)
+        self.repository._clear_future_workouts(today_str)
 
         saved_workouts: List[Workout] = []
         for w in workouts:
-            wid = self.repository.save_workout(
+            wid = self.repository._save_workout(
                 date=w['date'],
                 sport_type=w['sport_type'],
                 title=w['title'],
@@ -815,7 +821,7 @@ class CoachService:
 
     def replan(self, force: bool = False) -> Tuple[str, List[Workout]]:
         """Generates or adapts the training plan from today onwards."""
-        objectives = self.repository.get_active_objectives()
+        objectives = self.repository._get_active_objectives()
         if not objectives:
             return (
                 "No active goals found. TrainMate needs at least one objective to "
@@ -839,18 +845,18 @@ class CoachService:
         start_date_str = start_date_obj.strftime("%Y-%m-%d")
 
         # Fetch metrics and baselines in window via repository
-        metrics = self.repository.get_metrics_cache(
+        metrics = self.repository._get_metrics_cache(
             start_date=start_date_str, end_date=target_date_str
         )
-        completed_activities = self.repository.get_completed_activities(
+        completed_activities = self.repository._get_completed_activities(
             start_date=start_date_str, end_date=target_date_str
         )
-        planned_workouts = self.repository.get_workouts(
+        planned_workouts = self.repository._get_workouts(
             start_date=start_date_str, end_date=target_date_str
         )
 
         # Retrieve baseline for reference
-        baseline = self.repository.get_baseline(target_date_str)
+        baseline = self.repository._get_baseline(target_date_str)
         if not baseline:
             baseline_str = "No baseline data available."
         else:
@@ -874,13 +880,13 @@ class CoachService:
         # Determine mesocycle end date for adaptation range
         meso_end_date_str = (target_date_obj + timedelta(days=6)).strftime("%Y-%m-%d")
         active_meso = None
-        objectives = self.repository.get_active_objectives()
+        objectives = self.repository._get_active_objectives()
         if objectives:
             objectives.sort(key=lambda x: str(x['target_date']))
             next_goal = objectives[0]
-            macro = self.repository.get_macrocycle_for_objective(next_goal['id'])
+            macro = self.repository._get_macrocycle_for_objective(next_goal['id'])
             if macro:
-                mesos = self.repository.get_mesocycles_for_macrocycle(macro['id'])
+                mesos = self.repository._get_mesocycles_for_macrocycle(macro['id'])
                 for m in mesos:
                     start = datetime.strptime(m['start_date'], "%Y-%m-%d").date()
                     end = datetime.strptime(m['end_date'], "%Y-%m-%d").date()
@@ -892,13 +898,13 @@ class CoachService:
         guidelines = self._load_science_guidelines()
         profile = config.user_profile
         strategy, meso_text = self._get_active_strategy_and_meso_text(objectives)
-        learnings = self.repository.get_coach_memory("athlete_learnings") or (
+        learnings = self.repository._get_coach_memory("athlete_learnings") or (
             "No observations yet. Over time, observe the athlete's responses to "
             "training volume and intensity."
         )
-        lifeevents = self.repository.get_upcoming_lifeevents(target_date_str)
+        lifeevents = self.repository._get_upcoming_lifeevents(target_date_str)
 
-        decision = self.engine.adapt_logic(
+        decision = self.engine._adapt_logic(
             target_date_str=target_date_str,
             history_days=history_days,
             start_date_str=start_date_str,
@@ -919,9 +925,13 @@ class CoachService:
 
         # Update memories if present
         if "training_strategy" in decision and decision["training_strategy"]:
-            self.repository.save_coach_memory("training_strategy", decision["training_strategy"])
+            self.repository._save_coach_memory(
+                "training_strategy", decision["training_strategy"]
+            )
         if "athlete_learnings" in decision and decision["athlete_learnings"]:
-            self.repository.save_coach_memory("athlete_learnings", decision["athlete_learnings"])
+            self.repository._save_coach_memory(
+                "athlete_learnings", decision["athlete_learnings"]
+            )
 
         reason = decision.get("reason", "No adaptation needed.")
         adapted = []
@@ -947,11 +957,14 @@ class CoachService:
         ]
 
     def apply_adaptations(
-        self, proposed_workouts: List[Dict[str, Any]], reason: str, start_date: str, end_date: str
+        self, proposed_workouts: List[Dict[str, Any]], reason: str,
+        start_date: str, end_date: str
     ) -> None:
         """Saves proposed adapted workouts, cleans up overridden ones, and syncs to Calendar."""
         # 1. Fetch all existing workouts in the adaptation range
-        existing_workouts = self.repository.get_workouts(start_date=start_date, end_date=end_date)
+        existing_workouts = self.repository._get_workouts(
+            start_date=start_date, end_date=end_date
+        )
 
         # Group proposed workouts by date
         proposed_by_date: Dict[str, List[Dict[str, Any]]] = {}
@@ -968,21 +981,21 @@ class CoachService:
                           f"on {ew_date}")
                     if ew.get('google_event_id') and ew['status'] == 'synced':
                         try:
-                            self.repository.delete_workout_calendar_event(ew['google_event_id'])
+                            self.repository._delete_workout_calendar_event(ew['google_event_id'])
                         except Exception as e:
                             print(f"Error deleting Google Calendar event: {e}")
-                    self.repository.delete_workout_by_id(ew['id'])
+                    self.repository._delete_workout_by_id(ew['id'])
 
         # 3. Save new adapted workouts and sync them
         for w in proposed_workouts:
-            existing = self.repository.get_workout(w['date'], w['sport_type'])
+            existing = self.repository._get_workout(w['date'], w['sport_type'])
             orig_desc = None
             ge_id = None
             if existing:
                 orig_desc = existing['original_description'] or existing['description']
                 ge_id = existing['google_event_id']
 
-            self.repository.save_workout(
+            self.repository._save_workout(
                 date=w['date'],
                 sport_type=w['sport_type'],
                 title=w['title'],
@@ -997,10 +1010,10 @@ class CoachService:
             )
 
             # Sync to Google Calendar
-            updated = self.repository.get_workout(w['date'], w['sport_type'])
+            updated = self.repository._get_workout(w['date'], w['sport_type'])
             if updated:
                 try:
-                    self.repository.sync_workout_to_calendar(updated)
+                    self.repository._sync_workout_to_calendar(updated)
                 except Exception as e:
                     print(f"Error syncing {w['title']} to Google Calendar: {e}")
 
