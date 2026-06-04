@@ -8,6 +8,7 @@ from trainmate.google_calendar import calendar_syncer
 from trainmate.coach import coach_engine
 from trainmate.config import config
 
+
 def main() -> None:
     """Entry point for the TrainMate Command Line Interface."""
     parser = argparse.ArgumentParser(
@@ -276,6 +277,11 @@ def main() -> None:
         parser.print_help()
         sys.exit(1)
 
+
+# ==============================================================================
+# Status Command
+# ==============================================================================
+
 def run_status() -> None:
     """Displays current athlete goals, Garmin metrics, baselines, and memories."""
     print("=== TRAINMATE ATHLETE STATUS ===")
@@ -321,7 +327,10 @@ def run_status() -> None:
             else:
                 print("Active Cycle  : None active today (outside mesocycle boundaries)")
         else:
-            print("Active Cycle  : No periodization strategy established. Run 'plan generate' first.")
+            print(
+                "Active Cycle  : No periodization strategy established. "
+                "Run 'plan generate' first."
+            )
     else:
         print("\nNext Objective: None (TrainMate needs at least one goal to start planning)")
 
@@ -367,6 +376,124 @@ def run_status() -> None:
     print(f"- Learnings : {learnings or 'None yet'}")
     print("\n================================")
 
+
+# ==============================================================================
+# Goal Command
+# ==============================================================================
+
+def run_goal_add(args: argparse.Namespace) -> None:
+    """Creates a new objective goal via command line."""
+    sports_str = ",".join(args.sport)
+    db.add_objective(
+        title=args.title,
+        target_date=args.date,
+        sport_type=sports_str,
+        description=args.desc,
+        priority=args.priority,
+        status='active'
+    )
+    print(
+        f"Goal '{args.title}' added successfully. "
+        f"Run 'plan generate' to generate training cycles."
+    )
+
+
+def run_goal_list() -> None:
+    """Lists all active and past training objective goals."""
+    goals = db.get_objectives()
+    print("=== TRAINING OBJECTIVES / GOALS ===")
+    for g in goals:
+        sport_str = g['sport_type']
+        print(
+            f"[{g['status'].upper()}] ID: {g['id']} | {g['title']} "
+            f"({sport_str}) on {g['target_date']} (Priority: {g['priority']})"
+        )
+        if g.get('description'):
+            print(f"  Description: {g['description']}")
+
+
+def run_goal_rm(args: argparse.Namespace) -> None:
+    """Deletes an objective goal by ID."""
+    db.delete_objective(args.id)
+    print(f"Goal with ID {args.id} removed successfully.")
+
+
+def run_goal_wipe(args: argparse.Namespace) -> None:
+    """Wipes all goals from the database after confirmation."""
+    if not args.yes:
+        try:
+            confirm = input(
+                "Are you sure you want to wipe all training objectives? [y/N]: "
+            ).strip().lower()
+        except EOFError:
+            confirm = 'n'
+        if confirm not in ('y', 'yes'):
+            print("Wipe cancelled.")
+            return
+
+    db.wipe_objectives()
+    print("All training objectives wiped successfully.")
+
+
+# ==============================================================================
+# Lifeevent Command
+# ==============================================================================
+
+def run_lifeevent_add(args: argparse.Namespace) -> None:
+    """Creates a new life event via command line."""
+    db.add_lifeevent(
+        title=args.title,
+        start_date=args.start,
+        end_date=args.end,
+        event_type=args.type,
+        impact_description=args.desc
+    )
+    print(
+        f"Life event '{args.title}' logged. "
+        f"This will be factored in when running 'plan generate' or 'workout adapt'."
+    )
+
+
+def run_lifeevent_list() -> None:
+    """Lists all logged training life events."""
+    events = db.get_lifeevents()
+    print("=== ATHLETE LIFE EVENTS ===")
+    for e in events:
+        print(
+            f"ID: {e['id']} | {e['title']} ({e['event_type']}): "
+            f"{e['start_date']} to {e['end_date']}"
+        )
+        if e.get('impact_description'):
+            print(f"  Impact: {e['impact_description']}")
+
+
+def run_lifeevent_rm(args: argparse.Namespace) -> None:
+    """Deletes a life event by ID."""
+    db.delete_lifeevent(args.id)
+    print(f"Life event with ID {args.id} removed successfully.")
+
+
+def run_lifeevent_wipe(args: argparse.Namespace) -> None:
+    """Wipes all life events from the database after confirmation."""
+    if not args.yes:
+        try:
+            confirm = input(
+                "Are you sure you want to wipe all life events? [y/N]: "
+            ).strip().lower()
+        except EOFError:
+            confirm = 'n'
+        if confirm not in ('y', 'yes'):
+            print("Wipe cancelled.")
+            return
+
+    db.wipe_lifeevents()
+    print("All life events wiped successfully.")
+
+
+# ==============================================================================
+# Plan Command
+# ==============================================================================
+
 def run_plan_generate(args: argparse.Namespace) -> None:
     """Executes the AI periodization strategy plan generation command."""
     # Make sure we have latest metrics cached
@@ -385,7 +512,8 @@ def run_plan_generate(args: argparse.Namespace) -> None:
                 if macro.get('config_hash') != current_hash and not args.force:
                     try:
                         confirm = input(
-                            "\nConfiguration in config.yaml has changed since the last plan generation.\n"
+                            "\nConfiguration in config.yaml has changed since the last "
+                            "plan generation.\n"
                             "Would you like to regenerate the periodization strategy? [y/N]: "
                         ).strip().lower()
                     except EOFError:
@@ -405,47 +533,6 @@ def run_plan_generate(args: argparse.Namespace) -> None:
     except Exception as e:
         print(f"Error during plan generation: {e}")
 
-def run_workout_generate() -> None:
-    """Executes the AI workout generation command based on active strategy."""
-    # Make sure we have latest metrics cached
-    metrics = db.get_metrics_cache()
-    if not metrics:
-        print("Warning: Metrics cache is empty. Proceeding without Garmin metrics.")
-        
-    try:
-        objectives = db.get_objectives(status='active')
-        if objectives:
-            objectives.sort(key=lambda x: str(x['target_date']))
-            next_goal = objectives[0]
-            macro = db.get_macrocycle_for_objective(next_goal['id'])
-            if macro:
-                current_hash = coach_engine._get_config_hash()
-                if macro.get('config_hash') != current_hash:
-                    try:
-                        confirm = input(
-                            "\nWarning: config.yaml has changed since the active "
-                            "periodization plan was generated.\n"
-                            "Generating workouts using the out-of-date plan might "
-                            "result in incorrect training targets.\n"
-                            "It is highly recommended to run 'plan generate' first. "
-                            "Proceed anyway? [y/N]: "
-                        ).strip().lower()
-                    except EOFError:
-                        confirm = 'n'
-                    if confirm not in ('y', 'yes'):
-                        print("Workout generation cancelled. Please run 'plan generate' first.")
-                        return
-                    else:
-                        print("Proceeding. Updating configuration hash in database.")
-                        db.update_macrocycle_config_hash(macro['id'], current_hash)
-
-        reasoning, workouts = coach_engine.generate_workouts()
-        print("\n=== WORKOUTS GENERATED BY COACH ===")
-        print(f"Reasoning:\n{reasoning}\n")
-        print(f"Generated {len(workouts)} workouts starting from today. Save complete.")
-        print("Run 'workout push' to commit this plan to Google Calendar.")
-    except Exception as e:
-        print(f"Error during workout generation: {e}")
 
 def run_plan_show() -> None:
     """Displays the active training macrocycle and mesocycles periodization timeline."""
@@ -516,6 +603,28 @@ def run_plan_show() -> None:
         for line in focus_lines:
             print(f"            {line}")
         print("            " + "-" * 40)
+
+
+def run_plan_wipe(args: argparse.Namespace) -> None:
+    """Wipes all plans from the database after confirmation."""
+    if not args.yes:
+        try:
+            confirm = input(
+                "Are you sure you want to wipe all periodization plans? [y/N]: "
+            ).strip().lower()
+        except EOFError:
+            confirm = 'n'
+        if confirm not in ('y', 'yes'):
+            print("Wipe cancelled.")
+            return
+
+    db.wipe_plans()
+    print("All periodization plans wiped successfully.")
+
+
+# ==============================================================================
+# Workout Command
+# ==============================================================================
 
 def run_workout_adapt(args: argparse.Namespace) -> None:
     # Executes the daily workout Garmin adaptation checks command.
@@ -623,6 +732,67 @@ def run_workout_adapt(args: argparse.Namespace) -> None:
     except Exception as e:
         print(f"Error executing daily adaptation: {e}")
 
+
+def run_workout_generate() -> None:
+    """Executes the AI workout generation command based on active strategy."""
+    # Make sure we have latest metrics cached
+    metrics = db.get_metrics_cache()
+    if not metrics:
+        print("Warning: Metrics cache is empty. Proceeding without Garmin metrics.")
+        
+    try:
+        objectives = db.get_objectives(status='active')
+        if objectives:
+            objectives.sort(key=lambda x: str(x['target_date']))
+            next_goal = objectives[0]
+            macro = db.get_macrocycle_for_objective(next_goal['id'])
+            if macro:
+                current_hash = coach_engine._get_config_hash()
+                if macro.get('config_hash') != current_hash:
+                    try:
+                        confirm = input(
+                            "\nWarning: config.yaml has changed since the active "
+                            "periodization plan was generated.\n"
+                            "Generating workouts using the out-of-date plan might "
+                            "result in incorrect training targets.\n"
+                            "It is highly recommended to run 'plan generate' first. "
+                            "Proceed anyway? [y/N]: "
+                        ).strip().lower()
+                    except EOFError:
+                        confirm = 'n'
+                    if confirm not in ('y', 'yes'):
+                        print("Workout generation cancelled. Please run 'plan generate' first.")
+                        return
+                    else:
+                        print("Proceeding. Updating configuration hash in database.")
+                        db.update_macrocycle_config_hash(macro['id'], current_hash)
+
+        reasoning, workouts = coach_engine.generate_workouts()
+        print("\n=== WORKOUTS GENERATED BY COACH ===")
+        print(f"Reasoning:\n{reasoning}\n")
+        print(f"Generated {len(workouts)} workouts starting from today. Save complete.")
+        print("Run 'workout push' to commit this plan to Google Calendar.")
+    except Exception as e:
+        print(f"Error during workout generation: {e}")
+
+
+def run_workout_list() -> None:
+    """Lists all stored workouts chronologically."""
+    workouts = db.get_workouts()
+    print("=== WORKOUT SCHEDULE ===")
+    for w in workouts:
+        mod_marker = " [ADAPTED]" if w['status'] == 'modified' or w['modification_reason'] else ""
+        sync_marker = " [SYNCED]" if w['status'] == 'synced' else ""
+        print(
+            f"ID: {w['id']} | {w['date']} | {w['sport_type'].upper()} | "
+            f"{w['title']}{mod_marker}{sync_marker}"
+        )
+        print(f"  Description: {w['description']}")
+        if w.get('modification_reason'):
+            print(f"  Reason: {w['modification_reason']}")
+        print("-" * 40)
+
+
 def run_workout_push() -> None:
     """Synchronizes planned workouts with Google Calendar."""
     today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
@@ -641,77 +811,6 @@ def run_workout_push() -> None:
     except Exception as e:
         print(f"Error syncing to Google Calendar: {e}")
 
-def run_metrics_pull() -> None:
-    """Pulls athlete metrics and activities from Google Sheets."""
-    try:
-        sheets_reader.sync_data()
-    except Exception as e:
-        print(f"Error syncing Google Sheets: {e}")
-
-def run_goal_add(args: argparse.Namespace) -> None:
-    """Creates a new objective goal via command line."""
-    sports_str = ",".join(args.sport)
-    db.add_objective(
-        title=args.title,
-        target_date=args.date,
-        sport_type=sports_str,
-        description=args.desc,
-        priority=args.priority,
-        status='active'
-    )
-    print(
-        f"Goal '{args.title}' added successfully. "
-        f"Run 'plan generate' to generate training cycles."
-    )
-
-def run_goal_rm(args: argparse.Namespace) -> None:
-    """Deletes an objective goal by ID."""
-    db.delete_objective(args.id)
-    print(f"Goal with ID {args.id} removed successfully.")
-
-def run_lifeevent_add(args: argparse.Namespace) -> None:
-    """Creates a new life event via command line."""
-    db.add_lifeevent(
-        title=args.title,
-        start_date=args.start,
-        end_date=args.end,
-        event_type=args.type,
-        impact_description=args.desc
-    )
-    print(
-        f"Life event '{args.title}' logged. "
-        f"This will be factored in when running 'plan generate' or 'workout adapt'."
-    )
-
-def run_lifeevent_rm(args: argparse.Namespace) -> None:
-    """Deletes a life event by ID."""
-    db.delete_lifeevent(args.id)
-    print(f"Life event with ID {args.id} removed successfully.")
-
-def run_goal_list() -> None:
-    """Lists all active and past training objective goals."""
-    goals = db.get_objectives()
-    print("=== TRAINING OBJECTIVES / GOALS ===")
-    for g in goals:
-        sport_str = g['sport_type']
-        print(
-            f"[{g['status'].upper()}] ID: {g['id']} | {g['title']} "
-            f"({sport_str}) on {g['target_date']} (Priority: {g['priority']})"
-        )
-        if g.get('description'):
-            print(f"  Description: {g['description']}")
-
-def run_lifeevent_list() -> None:
-    """Lists all logged training life events."""
-    events = db.get_lifeevents()
-    print("=== ATHLETE LIFE EVENTS ===")
-    for e in events:
-        print(
-            f"ID: {e['id']} | {e['title']} ({e['event_type']}): "
-            f"{e['start_date']} to {e['end_date']}"
-        )
-        if e.get('impact_description'):
-            print(f"  Impact: {e['impact_description']}")
 
 def run_workout_rm(args: argparse.Namespace) -> None:
     """Deletes a planned workout by its database ID."""
@@ -728,69 +827,6 @@ def run_workout_rm(args: argparse.Namespace) -> None:
     db.delete_workout_by_id(args.id)
     print(f"Workout with ID {args.id} ('{workout['title']}') removed successfully.")
 
-def run_workout_list() -> None:
-    """Lists all stored workouts chronologically."""
-    workouts = db.get_workouts()
-    print("=== WORKOUT SCHEDULE ===")
-    for w in workouts:
-        mod_marker = " [ADAPTED]" if w['status'] == 'modified' or w['modification_reason'] else ""
-        sync_marker = " [SYNCED]" if w['status'] == 'synced' else ""
-        print(
-            f"ID: {w['id']} | {w['date']} | {w['sport_type'].upper()} | "
-            f"{w['title']}{mod_marker}{sync_marker}"
-        )
-        print(f"  Description: {w['description']}")
-        if w.get('modification_reason'):
-            print(f"  Reason: {w['modification_reason']}")
-        print("-" * 40)
-
-def run_goal_wipe(args: argparse.Namespace) -> None:
-    """Wipes all goals from the database after confirmation."""
-    if not args.yes:
-        try:
-            confirm = input(
-                "Are you sure you want to wipe all training objectives? [y/N]: "
-            ).strip().lower()
-        except EOFError:
-            confirm = 'n'
-        if confirm not in ('y', 'yes'):
-            print("Wipe cancelled.")
-            return
-
-    db.wipe_objectives()
-    print("All training objectives wiped successfully.")
-
-def run_lifeevent_wipe(args: argparse.Namespace) -> None:
-    """Wipes all life events from the database after confirmation."""
-    if not args.yes:
-        try:
-            confirm = input(
-                "Are you sure you want to wipe all life events? [y/N]: "
-            ).strip().lower()
-        except EOFError:
-            confirm = 'n'
-        if confirm not in ('y', 'yes'):
-            print("Wipe cancelled.")
-            return
-
-    db.wipe_lifeevents()
-    print("All life events wiped successfully.")
-
-def run_plan_wipe(args: argparse.Namespace) -> None:
-    """Wipes all plans from the database after confirmation."""
-    if not args.yes:
-        try:
-            confirm = input(
-                "Are you sure you want to wipe all periodization plans? [y/N]: "
-            ).strip().lower()
-        except EOFError:
-            confirm = 'n'
-        if confirm not in ('y', 'yes'):
-            print("Wipe cancelled.")
-            return
-
-    db.wipe_plans()
-    print("All periodization plans wiped successfully.")
 
 def run_workout_wipe(args: argparse.Namespace) -> None:
     """Wipes all workouts from the database and Google Calendar after confirmation."""
@@ -819,6 +855,19 @@ def run_workout_wipe(args: argparse.Namespace) -> None:
     db.wipe_workouts()
     print("All workouts wiped successfully.")
 
+
+# ==============================================================================
+# Metrics Command
+# ==============================================================================
+
+def run_metrics_pull() -> None:
+    """Pulls athlete metrics and activities from Google Sheets."""
+    try:
+        sheets_reader.sync_data()
+    except Exception as e:
+        print(f"Error syncing Google Sheets: {e}")
+
+
 def run_metrics_wipe(args: argparse.Namespace) -> None:
     """Wipes all metrics, baselines, and activities after confirmation."""
     if not args.yes:
@@ -836,6 +885,7 @@ def run_metrics_wipe(args: argparse.Namespace) -> None:
 
     db.wipe_metrics()
     print("All metrics, baselines, and completed activities wiped successfully.")
+
 
 if __name__ == "__main__":
     main()
