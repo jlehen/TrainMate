@@ -20,11 +20,16 @@ def main() -> None:
     # status command
     subparsers.add_parser(
         "status",
+        aliases=["s"],
         help="Show current athlete status, active goals, recent metrics, and memories"
     )
     
     # goal command & subparsers
-    goal_parser = subparsers.add_parser("goal", help="Manage training objectives / goals")
+    goal_parser = subparsers.add_parser(
+        "goal",
+        aliases=["g"],
+        help="Manage training objectives / goals"
+    )
     goal_subparsers = goal_parser.add_subparsers(dest="subcommand", help="Goal sub-commands")
     
     # goal add
@@ -47,7 +52,11 @@ def main() -> None:
     goal_subparsers.add_parser("list", help="Show all training objectives")
     
     # lifeevent command & subparsers
-    lifeevent_parser = subparsers.add_parser("lifeevent", help="Manage life events")
+    lifeevent_parser = subparsers.add_parser(
+        "lifeevent",
+        aliases=["le", "e"],
+        help="Manage life events"
+    )
     lifeevent_subparsers = lifeevent_parser.add_subparsers(
         dest="subcommand", help="Life event sub-commands"
     )
@@ -72,7 +81,9 @@ def main() -> None:
     
     # plan command & subparsers
     plan_parser = subparsers.add_parser(
-        "plan", help="Manage and consult the periodized training plan (macrocycles & mesocycles)"
+        "plan",
+        aliases=["p"],
+        help="Manage and consult the periodized training plan (macrocycles & mesocycles)"
     )
     plan_subparsers = plan_parser.add_subparsers(
         dest="subcommand", help="Plan sub-commands"
@@ -95,7 +106,11 @@ def main() -> None:
     )
     
     # workout command & subparsers
-    workout_parser = subparsers.add_parser("workout", help="Manage workouts (microcycles)")
+    workout_parser = subparsers.add_parser(
+        "workout",
+        aliases=["w"],
+        help="Manage workouts (microcycles)"
+    )
     workout_subparsers = workout_parser.add_subparsers(
         dest="subcommand", help="Workout sub-commands"
     )
@@ -131,7 +146,11 @@ def main() -> None:
     )
     
     # metrics command & subparsers
-    metrics_parser = subparsers.add_parser("metrics", help="Manage and sync athlete metrics")
+    metrics_parser = subparsers.add_parser(
+        "metrics",
+        aliases=["m"],
+        help="Manage and sync athlete metrics"
+    )
     metrics_subparsers = metrics_parser.add_subparsers(
         dest="subcommand", help="Metrics sub-commands"
     )
@@ -151,9 +170,9 @@ def main() -> None:
         
     cmd = args.command.lower()
     
-    if cmd == "status":
+    if cmd in ("status", "s"):
         run_status()
-    elif cmd == "goal":
+    elif cmd in ("goal", "g"):
         if not args.subcommand:
             goal_parser.print_help()
             sys.exit(1)
@@ -164,7 +183,7 @@ def main() -> None:
             run_goal_rm(args)
         elif sub == "list":
             run_goal_list()
-    elif cmd == "lifeevent":
+    elif cmd in ("lifeevent", "le", "e"):
         if not args.subcommand:
             lifeevent_parser.print_help()
             sys.exit(1)
@@ -175,7 +194,7 @@ def main() -> None:
             run_lifeevent_rm(args)
         elif sub == "list":
             run_lifeevent_list()
-    elif cmd == "workout":
+    elif cmd in ("workout", "w"):
         if not args.subcommand:
             workout_parser.print_help()
             sys.exit(1)
@@ -190,14 +209,14 @@ def main() -> None:
             run_workout_adapt(args)
         elif sub == "push":
             run_workout_push()
-    elif cmd == "metrics":
+    elif cmd in ("metrics", "m"):
         if not args.subcommand:
             metrics_parser.print_help()
             sys.exit(1)
         sub = args.subcommand.lower()
         if sub == "pull":
             run_metrics_pull()
-    elif cmd == "plan":
+    elif cmd in ("plan", "p"):
         if not args.subcommand:
             plan_parser.print_help()
             sys.exit(1)
