@@ -1054,16 +1054,36 @@ def run_plan_feedback(args: argparse.Namespace) -> None:
 # Workout Command
 # ==============================================================================
 
+def _ensure_metrics_current() -> None:
+    """Pulls metrics from Sheets if today's data is absent, then warns if still missing."""
+    today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+    def _today_present() -> bool:
+        rows = db.get_metrics_cache(start_date=today_str, end_date=today_str)
+        if not rows:
+            return False
+        m = rows[0]
+        return not (
+            m.get('rhr') is None
+            and m.get('hrv') is None
+            and m.get('sleep_score') is None
+            and m.get('stress') is None
+        )
+
+    if not _today_present():
+        print("Syncing latest metrics from Google Sheets...")
+        run_metrics_pull()
+        if not _today_present():
+            print(yellow(
+                f"Warning: Garmin metrics for the current date ({today_str}) are missing."
+            ))
+
+
 def run_workout_adapt(args: argparse.Namespace) -> None:
     # Executes the daily workout Garmin adaptation checks command.
     date_str = args.date or datetime.now(timezone.utc).strftime("%Y-%m-%d")
-    
-    metrics = db.get_metrics_cache()
-    if not metrics:
-        print(yellow("Warning: Metrics cache is empty. Skipping Garmin metrics sync."))
-    else:
-        print("Syncing latest metrics from Google Sheets first...")
-        run_metrics_pull()
+
+    _ensure_metrics_current()
 
     # Display rolling trajectory
     try:
@@ -1186,11 +1206,8 @@ def run_workout_adapt(args: argparse.Namespace) -> None:
 
 def run_workout_generate(args: argparse.Namespace) -> None:
     """Executes the AI workout generation command based on active strategy."""
-    # Make sure we have latest metrics cached
-    metrics = db.get_metrics_cache()
-    if not metrics:
-        print(yellow("Warning: Metrics cache is empty. Proceeding without Garmin metrics."))
-        
+    _ensure_metrics_current()
+
     try:
         objectives = db.get_objectives(status='active')
         if objectives:
