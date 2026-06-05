@@ -38,7 +38,9 @@ def main() -> None:
     goal_subparsers = goal_parser.add_subparsers(dest="subcommand", help="Goal sub-commands")
     
     # goal add
-    g_add = goal_subparsers.add_parser("add", help="Add a new training objective/goal")
+    g_add = goal_subparsers.add_parser(
+        "add", aliases=["a"], help="Add a new training objective/goal"
+    )
     g_add.add_argument("--title", required=True, help="Goal title (e.g. Marathon)")
     g_add.add_argument("--date", required=True, help="Target event date (YYYY-MM-DD)")
     g_add.add_argument(
@@ -50,7 +52,9 @@ def main() -> None:
     g_add.add_argument("--priority", type=int, default=1, help="Goal priority (1 = highest)")
 
     # goal edit
-    g_edit = goal_subparsers.add_parser("edit", help="Edit an existing goal/objective")
+    g_edit = goal_subparsers.add_parser(
+        "edit", aliases=["e"], help="Edit an existing goal/objective"
+    )
     g_edit.add_argument("id", type=int, help="Goal ID to edit")
     g_edit.add_argument("--title", help="New goal title")
     g_edit.add_argument("--date", help="New target event date (YYYY-MM-DD)")
@@ -67,11 +71,11 @@ def main() -> None:
     )
     
     # goal rm
-    g_rm = goal_subparsers.add_parser("rm", help="Remove a goal by ID")
+    g_rm = goal_subparsers.add_parser("rm", aliases=["r"], help="Remove a goal by ID")
     g_rm.add_argument("id", type=int, help="Goal ID to remove")
     
     # goal list
-    goal_subparsers.add_parser("list", help="Show all training objectives")
+    goal_subparsers.add_parser("list", aliases=["l"], help="Show all training objectives")
 
     # goal wipe
     g_wipe = goal_subparsers.add_parser("wipe", help="Wipe all training objectives")
@@ -88,7 +92,7 @@ def main() -> None:
     )
     
     # lifeevent add
-    c_add = lifeevent_subparsers.add_parser("add", help="Add a new life event")
+    c_add = lifeevent_subparsers.add_parser("add", aliases=["a"], help="Add a new life event")
     c_add.add_argument("--title", required=True, help="Life event title (e.g. Vacation to Spain)")
     c_add.add_argument("--start", required=True, help="Start date (YYYY-MM-DD)")
     c_add.add_argument("--end", required=True, help="End date (YYYY-MM-DD)")
@@ -99,7 +103,9 @@ def main() -> None:
     c_add.add_argument("--desc", default="", help="Description/Impact description")
 
     # lifeevent edit
-    le_edit = lifeevent_subparsers.add_parser("edit", help="Edit an existing life event")
+    le_edit = lifeevent_subparsers.add_parser(
+        "edit", aliases=["e"], help="Edit an existing life event"
+    )
     le_edit.add_argument("id", type=int, help="Life event ID to edit")
     le_edit.add_argument("--title", help="New life event title")
     le_edit.add_argument("--start", help="New start date (YYYY-MM-DD)")
@@ -111,18 +117,22 @@ def main() -> None:
     le_edit.add_argument("--desc", help="New description/Impact description")
     
     # lifeevent rm
-    c_rm = lifeevent_subparsers.add_parser("rm", help="Remove a life event by ID")
+    c_rm = lifeevent_subparsers.add_parser("rm", aliases=["r"], help="Remove a life event by ID")
     c_rm.add_argument("id", type=int, help="Life event ID to remove")
     
     # lifeevent list
-    le_list = lifeevent_subparsers.add_parser("list", help="Show all logged life events")
+    le_list = lifeevent_subparsers.add_parser(
+        "list", aliases=["l"], help="Show all logged life events"
+    )
     le_list.add_argument(
         "-v", "--verbose", action="store_true",
         help="Show life event details including impact description"
     )
 
     # lifeevent show
-    le_show = lifeevent_subparsers.add_parser("show", help="Show details of a life event by ID")
+    le_show = lifeevent_subparsers.add_parser(
+        "show", aliases=["s"], help="Show details of a life event by ID"
+    )
     le_show.add_argument("id", type=int, help="Life event ID to display")
 
     # lifeevent wipe
@@ -255,13 +265,13 @@ def main() -> None:
             goal_parser.print_help()
             sys.exit(1)
         sub = args.subcommand.lower()
-        if sub == "add":
+        if sub in ("add", "a"):
             run_goal_add(args)
-        elif sub == "edit":
+        elif sub in ("edit", "e"):
             run_goal_edit(args)
-        elif sub == "rm":
+        elif sub in ("rm", "r"):
             run_goal_rm(args)
-        elif sub == "list":
+        elif sub in ("list", "l"):
             run_goal_list()
         elif sub == "wipe":
             run_goal_wipe(args)
@@ -270,15 +280,15 @@ def main() -> None:
             lifeevent_parser.print_help()
             sys.exit(1)
         sub = args.subcommand.lower()
-        if sub == "add":
+        if sub in ("add", "a"):
             run_lifeevent_add(args)
-        elif sub == "edit":
+        elif sub in ("edit", "e"):
             run_lifeevent_edit(args)
-        elif sub == "rm":
+        elif sub in ("rm", "r"):
             run_lifeevent_rm(args)
-        elif sub == "list":
+        elif sub in ("list", "l"):
             run_lifeevent_list(args)
-        elif sub == "show":
+        elif sub in ("show", "s"):
             run_lifeevent_show(args)
         elif sub == "wipe":
             run_lifeevent_wipe(args)
