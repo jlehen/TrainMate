@@ -167,11 +167,29 @@ def main() -> None:
         "-f", "--force", action="store_true",
         help="Force regeneration of the macrocycle/mesocycle strategy"
     )
+    p_gen.add_argument(
+        "--goal", "--goal-id", type=int, dest="goal_id",
+        help="Target goal ID to generate the periodization plan for"
+    )
     
     # plan show
-    plan_subparsers.add_parser(
+    p_show = plan_subparsers.add_parser(
         "show", aliases=["s"],
         help="Show the active macrocycle and mesocycles periodization strategy"
+    )
+    p_show.add_argument(
+        "--goal", "--goal-id", type=int, dest="goal_id",
+        help="Target goal ID to show the periodization plan for"
+    )
+
+    # plan rm
+    p_rm = plan_subparsers.add_parser(
+        "rm", aliases=["d"],
+        help="Remove/delete a specific periodization plan by Goal ID"
+    )
+    p_rm.add_argument(
+        "id", type=int,
+        help="Goal ID whose periodization plan should be removed"
     )
 
     # plan wipe
@@ -194,9 +212,13 @@ def main() -> None:
     )
     
     # workout generate
-    workout_subparsers.add_parser(
+    p_w_gen = workout_subparsers.add_parser(
         "generate", aliases=["g"],
         help="Generate the 4-week workouts (microcycles) based on the active strategy"
+    )
+    p_w_gen.add_argument(
+        "--goal", "--goal-id", type=int, dest="goal_id",
+        help="Target goal ID to generate workouts for"
     )
     
     # workout rm
@@ -313,7 +335,7 @@ def main() -> None:
         if sub in ("list", "l"):
             run_workout_list()
         elif sub in ("generate", "g"):
-            run_workout_generate()
+            run_workout_generate(args)
         elif sub in ("rm", "r"):
             run_workout_rm(args)
         elif sub in ("adapt", "a"):
@@ -339,7 +361,9 @@ def main() -> None:
         if sub in ("generate", "g"):
             run_plan_generate(args)
         elif sub in ("show", "s"):
-            run_plan_show()
+            run_plan_show(args)
+        elif sub in ("rm", "d"):
+            run_plan_rm(args)
         elif sub == "wipe":
             run_plan_wipe(args)
     else:
@@ -739,28 +763,39 @@ def run_plan_generate(args: argparse.Namespace) -> None:
     try:
         objectives = db.get_objectives(status='active')
         if objectives:
-            objectives.sort(key=lambda x: str(x['target_date']))
-            next_goal = objectives[0]
-            macro = db.get_macrocycle_for_objective(next_goal['id'])
-            if macro:
-                current_hash = coach_engine._get_config_hash()
-                if macro.get('config_hash') != current_hash and not args.force:
-                    try:
-                        confirm = input(
-                            "\nConfiguration in config.yaml has changed since the last "
-                            "plan generation.\n"
-                            "Would you like to regenerate the periodization strategy? [y/N]: "
-                        ).strip().lower()
-                    except EOFError:
-                        confirm = 'n'
-                    if confirm in ('y', 'yes'):
-                        args.force = True
-                    else:
-                        print("Keeping current periodization strategy. "
-                               "Updating configuration hash in database.")
-                        db.update_macrocycle_config_hash(macro['id'], current_hash)
+            if args.goal_id is not None:
+                target_goals = [o for o in objectives if o['id'] == args.goal_id]
+                next_goal = target_goals[0] if target_goals else None
+            else:
+                objectives.sort(key=lambda x: str(x['target_date']))
+                next_goal = objectives[0]
 
-        strategy, mesocycles = coach_engine.generate_periodization_plan(force=bool(args.force))
+            if next_goal:
+                macro = db.get_macrocycle_for_objective(next_goal['id'])
+                if macro:
+                    current_hash = coach_engine._get_config_hash()
+                    if macro.get('config_hash') != current_hash and not args.force:
+                        try:
+                            confirm = input(
+                                "\nConfiguration in config.yaml has changed since the last "
+                                "plan generation.\n"
+                                "Would you like to regenerate the periodization strategy? [y/N]: "
+                            ).strip().lower()
+                        except EOFError:
+                            confirm = 'n'
+                        if confirm in ('y', 'yes'):
+                            args.force = True
+                        else:
+                            print("Keeping current periodization strategy. "
+                                   "Updating configuration hash in database.")
+                            db.update_macrocycle_config_hash(macro['id'], current_hash)
+
+        plan_kwargs = {}
+        if args.goal_id is not None:
+            plan_kwargs['objective_id'] = args.goal_id
+        strategy, mesocycles = coach_engine.generate_periodization_plan(
+            force=bool(args.force), **plan_kwargs
+        )
         print(bold(cyan("\n=== PERIODIZATION PLAN GENERATED BY COACH ===")))
         print(f"{bold('Strategy')}:\n{wrap_text(strategy, width=80)}\n")
         print(green(f"Generated {len(mesocycles)} mesocycles. Save complete."))
@@ -769,15 +804,27 @@ def run_plan_generate(args: argparse.Namespace) -> None:
         print(red(f"Error during plan generation: {e}"))
 
 
-def run_plan_show() -> None:
+def run_plan_show(args: argparse.Namespace) -> None:
     """Displays the active training macrocycle and mesocycles periodization timeline."""
     objectives = db.get_objectives(status='active')
     if not objectives:
         print(yellow("No active goals found. TrainMate needs at least one objective."))
         return
         
-    objectives.sort(key=lambda x: str(x['target_date']))
-    next_goal = objectives[0]
+    if args.goal_id is not None:
+        target_goals = [o for o in objectives if o['id'] == args.goal_id]
+        if not target_goals:
+            # Check if goal exists but is archived/completed
+            goal = db.get_objective(args.goal_id)
+            if not goal:
+                print(red(f"Goal with ID {args.goal_id} not found."))
+                return
+            next_goal = goal
+        else:
+            next_goal = target_goals[0]
+    else:
+        objectives.sort(key=lambda x: str(x['target_date']))
+        next_goal = objectives[0]
     
     macrocycle = db.get_macrocycle_for_objective(next_goal['id'])
     if not macrocycle:
@@ -852,6 +899,42 @@ def run_plan_show() -> None:
         for line in focus_lines:
             print(f"            {line}")
         print("            " + gray("-" * 40))
+
+
+def run_plan_rm(args: argparse.Namespace) -> None:
+    """Deletes the periodization plan for a specific goal."""
+    goal = db.get_objective(args.id)
+    if not goal:
+        print(red(f"Goal with ID {args.id} not found."))
+        return
+
+    macro = db.get_macrocycle_for_objective(args.id)
+    if not macro:
+        print(yellow(f"No periodization plan exists for goal '{goal['title']}' (ID {args.id})."))
+        return
+
+    # Delete the plan
+    coach_engine.delete_plan(args.id)
+    print(green(f"Periodization plan for goal '{goal['title']}' removed successfully."))
+
+    # Warn about subsequent plans
+    objectives = db.get_objectives(status='active')
+    subsequent_goals_with_plans = []
+    for obj in objectives:
+        if str(obj['target_date']) > str(goal['target_date']):
+            if obj['id'] is not None:
+                sub_macro = db.get_macrocycle_for_objective(obj['id'])
+                if sub_macro:
+                    subsequent_goals_with_plans.append(obj)
+
+    if subsequent_goals_with_plans:
+        print(yellow(
+            "\nWarning: The following subsequent active goals have existing plans that\n"
+            "were aligned with the plan you just deleted. You may need to regenerate them\n"
+            "so their dates align correctly (e.g. running 'plan generate --goal <ID> --force'):"
+        ))
+        for sg in subsequent_goals_with_plans:
+            print(yellow(f" - ID {sg['id']}: '{sg['title']}' (Target date: {sg['target_date']})"))
 
 
 def run_plan_wipe(args: argparse.Namespace) -> None:
@@ -1005,7 +1088,7 @@ def run_workout_adapt(args: argparse.Namespace) -> None:
         print(red(f"Error executing daily adaptation: {e}"))
 
 
-def run_workout_generate() -> None:
+def run_workout_generate(args: argparse.Namespace) -> None:
     """Executes the AI workout generation command based on active strategy."""
     # Make sure we have latest metrics cached
     metrics = db.get_metrics_cache()
@@ -1015,33 +1098,42 @@ def run_workout_generate() -> None:
     try:
         objectives = db.get_objectives(status='active')
         if objectives:
-            objectives.sort(key=lambda x: str(x['target_date']))
-            next_goal = objectives[0]
-            macro = db.get_macrocycle_for_objective(next_goal['id'])
-            if macro:
-                current_hash = coach_engine._get_config_hash()
-                if macro.get('config_hash') != current_hash:
-                    try:
-                        confirm = input(
-                            "\nWarning: config.yaml has changed since the active "
-                            "periodization plan was generated.\n"
-                            "Generating workouts using the out-of-date plan might "
-                            "result in incorrect training targets.\n"
-                            "It is highly recommended to run 'plan generate' first. "
-                            "Proceed anyway? [y/N]: "
-                        ).strip().lower()
-                    except EOFError:
-                        confirm = 'n'
-                    if confirm not in ('y', 'yes'):
-                        print(yellow(
-                            "Workout generation cancelled. Please run 'plan generate' first."
-                        ))
-                        return
-                    else:
-                        print("Proceeding. Updating configuration hash in database.")
-                        db.update_macrocycle_config_hash(macro['id'], current_hash)
+            if args.goal_id is not None:
+                target_goals = [o for o in objectives if o['id'] == args.goal_id]
+                next_goal = target_goals[0] if target_goals else None
+            else:
+                objectives.sort(key=lambda x: str(x['target_date']))
+                next_goal = objectives[0]
 
-        reasoning, workouts = coach_engine.generate_workouts()
+            if next_goal:
+                macro = db.get_macrocycle_for_objective(next_goal['id'])
+                if macro:
+                    current_hash = coach_engine._get_config_hash()
+                    if macro.get('config_hash') != current_hash:
+                        try:
+                            confirm = input(
+                                "\nWarning: config.yaml has changed since the active "
+                                "periodization plan was generated.\n"
+                                "Generating workouts using the out-of-date plan might "
+                                "result in incorrect training targets.\n"
+                                "It is highly recommended to run 'plan generate' first. "
+                                "Proceed anyway? [y/N]: "
+                            ).strip().lower()
+                        except EOFError:
+                            confirm = 'n'
+                        if confirm not in ('y', 'yes'):
+                            print(yellow(
+                                "Workout generation cancelled. Please run 'plan generate' first."
+                            ))
+                            return
+                        else:
+                            print("Proceeding. Updating configuration hash in database.")
+                            db.update_macrocycle_config_hash(macro['id'], current_hash)
+
+        workout_kwargs = {}
+        if args.goal_id is not None:
+            workout_kwargs['objective_id'] = args.goal_id
+        reasoning, workouts = coach_engine.generate_workouts(**workout_kwargs)
         print(bold(cyan("\n=== WORKOUTS GENERATED BY COACH ===")))
         print(f"{bold('Reasoning')}:\n{wrap_text(reasoning, width=80)}\n")
         print(green(

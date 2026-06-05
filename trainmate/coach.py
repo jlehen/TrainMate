@@ -87,6 +87,10 @@ class CoachRepository:
     def _update_macrocycle_config_hash(self, macrocycle_id: int, config_hash: str) -> None:
         self._db.update_macrocycle_config_hash(macrocycle_id, config_hash)
 
+    def _delete_macrocycle_for_objective(self, objective_id: int) -> None:
+        self._db.delete_macrocycle_for_objective(objective_id)
+
+
     def _clear_future_workouts(self, today_str: str) -> None:
         self._db.clear_future_workouts(today_str)
 
@@ -349,21 +353,23 @@ UPCOMING LIFE EVENTS:
     def _generate_macrocycle_strategy(
         self, next_goal: Objective, objectives: List[Objective],
         lifeevents: List[LifeEvent], today_str: str, guidelines: str,
-        profile: Optional[Dict[str, Any]], previous_strategy_text: Optional[str] = None
+        profile: Optional[Dict[str, Any]], previous_strategy_text: Optional[str] = None,
+        plan_start_str: Optional[str] = None
     ) -> Dict[str, Any]:
         """Queries LLM to determine the overall macrocycle strategy and mesocycle blocks."""
+        plan_start = plan_start_str or today_str
         custom_task = f"""
 TASK:
-Determine the overall periodization strategy (macrocycle) from today ({today_str}) until the next
-chronological goal ({next_goal['target_date']}).
+Determine the overall periodization strategy (macrocycle) from {plan_start} until the target
+goal ({next_goal['target_date']}).
 Divide this timeframe into contiguous, sequential mesocycles (determining the duration of each
 block based on the periodization style guidelines provided in the science file). When planning
 mesocycles, it is acceptable to shorten/extend a block by a few days to align transition or
 recovery periods with upcoming life events, and we should also try to align transition
 boundaries with long life events (e.g. aligning a deload week or phase change with a vacation).
 Make sure there are no gaps between the end date of one mesocycle and the start date of the next.
-The first mesocycle must start on today's date ({today_str}) and the last mesocycle must end on or
-around the goal date ({next_goal['target_date']}).
+The first mesocycle must start on the start date ({plan_start}) and the last mesocycle must end
+on or around the goal date ({next_goal['target_date']}).
 """
 
         if previous_strategy_text:
@@ -435,9 +441,9 @@ You MUST respond with a JSON object containing:
         )
 
         user_content = (
-            f"Today's date is {today_str}. The next chronological goal is "
+            f"Today's date is {today_str}. The target goal is "
             f"'{next_goal['title']}' on {next_goal['target_date']}. "
-            f"Please determine the macrocycle and mesocycle blocks starting from {today_str}."
+            f"Please determine the macrocycle and mesocycle blocks starting from {plan_start}."
         )
 
         print("Querying OpenRouter to generate macrocycle and mesocycles periodization strategy...")
@@ -703,14 +709,19 @@ class CoachService:
         )
 
     def _get_active_strategy_and_meso_text(
-        self, objectives: List[Objective]
+        self, objectives: List[Objective], objective_id: Optional[int] = None
     ) -> Tuple[str, str]:
         strategy = None
         meso_text = ""
         if objectives:
-            sorted_objs = sorted(objectives, key=lambda x: str(x['target_date']))
-            next_goal = sorted_objs[0]
-            if next_goal['id'] is not None:
+            if objective_id is not None:
+                target_goals = [o for o in objectives if o['id'] == objective_id]
+                next_goal = target_goals[0] if target_goals else None
+            else:
+                sorted_objs = sorted(objectives, key=lambda x: str(x['target_date']))
+                next_goal = sorted_objs[0] if sorted_objs else None
+
+            if next_goal and next_goal['id'] is not None:
                 macrocycle = self.repository._get_macrocycle_for_objective(next_goal['id'])
                 if macrocycle:
                     strategy = macrocycle['strategy']
@@ -730,10 +741,12 @@ class CoachService:
 
     def _get_coach_system_prompt(
         self, objectives: List[Objective], lifeevents: List[LifeEvent],
-        custom_task: str = ""
+        custom_task: str = "", objective_id: Optional[int] = None
     ) -> str:
         guidelines = self._load_science_guidelines()
-        strategy, meso_text = self._get_active_strategy_and_meso_text(objectives)
+        strategy, meso_text = self._get_active_strategy_and_meso_text(
+            objectives, objective_id=objective_id
+        )
         learnings = self.repository._get_coach_memory("athlete_learnings") or (
             "No observations yet. Over time, observe the athlete's responses to "
             "training volume and intensity."
@@ -750,32 +763,69 @@ class CoachService:
             custom_task=custom_task
         )
 
+    def delete_plan(self, objective_id: int) -> None:
+        """Deletes the periodization plan for a specific objective."""
+        self.repository._delete_macrocycle_for_objective(objective_id)
+
     def generate_periodization_plan(
-        self, force: bool = False
+        self, force: bool = False, objective_id: Optional[int] = None
     ) -> Tuple[str, List[Dict[str, Any]]]:
         """Determines the macrocycle strategy and mesocycle blocks."""
         objectives = self.repository._get_active_objectives()
         if not objectives:
             return "No active goals found. TrainMate needs at least one objective.", []
 
-        # Sort objectives by target date to identify the next goal
-        objectives.sort(key=lambda x: str(x['target_date']))
-        next_goal = objectives[0]
+        # Identify the target goal
+        if objective_id is not None:
+            target_goals = [o for o in objectives if o['id'] == objective_id]
+            if not target_goals:
+                all_goals = self.repository._get_objective(objective_id)
+                if all_goals:
+                    next_goal = all_goals
+                else:
+                    raise ValueError(f"Goal with ID {objective_id} not found.")
+            else:
+                next_goal = target_goals[0]
+        else:
+            objectives.sort(key=lambda x: str(x['target_date']))
+            next_goal = objectives[0]
 
         # Get future life events
         today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        today_date = datetime.strptime(today_str, "%Y-%m-%d").date()
+
+        # Determine plan start date based on preceding goals with plans
+        plan_start_date = today_date
+        preceding_objs = [
+            o for o in objectives
+            if str(o['target_date']) < str(next_goal['target_date'])
+        ]
+        if preceding_objs:
+            latest_preceding_target = None
+            for po in preceding_objs:
+                if po['id'] is not None:
+                    po_macro = self.repository._get_macrocycle_for_objective(po['id'])
+                    if po_macro:
+                        po_target = datetime.strptime(po['target_date'], "%Y-%m-%d").date()
+                        if (latest_preceding_target is None or
+                                po_target > latest_preceding_target):
+                            latest_preceding_target = po_target
+            if latest_preceding_target is not None:
+                plan_start_date = latest_preceding_target + timedelta(days=1)
+                if plan_start_date < today_date:
+                    plan_start_date = today_date
 
         # Compute duration
-        today_date = datetime.strptime(today_str, "%Y-%m-%d").date()
         target_date = datetime.strptime(next_goal['target_date'], "%Y-%m-%d").date()
-        duration_days = (target_date - today_date).days
+        duration_days = (target_date - plan_start_date).days
         duration_weeks = duration_days / 7.0
 
         if duration_weeks < 5:
             raise ValueError(
                 f"Goal '{next_goal['title']}' is too close "
-                f"({duration_weeks:.1f} weeks away). TrainMate requires at "
-                "least 5 weeks to generate a periodization plan."
+                f"({duration_weeks:.1f} weeks away from the start date "
+                f"{plan_start_date.strftime('%Y-%m-%d')}). "
+                f"TrainMate requires at least 5 weeks to generate a periodization plan."
             )
 
         if duration_weeks > 24:
@@ -784,7 +834,7 @@ class CoachService:
             print("Querying LLM to generate intermediate objectives...")
             goals_data = self.engine._generate_intermediate_goals(
                 next_goal=next_goal,
-                today_str=today_str,
+                today_str=plan_start_date.strftime("%Y-%m-%d"),
                 duration_weeks=duration_weeks
             )
             proposed_goals = goals_data.get("goals", [])
@@ -869,7 +919,8 @@ class CoachService:
                 today_str=today_str,
                 guidelines=guidelines,
                 profile=profile,
-                previous_strategy_text=prev_strategy_text
+                previous_strategy_text=prev_strategy_text,
+                plan_start_str=plan_start_date.strftime("%Y-%m-%d")
             )
             strategy = macro_data.get("strategy", "Endurance preparation strategy.")
             mesocycles = macro_data.get("mesocycles", [])
@@ -893,15 +944,23 @@ class CoachService:
 
         return strategy, mesocycles
 
-    def generate_workouts(self) -> Tuple[str, List[Workout]]:
+    def generate_workouts(
+        self, objective_id: Optional[int] = None
+    ) -> Tuple[str, List[Workout]]:
         """Generates the 4-week workouts (microcycles) based on the active strategy."""
         objectives = self.repository._get_active_objectives()
         if not objectives:
             return "No active goals found. TrainMate needs at least one objective.", []
 
-        # Sort objectives by target date to identify the next goal
-        objectives.sort(key=lambda x: str(x['target_date']))
-        next_goal = objectives[0]
+        # Identify the target goal
+        if objective_id is not None:
+            target_goals = [o for o in objectives if o['id'] == objective_id]
+            if not target_goals:
+                raise ValueError(f"Active goal with ID {objective_id} not found.")
+            next_goal = target_goals[0]
+        else:
+            objectives.sort(key=lambda x: str(x['target_date']))
+            next_goal = objectives[0]
 
         # Verify active periodization strategy exists
         macrocycle = self.repository._get_macrocycle_for_objective(next_goal['id'])
@@ -915,7 +974,9 @@ class CoachService:
         lifeevents = self.repository._get_upcoming_lifeevents(today_str)
         guidelines = self._load_science_guidelines()
         profile = config.user_profile
-        strategy, meso_text = self._get_active_strategy_and_meso_text(objectives)
+        strategy, meso_text = self._get_active_strategy_and_meso_text(
+            objectives, objective_id=objective_id
+        )
         learnings = self.repository._get_coach_memory("athlete_learnings") or (
             "No observations yet. Over time, observe the athlete's responses to "
             "training volume and intensity."
@@ -974,7 +1035,9 @@ class CoachService:
         print(f"Generated {len(workouts)} workouts.")
         return plan_data.get("reasoning", "Plan generated."), saved_workouts
 
-    def replan(self, force: bool = False) -> Tuple[str, List[Workout]]:
+    def replan(
+        self, force: bool = False, objective_id: Optional[int] = None
+    ) -> Tuple[str, List[Workout]]:
         """Generates or adapts the training plan from today onwards."""
         objectives = self.repository._get_active_objectives()
         if not objectives:
@@ -984,8 +1047,8 @@ class CoachService:
                 []
             )
 
-        self.generate_periodization_plan(force=force)
-        return self.generate_workouts()
+        self.generate_periodization_plan(force=force, objective_id=objective_id)
+        return self.generate_workouts(objective_id=objective_id)
 
     def adapt(self, target_date_str: Optional[str] = None) -> Tuple[str, List[Workout]]:
         """Evaluates metrics/activities over a rolling window and adapts mesocycle if needed."""
@@ -1035,24 +1098,35 @@ class CoachService:
         # Determine mesocycle end date for adaptation range
         meso_end_date_str = (target_date_obj + timedelta(days=6)).strftime("%Y-%m-%d")
         active_meso = None
+        next_goal = None
         objectives = self.repository._get_active_objectives()
-        if objectives:
+        for obj in objectives:
+            if obj['id'] is not None:
+                macro = self.repository._get_macrocycle_for_objective(obj['id'])
+                if macro:
+                    mesos = self.repository._get_mesocycles_for_macrocycle(macro['id'])
+                    for m in mesos:
+                        start = datetime.strptime(m['start_date'], "%Y-%m-%d").date()
+                        end = datetime.strptime(m['end_date'], "%Y-%m-%d").date()
+                        if start <= target_date_obj <= end:
+                            active_meso = m
+                            meso_end_date_str = m['end_date']
+                            next_goal = obj
+                            break
+            if active_meso:
+                break
+
+        # Fallback to objectives[0] if no active mesocycle covers target_date_obj
+        if not next_goal and objectives:
             objectives.sort(key=lambda x: str(x['target_date']))
             next_goal = objectives[0]
-            macro = self.repository._get_macrocycle_for_objective(next_goal['id'])
-            if macro:
-                mesos = self.repository._get_mesocycles_for_macrocycle(macro['id'])
-                for m in mesos:
-                    start = datetime.strptime(m['start_date'], "%Y-%m-%d").date()
-                    end = datetime.strptime(m['end_date'], "%Y-%m-%d").date()
-                    if start <= target_date_obj <= end:
-                        active_meso = m
-                        meso_end_date_str = m['end_date']
-                        break
 
         guidelines = self._load_science_guidelines()
         profile = config.user_profile
-        strategy, meso_text = self._get_active_strategy_and_meso_text(objectives)
+        objective_id = next_goal['id'] if next_goal else None
+        strategy, meso_text = self._get_active_strategy_and_meso_text(
+            objectives, objective_id=objective_id
+        )
         learnings = self.repository._get_coach_memory("athlete_learnings") or (
             "No observations yet. Over time, observe the athlete's responses to "
             "training volume and intensity."

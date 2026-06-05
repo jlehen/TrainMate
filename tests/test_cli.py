@@ -437,6 +437,25 @@ class TestTrainMateCLI(unittest.TestCase):
         self.assertIn("Build base then taper", stdout)
         self.assertIn("Base Building", stdout)
 
+        # 3. Plan rm command
+        mock_coach.delete_plan.reset_mock()
+        obj_to_rm = test_db.add_objective(
+            title="Goal to remove plan for",
+            target_date="2026-09-22",
+            sport_type="running"
+        )
+        test_db.save_macrocycle(
+            objective_id=obj_to_rm,
+            strategy="Plan to delete",
+            goals_hash="ghash",
+            lifeevents_hash="lhash",
+            mesocycles=[]
+        )
+        exit_code, stdout, stderr = self.run_cli(['plan', 'rm', str(obj_to_rm)])
+        self.assertEqual(exit_code, 0)
+        self.assertIn("removed successfully", stdout)
+        mock_coach.delete_plan.assert_called_once_with(obj_to_rm)
+
     def test_status_command(self):
         # Seed test metrics
         test_db.save_metric_cache(

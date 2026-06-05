@@ -593,6 +593,74 @@ class TestPeriodization(unittest.TestCase):
         self.assertIsNotNone(macro)
         self.assertEqual(macro['strategy'], "Simulated base building strategy")
 
+    @patch('trainmate.coach.openrouter_client')
+    def test_multi_goal_planning_and_deletion(self, mock_client):
+        # Seed two active objectives
+        obj1_id = test_db.add_objective(
+            title="Goal A",
+            target_date="2026-08-01",
+            sport_type="running",
+            priority=1
+        )
+        obj2_id = test_db.add_objective(
+            title="Goal B",
+            target_date="2026-11-01",
+            sport_type="running",
+            priority=2
+        )
+
+        mock_macro_a = {
+            "strategy": "Plan A strategy",
+            "mesocycles": [
+                {
+                    "name": "Base Building A",
+                    "start_date": "2026-06-05",
+                    "end_date": "2026-08-01",
+                    "focus": "Aerobic conditioning"
+                }
+            ]
+        }
+        mock_macro_b = {
+            "strategy": "Plan B strategy",
+            "mesocycles": [
+                {
+                    "name": "Base Building B",
+                    "start_date": "2026-08-02",
+                    "end_date": "2026-11-01",
+                    "focus": "Aerobic threshold"
+                }
+            ]
+        }
+        mock_client.complete.side_effect = [mock_macro_a, mock_macro_b]
+
+        # 1. Generate plan for Goal A
+        strategy_a, mesos_a = coach_engine.generate_periodization_plan(
+            force=True, objective_id=obj1_id
+        )
+        self.assertEqual(strategy_a, "Plan A strategy")
+        self.assertEqual(mesos_a[0]['start_date'], "2026-06-05")
+
+        # 2. Generate plan for Goal B, should start on 2026-08-02 (day after Goal A)
+        strategy_b, mesos_b = coach_engine.generate_periodization_plan(
+            force=True, objective_id=obj2_id
+        )
+        self.assertEqual(strategy_b, "Plan B strategy")
+        # Ensure LLM call got correct start date argument
+        called_args = mock_client.complete.call_args_list[1][0]
+        # System prompt contains plan_start_str
+        self.assertIn("from 2026-08-02 until", called_args[0])
+
+        # Verify macrocycles in database
+        macro_a = test_db.get_macrocycle_for_objective(obj1_id)
+        macro_b = test_db.get_macrocycle_for_objective(obj2_id)
+        self.assertIsNotNone(macro_a)
+        self.assertIsNotNone(macro_b)
+
+        # 3. Delete plan A
+        coach_engine.delete_plan(obj1_id)
+        self.assertIsNone(test_db.get_macrocycle_for_objective(obj1_id))
+        self.assertIsNotNone(test_db.get_macrocycle_for_objective(obj2_id))
+
 if __name__ == '__main__':
     unittest.main()
 

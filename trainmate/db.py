@@ -659,6 +659,16 @@ class Database:
             )
             conn.commit()
 
+    def delete_macrocycle_for_objective(self, objective_id: int) -> None:
+        """Deletes the macrocycle and its nested mesocycles for a specific objective."""
+        with self._get_connection() as conn:
+            conn.cursor().execute(
+                "DELETE FROM macrocycles WHERE objective_id = ?",
+                (objective_id,)
+            )
+            conn.commit()
+
+
     def wipe_objectives(self) -> None:
         """Deletes all objectives from the database."""
         with self._get_connection() as conn:

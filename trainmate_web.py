@@ -154,7 +154,13 @@ def get_workouts() -> Any:
 def generate_plan() -> Any:
     """API endpoint to generate the periodization plan (macro/meso strategy)."""
     try:
-        strategy, mesocycles = coach_engine.generate_periodization_plan()
+        data = request.json or {}
+        goal_id = data.get("goal_id")
+        if goal_id is not None:
+            goal_id = int(goal_id)
+        strategy, mesocycles = coach_engine.generate_periodization_plan(
+            objective_id=goal_id
+        )
         return jsonify({
             "message": "Periodization plan generated and saved.",
             "strategy": strategy,
@@ -163,11 +169,25 @@ def generate_plan() -> Any:
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+@app.route("/api/plan/<int:goal_id>", methods=["DELETE"])
+def delete_plan(goal_id: int) -> Any:
+    """API endpoint to delete the periodization plan for a specific goal."""
+    try:
+        coach_engine.delete_plan(goal_id)
+        msg = f"Periodization plan for goal {goal_id} deleted successfully."
+        return jsonify({"message": msg})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
 @app.route("/api/workouts/generate", methods=["POST"])
 def generate_workouts() -> Any:
     """API endpoint to generate workouts (microcycles) based on active strategy."""
     try:
-        reasoning, workouts = coach_engine.generate_workouts()
+        data = request.json or {}
+        goal_id = data.get("goal_id")
+        if goal_id is not None:
+            goal_id = int(goal_id)
+        reasoning, workouts = coach_engine.generate_workouts(objective_id=goal_id)
         return jsonify({
             "message": "Workouts generated and saved.",
             "reasoning": reasoning,
