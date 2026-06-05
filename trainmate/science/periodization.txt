@@ -1,40 +1,220 @@
-ATHLETIC PERIODIZATION AND TRAINING STRUCTURE
-============================================
+# TrainMate Engine Architecture: Periodization & Training Structure Guide
 
-To maximize performance for a target event and avoid burnout, training must be structured into
-macrocycles, mesocycles, and microcycles.
+## 1. Core Architectural Overview
 
-1. Macrocycle (The Goal Plan):
-   - In Traditional Periodization, the overall timeline leading up to the
-     target objective/race (typically 3 to 12 months). It is most effective for
-     a single annual peak but can lead to boredom or loss of base fitness
-     toward the end.
-   - In Block Periodization, macrocycles are smaller (5 to 10 weeks). It allows multiple peaks and reduces boredom.
-   - Structured into sequential phases: Base building, Build (specific prep), Peak/Taper, and
-     Race/Event phase.
-   - TrainMate focuses on the *next chronological goal* for active scheduling.
+The TrainMate engine schedules training time using a hierarchical, nested
+structure. Time containers (Macrocycles, Mesocycles, Microcycles) act as
+programmatic wrappers, while Periodization Styles (Traditional vs. Block)
+dictate the mathematical distribution of training volume and intensity inside
+those containers.
 
-2. Mesocycle (The Block Plan):
-   - Typically a 3-week or 4-week block of training.
-   - Standard 4-week progression:
-     - Week 1: Introduction/Base load.
-     - Week 2: Progression (load increases by ~10%).
-     - Week 3: Peak overload (highest load, specific target workouts).
-     - Week 4: Deload/Recovery (workload reduced by 30-40% to allow adaptation and clear fatigue).
+*   **Macrocycle** (Overarching Goal Timeline)
+    *   **Mesocycle Blocks** (Targeted Phase Adaptation)
+        *   **Microcycles** (Fluid Work/Rest Schedule)
+            *   **Daily Workout Blueprints**
 
-3. Microcycle (The Weekly Plan):
-   - A 7-day training schedule.
-   - Structure should alternate stress and recovery.
-   - Avoid back-to-back high-intensity workouts (intervals, tempo, sprints).
-   - Include at least 1-2 rest/recovery days per week.
-   - Include 1 long endurance workout per week (typically on weekends).
-   - When strength training is included as cross-training to build durability,
-     never lift heavy the day before a high-intensity endurance session.
+---
 
-4. Life Event Adjustments:
-   - Business Trip: Adjust volume/intensity based on travel schedule and fatigue. Focus on
-     short workouts, maintenance, or rest on heavy travel days.
-   - Vacation: Adjust volume based on travel constraints (usually maintain a base level of fitness
-     or reduce load if active vacation, or adjust to local sport).
-   - Parties / Major Social Events: Shift high-intensity workouts away from the day of and the
-     morning after the event to prevent training under influence of fatigue/alcohol/dehydration. High-intensity sessions in a compromised state are counterproductive.
+## 2. Component Hierarchy & Container Logic
+
+### A. Macrocycle (The Goal Timeline)
+
+The macrocycle encompasses the entire overarching timeline leading up to an
+athlete's primary objective or target event.
+* **Duration Constraints:** Programmatic minimum of 5 weeks; maximum of 24
+  weeks.
+* **System Scheduling Rule:** The engine tracks the *next chronological target
+  event* and builds the macrocycle backward from the event date. Timelines
+  exceeding 24 weeks must be split into multiple sequential macrocycles
+  separated by a formal recovery period.
+
+### B. Mesocycle (The Phase Block)
+
+A medium-sized container dedicated to forcing a specific physical or metabolic
+adaptation.
+* **Traditional Duration:** 4 to 8 weeks per mesocycle. Changes occur on a
+  gradual, shallow gradient.
+* **Block Duration:** 2 to 4 weeks per mesocycle. Changes occur on a steep,
+  abrupt vertical step function.
+
+#### Mesocycle Loading Progressions:
+
+* **Standard 3:1 Loading (Low-Stress Archetype):** For users under 40 with low
+  non-training life stress. 3 weeks of progressive load scaling, followed by a
+  1-week deload.
+* **Modified 2:1 Loading (High-Stress/Masters Archetype):** triggered if the
+  user profile indicates an age of 40+, high self-reported lifestyle stress, or
+  complex concurrent training goals. 2 weeks of progressive load scaling,
+  followed by a 1-week deload to prevent non-functional overreaching.
+* **Deload Protocol:** During a deload week, the system cuts total training
+  volume by 30–40% while maintaining target movement intensity at 80–90% of the
+  prior week's peak to maintain neural pathways while clearing systemic
+  fatigue.
+
+### C. Microcycle (The Fluid Schedule)
+
+The structural unit of daily workout allocation. While default configurations
+align to a standard 7-day calendar, the engine must support fluid 10-to-14-day
+microcycles for advanced or hybrid athletes to avoid overlapping fatigue.
+
+#### Microcycle Programming Constraints:
+* **The Fatigue Buffer:** High-intensity sessions (VO2max intervals, threshold
+  workouts, anaerobic sprints) must never be scheduled on consecutive days.
+* **Endurance Anchor:** Every microcycle requires exactly one long,
+  low-intensity endurance session (typically assigned to weekends or rest
+  windows).
+* **Rest Mandate:** The engine must enforce 1 to 2 complete rest or active
+  recovery days within any rolling 7-day calendar equivalent.
+
+#### Adaptive Stress Consolidation Rule:
+
+For hybrid athletes executing concurrent strength and endurance programming,
+the engine must protect designated rest days from hidden central nervous system
+(CNS) fatigue. It resolves the conflict between metabolic and neuromuscular
+stress by executing a **Tiered Availability Routing Hierarchy**:
+
+* Tier 1: Optimal Same-Day Consolidation (Default / High Availability)
+
+  * **Trigger:** Athlete profile allows for multi-session training days.
+  * **Logic:** Consolidate high-intensity endurance elements and heavy strength
+    training on the **same calendar day**. 
+  * **System Constraints:** Enforce a minimum 6-hour passive recovery buffer
+    between sessions. Route the priority adaptation first (e.g., endurance
+    first for aerobic profiling; strength first for neuromuscular/hypertrophy
+    profiling).
+
+* Tier 2: Alternating Sequential Loading (Standard Availability / 1x Day Cap)
+
+  * **Trigger:** Athlete is logistically restricted to exactly one training
+    session per calendar day.
+  * **Logic:** The engine concentrates systemic stress over a **48-hour block**
+    rather than a 24-hour day. It pairs the heavy strength session and the
+    high-intensity endurance session on consecutive days.
+  * **System Constraints:** The engine must automatically lock the subsequent
+    24-to-48-hour calendar window following this block, forcing either a
+    complete rest day or a strict, low-intensity Zone 1/2 recovery session.
+
+* Tier 3: Adaptive System Downgrade (Critical Time / Facility Restrictions)
+
+  * **Trigger:** Athlete has restricted availability, and a compressed
+    microcycle layout forces a scheduling collision that violates the 48-hour
+    recovery buffer.
+  * **Logic:** The engine is strictly forbidden from simply stacking standard
+    high-intensity sessions back-to-back without recovery. It must dynamically
+    execute one of two fallback algorithms:
+
+    * **The Combined Hybrid Session:** Merge both disciplines into a single
+      workout block capping out at a maximum of 75 minutes. Automatically
+      truncate accessory strength volume by 50% and restrict endurance to a
+      highly condensed interval block.
+    * **The Intensity Demotion:** Maintain the primary structural target (e.g.,
+      Heavy Strength) as programmed, but automatically downgrade the competing
+      session's intensity tier (e.g., converting a VO2max interval workout into
+      a flat, steady-state Zone 2 aerobic maintenance ride).
+
+---
+
+## 3. Algorithmic Periodization Style Selection
+
+The system routes the user into one of two mathematical engines based on
+experience level, timeline constraints, and performance goals.
+
+### Engine A: Traditional Linear Model (The Smooth Ramp)
+
+Best suited for beginner-to-intermediate fitness levels, long timelines, and
+multi-sport entry-level athletes. 
+
+#### Mathematical Crossover Equation ($TW = V \times I$):
+
+Volume ($V$) and Intensity ($I$) scale gradually in inverse directions across
+three distinct, blended mesocycles. Total Workload ($TW$) adjustments are
+smooth, changing by a shallow gradient of only $\pm 2\text{--}5\%$
+week-over-week.
+
+*   **Phase 1 (Base):** Volume [████████] | Intensity [██]
+*   **Phase 2 (Build):** Volume [██████] | Intensity [██████]
+*   **Phase 3 (Peak):** Volume [████] | Intensity [████████]
+
+1. **Base Phase (General Physical Preparation - GPP):** 
+   * *Duration:* 6 to 12 weeks. 
+   * *Math:* Volume is maximized ($80\text{--}100\%$ capacity); intensity is
+     restricted ($50\text{--}60\%$ max HR / 1RM). Weekly volume increments grow
+     linearly by $+5\text{--}10\%$ during load weeks.
+2. **Build Phase (Specific Physical Preparation - SPP):** 
+   * *Duration:* 4 to 8 weeks. 
+   * *Math:* Volume linearly scales down by $5\text{--}10\%$ weekly; intensity
+     linearly scales up by $5\text{--}10\%$ weekly ($75\text{--}85\%$ max
+     thresholds). 
+   * *Intra-Cycle Variance:* High. Individual microcycles contain high training
+     quality diversity, splitting weekly volume across energy systems
+     simultaneously (e.g., $75\%$ Aerobic Base, $15\%$ Threshold, $10\%$
+     Neuromuscular Speed).
+3. **Peak Phase (Competition Prep & Taper):** 
+   * *Duration:* 2 to 4 weeks. 
+   * *Math:* Volume drops to lowest baseline ($40\text{--}50\%$); intensity
+     spikes to maximum ($90\text{--}100\%$ race pace/power).
+
+### Engine B: Block Periodization Model (The Step Function)
+
+Best suited for advanced, highly plateued, or hybrid athletes facing compressed
+timelines ($< 10$ weeks).
+
+#### Mathematical Shock Equation:
+
+Volume and intensity do not cross gradually.  Instead, they shift via a steep
+step function at mesocycle boundaries. To prevent structural injury under
+concentrated loads, individual microcycles maintain extremely low
+variance—focusing entirely on a single metabolic or physical adaptation quality
+at a time.
+
+*   **Block 1 (Accumulation):** Volume [████████] | Intensity [██]
+*   **Block 2 (Transmutation):** Volume [████] | Intensity [████████]
+*   **Block 3 (Realization):** Volume [██] | Intensity [████████]
+
+1. **Accumulation Block (Foundational Capacity):**
+   * *Duration Boundaries:* Minimum 2 weeks (14 days); Hard Ceiling 6 weeks (42
+     days). Recommended default: 3–4 weeks.
+   * *Math & Focus:* Massive concentrated training volume; near-zero
+     high-intensity intervals. Sharp boundary delta: volume drops by $\sim
+     35\%$ overnight upon transition to the next block.
+2. **Transmutation Block (High-Intensity Transformation):**
+   * *Duration Boundaries:* Minimum 2 weeks (14 days); Hard Ceiling 4 weeks (28
+     days). Recommended default: 3 weeks.
+   * *Math & Focus:* Intensive, concentrated workloads (VO2max, explosive
+     speed, maximal strength). Volume is cut by $50\%$ from baseline; intensity
+     immediately steps up to peak thresholds ($+40\%$ delta). 
+   * *System Safety Protocol:* The engine triggers a critical error if a
+     Transmutation block attempts to schedule a 5th consecutive week,
+     automatically forcing an immediate transition to the Realization block to
+     avoid systemic autonomic nervous system burnout.
+3. **Realization Block
+     (The Taper & Peak):**
+   * *Duration Boundaries:* Minimum 1 week (7 days); Hard Ceiling 2 weeks (14
+     days).
+   * *Math & Focus:* Total volume is cratered to eliminate accumulated fatigue,
+     while movement intensity remains sharp and crisp to preserve neuromuscular
+     recruitment.
+
+---
+
+## 4. Auto-Regulation & Dynamic Exception Handling
+
+The static calendar structure must dynamically yield to real-time objective and
+subjective biological feedback.
+
+* **Physiological Red Flags:** If biometric inputs (e.g., waking HRV suppressed
+  below the user's rolling 7-day baseline, or resting heart rate elevated for
+  2+ consecutive days) indicate incomplete recovery, the system immediately
+  downgrades any scheduled high-intensity sessions to Zone 2 maintenance or
+  mandatory rest, regardless of the active mesocycle rules.
+* **Business Travel Exception:** For designated heavy travel days, the engine
+  caps workout duration to a maximum of 30–45 minutes, down-regulates session
+  intensity, or converts the calendar block into an active rest day.
+* **Vacation Exception:** Based on travel constraints, the engine dynamically
+  recalibrates to maintain base aerobic fitness via non-specific local
+  disciplines (e.g., hiking, swimming), or programmatically repurposes the
+  vacation block as a scheduled mesocycle deload.
+* **Social / Major Lifecycle Events:** The engine blocks high-intensity
+  sessions from being scheduled on the calendar day of, or the morning
+  immediately following, a major social event to mitigate increased injury
+  risks associated with sleep deprivation, fatigue, or dehydration.
