@@ -192,6 +192,28 @@ def main() -> None:
         help="Goal ID whose periodization plan should be removed"
     )
 
+    # plan feedback
+    p_fb = plan_subparsers.add_parser(
+        "feedback",
+        help="Add athlete feedback on the current macrocycle or a mesocycle"
+    )
+    p_fb.add_argument(
+        "--macro", action="store_true",
+        help="Provide general feedback on the overall macrocycle strategy"
+    )
+    p_fb.add_argument(
+        "--meso", type=int,
+        help="Provide feedback on a specific mesocycle ID"
+    )
+    p_fb.add_argument(
+        "--goal", "--goal-id", type=int, dest="goal_id",
+        help="Target goal ID whose plan the feedback should attach to"
+    )
+    p_fb.add_argument(
+        "text",
+        help="Feedback content string"
+    )
+
     # plan wipe
     p_wipe = plan_subparsers.add_parser("wipe", help="Wipe all periodization plans")
     p_wipe.add_argument("-y", "--yes", action="store_true", help="Skip confirmation prompt")
@@ -364,6 +386,8 @@ def main() -> None:
             run_plan_show(args)
         elif sub in ("rm", "d"):
             run_plan_rm(args)
+        elif sub == "feedback":
+            run_plan_feedback(args)
         elif sub == "wipe":
             run_plan_wipe(args)
     else:
@@ -842,7 +866,10 @@ def run_plan_show(args: argparse.Namespace) -> None:
         f"{bold('Objective')}: {cyan(next_goal['title'])} ({magenta(sport_str)}) "
         f"on {cyan(next_goal['target_date'])}"
     )
-    print(f"{bold('Overall Strategy')}:\n{wrap_text(macrocycle['strategy'], width=80)}\n")
+    print(format_labeled_block(f"{bold('Overall Strategy')}:", macrocycle['strategy']))
+    if macrocycle.get('feedback'):
+        print(format_labeled_block(f"{bold('Feedback')}:", macrocycle['feedback']))
+    print()
     print(bold("Periodization Timeline:"))
     
     today = datetime.now(timezone.utc).date()
@@ -898,6 +925,11 @@ def run_plan_show(args: argparse.Namespace) -> None:
         focus_lines = textwrap.wrap(m['focus'], width=80)
         for line in focus_lines:
             print(f"            {line}")
+        if m.get('feedback'):
+            fb_lines = textwrap.wrap(m['feedback'], width=80)
+            print(f"            {bold('Feedback')}:")
+            for line in fb_lines:
+                print(f"              {line}")
         print("            " + gray("-" * 40))
 
 
@@ -952,6 +984,64 @@ def run_plan_wipe(args: argparse.Namespace) -> None:
 
     db.wipe_plans()
     print(green("All periodization plans wiped successfully."))
+
+
+def run_plan_feedback(args: argparse.Namespace) -> None:
+    """Saves athlete feedback for a macrocycle or specific mesocycle."""
+    if not args.text:
+        print(red("Error: Feedback text cannot be empty."))
+        sys.exit(1)
+
+    if not args.macro and not args.meso:
+        print(red("Error: You must specify --macro or --meso <id>."))
+        sys.exit(1)
+
+    # 1. Handle mesocycle feedback directly if specified
+    if args.meso:
+        meso = db.get_mesocycle(args.meso)
+        if not meso:
+            print(red(f"Mesocycle with ID {args.meso} not found."))
+            sys.exit(1)
+        db.update_mesocycle_feedback(args.meso, args.text)
+        print(green(
+            f"Feedback successfully saved for Mesocycle ID {args.meso} ('{meso['name']}')."
+        ))
+        print(yellow(
+            "Note: You must regenerate the periodization plan to apply this feedback.\n"
+            "Run 'plan generate --force' (or with '--goal <ID> --force') to update the plan."
+        ))
+        return
+
+    # 2. Handle macrocycle feedback. Find target goal first.
+    objectives = db.get_objectives(status='active')
+    if not objectives:
+        print(yellow("No active goals found. TrainMate needs at least one objective."))
+        sys.exit(1)
+
+    if args.goal_id is not None:
+        target_goals = [o for o in objectives if o['id'] == args.goal_id]
+        if not target_goals:
+            print(red(f"Active goal with ID {args.goal_id} not found."))
+            sys.exit(1)
+        next_goal = target_goals[0]
+    else:
+        objectives.sort(key=lambda x: str(x['target_date']))
+        next_goal = objectives[0]
+
+    macro = db.get_macrocycle_for_objective(next_goal['id'])
+    if not macro:
+        print(yellow(f"No active periodization plan exists for goal '{next_goal['title']}'."))
+        sys.exit(1)
+
+    db.update_macrocycle_feedback(macro['id'], args.text)
+    print(green(
+        f"Feedback successfully saved for Macrocycle ID {macro['id']} "
+        f"(Goal: '{next_goal['title']}')."
+    ))
+    print(yellow(
+        "Note: You must regenerate the periodization plan to apply this feedback.\n"
+        "Run 'plan generate --force' (or with '--goal <ID> --force') to update the plan."
+    ))
 
 
 # ==============================================================================

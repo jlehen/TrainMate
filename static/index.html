@@ -208,6 +208,16 @@
                         <label>Overall Training Strategy</label>
                         <p id="strategy-philosophy"></p>
                     </div>
+                    <div class="macro-feedback-box" id="macro-feedback-section" style="margin: 0 1.5rem 1rem 1.5rem; padding-top: 1rem; border-top: 1px solid var(--border-color);">
+                        <label class="form-label" style="font-size: 0.85rem; color: var(--text-muted); display: block; margin-bottom: 0.5rem;"><i class="fa-solid fa-comments"></i> Give Feedback to AI Coach</label>
+                        <div style="display: flex; gap: 0.5rem;">
+                            <textarea id="macro-feedback-input" placeholder="e.g. increase base volume or suggest lighter workouts..." style="flex-grow: 1; min-height: 40px; max-height: 120px; border-radius: 8px; padding: 0.5rem; background: rgba(0,0,0,0.25); color: #fff; border: 1px solid var(--border-color); resize: vertical; font-family: inherit; font-size: 0.85rem;"></textarea>
+                            <button id="btn-save-macro-feedback" class="btn btn-secondary btn-sm" style="align-self: flex-end; padding: 0.5rem 1rem;"><i class="fa-solid fa-save"></i> Save</button>
+                        </div>
+                        <div id="macro-feedback-notice" style="display: none; margin-top: 0.5rem; font-size: 0.75rem; color: var(--accent-gold);">
+                            <i class="fa-solid fa-triangle-exclamation"></i> Feedback saved! Propose to regenerate your plan to apply it.
+                        </div>
+                    </div>
                     <div class="timeline-wrapper">
                         <label>Periodization Timeline</label>
                         <div class="timeline-container" id="web-timeline-container">
@@ -220,6 +230,16 @@
                             <span class="cycle-details-dates" id="cycle-details-dates"></span>
                         </div>
                         <div class="cycle-details-focus" id="cycle-details-focus"></div>
+                        <div class="meso-feedback-container" id="meso-feedback-section" style="margin-top: 1rem; border-top: 1px dashed rgba(255, 255, 255, 0.1); padding-top: 1rem;">
+                            <label class="form-label" style="font-size: 0.8rem; color: var(--text-muted); display: block; margin-bottom: 0.5rem;"><i class="fa-solid fa-comment-medical"></i> Focus Feedback for this Block</label>
+                            <div style="display: flex; gap: 0.5rem;">
+                                <input type="text" id="meso-feedback-input" placeholder="e.g. prioritize aerobic base or focus on speed..." style="flex-grow: 1; border-radius: 8px; padding: 0.45rem; background: rgba(0,0,0,0.2); color: #fff; border: 1px solid var(--border-color); font-family: inherit; font-size: 0.8rem; outline: none;">
+                                <button id="btn-save-meso-feedback" class="btn btn-secondary btn-sm" style="padding: 0.45rem 0.85rem;"><i class="fa-solid fa-save"></i> Save</button>
+                            </div>
+                            <div id="meso-feedback-notice" style="display: none; margin-top: 0.5rem; font-size: 0.75rem; color: var(--accent-gold);">
+                                <i class="fa-solid fa-triangle-exclamation"></i> Feedback saved! Propose to regenerate your plan to apply it.
+                            </div>
+                        </div>
                     </div>
                 </div>
                 

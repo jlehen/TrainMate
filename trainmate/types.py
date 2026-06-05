@@ -77,7 +77,9 @@ class Macrocycle(TypedDict):
     strategy: str
     goals_hash: str
     lifeevents_hash: str
+    config_hash: Optional[str]
     created_at: str
+    feedback: Optional[str]
 
 class Mesocycle(TypedDict):
     """Represents a specific block/phase of training within a macrocycle."""
@@ -87,3 +89,4 @@ class Mesocycle(TypedDict):
     start_date: str
     end_date: str
     focus: str
+    feedback: Optional[str]

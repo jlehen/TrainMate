@@ -179,6 +179,28 @@ def delete_plan(goal_id: int) -> Any:
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+@app.route("/api/macrocycles/<int:macro_id>/feedback", methods=["POST"])
+def save_macrocycle_feedback(macro_id: int) -> Any:
+    """API endpoint to save athlete feedback for a specific macrocycle."""
+    try:
+        data = request.json or {}
+        feedback = data.get("feedback", "")
+        db.update_macrocycle_feedback(macro_id, feedback)
+        return jsonify({"message": "Macrocycle feedback saved successfully."})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/api/mesocycles/<int:meso_id>/feedback", methods=["POST"])
+def save_mesocycle_feedback(meso_id: int) -> Any:
+    """API endpoint to save athlete feedback for a specific mesocycle block."""
+    try:
+        data = request.json or {}
+        feedback = data.get("feedback", "")
+        db.update_mesocycle_feedback(meso_id, feedback)
+        return jsonify({"message": "Mesocycle feedback saved successfully."})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
 @app.route("/api/workouts/generate", methods=["POST"])
 def generate_workouts() -> Any:
     """API endpoint to generate workouts (microcycles) based on active strategy."""

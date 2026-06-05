@@ -187,6 +187,7 @@ class Database:
                     lifeevents_hash TEXT NOT NULL,
                     config_hash TEXT,
                     created_at TEXT NOT NULL,
+                    feedback TEXT DEFAULT NULL,
                     FOREIGN KEY (objective_id) REFERENCES objectives(id) ON DELETE CASCADE
                 )
             """)
@@ -212,6 +213,7 @@ class Database:
                     start_date TEXT NOT NULL,
                     end_date TEXT NOT NULL,
                     focus TEXT NOT NULL,
+                    feedback TEXT DEFAULT NULL,
                     FOREIGN KEY (macrocycle_id) REFERENCES macrocycles(id) ON DELETE CASCADE
                 )
             """)
@@ -619,6 +621,32 @@ class Database:
                 (macrocycle_id,)
             )
             return [dict(row) for row in cursor.fetchall()]  # type: ignore
+
+    def get_mesocycle(self, mesocycle_id: int) -> Optional[Mesocycle]:
+        """Fetches a specific mesocycle by its unique ID."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM mesocycles WHERE id = ?", (mesocycle_id,))
+            row = cursor.fetchone()
+            return dict(row) if row else None  # type: ignore
+
+    def update_macrocycle_feedback(self, macrocycle_id: int, feedback: str) -> None:
+        """Saves user feedback for a specific macrocycle strategy."""
+        with self._get_connection() as conn:
+            conn.cursor().execute(
+                "UPDATE macrocycles SET feedback = ? WHERE id = ?",
+                (feedback, macrocycle_id)
+            )
+            conn.commit()
+
+    def update_mesocycle_feedback(self, mesocycle_id: int, feedback: str) -> None:
+        """Saves user feedback for a specific training phase/mesocycle block."""
+        with self._get_connection() as conn:
+            conn.cursor().execute(
+                "UPDATE mesocycles SET feedback = ? WHERE id = ?",
+                (feedback, mesocycle_id)
+            )
+            conn.commit()
 
     def save_macrocycle(
         self, objective_id: int, strategy: str, goals_hash: str,

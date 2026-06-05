@@ -133,6 +133,7 @@ Active macro training cycles tied to target objectives.
 *   `goals_hash` / `lifeevents_hash` (TEXT - status tracking for plan invalidation)
 *   `config_hash` (TEXT - hash of config.yaml to detect configuration changes)
 *   `created_at` (TEXT)
+*   `feedback` (TEXT - athlete feedback to incorporate into strategy replanning)
 
 ### mesocycles
 Specific block training phases within a macrocycle.
@@ -142,6 +143,7 @@ Specific block training phases within a macrocycle.
 *   `start_date` (TEXT)
 *   `end_date` (TEXT)
 *   `focus` (TEXT)
+*   `feedback` (TEXT - athlete feedback to incorporate into cycle replanning)
 
 ---
 

@@ -1,5 +1,7 @@
 // --- CONSTANTS & DOM REFERENCES ---
 const API_BASE = "";
+let activeMacrocycleId = null;
+let activeMesocycleId = null;
 
 // Logging helper
 function logConsole(message, type = "success") {
@@ -80,10 +82,14 @@ async function fetchStatus() {
         // Update Strategy Card
         const strategyCard = document.getElementById("strategy-card");
         if (data.macrocycle && data.mesocycles && data.mesocycles.length > 0) {
+            activeMacrocycleId = data.macrocycle.id;
             strategyCard.style.display = "block";
             document.getElementById("strategy-philosophy").innerText = data.macrocycle.strategy;
+            document.getElementById("macro-feedback-input").value = data.macrocycle.feedback || "";
+            document.getElementById("macro-feedback-notice").style.display = "none";
             renderTimeline(data.mesocycles);
         } else {
+            activeMacrocycleId = null;
             strategyCard.style.display = "none";
         }
         
@@ -170,6 +176,11 @@ function renderTimeline(mesocycles) {
             detailsName.innerText = m.name;
             detailsDates.innerText = `${m.start_date} to ${m.end_date} (${duration} days)`;
             detailsFocus.innerText = m.focus;
+            
+            // Populate feedback input
+            activeMesocycleId = m.id;
+            document.getElementById("meso-feedback-input").value = m.feedback || "";
+            document.getElementById("meso-feedback-notice").style.display = "none";
         });
         
         container.appendChild(block);
@@ -658,6 +669,83 @@ document.getElementById("form-add-event").addEventListener("submit", async (e) =
         }
     } catch (err) {
         logConsole(`Error logging event: ${err.message}`, "error");
+    }
+});
+
+document.getElementById("btn-save-macro-feedback").addEventListener("click", async () => {
+    if (!activeMacrocycleId) {
+        logConsole("No active macrocycle to save feedback for.", "error");
+        return;
+    }
+    const feedback = document.getElementById("macro-feedback-input").value;
+    logConsole("Saving strategy feedback...", "system");
+    try {
+        const res = await fetch(`${API_BASE}/api/macrocycles/${activeMacrocycleId}/feedback`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ feedback })
+        });
+        const data = await res.json();
+        if (res.ok) {
+            logConsole("Strategy feedback saved successfully.");
+            document.getElementById("macro-feedback-notice").style.display = "block";
+            // Refresh status to ensure local data is updated
+            const statusRes = await fetch(`${API_BASE}/api/status`);
+            if (statusRes.ok) {
+                const statusData = await statusRes.json();
+                if (statusData.macrocycle) {
+                    document.getElementById("macro-feedback-input").value =
+                        statusData.macrocycle.feedback || "";
+                }
+            }
+        } else {
+            logConsole(`Failed to save strategy feedback: ${data.error}`, "error");
+        }
+    } catch (e) {
+        logConsole(`Error saving strategy feedback: ${e.message}`, "error");
+    }
+});
+
+document.getElementById("btn-save-meso-feedback").addEventListener("click", async () => {
+    if (!activeMesocycleId) {
+        logConsole("No active mesocycle to save feedback for.", "error");
+        return;
+    }
+    const feedback = document.getElementById("meso-feedback-input").value;
+    logConsole("Saving block feedback...", "system");
+    try {
+        const res = await fetch(`${API_BASE}/api/mesocycles/${activeMesocycleId}/feedback`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ feedback })
+        });
+        const data = await res.json();
+        if (res.ok) {
+            logConsole("Block feedback saved successfully.");
+            document.getElementById("meso-feedback-notice").style.display = "block";
+            // Refresh status to update local mesocycles list without losing active selection
+            const savedSelectedId = activeMesocycleId;
+            const statusRes = await fetch(`${API_BASE}/api/status`);
+            if (statusRes.ok) {
+                const statusData = await statusRes.json();
+                // Redraw timeline
+                renderTimeline(statusData.mesocycles);
+                // Reselect the block that was updated
+                const blocks = document.querySelectorAll(".cycle-block");
+                blocks.forEach(b => {
+                    const blockTitle = b.title;
+                    const targetMeso = statusData.mesocycles.find(item => item.id === savedSelectedId);
+                    if (targetMeso && blockTitle.includes(targetMeso.name) &&
+                        blockTitle.includes(targetMeso.start_date)) {
+                        b.click();
+                    }
+                });
+            }
+        } else {
+            logConsole(`Failed to save block feedback: ${data.error}`, "error");
+        }
+    } catch (e) {
+        logConsole(`Error saving block feedback: ${e.message}`, "error");
     }
 });
 

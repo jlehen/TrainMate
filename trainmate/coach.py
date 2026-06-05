@@ -87,6 +87,12 @@ class CoachRepository:
     def _update_macrocycle_config_hash(self, macrocycle_id: int, config_hash: str) -> None:
         self._db.update_macrocycle_config_hash(macrocycle_id, config_hash)
 
+    def _update_macrocycle_feedback(self, macro_id: int, feedback: str) -> None:
+        self._db.update_macrocycle_feedback(macro_id, feedback)
+
+    def _update_mesocycle_feedback(self, meso_id: int, feedback: str) -> None:
+        self._db.update_mesocycle_feedback(meso_id, feedback)
+
     def _delete_macrocycle_for_objective(self, objective_id: int) -> None:
         self._db.delete_macrocycle_for_objective(objective_id)
 
@@ -354,7 +360,7 @@ UPCOMING LIFE EVENTS:
         self, next_goal: Objective, objectives: List[Objective],
         lifeevents: List[LifeEvent], today_str: str, guidelines: str,
         profile: Optional[Dict[str, Any]], previous_strategy_text: Optional[str] = None,
-        plan_start_str: Optional[str] = None
+        plan_start_str: Optional[str] = None, athlete_feedback: Optional[str] = None
     ) -> Dict[str, Any]:
         """Queries LLM to determine the overall macrocycle strategy and mesocycle blocks."""
         plan_start = plan_start_str or today_str
@@ -370,6 +376,17 @@ boundaries with long life events (e.g. aligning a deload week or phase change wi
 Make sure there are no gaps between the end date of one mesocycle and the start date of the next.
 The first mesocycle must start on the start date ({plan_start}) and the last mesocycle must end
 on or around the goal date ({next_goal['target_date']}).
+"""
+
+        if athlete_feedback:
+            custom_task += f"""
+ATHLETE FEEDBACK ON THE PREVIOUS PLAN:
+The athlete has provided direct feedback on the previous periodization plan:
+{athlete_feedback}
+You MUST revise the macrocycle strategy and/or the duration, boundaries, and focuses of individual 
+mesocycles to directly address this feedback. Make adjustments (e.g. scheduling more rest, 
+changing block emphasis, extending/shortening specific cycles) while continuing to respect overall 
+sports science principles and guidelines.
 """
 
         if previous_strategy_text:
@@ -907,6 +924,23 @@ class CoachService:
                     f"- Mesocycles:\n{prev_meso_text or '  - None\n'}"
                 )
 
+            # Retrieve active feedback from existing plan
+            feedback_text = None
+            if existing_macro:
+                fb_parts = []
+                if existing_macro.get('feedback'):
+                    fb_parts.append(
+                        f"- Overall Strategy Feedback: \"{existing_macro['feedback']}\""
+                    )
+                existing_mesos = self.repository._get_mesocycles_for_macrocycle(
+                    existing_macro['id']
+                )
+                for m in existing_mesos:
+                    if m.get('feedback'):
+                        fb_parts.append(f"- Phase \"{m['name']}\" Feedback: \"{m['feedback']}\"")
+                if fb_parts:
+                    feedback_text = "\n".join(fb_parts)
+
             # Generate new macrocycle strategy and mesocycles
             print("Goals or life events have changed, or force generation requested. "
                   "Determining new overall periodization strategy...")
@@ -920,7 +954,8 @@ class CoachService:
                 guidelines=guidelines,
                 profile=profile,
                 previous_strategy_text=prev_strategy_text,
-                plan_start_str=plan_start_date.strftime("%Y-%m-%d")
+                plan_start_str=plan_start_date.strftime("%Y-%m-%d"),
+                athlete_feedback=feedback_text
             )
             strategy = macro_data.get("strategy", "Endurance preparation strategy.")
             mesocycles = macro_data.get("mesocycles", [])
