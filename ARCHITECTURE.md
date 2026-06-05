@@ -9,9 +9,9 @@ a specific detail is not covered here.
 ## 1. System Overview
 
 TrainMate is a local AI sports-science coaching application. The user configures goals and life
-events; TrainMate generates periodized training plans (macrocycle → mesocycles) and 4-week
-workout schedules (microcycles), then adapts them daily based on Garmin metrics. Plans and
-workouts can be pushed to Google Calendar.
+events; TrainMate generates periodized training plans (macrocycle → mesocycles) and workout
+schedules (microcycles), then adapts them daily based on Garmin metrics. Plans and workouts can
+be pushed to Google Calendar.
 
 ```
   +--------------------------------------------------+
@@ -102,7 +102,9 @@ or directly by tests).
 | `_generate_macrocycle_strategy(...)` | LLM call → `{strategy, mesocycles}`. Label:         |
 |                                      | `periodization_plan`.                               |
 | `_generate_workouts_logic(...)`      | LLM call → `{reasoning, athlete_learnings,          |
-|                                      | workouts[]}`. Label: `workout_generation`.          |
+|                                      | workouts[]}`. Accepts `num_days` (default 28) which |
+|                                      | drives the horizon in the prompt. Label:            |
+|                                      | `workout_generation`.                               |
 | `_adapt_logic(...)`                  | LLM call → `{change_needed, reason,                 |
 |                                      | adapted_workouts[]}`. Label: `workout_adaptation`.  |
 | `_generate_intermediate_goals(...)`  | LLM call → `{goals[]}` when timeline > 24 weeks.    |
@@ -116,8 +118,10 @@ or directly by tests).
 | `generate_periodization_plan(force, objective_id)`  | Fetches objectives/lifeevents, checks hashes, calls                 |
 |                                                     | `CoachEngine._generate_macrocycle_strategy()`, saves to DB.         |
 |                                                     | Auto-splits timelines > 24 weeks.                                   |
-| `generate_workouts(objective_id)`                   | Requires an existing macrocycle. Fetches history, calls             |
-|                                                     | `CoachEngine._generate_workouts_logic()`, saves workouts to DB.     |
+| `generate_workouts(objective_id, end_date)`         | Requires an existing macrocycle. Computes `num_days` from           |
+|                                                     | `end_date` (or `config.workout_generate_days` if omitted).          |
+|                                                     | Fetches history, calls `CoachEngine._generate_workouts_logic()`,    |
+|                                                     | saves workouts to DB.                                               |
 | `replan(force, objective_id)`                       | Convenience: calls `generate_periodization_plan` then               |
 |                                                     | `generate_workouts`.                                                |
 | `adapt(target_date_str)`                            | Fetches metrics + workouts in rolling window, calls                 |
@@ -341,7 +345,9 @@ Handler functions are named `run_<command>_<subcommand>()` in `trainmate_cli.py`
 | `plan`       | `feedback`   | `p f`    | Add feedback (`--macro` or `--meso ID`, `--goal ID`, text)               |
 | `plan`       | `wipe`       | —        | Delete all plans                                                         |
 | `workout`    | `list`       | `w l`    | Show planned workouts                                                    |
-| `workout`    | `generate`   | `w g`    | Generate 4-week workouts from active strategy (`--goal ID`)              |
+| `workout`    | `generate`   | `w g`    | Generate workouts from active strategy (`--goal ID`,                     |
+|              |              |          | `--days N`, `--weeks N`, `--until DATE`,                                 |
+|              |              |          | `--until-goal [ID]`, `--until-mesocycle ID`)                             |
 | `workout`    | `rm`         | `w r`    | Remove workout by ID                                                     |
 | `workout`    | `adapt`      | `w a`    | Run daily adaptation check (`--date YYYY-MM-DD`, `-y` auto-apply)        |
 | `workout`    | `push`       | `w p`    | Sync planned workouts to Google Calendar                                 |
@@ -368,7 +374,7 @@ Flask server at `trainmate_web.py`, runs on port 5000. Static files served from 
 | DELETE      | `/api/plan/<goal_id>`           | Delete plan for goal                         |
 | POST        | `/api/macrocycles/<id>/feedback`| Save macrocycle feedback (`{feedback}`)      |
 | POST        | `/api/mesocycles/<id>/feedback` | Save mesocycle feedback (`{feedback}`)       |
-| POST        | `/api/workouts/generate`        | Generate 4-week workouts (`{goal_id?}`)      |
+| POST        | `/api/workouts/generate`        | Generate workouts (`{goal_id?}`)             |
 | POST        | `/api/adapt`                    | Run daily adaptation (`{date?}`)             |
 | POST        | `/api/workouts/push`            | Sync workouts to Google Calendar             |
 | POST        | `/api/metrics/pull`             | Pull Garmin metrics from Google Sheets       |
@@ -389,8 +395,9 @@ Required fields:
 | `google_calendar_id`   | str  | Target calendar ID                                            |
 | `service_account_file` | str  | Path to service account JSON (default:                        |
 |                        |      | `service_account.json`)                                       |
-| `metrics_history_days` | int  | Rolling window for adaptation (default: 15)                   |
-| `user_profile`         | dict | Must contain `lthr` or `ftp` (see below)                      |
+| `metrics_history_days`  | int  | Rolling window for adaptation (default: 15)                  |
+| `workout_generate_days` | int  | Default horizon for `workout generate` (default: 28)         |
+| `user_profile`          | dict | Must contain `lthr` or `ftp` (see below)                     |
 
 `user_profile` keys: `name`, `birth_year`, `max_hr`, `lthr`, `ftp`, `weekly_target_hours`,
 `sport_preferences`, `chronic_injuries`, `preferences`, `equipment`, `weekly_schedule`.
@@ -410,11 +417,16 @@ Required fields:
 6. Saves new macrocycle + mesocycles to DB (old ones deleted via `save_macrocycle`).
 
 ### Workout Generation (`workout generate`)
-1. `CoachService.generate_workouts()` verifies a macrocycle exists.
-2. Fetches metrics history (last `metrics_history_days` days) + baseline.
-3. Calls `CoachEngine._generate_workouts_logic()` → LLM → `{reasoning, athlete_learnings, workouts[]}`.
-4. Saves `athlete_learnings` to `coach_memory`.
-5. Clears future unsynced workouts (`clear_future_workouts`), then saves new workouts.
+1. CLI resolves the generation horizon (end date) from flags in priority order:
+   `--days` / `--weeks` → `--until DATE` → `--until-goal [ID]` → `--until-mesocycle ID` →
+   `config.workout_generate_days` (default 28).
+2. `CoachService.generate_workouts(end_date=...)` verifies a macrocycle exists, computes
+   `num_days` from `(end_date − today)`.
+3. Fetches metrics history (last `metrics_history_days` days) + baseline.
+4. Calls `CoachEngine._generate_workouts_logic(num_days=...)` → LLM →
+   `{reasoning, athlete_learnings, workouts[]}`.
+5. Saves `athlete_learnings` to `coach_memory`.
+6. Clears future unsynced workouts (`clear_future_workouts`), then saves new workouts.
 
 ### Daily Adaptation (`workout adapt`)
 1. `CoachService.adapt()` fetches metrics + planned workouts + completed activities in window.
@@ -441,8 +453,10 @@ Required fields:
 - **Workouts** = daily microcycle activities implementing the mesocycle focus.
   Commands: `workout generate/adapt/push`.
 
-Plan must be generated before workouts. Workouts cover a rolling 4-week window from today.
-`replan()` calls `generate_periodization_plan` then `generate_workouts` in one step.
+Plan must be generated before workouts. Workouts cover a rolling window from today whose length
+is controlled by the horizon flags on `workout generate` (default: `workout_generate_days` in
+`config.yaml`, falling back to 28 days). `replan()` calls `generate_periodization_plan` then
+`generate_workouts` in one step (always uses the config default).
 
 ---
 

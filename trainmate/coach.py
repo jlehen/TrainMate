@@ -409,40 +409,45 @@ You MUST respond with a JSON object containing:
         self, objectives: List[Objective], lifeevents: List[LifeEvent],
         today_str: str, guidelines: str, profile: Optional[Dict[str, Any]],
         strategy: str, meso_text: str, learnings: str,
+        num_days: int = 28,
         metrics: Optional[List[Dict[str, Any]]] = None,
         completed_activities: Optional[List[CompletedActivity]] = None,
         baseline: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
-        """Queries LLM to generate the 4-week workouts based on active strategy details."""
-        custom_task = """
-TASK:
-Generate a training schedule for the next 4 weeks (28 days) starting from today.
-Ensure the weekly schedules/microcycles are designed specifically to match the focus, target
-volume, and intensity of the active mesocycle block(s) the athlete is in during this period, and
-incorporate any deload weeks or exceptions for upcoming life events in accordance with the
-science guidelines.
-
-You MUST respond with a JSON object containing:
-{
-  "reasoning": "Explain the microcycle design, detailing how workouts align with the active
-    mesocycle focus.",
-  "athlete_learnings": "Update athlete observations text blob based on metrics or status
-    if any.",
-  "workouts": [
-    {
-      "date": "YYYY-MM-DD",
-      "sport_type": "running" | "road_biking" | "hiking" | "strength_training" | "yoga" |
-        "ski_touring" | "rest",
-      "title": "Workout Title (e.g., Tempo Run, Long Ride, Rest Day)",
-      "description": "Detailed description of intensity, duration, heart rate zones, and
-        goals.",
-      "duration_minutes": 60, (Estimated workout duration in minutes, integer. Use 0 for rest days)
-      "rpe": 6, (Expected Rate of Perceived Exertion, integer 1-10. Use 0 for rest days)
-      "tss": 45.0 (Expected Training Stress Score, float/integer. Use 0 for rest days)
-    }
-  ]
-}
-"""
+        """Queries LLM to generate workouts for a given number of days based on active strategy."""
+        weeks = num_days / 7
+        if weeks == int(weeks):
+            duration_desc = f"{int(weeks)} week{'s' if weeks != 1 else ''} ({num_days} days)"
+        else:
+            duration_desc = f"{num_days} day{'s' if num_days != 1 else ''}"
+        custom_task = (
+            f"TASK:\nGenerate a training schedule for the next {duration_desc} starting from today.\n"
+            "Ensure the weekly schedules/microcycles are designed specifically to match the focus, target\n"
+            "volume, and intensity of the active mesocycle block(s) the athlete is in during this period, and\n"
+            "incorporate any deload weeks or exceptions for upcoming life events in accordance with the\n"
+            "science guidelines.\n"
+            "\n"
+            "You MUST respond with a JSON object containing:\n"
+            "{\n"
+            '  "reasoning": "Explain the microcycle design, detailing how workouts align with the active\n'
+            '    mesocycle focus.",\n'
+            '  "athlete_learnings": "Update athlete observations text blob based on metrics or status\n'
+            '    if any.",\n'
+            '  "workouts": [\n'
+            "    {\n"
+            '      "date": "YYYY-MM-DD",\n'
+            '      "sport_type": "running" | "road_biking" | "hiking" | "strength_training" | "yoga" |\n'
+            '        "ski_touring" | "rest",\n'
+            '      "title": "Workout Title (e.g., Tempo Run, Long Ride, Rest Day)",\n'
+            '      "description": "Detailed description of intensity, duration, heart rate zones, and\n'
+            '        goals.",\n'
+            "      \"duration_minutes\": 60, (Estimated workout duration in minutes, integer. Use 0 for rest days)\n"
+            "      \"rpe\": 6, (Expected Rate of Perceived Exertion, integer 1-10. Use 0 for rest days)\n"
+            "      \"tss\": 45.0 (Expected Training Stress Score, float/integer. Use 0 for rest days)\n"
+            "    }\n"
+            "  ]\n"
+            "}\n"
+        )
         system_prompt = self._build_system_prompt(
             objectives=objectives,
             lifeevents=lifeevents,
@@ -455,7 +460,7 @@ You MUST respond with a JSON object containing:
         )
         user_content = (
             f"Today's date is {today_str}. "
-            f"Please generate the 4-week microcycles (workouts) starting today."
+            f"Please generate the microcycles (workouts) for the next {duration_desc} starting today."
         )
 
         history_text_parts = []
@@ -987,9 +992,9 @@ class CoachService:
         return strategy, mesocycles
 
     def generate_workouts(
-        self, objective_id: Optional[int] = None
+        self, objective_id: Optional[int] = None, end_date: Optional[str] = None
     ) -> Tuple[str, List[Workout]]:
-        """Generates the 4-week workouts (microcycles) based on the active strategy."""
+        """Generates workouts (microcycles) based on the active strategy."""
         objectives = self._db.get_objectives(status='active')
         if not objectives:
             return "No active goals found. TrainMate needs at least one objective.", []
@@ -1013,6 +1018,14 @@ class CoachService:
             )
 
         today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        today_date_obj = datetime.strptime(today_str, "%Y-%m-%d").date()
+
+        if end_date is not None:
+            end_date_obj = datetime.strptime(end_date, "%Y-%m-%d").date()
+            num_days = max(1, (end_date_obj - today_date_obj).days)
+        else:
+            num_days = config.workout_generate_days
+
         lifeevents = self._db.get_lifeevents(start_after=today_str)
         guidelines = self._load_science_guidelines()
         profile = config.user_profile
@@ -1026,7 +1039,6 @@ class CoachService:
 
         # Retrieve recent history context
         history_days = config.metrics_history_days
-        today_date_obj = datetime.strptime(today_str, "%Y-%m-%d").date()
         start_date_obj = today_date_obj - timedelta(days=history_days - 1)
         start_date_str = start_date_obj.strftime("%Y-%m-%d")
 
@@ -1047,6 +1059,7 @@ class CoachService:
             strategy=strategy,
             meso_text=meso_text,
             learnings=learnings,
+            num_days=num_days,
             metrics=metrics,
             completed_activities=completed_activities,
             baseline=baseline

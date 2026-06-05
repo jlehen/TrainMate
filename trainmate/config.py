@@ -96,5 +96,11 @@ class Config:
         """Gets the number of days of metrics history to look at, defaulting to 15."""
         return self.get("metrics_history_days", 15)
 
+    @property
+    def workout_generate_days(self) -> int:
+        """Gets the default number of days to generate workouts for, defaulting to 28."""
+        raw = self.get("workout_generate_days", 28)
+        return int(raw)
+
 # Singleton instance
 config = Config()
