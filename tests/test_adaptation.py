@@ -18,7 +18,7 @@ import trainmate.google_sheets
 trainmate.coach.db = test_db
 trainmate.google_sheets.db = test_db
 
-from trainmate.coach import coach_engine
+from trainmate.coach import coach_service
 from trainmate.google_sheets import sheets_reader
 
 class TestAdaptation(unittest.TestCase):
@@ -214,7 +214,7 @@ class TestAdaptation(unittest.TestCase):
             )
 
             # Call coach adapt
-            reason, proposed = coach_engine.adapt("2026-06-03")
+            reason, proposed = coach_service.adapt("2026-06-03")
 
             # Check that OpenRouter was called
             self.assertTrue(mock_client.complete.called)

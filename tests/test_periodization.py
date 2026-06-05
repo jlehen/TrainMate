@@ -17,7 +17,7 @@ trainmate.db.db = test_db
 import trainmate.coach
 trainmate.coach.db = test_db
 
-from trainmate.coach import coach_engine
+from trainmate.coach import coach_service
 
 class TestPeriodization(unittest.TestCase):
     @classmethod
@@ -113,9 +113,9 @@ class TestPeriodization(unittest.TestCase):
 
     def test_hashing_helpers(self):
         # Empty objectives & constraints hashes
-        hash1 = coach_engine._get_goals_hash([])
-        hash2 = coach_engine._get_lifeevents_hash([])
-        hash3 = coach_engine._get_config_hash()
+        hash1 = coach_service._get_goals_hash([])
+        hash2 = coach_service._get_lifeevents_hash([])
+        hash3 = coach_service._get_config_hash()
         self.assertIsNotNone(hash1)
         self.assertIsNotNone(hash2)
         self.assertIsNotNone(hash3)
@@ -130,12 +130,12 @@ class TestPeriodization(unittest.TestCase):
             'priority': 1,
             'status': 'active'
         }
-        hash1_with_obj = coach_engine._get_goals_hash([obj])
+        hash1_with_obj = coach_service._get_goals_hash([obj])
         self.assertNotEqual(hash1, hash1_with_obj)
         
         # Changing description changes hash
         obj['description'] = 'sub 2:50'
-        hash1_with_obj_modified = coach_engine._get_goals_hash([obj])
+        hash1_with_obj_modified = coach_service._get_goals_hash([obj])
         self.assertNotEqual(hash1_with_obj, hash1_with_obj_modified)
         
         # Constraints hash changes
@@ -147,7 +147,7 @@ class TestPeriodization(unittest.TestCase):
             'event_type': 'vacation',
             'impact_description': 'easy'
         }
-        hash2_with_c = coach_engine._get_lifeevents_hash([c])
+        hash2_with_c = coach_service._get_lifeevents_hash([c])
         self.assertNotEqual(hash2, hash2_with_c)
 
     @patch('trainmate.coach.openrouter_client')
@@ -197,7 +197,7 @@ class TestPeriodization(unittest.TestCase):
         mock_client.complete.side_effect = [mock_macro_response, mock_workouts_response]
         
         # 1. First replan: Should generate macrocycle + microcycles
-        reason, workouts = coach_engine.replan(force=False)
+        reason, workouts = coach_service.replan(force=False)
         self.assertEqual(reason, "Microcycle generated reasoning")
         self.assertEqual(len(workouts), 1)
         self.assertEqual(workouts[0]['title'], "Base Run")
@@ -218,14 +218,14 @@ class TestPeriodization(unittest.TestCase):
         # Side effect only needs to handle microcycle generation now, as macro is reused
         mock_client.complete.side_effect = [mock_workouts_response]
         
-        reason, workouts = coach_engine.replan(force=False)
+        reason, workouts = coach_service.replan(force=False)
         self.assertEqual(mock_client.complete.call_count, 1) # Only microcycles generated!
         
         # 3. Third replan: No changes, force=True -> Should RE-GENERATE macrocycle + microcycles
         mock_client.complete.reset_mock()
         mock_client.complete.side_effect = [mock_macro_response, mock_workouts_response]
         
-        reason, workouts = coach_engine.replan(force=True)
+        reason, workouts = coach_service.replan(force=True)
         self.assertEqual(mock_client.complete.call_count, 2) # Both generated!
         
         # 4. Fourth replan: Change goal, force=False -> Should RE-GENERATE macrocycle + microcycles
@@ -238,7 +238,7 @@ class TestPeriodization(unittest.TestCase):
         mock_client.complete.reset_mock()
         mock_client.complete.side_effect = [mock_macro_response, mock_workouts_response]
         
-        reason, workouts = coach_engine.replan(force=False)
+        reason, workouts = coach_service.replan(force=False)
         self.assertEqual(mock_client.complete.call_count, 2) # Both generated because goals changed!
 
     def test_system_prompt_inserts_periodization(self):
@@ -273,7 +273,7 @@ class TestPeriodization(unittest.TestCase):
         
         # Get active objectives
         objs = test_db.get_objectives(status='active')
-        prompt = coach_engine._get_coach_system_prompt(objs, [])
+        prompt = coach_service._get_coach_system_prompt(objs, [])
         
         self.assertIn("Run long and slow", prompt)
         self.assertIn("Base Building (2026-06-01 to 2026-06-28): Zone 2 runs", prompt)
@@ -335,7 +335,7 @@ class TestPeriodization(unittest.TestCase):
         )
 
         # 3. Trigger replanning
-        coach_engine.replan(force=False)
+        coach_service.replan(force=False)
 
         # 4. Verify that OpenRouter was called with the previous strategy in context
         self.assertEqual(mock_client.complete.call_count, 2)
@@ -376,7 +376,7 @@ class TestPeriodization(unittest.TestCase):
         }
         with patch.dict(trainmate.coach.config.data, {"user_profile": test_profile}):
             # Get prompt
-            prompt = coach_engine._get_coach_system_prompt([], [])
+            prompt = coach_service._get_coach_system_prompt([], [])
             self.assertIn("Jane Doe", prompt)
             self.assertIn("Birth Year: 1990", prompt)
             self.assertIn("Tendency for runner's knee.", prompt)
@@ -423,11 +423,11 @@ class TestPeriodization(unittest.TestCase):
 
         # Verify that generating workouts before plan raises ValueError
         with self.assertRaises(ValueError):
-            coach_engine.generate_workouts()
+            coach_service.generate_workouts()
 
         # Generate plan strategy
         mock_client.complete.return_value = mock_macro_response
-        strategy, mesos = coach_engine.generate_periodization_plan(force=False)
+        strategy, mesos = coach_service.generate_periodization_plan(force=False)
         self.assertEqual(strategy, "Separate strategy philosophy")
         self.assertEqual(len(mesos), 1)
         mock_client.complete.assert_called_once()
@@ -435,7 +435,7 @@ class TestPeriodization(unittest.TestCase):
         # Generate workouts
         mock_client.complete.reset_mock()
         mock_client.complete.return_value = mock_workouts_response
-        reason, workouts = coach_engine.generate_workouts()
+        reason, workouts = coach_service.generate_workouts()
         self.assertEqual(reason, "Separate workout reasoning")
         self.assertEqual(len(workouts), 1)
         self.assertEqual(workouts[0]['title'], "Base Run")
@@ -466,7 +466,7 @@ class TestPeriodization(unittest.TestCase):
                 f.write("User guideline text")
 
             # Call _load_science_guidelines
-            guidelines = coach_engine._load_science_guidelines()
+            guidelines = coach_service._load_science_guidelines()
 
             # Assert both contents are present
             self.assertIn("=== Guidelines from app_science.txt ===", guidelines)
@@ -480,14 +480,14 @@ class TestPeriodization(unittest.TestCase):
 
     def test_config_hash_logic(self):
         # 1. Get initial config hash
-        initial_hash = coach_engine._get_config_hash()
+        initial_hash = coach_service._get_config_hash()
         self.assertIsNotNone(initial_hash)
         
         # 2. Mock a change to config.user_profile
         original_profile = dict(trainmate.coach.config.data['user_profile'])
         try:
             trainmate.coach.config.data['user_profile']['weekly_target_hours'] = 20.0
-            new_hash = coach_engine._get_config_hash()
+            new_hash = coach_service._get_config_hash()
             self.assertNotEqual(initial_hash, new_hash)
         finally:
             trainmate.coach.config.data['user_profile'] = original_profile
@@ -531,7 +531,7 @@ class TestPeriodization(unittest.TestCase):
         )
 
         with self.assertRaises(ValueError) as context:
-            coach_engine.generate_periodization_plan()
+            coach_service.generate_periodization_plan()
 
         self.assertIn("too close", str(context.exception))
 
@@ -574,7 +574,7 @@ class TestPeriodization(unittest.TestCase):
         mock_client.complete.side_effect = [mock_split_response, mock_macro_response]
 
         # Call generate_periodization_plan
-        strategy, mesos = coach_engine.generate_periodization_plan(force=True)
+        strategy, mesos = coach_service.generate_periodization_plan(force=True)
 
         self.assertEqual(mock_client.complete.call_count, 2)
 
@@ -634,14 +634,14 @@ class TestPeriodization(unittest.TestCase):
         mock_client.complete.side_effect = [mock_macro_a, mock_macro_b]
 
         # 1. Generate plan for Goal A
-        strategy_a, mesos_a = coach_engine.generate_periodization_plan(
+        strategy_a, mesos_a = coach_service.generate_periodization_plan(
             force=True, objective_id=obj1_id
         )
         self.assertEqual(strategy_a, "Plan A strategy")
         self.assertEqual(mesos_a[0]['start_date'], "2026-06-05")
 
         # 2. Generate plan for Goal B, should start on 2026-08-02 (day after Goal A)
-        strategy_b, mesos_b = coach_engine.generate_periodization_plan(
+        strategy_b, mesos_b = coach_service.generate_periodization_plan(
             force=True, objective_id=obj2_id
         )
         self.assertEqual(strategy_b, "Plan B strategy")
@@ -657,7 +657,7 @@ class TestPeriodization(unittest.TestCase):
         self.assertIsNotNone(macro_b)
 
         # 3. Delete plan A
-        coach_engine.delete_plan(obj1_id)
+        coach_service.delete_plan(obj1_id)
         self.assertIsNone(test_db.get_macrocycle_for_objective(obj1_id))
         self.assertIsNotNone(test_db.get_macrocycle_for_objective(obj2_id))
 
@@ -741,7 +741,7 @@ class TestPeriodization(unittest.TestCase):
         }
         
         # Trigger planning
-        strategy, mesos = coach_engine.generate_periodization_plan(force=True)
+        strategy, mesos = coach_service.generate_periodization_plan(force=True)
         
         # Verify call arguments
         called_args = mock_client.complete.call_args[0]
@@ -804,7 +804,7 @@ class TestPeriodization(unittest.TestCase):
         }
         
         # Trigger workout generation
-        coach_engine.generate_workouts()
+        coach_service.generate_workouts()
         
         # Verify call arguments
         called_args = mock_client.complete.call_args[0]

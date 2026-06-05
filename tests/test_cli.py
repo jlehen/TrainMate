@@ -318,7 +318,7 @@ class TestTrainMateCLI(unittest.TestCase):
         self.assertIn("No fields to update", stdout)
 
     @patch('trainmate_cli.sheets_reader')
-    @patch('trainmate_cli.coach_engine')
+    @patch('trainmate_cli.coach_service')
     def test_workout_commands(self, mock_coach, mock_sheets_reader):
         # Mock responses
         mock_coach.adapt.return_value = (
@@ -360,7 +360,7 @@ class TestTrainMateCLI(unittest.TestCase):
         self.assertIn(f"Workout with ID {w_id} ('Interval Session') removed successfully", stdout)
 
     @patch('trainmate_cli.sheets_reader')
-    @patch('trainmate_cli.coach_engine')
+    @patch('trainmate_cli.coach_service')
     def test_plan_commands(self, mock_coach, mock_sheets_reader):
         mock_coach.generate_periodization_plan.return_value = (
             "Test coaching plan strategy",

@@ -17,7 +17,7 @@ trainmate.db.db = test_db
 import trainmate.coach
 trainmate.coach.db = test_db
 
-from trainmate.coach import coach_engine
+from trainmate.coach import coach_service
 import trainmate_cli
 trainmate_cli.db = test_db
 
@@ -139,7 +139,7 @@ class TestFeedback(unittest.TestCase):
         
         # Get system prompt via active strategy text and meso text
         objs = test_db.get_objectives(status='active')
-        prompt = coach_engine._get_coach_system_prompt(objs, [])
+        prompt = coach_service._get_coach_system_prompt(objs, [])
         
         # Verify prompt details
         self.assertIn("Keep heart rate low", prompt)
@@ -189,7 +189,7 @@ class TestFeedback(unittest.TestCase):
         mock_client.complete.return_value = mock_macro_response
 
         # 2. Trigger strategy replanning via generate_periodization_plan (forced)
-        coach_engine.generate_periodization_plan(force=True)
+        coach_service.generate_periodization_plan(force=True)
 
         # 3. Verify that OpenRouter was called with the athlete feedback text in prompt
         called_args = mock_client.complete.call_args[0]

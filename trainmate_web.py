@@ -5,7 +5,7 @@ from typing import Any, Dict
 from trainmate.db import db
 from trainmate.google_sheets import sheets_reader
 from trainmate.google_calendar import calendar_syncer
-from trainmate.coach import coach_engine
+from trainmate.coach import coach_service
 from trainmate.config import config
 
 app = Flask(__name__, static_folder="static", static_url_path="")
@@ -43,7 +43,7 @@ def get_status() -> Any:
         macrocycle = db.get_macrocycle_for_objective(next_goal['id'])
         if macrocycle:
             mesocycles = db.get_mesocycles_for_macrocycle(macrocycle['id'])
-            current_hash = coach_engine._get_config_hash()
+            current_hash = coach_service._get_config_hash()
             config_mismatch = macrocycle.get('config_hash') != current_hash
             
     return jsonify({
@@ -158,7 +158,7 @@ def generate_plan() -> Any:
         goal_id = data.get("goal_id")
         if goal_id is not None:
             goal_id = int(goal_id)
-        strategy, mesocycles = coach_engine.generate_periodization_plan(
+        strategy, mesocycles = coach_service.generate_periodization_plan(
             objective_id=goal_id
         )
         return jsonify({
@@ -173,7 +173,7 @@ def generate_plan() -> Any:
 def delete_plan(goal_id: int) -> Any:
     """API endpoint to delete the periodization plan for a specific goal."""
     try:
-        coach_engine.delete_plan(goal_id)
+        coach_service.delete_plan(goal_id)
         msg = f"Periodization plan for goal {goal_id} deleted successfully."
         return jsonify({"message": msg})
     except Exception as e:
@@ -209,7 +209,7 @@ def generate_workouts() -> Any:
         goal_id = data.get("goal_id")
         if goal_id is not None:
             goal_id = int(goal_id)
-        reasoning, workouts = coach_engine.generate_workouts(objective_id=goal_id)
+        reasoning, workouts = coach_service.generate_workouts(objective_id=goal_id)
         return jsonify({
             "message": "Workouts generated and saved.",
             "reasoning": reasoning,
@@ -224,7 +224,7 @@ def adapt() -> Any:
     data = request.json or {}
     date_str = data.get("date") or datetime.now(timezone.utc).strftime("%Y-%m-%d")
     try:
-        reason, adapted_workout = coach_engine.adapt(date_str)
+        reason, adapted_workout = coach_service.adapt(date_str)
         return jsonify({
             "message": "Daily adaptation check finished.",
             "reason": reason,
