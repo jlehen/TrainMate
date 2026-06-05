@@ -9,6 +9,7 @@ user_profile:
   birth_year: 1980
   max_hr: 185
   lthr: 165
+  ftp: 220
   weekly_target_hours: 6.0
   sport_preferences:
     - "running"

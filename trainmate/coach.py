@@ -189,6 +189,8 @@ class CoachEngine:
             lines.append(f"- Max Heart Rate: {profile['max_hr']} bpm")
         if "lthr" in profile:
             lines.append(f"- Lactate Threshold HR (LTHR): {profile['lthr']} bpm")
+        if "ftp" in profile:
+            lines.append(f"- Functional Threshold Power (FTP): {profile['ftp']} W")
         if "weekly_target_hours" in profile:
             lines.append(f"- Weekly Target Hours: {profile['weekly_target_hours']} hours")
         if "sport_preferences" in profile:

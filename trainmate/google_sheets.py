@@ -272,7 +272,10 @@ class GarminSheetsReader:
         """
         duration_hours = duration_sec / 3600.0
         profile = config.user_profile or {}
-        lthr = profile.get("lthr", 165)
+        lthr = profile.get("lthr")
+        if not lthr:
+            max_hr = profile.get("max_hr")
+            lthr = int(round(max_hr * 0.85)) if max_hr else 165
         
         sport = (sport_type or "").lower().replace("_", " ")
         

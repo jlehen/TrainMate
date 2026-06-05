@@ -661,6 +661,35 @@ class TestPeriodization(unittest.TestCase):
         self.assertIsNone(test_db.get_macrocycle_for_objective(obj1_id))
         self.assertIsNotNone(test_db.get_macrocycle_for_objective(obj2_id))
 
+    def test_config_user_profile_validation(self):
+        # Accessing profile with both LTHR and FTP should succeed
+        test_profile_both = {"lthr": 170, "ftp": 220}
+        with patch.dict(trainmate.coach.config.data, {"user_profile": test_profile_both}):
+            profile = trainmate.coach.config.user_profile
+            self.assertEqual(profile["lthr"], 170)
+            self.assertEqual(profile["ftp"], 220)
+
+        # Accessing profile with only LTHR should succeed
+        test_profile_lthr = {"lthr": 170}
+        with patch.dict(trainmate.coach.config.data, {"user_profile": test_profile_lthr}):
+            profile = trainmate.coach.config.user_profile
+            self.assertEqual(profile["lthr"], 170)
+            self.assertNotIn("ftp", profile)
+
+        # Accessing profile with only FTP should succeed
+        test_profile_ftp = {"ftp": 220}
+        with patch.dict(trainmate.coach.config.data, {"user_profile": test_profile_ftp}):
+            profile = trainmate.coach.config.user_profile
+            self.assertEqual(profile["ftp"], 220)
+            self.assertNotIn("lthr", profile)
+
+        # Accessing profile with neither LTHR nor FTP should raise ValueError
+        test_profile_neither = {"name": "Test Athlete"}
+        with patch.dict(trainmate.coach.config.data, {"user_profile": test_profile_neither}):
+            with self.assertRaises(ValueError) as context:
+                _ = trainmate.coach.config.user_profile
+            self.assertIn("must contain at least 'lthr' or 'ftp'", str(context.exception))
+
 if __name__ == '__main__':
     unittest.main()
 

@@ -83,7 +83,13 @@ class Config:
     @property
     def user_profile(self) -> dict[str, Any]:
         """Gets the user profile information dict."""
-        return self.get("user_profile", {})
+        profile = self.get("user_profile", {})
+        if profile:
+            if "lthr" not in profile and "ftp" not in profile:
+                raise ValueError(
+                    "Configuration error: user_profile must contain at least 'lthr' or 'ftp'."
+                )
+        return profile
 
     @property
     def metrics_history_days(self) -> int:
