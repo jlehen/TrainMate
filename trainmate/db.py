@@ -242,6 +242,14 @@ class Database:
                 cursor.execute("SELECT * FROM objectives ORDER BY target_date ASC")
             return [dict(row) for row in cursor.fetchall()]  # type: ignore
 
+    def get_objective(self, obj_id: int) -> Optional[Objective]:
+        """Fetches a specific objective by its unique ID."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM objectives WHERE id = ?", (obj_id,))
+            row = cursor.fetchone()
+            return dict(row) if row else None  # type: ignore
+
     def update_objective(self, obj_id: int, **kwargs: Any) -> None:
         """Updates objective properties in the database."""
         if not kwargs:
@@ -293,6 +301,16 @@ class Database:
             cursor.execute("SELECT * FROM lifeevents WHERE id = ?", (lifeevent_id,))
             row = cursor.fetchone()
             return dict(row) if row else None  # type: ignore
+
+    def update_lifeevent(self, lifeevent_id: int, **kwargs: Any) -> None:
+        """Updates life event properties in the database."""
+        if not kwargs:
+            return
+        fields = ", ".join([f"{k} = ?" for k in kwargs.keys()])
+        values = list(kwargs.values()) + [lifeevent_id]
+        with self._get_connection() as conn:
+            conn.cursor().execute(f"UPDATE lifeevents SET {fields} WHERE id = ?", values)
+            conn.commit()
 
     def delete_lifeevent(self, lifeevent_id: int) -> None:
         """Deletes a life event by ID."""

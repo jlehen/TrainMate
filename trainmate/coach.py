@@ -42,8 +42,15 @@ class CoachRepository:
             status=status
         )
 
+    def _get_objective(self, obj_id: int) -> Optional[Objective]:
+        return self._db.get_objective(obj_id)
+
     def _update_objective(self, obj_id: int, **kwargs: Any) -> None:
         self._db.update_objective(obj_id, **kwargs)
+
+    def _update_lifeevent(self, lifeevent_id: int, **kwargs: Any) -> None:
+        self._db.update_lifeevent(lifeevent_id, **kwargs)
+
 
 
     def _get_upcoming_lifeevents(self, today_str: str) -> List[LifeEvent]:

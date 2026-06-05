@@ -130,11 +130,18 @@ def manage_life_events() -> Any:
     today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     return jsonify(db.get_lifeevents(start_after=today_str))
 
-@app.route("/api/life-events/<int:event_id>", methods=["DELETE"])
-def delete_life_event(event_id: int) -> Any:
-    """API endpoint to delete a specific life event."""
-    db.delete_lifeevent(event_id)
-    return jsonify({"message": "Life event deleted."})
+@app.route("/api/life-events/<int:event_id>", methods=["DELETE", "PUT"])
+def single_life_event(event_id: int) -> Any:
+    """API endpoint to update or delete a specific life event."""
+    if request.method == "DELETE":
+        db.delete_lifeevent(event_id)
+        return jsonify({"message": "Life event deleted."})
+    elif request.method == "PUT":
+        data = request.json
+        if not data:
+            return jsonify({"error": "No update fields provided"}), 400
+        db.update_lifeevent(event_id, **data)
+        return jsonify({"message": "Life event updated."})
 
 @app.route("/api/workouts", methods=["GET"])
 def get_workouts() -> Any:

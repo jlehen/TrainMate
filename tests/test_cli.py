@@ -211,6 +211,108 @@ class TestTrainMateCLI(unittest.TestCase):
         self.assertEqual(exit_code, 0)
         self.assertNotIn("Ibiza Vacation", stdout)
 
+    def test_goal_edit_command(self):
+        # 1. Add goal
+        exit_code, stdout, stderr = self.run_cli([
+            'goal', 'add',
+            '--title', 'Berlin Marathon',
+            '--date', '2026-09-27',
+            '--sport', 'running',
+            '--desc', 'Sub 3:15 goal',
+            '--priority', '2'
+        ])
+        self.assertEqual(exit_code, 0)
+        
+        # Get its ID (should be 1 since setUp clears db)
+        goals = test_db.get_objectives()
+        self.assertEqual(len(goals), 1)
+        g_id = goals[0]['id']
+        
+        # 2. Edit goal fields
+        exit_code, stdout, stderr = self.run_cli([
+            'goal', 'edit', str(g_id),
+            '--title', 'Berlin Marathon Elite',
+            '--date', '2026-09-28',
+            '--sport', 'running', 'strength_training',
+            '--desc', 'Sub 3:10 elite goal',
+            '--priority', '1',
+            '--status', 'completed'
+        ])
+        self.assertEqual(exit_code, 0)
+        self.assertIn(f"Goal with ID {g_id} updated successfully", stdout)
+        
+        # 3. Verify changes
+        edited_goal = test_db.get_objective(g_id)
+        self.assertIsNotNone(edited_goal)
+        self.assertEqual(edited_goal['title'], 'Berlin Marathon Elite')
+        self.assertEqual(edited_goal['target_date'], '2026-09-28')
+        self.assertEqual(edited_goal['sport_type'], 'running,strength_training')
+        self.assertEqual(edited_goal['description'], 'Sub 3:10 elite goal')
+        self.assertEqual(edited_goal['priority'], 1)
+        self.assertEqual(edited_goal['status'], 'completed')
+
+        # 4. Try editing non-existent goal
+        exit_code, stdout, stderr = self.run_cli([
+            'goal', 'edit', '999', '--title', 'Fail'
+        ])
+        self.assertEqual(exit_code, 1)
+        self.assertIn("Goal with ID 999 not found", stdout)
+
+        # 5. Try editing with no fields
+        exit_code, stdout, stderr = self.run_cli(['goal', 'edit', str(g_id)])
+        self.assertEqual(exit_code, 0)
+        self.assertIn("No fields to update", stdout)
+
+    def test_lifeevent_edit_command(self):
+        # 1. Add lifeevent
+        exit_code, stdout, stderr = self.run_cli([
+            'lifeevent', 'add',
+            '--title', 'Summer Vacation',
+            '--start', '2026-08-01',
+            '--end', '2026-08-15',
+            '--type', 'vacation',
+            '--desc', 'No workouts'
+        ])
+        self.assertEqual(exit_code, 0)
+        
+        # Get its ID
+        events = test_db.get_lifeevents()
+        self.assertEqual(len(events), 1)
+        e_id = events[0]['id']
+        
+        # 2. Edit event fields
+        exit_code, stdout, stderr = self.run_cli([
+            'lifeevent', 'edit', str(e_id),
+            '--title', 'Summer Vacation Adapted',
+            '--start', '2026-08-02',
+            '--end', '2026-08-16',
+            '--type', 'business_trip',
+            '--desc', 'Light running only'
+        ])
+        self.assertEqual(exit_code, 0)
+        self.assertIn(f"Life event with ID {e_id} updated successfully", stdout)
+        
+        # 3. Verify changes
+        edited_event = test_db.get_lifeevent(e_id)
+        self.assertIsNotNone(edited_event)
+        self.assertEqual(edited_event['title'], 'Summer Vacation Adapted')
+        self.assertEqual(edited_event['start_date'], '2026-08-02')
+        self.assertEqual(edited_event['end_date'], '2026-08-16')
+        self.assertEqual(edited_event['event_type'], 'business_trip')
+        self.assertEqual(edited_event['impact_description'], 'Light running only')
+
+        # 4. Try editing non-existent event
+        exit_code, stdout, stderr = self.run_cli([
+            'lifeevent', 'edit', '999', '--title', 'Fail'
+        ])
+        self.assertEqual(exit_code, 1)
+        self.assertIn("Life event with ID 999 not found", stdout)
+
+        # 5. Try editing with no fields
+        exit_code, stdout, stderr = self.run_cli(['lifeevent', 'edit', str(e_id)])
+        self.assertEqual(exit_code, 0)
+        self.assertIn("No fields to update", stdout)
+
     @patch('trainmate_cli.sheets_reader')
     @patch('trainmate_cli.coach_engine')
     def test_workout_commands(self, mock_coach, mock_sheets_reader):

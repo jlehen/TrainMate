@@ -48,6 +48,23 @@ def main() -> None:
     )
     g_add.add_argument("--desc", default="", help="Description")
     g_add.add_argument("--priority", type=int, default=1, help="Goal priority (1 = highest)")
+
+    # goal edit
+    g_edit = goal_subparsers.add_parser("edit", help="Edit an existing goal/objective")
+    g_edit.add_argument("id", type=int, help="Goal ID to edit")
+    g_edit.add_argument("--title", help="New goal title")
+    g_edit.add_argument("--date", help="New target event date (YYYY-MM-DD)")
+    g_edit.add_argument(
+        "--sport", nargs="+",
+        choices=["running", "road_biking", "hiking", "strength_training", "yoga", "ski_touring"],
+        help="New sport types (one or more)"
+    )
+    g_edit.add_argument("--desc", help="New description")
+    g_edit.add_argument("--priority", type=int, help="New priority (1 = highest)")
+    g_edit.add_argument(
+        "--status", choices=["active", "completed", "archived"],
+        help="New status ('active', 'completed', 'archived')"
+    )
     
     # goal rm
     g_rm = goal_subparsers.add_parser("rm", help="Remove a goal by ID")
@@ -80,6 +97,18 @@ def main() -> None:
         help="Life event type"
     )
     c_add.add_argument("--desc", default="", help="Description/Impact description")
+
+    # lifeevent edit
+    le_edit = lifeevent_subparsers.add_parser("edit", help="Edit an existing life event")
+    le_edit.add_argument("id", type=int, help="Life event ID to edit")
+    le_edit.add_argument("--title", help="New life event title")
+    le_edit.add_argument("--start", help="New start date (YYYY-MM-DD)")
+    le_edit.add_argument("--end", help="New end date (YYYY-MM-DD)")
+    le_edit.add_argument(
+        "--type", choices=["business_trip", "vacation", "party", "other"],
+        help="New life event type"
+    )
+    le_edit.add_argument("--desc", help="New description/Impact description")
     
     # lifeevent rm
     c_rm = lifeevent_subparsers.add_parser("rm", help="Remove a life event by ID")
@@ -228,6 +257,8 @@ def main() -> None:
         sub = args.subcommand.lower()
         if sub == "add":
             run_goal_add(args)
+        elif sub == "edit":
+            run_goal_edit(args)
         elif sub == "rm":
             run_goal_rm(args)
         elif sub == "list":
@@ -241,6 +272,8 @@ def main() -> None:
         sub = args.subcommand.lower()
         if sub == "add":
             run_lifeevent_add(args)
+        elif sub == "edit":
+            run_lifeevent_edit(args)
         elif sub == "rm":
             run_lifeevent_rm(args)
         elif sub == "list":
@@ -439,6 +472,38 @@ def run_goal_add(args: argparse.Namespace) -> None:
     )
 
 
+def run_goal_edit(args: argparse.Namespace) -> None:
+    """Edits an existing goal/objective."""
+    goal = db.get_objective(args.id)
+    if not goal:
+        print(f"Goal with ID {args.id} not found.")
+        sys.exit(1)
+
+    kwargs = {}
+    if args.title is not None:
+        kwargs['title'] = args.title
+    if args.date is not None:
+        kwargs['target_date'] = args.date
+    if args.sport is not None:
+        kwargs['sport_type'] = ",".join(args.sport)
+    if args.desc is not None:
+        kwargs['description'] = args.desc
+    if args.priority is not None:
+        kwargs['priority'] = args.priority
+    if args.status is not None:
+        kwargs['status'] = args.status
+
+    if not kwargs:
+        print("No fields to update. Provide at least one field to change.")
+        return
+
+    db.update_objective(args.id, **kwargs)
+    print(
+        f"Goal with ID {args.id} updated successfully. "
+        "Run 'plan generate' to regenerate training cycles if needed."
+    )
+
+
 def run_goal_list() -> None:
     """Lists all active and past training objective goals."""
     goals = db.get_objectives()
@@ -492,6 +557,36 @@ def run_lifeevent_add(args: argparse.Namespace) -> None:
     print(
         f"Life event '{args.title}' logged. "
         f"This will be factored in when running 'plan generate' or 'workout adapt'."
+    )
+
+
+def run_lifeevent_edit(args: argparse.Namespace) -> None:
+    """Edits an existing life event."""
+    event = db.get_lifeevent(args.id)
+    if not event:
+        print(f"Life event with ID {args.id} not found.")
+        sys.exit(1)
+
+    kwargs = {}
+    if args.title is not None:
+        kwargs['title'] = args.title
+    if args.start is not None:
+        kwargs['start_date'] = args.start
+    if args.end is not None:
+        kwargs['end_date'] = args.end
+    if args.type is not None:
+        kwargs['event_type'] = args.type
+    if args.desc is not None:
+        kwargs['impact_description'] = args.desc
+
+    if not kwargs:
+        print("No fields to update. Provide at least one field to change.")
+        return
+
+    db.update_lifeevent(args.id, **kwargs)
+    print(
+        f"Life event with ID {args.id} updated successfully. "
+        "Run 'plan generate' or 'workout adapt' to factor in the changes."
     )
 
 
