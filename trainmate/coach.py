@@ -196,11 +196,12 @@ class CoachEngine:
                     continue
                 day_data = weekly_schedule[day_key]
                 if isinstance(day_data, dict):
-                    hours = day_data.get("available_hours", 0.0)
+                    hours = day_data.get("total_available_hours", 0.0)
+                    max_sessions = day_data.get("max_sessions", 1)
                     cert = day_data.get("certainty_percent", 100)
                     equip = day_data.get("equipment", [])
                     equip_str = f" (Equipment: {', '.join(equip)})" if equip else ""
-                    lines.append(f"  * {day}: {hours} hours | Certainty: {cert}%{equip_str}")
+                    lines.append(f"  * {day}: {hours} hours | Max sessions: {max_sessions} | Certainty: {cert}%{equip_str}")
                 else:
                     lines.append(f"  * {day}: {day_data} hours")
 
@@ -243,7 +244,7 @@ COACHING ROLE AND OBJECTIVES:
    to manage fatigue.
 5. Adhere to the day-by-day weekly availability schedule and day-dependent equipment access
    (e.g., do not schedule gym workouts on home-only days; do not schedule workouts on rest days;
-   do not exceed daily availability). Respect certainty percentages (higher values indicate more
+   do not exceed daily availability or max sessions). Respect certainty percentages (higher values indicate more
    rigid constraints; lower values allow flexibility).
 
 ================================================================================

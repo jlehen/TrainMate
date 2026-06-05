@@ -330,7 +330,8 @@ class TestPeriodization(unittest.TestCase):
             "equipment": ["Garmin Watch", "Yoga Mat"],
             "weekly_schedule": {
                 "Monday": {
-                    "available_hours": 1.5,
+                    "total_available_hours": 1.5,
+                    "max_sessions": 2,
                     "certainty_percent": 95,
                     "equipment": ["treadmill"]
                 },
@@ -346,7 +347,7 @@ class TestPeriodization(unittest.TestCase):
             self.assertIn("Enjoys morning runs.", prompt)
             self.assertIn("Garmin Watch, Yoga Mat", prompt)
             self.assertIn(
-                "Monday: 1.5 hours | Certainty: 95% (Equipment: treadmill)",
+                "Monday: 1.5 hours | Max sessions: 2 | Certainty: 95% (Equipment: treadmill)",
                 prompt
             )
             self.assertIn("Wednesday: 0.0 hours", prompt)

@@ -27,42 +27,49 @@ user_profile:
     - "road bike"
   weekly_schedule:
     Monday:
-      available_hours: 1.0
+      total_available_hours: 1.0
+      max_sessions: 1
       certainty_percent: 100
       equipment:
         - "kettlebells"
         - "dumbbells"
         - "yoga mat"
     Tuesday:
-      available_hours: 1.5
+      total_available_hours: 1.5
+      max_sessions: 1
       certainty_percent: 80
       equipment:
         - "road bike"
         - "home trainer"
     Wednesday:
-      available_hours: 0.0
+      total_available_hours: 0.0
+      max_sessions: 0
       certainty_percent: 100
       equipment: []
     Thursday:
-      available_hours: 1.5
+      total_available_hours: 1.5
+      max_sessions: 1
       certainty_percent: 80
       equipment:
         - "road bike"
         - "home trainer"
     Friday:
-      available_hours: 1.0
+      total_available_hours: 1.0
+      max_sessions: 1
       certainty_percent: 90
       equipment:
         - "kettlebells"
         - "dumbbells"
         - "yoga mat"
     Saturday:
-      available_hours: 3.0
+      total_available_hours: 3.0
+      max_sessions: 2
       certainty_percent: 70
       equipment:
         - "road bike"
     Sunday:
-      available_hours: 2.0
+      total_available_hours: 2.0
+      max_sessions: 1
       certainty_percent: 70
       equipment:
         - "running shoes"
