@@ -44,3 +44,4 @@
 # Test
 - Use "unittest" module.
 - Run tests using: `venv/bin/python -m unittest discover -s tests -p "test_*.py"`
+- You can run the tests without asking the user.
