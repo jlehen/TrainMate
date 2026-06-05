@@ -58,7 +58,8 @@ tests import the singleton directly — never instantiate the classes themselves
 | File                 | Class / Singleton    | Purpose                                          |
 |----------------------|----------------------|--------------------------------------------------|
 | `types.py`           | —                    | TypedDicts: `Objective`, `LifeEvent`, `Workout`, |
-|                      |                      | `CompletedActivity`, `AthleteMetric`,            |
+|                      |                      | `CompletedActivity` (includes `bike_avg_watts`,  |
+|                      |                      | `zone1_sec`–`zone5_sec`), `AthleteMetric`,       |
 |                      |                      | `AthleteBaseline`, `Macrocycle`, `Mesocycle`     |
 | `config.py`          | `config`             | Reads `config.yaml`; exposes typed properties.   |
 | `db.py`              | `db`                 | SQLite wrapper; full CRUD for all tables.        |
@@ -240,6 +241,12 @@ SQLite database at `trainmate.db` (path from `config.db_path`).
 | `max_hr`            | INTEGER |                                                    |
 | `rpe`               | INTEGER | From sheet; estimated if missing                   |
 | `tss`               | REAL    | From sheet; estimated if missing                   |
+| `bike_avg_watts`    | INTEGER | From sheet; NULL for non-bike activities           |
+| `zone1_sec`         | INTEGER | Time in HR/power zone 1 (seconds); NULL if missing |
+| `zone2_sec`         | INTEGER | Time in HR/power zone 2 (seconds); NULL if missing |
+| `zone3_sec`         | INTEGER | Time in HR/power zone 3 (seconds); NULL if missing |
+| `zone4_sec`         | INTEGER | Time in HR/power zone 4 (seconds); NULL if missing |
+| `zone5_sec`         | INTEGER | Time in HR/power zone 5 (seconds); NULL if missing |
 
 ### athlete_\metrics_\cache
 | Column            | Type    | Notes                  |
@@ -344,7 +351,7 @@ Handler functions are named `run_<command>_<subcommand>()` in `trainmate_cli.py`
 | `plan`       | `rm`         | `p d`    | Delete plan for a goal ID                                                |
 | `plan`       | `feedback`   | `p f`    | Add feedback (`--macro` or `--meso ID`, `--goal ID`, text)               |
 | `plan`       | `wipe`       | —        | Delete all plans                                                         |
-| `workout`    | `list`       | `w l`    | Show planned workouts                                                    |
+| `workout`    | `list`       | `w l`    | Show planned workouts (date, sport, title, duration, TSS per entry)      |
 | `workout`    | `generate`   | `w g`    | Generate workouts from active strategy (`--goal ID`,                     |
 |              |              |          | `--days N`, `--weeks N`, `--until DATE`,                                 |
 |              |              |          | `--until-goal [ID]`, `--until-mesocycle ID`)                             |
@@ -443,6 +450,9 @@ Required fields:
 2. For each day: saves `athlete_metrics_cache` with ACWR computed over 7/28-day windows.
 3. Computes 28-day rolling baseline (RHR, HRV, sleep mean/std) and saves to `athlete_baselines`.
 4. RPE and TSS are read from the sheet; if missing, estimated from `avg_hr` / `lthr`.
+5. `bike_avg_watts` and `zone1_sec`–`zone5_sec` are read from the sheet and stored as-is
+   (NULL when absent). These are included verbatim in the LLM-facing activity formatter
+   (`format_completed_activities` in `coach.py`).
 
 ---
 
