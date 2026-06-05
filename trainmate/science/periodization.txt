@@ -5,8 +5,12 @@ To maximize performance for a target event and avoid burnout, training must be s
 macrocycles, mesocycles, and microcycles.
 
 1. Macrocycle (The Goal Plan):
-   - The overall timeline leading up to the target objective/race (typically 3 to 12 months).
-   - Structured into sequential phases: Strength, Base building, Build (specific prep), Peak/Taper, and
+   - In Traditional Periodization, the overall timeline leading up to the
+     target objective/race (typically 3 to 12 months). It is most effective for
+     a single annual peak but can lead to boredom or loss of base fitness
+     toward the end.
+   - In Block Periodization, macrocycles are smaller (5 to 10 weeks). It allows multiple peaks and reduces boredom.
+   - Structured into sequential phases: Base building, Build (specific prep), Peak/Taper, and
      Race/Event phase.
    - TrainMate focuses on the *next chronological goal* for active scheduling.
 
@@ -24,7 +28,8 @@ macrocycles, mesocycles, and microcycles.
    - Avoid back-to-back high-intensity workouts (intervals, tempo, sprints).
    - Include at least 1-2 rest/recovery days per week.
    - Include 1 long endurance workout per week (typically on weekends).
-   - Include strength training as cross-training to build durability.
+   - When strength training is included as cross-training to build durability,
+     never lift heavy the day before a high-intensity endurance session.
 
 4. Life Event Adjustments:
    - Business Trip: Adjust volume/intensity based on travel schedule and fatigue. Focus on
@@ -32,4 +37,4 @@ macrocycles, mesocycles, and microcycles.
    - Vacation: Adjust volume based on travel constraints (usually maintain a base level of fitness
      or reduce load if active vacation, or adjust to local sport).
    - Parties / Major Social Events: Shift high-intensity workouts away from the day of and the
-     morning after the event to prevent training under influence of fatigue/alcohol/dehydration.
+     morning after the event to prevent training under influence of fatigue/alcohol/dehydration. High-intensity sessions in a compromised state are counterproductive.
