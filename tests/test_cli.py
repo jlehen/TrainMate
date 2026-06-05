@@ -412,7 +412,7 @@ class TestTrainMateCLI(unittest.TestCase):
         # Plan show when no macrocycle
         exit_code, stdout, stderr = self.run_cli(['plan', 'show'])
         self.assertEqual(exit_code, 0)
-        self.assertIn("No active periodization strategy found", stdout)
+        self.assertIn("No active macrocycle strategy found", stdout)
 
         # Save macrocycle and mesocycles
         test_db.save_macrocycle(
@@ -433,7 +433,7 @@ class TestTrainMateCLI(unittest.TestCase):
         # Plan show success
         exit_code, stdout, stderr = self.run_cli(['plan', 'show'])
         self.assertEqual(exit_code, 0)
-        self.assertIn("=== ACTIVE PERIODIZATION STRATEGY ===", stdout)
+        self.assertIn("=== ACTIVE MACROCYCLE STRATEGY ===", stdout)
         self.assertIn("Build base then taper", stdout)
         self.assertIn("Base Building", stdout)
 

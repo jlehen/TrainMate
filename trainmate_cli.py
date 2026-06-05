@@ -446,18 +446,18 @@ def run_status(verbose: bool = False) -> None:
             
             if active_meso:
                 print(
-                    f"{bold('Active Macrocycle')}: {green(active_meso['name'])} "
+                    f"{bold('Active Mesocycle')}: {green(active_meso['name'])} "
                     f"({cyan(active_meso['start_date'])} to {cyan(active_meso['end_date'])})"
                 )
                 print(format_labeled_block(f"{bold('Cycle Focus')}:", active_meso['focus']))
             else:
                 print(
-                    f"{bold('Active Macrocycle')}: "
+                    f"{bold('Active Mesocycle')}: "
                     f"None active today (outside mesocycle boundaries)"
                 )
         else:
             print(
-                f"{bold('Active Macrocycle')}: "
+                f"{bold('Active Mesocycle')}: "
                 f"No periodization strategy established. Run 'plan generate' first."
             )
     else:
@@ -853,24 +853,24 @@ def run_plan_show(args: argparse.Namespace) -> None:
     macrocycle = db.get_macrocycle_for_objective(next_goal['id'])
     if not macrocycle:
         print(yellow(
-            f"No active periodization strategy found for goal '{next_goal['title']}'."
+            f"No active macrocycle strategy found for goal '{next_goal['title']}'."
         ))
         print("Run 'plan generate' to create one.")
         return
         
     mesocycles = db.get_mesocycles_for_macrocycle(macrocycle['id'])
     
-    print(bold(cyan("\n=== ACTIVE PERIODIZATION STRATEGY ===")))
+    print(bold(cyan("\n=== ACTIVE MACROCYCLE STRATEGY ===")))
     sport_str = next_goal['sport_type'].upper()
     print(
         f"{bold('Objective')}: {cyan(next_goal['title'])} ({magenta(sport_str)}) "
         f"on {cyan(next_goal['target_date'])}"
     )
-    print(format_labeled_block(f"{bold('Overall Strategy')}:", macrocycle['strategy']))
+    print(format_labeled_block(f"{bold('Macrocycle Strategy')}:", macrocycle['strategy']))
     if macrocycle.get('feedback'):
-        print(format_labeled_block(f"{bold('Feedback')}:", macrocycle['feedback']))
+        print(format_labeled_block(f"{bold('Macrocycle Feedback')}:", macrocycle['feedback']))
     print()
-    print(bold("Periodization Timeline:"))
+    print(bold("Mesocycle Timeline:"))
     
     today = datetime.now(timezone.utc).date()
     
@@ -924,13 +924,13 @@ def run_plan_show(args: argparse.Namespace) -> None:
               
         focus_lines = textwrap.wrap(m['focus'], width=80)
         for line in focus_lines:
-            print(f"            {line}")
+            print(f"  {line}")
         if m.get('feedback'):
             fb_lines = textwrap.wrap(m['feedback'], width=80)
-            print(f"            {bold('Feedback')}:")
+            print(f"  {bold('Mesocycle Feedback')}:")
             for line in fb_lines:
-                print(f"              {line}")
-        print("            " + gray("-" * 40))
+                print(f"    {line}")
+        print("  " + gray("-" * 40))
 
 
 def run_plan_rm(args: argparse.Namespace) -> None:

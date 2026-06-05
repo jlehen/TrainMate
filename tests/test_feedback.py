@@ -260,8 +260,8 @@ class TestFeedback(unittest.TestCase):
         # 6. Verify outputs in plan show
         exit_code, stdout, stderr = self.run_cli(['plan', 'show'])
         self.assertEqual(exit_code, 0)
-        self.assertIn("Feedback:\n  overall too easy", stdout)
-        self.assertIn("Feedback:\n              more speed", stdout)
+        self.assertIn("Macrocycle Feedback:\n  overall too easy", stdout)
+        self.assertIn("Mesocycle Feedback:\n    more speed", stdout)
 
 
 if __name__ == '__main__':
