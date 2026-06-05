@@ -18,8 +18,9 @@
   case, use the basename of the filename.
 
 # Code style
-- Code lines should not be longer than 100 characters.
-- Comments should be wrapped at 100 characters.
+- Everything wraps at 100 characters: code lines, comments and LLM prompts.
+- Multiline LLM prompts must use string literal enclosed in triple quotes
+  or implicit string concatenation with parenthesis.
 - Try to reduce indented code, unless it's very trivial (1-2 lines).
   For instance, instead of:
 
