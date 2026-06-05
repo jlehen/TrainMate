@@ -352,11 +352,11 @@ UPCOMING LIFE EVENTS:
 TASK:
 Determine the overall periodization strategy (macrocycle) from today ({today_str}) until the next
 chronological goal ({next_goal['target_date']}).
-Divide this timeframe into contiguous, sequential mesocycles (typically blocks of 3-4 weeks,
-though the final peak/taper/race block or very short periods can be shorter). When planning
+Divide this timeframe into contiguous, sequential mesocycles (determining the duration of each
+block based on the periodization style guidelines provided in the science file). When planning
 mesocycles, it is acceptable to shorten/extend a block by a few days to align transition or
-recovery periods with upcoming life events (e.g. extending a block to ensure a deload week aligns
-with a vacation or trip).
+recovery periods with upcoming life events, and we should also try to align transition
+boundaries with long life events (e.g. aligning a deload week or phase change with a vacation).
 Make sure there are no gaps between the end date of one mesocycle and the start date of the next.
 The first mesocycle must start on today's date ({today_str}) and the last mesocycle must end on or
 around the goal date ({next_goal['target_date']}).
@@ -452,9 +452,9 @@ You MUST respond with a JSON object containing:
 TASK:
 Generate a training schedule for the next 4 weeks (28 days) starting from today. 
 Ensure the weekly schedules/microcycles are designed specifically to match the focus, target
-volume, and intensity of the active mesocycle block(s) the athlete is in during this period.
-Incorporate deload weeks and schedule around life events (business trip = maintain base/low-volume
-or rest on travel days, vacation = maintain fitness, party = easy workouts next day).
+volume, and intensity of the active mesocycle block(s) the athlete is in during this period, and
+incorporate any deload weeks or exceptions for upcoming life events in accordance with the
+science guidelines.
 
 You MUST respond with a JSON object containing:
 {
@@ -627,8 +627,8 @@ Adherence Discrepancies & Violations:
             "(e.g., a base fitness check, a 10K tune-up, or a half marathon test) "
             "that anchor each macrocycle container.\n\n"
             "GUIDELINES FOR INTERMEDIATE GOALS:\n"
-            "1. Each macrocycle container leading to a goal must be between 5 and 24 weeks "
-            "long (ideally 12-20 weeks).\n"
+            "1. Each macrocycle container leading to a goal must respect the duration constraints\n"
+            "   detailed in the science guidelines (5 to 24 weeks).\n"
             f"2. The target dates for all proposed goals must be sequential, start after "
             f"today ({today_str}), and lead chronologically up to the final event date "
             f"({target_date}).\n"
