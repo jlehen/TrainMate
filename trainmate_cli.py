@@ -195,6 +195,7 @@ def main() -> None:
     # plan feedback
     p_fb = plan_subparsers.add_parser(
         "feedback",
+        aliases=["f"],
         help="Add athlete feedback on the current macrocycle or a mesocycle"
     )
     p_fb.add_argument(
@@ -386,7 +387,7 @@ def main() -> None:
             run_plan_show(args)
         elif sub in ("rm", "d"):
             run_plan_rm(args)
-        elif sub == "feedback":
+        elif sub in ("feedback", "f"):
             run_plan_feedback(args)
         elif sub == "wipe":
             run_plan_wipe(args)

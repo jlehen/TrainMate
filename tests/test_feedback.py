@@ -236,7 +236,7 @@ class TestFeedback(unittest.TestCase):
         )
 
         # 4. Save macrocycle feedback via CLI
-        exit_code, stdout, stderr = self.run_cli(['plan', 'feedback', '--macro', 'overall too easy'])
+        exit_code, stdout, stderr = self.run_cli(['plan', 'f', '--macro', 'overall too easy'])
         self.assertEqual(exit_code, 0)
         self.assertIn("Feedback successfully saved for Macrocycle ID", stdout)
         self.assertIn("regenerate the periodization plan to apply this feedback", stdout)
