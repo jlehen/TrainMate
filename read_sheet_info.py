@@ -26,7 +26,9 @@ for s in sheets:
 for s in sheets:
     title = s.get('properties', {}).get('title')
     try:
-        data_res = sheet.values().get(spreadsheetId=SPREADSHEET_ID, range=f"'{title}'!A1:K10").execute()
+        data_res = sheet.values().get(
+            spreadsheetId=SPREADSHEET_ID, range=f"'{title}'!A1:K10"
+        ).execute()
         values = data_res.get('values', [])
         print(f"\n--- Data sample for '{title}' (first 10 rows) ---")
         for row in values:

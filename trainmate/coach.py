@@ -225,7 +225,11 @@ class CoachEngine:
                     cert = day_data.get("certainty_percent", 100)
                     equip = day_data.get("equipment", [])
                     equip_str = f" (Equipment: {', '.join(equip)})" if equip else ""
-                    lines.append(f"  * {day}: {hours} hours | Max sessions: {max_sessions} | Certainty: {cert}%{equip_str}")
+                    lines.append(
+                        f"  * {day}: {hours} hours | "
+                        f"Max sessions: {max_sessions} | "
+                        f"Certainty: {cert}%{equip_str}"
+                    )
                 else:
                     lines.append(f"  * {day}: {day_data} hours")
 
@@ -264,12 +268,12 @@ COACHING ROLE AND OBJECTIVES:
    synergies between them (e.g. general base or strength building phases).
 3. Dynamically adjust training plans based on recent Garmin metrics (Resting HR, HRV, Sleep,
    ACWR) to optimize recovery and prevent injury.
-4. Shift or scale training volume and intensity around life events (business trip, vacation, parties)
-   to manage fatigue.
+4. Shift or scale training volume and intensity around life events (business trip, vacation,
+   parties) to manage fatigue.
 5. Adhere to the day-by-day weekly availability schedule and day-dependent equipment access
    (e.g., do not schedule gym workouts on home-only days; do not schedule workouts on rest days;
-   do not exceed daily availability or max sessions). Respect certainty percentages (higher values indicate more
-   rigid constraints; lower values allow flexibility).
+   do not exceed daily availability or max sessions). Respect certainty percentages (higher
+   values indicate more rigid constraints; lower values allow flexibility).
 
 ================================================================================
 START OF SPORTS SCIENCE GUIDELINES
@@ -509,14 +513,21 @@ You MUST respond with a JSON object containing:
         """Queries LLM to evaluate metrics/activities and adapt workouts if needed."""
         custom_task = f"""
 TASK:
-Analyze the athlete's actual workout adherence and physiological metrics trajectory over the past {history_days} days.
-Review the list of completed activities compared to planned workouts and any calculated discrepancies (misses, workload/duration differences, rest violations).
-Also inspect the rolling baseline reference and the daily metrics sequence to see if the athlete shows signs of accumulated fatigue.
+Analyze the athlete's actual workout adherence and physiological metrics trajectory
+over the past {history_days} days.
+Review the list of completed activities compared to planned workouts and any
+calculated discrepancies (misses, workload/duration differences, rest violations).
+Also inspect the rolling baseline reference and the daily metrics sequence to see
+if the athlete shows signs of accumulated fatigue.
 
-Based on this, determine if we need to adapt the training plan for the remainder of the active mesocycle block (from {target_date_str} to {meso_end_date_str}).
-- If they are showing high fatigue or injury risk (e.g. elevated RHR, depressed HRV, poor sleep, or ACWR > 1.3), replace hard workouts with recovery or rest.
-- If they have missed key workouts, adjust the remaining workouts to safely build back volume without spiking the acute load too fast.
-- If they are fully recovered and on track, keep the plan as scheduled or make minor optimal adjustments.
+Based on this, determine if we need to adapt the training plan for the remainder of
+the active mesocycle block (from {target_date_str} to {meso_end_date_str}).
+- If they are showing high fatigue or injury risk (e.g. elevated RHR, depressed HRV,
+  poor sleep, or ACWR > 1.3), replace hard workouts with recovery or rest.
+- If they have missed key workouts, adjust the remaining workouts to safely build back
+  volume without spiking the acute load too fast.
+- If they are fully recovered and on track, keep the plan as scheduled or make minor
+  optimal adjustments.
 
 You MUST respond with a JSON object containing:
 {{
@@ -525,7 +536,8 @@ You MUST respond with a JSON object containing:
   "adapted_workouts": [
     {{
       "date": "YYYY-MM-DD",
-      "sport_type": "running" | "road_biking" | "hiking" | "strength_training" | "yoga" | "ski_touring" | "rest",
+      "sport_type": "running" | "road_biking" | "hiking" | "strength_training" |
+        "yoga" | "ski_touring" | "rest",
       "title": "Adapted Workout Title",
       "description": "Adapted description of intensity, duration, heart rate zones, and goals.",
       "duration_minutes": 45,

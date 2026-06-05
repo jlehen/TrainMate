@@ -72,7 +72,9 @@ class TestAdaptation(unittest.TestCase):
         )
 
         # 2. Retrieve completed activities
-        activities = test_db.get_completed_activities(start_date="2026-06-01", end_date="2026-06-05")
+        activities = test_db.get_completed_activities(
+            start_date="2026-06-01", end_date="2026-06-05"
+        )
         self.assertEqual(len(activities), 1)
         act = activities[0]
         self.assertEqual(act['activity_id'], "act_123")
@@ -116,7 +118,9 @@ class TestAdaptation(unittest.TestCase):
             self.assertAlmostEqual(tss, 64.0)
 
             # Test strength without HR
-            rpe_st, tss_st = sheets_reader._estimate_activity_metrics("strength_training", 1800.0, None)
+            rpe_st, tss_st = sheets_reader._estimate_activity_metrics(
+                "strength_training", 1800.0, None
+            )
             self.assertEqual(rpe_st, 5)
             self.assertAlmostEqual(tss_st, 22.5)  # 0.5 hours * 45.0 = 22.5
 
@@ -181,19 +185,33 @@ class TestAdaptation(unittest.TestCase):
             # Seed baseline
             test_db.save_baseline("2026-06-03", 50.0, 2.0, 60.0, 5.0, 80.0, 5.0)
 
-            # Seed planned workouts
-            # June 1: running (Completed on track)
-            test_db.save_workout("2026-06-01", "running", "Easy Run", "30 mins", duration_minutes=30, rpe=4, tss=20)
+            # June 1: running (On track)
+            test_db.save_workout(
+                "2026-06-01", "running", "Easy Run", "30 mins",
+                duration_minutes=30, rpe=4, tss=20
+            )
             # June 2: road_biking (Completed but duration discrepant: 60m planned, 30m actual)
-            test_db.save_workout("2026-06-02", "road_biking", "Tempo Ride", "60 mins", duration_minutes=60, rpe=6, tss=40)
+            test_db.save_workout(
+                "2026-06-02", "road_biking", "Tempo Ride", "60 mins",
+                duration_minutes=60, rpe=6, tss=40
+            )
             # June 3: running (Missed completely)
-            test_db.save_workout("2026-06-03", "running", "Interval Session", "45 mins", duration_minutes=45, rpe=8, tss=60)
+            test_db.save_workout(
+                "2026-06-03", "running", "Interval Session", "45 mins",
+                duration_minutes=45, rpe=8, tss=60
+            )
 
             # Seed completed activities
             # June 1: running (On track)
-            test_db.save_completed_activity("act_1", "2026-06-01", "2026-06-01 08:00:00", "Easy Run", "running", 1800.0, 5.0, 50.0, 132, 150, 4, 20.0)
+            test_db.save_completed_activity(
+                "act_1", "2026-06-01", "2026-06-01 08:00:00", "Easy Run",
+                "running", 1800.0, 5.0, 50.0, 132, 150, 4, 20.0
+            )
             # June 2: cycling (Short ride, duration discrepancy)
-            test_db.save_completed_activity("act_2", "2026-06-02", "2026-06-02 08:00:00", "Short Cycling", "cycling", 1800.0, 12.0, 100.0, 132, 150, 4, 20.0)
+            test_db.save_completed_activity(
+                "act_2", "2026-06-02", "2026-06-02 08:00:00", "Short Cycling",
+                "cycling", 1800.0, 12.0, 100.0, 132, 150, 4, 20.0
+            )
 
             # Call coach adapt
             reason, proposed = coach_engine.adapt("2026-06-03")
@@ -207,7 +225,10 @@ class TestAdaptation(unittest.TestCase):
 
             # Ensure prompt contained discrepancies
             prompt_user_content = mock_client.complete.call_args[0][1]
-            self.assertIn("Complete Miss! Missed planned workout 'Interval Session'", prompt_user_content)
+            self.assertIn(
+                "Complete Miss! Missed planned workout 'Interval Session'",
+                prompt_user_content
+            )
             self.assertIn("duration mismatch", prompt_user_content)
 
     def test_analyze_adherence_direct(self):

@@ -55,7 +55,11 @@ class TestTrainMateCLI(unittest.TestCase):
         stdout = io.StringIO()
         stderr = io.StringIO()
         with patch.object(sys, 'argv', ['trainmate_cli.py'] + args):
-            with patch('sys.stdout', stdout), patch('sys.stderr', stderr), patch('builtins.input', return_value=input_value):
+            with (
+                patch('sys.stdout', stdout),
+                patch('sys.stderr', stderr),
+                patch('builtins.input', return_value=input_value)
+            ):
                 try:
                     trainmate_cli.main()
                     exit_code = 0
@@ -567,7 +571,10 @@ class TestTrainMateCLI(unittest.TestCase):
         )
         exit_code, stdout, stderr = self.run_cli(['workout', 'rm', str(w_id)])
         self.assertEqual(exit_code, 0)
-        self.assertIn("Workout is synced to Google Calendar. Attempting to delete calendar event", stdout)
+        self.assertIn(
+            "Workout is synced to Google Calendar. Attempting to delete calendar event",
+            stdout
+        )
         self.assertIn(f"Workout with ID {w_id} ('Synced Run') removed successfully", stdout)
         mock_calendar.delete_workout_event.assert_called_once_with("mock_event_123")
 

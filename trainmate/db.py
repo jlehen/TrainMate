@@ -75,7 +75,8 @@ class Database:
                                 title TEXT NOT NULL,
                                 start_date TEXT NOT NULL,
                                 end_date TEXT NOT NULL,
-                                event_type TEXT NOT NULL, -- 'business_trip', 'vacation', 'party', 'other'
+                                -- event_type values: 'business_trip', 'vacation', 'party', 'other'
+                                event_type TEXT NOT NULL,
                                 impact_description TEXT
                             )
                         """)
@@ -108,7 +109,9 @@ class Database:
 
             # Add new columns to workouts table if they don't exist
             try:
-                cursor.execute("ALTER TABLE workouts ADD COLUMN duration_minutes INTEGER DEFAULT NULL")
+                cursor.execute(
+                    "ALTER TABLE workouts ADD COLUMN duration_minutes INTEGER DEFAULT NULL"
+                )
             except sqlite3.OperationalError:
                 pass
             try:
@@ -224,8 +227,9 @@ class Database:
         with self._get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("""
-                INSERT INTO objectives (title, target_date, sport_type, description, priority, status)
-                VALUES (?, ?, ?, ?, ?, ?)
+                INSERT INTO objectives (
+                    title, target_date, sport_type, description, priority, status
+                ) VALUES (?, ?, ?, ?, ?, ?)
             """, (title, target_date, sport_type, description, priority, status))
             conn.commit()
             return int(cursor.lastrowid)
@@ -340,22 +344,27 @@ class Database:
                 ge_id = google_event_id if google_event_id is not None else row['google_event_id']
                 cursor.execute("""
                     UPDATE workouts
-                    SET title = ?, description = ?, original_description = COALESCE(?, original_description),
+                    SET title = ?, description = ?,
+                        original_description = COALESCE(?, original_description),
                         status = ?, modification_reason = ?, google_event_id = ?,
                         duration_minutes = COALESCE(?, duration_minutes),
                         rpe = COALESCE(?, rpe),
                         tss = COALESCE(?, tss)
                     WHERE id = ?
-                """, (title, description, original_description, status, modification_reason, ge_id,
-                      duration_minutes, rpe, tss, workout_id))
+                """, (title, description, original_description, status,
+                      modification_reason, ge_id, duration_minutes, rpe, tss,
+                      workout_id))
             else:
                 cursor.execute("""
-                    INSERT INTO workouts (date, sport_type, title, description, original_description,
-                                         status, modification_reason, google_event_id,
-                                         duration_minutes, rpe, tss)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """, (date, sport_type, title, description, original_description or description,
-                      status, modification_reason, google_event_id, duration_minutes, rpe, tss))
+                    INSERT INTO workouts (
+                        date, sport_type, title, description, original_description,
+                        status, modification_reason, google_event_id,
+                        duration_minutes, rpe, tss
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (date, sport_type, title, description,
+                      original_description or description, status,
+                      modification_reason, google_event_id, duration_minutes,
+                      rpe, tss))
                 workout_id = cursor.lastrowid
             conn.commit()
             return int(workout_id)
@@ -364,7 +373,10 @@ class Database:
         """Fetches a workout by date and sport type."""
         with self._get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute("SELECT * FROM workouts WHERE date = ? AND sport_type = ?", (date, sport_type))
+            cursor.execute(
+                "SELECT * FROM workouts WHERE date = ? AND sport_type = ?",
+                (date, sport_type)
+            )
             row = cursor.fetchone()
             return dict(row) if row else None  # type: ignore
 
@@ -380,7 +392,10 @@ class Database:
                     (start_date, end_date)
                 )
             elif start_date:
-                cursor.execute("SELECT * FROM workouts WHERE date >= ? ORDER BY date ASC", (start_date,))
+                cursor.execute(
+                    "SELECT * FROM workouts WHERE date >= ? ORDER BY date ASC",
+                    (start_date,)
+                )
             else:
                 cursor.execute("SELECT * FROM workouts ORDER BY date ASC")
             return [dict(row) for row in cursor.fetchall()]  # type: ignore
@@ -459,7 +474,10 @@ class Database:
                     (start_date,)
                 )
             else:
-                cursor.execute("SELECT * FROM completed_activities ORDER BY date ASC, start_time ASC")
+                cursor.execute(
+                    "SELECT * FROM completed_activities "
+                    "ORDER BY date ASC, start_time ASC"
+                )
             return [dict(row) for row in cursor.fetchall()]  # type: ignore
 
     # --- Athlete Metrics Cache ---
@@ -473,18 +491,24 @@ class Database:
         with self._get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("""
-                INSERT INTO athlete_metrics_cache (date, rhr, hrv, sleep_score, stress, acute_workload,
-                                                  chronic_workload, acwr)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO athlete_metrics_cache (
+                    date, rhr, hrv, sleep_score, stress, acute_workload,
+                    chronic_workload, acwr
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(date) DO UPDATE SET
                     rhr=excluded.rhr,
                     hrv=excluded.hrv,
                     sleep_score=excluded.sleep_score,
                     stress=excluded.stress,
-                    acute_workload=COALESCE(excluded.acute_workload, athlete_metrics_cache.acute_workload),
-                    chronic_workload=COALESCE(excluded.chronic_workload, athlete_metrics_cache.chronic_workload),
+                    acute_workload=COALESCE(
+                        excluded.acute_workload, athlete_metrics_cache.acute_workload
+                    ),
+                    chronic_workload=COALESCE(
+                        excluded.chronic_workload, athlete_metrics_cache.chronic_workload
+                    ),
                     acwr=COALESCE(excluded.acwr, athlete_metrics_cache.acwr)
-            """, (date, rhr, hrv, sleep_score, stress, acute_workload, chronic_workload, acwr))
+            """, (date, rhr, hrv, sleep_score, stress, acute_workload,
+                  chronic_workload, acwr))
             conn.commit()
 
     def get_metrics_cache(
@@ -495,12 +519,14 @@ class Database:
             cursor = conn.cursor()
             if start_date and end_date:
                 cursor.execute(
-                    "SELECT * FROM athlete_metrics_cache WHERE date >= ? AND date <= ? ORDER BY date ASC",
+                    "SELECT * FROM athlete_metrics_cache "
+                    "WHERE date >= ? AND date <= ? ORDER BY date ASC",
                     (start_date, end_date)
                 )
             elif start_date:
                 cursor.execute(
-                    "SELECT * FROM athlete_metrics_cache WHERE date >= ? ORDER BY date ASC", (start_date,)
+                    "SELECT * FROM athlete_metrics_cache WHERE date >= ? "
+                    "ORDER BY date ASC", (start_date,)
                 )
             else:
                 cursor.execute("SELECT * FROM athlete_metrics_cache ORDER BY date ASC")
@@ -515,9 +541,10 @@ class Database:
         with self._get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("""
-                INSERT INTO athlete_baselines (date, rhr_baseline_mean, rhr_baseline_std, hrv_baseline_mean,
-                                              hrv_baseline_std, sleep_baseline_mean, sleep_baseline_std)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO athlete_baselines (
+                    date, rhr_baseline_mean, rhr_baseline_std, hrv_baseline_mean,
+                    hrv_baseline_std, sleep_baseline_mean, sleep_baseline_std
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(date) DO UPDATE SET
                     rhr_baseline_mean=excluded.rhr_baseline_mean,
                     rhr_baseline_std=excluded.rhr_baseline_std,
@@ -532,7 +559,10 @@ class Database:
         """Fetches baseline valid on or closest prior to the date."""
         with self._get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute("SELECT * FROM athlete_baselines WHERE date <= ? ORDER BY date DESC LIMIT 1", (date,))
+            cursor.execute(
+                "SELECT * FROM athlete_baselines WHERE date <= ? "
+                "ORDER BY date DESC LIMIT 1", (date,)
+            )
             row = cursor.fetchone()
             return dict(row) if row else None  # type: ignore
 

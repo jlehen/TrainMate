@@ -86,4 +86,7 @@ class TestGarminSheetsReader(unittest.TestCase):
             
         output = stdout.getvalue()
         today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-        self.assertIn(f"Warning: Garmin metrics for the current date ({today_str}) are missing.", output)
+        self.assertIn(
+            f"Warning: Garmin metrics for the current date ({today_str}) are missing.",
+            output
+        )

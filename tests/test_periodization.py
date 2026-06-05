@@ -63,8 +63,18 @@ class TestPeriodization(unittest.TestCase):
         
         # Save a macrocycle
         mesos = [
-            {"name": "Base Building", "start_date": "2026-06-01", "end_date": "2026-06-28", "focus": "Aerobic threshold"},
-            {"name": "Specific prep", "start_date": "2026-06-29", "end_date": "2026-07-26", "focus": "Intensity increase"}
+            {
+                "name": "Base Building",
+                "start_date": "2026-06-01",
+                "end_date": "2026-06-28",
+                "focus": "Aerobic threshold"
+            },
+            {
+                "name": "Specific prep",
+                "start_date": "2026-06-29",
+                "end_date": "2026-07-26",
+                "focus": "Intensity increase"
+            }
         ]
         macro_id = test_db.save_macrocycle(
             objective_id=obj_id,
@@ -154,15 +164,30 @@ class TestPeriodization(unittest.TestCase):
         mock_macro_response = {
             "strategy": "Simulated overall strategy",
             "mesocycles": [
-                {"name": "Base Building", "start_date": "2026-06-01", "end_date": "2026-06-28", "focus": "Endurance"},
-                {"name": "Peak & Taper", "start_date": "2026-06-29", "end_date": "2026-07-05", "focus": "Taper"}
+                {
+                    "name": "Base Building",
+                    "start_date": "2026-06-01",
+                    "end_date": "2026-06-28",
+                    "focus": "Endurance"
+                },
+                {
+                    "name": "Peak & Taper",
+                    "start_date": "2026-06-29",
+                    "end_date": "2026-07-05",
+                    "focus": "Taper"
+                }
             ]
         }
         mock_workouts_response = {
             "reasoning": "Microcycle generated reasoning",
             "athlete_learnings": "Simulated learnings",
             "workouts": [
-                {"date": "2026-06-01", "sport_type": "running", "title": "Base Run", "description": "45 mins zone 2"}
+                {
+                    "date": "2026-06-01",
+                    "sport_type": "running",
+                    "title": "Base Run",
+                    "description": "45 mins zone 2"
+                }
             ]
         }
         
@@ -187,7 +212,8 @@ class TestPeriodization(unittest.TestCase):
         mesos = test_db.get_mesocycles_for_macrocycle(macro['id'])
         self.assertEqual(len(mesos), 2)
         
-        # 2. Second replan: No changes, force=False -> Should REUSE macrocycle, only generate microcycles
+        # 2. Second replan: No changes, force=False -> Should REUSE macrocycle, only generate
+        # microcycles
         mock_client.complete.reset_mock()
         # Side effect only needs to handle microcycle generation now, as macro is reused
         mock_client.complete.side_effect = [mock_workouts_response]
@@ -224,8 +250,18 @@ class TestPeriodization(unittest.TestCase):
             priority=1
         )
         mesos = [
-            {"name": "Base Building", "start_date": "2026-06-01", "end_date": "2026-06-28", "focus": "Zone 2 runs"},
-            {"name": "Peak & Taper", "start_date": "2026-06-29", "end_date": "2026-07-05", "focus": "Tapering"}
+            {
+                "name": "Base Building",
+                "start_date": "2026-06-01",
+                "end_date": "2026-06-28",
+                "focus": "Zone 2 runs"
+            },
+            {
+                "name": "Peak & Taper",
+                "start_date": "2026-06-29",
+                "end_date": "2026-07-05",
+                "focus": "Tapering"
+            }
         ]
         test_db.save_macrocycle(
             objective_id=obj_id,
