@@ -151,8 +151,11 @@ def main() -> None:
     
     # plan generate
     p_gen = plan_subparsers.add_parser(
-        "generate",
-        help="Generate or adapt the periodized training plan strategy (macrocycles & mesocycles)"
+        "generate", aliases=["g"],
+        help=(
+            "Generate or adapt the periodized training plan strategy "
+            "(macrocycles & mesocycles)"
+        )
     )
     p_gen.add_argument(
         "-f", "--force", action="store_true",
@@ -161,7 +164,7 @@ def main() -> None:
     
     # plan show
     plan_subparsers.add_parser(
-        "show",
+        "show", aliases=["s"],
         help="Show the active macrocycle and mesocycles periodization strategy"
     )
 
@@ -180,21 +183,25 @@ def main() -> None:
     )
     
     # workout list
-    workout_subparsers.add_parser("list", help="Show all planned workouts")
+    workout_subparsers.add_parser(
+        "list", aliases=["l"], help="Show all planned workouts"
+    )
     
     # workout generate
     workout_subparsers.add_parser(
-        "generate",
+        "generate", aliases=["g"],
         help="Generate the 4-week workouts (microcycles) based on the active strategy"
     )
     
     # workout rm
-    w_rm = workout_subparsers.add_parser("rm", help="Remove a workout by ID")
+    w_rm = workout_subparsers.add_parser(
+        "rm", aliases=["r"], help="Remove a workout by ID"
+    )
     w_rm.add_argument("id", type=int, help="Workout ID to remove")
     
     # workout adapt
     w_adapt = workout_subparsers.add_parser(
-        "adapt",
+        "adapt", aliases=["a"],
         help="Run the daily Garmin check for today (syncs adapted workouts to Calendar)"
     )
     w_adapt.add_argument("--date", help="Date in YYYY-MM-DD format (defaults to UTC today)")
@@ -205,7 +212,7 @@ def main() -> None:
     
     # workout push
     workout_subparsers.add_parser(
-        "push",
+        "push", aliases=["p"],
         help="Commit all local planned workouts to Google Calendar"
     )
 
@@ -297,15 +304,15 @@ def main() -> None:
             workout_parser.print_help()
             sys.exit(1)
         sub = args.subcommand.lower()
-        if sub == "list":
+        if sub in ("list", "l"):
             run_workout_list()
-        elif sub == "generate":
+        elif sub in ("generate", "g"):
             run_workout_generate()
-        elif sub == "rm":
+        elif sub in ("rm", "r"):
             run_workout_rm(args)
-        elif sub == "adapt":
+        elif sub in ("adapt", "a"):
             run_workout_adapt(args)
-        elif sub == "push":
+        elif sub in ("push", "p"):
             run_workout_push()
         elif sub == "wipe":
             run_workout_wipe(args)
@@ -323,9 +330,9 @@ def main() -> None:
             plan_parser.print_help()
             sys.exit(1)
         sub = args.subcommand.lower()
-        if sub == "generate":
+        if sub in ("generate", "g"):
             run_plan_generate(args)
-        elif sub == "show":
+        elif sub in ("show", "s"):
             run_plan_show()
         elif sub == "wipe":
             run_plan_wipe(args)
