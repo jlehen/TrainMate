@@ -1,6 +1,7 @@
 import os
 import re
 import sys
+import textwrap
 
 # ANSI escape codes for terminal coloring
 ANSI_ESCAPE = re.compile(r'(?:\033|\x1b)\[[0-9;]*m')
@@ -80,3 +81,42 @@ def pad_visible(s: str, width: int, align_left: bool = True) -> str:
         return s + padding
     else:
         return padding + s
+
+
+def wrap_text(text: str, width: int = 80) -> str:
+    """Wraps text at the specified width while preserving layout and indentation."""
+    if not text:
+        return text
+    paragraphs = text.split('\n')
+    wrapped_paragraphs = []
+    for para in paragraphs:
+        if not para.strip():
+            wrapped_paragraphs.append('')
+            continue
+        
+        # Detect leading whitespace and list prefix (e.g. "- ", "* ", "1. ")
+        match = re.match(r'^(\s*(?:[-*+]\s+|\d+\.\s+)?)(.*)', para)
+        if match:
+            prefix, content = match.groups()
+            indent = ' ' * len(prefix)
+            # Wrap the paragraph, using the prefix indent for subsequent lines
+            wrapped = textwrap.wrap(para, width=width, subsequent_indent=indent)
+            wrapped_paragraphs.extend(wrapped)
+        else:
+            wrapped_paragraphs.append(textwrap.fill(para, width=width))
+            
+    return '\n'.join(wrapped_paragraphs)
+
+
+def format_labeled_text(
+    label: str, text: str, width: int = 80, color_fn=None
+) -> str:
+    """Wraps and indents text dynamically under its label, optional coloring."""
+    indent_len = visible_len(label)
+    wrapped_width = max(20, width - indent_len)
+    wrapped_text = wrap_text(text, width=wrapped_width)
+    if color_fn:
+        wrapped_text = color_fn(wrapped_text)
+    indented_text = wrapped_text.replace('\n', '\n' + ' ' * indent_len)
+    return f"{label}{indented_text}"
+
