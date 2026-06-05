@@ -868,7 +868,8 @@ def run_plan_show(args: argparse.Namespace) -> None:
     print(bold(cyan("\n=== ACTIVE MACROCYCLE STRATEGY ===")))
     sport_str = next_goal['sport_type'].upper()
     print(
-        f"{bold('Objective')}: {cyan(next_goal['title'])} ({magenta(sport_str)}) "
+        f"{bold('Objective')} [ID: {next_goal['id']}]: "
+        f"{cyan(next_goal['title'])} ({magenta(sport_str)}) "
         f"on {cyan(next_goal['target_date'])}"
     )
     print(format_labeled_block(f"{bold('Macrocycle Strategy')}:", macrocycle['strategy']))
@@ -922,7 +923,7 @@ def run_plan_show(args: argparse.Namespace) -> None:
             m_name_disp = m['name']
             
         print(
-            f"{prefix} {status_str} {pad_visible(m_name_disp, 15)} "
+            f"{prefix} {status_str} [ID: {m['id']}] {pad_visible(m_name_disp, 15)} "
             f"({cyan(m['start_date'])} -> {cyan(m['end_date'])}) "
             f"[{bar}]{extra} {duration_desc}"
         )
