@@ -196,7 +196,8 @@ def main() -> None:
     p_fb = plan_subparsers.add_parser(
         "feedback",
         aliases=["f"],
-        help="Add athlete feedback on the current macrocycle or a mesocycle"
+        description="Add athlete feedback (either --macro or --meso is mandatory).",
+        help="Add athlete feedback (either --macro or --meso is mandatory)"
     )
     p_fb.add_argument(
         "--macro", action="store_true",
@@ -208,7 +209,10 @@ def main() -> None:
     )
     p_fb.add_argument(
         "--goal", "--goal-id", type=int, dest="goal_id",
-        help="Target goal ID whose plan the feedback should attach to"
+        help=(
+            "Target goal ID whose plan the feedback should attach to "
+            "(default to the current active goal)"
+        )
     )
     p_fb.add_argument(
         "text",
