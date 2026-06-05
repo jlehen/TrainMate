@@ -30,12 +30,25 @@ def format_completed_activities(completed_activities: List[CompletedActivity]) -
             (act.get('tss') or 0.0)
             + (act.get('rpe') or 0) * (act['duration_sec'] / 3600.0)
         )
-        completed_list.append(
+        line = (
             f"- {act['date']} ({act['activity_type'].upper()}): "
             f"'{act['activity_name']}' | "
             f"Duration: {act['duration_sec']/60:.0f}m, Avg HR: {act['avg_hr']}, "
             f"Load: {act_load:.1f}"
         )
+        extras = []
+        if act.get('bike_avg_watts') is not None:
+            extras.append(f"Avg Power: {act['bike_avg_watts']}W")
+        zone_parts = [
+            f"Z{i}={act[f'zone{i}_sec'] // 60}m"
+            for i in range(1, 6)
+            if act.get(f'zone{i}_sec') is not None
+        ]
+        if zone_parts:
+            extras.append(f"Zones: {', '.join(zone_parts)}")
+        if extras:
+            line += " | " + ", ".join(extras)
+        completed_list.append(line)
     return "\n".join(completed_list)
 
 

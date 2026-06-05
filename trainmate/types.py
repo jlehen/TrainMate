@@ -48,6 +48,12 @@ class CompletedActivity(TypedDict):
     max_hr: Optional[int]
     rpe: int
     tss: float
+    bike_avg_watts: Optional[int]
+    zone1_sec: Optional[int]
+    zone2_sec: Optional[int]
+    zone3_sec: Optional[int]
+    zone4_sec: Optional[int]
+    zone5_sec: Optional[int]
 
 class AthleteMetric(TypedDict):
     """Represents Garmin health/performance metrics cached for a specific day."""

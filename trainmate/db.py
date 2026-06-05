@@ -140,6 +140,20 @@ class Database:
                     tss REAL
                 )
             """)
+
+            # Add new columns to completed_activities if they don't exist
+            for col in [
+                "bike_avg_watts INTEGER DEFAULT NULL",
+                "zone1_sec INTEGER DEFAULT NULL",
+                "zone2_sec INTEGER DEFAULT NULL",
+                "zone3_sec INTEGER DEFAULT NULL",
+                "zone4_sec INTEGER DEFAULT NULL",
+                "zone5_sec INTEGER DEFAULT NULL",
+            ]:
+                try:
+                    cursor.execute(f"ALTER TABLE completed_activities ADD COLUMN {col}")
+                except sqlite3.OperationalError:
+                    pass
             
             # Athlete metrics cache table
             cursor.execute("""
@@ -429,7 +443,10 @@ class Database:
         self, activity_id: str, date: str, start_time: Optional[str],
         activity_name: Optional[str], activity_type: str, duration_sec: float,
         distance_km: float, elevation_gain_m: float, avg_hr: Optional[int],
-        max_hr: Optional[int], rpe: int, tss: float
+        max_hr: Optional[int], rpe: int, tss: float,
+        bike_avg_watts: Optional[int] = None, zone1_sec: Optional[int] = None,
+        zone2_sec: Optional[int] = None, zone3_sec: Optional[int] = None,
+        zone4_sec: Optional[int] = None, zone5_sec: Optional[int] = None
     ) -> None:
         """Saves a completed Garmin activity, updating it if it already exists."""
         with self._get_connection() as conn:
@@ -438,8 +455,9 @@ class Database:
                 INSERT INTO completed_activities (
                     activity_id, date, start_time, activity_name, activity_type,
                     duration_sec, distance_km, elevation_gain_m, avg_hr, max_hr,
-                    rpe, tss
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    rpe, tss, bike_avg_watts, zone1_sec, zone2_sec, zone3_sec,
+                    zone4_sec, zone5_sec
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(activity_id) DO UPDATE SET
                     date=excluded.date,
                     start_time=excluded.start_time,
@@ -451,10 +469,17 @@ class Database:
                     avg_hr=excluded.avg_hr,
                     max_hr=excluded.max_hr,
                     rpe=excluded.rpe,
-                    tss=excluded.tss
+                    tss=excluded.tss,
+                    bike_avg_watts=excluded.bike_avg_watts,
+                    zone1_sec=excluded.zone1_sec,
+                    zone2_sec=excluded.zone2_sec,
+                    zone3_sec=excluded.zone3_sec,
+                    zone4_sec=excluded.zone4_sec,
+                    zone5_sec=excluded.zone5_sec
             """, (activity_id, date, start_time, activity_name, activity_type,
                   duration_sec, distance_km, elevation_gain_m, avg_hr, max_hr,
-                  rpe, tss))
+                  rpe, tss, bike_avg_watts, zone1_sec, zone2_sec, zone3_sec,
+                  zone4_sec, zone5_sec))
             conn.commit()
 
     def get_completed_activities(

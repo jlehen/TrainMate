@@ -118,7 +118,14 @@ class GarminSheetsReader:
             
             avg_hr = self._safe_int(row_dict.get('Avg HR'))
             max_hr = self._safe_int(row_dict.get('Max HR'))
-            
+
+            bike_avg_watts = self._safe_int(row_dict.get('Bike Avg Watts'))
+            zone1_sec = self._safe_int(row_dict.get('Zone 1 Sec'))
+            zone2_sec = self._safe_int(row_dict.get('Zone 2 Sec'))
+            zone3_sec = self._safe_int(row_dict.get('Zone 3 Sec'))
+            zone4_sec = self._safe_int(row_dict.get('Zone 4 Sec'))
+            zone5_sec = self._safe_int(row_dict.get('Zone 5 Sec'))
+
             # Read RPE and TSS from sheet if present, fallback to estimation if missing/invalid
             rpe = self._safe_int(row_dict.get('RPE'))
             tss = self._safe_float_optional(row_dict.get('TSS'))
@@ -131,7 +138,7 @@ class GarminSheetsReader:
                     rpe = est_rpe
                 if tss is None:
                     tss = est_tss
-            
+
             # Save completed activity to DB
             db.save_completed_activity(
                 activity_id=activity_id,
@@ -145,7 +152,13 @@ class GarminSheetsReader:
                 avg_hr=avg_hr,
                 max_hr=max_hr,
                 rpe=rpe,
-                tss=tss
+                tss=tss,
+                bike_avg_watts=bike_avg_watts,
+                zone1_sec=zone1_sec,
+                zone2_sec=zone2_sec,
+                zone3_sec=zone3_sec,
+                zone4_sec=zone4_sec,
+                zone5_sec=zone5_sec
             )
             
             # Workload calculation: TSS + RPE * Duration (hours)
