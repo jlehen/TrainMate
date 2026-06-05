@@ -286,11 +286,20 @@ class Database:
                 cursor.execute("SELECT * FROM lifeevents ORDER BY start_date ASC")
             return [dict(row) for row in cursor.fetchall()]  # type: ignore
 
+    def get_lifeevent(self, lifeevent_id: int) -> Optional[LifeEvent]:
+        """Fetches a life event by its unique ID."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM lifeevents WHERE id = ?", (lifeevent_id,))
+            row = cursor.fetchone()
+            return dict(row) if row else None  # type: ignore
+
     def delete_lifeevent(self, lifeevent_id: int) -> None:
         """Deletes a life event by ID."""
         with self._get_connection() as conn:
             conn.cursor().execute("DELETE FROM lifeevents WHERE id = ?", (lifeevent_id,))
             conn.commit()
+
 
     # --- Workouts CRUD ---
     def save_workout(

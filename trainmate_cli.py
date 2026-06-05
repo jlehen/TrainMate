@@ -86,7 +86,15 @@ def main() -> None:
     c_rm.add_argument("id", type=int, help="Life event ID to remove")
     
     # lifeevent list
-    lifeevent_subparsers.add_parser("list", help="Show all logged life events")
+    le_list = lifeevent_subparsers.add_parser("list", help="Show all logged life events")
+    le_list.add_argument(
+        "-v", "--verbose", action="store_true",
+        help="Show life event details including impact description"
+    )
+
+    # lifeevent show
+    le_show = lifeevent_subparsers.add_parser("show", help="Show details of a life event by ID")
+    le_show.add_argument("id", type=int, help="Life event ID to display")
 
     # lifeevent wipe
     le_wipe = lifeevent_subparsers.add_parser("wipe", help="Wipe all life events")
@@ -236,7 +244,9 @@ def main() -> None:
         elif sub == "rm":
             run_lifeevent_rm(args)
         elif sub == "list":
-            run_lifeevent_list()
+            run_lifeevent_list(args)
+        elif sub == "show":
+            run_lifeevent_show(args)
         elif sub == "wipe":
             run_lifeevent_wipe(args)
     elif cmd in ("workout", "w"):
@@ -485,17 +495,32 @@ def run_lifeevent_add(args: argparse.Namespace) -> None:
     )
 
 
-def run_lifeevent_list() -> None:
+def _lifeevent_print(e: dict, show_impact: bool = True) -> None:
+    """Prints a single life event formatting its fields."""
+    print(
+        f"ID: {e['id']} | {e['title']} ({e['event_type']}): "
+        f"{e['start_date']} to {e['end_date']}"
+    )
+    if show_impact and e.get('impact_description'):
+        print(f"  Impact: {e['impact_description']}")
+
+
+def run_lifeevent_list(args: argparse.Namespace) -> None:
     """Lists all logged training life events."""
     events = db.get_lifeevents()
     print("=== ATHLETE LIFE EVENTS ===")
     for e in events:
-        print(
-            f"ID: {e['id']} | {e['title']} ({e['event_type']}): "
-            f"{e['start_date']} to {e['end_date']}"
-        )
-        if e.get('impact_description'):
-            print(f"  Impact: {e['impact_description']}")
+        _lifeevent_print(e, show_impact=args.verbose)
+
+
+def run_lifeevent_show(args: argparse.Namespace) -> None:
+    """Displays a specific life event and its impact description by ID."""
+    event = db.get_lifeevent(args.id)
+    if not event:
+        print(f"Life event with ID {args.id} not found.")
+        return
+
+    _lifeevent_print(event, show_impact=True)
 
 
 def run_lifeevent_rm(args: argparse.Namespace) -> None:

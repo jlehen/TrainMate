@@ -168,12 +168,38 @@ class TestTrainMateCLI(unittest.TestCase):
         self.assertEqual(exit_code, 0)
         self.assertIn("Life event 'Ibiza Vacation' logged", stdout)
 
-        # 3. List life events again
+        # 3. List life events again (default should not show impact description)
         exit_code, stdout, stderr = self.run_cli(['lifeevent', 'list'])
         self.assertEqual(exit_code, 0)
         self.assertIn("Ibiza Vacation", stdout)
         self.assertIn("vacation", stdout)
         self.assertIn("ID: 1", stdout)
+        self.assertNotIn("Impact:", stdout)
+
+        # 3b. List life events with -v / --verbose (should show impact description)
+        exit_code, stdout, stderr = self.run_cli(['lifeevent', 'list', '-v'])
+        self.assertEqual(exit_code, 0)
+        self.assertIn("Ibiza Vacation", stdout)
+        self.assertIn("vacation", stdout)
+        self.assertIn("ID: 1", stdout)
+        self.assertIn("Impact: 50% intensity", stdout)
+
+        exit_code, stdout, stderr = self.run_cli(['lifeevent', 'list', '--verbose'])
+        self.assertEqual(exit_code, 0)
+        self.assertIn("Impact: 50% intensity", stdout)
+
+        # 3c. Show life event by ID
+        exit_code, stdout, stderr = self.run_cli(['lifeevent', 'show', '1'])
+        self.assertEqual(exit_code, 0)
+        self.assertIn("Ibiza Vacation", stdout)
+        self.assertIn("vacation", stdout)
+        self.assertIn("ID: 1", stdout)
+        self.assertIn("Impact: 50% intensity", stdout)
+
+        # Show non-existent life event
+        exit_code, stdout, stderr = self.run_cli(['lifeevent', 'show', '999'])
+        self.assertEqual(exit_code, 0)
+        self.assertIn("Life event with ID 999 not found.", stdout)
 
         # 4. Remove life event
         exit_code, stdout, stderr = self.run_cli(['lifeevent', 'rm', '1'])
