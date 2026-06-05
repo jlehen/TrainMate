@@ -120,3 +120,22 @@ def format_labeled_text(
     indented_text = wrapped_text.replace('\n', '\n' + ' ' * indent_len)
     return f"{label}{indented_text}"
 
+
+def format_labeled_block(
+    label: str, text: str, width: int = 80, color_fn=None
+) -> str:
+    """Wraps text on a new line, indented 2 spaces deeper than the label."""
+    if not text:
+        return f"{label}"
+    match = re.match(r'^(\s*)', label)
+    leading_spaces = match.group(1) if match else ""
+    block_indent = leading_spaces + "  "
+    
+    wrapped_width = max(20, width - len(block_indent))
+    wrapped_text = wrap_text(text, width=wrapped_width)
+    if color_fn:
+        wrapped_text = color_fn(wrapped_text)
+    
+    indented_text = block_indent + wrapped_text.replace('\n', '\n' + block_indent)
+    return f"{label}\n{indented_text}"
+

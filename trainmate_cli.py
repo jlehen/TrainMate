@@ -9,7 +9,8 @@ from trainmate.coach import coach_engine
 from trainmate.config import config
 from trainmate.util import (
     bold, dim, green, red, yellow, cyan, blue, magenta, gray,
-    color_acwr, visible_len, pad_visible, wrap_text, format_labeled_text
+    color_acwr, visible_len, pad_visible, wrap_text, format_labeled_text,
+    format_labeled_block
 )
 
 
@@ -372,9 +373,9 @@ def run_status(verbose: bool = False) -> None:
             f"\n{bold('Next Objective')}: {cyan(next_goal['title'])} "
             f"({magenta(sport_str)})"
         )
-        print(f"{bold('Target Date')}   : {next_goal['target_date']}{gray(days_rem_str)}")
-        desc_label = f"{bold('Description')}   : "
-        print(format_labeled_text(desc_label, next_goal.get('description', '')))
+        print(f"{bold('Target Date')}: {next_goal['target_date']}{gray(days_rem_str)}")
+        
+        print(format_labeled_block(f"{bold('Description')}:", next_goal.get('description', '')))
         
         # Query active mesocycle
         macro = db.get_macrocycle_for_objective(next_goal['id'])
@@ -397,17 +398,19 @@ def run_status(verbose: bool = False) -> None:
             
             if active_meso:
                 print(
-                    f"{bold('Active Cycle')}  : {green(active_meso['name'])} "
+                    f"{bold('Active Macrocycle')}: {green(active_meso['name'])} "
                     f"({active_meso['start_date']} to {active_meso['end_date']})"
                 )
-                focus_label = f"{bold('Cycle Focus')}   : "
-                print(format_labeled_text(focus_label, active_meso['focus']))
+                print(format_labeled_block(f"{bold('Cycle Focus')}:", active_meso['focus']))
             else:
-                print(f"{bold('Active Cycle')}  : None active today (outside mesocycle boundaries)")
+                print(
+                    f"{bold('Active Macrocycle')}: "
+                    f"None active today (outside mesocycle boundaries)"
+                )
         else:
             print(
-                f"{bold('Active Cycle')}  : No periodization strategy established. "
-                "Run 'plan generate' first."
+                f"{bold('Active Macrocycle')}: "
+                f"No periodization strategy established. Run 'plan generate' first."
             )
     else:
         print(
@@ -486,8 +489,8 @@ def run_status(verbose: bool = False) -> None:
     learnings = db.get_coach_memory("athlete_learnings")
     print(bold("\nCoach Memory:"))
     
-    print(format_labeled_text("- Strategy  : ", strategy or 'Not established'))
-    print(format_labeled_text("- Learnings : ", learnings or 'None yet'))
+    print(format_labeled_block("- Strategy:", strategy or 'Not established'))
+    print(format_labeled_block("- Learnings:", learnings or 'None yet'))
 
     if verbose:
         goals = db.get_objectives()
@@ -508,7 +511,7 @@ def run_status(verbose: bool = False) -> None:
                 f"({sport_str}) on {g['target_date']} (Priority: {g['priority']})"
             )
             if g.get('description'):
-                print(format_labeled_text("  Description: ", g['description']))
+                print(format_labeled_block("  Description:", g['description']))
 
         events = db.get_lifeevents()
         print(bold(cyan("\nLife Events:")))
@@ -520,7 +523,7 @@ def run_status(verbose: bool = False) -> None:
                 f"{e['start_date']} to {e['end_date']}"
             )
             if e.get('impact_description'):
-                print(format_labeled_text("  Impact: ", e['impact_description']))
+                print(format_labeled_block("  Impact:", e['impact_description']))
 
     print(bold(cyan("\n================================")))
 
@@ -596,7 +599,7 @@ def run_goal_list() -> None:
             f"({sport_str}) on {g['target_date']} (Priority: {g['priority']})"
         )
         if g.get('description'):
-            print(format_labeled_text("  Description: ", g['description']))
+            print(format_labeled_block("  Description:", g['description']))
 
 
 def run_goal_rm(args: argparse.Namespace) -> None:
@@ -678,7 +681,7 @@ def _lifeevent_print(e: dict, show_impact: bool = True) -> None:
         f"{e['start_date']} to {e['end_date']}"
     )
     if show_impact and e.get('impact_description'):
-        print(format_labeled_text("  Impact: ", e['impact_description']))
+        print(format_labeled_block("  Impact:", e['impact_description']))
 
 
 def run_lifeevent_list(args: argparse.Namespace) -> None:
@@ -1064,9 +1067,9 @@ def run_workout_list() -> None:
             f"ID: {w['id']} | {w['date']} | {magenta(w['sport_type'].upper())} | "
             f"{bold(w['title'])}{mod_marker}{sync_marker}"
         )
-        print(format_labeled_text("  Description: ", w['description']))
+        print(format_labeled_block("  Description:", w['description']))
         if w.get('modification_reason'):
-            print(format_labeled_text("  Reason: ", w['modification_reason'], color_fn=yellow))
+            print(format_labeled_block("  Reason:", w['modification_reason'], color_fn=yellow))
         print(gray("-" * 40))
 
 

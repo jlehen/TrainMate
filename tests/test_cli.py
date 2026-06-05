@@ -186,11 +186,11 @@ class TestTrainMateCLI(unittest.TestCase):
         self.assertIn("Ibiza Vacation", stdout)
         self.assertIn("vacation", stdout)
         self.assertIn("ID: 1", stdout)
-        self.assertIn("Impact: 50% intensity", stdout)
+        self.assertIn("Impact:\n    50% intensity", stdout)
 
         exit_code, stdout, stderr = self.run_cli(['lifeevent', 'list', '--verbose'])
         self.assertEqual(exit_code, 0)
-        self.assertIn("Impact: 50% intensity", stdout)
+        self.assertIn("Impact:\n    50% intensity", stdout)
 
         # 3c. Show life event by ID
         exit_code, stdout, stderr = self.run_cli(['lifeevent', 'show', '1'])
@@ -198,7 +198,7 @@ class TestTrainMateCLI(unittest.TestCase):
         self.assertIn("Ibiza Vacation", stdout)
         self.assertIn("vacation", stdout)
         self.assertIn("ID: 1", stdout)
-        self.assertIn("Impact: 50% intensity", stdout)
+        self.assertIn("Impact:\n    50% intensity", stdout)
 
         # Show non-existent life event
         exit_code, stdout, stderr = self.run_cli(['lifeevent', 'show', '999'])
@@ -475,8 +475,8 @@ class TestTrainMateCLI(unittest.TestCase):
         self.assertIn("Overnight HRV: 82 ms", stdout)
         self.assertIn("ACWR       : 1.14", stdout)
         self.assertIn("Baselines (28-day)", stdout)
-        self.assertIn("Strategy  : Focus on aerobic base", stdout)
-        self.assertIn("Learnings : Rest well on Fridays", stdout)
+        self.assertIn("Strategy:\n  Focus on aerobic base", stdout)
+        self.assertIn("Learnings:\n  Rest well on Fridays", stdout)
 
         # Test verbose status with goals and lifeevents
         test_db.add_lifeevent(
@@ -504,7 +504,7 @@ class TestTrainMateCLI(unittest.TestCase):
             f"- ID: {e_id} | Ibiza Trip (vacation): 2026-07-01 to 2026-07-08",
             stdout_v
         )
-        self.assertIn("  Impact: Rest weeks", stdout_v)
+        self.assertIn("  Impact:\n    Rest weeks", stdout_v)
 
         exit_code_verbose, stdout_verbose, stderr_verbose = self.run_cli(
             ['status', '--verbose']
@@ -520,7 +520,7 @@ class TestTrainMateCLI(unittest.TestCase):
             f"- ID: {e_id} | Ibiza Trip (vacation): 2026-07-01 to 2026-07-08",
             stdout_verbose
         )
-        self.assertIn("  Impact: Rest weeks", stdout_verbose)
+        self.assertIn("  Impact:\n    Rest weeks", stdout_verbose)
 
     @patch('trainmate_cli.calendar_syncer')
     def test_workout_push_command(self, mock_calendar):
