@@ -15,6 +15,11 @@ from trainmate.util import (
 
 
 
+def fmt_date(date_str: str) -> str:
+    """Return 'YYYY-MM-DD Ddd' (e.g. '2026-06-05 Fri')."""
+    return datetime.strptime(date_str, "%Y-%m-%d").strftime("%Y-%m-%d %a")
+
+
 def main() -> None:
     """Entry point for the TrainMate Command Line Interface."""
     parser = argparse.ArgumentParser(
@@ -891,7 +896,7 @@ def run_plan_show(args: argparse.Namespace) -> None:
     print(
         f"{bold('Objective')} [ID: {next_goal['id']}]: "
         f"{cyan(next_goal['title'])} ({magenta(sport_str)}) "
-        f"on {cyan(next_goal['target_date'])}"
+        f"on {cyan(fmt_date(next_goal['target_date']))}"
     )
     print(format_labeled_block(f"{bold('Macrocycle Strategy')}:", macrocycle['strategy']))
     if macrocycle.get('feedback'):
@@ -945,7 +950,7 @@ def run_plan_show(args: argparse.Namespace) -> None:
             
         print(
             f"{prefix} {status_str} [ID: {m['id']}] {pad_visible(m_name_disp, 15)} "
-            f"({cyan(m['start_date'])} -> {cyan(m['end_date'])}) "
+            f"({cyan(fmt_date(m['start_date']))} -> {cyan(fmt_date(m['end_date']))}) "
             f"[{bar}]{extra} {duration_desc}"
         )
               
@@ -1343,7 +1348,7 @@ def run_workout_list() -> None:
         duration_str = f" | {duration}min" if duration else ""
         tss_str = f" | TSS {tss}" if tss is not None else ""
         print(
-            f"ID: {w['id']} | {cyan(w['date'])} | {magenta(w['sport_type'].upper())} | "
+            f"ID: {w['id']} | {cyan(fmt_date(w['date']))} | {magenta(w['sport_type'].upper())} | "
             f"{bold(w['title'])}{mod_marker}{sync_marker}{duration_str}{tss_str}"
         )
         print(format_labeled_block("  Description:", w['description']))
