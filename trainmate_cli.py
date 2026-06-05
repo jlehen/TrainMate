@@ -373,7 +373,7 @@ def run_status(verbose: bool = False) -> None:
             f"\n{bold('Next Objective')}: {cyan(next_goal['title'])} "
             f"({magenta(sport_str)})"
         )
-        print(f"{bold('Target Date')}: {next_goal['target_date']}{gray(days_rem_str)}")
+        print(f"{bold('Target Date')}: {cyan(next_goal['target_date'])}{gray(days_rem_str)}")
         
         print(format_labeled_block(f"{bold('Description')}:", next_goal.get('description', '')))
         
@@ -399,7 +399,7 @@ def run_status(verbose: bool = False) -> None:
             if active_meso:
                 print(
                     f"{bold('Active Macrocycle')}: {green(active_meso['name'])} "
-                    f"({active_meso['start_date']} to {active_meso['end_date']})"
+                    f"({cyan(active_meso['start_date'])} to {cyan(active_meso['end_date'])})"
                 )
                 print(format_labeled_block(f"{bold('Cycle Focus')}:", active_meso['focus']))
             else:
@@ -421,7 +421,7 @@ def run_status(verbose: bool = False) -> None:
     metrics = db.get_metrics_cache()
     if metrics:
         last_metrics = metrics[-1]
-        print(f"\nRecent Garmin Metrics ({last_metrics['date']}):")
+        print(f"\nRecent Garmin Metrics ({cyan(last_metrics['date'])}):")
         
         baseline = db.get_baseline(last_metrics['date'])
         rhr_val = last_metrics['rhr']
@@ -508,7 +508,7 @@ def run_status(verbose: bool = False) -> None:
                 title_disp = gray(g['title'])
             print(
                 f"- {status_disp} ID: {g['id']} | {title_disp} "
-                f"({sport_str}) on {g['target_date']} (Priority: {g['priority']})"
+                f"({sport_str}) on {cyan(g['target_date'])} (Priority: {g['priority']})"
             )
             if g.get('description'):
                 print(format_labeled_block("  Description:", g['description']))
@@ -520,7 +520,7 @@ def run_status(verbose: bool = False) -> None:
         for e in events:
             print(
                 f"- ID: {e['id']} | {yellow(e['title'])} ({magenta(e['event_type'])}): "
-                f"{e['start_date']} to {e['end_date']}"
+                f"{cyan(e['start_date'])} to {cyan(e['end_date'])}"
             )
             if e.get('impact_description'):
                 print(format_labeled_block("  Impact:", e['impact_description']))
@@ -596,7 +596,7 @@ def run_goal_list() -> None:
             title_disp = gray(g['title'])
         print(
             f"{status_disp} ID: {g['id']} | {title_disp} "
-            f"({sport_str}) on {g['target_date']} (Priority: {g['priority']})"
+            f"({sport_str}) on {cyan(g['target_date'])} (Priority: {g['priority']})"
         )
         if g.get('description'):
             print(format_labeled_block("  Description:", g['description']))
@@ -678,7 +678,7 @@ def _lifeevent_print(e: dict, show_impact: bool = True) -> None:
     """Prints a single life event formatting its fields."""
     print(
         f"ID: {e['id']} | {yellow(e['title'])} ({magenta(e['event_type'])}): "
-        f"{e['start_date']} to {e['end_date']}"
+        f"{cyan(e['start_date'])} to {cyan(e['end_date'])}"
     )
     if show_impact and e.get('impact_description'):
         print(format_labeled_block("  Impact:", e['impact_description']))
@@ -793,7 +793,7 @@ def run_plan_show() -> None:
     sport_str = next_goal['sport_type'].upper()
     print(
         f"{bold('Objective')}: {cyan(next_goal['title'])} ({magenta(sport_str)}) "
-        f"on {next_goal['target_date']}"
+        f"on {cyan(next_goal['target_date'])}"
     )
     print(f"{bold('Overall Strategy')}:\n{wrap_text(macrocycle['strategy'], width=80)}\n")
     print(bold("Periodization Timeline:"))
@@ -844,7 +844,7 @@ def run_plan_show() -> None:
             
         print(
             f"{prefix} {status_str} {pad_visible(m_name_disp, 15)} "
-            f"({m['start_date']} -> {m['end_date']}) "
+            f"({cyan(m['start_date'])} -> {cyan(m['end_date'])}) "
             f"[{bar}]{extra} {duration_desc}"
         )
               
@@ -1064,7 +1064,7 @@ def run_workout_list() -> None:
         if w['status'] == 'synced':
             sync_marker = bold(green(" [SYNCED]"))
         print(
-            f"ID: {w['id']} | {w['date']} | {magenta(w['sport_type'].upper())} | "
+            f"ID: {w['id']} | {cyan(w['date'])} | {magenta(w['sport_type'].upper())} | "
             f"{bold(w['title'])}{mod_marker}{sync_marker}"
         )
         print(format_labeled_block("  Description:", w['description']))
