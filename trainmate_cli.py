@@ -1268,9 +1268,13 @@ def run_workout_list() -> None:
         sync_marker = ""
         if w['status'] == 'synced':
             sync_marker = bold(green(" [SYNCED]"))
+        duration = w.get('duration_minutes')
+        tss = w.get('tss')
+        duration_str = f" | {duration}min" if duration else ""
+        tss_str = f" | TSS {tss}" if tss is not None else ""
         print(
             f"ID: {w['id']} | {cyan(w['date'])} | {magenta(w['sport_type'].upper())} | "
-            f"{bold(w['title'])}{mod_marker}{sync_marker}"
+            f"{bold(w['title'])}{mod_marker}{sync_marker}{duration_str}{tss_str}"
         )
         print(format_labeled_block("  Description:", w['description']))
         if w.get('modification_reason'):
