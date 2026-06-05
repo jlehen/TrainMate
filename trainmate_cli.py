@@ -7,6 +7,11 @@ from trainmate.google_sheets import sheets_reader
 from trainmate.google_calendar import calendar_syncer
 from trainmate.coach import coach_engine
 from trainmate.config import config
+from trainmate.util import (
+    bold, dim, green, red, yellow, cyan, blue, magenta, gray,
+    color_acwr, visible_len, pad_visible
+)
+
 
 
 def main() -> None:
@@ -348,7 +353,7 @@ def main() -> None:
 
 def run_status(verbose: bool = False) -> None:
     """Displays current athlete goals, Garmin metrics, baselines, and memories."""
-    print("=== TRAINMATE ATHLETE STATUS ===")
+    print(bold(cyan("=== TRAINMATE ATHLETE STATUS ===")))
     
     # Active Goal & Periodization Strategy
     objectives = db.get_objectives(status='active')
@@ -363,17 +368,22 @@ def run_status(verbose: bool = False) -> None:
         days_rem = (target_date - today).days
         days_rem_str = f" ({days_rem} days remaining)" if days_rem >= 0 else ""
         
-        print(f"\nNext Objective: {next_goal['title']} ({sport_str})")
-        print(f"Target Date   : {next_goal['target_date']}{days_rem_str}")
-        print(f"Description   : {next_goal.get('description', '')}")
+        print(
+            f"\n{bold('Next Objective')}: {cyan(next_goal['title'])} "
+            f"({magenta(sport_str)})"
+        )
+        print(f"{bold('Target Date')}   : {next_goal['target_date']}{gray(days_rem_str)}")
+        print(f"{bold('Description')}   : {next_goal.get('description', '')}")
         
         # Query active mesocycle
         macro = db.get_macrocycle_for_objective(next_goal['id'])
         if macro:
             current_hash = coach_engine._get_config_hash()
             if macro.get('config_hash') != current_hash:
-                print("\nWarning: config.yaml has changed since the active periodization plan "
-                      "was generated.\nRun 'plan generate' to regenerate.")
+                print(yellow(
+                    "\nWarning: config.yaml has changed since the active periodization plan "
+                    "was generated.\nRun 'plan generate' to regenerate."
+                ))
             
             mesos = db.get_mesocycles_for_macrocycle(macro['id'])
             active_meso = None
@@ -385,38 +395,75 @@ def run_status(verbose: bool = False) -> None:
                     break
             
             if active_meso:
-                print(f"Active Cycle  : {active_meso['name']} ({active_meso['start_date']} to "
-                      f"{active_meso['end_date']})")
-                print(f"Cycle Focus   : {active_meso['focus']}")
+                print(
+                    f"{bold('Active Cycle')}  : {green(active_meso['name'])} "
+                    f"({active_meso['start_date']} to {active_meso['end_date']})"
+                )
+                print(f"{bold('Cycle Focus')}   : {active_meso['focus']}")
             else:
-                print("Active Cycle  : None active today (outside mesocycle boundaries)")
+                print(f"{bold('Active Cycle')}  : None active today (outside mesocycle boundaries)")
         else:
             print(
-                "Active Cycle  : No periodization strategy established. "
+                f"{bold('Active Cycle')}  : No periodization strategy established. "
                 "Run 'plan generate' first."
             )
     else:
-        print("\nNext Objective: None (TrainMate needs at least one goal to start planning)")
+        print(
+            f"\n{bold('Next Objective')}: None (TrainMate needs at least one goal to start planning)"
+        )
 
     # Recent Garmin metrics
     metrics = db.get_metrics_cache()
     if metrics:
         last_metrics = metrics[-1]
         print(f"\nRecent Garmin Metrics ({last_metrics['date']}):")
-        print(f"- Resting HR : {last_metrics['rhr']} bpm")
-        print(f"- Overnight HRV: {last_metrics['hrv']} ms")
-        print(f"- Sleep Score: {last_metrics['sleep_score']}")
-        print(f"- Stress     : {last_metrics['stress']}")
+        
+        baseline = db.get_baseline(last_metrics['date'])
+        rhr_val = last_metrics['rhr']
+        hrv_val = last_metrics['hrv']
+        sleep_val = last_metrics['sleep_score']
+        stress_val = last_metrics['stress']
+        
+        rhr_display = f"{rhr_val} bpm"
+        hrv_display = f"{hrv_val} ms"
+        sleep_display = str(sleep_val)
+        stress_display = str(stress_val)
+        
+        if baseline:
+            if rhr_val is not None and baseline['rhr_baseline_mean'] is not None:
+                sd = baseline['rhr_baseline_std'] or 1.0
+                if rhr_val > (baseline['rhr_baseline_mean'] + max(3.0, sd)):
+                    rhr_display = red(f"{rhr_val} bpm (^)")
+                else:
+                    rhr_display = green(f"{rhr_val} bpm")
+            if hrv_val is not None and baseline['hrv_baseline_mean'] is not None:
+                sd = baseline['hrv_baseline_std'] or 1.0
+                if hrv_val < (baseline['hrv_baseline_mean'] - sd):
+                    hrv_display = red(f"{hrv_val} ms (v)")
+                else:
+                    hrv_display = green(f"{hrv_val} ms")
+            if sleep_val is not None:
+                if sleep_val < 60:
+                    sleep_display = red(f"{sleep_val} (v)")
+                else:
+                    sleep_display = green(str(sleep_val))
+                    
+        print(f"- Resting HR : {rhr_display}")
+        print(f"- Overnight HRV: {hrv_display}")
+        print(f"- Sleep Score: {sleep_display}")
+        print(f"- Stress     : {stress_display}")
         
         acute = last_metrics['acute_workload'] or 0.0
         chronic = last_metrics['chronic_workload'] or 0.0
         acwr = last_metrics['acwr'] or 0.0
-        print(f"- ACWR       : {acwr:.2f} (Acute: {acute:.1f}, Chronic: {chronic:.1f})")
+        print(
+            f"- ACWR       : {color_acwr(acwr)} "
+            f"(Acute: {acute:.1f}, Chronic: {chronic:.1f})"
+        )
         
         # Baselines
-        baseline = db.get_baseline(last_metrics['date'])
         if baseline:
-            print("Baselines (28-day):")
+            print(bold("Baselines (28-day):"))
             print(
                 f"- RHR Mean   : {baseline['rhr_baseline_mean']:.1f} "
                 f"(std: {baseline['rhr_baseline_std']:.2f})"
@@ -430,42 +477,49 @@ def run_status(verbose: bool = False) -> None:
                 f"(std: {baseline['sleep_baseline_std']:.2f})"
             )
     else:
-        print("\nRecent Garmin Metrics: No cached metrics. Run 'metrics pull' first.")
+        print(yellow("\nRecent Garmin Metrics: No cached metrics. Run 'metrics pull' first."))
 
     # Coach Memory
     strategy = db.get_coach_memory("training_strategy")
     learnings = db.get_coach_memory("athlete_learnings")
-    print("\nCoach Memory:")
+    print(bold("\nCoach Memory:"))
     print(f"- Strategy  : {strategy or 'Not established'}")
     print(f"- Learnings : {learnings or 'None yet'}")
 
     if verbose:
         goals = db.get_objectives()
-        print("\nGoals:")
+        print(bold(cyan("\nGoals:")))
         if not goals:
             print("- None")
         for g in goals:
             sport_str = g['sport_type']
+            status_tag = g['status'].upper()
+            if g['status'] == 'active':
+                status_disp = green(f"[{status_tag}]")
+                title_disp = cyan(g['title'])
+            else:
+                status_disp = gray(f"[{status_tag}]")
+                title_disp = gray(g['title'])
             print(
-                f"- [{g['status'].upper()}] ID: {g['id']} | {g['title']} "
+                f"- {status_disp} ID: {g['id']} | {title_disp} "
                 f"({sport_str}) on {g['target_date']} (Priority: {g['priority']})"
             )
             if g.get('description'):
                 print(f"  Description: {g['description']}")
 
         events = db.get_lifeevents()
-        print("\nLife Events:")
+        print(bold(cyan("\nLife Events:")))
         if not events:
             print("- None")
         for e in events:
             print(
-                f"- ID: {e['id']} | {e['title']} ({e['event_type']}): "
+                f"- ID: {e['id']} | {yellow(e['title'])} ({magenta(e['event_type'])}): "
                 f"{e['start_date']} to {e['end_date']}"
             )
             if e.get('impact_description'):
                 print(f"  Impact: {e['impact_description']}")
 
-    print("\n================================")
+    print(bold(cyan("\n================================")))
 
 
 # ==============================================================================
@@ -483,17 +537,17 @@ def run_goal_add(args: argparse.Namespace) -> None:
         priority=args.priority,
         status='active'
     )
-    print(
+    print(green(
         f"Goal '{args.title}' added successfully. "
         f"Run 'plan generate' to generate training cycles."
-    )
+    ))
 
 
 def run_goal_edit(args: argparse.Namespace) -> None:
     """Edits an existing goal/objective."""
     goal = db.get_objective(args.id)
     if not goal:
-        print(f"Goal with ID {args.id} not found.")
+        print(red(f"Goal with ID {args.id} not found."))
         sys.exit(1)
 
     kwargs = {}
@@ -511,24 +565,31 @@ def run_goal_edit(args: argparse.Namespace) -> None:
         kwargs['status'] = args.status
 
     if not kwargs:
-        print("No fields to update. Provide at least one field to change.")
+        print(yellow("No fields to update. Provide at least one field to change."))
         return
 
     db.update_objective(args.id, **kwargs)
-    print(
+    print(green(
         f"Goal with ID {args.id} updated successfully. "
         "Run 'plan generate' to regenerate training cycles if needed."
-    )
+    ))
 
 
 def run_goal_list() -> None:
     """Lists all active and past training objective goals."""
     goals = db.get_objectives()
-    print("=== TRAINING OBJECTIVES / GOALS ===")
+    print(bold(cyan("=== TRAINING OBJECTIVES / GOALS ===")))
     for g in goals:
         sport_str = g['sport_type']
+        status_tag = g['status'].upper()
+        if g['status'] == 'active':
+            status_disp = green(f"[{status_tag}]")
+            title_disp = cyan(g['title'])
+        else:
+            status_disp = gray(f"[{status_tag}]")
+            title_disp = gray(g['title'])
         print(
-            f"[{g['status'].upper()}] ID: {g['id']} | {g['title']} "
+            f"{status_disp} ID: {g['id']} | {title_disp} "
             f"({sport_str}) on {g['target_date']} (Priority: {g['priority']})"
         )
         if g.get('description'):
@@ -538,7 +599,7 @@ def run_goal_list() -> None:
 def run_goal_rm(args: argparse.Namespace) -> None:
     """Deletes an objective goal by ID."""
     db.delete_objective(args.id)
-    print(f"Goal with ID {args.id} removed successfully.")
+    print(green(f"Goal with ID {args.id} removed successfully."))
 
 
 def run_goal_wipe(args: argparse.Namespace) -> None:
@@ -555,7 +616,7 @@ def run_goal_wipe(args: argparse.Namespace) -> None:
             return
 
     db.wipe_objectives()
-    print("All training objectives wiped successfully.")
+    print(green("All training objectives wiped successfully."))
 
 
 # ==============================================================================
@@ -571,17 +632,17 @@ def run_lifeevent_add(args: argparse.Namespace) -> None:
         event_type=args.type,
         impact_description=args.desc
     )
-    print(
+    print(green(
         f"Life event '{args.title}' logged. "
         f"This will be factored in when running 'plan generate' or 'workout adapt'."
-    )
+    ))
 
 
 def run_lifeevent_edit(args: argparse.Namespace) -> None:
     """Edits an existing life event."""
     event = db.get_lifeevent(args.id)
     if not event:
-        print(f"Life event with ID {args.id} not found.")
+        print(red(f"Life event with ID {args.id} not found."))
         sys.exit(1)
 
     kwargs = {}
@@ -597,20 +658,20 @@ def run_lifeevent_edit(args: argparse.Namespace) -> None:
         kwargs['impact_description'] = args.desc
 
     if not kwargs:
-        print("No fields to update. Provide at least one field to change.")
+        print(yellow("No fields to update. Provide at least one field to change."))
         return
 
     db.update_lifeevent(args.id, **kwargs)
-    print(
+    print(green(
         f"Life event with ID {args.id} updated successfully. "
         "Run 'plan generate' or 'workout adapt' to factor in the changes."
-    )
+    ))
 
 
 def _lifeevent_print(e: dict, show_impact: bool = True) -> None:
     """Prints a single life event formatting its fields."""
     print(
-        f"ID: {e['id']} | {e['title']} ({e['event_type']}): "
+        f"ID: {e['id']} | {yellow(e['title'])} ({magenta(e['event_type'])}): "
         f"{e['start_date']} to {e['end_date']}"
     )
     if show_impact and e.get('impact_description'):
@@ -620,7 +681,7 @@ def _lifeevent_print(e: dict, show_impact: bool = True) -> None:
 def run_lifeevent_list(args: argparse.Namespace) -> None:
     """Lists all logged training life events."""
     events = db.get_lifeevents()
-    print("=== ATHLETE LIFE EVENTS ===")
+    print(bold(cyan("=== ATHLETE LIFE EVENTS ===")))
     for e in events:
         _lifeevent_print(e, show_impact=args.verbose)
 
@@ -629,7 +690,7 @@ def run_lifeevent_show(args: argparse.Namespace) -> None:
     """Displays a specific life event and its impact description by ID."""
     event = db.get_lifeevent(args.id)
     if not event:
-        print(f"Life event with ID {args.id} not found.")
+        print(red(f"Life event with ID {args.id} not found."))
         return
 
     _lifeevent_print(event, show_impact=True)
@@ -638,7 +699,7 @@ def run_lifeevent_show(args: argparse.Namespace) -> None:
 def run_lifeevent_rm(args: argparse.Namespace) -> None:
     """Deletes a life event by ID."""
     db.delete_lifeevent(args.id)
-    print(f"Life event with ID {args.id} removed successfully.")
+    print(green(f"Life event with ID {args.id} removed successfully."))
 
 
 def run_lifeevent_wipe(args: argparse.Namespace) -> None:
@@ -655,7 +716,7 @@ def run_lifeevent_wipe(args: argparse.Namespace) -> None:
             return
 
     db.wipe_lifeevents()
-    print("All life events wiped successfully.")
+    print(green("All life events wiped successfully."))
 
 
 # ==============================================================================
@@ -667,7 +728,7 @@ def run_plan_generate(args: argparse.Namespace) -> None:
     # Make sure we have latest metrics cached
     metrics = db.get_metrics_cache()
     if not metrics:
-        print("Warning: Metrics cache is empty. Proceeding without Garmin metrics.")
+        print(yellow("Warning: Metrics cache is empty. Proceeding without Garmin metrics."))
         
     try:
         objectives = db.get_objectives(status='active')
@@ -690,23 +751,23 @@ def run_plan_generate(args: argparse.Namespace) -> None:
                         args.force = True
                     else:
                         print("Keeping current periodization strategy. "
-                              "Updating configuration hash in database.")
+                               "Updating configuration hash in database.")
                         db.update_macrocycle_config_hash(macro['id'], current_hash)
 
         strategy, mesocycles = coach_engine.generate_periodization_plan(force=bool(args.force))
-        print("\n=== PERIODIZATION PLAN GENERATED BY COACH ===")
-        print(f"Strategy:\n{strategy}\n")
-        print(f"Generated {len(mesocycles)} mesocycles. Save complete.")
+        print(bold(cyan("\n=== PERIODIZATION PLAN GENERATED BY COACH ===")))
+        print(f"{bold('Strategy')}:\n{strategy}\n")
+        print(green(f"Generated {len(mesocycles)} mesocycles. Save complete."))
         print("Run 'workout generate' to schedule workouts based on this plan.")
     except Exception as e:
-        print(f"Error during plan generation: {e}")
+        print(red(f"Error during plan generation: {e}"))
 
 
 def run_plan_show() -> None:
     """Displays the active training macrocycle and mesocycles periodization timeline."""
     objectives = db.get_objectives(status='active')
     if not objectives:
-        print("No active goals found. TrainMate needs at least one objective.")
+        print(yellow("No active goals found. TrainMate needs at least one objective."))
         return
         
     objectives.sort(key=lambda x: str(x['target_date']))
@@ -714,17 +775,22 @@ def run_plan_show() -> None:
     
     macrocycle = db.get_macrocycle_for_objective(next_goal['id'])
     if not macrocycle:
-        print(f"No active periodization strategy found for goal '{next_goal['title']}'.")
+        print(yellow(
+            f"No active periodization strategy found for goal '{next_goal['title']}'."
+        ))
         print("Run 'plan generate' to create one.")
         return
         
     mesocycles = db.get_mesocycles_for_macrocycle(macrocycle['id'])
     
-    print("\n=== ACTIVE PERIODIZATION STRATEGY ===")
+    print(bold(cyan("\n=== ACTIVE PERIODIZATION STRATEGY ===")))
     sport_str = next_goal['sport_type'].upper()
-    print(f"Objective: {next_goal['title']} ({sport_str}) on {next_goal['target_date']}")
-    print(f"Overall Strategy:\n{macrocycle['strategy']}\n")
-    print("Periodization Timeline:")
+    print(
+        f"{bold('Objective')}: {cyan(next_goal['title'])} ({magenta(sport_str)}) "
+        f"on {next_goal['target_date']}"
+    )
+    print(f"{bold('Overall Strategy')}:\n{macrocycle['strategy']}\n")
+    print(bold("Periodization Timeline:"))
     
     today = datetime.now(timezone.utc).date()
     
@@ -738,20 +804,20 @@ def run_plan_show() -> None:
             
         bar_length = 20
         if end < today:
-            status_str = "[DONE]  "
-            bar = "=" * bar_length
+            status_str = gray("[DONE]  ")
+            bar = gray("=" * bar_length)
             extra = ""
         elif start <= today <= end:
-            status_str = "[ACTIVE]"
+            status_str = green("[ACTIVE]")
             days_passed = (today - start).days + 1
             days_passed = max(1, min(days_passed, total_days))
             filled = round(bar_length * days_passed / total_days)
             filled = max(0, min(filled, bar_length))
-            bar = "=" * filled + "." * (bar_length - filled)
-            extra = f" (Day {days_passed}/{total_days})"
+            bar = green("=" * filled) + gray("." * (bar_length - filled))
+            extra = green(f" (Day {days_passed}/{total_days})")
         else:
-            status_str = "[FUTURE]"
-            bar = "." * bar_length
+            status_str = blue("[FUTURE]")
+            bar = gray("." * bar_length)
             extra = ""
             
         if total_days >= 7:
@@ -763,14 +829,23 @@ def run_plan_show() -> None:
         else:
             duration_desc = f"({total_days} days)"
             
-        prefix = "|->" if status_str == "[ACTIVE]" else "|--"
-        print(f"{prefix} {status_str} {m['name']:<15} ({m['start_date']} -> {m['end_date']}) "
-              f"[{bar}]{extra} {duration_desc}")
+        prefix = "|->" if start <= today <= end else "|--"
+        if start <= today <= end:
+            prefix = green(prefix)
+            m_name_disp = green(m['name'])
+        else:
+            m_name_disp = m['name']
+            
+        print(
+            f"{prefix} {status_str} {pad_visible(m_name_disp, 15)} "
+            f"({m['start_date']} -> {m['end_date']}) "
+            f"[{bar}]{extra} {duration_desc}"
+        )
               
         focus_lines = textwrap.wrap(m['focus'], width=80)
         for line in focus_lines:
             print(f"            {line}")
-        print("            " + "-" * 40)
+        print("            " + gray("-" * 40))
 
 
 def run_plan_wipe(args: argparse.Namespace) -> None:
@@ -787,7 +862,7 @@ def run_plan_wipe(args: argparse.Namespace) -> None:
             return
 
     db.wipe_plans()
-    print("All periodization plans wiped successfully.")
+    print(green("All periodization plans wiped successfully."))
 
 
 # ==============================================================================
@@ -800,7 +875,7 @@ def run_workout_adapt(args: argparse.Namespace) -> None:
     
     metrics = db.get_metrics_cache()
     if not metrics:
-        print("Warning: Metrics cache is empty. Skipping Garmin metrics sync.")
+        print(yellow("Warning: Metrics cache is empty. Skipping Garmin metrics sync."))
     else:
         print("Syncing latest metrics from Google Sheets first...")
         run_metrics_pull()
@@ -812,51 +887,70 @@ def run_workout_adapt(args: argparse.Namespace) -> None:
         start_date = (date_obj - timedelta(days=history_days - 1)).strftime("%Y-%m-%d")
         metrics_history = db.get_metrics_cache(start_date=start_date, end_date=date_str)
         
-        print("\n=== METRICS TRAJECTORY (PAST 5 DAYS) ===")
-        print(f"{'Date':<12} | {'HRV (ms)':<8} | {'RHR (bpm)':<9} | {'Sleep':<5} | {'ACWR':<5}")
-        print("-" * 50)
+        print(bold(cyan("\n=== METRICS TRAJECTORY (PAST 5 DAYS) ===")))
+        print(bold(
+            f"{'Date':<12} | {'HRV (ms)':<8} | {'RHR (bpm)':<9} | {'Sleep':<5} | {'ACWR':<5}"
+        ))
+        print(gray("-" * 50))
         for m in metrics_history:
             base = db.get_baseline(m['date'])
-            hrv_marker = ""
-            rhr_marker = ""
-            sleep_marker = ""
+            
+            hrv_val = m['hrv']
+            rhr_val = m['rhr']
+            sleep_val = m['sleep_score']
+            acwr_val = m['acwr']
+            
+            hrv_str = f"{hrv_val or 'N/A'}"
+            rhr_str = f"{rhr_val or 'N/A'}"
+            sleep_str = f"{sleep_val or 'N/A'}"
+            acwr_str = color_acwr(acwr_val) if acwr_val is not None else "N/A"
             
             if base:
-                if m['hrv'] is not None and base['hrv_baseline_mean'] is not None:
+                if hrv_val is not None and base['hrv_baseline_mean'] is not None:
                     sd = base['hrv_baseline_std'] or 1.0
-                    if m['hrv'] < (base['hrv_baseline_mean'] - sd):
-                        hrv_marker = " (v)"
-                if m['rhr'] is not None and base['rhr_baseline_mean'] is not None:
+                    if hrv_val < (base['hrv_baseline_mean'] - sd):
+                        hrv_str = red(f"{hrv_val} (v)")
+                    else:
+                        hrv_str = green(str(hrv_val))
+                if rhr_val is not None and base['rhr_baseline_mean'] is not None:
                     sd = base['rhr_baseline_std'] or 1.0
-                    if m['rhr'] > (base['rhr_baseline_mean'] + max(3.0, sd)):
-                        rhr_marker = " (^)"
-                if m['sleep_score'] is not None and m['sleep_score'] < 60:
-                    sleep_marker = " (v)"
-                    
-            hrv_str = f"{m['hrv'] or 'N/A'}{hrv_marker}"
-            rhr_str = f"{m['rhr'] or 'N/A'}{rhr_marker}"
-            sleep_str = f"{m['sleep_score'] or 'N/A'}{sleep_marker}"
-            acwr_str = f"{m['acwr']:.2f}" if m['acwr'] is not None else "N/A"
-            print(f"{m['date']:<12} | {hrv_str:<8} | {rhr_str:<9} | {sleep_str:<5} | {acwr_str:<5}")
-        print("((v) suppressed/poor, (^) elevated compared to baseline)\n")
+                    if rhr_val > (base['rhr_baseline_mean'] + max(3.0, sd)):
+                        rhr_str = red(f"{rhr_val} (^)")
+                    else:
+                        rhr_str = green(str(rhr_val))
+                if sleep_val is not None:
+                    if sleep_val < 60:
+                        sleep_str = red(f"{sleep_val} (v)")
+                    else:
+                        sleep_str = green(str(sleep_val))
+            
+            date_col = pad_visible(m['date'], 12)
+            hrv_col = pad_visible(hrv_str, 8)
+            rhr_col = pad_visible(rhr_str, 9)
+            sleep_col = pad_visible(sleep_str, 5)
+            acwr_col = pad_visible(acwr_str, 5)
+            print(f"{date_col} | {hrv_col} | {rhr_col} | {sleep_col} | {acwr_col}")
+        print(gray("((v) suppressed/poor, (^) elevated compared to baseline)\n"))
     except Exception as e:
-        print(f"Warning: Could not display metrics trajectory: {e}")
+        print(yellow(f"Warning: Could not display metrics trajectory: {e}"))
 
     print(f"Evaluating daily Garmin metrics adaptation for {date_str}...")
     try:
         reason, proposed_workouts = coach_engine.adapt(date_str)
-        print(f"\nDecision Summary:\n{reason}")
+        print(f"\n{bold('Decision Summary')}:\n{reason}")
         
         if not proposed_workouts:
-            print("\nAll metrics are green and workout plan is on track. No changes recommended.")
+            print(green(
+                "\nAll metrics are green and workout plan is on track. No changes recommended."
+            ))
             return
 
-        print("\nPROPOSED WORKOUT ADAPTATIONS:")
-        print(
+        print(bold(yellow("\nPROPOSED WORKOUT ADAPTATIONS:")))
+        print(bold(
             f"{'Date':<12} | {'Sport':<12} | {'Original Workout':<25} | "
             f"{'Adapted Workout':<25} | {'Duration/RPE/TSS':<16}"
-        )
-        print("-" * 100)
+        ))
+        print(gray("-" * 100))
         for pw in proposed_workouts:
             existing = db.get_workout(pw['date'], pw['sport_type'])
             orig_title = existing['title'] if existing else "[None]"
@@ -873,10 +967,14 @@ def run_workout_adapt(args: argparse.Namespace) -> None:
                 f"TSS{pw.get('tss') or 0}"
             )
             stats_diff = f"{orig_stats} -> {new_stats}" if orig_stats else new_stats
-            print(
-                f"{pw['date']:<12} | {pw['sport_type'].upper():<12} | {orig_title:<25} | "
-                f"{pw['title']:<25} | {stats_diff:<16}"
-            )
+            
+            date_col = pad_visible(cyan(pw['date']), 12)
+            sport_col = pad_visible(magenta(pw['sport_type'].upper()), 12)
+            orig_col = pad_visible(gray(orig_title), 25)
+            new_col = pad_visible(green(pw['title']), 25)
+            stats_col = pad_visible(yellow(stats_diff), 16)
+            
+            print(f"{date_col} | {sport_col} | {orig_col} | {new_col} | {stats_col}")
 
         if args.auto:
             confirm = "y"
@@ -893,12 +991,12 @@ def run_workout_adapt(args: argparse.Namespace) -> None:
             coach_engine.apply_adaptations(
                 proposed_workouts, reason, start_date_adapt, end_date_adapt
             )
-            print("Adaptations applied and synced to calendar successfully.")
+            print(green("Adaptations applied and synced to calendar successfully."))
         else:
             print("\nAdaptations discarded.")
 
     except Exception as e:
-        print(f"Error executing daily adaptation: {e}")
+        print(red(f"Error executing daily adaptation: {e}"))
 
 
 def run_workout_generate() -> None:
@@ -906,7 +1004,7 @@ def run_workout_generate() -> None:
     # Make sure we have latest metrics cached
     metrics = db.get_metrics_cache()
     if not metrics:
-        print("Warning: Metrics cache is empty. Proceeding without Garmin metrics.")
+        print(yellow("Warning: Metrics cache is empty. Proceeding without Garmin metrics."))
         
     try:
         objectives = db.get_objectives(status='active')
@@ -929,36 +1027,44 @@ def run_workout_generate() -> None:
                     except EOFError:
                         confirm = 'n'
                     if confirm not in ('y', 'yes'):
-                        print("Workout generation cancelled. Please run 'plan generate' first.")
+                        print(yellow(
+                            "Workout generation cancelled. Please run 'plan generate' first."
+                        ))
                         return
                     else:
                         print("Proceeding. Updating configuration hash in database.")
                         db.update_macrocycle_config_hash(macro['id'], current_hash)
 
         reasoning, workouts = coach_engine.generate_workouts()
-        print("\n=== WORKOUTS GENERATED BY COACH ===")
-        print(f"Reasoning:\n{reasoning}\n")
-        print(f"Generated {len(workouts)} workouts starting from today. Save complete.")
+        print(bold(cyan("\n=== WORKOUTS GENERATED BY COACH ===")))
+        print(f"{bold('Reasoning')}:\n{reasoning}\n")
+        print(green(
+            f"Generated {len(workouts)} workouts starting from today. Save complete."
+        ))
         print("Run 'workout push' to commit this plan to Google Calendar.")
     except Exception as e:
-        print(f"Error during workout generation: {e}")
+        print(red(f"Error during workout generation: {e}"))
 
 
 def run_workout_list() -> None:
     """Lists all stored workouts chronologically."""
     workouts = db.get_workouts()
-    print("=== WORKOUT SCHEDULE ===")
+    print(bold(cyan("=== WORKOUT SCHEDULE ===")))
     for w in workouts:
-        mod_marker = " [ADAPTED]" if w['status'] == 'modified' or w['modification_reason'] else ""
-        sync_marker = " [SYNCED]" if w['status'] == 'synced' else ""
+        mod_marker = ""
+        if w['status'] == 'modified' or w['modification_reason']:
+            mod_marker = bold(yellow(" [ADAPTED]"))
+        sync_marker = ""
+        if w['status'] == 'synced':
+            sync_marker = bold(green(" [SYNCED]"))
         print(
-            f"ID: {w['id']} | {w['date']} | {w['sport_type'].upper()} | "
-            f"{w['title']}{mod_marker}{sync_marker}"
+            f"ID: {w['id']} | {w['date']} | {magenta(w['sport_type'].upper())} | "
+            f"{bold(w['title'])}{mod_marker}{sync_marker}"
         )
         print(f"  Description: {w['description']}")
         if w.get('modification_reason'):
-            print(f"  Reason: {w['modification_reason']}")
-        print("-" * 40)
+            print(f"  Reason: {yellow(w['modification_reason'])}")
+        print(gray("-" * 40))
 
 
 def run_workout_push() -> None:
@@ -975,16 +1081,16 @@ def run_workout_push() -> None:
     print(f"Syncing {len(unsynced)} workouts to Google Calendar...")
     try:
         calendar_syncer.sync_multiple(unsynced)
-        print("Google Calendar synchronization completed.")
+        print(green("Google Calendar synchronization completed."))
     except Exception as e:
-        print(f"Error syncing to Google Calendar: {e}")
+        print(red(f"Error syncing to Google Calendar: {e}"))
 
 
 def run_workout_rm(args: argparse.Namespace) -> None:
     """Deletes a planned workout by its database ID."""
     workout = db.get_workout_by_id(args.id)
     if not workout:
-        print(f"Workout with ID {args.id} not found.")
+        print(red(f"Workout with ID {args.id} not found."))
         return
         
     if workout.get('google_event_id') and workout.get('status') == 'synced':
@@ -993,7 +1099,9 @@ def run_workout_rm(args: argparse.Namespace) -> None:
             calendar_syncer.delete_workout_event(workout['google_event_id'])
         
     db.delete_workout_by_id(args.id)
-    print(f"Workout with ID {args.id} ('{workout['title']}') removed successfully.")
+    print(green(
+        f"Workout with ID {args.id} ('{workout['title']}') removed successfully."
+    ))
 
 
 def run_workout_wipe(args: argparse.Namespace) -> None:
@@ -1021,7 +1129,7 @@ def run_workout_wipe(args: argparse.Namespace) -> None:
                 calendar_syncer.delete_workout_event(ge_id)
 
     db.wipe_workouts()
-    print("All workouts wiped successfully.")
+    print(green("All workouts wiped successfully."))
 
 
 # ==============================================================================
@@ -1033,7 +1141,7 @@ def run_metrics_pull() -> None:
     try:
         sheets_reader.sync_data()
     except Exception as e:
-        print(f"Error syncing Google Sheets: {e}")
+        print(red(f"Error syncing Google Sheets: {e}"))
 
 
 def run_metrics_wipe(args: argparse.Namespace) -> None:
@@ -1052,7 +1160,7 @@ def run_metrics_wipe(args: argparse.Namespace) -> None:
             return
 
     db.wipe_metrics()
-    print("All metrics, baselines, and completed activities wiped successfully.")
+    print(green("All metrics, baselines, and completed activities wiped successfully."))
 
 
 if __name__ == "__main__":
