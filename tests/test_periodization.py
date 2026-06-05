@@ -482,5 +482,81 @@ class TestPeriodization(unittest.TestCase):
         macro = test_db.get_macrocycle_for_objective(obj_id)
         self.assertEqual(macro['config_hash'], "newconfhash456")
 
+    def test_validation_under_5_weeks(self):
+        from datetime import datetime, timedelta, timezone
+        today = datetime.now(timezone.utc).date()
+        target_date_str = (today + timedelta(weeks=3)).strftime("%Y-%m-%d")
+
+        test_db.add_objective(
+            title="Short Goal",
+            target_date=target_date_str,
+            sport_type="running",
+            priority=1
+        )
+
+        with self.assertRaises(ValueError) as context:
+            coach_engine.generate_periodization_plan()
+
+        self.assertIn("too close", str(context.exception))
+
+    @patch('trainmate.coach.openrouter_client')
+    def test_splitting_over_24_weeks(self, mock_client):
+        from datetime import datetime, timedelta, timezone
+        today = datetime.now(timezone.utc).date()
+        target_date_str = (today + timedelta(weeks=30)).strftime("%Y-%m-%d")
+
+        test_db.add_objective(
+            title="Ultra Marathon",
+            target_date=target_date_str,
+            sport_type="running",
+            priority=1
+        )
+
+        phase_date_str = (today + timedelta(weeks=15)).strftime("%Y-%m-%d")
+        mock_split_response = {
+            "goals": [
+                {
+                    "title": "Ultra Marathon - Interim: Half Marathon Tune-Up",
+                    "target_date": phase_date_str,
+                    "sport_type": "running",
+                    "description": "Mid-way aerobic benchmark",
+                    "priority": 1
+                }
+            ]
+        }
+        mock_macro_response = {
+            "strategy": "Simulated base building strategy",
+            "mesocycles": [
+                {
+                    "name": "Base Building",
+                    "start_date": today.strftime("%Y-%m-%d"),
+                    "end_date": phase_date_str,
+                    "focus": "Aerobic conditioning"
+                }
+            ]
+        }
+        mock_client.complete.side_effect = [mock_split_response, mock_macro_response]
+
+        # Call generate_periodization_plan
+        strategy, mesos = coach_engine.generate_periodization_plan(force=True)
+
+        self.assertEqual(mock_client.complete.call_count, 2)
+
+        active_objs = test_db.get_objectives(status='active')
+        self.assertEqual(len(active_objs), 2)
+        active_objs.sort(key=lambda x: str(x['target_date']))
+        
+        intermediate_goal = active_objs[0]
+        self.assertEqual(
+            intermediate_goal['title'],
+            "Ultra Marathon - Interim: Half Marathon Tune-Up"
+        )
+        self.assertEqual(intermediate_goal['target_date'], phase_date_str)
+
+        macro = test_db.get_macrocycle_for_objective(intermediate_goal['id'])
+        self.assertIsNotNone(macro)
+        self.assertEqual(macro['strategy'], "Simulated base building strategy")
+
 if __name__ == '__main__':
     unittest.main()
+

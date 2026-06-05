@@ -29,6 +29,23 @@ class CoachRepository:
     def _get_active_objectives(self) -> List[Objective]:
         return self._db.get_objectives(status='active')
 
+    def _add_objective(
+        self, title: str, target_date: str, sport_type: str,
+        description: str = "", priority: int = 1, status: str = 'active'
+    ) -> int:
+        return self._db.add_objective(
+            title=title,
+            target_date=target_date,
+            sport_type=sport_type,
+            description=description,
+            priority=priority,
+            status=status
+        )
+
+    def _update_objective(self, obj_id: int, **kwargs: Any) -> None:
+        self._db.update_objective(obj_id, **kwargs)
+
+
     def _get_upcoming_lifeevents(self, today_str: str) -> List[LifeEvent]:
         return self._db.get_lifeevents(start_after=today_str)
 
@@ -585,6 +602,65 @@ Adherence Discrepancies & Violations:
         )
         return decision
 
+    def _generate_intermediate_goals(
+        self, next_goal: Objective, today_str: str, duration_weeks: float
+    ) -> Dict[str, Any]:
+        """Queries the LLM to generate intermediate objectives to split a >24w timeline."""
+        orig_title = next_goal['title']
+        target_date = next_goal['target_date']
+        sport_type = next_goal['sport_type']
+        desc = next_goal.get('description', '')
+        priority = next_goal['priority']
+
+        system_prompt = (
+            "You are TrainMate Coach, an advanced AI sports science training coach.\n"
+            "You help split long-term training timelines (exceeding 24 weeks) into "
+            "multiple sequential macrocycles.\n"
+            "You do this by proposing sports-science-sensible intermediate training goals "
+            "(e.g., a base fitness check, a 10K tune-up, or a half marathon test) "
+            "that anchor each macrocycle container.\n\n"
+            "GUIDELINES FOR INTERMEDIATE GOALS:\n"
+            "1. Each macrocycle container leading to a goal must be between 5 and 24 weeks "
+            "long (ideally 12-20 weeks).\n"
+            f"2. The target dates for all proposed goals must be sequential, start after "
+            f"today ({today_str}), and lead chronologically up to the final event date "
+            f"({target_date}).\n"
+            f"3. The sport type of the intermediate goals must be: {sport_type}.\n"
+            "4. Provide a clear description explaining why this is a sensible sports "
+            "science milestone for the athlete's progression.\n"
+            "5. The intermediate milestones must be named clearly so that they can be "
+            "easily linked to the original long-term goal. Format their titles as: "
+            f"'{orig_title} - Interim: <milestone_name>'. For example, if the original goal "
+            f"is '{orig_title}', an intermediate goal title could be "
+            f"'{orig_title} - Interim: Half Marathon Tune-Up'.\n"
+        )
+
+        user_content = (
+            f"Today's date is {today_str}.\n"
+            f"The final objective is '{orig_title}' on {target_date}.\n"
+            f"Sport type: {sport_type}\n"
+            f"Description: {desc}\n\n"
+            f"Please split this {duration_weeks:.1f}-week timeline by proposing intermediate "
+            "goals.\n"
+            "You MUST respond with a JSON object containing:\n"
+            "{\n"
+            '  "goals": [\n'
+            "    {\n"
+            f'      "title": "{orig_title} - Interim: <name>",\n'
+            '      "target_date": "YYYY-MM-DD",\n'
+            f'      "sport_type": "{sport_type}",\n'
+            '      "description": "Sports science rationale for this milestone.",\n'
+            f'      "priority": {priority}\n'
+            "    }\n"
+            "  ]\n"
+            "}\n"
+        )
+        print("Querying OpenRouter to generate intermediate objectives...")
+        result = openrouter_client.complete(
+            system_prompt, user_content, label="generate_intermediate_goals"
+        )
+        return result
+
 
 class CoachService:
     """Orchestrates sports science coaching by coordinating data I/O and business logic."""
@@ -669,6 +745,51 @@ class CoachService:
 
         # Get future life events
         today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+        # Compute duration
+        today_date = datetime.strptime(today_str, "%Y-%m-%d").date()
+        target_date = datetime.strptime(next_goal['target_date'], "%Y-%m-%d").date()
+        duration_days = (target_date - today_date).days
+        duration_weeks = duration_days / 7.0
+
+        if duration_weeks < 5:
+            raise ValueError(
+                f"Goal '{next_goal['title']}' is too close "
+                f"({duration_weeks:.1f} weeks away). TrainMate requires at "
+                "least 5 weeks to generate a periodization plan."
+            )
+
+        if duration_weeks > 24:
+            print(f"Goal '{next_goal['title']}' is {duration_weeks:.1f} "
+                  "weeks away (> 24 weeks).")
+            print("Querying LLM to generate intermediate objectives...")
+            goals_data = self.engine._generate_intermediate_goals(
+                next_goal=next_goal,
+                today_str=today_str,
+                duration_weeks=duration_weeks
+            )
+            proposed_goals = goals_data.get("goals", [])
+            if not proposed_goals:
+                raise ValueError(
+                    "LLM did not return any intermediate goals to split "
+                    "the timeline."
+                )
+
+            for pg in proposed_goals:
+                self.repository._add_objective(
+                    title=pg['title'],
+                    target_date=pg['target_date'],
+                    sport_type=pg['sport_type'],
+                    description=pg.get('description', ''),
+                    priority=pg.get('priority', next_goal['priority']),
+                    status='active'
+                )
+
+            # Re-fetch active objectives and update next_goal
+            objectives = self.repository._get_active_objectives()
+            objectives.sort(key=lambda x: str(x['target_date']))
+            next_goal = objectives[0]
+
         lifeevents = self.repository._get_upcoming_lifeevents(today_str)
 
         # Compute current hashes
