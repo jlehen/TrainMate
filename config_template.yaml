@@ -3,6 +3,8 @@ google_sheet_id: "17G0Rt9H-DR__f3miJNXIH7Ay0dE3FKv51HT9unkZrnc"
 google_calendar_id: "a05efe90aef057e16bf8f423500dda43244ae61b3bd1a9990f55cade1f4e8549@group.calendar.google.com"
 openrouter_model: "google/gemini-3.5-flash"
 service_account_file: "service_account.json"
+metrics_history_days: 15
+
 
 user_profile:
   name: "Athlete"

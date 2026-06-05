@@ -93,8 +93,8 @@ class Config:
 
     @property
     def metrics_history_days(self) -> int:
-        """Gets the number of days of metrics history to look at, defaulting to 5."""
-        return self.get("metrics_history_days", 5)
+        """Gets the number of days of metrics history to look at, defaulting to 15."""
+        return self.get("metrics_history_days", 15)
 
 # Singleton instance
 config = Config()

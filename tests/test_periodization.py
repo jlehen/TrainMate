@@ -690,6 +690,129 @@ class TestPeriodization(unittest.TestCase):
                 _ = trainmate.coach.config.user_profile
             self.assertIn("must contain at least 'lthr' or 'ftp'", str(context.exception))
 
+    @patch('trainmate.coach.openrouter_client')
+    def test_recent_history_summary_periodization_plan(self, mock_client):
+        # Seed objective
+        obj_id = test_db.add_objective(
+            title="Zurich Marathon",
+            target_date="2026-10-15",
+            sport_type="running",
+            priority=1
+        )
+        
+        # Seed completed activity
+        test_db.save_completed_activity(
+            activity_id="act_test_1",
+            date="2026-06-04",
+            start_time="08:00:00",
+            activity_name="Morning Run",
+            activity_type="running",
+            duration_sec=3600.0,
+            distance_km=10.0,
+            elevation_gain_m=100.0,
+            avg_hr=150,
+            max_hr=170,
+            rpe=6,
+            tss=60.0
+        )
+        
+        # Seed metrics cache
+        test_db.save_metric_cache(
+            date="2026-06-04",
+            rhr=55,
+            hrv=60,
+            sleep_score=80,
+            stress=25,
+            acute_workload=420.0,
+            chronic_workload=400.0,
+            acwr=1.05
+        )
+        
+        mock_client.complete.return_value = {
+            "strategy": "Separate strategy philosophy",
+            "mesocycles": [
+                {
+                    "name": "Base Phase",
+                    "start_date": "2026-06-01",
+                    "end_date": "2026-06-28",
+                    "focus": "Base"
+                }
+            ]
+        }
+        
+        # Trigger planning
+        strategy, mesos = coach_engine.generate_periodization_plan(force=True)
+        
+        # Verify call arguments
+        called_args = mock_client.complete.call_args[0]
+        system_prompt = called_args[0]
+        
+        self.assertIn("ATHLETE RECENT TRAINING SUMMARY (PAST 15 DAYS):", system_prompt)
+        self.assertIn("Completed Workouts (Past 15 days):", system_prompt)
+        self.assertIn("running: 1 sessions", system_prompt)
+        self.assertIn("Resting Heart Rate: 55.0 bpm", system_prompt)
+
+    @patch('trainmate.coach.openrouter_client')
+    def test_recent_history_workout_generation(self, mock_client):
+        # Seed objective
+        obj_id = test_db.add_objective(
+            title="Zurich Marathon",
+            target_date="2026-10-15",
+            sport_type="running",
+            priority=1
+        )
+        
+        # Seed macrocycle so we can generate workouts
+        test_db.save_macrocycle(
+            objective_id=obj_id,
+            strategy="Keep heart rate low",
+            goals_hash="hash1",
+            lifeevents_hash="hash2",
+            mesocycles=[
+                {
+                    "name": "Base Phase",
+                    "start_date": "2026-06-01",
+                    "end_date": "2026-06-28",
+                    "focus": "Base"
+                }
+            ]
+        )
+        
+        # Seed metrics cache
+        test_db.save_metric_cache(
+            date="2026-06-04",
+            rhr=55,
+            hrv=60,
+            sleep_score=80,
+            stress=25,
+            acute_workload=420.0,
+            chronic_workload=400.0,
+            acwr=1.05
+        )
+        
+        # Mock OpenRouter workouts response
+        mock_client.complete.return_value = {
+            "reasoning": "Separate workout reasoning",
+            "workouts": [
+                {
+                    "date": "2026-06-05",
+                    "sport_type": "running",
+                    "title": "Base Run",
+                    "description": "30 mins"
+                }
+            ]
+        }
+        
+        # Trigger workout generation
+        coach_engine.generate_workouts()
+        
+        # Verify call arguments
+        called_args = mock_client.complete.call_args[0]
+        user_content = called_args[1]
+        
+        self.assertIn("Athlete's Metrics History (Past 15 Days):", user_content)
+        self.assertIn("RHR=55bpm, HRV=60ms", user_content)
+
 if __name__ == '__main__':
     unittest.main()
 

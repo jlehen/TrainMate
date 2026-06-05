@@ -171,5 +171,6 @@ $$\text{ACWR} = \frac{\text{Acute Workload}}{\text{Chronic Workload}}$$
 *   ACWR > 1.5: Elevated injury risk ("Danger Zone").
 
 ### Daily Readiness & Adaptation
-TrainMate tracks multi-day rolling trajectories (up to 5 days) for Resting Heart Rate (RHR), Heart Rate Variability (HRV), and Sleep against a 28-day baseline. 
+TrainMate tracks multi-day rolling trajectories (up to 15 days by default) for Resting Heart
+Rate (RHR), Heart Rate Variability (HRV), and Sleep against a 28-day baseline. 
 *   If HRV drops > 1 standard deviation below the mean, or RHR elevates > 1 std (min +3 bpm), it flags potential overtraining and dynamically proposes lighter, adapted workouts via `workout adapt`.

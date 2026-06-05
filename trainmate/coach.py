@@ -11,6 +11,60 @@ from trainmate.types import Objective, LifeEvent, Workout, CompletedActivity
 from trainmate.adherence import analyze_adherence
 
 
+def format_metrics_history(metrics: List[Dict[str, Any]]) -> str:
+    """Formats metrics cache history to a readable block for LLM prompts."""
+    metrics_lines = []
+    for m in metrics:
+        metrics_lines.append(
+            f"- {m['date']}: RHR={m['rhr']}bpm, HRV={m['hrv']}ms, "
+            f"Sleep={m['sleep_score']}, Stress={m['stress']}, ACWR={m['acwr']:.2f}"
+        )
+    return "\n".join(metrics_lines)
+
+
+def format_completed_activities(completed_activities: List[CompletedActivity]) -> str:
+    """Formats Garmin completed activities to a readable block for LLM prompts."""
+    completed_list = []
+    for act in completed_activities:
+        act_load = (
+            (act.get('tss') or 0.0)
+            + (act.get('rpe') or 0) * (act['duration_sec'] / 3600.0)
+        )
+        completed_list.append(
+            f"- {act['date']} ({act['activity_type'].upper()}): "
+            f"'{act['activity_name']}' | "
+            f"Duration: {act['duration_sec']/60:.0f}m, Avg HR: {act['avg_hr']}, "
+            f"Load: {act_load:.1f}"
+        )
+    return "\n".join(completed_list)
+
+
+def format_planned_workouts(planned_workouts: List[Workout]) -> str:
+    """Formats planned workouts to a readable block for LLM prompts."""
+    planned_list = []
+    for w in planned_workouts:
+        planned_list.append(
+            f"- {w['date']} ({w['sport_type'].upper()}): {w['title']} | "
+            f"Expected duration: {w.get('duration_minutes')}m, "
+            f"RPE: {w.get('rpe')}, TSS: {w.get('tss')}"
+        )
+    return "\n".join(planned_list)
+
+
+def format_baseline(baseline: Optional[Dict[str, Any]]) -> str:
+    """Formats 28-day baseline reference to a readable block for LLM prompts."""
+    if not baseline:
+        return "No baseline data available."
+    return (
+        f"Resting HR: Mean = {baseline['rhr_baseline_mean']:.1f}, "
+        f"StdDev = {baseline['rhr_baseline_std']:.2f}\n"
+        f"HRV: Mean = {baseline['hrv_baseline_mean']:.1f}, "
+        f"StdDev = {baseline['hrv_baseline_std']:.2f}\n"
+        f"Sleep Score: Mean = {baseline['sleep_baseline_mean']:.1f}, "
+        f"StdDev = {baseline['sleep_baseline_std']:.2f}"
+    )
+
+
 class CoachRepository:
     """Handles I/O operations for the coach, database access, and calendar syncing."""
 
@@ -362,7 +416,8 @@ UPCOMING LIFE EVENTS:
         self, next_goal: Objective, objectives: List[Objective],
         lifeevents: List[LifeEvent], today_str: str, guidelines: str,
         profile: Optional[Dict[str, Any]], previous_strategy_text: Optional[str] = None,
-        plan_start_str: Optional[str] = None, athlete_feedback: Optional[str] = None
+        plan_start_str: Optional[str] = None, athlete_feedback: Optional[str] = None,
+        history_summary: Optional[str] = None
     ) -> Dict[str, Any]:
         """Queries LLM to determine the overall macrocycle strategy and mesocycle blocks."""
         plan_start = plan_start_str or today_str
@@ -452,6 +507,12 @@ You MUST respond with a JSON object containing:
 
         system_prompt += (
             f"\nATHLETE PROFILE & PREFERENCES:\n{athlete_profile}\n"
+        )
+        if history_summary:
+            system_prompt += (
+                f"\nATHLETE RECENT TRAINING SUMMARY (PAST 15 DAYS):\n{history_summary}\n"
+            )
+        system_prompt += (
             f"\nACTIVE ATHLETE GOALS (CHRONOLOGICAL):\n"
             f"{obj_text if obj_text else 'No active goals.'}\n\n"
             f"UPCOMING LIFE EVENTS:\n"
@@ -474,7 +535,10 @@ You MUST respond with a JSON object containing:
     def _generate_workouts_logic(
         self, objectives: List[Objective], lifeevents: List[LifeEvent],
         today_str: str, guidelines: str, profile: Optional[Dict[str, Any]],
-        strategy: str, meso_text: str, learnings: str
+        strategy: str, meso_text: str, learnings: str,
+        metrics: Optional[List[Dict[str, Any]]] = None,
+        completed_activities: Optional[List[CompletedActivity]] = None,
+        baseline: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
         """Queries LLM to generate the 4-week workouts based on active strategy details."""
         custom_task = """
@@ -518,8 +582,28 @@ You MUST respond with a JSON object containing:
         )
         user_content = (
             f"Today's date is {today_str}. "
-            "Please generate the 4-week microcycles (workouts) starting today."
+            f"Please generate the 4-week microcycles (workouts) starting today."
         )
+
+        history_text_parts = []
+        if metrics:
+            metrics_text = format_metrics_history(metrics)
+            history_text_parts.append(
+                f"Athlete's Metrics History (Past 15 Days):\n{metrics_text}"
+            )
+        if baseline:
+            baseline_str = format_baseline(baseline)
+            history_text_parts.append(
+                f"Baseline Reference:\n{baseline_str}"
+            )
+        if completed_activities:
+            completed_text = format_completed_activities(completed_activities)
+            history_text_parts.append(
+                f"Actual Completed Garmin Activities in Window:\n{completed_text}"
+            )
+
+        if history_text_parts:
+            user_content += "\n\n" + "\n\n".join(history_text_parts)
 
         print("Querying OpenRouter to generate training workouts (microcycles)...")
         plan_data = openrouter_client.complete(
@@ -585,40 +669,14 @@ You MUST respond with a JSON object containing:
         )
 
         # Build user content containing trajectory metrics and discrepancies
-        metrics_lines = []
-        for m in metrics:
-            metrics_lines.append(
-                f"- {m['date']}: RHR={m['rhr']}bpm, HRV={m['hrv']}ms, Sleep={m['sleep_score']}, "
-                f"Stress={m['stress']}, ACWR={m['acwr']:.2f}"
-            )
-        metrics_text = "\n".join(metrics_lines)
-
+        metrics_text = format_metrics_history(metrics)
         discrepancy_text = (
             "\n".join(discrepancies) if discrepancies
             else "No discrepancies detected (athlete fully on track)."
         )
+        planned_text = format_planned_workouts(planned_workouts)
+        completed_text = format_completed_activities(completed_activities)
 
-        planned_list = []
-        for w in planned_workouts:
-            planned_list.append(
-                f"- {w['date']} ({w['sport_type'].upper()}): {w['title']} | "
-                f"Expected duration: {w.get('duration_minutes')}m, RPE: {w.get('rpe')}, "
-                f"TSS: {w.get('tss')}"
-            )
-        planned_text = "\n".join(planned_list)
-
-        completed_list = []
-        for act in completed_activities:
-            act_load = (
-                (act.get('tss') or 0.0)
-                + (act.get('rpe') or 0) * (act['duration_sec'] / 3600.0)
-            )
-            completed_list.append(
-                f"- {act['date']} ({act['activity_type'].upper()}): '{act['activity_name']}' | "
-                f"Duration: {act['duration_sec']/60:.0f}m, Avg HR: {act['avg_hr']}, "
-                f"Load: {act_load:.1f}"
-            )
-        completed_text = "\n".join(completed_list)
 
         user_content = f"""
 Evaluation Date: {target_date_str}
@@ -712,6 +770,73 @@ class CoachService:
     def __init__(self, repository: CoachRepository, engine: CoachEngine):
         self.repository = repository
         self.engine = engine
+
+    def _get_recent_history_summary(self, today_str: str) -> str:
+        """Retrieves and constructs a summary of the past 15 days of workouts/metrics."""
+        today_date = datetime.strptime(today_str, "%Y-%m-%d").date()
+        start_date_obj = today_date - timedelta(days=14)
+        start_date_str = start_date_obj.strftime("%Y-%m-%d")
+
+        metrics = self.repository._get_metrics_cache(
+            start_date=start_date_str, end_date=today_str
+        )
+        completed_activities = self.repository._get_completed_activities(
+            start_date=start_date_str, end_date=today_str
+        )
+
+        lines = []
+
+        # 1. Activities summary
+        if completed_activities:
+            sport_durations: Dict[str, float] = {}
+            sport_counts: Dict[str, int] = {}
+            for act in completed_activities:
+                sport = act.get('activity_type', 'unknown').lower()
+                dur_min = act.get('duration_sec', 0.0) / 60.0
+                sport_durations[sport] = sport_durations.get(sport, 0.0) + dur_min
+                sport_counts[sport] = sport_counts.get(sport, 0) + 1
+
+            lines.append("Completed Workouts (Past 15 days):")
+            total_duration_hours = 0.0
+            for sport, count in sport_counts.items():
+                dur_hours = sport_durations[sport] / 60.0
+                total_duration_hours += dur_hours
+                lines.append(
+                    f"  - {sport}: {count} sessions, "
+                    f"total duration {dur_hours:.1f} hours"
+                )
+            
+            weekly_avg_hours = (total_duration_hours / 15.0) * 7.0
+            lines.append(
+                f"  - Total training volume: {total_duration_hours:.1f} hours "
+                f"(~{weekly_avg_hours:.1f} hours/week)"
+            )
+        else:
+            lines.append("Completed Workouts (Past 15 days):\n  - No completed workouts found.")
+
+        # 2. Metrics summary
+        if metrics:
+            rhrs = [m['rhr'] for m in metrics if m.get('rhr') is not None]
+            hrvs = [m['hrv'] for m in metrics if m.get('hrv') is not None]
+            sleeps = [m['sleep_score'] for m in metrics if m.get('sleep_score') is not None]
+            acwrs = [m['acwr'] for m in metrics if m.get('acwr') is not None]
+
+            lines.append("Physiological Metrics (15-day average):")
+            if rhrs:
+                lines.append(f"  - Resting Heart Rate: {sum(rhrs)/len(rhrs):.1f} bpm")
+            if hrvs:
+                lines.append(f"  - Heart Rate Variability (HRV): {sum(hrvs)/len(hrvs):.1f} ms")
+            if sleeps:
+                lines.append(f"  - Sleep Score: {sum(sleeps)/len(sleeps):.1f}/100")
+            if acwrs:
+                lines.append(
+                    f"  - Current ACWR (Acute:Chronic Workload Ratio): "
+                    f"{acwrs[-1]:.2f} (latest)"
+                )
+        else:
+            lines.append("Physiological Metrics (Past 15 days):\n  - No metrics found.")
+
+        return "\n".join(lines)
 
     def _get_config_hash(self) -> str:
         return self.engine._get_config_hash()
@@ -948,6 +1073,7 @@ class CoachService:
                   "Determining new overall periodization strategy...")
             guidelines = self._load_science_guidelines()
             profile = config.user_profile
+            history_summary = self._get_recent_history_summary(today_str)
             macro_data = self.engine._generate_macrocycle_strategy(
                 next_goal=next_goal,
                 objectives=objectives,
@@ -957,7 +1083,8 @@ class CoachService:
                 profile=profile,
                 previous_strategy_text=prev_strategy_text,
                 plan_start_str=plan_start_date.strftime("%Y-%m-%d"),
-                athlete_feedback=feedback_text
+                athlete_feedback=feedback_text,
+                history_summary=history_summary
             )
             strategy = macro_data.get("strategy", "Endurance preparation strategy.")
             mesocycles = macro_data.get("mesocycles", [])
@@ -1019,6 +1146,20 @@ class CoachService:
             "training volume and intensity."
         )
 
+        # Retrieve recent history context
+        history_days = config.metrics_history_days
+        today_date_obj = datetime.strptime(today_str, "%Y-%m-%d").date()
+        start_date_obj = today_date_obj - timedelta(days=history_days - 1)
+        start_date_str = start_date_obj.strftime("%Y-%m-%d")
+
+        metrics = self.repository._get_metrics_cache(
+            start_date=start_date_str, end_date=today_str
+        )
+        completed_activities = self.repository._get_completed_activities(
+            start_date=start_date_str, end_date=today_str
+        )
+        baseline = self.repository._get_baseline(today_str)
+
         plan_data = self.engine._generate_workouts_logic(
             objectives=objectives,
             lifeevents=lifeevents,
@@ -1027,7 +1168,10 @@ class CoachService:
             profile=profile,
             strategy=strategy,
             meso_text=meso_text,
-            learnings=learnings
+            learnings=learnings,
+            metrics=metrics,
+            completed_activities=completed_activities,
+            baseline=baseline
         )
 
         # Save learnings to memory
