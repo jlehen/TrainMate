@@ -90,3 +90,65 @@ class TestGarminSheetsReader(unittest.TestCase):
             f"Warning: Garmin metrics for the current date ({today_str}) are missing.",
             output
         )
+
+    @patch('trainmate.google_sheets.sheets_reader._get_sheet_values')
+    def test_sync_data_rpe_tss_from_sheet(self, mock_get_values):
+        today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        # Mock daily metrics and activities, providing RPE and TSS directly in activities
+        mock_get_values.side_effect = [
+            [
+                ["Date", "Resting HR (RHR)", "Overnight HRV Average",
+                 "Sleep Score", "Average Stress"],
+                [today_str, "50", "70", "80", "20"]
+            ],
+            [
+                ["Activity ID", "Date", "Start Time", "Activity Name", "Type",
+                 "Duration (sec)", "RPE", "TSS"],
+                ["act_sheet_1", today_str, "08:00:00", "Morning Run", "running",
+                 "3600", "8", "75.5"]
+            ]
+        ]
+
+        stdout = io.StringIO()
+        with patch('sys.stdout', stdout):
+            sheets_reader.sync_data()
+
+        # Check that the activity was saved with RPE and TSS from the sheet
+        activities = test_db.get_completed_activities()
+        # Find the activity we just inserted
+        act = next((a for a in activities if a["activity_id"] == "act_sheet_1"), None)
+        self.assertIsNotNone(act)
+        self.assertEqual(act["rpe"], 8)
+        self.assertEqual(act["tss"], 75.5)
+
+    @patch('trainmate.google_sheets.sheets_reader._get_sheet_values')
+    def test_sync_data_rpe_only_from_sheet(self, mock_get_values):
+        today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        mock_get_values.side_effect = [
+            [
+                ["Date", "Resting HR (RHR)", "Overnight HRV Average",
+                 "Sleep Score", "Average Stress"],
+                [today_str, "50", "70", "80", "20"]
+            ],
+            [
+                ["Activity ID", "Date", "Start Time", "Activity Name", "Type",
+                 "Duration (sec)", "RPE", "TSS"],
+                ["act_sheet_2", today_str, "08:00:00", "Morning Run", "running",
+                 "3600", "9", ""]
+            ]
+        ]
+
+        stdout = io.StringIO()
+        with patch('sys.stdout', stdout):
+            sheets_reader.sync_data()
+
+        activities = test_db.get_completed_activities()
+        act = next((a for a in activities if a["activity_id"] == "act_sheet_2"), None)
+        self.assertIsNotNone(act)
+        # RPE should be 9 (provided)
+        self.assertEqual(act["rpe"], 9)
+        # TSS should be estimated (duration=1h, no HR so fallback estimated)
+        # Let's verify what estimated TSS is for running 3600s with no HR:
+        # avg_hr is None/0. lthr is 165. For sport running (not yoga/strength/rest),
+        # fallback is duration_hours * 30.0 = 1.0 * 30.0 = 30.0.
+        self.assertEqual(act["tss"], 30.0)

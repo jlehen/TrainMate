@@ -83,7 +83,7 @@ class GarminSheetsReader:
         # Parse Activities to compute training workload
         # Headers: Activity ID, Date, Start Time, Activity Name, Type,
         # Duration (sec), Duration (Formatted), Distance (km), Elevation Gain (m),
-        # Avg HR, Max HR
+        # Avg HR, Max HR, RPE, TSS
         daily_activity_load: Dict[str, float] = {}  # Map date string -> total training load
         
         for row in activity_rows:
@@ -119,8 +119,18 @@ class GarminSheetsReader:
             avg_hr = self._safe_int(row_dict.get('Avg HR'))
             max_hr = self._safe_int(row_dict.get('Max HR'))
             
-            # Calculate/estimate rpe and tss
-            rpe, tss = self._estimate_activity_metrics(activity_type, duration_sec, avg_hr)
+            # Read RPE and TSS from sheet if present, fallback to estimation if missing/invalid
+            rpe = self._safe_int(row_dict.get('RPE'))
+            tss = self._safe_float_optional(row_dict.get('TSS'))
+
+            if rpe is None or tss is None:
+                est_rpe, est_tss = self._estimate_activity_metrics(
+                    activity_type, duration_sec, avg_hr
+                )
+                if rpe is None:
+                    rpe = est_rpe
+                if tss is None:
+                    tss = est_tss
             
             # Save completed activity to DB
             db.save_completed_activity(
@@ -303,6 +313,15 @@ class GarminSheetsReader:
             return float(str(val).strip())
         except ValueError:
             return 0.0
+
+    def _safe_float_optional(self, val: Any) -> Optional[float]:
+        """Safely parses a cell value to float, returning None if empty or invalid."""
+        if val is None:
+            return None
+        try:
+            return float(str(val).strip().replace(',', ''))
+        except ValueError:
+            return None
 
     def _mean_std(self, values: List[float]) -> Tuple[float, float]:
         """Calculates the mean and sample standard deviation of a list of floats.

@@ -156,7 +156,7 @@ TrainMate uses specific prompt guidelines for LLM coaching:
 
 ### Workload Calculation
 Workload is computed per activity in `google_sheets.py`:
-$$\text{Workload} = \frac{\text{Duration in Seconds}}{3600} \times \text{Average Heart Rate}$$
+$$\text{Workload} = \text{TSS} + \text{RPE} \times \frac{\text{Duration in Seconds}}{3600}$$
 
 ### Acute Workload (7 Days)
 Sum of training workload from the current day and the previous 6 days.
