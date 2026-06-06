@@ -328,9 +328,49 @@ def main() -> None:
     )
     
     # workout push
-    workout_subparsers.add_parser(
+    w_push = workout_subparsers.add_parser(
         "push", aliases=["p"],
-        help="Commit all local planned workouts to Google Calendar"
+        help="Commit local planned workouts to Google Calendar"
+    )
+    w_push.add_argument(
+        "-f", "--force", action="store_true",
+        help="Re-push already-synced workouts, overwriting existing calendar entries"
+    )
+    w_push.add_argument(
+        "--type", "--sport-type", dest="sport_type",
+        help="Filter workouts by sport type"
+    )
+    w_push.add_argument(
+        "--days", type=int, dest="days", metavar="N",
+        help="Push workouts for N days from today"
+    )
+    w_push.add_argument(
+        "--weeks", type=float, dest="weeks", metavar="N",
+        help="Push workouts for N weeks from today"
+    )
+    w_push.add_argument(
+        "--from", "--from-date", dest="from_date",
+        help="Push workouts starting from DATE (YYYY-MM-DD)"
+    )
+    w_push.add_argument(
+        "--until", "--until-date", dest="until_date",
+        help="Push workouts until DATE (YYYY-MM-DD)"
+    )
+    w_push.add_argument(
+        "--from-mesocycle", action="store_true", dest="from_meso",
+        help="Push workouts starting from the start of the current mesocycle"
+    )
+    w_push.add_argument(
+        "--until-mesocycle", type=int, nargs="?", const=-1, dest="until_meso_id", metavar="ID",
+        help="Push workouts until the end of a mesocycle (uses current if ID omitted)"
+    )
+    w_push.add_argument(
+        "--mesocycle", type=int, nargs="?", const=-1, dest="meso_id", metavar="ID",
+        help="Push workouts within a mesocycle (uses current if ID omitted)"
+    )
+    w_push.add_argument(
+        "--goal", "--goal-id", type=int, nargs="?", const=-1, dest="goal_id", metavar="ID",
+        help="Push workouts for a goal's plan duration (uses active goal if ID omitted)"
     )
 
     # workout wipe
@@ -430,7 +470,7 @@ def main() -> None:
         elif sub in ("adapt", "a"):
             run_workout_adapt(args)
         elif sub in ("push", "p"):
-            run_workout_push()
+            run_workout_push(args)
         elif sub == "wipe":
             run_workout_wipe(args)
     elif cmd in ("metrics", "m"):
@@ -1423,11 +1463,12 @@ def _get_active_mesocycle(target_date_str: str) -> Optional[dict]:
     return None
 
 
-def run_workout_list(args: argparse.Namespace) -> None:
-    """Lists stored workouts chronologically, with optional date, goal, or type filters."""
+def _resolve_workout_date_range(
+    args: argparse.Namespace,
+) -> tuple[str | None, str | None]:
+    """Resolves (start_date, end_date) from the shared date-filter CLI args."""
     today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-    today_date = datetime.now(timezone.utc).date()
-    
+
     # Resolve start_date
     start_date = None
     if getattr(args, 'from_date', None) is not None:
@@ -1491,15 +1532,14 @@ def run_workout_list(args: argparse.Namespace) -> None:
     ):
         start_date = today_str
 
-    # Resolve end_date
-    # Set up dummy namespace to reuse _resolve_workout_end_date()
+    # Resolve end_date — map list/push args to the horizon_* namespace expected
+    # by _resolve_workout_end_date()
     target_meso_id = None
     if getattr(args, 'until_meso_id', None) is not None:
         target_meso_id = args.until_meso_id
     elif getattr(args, 'meso_id', None) is not None:
         target_meso_id = args.meso_id
 
-    # Resolve -1 sentinel to active mesocycle ID for end_date resolution
     if target_meso_id == -1:
         active_meso = _get_active_mesocycle(today_str)
         if not active_meso:
@@ -1507,7 +1547,6 @@ def run_workout_list(args: argparse.Namespace) -> None:
             sys.exit(1)
         target_meso_id = active_meso['id']
 
-    # Resolve goal_id for end_date resolution
     target_goal_id = None
     if getattr(args, 'goal_id', None) is not None:
         target_goal_id = args.goal_id
@@ -1519,15 +1558,22 @@ def run_workout_list(args: argparse.Namespace) -> None:
             target_goal_id = active_goal['id']
 
     horizon_args = argparse.Namespace(
-        horizon_days=args.days,
-        horizon_weeks=args.weeks,
-        horizon_until=args.until_date,
+        horizon_days=getattr(args, 'days', None),
+        horizon_weeks=getattr(args, 'weeks', None),
+        horizon_until=getattr(args, 'until_date', None),
         horizon_goal_id=target_goal_id,
         horizon_meso_id=target_meso_id,
     )
-    
+
     next_goal = _get_active_goal()
     end_date = _resolve_workout_end_date(horizon_args, next_goal)
+
+    return start_date, end_date
+
+
+def run_workout_list(args: argparse.Namespace) -> None:
+    """Lists stored workouts chronologically, with optional date, goal, or type filters."""
+    start_date, end_date = _resolve_workout_date_range(args)
 
     # Fetch workouts using our extended db.get_workouts
     workouts = db.get_workouts(
@@ -1568,20 +1614,39 @@ def run_workout_list(args: argparse.Namespace) -> None:
         print(gray("-" * 40))
 
 
-def run_workout_push() -> None:
+def run_workout_push(args: argparse.Namespace) -> None:
     """Synchronizes planned workouts with Google Calendar."""
     today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-    planned_workouts = db.get_workouts(start_date=today_str)
-    # Filter to only unsynced/planned ones
-    unsynced = [w for w in planned_workouts if w['status'] in ('planned', 'modified')]
-    
-    if not unsynced:
-        print("No new or modified workouts to sync. Run 'plan generate' to generate a schedule.")
+    force = getattr(args, 'force', False)
+
+    start_date, end_date = _resolve_workout_date_range(args)
+    # Default to today onwards when no date filter is given
+    if start_date is None:
+        start_date = today_str
+
+    all_workouts = db.get_workouts(
+        start_date=start_date,
+        end_date=end_date,
+        sport_type=getattr(args, 'sport_type', None),
+    )
+
+    eligible_statuses = ('planned', 'modified', 'synced') if force else ('planned', 'modified')
+    to_push = [w for w in all_workouts if w['status'] in eligible_statuses]
+
+    if not to_push:
+        if force:
+            print("No workouts found in the specified range.")
+        else:
+            print(
+                "No new or modified workouts to sync. "
+                "Run 'workout generate' to generate a schedule, "
+                "or use -f to re-push already-synced workouts."
+            )
         return
-        
-    print(f"Syncing {len(unsynced)} workouts to Google Calendar...")
+
+    print(f"Syncing {len(to_push)} workouts to Google Calendar...")
     try:
-        calendar_syncer.sync_multiple(unsynced)
+        calendar_syncer.sync_multiple(to_push)
         print(green("Google Calendar synchronization completed."))
     except Exception as e:
         print(red(f"Error syncing to Google Calendar: {e}"))
