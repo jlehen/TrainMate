@@ -61,6 +61,21 @@ class CalendarSyncer:
             summary = title
             event_description = description or ""
 
+        # Prepend duration and tss to description if available
+        duration = workout.get('duration_minutes')
+        tss = workout.get('tss')
+        prefix_parts = []
+        if duration is not None:
+            prefix_parts.append(f"Duration: {duration}m")
+        if tss is not None:
+            prefix_parts.append(f"TSS: {tss}")
+        prefix = " | ".join(prefix_parts)
+        if prefix:
+            if event_description:
+                event_description = f"{prefix}\n\n{event_description}"
+            else:
+                event_description = prefix
+
         event_body = {
             'summary': summary,
             'description': event_description,
