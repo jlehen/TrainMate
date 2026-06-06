@@ -49,13 +49,13 @@ class TestTrainMateCLI(unittest.TestCase):
         self.assertIn("workout", stdout)
         self.assertIn("plan", stdout)
         self.assertIn("status", stdout)
-        self.assertIn("metrics", stdout)
+        self.assertIn("data", stdout)
 
         exit_code, stdout, stderr = self.run_cli(["workout", "--help"])
         self.assertEqual(exit_code, 0)
         self.assertIn("push", stdout)
 
-        exit_code, stdout, stderr = self.run_cli(["metrics", "--help"])
+        exit_code, stdout, stderr = self.run_cli(["data", "--help"])
         self.assertEqual(exit_code, 0)
         self.assertIn("pull", stdout)
 
@@ -454,8 +454,8 @@ class TestTrainMateCLI(unittest.TestCase):
         mock_calendar.sync_multiple.assert_called_once()
 
     @patch("trainmate_cli.sheets_reader")
-    def test_metrics_pull_command(self, mock_sheets_reader):
-        exit_code, stdout, stderr = self.run_cli(["metrics", "pull"])
+    def test_data_pull_command(self, mock_sheets_reader):
+        exit_code, stdout, stderr = self.run_cli(["data", "pull"])
         self.assertEqual(exit_code, 0)
         mock_sheets_reader.sync_data.assert_called_once()
 
@@ -480,7 +480,7 @@ class TestTrainMateCLI(unittest.TestCase):
         mock_calendar.delete_workout_event.assert_called_once_with("mock_event_123")
 
     @patch("trainmate_cli.sheets_reader")
-    def test_plan_workout_metrics_pull_prompt(self, mock_sheets_reader):
+    def test_plan_workout_data_pull_prompt(self, mock_sheets_reader):
         test_db.save_metric_cache(
             date="2026-06-03", rhr=50, hrv=75, sleep_score=80, stress=20
         )
@@ -622,7 +622,7 @@ class TestTrainMateCLI(unittest.TestCase):
         self.assertEqual(len(test_db.get_workouts()), 0)
         mock_calendar.delete_workout_event.assert_called_once_with("ge_2")
 
-    def test_metrics_wipe(self):
+    def test_data_wipe(self):
         test_db.save_metric_cache(
             date="2026-05-31", rhr=48, hrv=82, sleep_score=90, stress=15
         )
@@ -641,12 +641,12 @@ class TestTrainMateCLI(unittest.TestCase):
         self.assertIsNotNone(test_db.get_baseline("2026-05-31"))
         self.assertEqual(len(test_db.get_completed_activities()), 1)
 
-        exit_code, stdout, stderr = self.run_cli(["metrics", "wipe"], input_value="n")
+        exit_code, stdout, stderr = self.run_cli(["data", "wipe"], input_value="n")
         self.assertEqual(exit_code, 0)
         self.assertEqual(len(test_db.get_metrics_cache()), 1)
         self.assertEqual(len(test_db.get_completed_activities()), 1)
 
-        exit_code, stdout, stderr = self.run_cli(["metrics", "wipe"], input_value="y")
+        exit_code, stdout, stderr = self.run_cli(["data", "wipe"], input_value="y")
         self.assertEqual(exit_code, 0)
         self.assertIn(
             "All metrics, baselines, and completed activities wiped successfully.", stdout
@@ -658,7 +658,7 @@ class TestTrainMateCLI(unittest.TestCase):
         test_db.save_metric_cache(
             date="2026-05-31", rhr=48, hrv=82, sleep_score=90, stress=15
         )
-        exit_code, stdout, stderr = self.run_cli(["metrics", "wipe", "-y"])
+        exit_code, stdout, stderr = self.run_cli(["data", "wipe", "-y"])
         self.assertEqual(exit_code, 0)
         self.assertEqual(len(test_db.get_metrics_cache()), 0)
 
@@ -822,7 +822,7 @@ class TestTrainMateCLI(unittest.TestCase):
         self.assertIn("No planned workouts or completed activities found", stdout)
 
     @patch("trainmate_cli.coach_service")
-    def test_workout_analyze_command(self, mock_coach):
+    def test_data_analyze_command(self, mock_coach):
         mock_coach.analyze_workouts.return_value = {
             "macrocycle_summary": "Simulated base building results",
             "inferred_macrocycle": {
@@ -847,7 +847,7 @@ class TestTrainMateCLI(unittest.TestCase):
         }
 
         exit_code, stdout, stderr = self.run_cli([
-            "workout", "analyze", "--from", "2026-01-01", "--until", "2026-03-31",
+            "data", "analyze", "--from", "2026-01-01", "--until", "2026-03-31",
             "--context", "Felt good"
         ])
         self.assertEqual(exit_code, 0)

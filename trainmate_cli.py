@@ -415,31 +415,7 @@ def main() -> None:
         help="Push workouts for a goal's plan duration (uses active goal if ID omitted)"
     )
 
-    # workout analyze
-    w_an = workout_subparsers.add_parser(
-        "analyze", aliases=["an"],
-        help="Analyze recorded workouts and metrics to determine macrocycle/mesocycles"
-    )
-    w_an.add_argument(
-        "--from", "--from-date", dest="from_date",
-        help="Start date of the historical period to analyze (YYYY-MM-DD)"
-    )
-    w_an.add_argument(
-        "--until", "--until-date", dest="until_date",
-        help="End date of the historical period to analyze (YYYY-MM-DD, defaults to today)"
-    )
-    w_an.add_argument(
-        "--days", type=int, dest="days", metavar="N",
-        help="Number of days to analyze looking back from --until"
-    )
-    w_an.add_argument(
-        "--weeks", type=float, dest="weeks", metavar="N",
-        help="Number of weeks to analyze looking back from --until"
-    )
-    w_an.add_argument(
-        "--context", dest="context",
-        help="Optional text context detailing subjective athlete notes (travel, illness, etc.)"
-    )
+
 
     # workout wipe
     w_wipe = workout_subparsers.add_parser(
@@ -448,25 +424,53 @@ def main() -> None:
     )
     w_wipe.add_argument("-y", "--yes", action="store_true", help="Skip confirmation prompt")
     
-    # metrics command & subparsers
-    metrics_parser = subparsers.add_parser(
-        "metrics",
-        aliases=["m"],
-        help="Manage and sync athlete metrics"
+    # data command & subparsers
+    data_parser = subparsers.add_parser(
+        "data",
+        aliases=["d"],
+        help="Manage and sync athlete metrics and activities"
     )
-    metrics_subparsers = metrics_parser.add_subparsers(
-        dest="subcommand", help="Metrics sub-commands"
+    data_subparsers = data_parser.add_subparsers(
+        dest="subcommand", help="Data sub-commands"
     )
     
-    # metrics pull
-    metrics_subparsers.add_parser(
+    # data pull
+    data_subparsers.add_parser(
         "pull",
         help="Fetch latest activities and metrics from Sheets"
     )
 
-    # metrics wipe
-    m_wipe = metrics_subparsers.add_parser("wipe", help="Wipe all metrics from the database")
-    m_wipe.add_argument("-y", "--yes", action="store_true", help="Skip confirmation prompt")
+    # data analyze
+    d_an = data_subparsers.add_parser(
+        "analyze", aliases=["a"],
+        help="Analyze recorded workouts and metrics to determine macrocycle/mesocycles"
+    )
+    d_an.add_argument(
+        "--from", "--from-date", dest="from_date",
+        help="Start date of the historical period to analyze (YYYY-MM-DD)"
+    )
+    d_an.add_argument(
+        "--until", "--until-date", dest="until_date",
+        help="End date of the historical period to analyze (YYYY-MM-DD, defaults to today)"
+    )
+    d_an.add_argument(
+        "--days", type=int, dest="days", metavar="N",
+        help="Number of days to analyze looking back from --until"
+    )
+    d_an.add_argument(
+        "--weeks", type=float, dest="weeks", metavar="N",
+        help="Number of weeks to analyze looking back from --until"
+    )
+    d_an.add_argument(
+        "--context", dest="context",
+        help="Optional text context detailing subjective athlete notes (travel, illness, etc.)"
+    )
+
+    # data wipe
+    d_wipe = data_subparsers.add_parser(
+        "wipe", help="Wipe all metrics and completed activities from the database"
+    )
+    d_wipe.add_argument("-y", "--yes", action="store_true", help="Skip confirmation prompt")
     
     # Parse the arguments
     args = parser.parse_args()
@@ -482,13 +486,13 @@ def main() -> None:
         if not metrics:
             try:
                 confirm = input(
-                    "Garmin metrics have not been pulled yet. "
-                    "Would you like to pull them now? [y/N]: "
+                    "Garmin data has not been pulled yet. "
+                    "Would you like to pull it now? [y/N]: "
                 ).strip().lower()
             except EOFError:
                 confirm = 'n'
             if confirm in ('y', 'yes'):
-                run_metrics_pull()
+                run_data_pull()
 
     if cmd in ("status", "s"):
         run_status(verbose=args.verbose)
@@ -541,19 +545,19 @@ def main() -> None:
             run_workout_adapt(args)
         elif sub in ("push", "p"):
             run_workout_push(args)
-        elif sub in ("analyze", "an"):
-            run_workout_analyze(args)
         elif sub == "wipe":
             run_workout_wipe(args)
-    elif cmd in ("metrics", "m"):
+    elif cmd in ("data", "d"):
         if not args.subcommand:
-            metrics_parser.print_help()
+            data_parser.print_help()
             sys.exit(1)
         sub = args.subcommand.lower()
         if sub == "pull":
-            run_metrics_pull()
+            run_data_pull()
+        elif sub in ("analyze", "a"):
+            run_data_analyze(args)
         elif sub == "wipe":
-            run_metrics_wipe(args)
+            run_data_wipe(args)
     elif cmd in ("plan", "p"):
         if not args.subcommand:
             plan_parser.print_help()
@@ -709,7 +713,7 @@ def run_status(verbose: bool = False) -> None:
                 f"(std: {baseline['sleep_baseline_std']:.2f})"
             )
     else:
-        print(yellow("\nRecent Garmin Metrics: No cached metrics. Run 'metrics pull' first."))
+        print(yellow("\nRecent Garmin Metrics: No cached metrics. Run 'data pull' first."))
 
     # Coach Memory
     strategy = db.get_coach_memory("training_strategy")
@@ -1245,8 +1249,8 @@ def _ensure_metrics_current() -> None:
         )
 
     if not _today_present():
-        print("Syncing latest metrics from Google Sheets...")
-        run_metrics_pull()
+        print("Syncing latest data from Google Sheets...")
+        run_data_pull()
         if not _today_present():
             print(yellow(
                 f"Warning: Garmin metrics for the current date ({today_str}) are missing."
@@ -1870,10 +1874,10 @@ def run_workout_wipe(args: argparse.Namespace) -> None:
 
 
 # ==============================================================================
-# Metrics Command
+# Data Command
 # ==============================================================================
 
-def run_metrics_pull() -> None:
+def run_data_pull() -> None:
     """Pulls athlete metrics and activities from Google Sheets."""
     try:
         sheets_reader.sync_data()
@@ -1881,7 +1885,7 @@ def run_metrics_pull() -> None:
         print(red(f"Error syncing Google Sheets: {e}"))
 
 
-def run_metrics_wipe(args: argparse.Namespace) -> None:
+def run_data_wipe(args: argparse.Namespace) -> None:
     """Wipes all metrics, baselines, and activities after confirmation."""
     if not args.yes:
         try:
@@ -1900,8 +1904,8 @@ def run_metrics_wipe(args: argparse.Namespace) -> None:
     print(green("All metrics, baselines, and completed activities wiped successfully."))
 
 
-def run_workout_analyze(args: argparse.Namespace) -> None:
-    """Runs workout analyze to reverse-engineer training cycles."""
+def run_data_analyze(args: argparse.Namespace) -> None:
+    """Runs data analyze to reverse-engineer training cycles."""
     try:
         result = coach_service.analyze_workouts(
             from_date_str=args.from_date,

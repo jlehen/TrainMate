@@ -373,11 +373,11 @@ Handler functions are named `run_<command>_<subcommand>()` in `trainmate_cli.py`
 | `workout`    | `rm`         | `w r`    | Remove workout by ID                                                     |
 | `workout`    | `adapt`      | `w a`    | Run daily adaptation check (`--date YYYY-MM-DD`, `-y` auto-apply)        |
 | `workout`    | `push`       | `w p`    | Sync planned workouts to Google Calendar                                 |
-| `workout`    | `analyze`    | `w an`   | Analyze completed workouts/metrics to detect cycles                      |
-|              |              |          | (`--from`, `--until`, `--days`, `--weeks`, `--context`)                  |
 | `workout`    | `wipe`       | —        | Delete all workouts                                                      |
-| `metrics`    | `pull`       | `m pull` | Fetch Garmin metrics from Google Sheets                                  |
-| `metrics`    | `wipe`       | —        | Delete all metrics, baselines, completed activities                      |
+| `data`       | `pull`       | `d pull` | Fetch Garmin metrics and activities from Google Sheets                  |
+| `data`       | `analyze`    | `d a`    | Analyze completed workouts/metrics to detect cycles                      |
+|              |              |          | (`--from`, `--until`, `--days`, `--weeks`, `--context`)                  |
+| `data`       | `wipe`       | —        | Delete all metrics, baselines, completed activities                      |
 
 ---
 
@@ -467,7 +467,7 @@ Required fields:
 6. If applied: `apply_adaptations()` deletes overridden calendar events + DB rows, saves adapted
    workouts with `status='modified'`, syncs to Calendar.
 
-### Metrics Pull (`metrics pull`)
+### Data Pull (`data pull`)
 1. `GarminSheetsReader.sync_data()` fetches "Daily Metrics" and "Activities" sheets.
 2. For each day: saves `athlete_metrics_cache` with ACWR computed over 7/28-day windows.
 3. Computes 28-day rolling baseline (RHR, HRV, sleep mean/std) and saves to `athlete_baselines`.
@@ -476,7 +476,7 @@ Required fields:
    (NULL when absent). These are included verbatim in the LLM-facing activity formatter
    (`format_completed_activities` in `coach.py`).
 
-### Workout Analysis (`workout analyze`)
+### Data Analysis (`data analyze`)
 1. `CoachService.analyze_workouts()` determines target start/end dates automatically based on
    active and preceding goals if date range parameters are omitted.
 2. Queries the database for completed activities and physiological metrics for that date range.
