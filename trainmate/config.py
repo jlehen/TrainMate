@@ -102,5 +102,14 @@ class Config:
         raw = self.get("workout_generate_days", 28)
         return int(raw)
 
+    @property
+    def low_load_threshold(self) -> float:
+        """Gets the workload score below which an activity is considered minor (default 25).
+
+        Used to: (1) widen mismatch tolerance to 50% for matched activities, and
+        (2) display unplanned activities as '(minor)' rather than 'UNPLANNED'.
+        """
+        return float(self.get("low_load_threshold", 25.0))
+
 # Singleton instance
 config = Config()

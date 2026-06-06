@@ -6,6 +6,7 @@ from trainmate.db import db
 from trainmate.google_sheets import sheets_reader
 from trainmate.google_calendar import calendar_syncer
 from trainmate.coach import coach_service
+from trainmate.adherence import analyze_adherence
 from trainmate.config import config
 from trainmate.util import (
     bold, dim, green, red, yellow, cyan, blue, magenta, gray,
@@ -279,6 +280,47 @@ def main() -> None:
         help="Show workouts for a goal's plan duration (uses active goal if ID omitted)"
     )
     
+    # workout compare
+    w_cmp = workout_subparsers.add_parser(
+        "compare", aliases=["c"], help="Compare planned workouts against completed activities"
+    )
+    w_cmp.add_argument(
+        "--type", "--sport-type", dest="sport_type",
+        help="Filter display by sport type"
+    )
+    w_cmp.add_argument(
+        "--days", type=int, dest="days", metavar="N",
+        help="Compare workouts for N days from today"
+    )
+    w_cmp.add_argument(
+        "--weeks", type=float, dest="weeks", metavar="N",
+        help="Compare workouts for N weeks from today"
+    )
+    w_cmp.add_argument(
+        "--from", "--from-date", dest="from_date",
+        help="Compare workouts starting from DATE (YYYY-MM-DD)"
+    )
+    w_cmp.add_argument(
+        "--until", "--until-date", dest="until_date",
+        help="Compare workouts until DATE (YYYY-MM-DD)"
+    )
+    w_cmp.add_argument(
+        "--from-mesocycle", action="store_true", dest="from_meso",
+        help="Compare workouts starting from the start of the current mesocycle"
+    )
+    w_cmp.add_argument(
+        "--until-mesocycle", type=int, nargs="?", const=-1, dest="until_meso_id", metavar="ID",
+        help="Compare workouts until the end of a mesocycle (uses current if ID omitted)"
+    )
+    w_cmp.add_argument(
+        "--mesocycle", type=int, nargs="?", const=-1, dest="meso_id", metavar="ID",
+        help="Compare workouts within a mesocycle (uses current if ID omitted)"
+    )
+    w_cmp.add_argument(
+        "--goal", "--goal-id", type=int, nargs="?", const=-1, dest="goal_id", metavar="ID",
+        help="Compare workouts for a goal's plan duration (uses active goal if ID omitted)"
+    )
+
     # workout generate
     p_w_gen = workout_subparsers.add_parser(
         "generate", aliases=["g"],
@@ -463,6 +505,8 @@ def main() -> None:
         sub = args.subcommand.lower()
         if sub in ("list", "l"):
             run_workout_list(args)
+        elif sub in ("compare", "c"):
+            run_workout_compare(args)
         elif sub in ("generate", "g"):
             run_workout_generate(args)
         elif sub in ("rm", "r"):
@@ -1612,6 +1656,159 @@ def run_workout_list(args: argparse.Namespace) -> None:
         if w.get('modification_reason'):
             print(format_labeled_block("  Reason:", w['modification_reason'], color_fn=yellow))
         print(gray("-" * 40))
+
+
+def run_workout_compare(args: argparse.Namespace) -> None:
+    """Compares planned workouts against completed activities for the given date range."""
+    today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    today_obj = datetime.now(timezone.utc).date()
+
+    start_date, end_date = _resolve_workout_date_range(args)
+
+    # For compare, --days/--weeks mean "look back N days" instead of "look forward N days".
+    # An explicit --from/--mesocycle/--goal already sets start_date to the right anchor.
+    has_explicit_start = (
+        getattr(args, 'from_date', None) is not None
+        or getattr(args, 'from_meso', False)
+        or getattr(args, 'meso_id', None) is not None
+        or getattr(args, 'goal_id', None) is not None
+    )
+    if not has_explicit_start:
+        days = getattr(args, 'days', None)
+        weeks = getattr(args, 'weeks', None)
+        if days is not None:
+            start_date = (today_obj - timedelta(days=days - 1)).strftime("%Y-%m-%d")
+        elif weeks is not None:
+            ndays = max(1, round(weeks * 7))
+            start_date = (today_obj - timedelta(days=ndays - 1)).strftime("%Y-%m-%d")
+        else:
+            # Default or --until-only: 14-day lookback
+            start_date = (today_obj - timedelta(days=13)).strftime("%Y-%m-%d")
+
+    # Cap end_date at today — we can only compare past/present activities
+    if end_date is None or end_date > today_str:
+        end_date = today_str
+
+    all_workouts = db.get_workouts(start_date=start_date, end_date=end_date)
+    activities = db.get_completed_activities(start_date=start_date, end_date=end_date)
+
+    start_date_obj = datetime.strptime(start_date, "%Y-%m-%d").date()
+    end_date_obj = datetime.strptime(end_date, "%Y-%m-%d").date()
+    history_days = (end_date_obj - start_date_obj).days + 1
+
+    discrepancies, matching_results = analyze_adherence(
+        planned_workouts=all_workouts,
+        completed_activities=activities,
+        start_date_obj=start_date_obj,
+        history_days=history_days,
+        low_load_threshold=config.low_load_threshold,
+    )
+
+    sport_filter = (getattr(args, 'sport_type', None) or "").lower() or None
+
+    matched_act_ids = {
+        r['completed']['activity_id'] for r in matching_results if r['completed']
+    }
+
+    acts_by_date: dict = {}
+    for act in activities:
+        acts_by_date.setdefault(act['date'], []).append(act)
+
+    results_by_date: dict = {}
+    for r in matching_results:
+        results_by_date.setdefault(r['date'], []).append(r)
+
+    print(bold(cyan("=== WORKOUT COMPARE ===")))
+    filter_parts = [f"From: {start_date}", f"Until: {end_date}"]
+    if sport_filter:
+        filter_parts.append(f"Type: {sport_filter}")
+    print(gray(f"Filters: {', '.join(filter_parts)}"))
+    print()
+
+    def _fmt_act(act: dict) -> str:
+        dur = f"{act['duration_sec'] / 60:.0f}min"
+        parts: list[str] = [dur]
+        if act.get('tss'):
+            parts.append(f"TSS {act['tss']:.0f}")
+        if act.get('rpe'):
+            parts.append(f"RPE {act['rpe']}")
+        return f"[{act['activity_type']}] {act['activity_name']} ({', '.join(parts)})"
+
+    has_output = False
+    for d in range(history_days):
+        date_curr = (start_date_obj + timedelta(days=d)).strftime("%Y-%m-%d")
+        day_results = results_by_date.get(date_curr, [])
+        day_acts = acts_by_date.get(date_curr, [])
+        unplanned = [a for a in day_acts if a['activity_id'] not in matched_act_ids]
+
+        if sport_filter:
+            day_results = [
+                r for r in day_results
+                if r['planned']['sport_type'].lower() == sport_filter
+            ]
+            unplanned = [
+                a for a in unplanned
+                if sport_filter in a['activity_type'].lower()
+            ]
+
+        if not day_results and not unplanned:
+            continue
+
+        has_output = True
+        print(bold(cyan(fmt_date(date_curr))))
+
+        for r in day_results:
+            w = r['planned']
+            act = r['completed']
+            is_rest = w['sport_type'] == 'rest'
+
+            if is_rest:
+                print(f"  PLANNED:    [{magenta('REST')}]")
+            else:
+                parts = []
+                if w.get('duration_minutes'):
+                    parts.append(f"{w['duration_minutes']}min")
+                if w.get('tss') is not None:
+                    parts.append(f"TSS {w['tss']}")
+                info = f" ({', '.join(parts)})" if parts else ""
+                print(f"  PLANNED:    [{magenta(w['sport_type'].upper())}] {bold(w['title'])}{info}")
+
+            if act:
+                act_str = _fmt_act(act)
+                if is_rest:
+                    print(f"  ACTUAL:     {red(act_str)} {bold(red('[REST VIOLATION]'))}")
+                else:
+                    print(f"  ACTUAL:     {green(act_str)}")
+            elif not is_rest:
+                print(f"  ACTUAL:     {red('(none — missed)')}")
+
+        for act in unplanned:
+            act_load = (
+                (act.get('tss') or 0.0)
+                + (act.get('rpe') or 0) * (act['duration_sec'] / 3600.0)
+            )
+            act_str = _fmt_act(act)
+            if act_load >= config.low_load_threshold:
+                print(f"  UNPLANNED:  {yellow(act_str)}")
+            else:
+                print(gray(f"  (minor):    {act_str}"))
+
+        print(gray("-" * 40))
+
+    if not has_output:
+        print(gray("No planned workouts or completed activities found in this range."))
+        return
+
+    print()
+    if discrepancies:
+        print(bold(yellow("=== DISCREPANCIES ===")))
+        for disc in discrepancies:
+            print(yellow(disc))
+        print()
+        n = len(discrepancies)
+        print(bold(yellow(f"{n} discrepanc{'ies' if n != 1 else 'y'} found.")))
+    else:
+        print(bold(green("No discrepancies found. Great adherence!")))
 
 
 def run_workout_push(args: argparse.Namespace) -> None:

@@ -1150,7 +1150,8 @@ class CoachService:
             planned_workouts=planned_workouts,
             completed_activities=completed_activities,
             start_date_obj=start_date_obj,
-            history_days=history_days
+            history_days=history_days,
+            low_load_threshold=config.low_load_threshold,
         )
 
         # Determine mesocycle end date for adaptation range

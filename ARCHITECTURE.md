@@ -356,6 +356,17 @@ Handler functions are named `run_<command>_<subcommand>()` in `trainmate_cli.py`
 |              |              |          | `--weeks N`, `--from DATE`, `--until DATE`,              |
 |              |              |          | `--from-mesocycle`, `--until-mesocycle [ID]`,            |
 |              |              |          | `--mesocycle [ID]`, `--goal [ID]`)                       |
+| `workout`    | `compare`    | `w c`    | Compare planned workouts vs completed activities.        |
+|              |              |          | Calls `analyze_adherence()` and prints PLANNED/ACTUAL    |
+|              |              |          | per day; flags missed sessions (red), rest violations    |
+|              |              |          | (red), unplanned high-load activities (yellow), then     |
+|              |              |          | shows a discrepancy summary. Date range flags same as    |
+|              |              |          | `workout list` (`--type`, `--days`, `--weeks`,           |
+|              |              |          | `--from`, `--until`, `--from-mesocycle`,                 |
+|              |              |          | `--until-mesocycle [ID]`, `--mesocycle [ID]`,            |
+|              |              |          | `--goal [ID]`). Default: 14-day lookback. `--days`/      |
+|              |              |          | `--weeks` look *back* (not forward). End date is always  |
+|              |              |          | capped at today.                                         |
 | `workout`    | `generate`   | `w g`    | Generate workouts from active strategy (`--goal ID`,                     |
 |              |              |          | `--days N`, `--weeks N`, `--until DATE`,                                 |
 |              |              |          | `--until-goal [ID]`, `--until-mesocycle ID`)                             |
@@ -408,6 +419,11 @@ Required fields:
 |                        |      | `service_account.json`)                                       |
 | `metrics_history_days`  | int  | Rolling window for adaptation (default: 15)                  |
 | `workout_generate_days` | int  | Default horizon for `workout generate` (default: 28)         |
+| `low_load_threshold`    | float| Workload score below which an activity is "minor"            |
+|                         |      | (default: 25). Controls two behaviors: (1) matched-activity  |
+|                         |      | mismatch tolerance widens to 50% instead of 30%, and (2)     |
+|                         |      | unplanned activities are shown as `(minor)` (gray) rather    |
+|                         |      | than `UNPLANNED` (yellow) in `workout compare`.              |
 | `user_profile`          | dict | Must contain `lthr` or `ftp` (see below)                     |
 
 `user_profile` keys: `name`, `birth_year`, `max_hr`, `lthr`, `ftp`, `weekly_target_hours`,

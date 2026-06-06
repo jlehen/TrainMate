@@ -18,7 +18,8 @@ def analyze_adherence(
     planned_workouts: List[Dict[str, Any]],
     completed_activities: List[Dict[str, Any]],
     start_date_obj: Any,
-    history_days: int
+    history_days: int,
+    low_load_threshold: float = 25.0,
 ) -> Tuple[List[str], List[Dict[str, Any]]]:
     """Evaluates planned workouts vs completed Garmin activities over a rolling window.
 
@@ -80,7 +81,7 @@ def analyze_adherence(
                         (act.get("tss") or 0.0)
                         + (act.get("rpe") or 0) * (act["duration_sec"] / 3600.0)
                     )
-                    if act_load <= 10.0:
+                    if act_load < low_load_threshold:
                         continue
                     matched_act = act
                     used_act_ids.add(act["activity_id"])
@@ -121,19 +122,23 @@ def analyze_adherence(
                     p_tss = w.get("tss") or 0
                     exp_load = p_tss + p_rpe * (p_duration / 60.0)
 
+                    # Low-load activities get a wider tolerance
+                    tolerance = 0.50 if act_load < low_load_threshold else 0.30
+                    tol_pct = f"+/-{tolerance*100:.0f}%"
+
                     disc_reasons = []
                     if (
                         p_duration > 0
-                        and (abs(act_duration_min - p_duration) / p_duration) > 0.30
+                        and (abs(act_duration_min - p_duration) / p_duration) > tolerance
                     ):
                         disc_reasons.append(
-                            f"duration mismatch +/-30% (planned {p_duration:.0f}m, "
+                            f"duration mismatch {tol_pct} (planned {p_duration:.0f}m, "
                             f"actual {act_duration_min:.0f}m)"
                         )
 
-                    if exp_load > 0 and (abs(act_load - exp_load) / exp_load) > 0.30:
+                    if exp_load > 0 and (abs(act_load - exp_load) / exp_load) > tolerance:
                         disc_reasons.append(
-                            f"workload mismatch +/-30% (planned load {exp_load:.1f}, "
+                            f"workload mismatch {tol_pct} (planned load {exp_load:.1f}, "
                             f"actual load {act_load:.1f})"
                         )
 
@@ -157,7 +162,7 @@ def analyze_adherence(
                 (act.get("tss") or 0.0)
                 + (act.get("rpe") or 0) * (act["duration_sec"] / 3600.0)
             )
-            if act_load > 10.0:
+            if act_load >= low_load_threshold:
                 discrepancies.append(
                     f"- {date_curr}: Unplanned Activity! Performed "
                     f"'{act['activity_name']}' ({act['activity_type']}) with "
