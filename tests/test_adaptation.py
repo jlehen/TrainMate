@@ -156,7 +156,8 @@ class TestAdaptation(unittest.TestCase):
         
         with patch.dict(trainmate.coach.config.data, {
             "user_profile": test_profile,
-            "metrics_history_days": 3
+            "metrics_history_days": 3,
+            "low_load_threshold": 10.0
         }):
             # Mock LLM adaptation decision
             mock_decision = {
@@ -302,7 +303,8 @@ class TestAdaptation(unittest.TestCase):
             planned_workouts=planned,
             completed_activities=completed,
             start_date_obj=start_date,
-            history_days=4
+            history_days=4,
+            low_load_threshold=10.0
         )
 
         # Check discrepancies

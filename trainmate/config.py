@@ -97,6 +97,11 @@ class Config:
         return self.get("metrics_history_days", 15)
 
     @property
+    def goals_history_days(self) -> int:
+        """Gets the number of days into the past to look for preceding goals, defaulting to 90."""
+        return self.get("goals_history_days", 90)
+
+    @property
     def workout_generate_days(self) -> int:
         """Gets the default number of days to generate workouts for, defaulting to 28."""
         raw = self.get("workout_generate_days", 28)

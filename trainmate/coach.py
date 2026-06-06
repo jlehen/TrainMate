@@ -742,24 +742,21 @@ class CoachService:
     ) -> Tuple[str, str]:
         strategy = None
         meso_text = ""
-        if objectives:
-            if objective_id is not None:
-                target_goals = [o for o in objectives if o['id'] == objective_id]
-                next_goal = target_goals[0] if target_goals else None
-            else:
-                sorted_objs = sorted(objectives, key=lambda x: str(x['target_date']))
-                next_goal = sorted_objs[0] if sorted_objs else None
+        
+        next_goal = self._db.get_active_objective(objective_id)
+        if not next_goal and objective_id is not None:
+            next_goal = self._db.get_objective(objective_id)
 
-            if next_goal and next_goal['id'] is not None:
-                macrocycle = self._db.get_macrocycle_for_objective(next_goal['id'])
-                if macrocycle:
-                    strategy = macrocycle['strategy']
-                    mesocycles = self._db.get_mesocycles_for_macrocycle(macrocycle['id'])
-                    for m in mesocycles:
-                        meso_text += (
-                            f"  - {m['name']} ({m['start_date']} to "
-                            f"{m['end_date']}): {m['focus']}\n"
-                        )
+        if next_goal and next_goal['id'] is not None:
+            macrocycle = self._db.get_macrocycle_for_objective(next_goal['id'])
+            if macrocycle:
+                strategy = macrocycle['strategy']
+                mesocycles = self._db.get_mesocycles_for_macrocycle(macrocycle['id'])
+                for m in mesocycles:
+                    meso_text += (
+                        f"  - {m['name']} ({m['start_date']} to "
+                        f"{m['end_date']}): {m['focus']}\n"
+                    )
         if not strategy:
             strategy = self._db.get_coach_memory("training_strategy") or (
                 "Not established yet. Establish an endurance-focused training strategy "
@@ -800,24 +797,17 @@ class CoachService:
         self, force: bool = False, objective_id: Optional[int] = None
     ) -> Tuple[str, List[Dict[str, Any]]]:
         """Determines the macrocycle strategy and mesocycle blocks."""
-        objectives = self._db.get_objectives(status='active')
-        if not objectives:
-            return "No active goals found. TrainMate needs at least one objective.", []
-
         # Identify the target goal
         if objective_id is not None:
-            target_goals = [o for o in objectives if o['id'] == objective_id]
-            if not target_goals:
-                all_goals = self._db.get_objective(objective_id)
-                if all_goals:
-                    next_goal = all_goals
-                else:
+            next_goal = self._db.get_active_objective(objective_id)
+            if not next_goal:
+                next_goal = self._db.get_objective(objective_id)
+                if not next_goal:
                     raise ValueError(f"Goal with ID {objective_id} not found.")
-            else:
-                next_goal = target_goals[0]
         else:
-            objectives.sort(key=lambda x: str(x['target_date']))
-            next_goal = objectives[0]
+            next_goal = self._db.get_active_objective()
+            if not next_goal:
+                return "No active goals found. TrainMate needs at least one objective.", []
 
         # Get future life events
         today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
@@ -825,24 +815,24 @@ class CoachService:
 
         # Determine plan start date based on preceding goals with plans
         plan_start_date = today_date
-        preceding_objs = [
-            o for o in objectives
-            if str(o['target_date']) < str(next_goal['target_date'])
-        ]
-        if preceding_objs:
-            latest_preceding_target = None
-            for po in preceding_objs:
-                if po['id'] is not None:
-                    po_macro = self._db.get_macrocycle_for_objective(po['id'])
-                    if po_macro:
-                        po_target = datetime.strptime(po['target_date'], "%Y-%m-%d").date()
-                        if (latest_preceding_target is None or
-                                po_target > latest_preceding_target):
-                            latest_preceding_target = po_target
-            if latest_preceding_target is not None:
-                plan_start_date = latest_preceding_target + timedelta(days=1)
-                if plan_start_date < today_date:
-                    plan_start_date = today_date
+        preceding_objs = self._db.get_preceding_objectives(next_goal['target_date'])
+        
+        latest_preceding_target = None
+        prev_macro = None
+        
+        for po in preceding_objs:
+            if po['id'] is not None:
+                po_macro = self._db.get_macrocycle_for_objective(po['id'])
+                if po_macro:
+                    po_target = datetime.strptime(po['target_date'], "%Y-%m-%d").date()
+                    latest_preceding_target = po_target
+                    prev_macro = po_macro
+                    break
+
+        if latest_preceding_target is not None:
+            plan_start_date = latest_preceding_target + timedelta(days=1)
+            if plan_start_date < today_date:
+                plan_start_date = today_date
 
         # Compute duration
         target_date = datetime.strptime(next_goal['target_date'], "%Y-%m-%d").date()
@@ -883,14 +873,18 @@ class CoachService:
                     status='active'
                 )
 
-            # Re-fetch active objectives and update next_goal
-            objectives = self._db.get_objectives(status='active')
-            objectives.sort(key=lambda x: str(x['target_date']))
-            next_goal = objectives[0]
-
-        lifeevents = self._db.get_lifeevents(start_after=today_str)
+            # Re-fetch active objective and update next_goal
+            next_goal = self._db.get_active_objective()
+            if not next_goal:
+                raise ValueError("No active objectives found after splitting.")
+            target_date = datetime.strptime(next_goal['target_date'], "%Y-%m-%d").date()
+            duration_days = (target_date - plan_start_date).days
+            duration_weeks = duration_days / 7.0
 
         # Compute current hashes
+        # We need to fetch active objectives for hash computation so the hash covers the whole landscape
+        objectives = self._db.get_objectives(status='active')
+        lifeevents = self._db.get_lifeevents(start_after=today_str)
         goals_hash = self.engine._get_goals_hash(objectives)
         lifeevents_hash = self.engine._get_lifeevents_hash(lifeevents)
         config_hash = self.engine._get_config_hash()
@@ -917,9 +911,8 @@ class CoachService:
 
         if not reused:
             # Get the previous strategy for context
-            prev_macro = existing_macro
-            if not prev_macro:
-                prev_macro = self._db.get_last_macrocycle()
+            if existing_macro:
+                prev_macro = existing_macro
 
             prev_strategy_text = None
             if prev_macro:
@@ -995,19 +988,17 @@ class CoachService:
         self, objective_id: Optional[int] = None, end_date: Optional[str] = None
     ) -> Tuple[str, List[Workout]]:
         """Generates workouts (microcycles) based on the active strategy."""
-        objectives = self._db.get_objectives(status='active')
-        if not objectives:
-            return "No active goals found. TrainMate needs at least one objective.", []
-
         # Identify the target goal
         if objective_id is not None:
-            target_goals = [o for o in objectives if o['id'] == objective_id]
-            if not target_goals:
-                raise ValueError(f"Active goal with ID {objective_id} not found.")
-            next_goal = target_goals[0]
+            next_goal = self._db.get_active_objective(objective_id)
+            if not next_goal:
+                next_goal = self._db.get_objective(objective_id)
+                if not next_goal:
+                    raise ValueError(f"Active goal with ID {objective_id} not found.")
         else:
-            objectives.sort(key=lambda x: str(x['target_date']))
-            next_goal = objectives[0]
+            next_goal = self._db.get_active_objective()
+            if not next_goal:
+                return "No active goals found. TrainMate needs at least one objective.", []
 
         # Verify active periodization strategy exists
         macrocycle = self._db.get_macrocycle_for_objective(next_goal['id'])
@@ -1029,6 +1020,9 @@ class CoachService:
         lifeevents = self._db.get_lifeevents(start_after=today_str)
         guidelines = self._load_science_guidelines()
         profile = config.user_profile
+        
+        # We need all objectives for _get_active_strategy_and_meso_text context
+        objectives = self._db.get_objectives(status='active')
         strategy, meso_text = self._get_active_strategy_and_meso_text(
             objectives, objective_id=objective_id
         )
@@ -1155,27 +1149,22 @@ class CoachService:
         )
 
         # Determine mesocycle end date for adaptation range
-        meso_end_date_str = (target_date_obj + timedelta(days=6)).strftime("%Y-%m-%d")
-        active_meso = None
-        next_goal = None
+        active_meso = self._db.get_active_mesocycle(target_date_str)
+        if active_meso:
+            meso_end_date_str = active_meso['end_date']
+        else:
+            meso_end_date_str = (target_date_obj + timedelta(days=6)).strftime("%Y-%m-%d")
+
         objectives = self._db.get_objectives(status='active')
+        
+        # Determine the fallback next_goal for passing to the prompt generator
+        next_goal = None
         for obj in objectives:
             if obj['id'] is not None:
                 macro = self._db.get_macrocycle_for_objective(obj['id'])
                 if macro:
-                    mesos = self._db.get_mesocycles_for_macrocycle(macro['id'])
-                    for m in mesos:
-                        start = datetime.strptime(m['start_date'], "%Y-%m-%d").date()
-                        end = datetime.strptime(m['end_date'], "%Y-%m-%d").date()
-                        if start <= target_date_obj <= end:
-                            active_meso = m
-                            meso_end_date_str = m['end_date']
-                            next_goal = obj
-                            break
-            if active_meso:
-                break
-
-        # Fallback to objectives[0] if no active mesocycle covers target_date_obj
+                    next_goal = obj
+                    break
         if not next_goal and objectives:
             objectives.sort(key=lambda x: str(x['target_date']))
             next_goal = objectives[0]

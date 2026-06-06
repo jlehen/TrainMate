@@ -262,6 +262,48 @@ class Database:
                 cursor.execute("SELECT * FROM objectives ORDER BY target_date ASC")
             return [dict(row) for row in cursor.fetchall()]  # type: ignore
 
+    def get_active_objective(self, objective_id: Optional[int] = None) -> Optional[Objective]:
+        """Fetches the target active goal, or the next upcoming one if no ID is provided."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            if objective_id is not None:
+                cursor.execute(
+                    "SELECT * FROM objectives WHERE id = ? AND status = 'active'", 
+                    (objective_id,)
+                )
+            else:
+                cursor.execute(
+                    "SELECT * FROM objectives WHERE status = 'active' "
+                    "ORDER BY target_date ASC LIMIT 1"
+                )
+            row = cursor.fetchone()
+            return dict(row) if row else None  # type: ignore
+
+    def get_preceding_objectives(
+        self, target_date: str, history_days: Optional[int] = None
+    ) -> List[Objective]:
+        """Fetches active objectives strictly before target_date, up to history_days ago."""
+        if history_days is None:
+            history_days = config.goals_history_days
+        
+        # Calculate the lower bound date
+        from datetime import datetime, timedelta, timezone # imported locally to avoid modifying imports block
+        target_date_obj = datetime.strptime(target_date, "%Y-%m-%d").date()
+        today = datetime.now(timezone.utc).date()
+        reference_date = min(today, target_date_obj)
+        lower_bound_obj = reference_date - timedelta(days=history_days)
+        lower_bound_str = lower_bound_obj.strftime("%Y-%m-%d")
+
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT * FROM objectives "
+                "WHERE status = 'active' AND target_date < ? AND target_date >= ? "
+                "ORDER BY target_date DESC",
+                (target_date, lower_bound_str)
+            )
+            return [dict(row) for row in cursor.fetchall()]  # type: ignore
+
     def get_objective(self, obj_id: int) -> Optional[Objective]:
         """Fetches a specific objective by its unique ID."""
         with self._get_connection() as conn:
@@ -658,6 +700,50 @@ class Database:
             cursor.execute("SELECT * FROM mesocycles WHERE id = ?", (mesocycle_id,))
             row = cursor.fetchone()
             return dict(row) if row else None  # type: ignore
+
+    def get_active_mesocycle(self, target_date: str) -> Optional[Mesocycle]:
+        """Finds the active mesocycle block for a given date.
+        
+        Falls back to the next future mesocycle, or the absolute first mesocycle
+        if none contain or follow the target date. Only considers active objectives.
+        """
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            
+            # Primary: mesocycle containing target_date
+            cursor.execute("""
+                SELECT m.* FROM mesocycles m
+                JOIN macrocycles mac ON m.macrocycle_id = mac.id
+                JOIN objectives o ON mac.objective_id = o.id
+                WHERE o.status = 'active'
+                  AND m.start_date <= ? AND m.end_date >= ?
+                ORDER BY m.start_date ASC LIMIT 1
+            """, (target_date, target_date))
+            row = cursor.fetchone()
+            if row: return dict(row) # type: ignore
+
+            # Fallback 1: first mesocycle that ends in the future
+            cursor.execute("""
+                SELECT m.* FROM mesocycles m
+                JOIN macrocycles mac ON m.macrocycle_id = mac.id
+                JOIN objectives o ON mac.objective_id = o.id
+                WHERE o.status = 'active'
+                  AND m.end_date >= ?
+                ORDER BY m.start_date ASC LIMIT 1
+            """, (target_date,))
+            row = cursor.fetchone()
+            if row: return dict(row) # type: ignore
+
+            # Fallback 2: absolute first mesocycle
+            cursor.execute("""
+                SELECT m.* FROM mesocycles m
+                JOIN macrocycles mac ON m.macrocycle_id = mac.id
+                JOIN objectives o ON mac.objective_id = o.id
+                WHERE o.status = 'active'
+                ORDER BY m.start_date ASC LIMIT 1
+            """)
+            row = cursor.fetchone()
+            return dict(row) if row else None # type: ignore
 
     def update_macrocycle_feedback(self, macrocycle_id: int, feedback: str) -> None:
         """Saves user feedback for a specific macrocycle strategy."""

@@ -1452,60 +1452,6 @@ def run_workout_generate(args: argparse.Namespace) -> None:
         print(red(f"Error during workout generation: {e}"))
 
 
-def _get_active_goal() -> Optional[dict]:
-    """Retrieves the current/next active training goal/objective."""
-    objectives = db.get_objectives(status='active')
-    if not objectives:
-        return None
-    objectives.sort(key=lambda x: str(x['target_date']))
-    return objectives[0]
-
-
-def _get_active_mesocycle(target_date_str: str) -> Optional[dict]:
-    """Finds the mesocycle block active on the target date."""
-    target_date_obj = datetime.strptime(target_date_str, "%Y-%m-%d").date()
-    objectives = db.get_objectives(status='active')
-    
-    # Check for mesocycle containing target_date
-    for obj in objectives:
-        if obj['id'] is None:
-            continue
-        macro = db.get_macrocycle_for_objective(obj['id'])
-        if not macro:
-            continue
-        mesos = db.get_mesocycles_for_macrocycle(macro['id'])
-        for m in mesos:
-            start = datetime.strptime(m['start_date'], "%Y-%m-%d").date()
-            end = datetime.strptime(m['end_date'], "%Y-%m-%d").date()
-            if start <= target_date_obj <= end:
-                return m
-                
-    # Fallback 1: first mesocycle that ends in the future
-    for obj in objectives:
-        if obj['id'] is None:
-            continue
-        macro = db.get_macrocycle_for_objective(obj['id'])
-        if not macro:
-            continue
-        mesos = db.get_mesocycles_for_macrocycle(macro['id'])
-        for m in mesos:
-            end = datetime.strptime(m['end_date'], "%Y-%m-%d").date()
-            if end >= target_date_obj:
-                return m
-                
-    # Fallback 2: absolute first mesocycle
-    for obj in objectives:
-        if obj['id'] is None:
-            continue
-        macro = db.get_macrocycle_for_objective(obj['id'])
-        if not macro:
-            continue
-        mesos = db.get_mesocycles_for_macrocycle(macro['id'])
-        if mesos:
-            return mesos[0]
-            
-    return None
-
 
 def _resolve_workout_date_range(
     args: argparse.Namespace,
@@ -1518,7 +1464,7 @@ def _resolve_workout_date_range(
     if getattr(args, 'from_date', None) is not None:
         start_date = args.from_date
     elif getattr(args, 'from_meso', False):
-        active_meso = _get_active_mesocycle(today_str)
+        active_meso = db.get_active_mesocycle(today_str)
         if not active_meso:
             print(red("Error: No active mesocycle found to start from."))
             sys.exit(1)
@@ -1526,7 +1472,7 @@ def _resolve_workout_date_range(
     elif getattr(args, 'meso_id', None) is not None:
         meso_id = args.meso_id
         if meso_id == -1:
-            active_meso = _get_active_mesocycle(today_str)
+            active_meso = db.get_active_mesocycle(today_str)
             if not active_meso:
                 print(red("Error: No active mesocycle found."))
                 sys.exit(1)
@@ -1540,7 +1486,7 @@ def _resolve_workout_date_range(
     elif getattr(args, 'until_meso_id', None) is not None:
         meso_id = args.until_meso_id
         if meso_id == -1:
-            active_meso = _get_active_mesocycle(today_str)
+            active_meso = db.get_active_mesocycle(today_str)
             if not active_meso:
                 print(red("Error: No active mesocycle found."))
                 sys.exit(1)
@@ -1555,7 +1501,7 @@ def _resolve_workout_date_range(
     elif getattr(args, 'goal_id', None) is not None:
         goal_id = args.goal_id
         if goal_id == -1:
-            active_goal = _get_active_goal()
+            active_goal = db.get_active_objective()
             if not active_goal:
                 print(red("Error: No active goal found."))
                 sys.exit(1)
@@ -1585,7 +1531,7 @@ def _resolve_workout_date_range(
         target_meso_id = args.meso_id
 
     if target_meso_id == -1:
-        active_meso = _get_active_mesocycle(today_str)
+        active_meso = db.get_active_mesocycle(today_str)
         if not active_meso:
             print(red("Error: No active mesocycle found."))
             sys.exit(1)
@@ -1595,7 +1541,7 @@ def _resolve_workout_date_range(
     if getattr(args, 'goal_id', None) is not None:
         target_goal_id = args.goal_id
         if target_goal_id == -1:
-            active_goal = _get_active_goal()
+            active_goal = db.get_active_objective()
             if not active_goal:
                 print(red("Error: No active goal found."))
                 sys.exit(1)
@@ -1609,7 +1555,7 @@ def _resolve_workout_date_range(
         horizon_meso_id=target_meso_id,
     )
 
-    next_goal = _get_active_goal()
+    next_goal = db.get_active_objective()
     end_date = _resolve_workout_end_date(horizon_args, next_goal)
 
     return start_date, end_date
