@@ -163,7 +163,8 @@ from trainmate.coach import coach_service
 **Life Events:** `add_lifeevent`, `get_lifeevents(start_after=)`, `get_lifeevent(id)`,
 `update_lifeevent(id, **kwargs)`, `delete_lifeevent`, `wipe_lifeevents`
 
-**Workouts:** `save_workout` (upsert), `get_workout(date, sport_type)`, `get_workouts(start_date, end_date)`,
+**Workouts:** `save_workout` (upsert), `get_workout(date, sport_type)`,
+`get_workouts(start_date, end_date, sport_type)`,
 `get_workout_by_id(id)`, `delete_workout_by_id`, `clear_future_workouts`, `wipe_workouts`
 
 **Completed Activities:** `save_completed_activity` (upsert on `activity_id`),
@@ -351,7 +352,10 @@ Handler functions are named `run_<command>_<subcommand>()` in `trainmate_cli.py`
 | `plan`       | `rm`         | `p d`    | Delete plan for a goal ID                                                |
 | `plan`       | `feedback`   | `p f`    | Add feedback (`--macro` or `--meso ID`, `--goal ID`, text)               |
 | `plan`       | `wipe`       | —        | Delete all plans                                                         |
-| `workout`    | `list`       | `w l`    | Show planned workouts (date, sport, title, duration, TSS per entry)      |
+| `workout`    | `list`       | `w l`    | Show planned workouts (`--type TYPE`, `--days N`,        |
+|              |              |          | `--weeks N`, `--from DATE`, `--until DATE`,              |
+|              |              |          | `--from-mesocycle`, `--until-mesocycle [ID]`,            |
+|              |              |          | `--mesocycle [ID]`, `--goal [ID]`)                       |
 | `workout`    | `generate`   | `w g`    | Generate workouts from active strategy (`--goal ID`,                     |
 |              |              |          | `--days N`, `--weeks N`, `--until DATE`,                                 |
 |              |              |          | `--until-goal [ID]`, `--until-mesocycle ID`)                             |

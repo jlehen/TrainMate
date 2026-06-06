@@ -397,23 +397,27 @@ class Database:
             return dict(row) if row else None  # type: ignore
 
     def get_workouts(
-        self, start_date: Optional[str] = None, end_date: Optional[str] = None
+        self,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
+        sport_type: Optional[str] = None
     ) -> List[Workout]:
-        """Fetches workouts ordered by date, optionally within a range."""
+        """Fetches workouts ordered by date, optionally within a range or by sport type."""
         with self._get_connection() as conn:
             cursor = conn.cursor()
-            if start_date and end_date:
-                cursor.execute(
-                    "SELECT * FROM workouts WHERE date >= ? AND date <= ? ORDER BY date ASC",
-                    (start_date, end_date)
-                )
-            elif start_date:
-                cursor.execute(
-                    "SELECT * FROM workouts WHERE date >= ? ORDER BY date ASC",
-                    (start_date,)
-                )
-            else:
-                cursor.execute("SELECT * FROM workouts ORDER BY date ASC")
+            query = "SELECT * FROM workouts WHERE 1=1"
+            params = []
+            if start_date:
+                query += " AND date >= ?"
+                params.append(start_date)
+            if end_date:
+                query += " AND date <= ?"
+                params.append(end_date)
+            if sport_type:
+                query += " AND LOWER(sport_type) = ?"
+                params.append(sport_type.lower())
+            query += " ORDER BY date ASC"
+            cursor.execute(query, params)
             return [dict(row) for row in cursor.fetchall()]  # type: ignore
 
     def clear_future_workouts(self, from_date: str) -> None:

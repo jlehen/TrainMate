@@ -815,5 +815,140 @@ class TestTrainMateCLI(unittest.TestCase):
         self.assertEqual(exit_code, 0)
         self.assertEqual(len(test_db.get_metrics_cache()), 0)
 
+    def test_workout_list_filters(self):
+        # Seed workouts
+        from datetime import datetime, timedelta, timezone
+        today_date = datetime.now(timezone.utc).date()
+        today_str = today_date.strftime("%Y-%m-%d")
+        tomorrow_str = (today_date + timedelta(days=1)).strftime("%Y-%m-%d")
+        past_str = (today_date - timedelta(days=5)).strftime("%Y-%m-%d")
+        future_str = (today_date + timedelta(days=10)).strftime("%Y-%m-%d")
+
+        # 1. Seed workouts in DB
+        test_db.save_workout(
+            date=today_str, sport_type="running", title="Today Run",
+            description="30 mins", status="planned"
+        )
+        test_db.save_workout(
+            date=tomorrow_str, sport_type="road_biking", title="Tomorrow Ride",
+            description="60 mins", status="planned"
+        )
+        test_db.save_workout(
+            date=past_str, sport_type="yoga", title="Past Yoga",
+            description="15 mins", status="planned"
+        )
+        test_db.save_workout(
+            date=future_str, sport_type="strength_training", title="Future Lift",
+            description="45 mins", status="planned"
+        )
+
+        # 2. Add active goal and mesocycle
+        goal_id = test_db.add_objective(
+            title="Berlin Marathon",
+            target_date=(today_date + timedelta(days=20)).strftime("%Y-%m-%d"),
+            sport_type="running",
+            priority=1,
+            status="active"
+        )
+        
+        # Save macrocycle and mesocycles
+        test_db.save_macrocycle(
+            objective_id=goal_id,
+            strategy="Base strategy",
+            goals_hash="ghash",
+            lifeevents_hash="lhash",
+            mesocycles=[
+                {
+                    "name": "Base Building",
+                    "start_date": (today_date - timedelta(days=2)).strftime("%Y-%m-%d"),
+                    "end_date": (today_date + timedelta(days=5)).strftime("%Y-%m-%d"),
+                    "focus": "Aerobic conditioning"
+                }
+            ]
+        )
+
+        # Get macrocycle / mesocycle to find meso ID
+        macro = test_db.get_macrocycle_for_objective(goal_id)
+        mesos = test_db.get_mesocycles_for_macrocycle(macro['id'])
+        meso_id = mesos[0]['id']
+
+        # --- Test 1: Unfiltered list (should list all 4 workouts) ---
+        exit_code, stdout, stderr = self.run_cli(['workout', 'list'])
+        self.assertEqual(exit_code, 0)
+        self.assertIn("Today Run", stdout)
+        self.assertIn("Tomorrow Ride", stdout)
+        self.assertIn("Past Yoga", stdout)
+        self.assertIn("Future Lift", stdout)
+
+        # --- Test 2: Filter by sport type ---
+        exit_code, stdout, stderr = self.run_cli([
+            'workout', 'list', '--type', 'running'
+        ])
+        self.assertEqual(exit_code, 0)
+        self.assertIn("Today Run", stdout)
+        self.assertNotIn("Tomorrow Ride", stdout)
+        self.assertNotIn("Past Yoga", stdout)
+        self.assertNotIn("Future Lift", stdout)
+
+        # --- Test 3: Filter by days (e.g. --days 2) ---
+        exit_code, stdout, stderr = self.run_cli([
+            'workout', 'list', '--days', '2'
+        ])
+        self.assertEqual(exit_code, 0)
+        self.assertIn("Today Run", stdout)
+        self.assertIn("Tomorrow Ride", stdout)
+        self.assertNotIn("Past Yoga", stdout)
+        self.assertNotIn("Future Lift", stdout)
+
+        # --- Test 4: Filter by date range (--from and --until) ---
+        exit_code, stdout, stderr = self.run_cli([
+            'workout', 'list', '--from', tomorrow_str, '--until', tomorrow_str
+        ])
+        self.assertEqual(exit_code, 0)
+        self.assertNotIn("Today Run", stdout)
+        self.assertIn("Tomorrow Ride", stdout)
+        self.assertNotIn("Past Yoga", stdout)
+        self.assertNotIn("Future Lift", stdout)
+
+        # --- Test 5: Filter by mesocycle range ---
+        exit_code, stdout, stderr = self.run_cli([
+            'workout', 'list', '--mesocycle', str(meso_id)
+        ])
+        self.assertEqual(exit_code, 0)
+        self.assertNotIn("Past Yoga", stdout)
+        self.assertIn("Today Run", stdout)
+        self.assertIn("Tomorrow Ride", stdout)
+        self.assertNotIn("Future Lift", stdout)
+
+        # --- Test 6: Filter by until-mesocycle ---
+        exit_code, stdout, stderr = self.run_cli([
+            'workout', 'list', '--until-mesocycle', str(meso_id)
+        ])
+        self.assertEqual(exit_code, 0)
+        self.assertNotIn("Past Yoga", stdout)
+        self.assertIn("Today Run", stdout)
+        self.assertIn("Tomorrow Ride", stdout)
+        self.assertNotIn("Future Lift", stdout)
+
+        # --- Test 7: Filter by goal plan range ---
+        exit_code, stdout, stderr = self.run_cli([
+            'workout', 'list', '--goal', str(goal_id)
+        ])
+        self.assertEqual(exit_code, 0)
+        self.assertNotIn("Past Yoga", stdout)
+        self.assertIn("Today Run", stdout)
+        self.assertIn("Tomorrow Ride", stdout)
+        self.assertIn("Future Lift", stdout)
+
+        # --- Test 8: Filter by from-mesocycle ---
+        exit_code, stdout, stderr = self.run_cli([
+            'workout', 'list', '--from-mesocycle'
+        ])
+        self.assertEqual(exit_code, 0)
+        self.assertNotIn("Past Yoga", stdout)
+        self.assertIn("Today Run", stdout)
+        self.assertIn("Tomorrow Ride", stdout)
+        self.assertIn("Future Lift", stdout)
+
 if __name__ == "__main__":
     unittest.main()
