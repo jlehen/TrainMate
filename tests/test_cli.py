@@ -821,6 +821,51 @@ class TestTrainMateCLI(unittest.TestCase):
         self.assertEqual(exit_code, 0)
         self.assertIn("No planned workouts or completed activities found", stdout)
 
+    @patch("trainmate_cli.coach_service")
+    def test_workout_analyze_command(self, mock_coach):
+        mock_coach.analyze_workouts.return_value = {
+            "macrocycle_summary": "Simulated base building results",
+            "inferred_macrocycle": {
+                "overall_focus": "aerobic base building",
+                "start_date": "2026-01-01",
+                "end_date": "2026-03-31"
+            },
+            "inferred_mesocycles": [
+                {
+                    "name": "Base Building Phase",
+                    "start_date": "2026-01-01",
+                    "end_date": "2026-02-15",
+                    "focus_detected": "Volume",
+                    "average_weekly_tss": 300,
+                    "estimated_consistency": "High"
+                }
+            ],
+            "physiological_insights": [
+                "HRV was stable during peak volume."
+            ],
+            "learnings_for_coach_memory": "Responds well to volume"
+        }
+
+        exit_code, stdout, stderr = self.run_cli([
+            "workout", "analyze", "--from", "2026-01-01", "--until", "2026-03-31",
+            "--context", "Felt good"
+        ])
+        self.assertEqual(exit_code, 0)
+        self.assertIn("=== HISTORICAL WORKOUT ANALYSIS REPORT ===", stdout)
+        self.assertIn("Macrocycle Focus: aerobic base building", stdout)
+        self.assertIn("Base Building Phase", stdout)
+        self.assertIn("HRV was stable during peak volume", stdout)
+        self.assertIn("Coach Observations (Saved to memory):", stdout)
+        self.assertIn("Responds well to volume", stdout)
+        mock_coach.analyze_workouts.assert_called_once_with(
+            from_date_str="2026-01-01",
+            until_date_str="2026-03-31",
+            days=None,
+            weeks=None,
+            context="Felt good"
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
+

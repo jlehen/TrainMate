@@ -373,6 +373,8 @@ Handler functions are named `run_<command>_<subcommand>()` in `trainmate_cli.py`
 | `workout`    | `rm`         | `w r`    | Remove workout by ID                                                     |
 | `workout`    | `adapt`      | `w a`    | Run daily adaptation check (`--date YYYY-MM-DD`, `-y` auto-apply)        |
 | `workout`    | `push`       | `w p`    | Sync planned workouts to Google Calendar                                 |
+| `workout`    | `analyze`    | `w an`   | Analyze completed workouts/metrics to detect cycles                      |
+|              |              |          | (`--from`, `--until`, `--days`, `--weeks`, `--context`)                  |
 | `workout`    | `wipe`       | —        | Delete all workouts                                                      |
 | `metrics`    | `pull`       | `m pull` | Fetch Garmin metrics from Google Sheets                                  |
 | `metrics`    | `wipe`       | —        | Delete all metrics, baselines, completed activities                      |
@@ -473,6 +475,16 @@ Required fields:
 5. `bike_avg_watts` and `zone1_sec`–`zone5_sec` are read from the sheet and stored as-is
    (NULL when absent). These are included verbatim in the LLM-facing activity formatter
    (`format_completed_activities` in `coach.py`).
+
+### Workout Analysis (`workout analyze`)
+1. `CoachService.analyze_workouts()` determines target start/end dates automatically based on
+   active and preceding goals if date range parameters are omitted.
+2. Queries the database for completed activities and physiological metrics for that date range.
+3. Groups metrics and activities week-by-week using Monday-commencing ISO weeks.
+4. Queries `CoachEngine._analyze_workouts_logic()` -> LLM -> `{macrocycle_summary,
+   inferred_macrocycle, inferred_mesocycles[], physiological_insights[],
+   learnings_for_coach_memory}`.
+5. Updates the coach's memory with any newly discovered `athlete_learnings`.
 
 ---
 

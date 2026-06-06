@@ -415,6 +415,32 @@ def main() -> None:
         help="Push workouts for a goal's plan duration (uses active goal if ID omitted)"
     )
 
+    # workout analyze
+    w_an = workout_subparsers.add_parser(
+        "analyze", aliases=["an"],
+        help="Analyze recorded workouts and metrics to determine macrocycle/mesocycles"
+    )
+    w_an.add_argument(
+        "--from", "--from-date", dest="from_date",
+        help="Start date of the historical period to analyze (YYYY-MM-DD)"
+    )
+    w_an.add_argument(
+        "--until", "--until-date", dest="until_date",
+        help="End date of the historical period to analyze (YYYY-MM-DD, defaults to today)"
+    )
+    w_an.add_argument(
+        "--days", type=int, dest="days", metavar="N",
+        help="Number of days to analyze looking back from --until"
+    )
+    w_an.add_argument(
+        "--weeks", type=float, dest="weeks", metavar="N",
+        help="Number of weeks to analyze looking back from --until"
+    )
+    w_an.add_argument(
+        "--context", dest="context",
+        help="Optional text context detailing subjective athlete notes (travel, illness, etc.)"
+    )
+
     # workout wipe
     w_wipe = workout_subparsers.add_parser(
         "wipe",
@@ -515,6 +541,8 @@ def main() -> None:
             run_workout_adapt(args)
         elif sub in ("push", "p"):
             run_workout_push(args)
+        elif sub in ("analyze", "an"):
+            run_workout_analyze(args)
         elif sub == "wipe":
             run_workout_wipe(args)
     elif cmd in ("metrics", "m"):
@@ -1870,6 +1898,69 @@ def run_metrics_wipe(args: argparse.Namespace) -> None:
 
     db.wipe_metrics()
     print(green("All metrics, baselines, and completed activities wiped successfully."))
+
+
+def run_workout_analyze(args: argparse.Namespace) -> None:
+    """Runs workout analyze to reverse-engineer training cycles."""
+    try:
+        result = coach_service.analyze_workouts(
+            from_date_str=args.from_date,
+            until_date_str=args.until_date,
+            days=args.days,
+            weeks=args.weeks,
+            context=args.context
+        )
+
+        print(bold(cyan("\n=== HISTORICAL WORKOUT ANALYSIS REPORT ===")))
+        
+        # Macrocycle Overview
+        if "inferred_macrocycle" in result:
+            im = result["inferred_macrocycle"]
+            print(
+                f"\n{bold('Macrocycle Focus')}: {cyan(im.get('overall_focus', 'N/A'))} "
+                f"({magenta(im.get('start_date', ''))} to {magenta(im.get('end_date', ''))})"
+            )
+        
+        if "macrocycle_summary" in result:
+            print(format_labeled_block(f"{bold('Summary')}:", result["macrocycle_summary"]))
+
+        # Inferred Mesocycles
+        if "inferred_mesocycles" in result and result["inferred_mesocycles"]:
+            print(bold(cyan("\nDetected Mesocycle Blocks:")))
+            for meso in result["inferred_mesocycles"]:
+                c_tag = meso.get("estimated_consistency", "Moderate")
+                if c_tag == "High":
+                    c_disp = green("[High Consistency]")
+                elif c_tag == "Low":
+                    c_disp = red("[Low Consistency]")
+                else:
+                    c_disp = yellow("[Moderate Consistency]")
+
+                print(
+                    f"  - {green(meso.get('name', 'Phase'))} "
+                    f"({cyan(meso.get('start_date', ''))} to {cyan(meso.get('end_date', ''))}) "
+                    f"{c_disp}"
+                )
+                print(f"    * Detected Focus: {meso.get('focus_detected', 'N/A')}")
+                print(f"    * Avg Weekly TSS: {meso.get('average_weekly_tss', 'N/A')}")
+
+        # Physiological Insights
+        if "physiological_insights" in result and result["physiological_insights"]:
+            print(bold(cyan("\nPhysiological Insights:")))
+            for insight in result["physiological_insights"]:
+                print(f"  - {insight}")
+
+        # Coach learnings
+        if "learnings_for_coach_memory" in result and result["learnings_for_coach_memory"]:
+            print(format_labeled_block(
+                bold(cyan("\nCoach Observations (Saved to memory):")),
+                result["learnings_for_coach_memory"]
+            ))
+
+        print(bold(cyan("\n==========================================")))
+
+    except Exception as e:
+        print(red(f"Error running workout analysis: {e}"))
 
 
 if __name__ == "__main__":

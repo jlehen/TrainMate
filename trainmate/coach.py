@@ -638,6 +638,88 @@ Adherence Discrepancies & Violations:
         )
         return result
 
+    def _analyze_workouts_logic(
+        self, objectives: List[Objective], guidelines: str,
+        profile: Optional[Dict[str, Any]],
+        weekly_summaries: List[Dict[str, Any]],
+        context: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """Queries LLM to reverse-engineer training cycles from weekly summaries."""
+        custom_task = (
+            "TASK:\n"
+            "Analyze the athlete's completed training load, zone distributions, and\n"
+            "physiological metrics week-by-week. Reverse-engineer this data to identify\n"
+            "the underlying training phases (macrocycle & mesocycles) that occurred.\n"
+            "\n"
+            "You MUST respond with a JSON object containing:\n"
+            "{\n"
+            '  "macrocycle_summary": "High-level summary of the training period.",\n'
+            '  "inferred_macrocycle": {\n'
+            '    "overall_focus": "e.g. Marathon base prep",\n'
+            '    "start_date": "YYYY-MM-DD",\n'
+            '    "end_date": "YYYY-MM-DD"\n'
+            "  },\n"
+            '  "inferred_mesocycles": [\n'
+            "    {\n"
+            '      "name": "Phase Name (e.g. Base Building, Build, Recovery, etc.)",\n'
+            '      "start_date": "YYYY-MM-DD",\n'
+            '      "end_date": "YYYY-MM-DD",\n'
+            '      "focus_detected": "Key detected focus of this block",\n'
+            '      "average_weekly_tss": 380.0,\n'
+            '      "estimated_consistency": "High" | "Moderate" | "Low"\n'
+            "    }\n"
+            "  ],\n"
+            '  "physiological_insights": [\n'
+            '    "Physiological response observations (e.g., HRV/RHR trends vs load)."\n'
+            "  ],\n"
+            '  "learnings_for_coach_memory": "Key insights to store in coach memory."\n'
+            "}\n"
+        )
+
+        system_prompt = (
+            "You are TrainMate Coach, an advanced AI sports science training coach.\n"
+            "You analyze historical activities and physiological metrics to identify\n"
+            "training periodization phases (macro and mesocycles).\n\n"
+            "================================================================================\n"
+            "START OF SPORTS SCIENCE GUIDELINES\n"
+            "================================================================================\n"
+            f"{guidelines}\n"
+            "================================================================================\n"
+            "END OF SPORTS SCIENCE GUIDELINES\n"
+            "================================================================================\n"
+        )
+
+        athlete_profile = self._format_athlete_profile(profile)
+        system_prompt += f"\nATHLETE PROFILE & PREFERENCES:\n{athlete_profile}\n"
+
+        obj_text = ""
+        for o in objectives:
+            details = o.get('description', '')
+            obj_text += (
+                f"- Goal: {o['title']} | Date: {o['target_date']} | "
+                f"Sport: {o['sport_type']} | Details: {details}\n"
+            )
+        system_prompt += (
+            f"\nATHLETE GOALS IN OR AFTER THIS PERIOD:\n"
+            f"{obj_text if obj_text else 'No objectives.'}\n"
+        )
+
+        system_prompt += f"\n{custom_task}\n"
+
+        user_content = "Please analyze the following weekly training summaries:\n\n"
+        user_content += json.dumps(weekly_summaries, indent=2)
+
+        if context:
+            user_content += f"\n\nATHLETE SUBJECTIVE CONTEXT FOR THIS PERIOD:\n{context}\n"
+
+        print("Querying OpenRouter to perform training history analysis...")
+        result = openrouter_client.complete(
+            system_prompt, user_content, label="workout_analysis"
+        )
+        return result
+
+
+
 
 class CoachService:
     """Orchestrates sports science coaching by coordinating data I/O and business logic."""
@@ -1291,5 +1373,202 @@ class CoachService:
                     print(f"Error syncing {w['title']} to Google Calendar: {e}")
 
 
+    def analyze_workouts(
+        self, from_date_str: Optional[str] = None, until_date_str: Optional[str] = None,
+        days: Optional[int] = None, weeks: Optional[int] = None,
+        context: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """Analyzes historical workouts and physiological metrics using LLM."""
+        until_date = datetime.now(timezone.utc).date()
+        if until_date_str:
+            until_date = datetime.strptime(until_date_str, "%Y-%m-%d").date()
+
+        from_date = None
+        if from_date_str:
+            from_date = datetime.strptime(from_date_str, "%Y-%m-%d").date()
+        elif days:
+            from_date = until_date - timedelta(days=days - 1)
+        elif weeks:
+            from_date = until_date - timedelta(weeks=weeks) + timedelta(days=1)
+        else:
+            # Auto-timeline detection based on active goals
+            earliest_goal = self._db.get_active_objective()
+            if earliest_goal:
+                target_date_str = earliest_goal['target_date']
+                preceding = self._db.get_preceding_objectives(target_date_str)
+                if preceding:
+                    last_goal_date = datetime.strptime(
+                        preceding[0]['target_date'], "%Y-%m-%d"
+                    ).date()
+                    from_date = last_goal_date + timedelta(days=1)
+                else:
+                    # No preceding goal. Assume the athlete was training for it.
+                    # Default to 12 weeks lookback from today/until_date, capped at today
+                    from_date = until_date - timedelta(weeks=12)
+            else:
+                # No active goals found. Default to 12 weeks lookback.
+                from_date = until_date - timedelta(weeks=12)
+
+        if from_date > until_date:
+            raise ValueError(f"Start date {from_date} is after end date {until_date}.")
+
+        from_str = from_date.strftime("%Y-%m-%d")
+        until_str = until_date.strftime("%Y-%m-%d")
+
+        print(f"Analyzing activities from {from_str} to {until_str}...")
+
+        metrics = self._db.get_metrics_cache(start_date=from_str, end_date=until_str)
+        completed_activities = self._db.get_completed_activities(
+            start_date=from_str, end_date=until_str
+        )
+
+        # Group by ISO week (Monday date string)
+        weeks_data: Dict[str, Dict[str, Any]] = {}
+        current_day = from_date
+        while current_day <= until_date:
+            monday = current_day - timedelta(days=current_day.weekday())
+            monday_str = monday.strftime("%Y-%m-%d")
+
+            if monday_str not in weeks_data:
+                weeks_data[monday_str] = {
+                    "days": [],
+                    "metrics": [],
+                    "activities": []
+                }
+            weeks_data[monday_str]["days"].append(current_day)
+            current_day += timedelta(days=1)
+
+        # Distribute metrics and activities into the weeks
+        for m in metrics:
+            m_date = datetime.strptime(m['date'], "%Y-%m-%d").date()
+            monday = m_date - timedelta(days=m_date.weekday())
+            monday_str = monday.strftime("%Y-%m-%d")
+            if monday_str in weeks_data:
+                weeks_data[monday_str]["metrics"].append(m)
+
+        for act in completed_activities:
+            act_date = datetime.strptime(act['date'], "%Y-%m-%d").date()
+            monday = act_date - timedelta(days=act_date.weekday())
+            monday_str = monday.strftime("%Y-%m-%d")
+            if monday_str in weeks_data:
+                weeks_data[monday_str]["activities"].append(act)
+
+        # Build summaries per week
+        weekly_summaries = []
+        for monday_str in sorted(weeks_data.keys()):
+            w_info = weeks_data[monday_str]
+            days_in_week = w_info["days"]
+            w_metrics = w_info["metrics"]
+            w_activities = w_info["activities"]
+
+            total_duration_hours = sum(
+                (act.get('duration_sec') or 0.0) / 3600.0 for act in w_activities
+            )
+            total_tss = sum(act.get('tss') or 0.0 for act in w_activities)
+
+            sports: Dict[str, int] = {}
+            for act in w_activities:
+                st = act['activity_type'].lower()
+                sports[st] = sports.get(st, 0) + 1
+
+            z1_z2_sec = sum(
+                (act.get('zone1_sec') or 0) + (act.get('zone2_sec') or 0)
+                for act in w_activities
+            )
+            z3_sec = sum(act.get('zone3_sec') or 0 for act in w_activities)
+            z4_z5_sec = sum(
+                (act.get('zone4_sec') or 0) + (act.get('zone5_sec') or 0)
+                for act in w_activities
+            )
+
+            avg_rpe = 0.0
+            rpes = [act['rpe'] for act in w_activities if act.get('rpe') is not None]
+            if rpes:
+                avg_rpe = sum(rpes) / len(rpes)
+
+            avg_rhr = None
+            rhrs = [m['rhr'] for m in w_metrics if m.get('rhr') is not None]
+            if rhrs:
+                avg_rhr = sum(rhrs) / len(rhrs)
+
+            avg_hrv = None
+            hrvs = [m['hrv'] for m in w_metrics if m.get('hrv') is not None]
+            if hrvs:
+                avg_hrv = sum(hrvs) / len(hrvs)
+
+            max_acwr = None
+            acwrs = [m['acwr'] for m in w_metrics if m.get('acwr') is not None]
+            if acwrs:
+                max_acwr = max(acwrs)
+
+            active_dates = {act['date'] for act in w_activities}
+            rest_days = len(days_in_week) - len(active_dates)
+
+            highlights = []
+            for act in w_activities:
+                is_hi = (
+                    (act.get('tss') and act['tss'] >= 120) or
+                    (act.get('rpe') and act['rpe'] >= 8) or
+                    any(
+                        kw in (act.get('activity_name') or "").lower()
+                        for kw in ["race", "test", "ftp", "marathon"]
+                    )
+                )
+                if is_hi:
+                    highlights.append({
+                        "date": act['date'],
+                        "type": act['activity_type'],
+                        "name": act.get('activity_name') or "Workout",
+                        "duration_min": int((act.get('duration_sec') or 0.0) / 60.0),
+                        "tss": act.get('tss'),
+                        "rpe": act.get('rpe')
+                    })
+
+            weekly_summaries.append({
+                "week_commencing": monday_str,
+                "total_duration_hours": round(total_duration_hours, 1),
+                "total_tss": round(total_tss, 1),
+                "average_rpe": round(avg_rpe, 1) if avg_rpe > 0 else 0.0,
+                "sports": sports,
+                "zone_distribution_sec": {
+                    "Z1_Z2": z1_z2_sec,
+                    "Z3": z3_sec,
+                    "Z4_Z5": z4_z5_sec
+                },
+                "avg_rhr": round(avg_rhr, 1) if avg_rhr is not None else None,
+                "avg_hrv": round(avg_hrv, 1) if avg_hrv is not None else None,
+                "max_acwr": round(max_acwr, 2) if max_acwr is not None else None,
+                "rest_days": rest_days,
+                "highlights": highlights
+            })
+
+        # Fetch relevant objectives (occurring on or after from_date)
+        all_objectives = self._db.get_objectives()
+        objectives = [
+            obj for obj in all_objectives
+            if datetime.strptime(obj['target_date'], "%Y-%m-%d").date() >= from_date
+        ]
+
+        guidelines = self._load_science_guidelines()
+        profile = config.user_profile
+
+        decision = self.engine._analyze_workouts_logic(
+            objectives=objectives,
+            guidelines=guidelines,
+            profile=profile,
+            weekly_summaries=weekly_summaries,
+            context=context
+        )
+
+        # Save learnings to memory if present in LLM response
+        if "learnings_for_coach_memory" in decision and decision["learnings_for_coach_memory"]:
+            self._db.save_coach_memory(
+                "athlete_learnings", decision["learnings_for_coach_memory"]
+            )
+
+        return decision
+
+
 # Singleton instance
 coach_service = CoachService()
+
