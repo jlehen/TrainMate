@@ -1,6 +1,6 @@
 import sqlite3
 import os
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Optional, List, Dict, Generator
 from contextlib import contextmanager
 from trainmate.config import config
@@ -8,6 +8,53 @@ from trainmate.types import (
     Objective, LifeEvent, Workout, AthleteMetric, AthleteBaseline, Macrocycle, Mesocycle,
     CompletedActivity
 )
+
+# Coach-learning enrichment (Phase 2).
+# Ordered confidence levels the LLM assigns to each observation.
+CONFIDENCE_LEVELS = ("tentative", "moderate", "established")
+
+# A learning is "dormant" — kept in the DB but excluded from LLM prompts — once it
+# has gone unreinforced for longer than the budget for its confidence level. Decay is
+# soft: a dormant learning revives the moment it is reinforced again.
+LEARNING_STALENESS_DAYS = {
+    "tentative": 21,
+    "moderate": 60,
+    "established": 180,
+}
+
+
+def normalize_sports(value: Any) -> str:
+    """Normalizes a sport-scope value (list or comma string) to a comma-joined,
+    lowercased string; empty/missing becomes 'general'."""
+    if not value:
+        return "general"
+    if isinstance(value, (list, tuple)):
+        parts = [str(s).strip().lower() for s in value if str(s).strip()]
+    else:
+        parts = [s.strip().lower() for s in str(value).split(",") if s.strip()]
+    return ",".join(parts) if parts else "general"
+
+
+def valid_confidence(value: Any) -> Optional[str]:
+    """Returns the confidence value if it is a recognized level, else None."""
+    return value if value in CONFIDENCE_LEVELS else None
+
+
+def learning_is_dormant(learning: Dict[str, Any], now: Optional[datetime] = None) -> bool:
+    """True if a learning has gone unreinforced past its confidence-based budget."""
+    now = now or datetime.now(timezone.utc)
+    ref = learning.get("last_reinforced_at") or learning.get("created_at")
+    if not ref:
+        return False
+    try:
+        ref_dt = datetime.fromisoformat(ref)
+    except (ValueError, TypeError):
+        return False
+    budget = LEARNING_STALENESS_DAYS.get(
+        learning.get("confidence") or "tentative", LEARNING_STALENESS_DAYS["tentative"]
+    )
+    return (now - ref_dt) > timedelta(days=budget)
+
 
 class Database:
     """Handles all database schema setups and operations using SQLite."""
@@ -189,10 +236,30 @@ class Database:
                 CREATE TABLE IF NOT EXISTS coach_learnings (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     text TEXT NOT NULL,
+                    sports TEXT NOT NULL DEFAULT 'general',
+                    confidence TEXT NOT NULL DEFAULT 'tentative',
                     created_at TEXT NOT NULL,
-                    updated_at TEXT NOT NULL
+                    updated_at TEXT NOT NULL,
+                    last_reinforced_at TEXT
                 )
             """)
+
+            # Phase 2 enrichment: add sport-scope, confidence, and recency columns to
+            # coach_learnings created before they existed.
+            for col in [
+                "sports TEXT NOT NULL DEFAULT 'general'",
+                "confidence TEXT NOT NULL DEFAULT 'tentative'",
+                "last_reinforced_at TEXT",
+            ]:
+                try:
+                    cursor.execute(f"ALTER TABLE coach_learnings ADD COLUMN {col}")
+                except sqlite3.OperationalError:
+                    pass  # Column already exists.
+            # Backfill recency for migrated rows: treat creation as the last reinforcement.
+            cursor.execute(
+                "UPDATE coach_learnings SET last_reinforced_at = created_at "
+                "WHERE last_reinforced_at IS NULL"
+            )
 
             # One-time migration: seed from the legacy coach_memory blob if present.
             cursor.execute(
@@ -208,8 +275,9 @@ class Database:
                     if row and row['value'] and row['value'].strip():
                         now = datetime.now(timezone.utc).isoformat()
                         cursor.execute(
-                            "INSERT INTO coach_learnings (text, created_at, updated_at) "
-                            "VALUES (?, ?, ?)", (row['value'].strip(), now, now)
+                            "INSERT INTO coach_learnings "
+                            "(text, created_at, updated_at, last_reinforced_at) "
+                            "VALUES (?, ?, ?, ?)", (row['value'].strip(), now, now, now)
                         )
 
             # Macrocycles table
@@ -662,22 +730,33 @@ class Database:
 
     # --- Coach Learnings ---
     def get_learnings(self) -> List[Dict[str, Any]]:
-        """Returns all athlete-observation records ordered by id."""
+        """Returns all athlete-observation records ordered by id. Each record carries a
+        computed `dormant` flag (True once it has decayed past its confidence budget)."""
         with self._get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute(
-                "SELECT id, text, created_at, updated_at FROM coach_learnings ORDER BY id"
+                "SELECT id, text, sports, confidence, created_at, updated_at, "
+                "last_reinforced_at FROM coach_learnings ORDER BY id"
             )
-            return [dict(row) for row in cursor.fetchall()]
+            learnings = [dict(row) for row in cursor.fetchall()]
+        now = datetime.now(timezone.utc)
+        for learning in learnings:
+            learning["dormant"] = learning_is_dormant(learning, now)
+        return learnings
 
-    def add_learning(self, text: str) -> int:
+    def add_learning(
+        self, text: str, sports: str = "general", confidence: str = "tentative"
+    ) -> int:
         """Adds a single athlete-observation record and returns its id."""
         now = datetime.now(timezone.utc).isoformat()
+        sports = normalize_sports(sports)
+        confidence = valid_confidence(confidence) or "tentative"
         with self._get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute(
-                "INSERT INTO coach_learnings (text, created_at, updated_at) "
-                "VALUES (?, ?, ?)", (text, now, now)
+                "INSERT INTO coach_learnings (text, sports, confidence, created_at, "
+                "updated_at, last_reinforced_at) VALUES (?, ?, ?, ?, ?, ?)",
+                (text, sports, confidence, now, now, now)
             )
             return cursor.lastrowid
 
@@ -699,11 +778,14 @@ class Database:
         """Applies a list of incremental learning operations in one transaction.
 
         Each delta is one of:
-          {"op": "add", "text": "..."}
-          {"op": "revise", "id": <int>, "text": "..."}
+          {"op": "add", "text": "...", "sports"?: "...", "confidence"?: "..."}
+          {"op": "revise", "id": <int>, "text"?: "...", "sports"?: "...", "confidence"?: "..."}
+          {"op": "reinforce", "id": <int>, "confidence"?: "..."}
           {"op": "retire", "id": <int>}
-        Malformed deltas (empty text, missing id, unknown op) are skipped so a
-        partially-valid LLM response still applies its valid operations.
+        `add` defaults sports to 'general' and confidence to 'tentative'. `revise` and
+        `reinforce` refresh recency (last_reinforced_at), so a reaffirmed learning leaves
+        the dormant state. Invalid confidence values and malformed deltas (empty text,
+        missing id, unknown op) are skipped so a partially-valid response still applies.
         """
         if not deltas:
             return
@@ -718,17 +800,51 @@ class Database:
                     text = (delta.get("text") or "").strip()
                     if text:
                         cursor.execute(
-                            "INSERT INTO coach_learnings (text, created_at, updated_at) "
-                            "VALUES (?, ?, ?)", (text, now, now)
+                            "INSERT INTO coach_learnings (text, sports, confidence, "
+                            "created_at, updated_at, last_reinforced_at) "
+                            "VALUES (?, ?, ?, ?, ?, ?)",
+                            (text, normalize_sports(delta.get("sports")),
+                             valid_confidence(delta.get("confidence")) or "tentative",
+                             now, now, now)
                         )
                 elif op == "revise":
-                    text = (delta.get("text") or "").strip()
                     learning_id = delta.get("id")
-                    if text and learning_id is not None:
-                        cursor.execute(
-                            "UPDATE coach_learnings SET text=?, updated_at=? WHERE id=?",
-                            (text, now, learning_id)
-                        )
+                    if learning_id is None:
+                        continue
+                    # Apply only the fields the model supplied; a revise reflects fresh
+                    # evidence, so refresh recency too.
+                    sets, params = [], []
+                    text = (delta.get("text") or "").strip()
+                    if text:
+                        sets.append("text=?")
+                        params.append(text)
+                    if delta.get("sports"):
+                        sets.append("sports=?")
+                        params.append(normalize_sports(delta.get("sports")))
+                    confidence = valid_confidence(delta.get("confidence"))
+                    if confidence:
+                        sets.append("confidence=?")
+                        params.append(confidence)
+                    if not sets:
+                        continue
+                    sets += ["updated_at=?", "last_reinforced_at=?"]
+                    params += [now, now, learning_id]
+                    cursor.execute(
+                        f"UPDATE coach_learnings SET {', '.join(sets)} WHERE id=?", params
+                    )
+                elif op == "reinforce":
+                    learning_id = delta.get("id")
+                    if learning_id is None:
+                        continue
+                    sets, params = ["last_reinforced_at=?"], [now]
+                    confidence = valid_confidence(delta.get("confidence"))
+                    if confidence:
+                        sets += ["confidence=?", "updated_at=?"]
+                        params += [confidence, now]
+                    params.append(learning_id)
+                    cursor.execute(
+                        f"UPDATE coach_learnings SET {', '.join(sets)} WHERE id=?", params
+                    )
                 elif op == "retire":
                     learning_id = delta.get("id")
                     if learning_id is not None:

@@ -16,9 +16,16 @@ from trainmate.adherence import analyze_adherence
 LEARNING_UPDATES_FIELD = (
     '  "learning_updates": [\n'
     "    // Optional. Incremental updates to athlete observations; each item is one of:\n"
-    '    //   {"op": "add", "text": "New observation."},\n'
-    '    //   {"op": "revise", "id": 3, "text": "Reworded observation #3."},\n'
+    '    //   {"op": "add", "text": "New observation.", "sports": "running", "confidence": "tentative"},\n'
+    '    //   {"op": "revise", "id": 3, "text": "Reworded observation #3.", "confidence": "moderate"},\n'
+    '    //   {"op": "reinforce", "id": 4, "confidence": "established"},\n'
     '    //   {"op": "retire", "id": 5}\n'
+    '    // "sports": comma-separated sport(s) the observation applies to (e.g. "running,road_biking"),\n'
+    '    //   or "general" if not sport-specific. Defaults to "general".\n'
+    '    // "confidence": how well-established the observation is — "tentative" | "moderate" |\n'
+    '    //   "established". Defaults to "tentative". Raise it as repeated evidence accumulates.\n'
+    "    // Use \"reinforce\" when you still see evidence for an existing observation but its\n"
+    "    //   wording needs no change — this keeps it fresh (unreinforced observations fade over time).\n"
     "    // Existing observations persist automatically; do NOT repeat unchanged ones.\n"
     "    // Reference existing observations by the [id] shown under COACH MEMORY.\n"
 )
@@ -862,14 +869,20 @@ class CoachService:
         return strategy, meso_text
 
     def _get_learnings_text(self) -> str:
-        """Renders stored athlete observations as an id-tagged block for prompts."""
-        learnings = self._db.get_learnings()
+        """Renders active athlete observations as a tagged block for prompts. Each line is
+        `[id|sports|confidence] text`. Dormant (decayed) observations are omitted so stale
+        notes stop influencing planning until reaffirmed."""
+        learnings = [l for l in self._db.get_learnings() if not l.get("dormant")]
         if not learnings:
             return (
                 "No observations yet. Over time, observe the athlete's responses to "
                 "training volume and intensity."
             )
-        return "\n".join(f"  [{l['id']}] {l['text']}" for l in learnings)
+        return "\n".join(
+            f"  [{l['id']}|{l.get('sports') or 'general'}|"
+            f"{l.get('confidence') or 'tentative'}] {l['text']}"
+            for l in learnings
+        )
 
     def _apply_learning_updates(self, data: Dict[str, Any]) -> None:
         """Applies incremental learning deltas returned by the LLM, if any."""

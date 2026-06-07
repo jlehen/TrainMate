@@ -721,7 +721,12 @@ def run_status(verbose: bool = False) -> None:
     if learnings:
         print("- Learnings:")
         for l in learnings:
-            print(format_labeled_block(f"  [{l['id']}]", l['text']))
+            tag = f"  [{l['id']}|{l.get('sports') or 'general'}|{l.get('confidence') or 'tentative'}]"
+            if l.get("dormant"):
+                # Decayed: kept on record but no longer fed to the coach until reaffirmed.
+                print(format_labeled_block(gray(tag), gray(f"{l['text']} (dormant)")))
+            else:
+                print(format_labeled_block(tag, l['text']))
     else:
         print(format_labeled_block("- Learnings:", "None yet"))
 
@@ -1962,10 +1967,18 @@ def run_data_analyze(args: argparse.Namespace) -> None:
             print(bold(cyan("\nCoach Observations (Saved to memory):")))
             for u in updates:
                 op = u.get("op")
+                meta = []
+                if u.get("sports"):
+                    meta.append(u["sports"])
+                if u.get("confidence"):
+                    meta.append(u["confidence"])
+                suffix = f" ({', '.join(meta)})" if meta else ""
                 if op == "add":
-                    print(f"  + {u.get('text', '')}")
+                    print(f"  + {u.get('text', '')}{suffix}")
                 elif op == "revise":
-                    print(f"  ~ [{u.get('id')}] {u.get('text', '')}")
+                    print(f"  ~ [{u.get('id')}] {u.get('text', '')}{suffix}")
+                elif op == "reinforce":
+                    print(f"  ↑ reinforced [{u.get('id')}]{suffix}")
                 elif op == "retire":
                     print(f"  - retired [{u.get('id')}]")
 

@@ -399,7 +399,7 @@ class TestTrainMateCLI(unittest.TestCase):
         self.assertIn("Overnight HRV: 82 ms", stdout)
         self.assertIn("ACWR       : 1.14", stdout)
         self.assertIn("Baselines (28-day)", stdout)
-        self.assertIn("[1]\n    Rest well on Fridays", stdout)
+        self.assertIn("[1|general|tentative]\n    Rest well on Fridays", stdout)
 
         test_db.add_lifeevent(
             title="Ibiza Trip", start_date="2026-07-01", end_date="2026-07-08",

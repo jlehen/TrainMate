@@ -120,10 +120,21 @@ or directly by tests).
 
 **Coach learnings via deltas:** `_generate_workouts_logic` and `_analyze_workouts_logic` emit a
 `learning_updates` array (shared prompt field `LEARNING_UPDATES_FIELD`) of incremental ops
-`{"op": "add"|"revise"|"retire", id?, text?}` rather than a full learnings blob. The app owns the
-merge via `CoachService._apply_learning_updates()` → `db.apply_learning_deltas()`, so a model that
-omits an existing learning cannot lose it. `_build_system_prompt` renders current learnings as
-`[id] text` via `CoachService._get_learnings_text()`.
+rather than a full learnings blob. The app owns the merge via
+`CoachService._apply_learning_updates()` → `db.apply_learning_deltas()`, so a model that omits an
+existing learning cannot lose it. Each learning carries a **sport scope** (`sports`: comma-list or
+`general`) and a **confidence** level (`tentative` | `moderate` | `established`). The four ops:
+- `{"op": "add", text, sports?, confidence?}` — new record (defaults `general`/`tentative`).
+- `{"op": "revise", id, text?, sports?, confidence?}` — change supplied fields; refreshes recency.
+- `{"op": "reinforce", id, confidence?}` — reaffirm without rewording; refreshes recency.
+- `{"op": "retire", id}` — hard delete.
+
+**Decay (soft):** a learning is *dormant* once it goes unreinforced past a confidence-based budget
+(`db.LEARNING_STALENESS_DAYS`: tentative 21d / moderate 60d / established 180d), computed by
+`db.learning_is_dormant()`. `get_learnings()` annotates each record with a `dormant` flag; dormant
+records stay in the DB and show in `status` (marked) but are **excluded from prompts** until a
+`revise`/`reinforce` refreshes them. `CoachService._get_learnings_text()` renders only active
+learnings as `[id|sports|confidence] text`.
 
 ### `CoachService`
 **Orchestrator — owns all DB and calendar access.** Exposes the public API called by the UIs.
@@ -191,12 +202,17 @@ from trainmate.coach import coach_service
 **Metrics & Baselines:** `save_metric_cache` (upsert), `get_metrics_cache(start_date, end_date)`,
 `save_baseline`, `get_baseline(date)` (returns closest prior baseline), `wipe_metrics`
 
-**Coach Learnings:** `get_learnings()`, `add_learning(text)`, `update_learning(id, text)`,
+**Coach Learnings:** `get_learnings()` (each record annotated with a computed `dormant` flag),
+`add_learning(text, sports='general', confidence='tentative')`, `update_learning(id, text)`,
 `delete_learning(id)`, `apply_learning_deltas(deltas)`. Discrete, addressable athlete-observation
-records (table `coach_learnings`), updated incrementally via LLM deltas. `apply_learning_deltas`
-runs all ops in one transaction and silently skips malformed deltas. A one-time migration seeds
-from the legacy `coach_memory.athlete_learnings` blob if present (the old table is left in place,
-not dropped). Periodization strategy lives in the `macrocycles` table, not here.
+records (table `coach_learnings`) enriched with sport scope, confidence, and recency; updated
+incrementally via LLM deltas (`add`/`revise`/`reinforce`/`retire`). `apply_learning_deltas` runs
+all ops in one transaction and silently skips malformed deltas (and invalid confidence values).
+Module-level helpers: `normalize_sports()`, `valid_confidence()`, `learning_is_dormant()`,
+constants `CONFIDENCE_LEVELS` / `LEARNING_STALENESS_DAYS` (see section 3 for the delta/decay
+model). A one-time migration seeds from the legacy `coach_memory.athlete_learnings` blob if present
+(the old table is left in place, not dropped). Periodization strategy lives in the `macrocycles`
+table, not here.
 
 **Macrocycles/Mesocycles:** `save_macrocycle` (deletes existing for objective, then inserts),
 `get_macrocycle_for_objective(objective_id)`, `get_last_macrocycle()`,
@@ -298,15 +314,19 @@ SQLite database at `trainmate.db` (path from `config.db_path`).
 
 ### coach_\learnings
 Discrete, addressable athlete-observation records, updated incrementally via LLM deltas
-(`add`/`revise`/`retire`). Replaces the legacy key-value `coach_memory` table (kept on existing
-DBs for migration, not dropped).
+(`add`/`revise`/`reinforce`/`retire`). Replaces the legacy key-value `coach_memory` table (kept on
+existing DBs for migration, not dropped). Enriched with sport scope, confidence, and recency
+(see section 3 for the decay model).
 
-| Column       | Type       | Notes                                       |
-|--------------|------------|---------------------------------------------|
-| `id`         | INTEGER PK | Referenced by `revise`/`retire` deltas      |
-| `text`       | TEXT       | LLM-generated observation                   |
-| `created_at` | TEXT       | ISO timestamp                               |
-| `updated_at` | TEXT       | ISO timestamp                               |
+| Column               | Type       | Notes                                                  |
+|----------------------|------------|--------------------------------------------------------|
+| `id`                 | INTEGER PK | Referenced by `revise`/`reinforce`/`retire` deltas     |
+| `text`               | TEXT       | LLM-generated observation                              |
+| `sports`             | TEXT       | Comma-separated sport scope, or `general` (default)    |
+| `confidence`         | TEXT       | `tentative` (default) / `moderate` / `established`     |
+| `created_at`         | TEXT       | ISO timestamp                                          |
+| `updated_at`         | TEXT       | ISO timestamp; last content/metadata change            |
+| `last_reinforced_at` | TEXT       | ISO timestamp; drives decay → `dormant` (see §3)       |
 
 ### macrocycles
 | Column            | Type                  | Notes                                            |
