@@ -1965,6 +1965,10 @@ def run_data_analyze(args: argparse.Namespace) -> None:
         updates = result.get("learning_updates")
         if updates:
             print(bold(cyan("\nCoach Observations (Saved to learnings):")))
+            try:
+                learnings_map = {l['id']: l for l in db.get_learnings()}
+            except Exception:
+                learnings_map = {}
             for u in updates:
                 op = u.get("op")
                 meta = []
@@ -1978,7 +1982,16 @@ def run_data_analyze(args: argparse.Namespace) -> None:
                 elif op == "revise":
                     print(f"  ~ [{u.get('id')}] {u.get('text', '')}{suffix}")
                 elif op == "reinforce":
-                    print(f"  ↑ reinforced [{u.get('id')}]{suffix}")
+                    learning_id = u.get("id")
+                    learning_text = ""
+                    if learning_id is not None and learning_id in learnings_map:
+                        learning_text = learnings_map[learning_id]['text']
+                    
+                    tag = f"  ↑ reinforced [{learning_id}]{suffix}"
+                    if learning_text:
+                        print(format_labeled_block(tag, learning_text))
+                    else:
+                        print(tag)
                 elif op == "retire":
                     print(f"  - retired [{u.get('id')}]")
 

@@ -389,7 +389,7 @@ class TestTrainMateCLI(unittest.TestCase):
             title="London Marathon", target_date="2026-09-20",
             sport_type="running", priority=1,
         )
-        test_db.add_learning("Rest well on Fridays")
+        learning_id = test_db.add_learning("Rest well on Fridays")
 
         exit_code, stdout, stderr = self.run_cli(["status"])
         self.assertEqual(exit_code, 0)
@@ -399,7 +399,7 @@ class TestTrainMateCLI(unittest.TestCase):
         self.assertIn("Overnight HRV: 82 ms", stdout)
         self.assertIn("ACWR       : 1.14", stdout)
         self.assertIn("Baselines (28-day)", stdout)
-        self.assertIn("[1|general|tentative]\n    Rest well on Fridays", stdout)
+        self.assertIn(f"[{learning_id}|general|tentative]\n    Rest well on Fridays", stdout)
 
         test_db.add_lifeevent(
             title="Ibiza Trip", start_date="2026-07-01", end_date="2026-07-08",
@@ -821,6 +821,8 @@ class TestTrainMateCLI(unittest.TestCase):
 
     @patch("trainmate_cli.coach_service")
     def test_data_analyze_command(self, mock_coach):
+        learning_id = test_db.add_learning("Athlete responds well to high sleep score")
+
         mock_coach.analyze_workouts.return_value = {
             "macrocycle_summary": "Simulated base building results",
             "inferred_macrocycle": {
@@ -842,7 +844,12 @@ class TestTrainMateCLI(unittest.TestCase):
                 "HRV was stable during peak volume."
             ],
             "learning_updates": [
-                {"op": "add", "text": "Responds well to volume"}
+                {"op": "add", "text": "Responds well to volume"},
+                {
+                    "op": "reinforce",
+                    "id": learning_id,
+                    "confidence": "established"
+                }
             ]
         }
 
@@ -857,6 +864,8 @@ class TestTrainMateCLI(unittest.TestCase):
         self.assertIn("HRV was stable during peak volume", stdout)
         self.assertIn("Coach Observations (Saved to learnings):", stdout)
         self.assertIn("Responds well to volume", stdout)
+        self.assertIn("reinforced", stdout)
+        self.assertIn("Athlete responds well to high sleep score", stdout)
         mock_coach.analyze_workouts.assert_called_once_with(
             from_date_str="2026-01-01",
             until_date_str="2026-03-31",
