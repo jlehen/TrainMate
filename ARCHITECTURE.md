@@ -126,7 +126,7 @@ or directly by tests).
 | `replan(force, objective_id)`                       | Convenience: calls `generate_periodization_plan` then               |
 |                                                     | `generate_workouts`.                                                |
 | `adapt(target_date_str)`                            | Fetches metrics + workouts in rolling window, calls                 |
-|                                                     | `CoachEngine._adapt_logic()`, updates coach memory. Returns         |
+|                                                     | `CoachEngine._adapt_logic()`. Returns                               |
 |                                                     | `(reason, proposed_workouts)`.                                      |
 | `apply_adaptations(proposed, reason, start, end)`   | Deletes overridden workouts (+ calendar events), saves adapted      |
 |                                                     | workouts, syncs to Calendar.                                        |
@@ -174,7 +174,8 @@ from trainmate.coach import coach_service
 `save_baseline`, `get_baseline(date)` (returns closest prior baseline), `wipe_metrics`
 
 **Coach Memory:** `save_coach_memory(key, value)` (upsert), `get_coach_memory(key)`.
-Keys in use: `training_strategy`, `athlete_learnings`.
+Key in use: `athlete_learnings` (free-text observations). Periodization strategy lives in
+the `macrocycles` table, not here.
 
 **Macrocycles/Mesocycles:** `save_macrocycle` (deletes existing for objective, then inserts),
 `get_macrocycle_for_objective(objective_id)`, `get_last_macrocycle()`,
@@ -279,7 +280,7 @@ Key-value store for LLM-updated coach notes.
 
 | Column       | Type    | Notes                                          |
 |--------------|---------|------------------------------------------------|
-| `key`        | TEXT PK | `training_strategy` or `athlete_learnings`     |
+| `key`        | TEXT PK | `athlete_learnings`                            |
 | `value`      | TEXT    | LLM-generated text blob                        |
 | `updated_at` | TEXT    | ISO timestamp                                  |
 

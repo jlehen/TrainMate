@@ -716,11 +716,9 @@ def run_status(verbose: bool = False) -> None:
         print(yellow("\nRecent Garmin Metrics: No cached metrics. Run 'data pull' first."))
 
     # Coach Memory
-    strategy = db.get_coach_memory("training_strategy")
     learnings = db.get_coach_memory("athlete_learnings")
     print(bold("\nCoach Memory:"))
-    
-    print(format_labeled_block("- Strategy:", strategy or 'Not established'))
+
     print(format_labeled_block("- Learnings:", learnings or 'None yet'))
 
     if verbose:

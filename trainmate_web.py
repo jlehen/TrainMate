@@ -33,9 +33,8 @@ def get_status() -> Any:
     # Get last baseline
     last_baseline = db.get_baseline(last_metrics['date']) if last_metrics else None
     
-    strategy = db.get_coach_memory("training_strategy")
     learnings = db.get_coach_memory("athlete_learnings")
-    
+
     macrocycle = None
     mesocycles = []
     config_mismatch = False
@@ -51,7 +50,6 @@ def get_status() -> Any:
         "last_metrics": last_metrics,
         "last_baseline": last_baseline,
         "coach_memory": {
-            "strategy": strategy,
             "learnings": learnings
         },
         "macrocycle": macrocycle,

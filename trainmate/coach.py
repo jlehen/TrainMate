@@ -840,7 +840,7 @@ class CoachService:
                         f"{m['end_date']}): {m['focus']}\n"
                     )
         if not strategy:
-            strategy = self._db.get_coach_memory("training_strategy") or (
+            strategy = (
                 "Not established yet. Establish an endurance-focused training strategy "
                 "based on goals."
             )
@@ -1281,12 +1281,6 @@ class CoachService:
             learnings=learnings,
             discrepancies=discrepancies
         )
-
-        # Update memories if present
-        if "training_strategy" in decision and decision["training_strategy"]:
-            self._db.save_coach_memory("training_strategy", decision["training_strategy"])
-        if "athlete_learnings" in decision and decision["athlete_learnings"]:
-            self._db.save_coach_memory("athlete_learnings", decision["athlete_learnings"])
 
         reason = decision.get("reason", "No adaptation needed.")
         adapted = []
