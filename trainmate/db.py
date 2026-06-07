@@ -554,12 +554,23 @@ class Database:
             cursor.execute(query, params)
             return [dict(row) for row in cursor.fetchall()]  # type: ignore
 
-    def clear_future_workouts(self, from_date: str) -> None:
-        """Deletes future workouts that are not already synced with Google Calendar."""
+    def clear_future_workouts(self, from_date: str, include_synced: bool = False) -> None:
+        """Deletes future workouts from the database.
+
+        By default synced workouts are spared (so their Google Calendar events are not
+        orphaned). Pass include_synced=True to remove them too — callers doing this are
+        responsible for deleting the corresponding Calendar events first.
+        """
         with self._get_connection() as conn:
-            conn.cursor().execute(
-                "DELETE FROM workouts WHERE date >= ? AND status != 'synced'", (from_date,)
-            )
+            if include_synced:
+                conn.cursor().execute(
+                    "DELETE FROM workouts WHERE date >= ?", (from_date,)
+                )
+            else:
+                conn.cursor().execute(
+                    "DELETE FROM workouts WHERE date >= ? AND status != 'synced'",
+                    (from_date,)
+                )
             conn.commit()
 
     def get_workout_by_id(self, workout_id: int) -> Optional[Workout]:

@@ -1340,8 +1340,16 @@ class CoachService:
         # Save workouts to database
         workouts = plan_data.get("workouts", [])
 
-        # Clear future unsynced workouts to prevent overlapping plans
-        self._db.clear_future_workouts(today_str)
+        # Clear future workouts from the previous plan to prevent overlap. This includes
+        # synced workouts: their Google Calendar events are deleted first so the old plan
+        # doesn't linger on the calendar.
+        for ew in self._db.get_workouts(start_date=today_str):
+            if ew.get('google_event_id') and ew['status'] == 'synced':
+                try:
+                    self._calendar_syncer.delete_workout_event(ew['google_event_id'])
+                except Exception as e:
+                    print(f"Error deleting Google Calendar event: {e}")
+        self._db.clear_future_workouts(today_str, include_synced=True)
 
         saved_workouts: List[Workout] = []
         for w in workouts:

@@ -310,6 +310,51 @@ class TestPeriodization(unittest.TestCase):
         self.assertEqual(workouts[0]["title"], "Base Run")
         mock_client.complete.assert_called_once()
 
+    @patch("trainmate.coach.calendar_syncer")
+    @patch("trainmate.coach.openrouter_client")
+    def test_generate_workouts_clears_stale_synced_workouts(
+        self, mock_client, mock_calendar
+    ):
+        """Regenerating workouts must wipe the previous plan's future workouts,
+        including synced ones (and delete their Google Calendar events)."""
+        test_db.add_objective(
+            title="Zurich Marathon", target_date="2026-10-15",
+            sport_type="running", priority=1,
+        )
+
+        mock_client.complete.return_value = {
+            "strategy": "Strategy", "mesocycles": [{
+                "name": "Base", "start_date": "2026-06-01",
+                "end_date": "2026-06-28", "focus": "Base",
+            }],
+        }
+        coach_service.generate_periodization_plan(force=False)
+
+        # Simulate a stale workout from the old plan that was synced to Calendar.
+        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        future = (datetime.now(timezone.utc) + timedelta(days=5)).strftime("%Y-%m-%d")
+        test_db.save_workout(
+            date=future, sport_type="running", title="Old Plan Run",
+            description="stale", status="synced", google_event_id="evt-old-123",
+        )
+
+        mock_client.complete.reset_mock()
+        mock_client.complete.return_value = {
+            "reasoning": "New plan", "workouts": [{
+                "date": today, "sport_type": "running",
+                "title": "New Run", "description": "fresh",
+            }],
+        }
+        coach_service.generate_workouts()
+
+        # The stale synced workout is gone, and only the new workout remains.
+        remaining = test_db.get_workouts(start_date=today)
+        titles = [w["title"] for w in remaining]
+        self.assertNotIn("Old Plan Run", titles)
+        self.assertEqual(titles, ["New Run"])
+        # Its Google Calendar event was deleted.
+        mock_calendar.delete_workout_event.assert_called_once_with("evt-old-123")
+
     @patch("trainmate.coach.config")
     def test_load_science_guidelines(self, mock_config):
         temp_app_dir = tempfile.mkdtemp()
