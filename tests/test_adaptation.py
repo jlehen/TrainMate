@@ -110,6 +110,52 @@ class TestAdaptation(unittest.TestCase):
             )
             self.assertIn("duration mismatch", prompt_user_content)
 
+    @patch("trainmate.coach.openrouter_client")
+    def test_adapt_records_learning_updates(self, mock_client):
+        test_profile = {"lthr": 165, "max_hr": 185}
+        with patch.dict(trainmate.coach.config.data, {
+            "user_profile": test_profile,
+            "metrics_history_days": 3,
+            "low_load_threshold": 10.0,
+        }):
+            # Pre-existing observation the model can reinforce by [id].
+            lid = test_db.add_learning(
+                "Elevated RHR after consecutive hard days", sports="running"
+            )
+
+            mock_client.complete.return_value = {
+                "change_needed": False,
+                "reason": "On track.",
+                "adapted_workouts": [],
+                "learning_updates": [
+                    {"op": "reinforce", "id": lid, "confidence": "moderate"},
+                    {"op": "add", "text": "Sleep score dips precede HRV suppression",
+                     "sports": "general", "confidence": "tentative"},
+                ],
+            }
+
+            test_db.save_metric_cache("2026-06-03", 56, 42, 60, 35, 14.0, 8.0, 1.75)
+            test_db.save_baseline("2026-06-03", 50.0, 2.0, 60.0, 5.0, 80.0, 5.0)
+
+            reason, proposed = coach_service.adapt("2026-06-03")
+            self.assertEqual(reason, "On track.")
+            self.assertEqual(proposed, [])
+
+            # The adapt prompt offers the learning_updates schema and shows the
+            # existing observation by id (so it can reinforce instead of duplicating).
+            system_prompt = mock_client.complete.call_args[0][0]
+            self.assertIn("learning_updates", system_prompt)
+            self.assertIn(f"[{lid}|running|", system_prompt)
+
+            # Deltas were applied: existing reinforced to 'moderate', new one added.
+            learnings = {l["id"]: l for l in test_db.get_learnings()}
+            self.assertEqual(len(learnings), 2)
+            self.assertEqual(learnings[lid]["confidence"], "moderate")
+            self.assertTrue(any(
+                l["text"] == "Sleep score dips precede HRV suppression"
+                for l in learnings.values()
+            ))
+
     def test_analyze_adherence_direct(self):
         planned = [
             {

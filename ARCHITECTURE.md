@@ -107,9 +107,8 @@ or directly by tests).
 |                                      | drives the horizon in the prompt. Label:            |
 |                                      | `workout_generation`.                               |
 | `_adapt_logic(...)`                  | LLM call → `{change_needed, reason,                 |
-|                                      | adapted_workouts[]}`. Label: `workout_adaptation`.  |
-|                                      | Reads learnings into the prompt but does **not**    |
-|                                      | emit `learning_updates`.                            |
+|                                      | learning_updates[], adapted_workouts[]}`. Label:    |
+|                                      | `workout_adaptation`.                               |
 | `_analyze_workouts_logic(...)`       | LLM call → `{macrocycle_summary,                    |
 |                                      | inferred_macrocycle, inferred_mesocycles[],         |
 |                                      | physiological_insights[], learning_updates[]}`.     |
@@ -118,9 +117,9 @@ or directly by tests).
 | `_generate_intermediate_goals(...)`  | LLM call → `{goals[]}` when timeline > 24 weeks.    |
 |                                      | Label: `generate_intermediate_goals`.               |
 
-**Coach learnings via deltas:** `_generate_workouts_logic` and `_analyze_workouts_logic` emit a
-`learning_updates` array (shared prompt field `LEARNING_UPDATES_FIELD`) of incremental ops
-rather than a full learnings blob. The app owns the merge via
+**Coach learnings via deltas:** `_generate_workouts_logic`, `_analyze_workouts_logic`, and
+`_adapt_logic` emit a `learning_updates` array (shared prompt field `LEARNING_UPDATES_FIELD`) of
+incremental ops rather than a full learnings blob. The app owns the merge via
 `CoachService._apply_learning_updates()` → `db.apply_learning_deltas()`, so a model that omits an
 existing learning cannot lose it. Each learning carries a **sport scope** (`sports`: comma-list or
 `general`) and a **confidence** level (`tentative` | `moderate` | `established`). The four ops:
@@ -134,10 +133,12 @@ existing learning cannot lose it. Each learning carries a **sport scope** (`spor
 `db.learning_is_dormant()`. `get_learnings()` annotates each record with a `dormant` flag; dormant
 records stay in the DB and show in `status` (marked) but are **excluded from prompts** until a
 `revise`/`reinforce` refreshes them. `CoachService._get_learnings_text()` renders only active
-learnings as `[id|sports|confidence] text`. Every flow that emits `learning_updates` (generate and
-analyze) also injects this rendered block into its prompt — generate/adapt via `_build_system_prompt`,
-analyze under its own `COACH MEMORY` heading — so the model can `revise`/`reinforce`/`retire` by
-`[id]` instead of blindly re-adding near-duplicates on repeated runs.
+learnings as `[id|sports|confidence] text`. Every flow that emits `learning_updates` (generate,
+analyze, adapt) also injects this rendered block into its prompt — generate/adapt via
+`_build_system_prompt`, analyze under its own `COACH MEMORY` heading — so the model can
+`revise`/`reinforce`/`retire` by `[id]` instead of blindly re-adding near-duplicates on repeated
+runs. `CoachService.adapt()` applies the deltas at evaluation time (regardless of whether the
+proposed workout changes are later applied).
 
 ### `CoachService`
 **Orchestrator — owns all DB and calendar access.** Exposes the public API called by the UIs.
@@ -511,9 +512,12 @@ Required fields:
 2. `analyze_adherence()` (`adherence.py`) computes discrepancies (misses, duration/load mismatches,
    rest violations).
 3. Finds active mesocycle for the target date → sets `meso_end_date` for adaptation range.
-4. Calls `CoachEngine._adapt_logic()` → LLM → `{change_needed, reason, adapted_workouts[]}`.
-5. Returns `(reason, proposed_workouts)` — caller decides whether to apply.
-6. If applied: `apply_adaptations()` deletes overridden calendar events + DB rows, saves adapted
+4. Calls `CoachEngine._adapt_logic()` → LLM →
+   `{change_needed, reason, learning_updates[], adapted_workouts[]}`.
+5. Applies `learning_updates` deltas to `coach_learnings` (`_apply_learning_updates`) — at
+   evaluation time, independent of whether the workout changes are applied.
+6. Returns `(reason, proposed_workouts)` — caller decides whether to apply.
+7. If applied: `apply_adaptations()` deletes overridden calendar events + DB rows, saves adapted
    workouts with `status='modified'`, syncs to Calendar.
 
 ### Data Pull (`data pull`)

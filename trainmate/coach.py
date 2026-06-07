@@ -536,24 +536,31 @@ the active mesocycle block (from {target_date_str} to {meso_end_date_str}).
 - If they are fully recovered and on track, keep the plan as scheduled or make minor
   optimal adjustments.
 
-You MUST respond with a JSON object containing:
-{{
-  "change_needed": true | false,
-  "reason": "Swapping tempo run to rest.",
-  "adapted_workouts": [
-    {{
-      "date": "YYYY-MM-DD",
-      "sport_type": "running" | "road_biking" | "hiking" | "strength_training" |
-        "yoga" | "ski_touring" | "rest",
-      "title": "Adapted Workout Title",
-      "description": "Adapted description of intensity, duration, heart rate zones, and goals.",
-      "duration_minutes": 45,
-      "rpe": 5,
-      "tss": 30.0
-    }}
-  ]
-}}
-"""
+If this window reveals a durable insight about how the athlete responds to training
+(recovery patterns, load tolerance, recurring adherence/injury signals), record it via
+learning_updates — prefer reinforcing or revising an existing observation by [id] over
+adding a near-duplicate. Do not record one-off, day-specific noise.
+""" + (
+            "You MUST respond with a JSON object containing:\n"
+            "{\n"
+            '  "change_needed": true | false,\n'
+            '  "reason": "Swapping tempo run to rest.",\n'
+            + LEARNING_UPDATES_FIELD +
+            "  ],\n"
+            '  "adapted_workouts": [\n'
+            "    {\n"
+            '      "date": "YYYY-MM-DD",\n'
+            '      "sport_type": "running" | "road_biking" | "hiking" | "strength_training" |\n'
+            '        "yoga" | "ski_touring" | "rest",\n'
+            '      "title": "Adapted Workout Title",\n'
+            '      "description": "Adapted description of intensity, duration, heart rate zones, and goals.",\n'
+            '      "duration_minutes": 45,\n'
+            '      "rpe": 5,\n'
+            '      "tss": 30.0\n'
+            "    }\n"
+            "  ]\n"
+            "}\n"
+        )
         system_prompt = self._build_system_prompt(
             objectives=objectives,
             lifeevents=lifeevents,
@@ -1321,6 +1328,11 @@ class CoachService:
             learnings=learnings,
             discrepancies=discrepancies
         )
+
+        # Record any durable observations the adaptation surfaced. Done at evaluation
+        # time (not apply time) since the insight stands regardless of whether the
+        # proposed workout changes are ultimately applied.
+        self._apply_learning_updates(decision)
 
         reason = decision.get("reason", "No adaptation needed.")
         adapted = []
