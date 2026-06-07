@@ -120,7 +120,7 @@ class TestWorkoutAnalysis(unittest.TestCase):
         )
         self.assertEqual(result["macrocycle_summary"], "Simulated aggregation summary")
 
-        # Verify learnings updated in memory
+        # Verify learnings updated in learnings
         saved_learnings = test_db.get_learnings()
         self.assertEqual(len(saved_learnings), 1)
         self.assertEqual(saved_learnings[0]["text"], "Athlete responds well to FTP tests.")
@@ -149,7 +149,7 @@ class TestWorkoutAnalysis(unittest.TestCase):
         )
 
         system_prompt = mock_client.complete.call_args[0][0]
-        self.assertIn("COACH MEMORY", system_prompt)
+        self.assertIn("COACH LEARNINGS", system_prompt)
         self.assertIn(f"[{lid}|running|moderate]", system_prompt)
         self.assertIn("Recovers slowly after back-to-back hard days", system_prompt)
 

@@ -715,9 +715,9 @@ def run_status(verbose: bool = False) -> None:
     else:
         print(yellow("\nRecent Garmin Metrics: No cached metrics. Run 'data pull' first."))
 
-    # Coach Memory
+    # Coach Learnings
     learnings = db.get_learnings()
-    print(bold("\nCoach Memory:"))
+    print(bold("\nCoach Learnings:"))
     if learnings:
         print("- Learnings:")
         for l in learnings:
@@ -1961,10 +1961,10 @@ def run_data_analyze(args: argparse.Namespace) -> None:
             for insight in result["physiological_insights"]:
                 print(f"  - {insight}")
 
-        # Coach learnings (incremental updates applied to memory)
+        # Coach learnings (incremental updates applied to learnings)
         updates = result.get("learning_updates")
         if updates:
-            print(bold(cyan("\nCoach Observations (Saved to memory):")))
+            print(bold(cyan("\nCoach Observations (Saved to learnings):")))
             for u in updates:
                 op = u.get("op")
                 meta = []

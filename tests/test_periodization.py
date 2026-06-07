@@ -150,7 +150,7 @@ class TestPeriodization(unittest.TestCase):
         self.assertIn("Run long and slow", prompt)
         self.assertIn("Base Building (2026-06-01 to 2026-06-28): Zone 2 runs", prompt)
         self.assertIn("Peak & Taper (2026-06-29 to 2026-07-05): Tapering", prompt)
-        self.assertIn("COACH MEMORY & ACTIVE PERIODIZATION STRATEGY:", prompt)
+        self.assertIn("COACH LEARNINGS & ACTIVE PERIODIZATION STRATEGY:", prompt)
         self.assertIn("START OF SPORTS SCIENCE GUIDELINES", prompt)
         self.assertIn("END OF SPORTS SCIENCE GUIDELINES", prompt)
 

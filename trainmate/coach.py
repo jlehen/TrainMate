@@ -11,7 +11,7 @@ from trainmate.types import Objective, LifeEvent, Workout, CompletedActivity
 from trainmate.adherence import analyze_adherence
 
 
-# Shared JSON-output instruction for incrementally updating coach memory. The LLM
+# Shared JSON-output instruction for incrementally updating coach learnings. The LLM
 # emits only deltas; the app owns the merge so unchanged observations are never lost.
 LEARNING_UPDATES_FIELD = (
     '  "learning_updates": [\n'
@@ -27,7 +27,7 @@ LEARNING_UPDATES_FIELD = (
     "    // Use \"reinforce\" when you still see evidence for an existing observation but its\n"
     "    //   wording needs no change — this keeps it fresh (unreinforced observations fade over time).\n"
     "    // Existing observations persist automatically; do NOT repeat unchanged ones.\n"
-    "    // Reference existing observations by the [id] shown under COACH MEMORY.\n"
+    "    // Reference existing observations by the [id] shown under COACH LEARNINGS.\n"
 )
 
 
@@ -242,7 +242,7 @@ START OF SPORTS SCIENCE GUIDELINES
 END OF SPORTS SCIENCE GUIDELINES
 ================================================================================
 
-COACH MEMORY & ACTIVE PERIODIZATION STRATEGY:
+COACH LEARNINGS & ACTIVE PERIODIZATION STRATEGY:
 - Established Training Strategy for the current macro-cycle:
 {strategy}
 - Mesocycles making up the macro-cycle:
@@ -736,7 +736,7 @@ Adherence Discrepancies & Violations:
         # Show existing observations so the model can revise/reinforce/retire them by
         # [id] rather than only re-adding near-duplicates on every run.
         system_prompt += (
-            "\nCOACH MEMORY — existing athlete observations "
+            "\nCOACH LEARNINGS — existing athlete observations "
             "(reference by [id] when revising, reinforcing, or retiring):\n"
             f"{learnings}\n"
         )
@@ -1192,7 +1192,7 @@ class CoachService:
             baseline=baseline
         )
 
-        # Apply incremental learning updates to coach memory
+        # Apply incremental learning updates to coach learnings
         self._apply_learning_updates(plan_data)
 
         # Save workouts to database
@@ -1607,7 +1607,7 @@ class CoachService:
             context=context
         )
 
-        # Apply incremental learning updates to coach memory
+        # Apply incremental learning updates to coach learnings
         self._apply_learning_updates(decision)
 
         return decision

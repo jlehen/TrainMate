@@ -49,7 +49,7 @@ def get_status() -> Any:
         "next_goal": next_goal,
         "last_metrics": last_metrics,
         "last_baseline": last_baseline,
-        "coach_memory": {
+        "coach_learnings": {
             "learnings": learnings
         },
         "macrocycle": macrocycle,

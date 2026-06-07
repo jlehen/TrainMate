@@ -141,7 +141,7 @@ show in `status` (marked) but are **excluded from prompts** until a
 only active learnings as `[id|sports|confidence] text`. Every flow that emits
 `learning_updates` (generate, analyze, adapt) also injects this rendered block
 into its prompt — generate/adapt via `_build_system_prompt`, analyze under its
-own `COACH MEMORY` heading — so the model can `revise`/`reinforce`/`retire` by
+own `COACH LEARNINGS` heading — so the model can `revise`/`reinforce`/`retire` by
 `[id]` instead of blindly re-adding near-duplicates on repeated runs.
 `CoachService.adapt()` applies the deltas at evaluation time (regardless of
 whether the proposed workout changes are later applied).
@@ -222,7 +222,7 @@ from trainmate.coach import coach_service
 **Coach Learnings:** `get_learnings()` (each record annotated with a computed
 `dormant` flag), `add_learning(text, sports='general',
 confidence='tentative')`, `update_learning(id, text)`, `delete_learning(id)`,
-`apply_learning_deltas(deltas)`.  Discrete, addressable athlete-observation
+`apply_learning_deltas(deltas)`. Discrete, addressable athlete-observation
 records (table `coach_learnings`) enriched with sport scope, confidence, and
 recency; updated incrementally via LLM deltas
 (`add`/`revise`/`reinforce`/`retire`). `apply_learning_deltas` runs all ops in
@@ -455,7 +455,7 @@ Flask server at `trainmate_web.py`, runs on port 5000. Static files served from
 | Method      | Path                            | Description                                  |
 |-------------|---------------------------------|----------------------------------------------|
 | GET         | `/api/status`                   | Active goal, latest metrics, coach learnings |
-|             |                                 | (under `coach_memory.learnings`),            |
+|             |                                 | (under `coach_learnings.learnings`),         |
 |             |                                 | macrocycle+mesocycles                        |
 | GET/POST    | `/api/objectives`               | List all / create objective                  |
 | DELETE/PUT  | `/api/objectives/<id>`          | Delete or update objective                   |

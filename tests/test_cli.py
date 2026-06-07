@@ -855,7 +855,7 @@ class TestTrainMateCLI(unittest.TestCase):
         self.assertIn("Macrocycle Focus: aerobic base building", stdout)
         self.assertIn("Base Building Phase", stdout)
         self.assertIn("HRV was stable during peak volume", stdout)
-        self.assertIn("Coach Observations (Saved to memory):", stdout)
+        self.assertIn("Coach Observations (Saved to learnings):", stdout)
         self.assertIn("Responds well to volume", stdout)
         mock_coach.analyze_workouts.assert_called_once_with(
             from_date_str="2026-01-01",
