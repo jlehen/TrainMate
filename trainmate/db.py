@@ -261,24 +261,6 @@ class Database:
                 "WHERE last_reinforced_at IS NULL"
             )
 
-            # One-time migration: seed from the legacy coach_memory blob if present.
-            cursor.execute(
-                "SELECT name FROM sqlite_master WHERE type='table' AND name='coach_memory'"
-            )
-            if cursor.fetchone():
-                cursor.execute("SELECT COUNT(*) AS n FROM coach_learnings")
-                if cursor.fetchone()['n'] == 0:
-                    cursor.execute(
-                        "SELECT value FROM coach_memory WHERE key='athlete_learnings'"
-                    )
-                    row = cursor.fetchone()
-                    if row and row['value'] and row['value'].strip():
-                        now = datetime.now(timezone.utc).isoformat()
-                        cursor.execute(
-                            "INSERT INTO coach_learnings "
-                            "(text, created_at, updated_at, last_reinforced_at) "
-                            "VALUES (?, ?, ?, ?)", (row['value'].strip(), now, now, now)
-                        )
 
             # Macrocycles table
             cursor.execute("""

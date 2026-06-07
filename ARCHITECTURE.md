@@ -227,12 +227,10 @@ records (table `coach_learnings`) enriched with sport scope, confidence, and
 recency; updated incrementally via LLM deltas
 (`add`/`revise`/`reinforce`/`retire`). `apply_learning_deltas` runs all ops in
 one transaction and silently skips malformed deltas (and invalid confidence
-values).  Module-level helpers: `normalize_sports()`, `valid_confidence()`,
+values). Module-level helpers: `normalize_sports()`, `valid_confidence()`,
 `learning_is_dormant()`, constants `CONFIDENCE_LEVELS` /
-`LEARNING_STALENESS_DAYS` (see section 3 for the delta/decay model). A one-time
-migration seeds from the legacy `coach_memory.athlete_learnings` blob if
-present (the old table is left in place, not dropped). Periodization strategy
-lives in the `macrocycles` table, not here.
+`LEARNING_STALENESS_DAYS` (see section 3 for the delta/decay model).
+Periodization strategy lives in the `macrocycles` table, not here.
 
 **Macrocycles/Mesocycles:** `save_macrocycle` (deletes existing for objective,
 then inserts), `get_macrocycle_for_objective(objective_id)`,
@@ -334,9 +332,8 @@ SQLite database at `trainmate.db` (path from `config.db_path`).
 
 ### coach_\learnings
 Discrete, addressable athlete-observation records, updated incrementally via LLM
-deltas (`add`/`revise`/`reinforce`/`retire`). Replaces the legacy key-value
-`coach_memory` table (kept on existing DBs for migration, not dropped). Enriched
-with sport scope, confidence, and recency (see section 3 for the decay model).
+deltas (`add`/`revise`/`reinforce`/`retire`). Enriched with sport scope,
+confidence, and recency (see section 3 for the decay model).
 
 | Column               | Type       | Notes                                                  |
 |----------------------|------------|--------------------------------------------------------|
