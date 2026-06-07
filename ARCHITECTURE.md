@@ -1,8 +1,8 @@
 # TrainMate Architecture & System Manifest
 
-This document is the primary reference for coding agents. Read it before reading source files —
-in most cases it will be sufficient. Read a source file only when you need to change it or when
-a specific detail is not covered here.
+This document is the primary reference for coding agents. Read it before reading
+source files — in most cases it will be sufficient. Read a source file only when you
+need to change it or when a specific detail is not covered here.
 
 ---
 
@@ -41,8 +41,9 @@ be pushed to Google Calendar.
 
 ## 2. Module Map
 
-Every module exposes one **singleton** at module level (see section 6 for the list). UIs and
-tests import the singleton directly — never instantiate the classes themselves.
+Every module exposes one **singleton** at module level (see section 6 for the
+list). UIs and tests import the singleton directly — never instantiate the
+classes themselves.
 
 ### Entry Points
 
@@ -83,12 +84,13 @@ tests import the singleton directly — never instantiate the classes themselves
 `coach.py` contains two classes and one module-level function:
 
 ### `_load_science_guidelines(app_science_dir, science_dir) → str`
-Module-level function. Concatenates all `*.txt` files from `trainmate/science/` (built-in) and
-`science/` (user-provided). Called by `CoachService._load_science_guidelines()`.
+Module-level function. Concatenates all `*.txt` files from `trainmate/science/`
+(built-in) and `science/` (user-provided). Called by
+`CoachService._load_science_guidelines()`.
 
 ### `CoachEngine`
-**Pure business logic — no DB or I/O.** All methods are prefixed `_` (called by `CoachService`
-or directly by tests).
+**Pure business logic — no DB or I/O.** All methods are prefixed `_` (called by
+`CoachService` or directly by tests).
 
 | Method                               | What it does                                        |
 |--------------------------------------|-----------------------------------------------------|
@@ -117,31 +119,36 @@ or directly by tests).
 | `_generate_intermediate_goals(...)`  | LLM call → `{goals[]}` when timeline > 24 weeks.    |
 |                                      | Label: `generate_intermediate_goals`.               |
 
-**Coach learnings via deltas:** `_generate_workouts_logic`, `_analyze_workouts_logic`, and
-`_adapt_logic` emit a `learning_updates` array (shared prompt field `LEARNING_UPDATES_FIELD`) of
-incremental ops rather than a full learnings blob. The app owns the merge via
-`CoachService._apply_learning_updates()` → `db.apply_learning_deltas()`, so a model that omits an
-existing learning cannot lose it. Each learning carries a **sport scope** (`sports`: comma-list or
-`general`) and a **confidence** level (`tentative` | `moderate` | `established`). The four ops:
+**Coach learnings via deltas:** `_generate_workouts_logic`,
+`_analyze_workouts_logic`, and `_adapt_logic` emit a `learning_updates` array
+(shared prompt field `LEARNING_UPDATES_FIELD`) of incremental ops rather than a
+full learnings blob. The app owns the merge via
+`CoachService._apply_learning_updates()` → `db.apply_learning_deltas()`, so a
+model that omits an existing learning cannot lose it. Each learning carries a
+**sport scope** (`sports`: comma-list or `general`) and a **confidence** level
+(`tentative` | `moderate` | `established`). The four ops:
 - `{"op": "add", text, sports?, confidence?}` — new record (defaults `general`/`tentative`).
 - `{"op": "revise", id, text?, sports?, confidence?}` — change supplied fields; refreshes recency.
 - `{"op": "reinforce", id, confidence?}` — reaffirm without rewording; refreshes recency.
 - `{"op": "retire", id}` — hard delete.
 
-**Decay (soft):** a learning is *dormant* once it goes unreinforced past a confidence-based budget
-(`db.LEARNING_STALENESS_DAYS`: tentative 21d / moderate 60d / established 180d), computed by
-`db.learning_is_dormant()`. `get_learnings()` annotates each record with a `dormant` flag; dormant
-records stay in the DB and show in `status` (marked) but are **excluded from prompts** until a
-`revise`/`reinforce` refreshes them. `CoachService._get_learnings_text()` renders only active
-learnings as `[id|sports|confidence] text`. Every flow that emits `learning_updates` (generate,
-analyze, adapt) also injects this rendered block into its prompt — generate/adapt via
-`_build_system_prompt`, analyze under its own `COACH MEMORY` heading — so the model can
-`revise`/`reinforce`/`retire` by `[id]` instead of blindly re-adding near-duplicates on repeated
-runs. `CoachService.adapt()` applies the deltas at evaluation time (regardless of whether the
-proposed workout changes are later applied).
+**Decay (soft):** a learning is *dormant* once it goes unreinforced past a
+confidence-based budget (`db.LEARNING_STALENESS_DAYS`: tentative 21d / moderate
+60d / established 180d), computed by `db.learning_is_dormant()`. `get_learnings()`
+annotates each record with a `dormant` flag; dormant records stay in the DB and
+show in `status` (marked) but are **excluded from prompts** until a
+`revise`/`reinforce` refreshes them. `CoachService._get_learnings_text()` renders
+only active learnings as `[id|sports|confidence] text`. Every flow that emits
+`learning_updates` (generate, analyze, adapt) also injects this rendered block
+into its prompt — generate/adapt via `_build_system_prompt`, analyze under its
+own `COACH MEMORY` heading — so the model can `revise`/`reinforce`/`retire` by
+`[id]` instead of blindly re-adding near-duplicates on repeated runs.
+`CoachService.adapt()` applies the deltas at evaluation time (regardless of
+whether the proposed workout changes are later applied).
 
 ### `CoachService`
-**Orchestrator — owns all DB and calendar access.** Exposes the public API called by the UIs.
+**Orchestrator — owns all DB and calendar access.** Exposes the public API
+called by the UIs.
 
 | Method                                              | What it does                                                        |
 |-----------------------------------------------------|---------------------------------------------------------------------|
@@ -181,49 +188,58 @@ from trainmate.coach import coach_service
 
 **File:** `trainmate/db.py` · **Singleton:** `db = Database()`
 
-- Every method opens a fresh `sqlite3` connection (context manager), commits, and closes.
-- `foreign_keys = ON` is set on every connection; cascades are used on macrocycles→mesocycles.
-- `save_workout(date, sport_type, ...)` is an **upsert**: it looks up by `(date, sport_type)`
-  and updates if found, inserts otherwise. The `google_event_id` is preserved unless explicitly
-  passed.
-- `clear_future_workouts(from_date)` deletes future workouts with `status != 'synced'`.
+- Every method opens a fresh `sqlite3` connection (context manager), commits,
+  and closes.
+- `foreign_keys = ON` is set on every connection; cascades are used on
+  macrocycles→mesocycles.
+- `save_workout(date, sport_type, ...)` is an **upsert**: it looks up by
+  `(date, sport_type)` and updates if found, inserts otherwise. The
+  `google_event_id` is preserved unless explicitly passed.
+- `clear_future_workouts(from_date)` deletes future workouts with `status !=
+  'synced'`.
 
 ### Key methods by domain
 
-**Objectives:** `add_objective`, `get_objectives(status=)`, `get_objective(id)`,
-`update_objective(id, **kwargs)`, `delete_objective`, `wipe_objectives`
+**Objectives:** `add_objective`, `get_objectives(status=)`,
+`get_objective(id)`, `update_objective(id, **kwargs)`, `delete_objective`,
+`wipe_objectives`
 
-**Life Events:** `add_lifeevent`, `get_lifeevents(start_after=)`, `get_lifeevent(id)`,
-`update_lifeevent(id, **kwargs)`, `delete_lifeevent`, `wipe_lifeevents`
+**Life Events:** `add_lifeevent`, `get_lifeevents(start_after=)`,
+`get_lifeevent(id)`, `update_lifeevent(id, **kwargs)`, `delete_lifeevent`,
+`wipe_lifeevents`
 
 **Workouts:** `save_workout` (upsert), `get_workout(date, sport_type)`,
-`get_workouts(start_date, end_date, sport_type)`,
-`get_workout_by_id(id)`, `delete_workout_by_id`, `clear_future_workouts`, `wipe_workouts`
+`get_workouts(start_date, end_date, sport_type)`, `get_workout_by_id(id)`,
+`delete_workout_by_id`, `clear_future_workouts`, `wipe_workouts`
 
 **Completed Activities:** `save_completed_activity` (upsert on `activity_id`),
 `get_completed_activities(start_date, end_date)`
 
-**Metrics & Baselines:** `save_metric_cache` (upsert), `get_metrics_cache(start_date, end_date)`,
-`save_baseline`, `get_baseline(date)` (returns closest prior baseline), `wipe_metrics`
+**Metrics & Baselines:** `save_metric_cache` (upsert),
+`get_metrics_cache(start_date, end_date)`, `save_baseline`,
+`get_baseline(date)` (returns closest prior baseline), `wipe_metrics`
 
-**Coach Learnings:** `get_learnings()` (each record annotated with a computed `dormant` flag),
-`add_learning(text, sports='general', confidence='tentative')`, `update_learning(id, text)`,
-`delete_learning(id)`, `apply_learning_deltas(deltas)`. Discrete, addressable athlete-observation
-records (table `coach_learnings`) enriched with sport scope, confidence, and recency; updated
-incrementally via LLM deltas (`add`/`revise`/`reinforce`/`retire`). `apply_learning_deltas` runs
-all ops in one transaction and silently skips malformed deltas (and invalid confidence values).
-Module-level helpers: `normalize_sports()`, `valid_confidence()`, `learning_is_dormant()`,
-constants `CONFIDENCE_LEVELS` / `LEARNING_STALENESS_DAYS` (see section 3 for the delta/decay
-model). A one-time migration seeds from the legacy `coach_memory.athlete_learnings` blob if present
-(the old table is left in place, not dropped). Periodization strategy lives in the `macrocycles`
-table, not here.
+**Coach Learnings:** `get_learnings()` (each record annotated with a computed
+`dormant` flag), `add_learning(text, sports='general',
+confidence='tentative')`, `update_learning(id, text)`, `delete_learning(id)`,
+`apply_learning_deltas(deltas)`.  Discrete, addressable athlete-observation
+records (table `coach_learnings`) enriched with sport scope, confidence, and
+recency; updated incrementally via LLM deltas
+(`add`/`revise`/`reinforce`/`retire`). `apply_learning_deltas` runs all ops in
+one transaction and silently skips malformed deltas (and invalid confidence
+values).  Module-level helpers: `normalize_sports()`, `valid_confidence()`,
+`learning_is_dormant()`, constants `CONFIDENCE_LEVELS` /
+`LEARNING_STALENESS_DAYS` (see section 3 for the delta/decay model). A one-time
+migration seeds from the legacy `coach_memory.athlete_learnings` blob if
+present (the old table is left in place, not dropped). Periodization strategy
+lives in the `macrocycles` table, not here.
 
-**Macrocycles/Mesocycles:** `save_macrocycle` (deletes existing for objective, then inserts),
-`get_macrocycle_for_objective(objective_id)`, `get_last_macrocycle()`,
-`get_mesocycles_for_macrocycle(macrocycle_id)`, `get_mesocycle(id)`,
-`update_macrocycle_feedback(id, feedback)`, `update_mesocycle_feedback(id, feedback)`,
-`update_macrocycle_config_hash(id, hash)`, `delete_macrocycle_for_objective`,
-`wipe_plans`
+**Macrocycles/Mesocycles:** `save_macrocycle` (deletes existing for objective,
+then inserts), `get_macrocycle_for_objective(objective_id)`,
+`get_last_macrocycle()`, `get_mesocycles_for_macrocycle(macrocycle_id)`,
+`get_mesocycle(id)`, `update_macrocycle_feedback(id, feedback)`,
+`update_mesocycle_feedback(id, feedback)`, `update_macrocycle_config_hash(id,
+hash)`, `delete_macrocycle_for_objective`, `wipe_plans`
 
 ---
 
@@ -317,10 +333,10 @@ SQLite database at `trainmate.db` (path from `config.db_path`).
 | `sleep_baseline_std`        | REAL    |
 
 ### coach_\learnings
-Discrete, addressable athlete-observation records, updated incrementally via LLM deltas
-(`add`/`revise`/`reinforce`/`retire`). Replaces the legacy key-value `coach_memory` table (kept on
-existing DBs for migration, not dropped). Enriched with sport scope, confidence, and recency
-(see section 3 for the decay model).
+Discrete, addressable athlete-observation records, updated incrementally via LLM
+deltas (`add`/`revise`/`reinforce`/`retire`). Replaces the legacy key-value
+`coach_memory` table (kept on existing DBs for migration, not dropped). Enriched
+with sport scope, confidence, and recency (see section 3 for the decay model).
 
 | Column               | Type       | Notes                                                  |
 |----------------------|------------|--------------------------------------------------------|
@@ -371,9 +387,10 @@ from trainmate.google_sheets import sheets_reader   # GarminSheetsReader
 from trainmate.google_calendar import calendar_syncer  # CalendarSyncer
 ```
 
-For tests, the DB singleton can be overridden by patching the module-level `db` variable in
-affected modules (see `tests/test_adaptation.py` for the pattern: assign `test_db` to
-`trainmate.coach.db`, `trainmate.google_sheets.db`, etc. before importing the singletons).
+For tests, the DB singleton can be overridden by patching the module-level `db`
+variable in affected modules (see `tests/test_adaptation.py` for the pattern:
+assign `test_db` to `trainmate.coach.db`, `trainmate.google_sheets.db`, etc.
+before importing the singletons).
 
 ---
 
@@ -432,7 +449,8 @@ Handler functions are named `run_<command>_<subcommand>()` in `trainmate_cli.py`
 
 ## 8. Web API Endpoints
 
-Flask server at `trainmate_web.py`, runs on port 5000. Static files served from `static/`.
+Flask server at `trainmate_web.py`, runs on port 5000. Static files served from
+`static/`.
 
 | Method      | Path                            | Description                                  |
 |-------------|---------------------------------|----------------------------------------------|
@@ -478,80 +496,98 @@ Required fields:
 |                         |      | than `UNPLANNED` (yellow) in `workout compare`.              |
 | `user_profile`          | dict | Must contain `lthr` or `ftp` (see below)                     |
 
-`user_profile` keys: `name`, `birth_year`, `max_hr`, `lthr`, `ftp`, `weekly_target_hours`,
-`sport_preferences`, `chronic_injuries`, `preferences`, `equipment`, `weekly_schedule`.
-`weekly_schedule` maps day names to `{total_available_hours, max_sessions, certainty_percent, equipment}`.
+`user_profile` keys: `name`, `birth_year`, `max_hr`, `lthr`, `ftp`,
+`weekly_target_hours`, `sport_preferences`, `chronic_injuries`, `preferences`,
+`equipment`, `weekly_schedule`. `weekly_schedule` maps day names to
+`{total_available_hours, max_sessions, certainty_percent, equipment}`.
 
 ---
 
 ## 10. Key Data Flows
 
 ### Plan Generation (`plan generate`)
-1. `CoachService.generate_periodization_plan()` fetches active objectives + life events.
+1. `CoachService.generate_periodization_plan()` fetches active objectives +
+   life events.
 2. Computes `goals_hash`, `lifeevents_hash`, `config_hash`.
 3. If existing macrocycle has matching hashes and `force=False` → reuse.
-4. Otherwise: calls `CoachEngine._generate_macrocycle_strategy()` → LLM → `{strategy, mesocycles}`.
-5. If timeline > 24 weeks: calls `CoachEngine._generate_intermediate_goals()` first, saves
-   intermediate objectives, then re-runs with the first goal.
-6. Saves new macrocycle + mesocycles to DB (old ones deleted via `save_macrocycle`).
+4. Otherwise: calls `CoachEngine._generate_macrocycle_strategy()` → LLM →
+   `{strategy, mesocycles}`.
+5. If timeline > 24 weeks: calls `CoachEngine._generate_intermediate_goals()`
+   first, saves intermediate objectives, then re-runs with the first goal.
+6. Saves new macrocycle + mesocycles to DB (old ones deleted via
+   `save_macrocycle`).
 
 ### Workout Generation (`workout generate`)
 1. CLI resolves the generation horizon (end date) from flags in priority order:
-   `--days` / `--weeks` → `--until DATE` → `--until-goal [ID]` → `--until-mesocycle ID` →
-   `config.workout_generate_days` (default 28).
-2. `CoachService.generate_workouts(end_date=...)` verifies a macrocycle exists, computes
-   `num_days` from `(end_date − today)`.
+   `--days` / `--weeks` → `--until DATE` → `--until-goal [ID]` →
+   `--until-mesocycle ID` → `config.workout_generate_days` (default 28).
+2. `CoachService.generate_workouts(end_date=...)` verifies a macrocycle exists,
+   computes `num_days` from `(end_date − today)`.
 3. Fetches metrics history (last `metrics_history_days` days) + baseline.
 4. Calls `CoachEngine._generate_workouts_logic(num_days=...)` → LLM →
    `{reasoning, learning_updates[], workouts[]}`.
-5. Applies `learning_updates` deltas to `coach_learnings` (`_apply_learning_updates`).
-6. Clears future unsynced workouts (`clear_future_workouts`), then saves new workouts.
+5. Applies `learning_updates` deltas to `coach_learnings`
+   (`_apply_learning_updates`).
+6. Clears future unsynced workouts (`clear_future_workouts`), then saves new
+   workouts.
 
 ### Daily Adaptation (`workout adapt`)
-1. `CoachService.adapt()` fetches metrics + planned workouts + completed activities in window.
-2. `analyze_adherence()` (`adherence.py`) computes discrepancies (misses, duration/load mismatches,
-   rest violations).
-3. Finds active mesocycle for the target date → sets `meso_end_date` for adaptation range.
-4. Calls `CoachEngine._adapt_logic()` → LLM →
-   `{change_needed, reason, learning_updates[], adapted_workouts[]}`.
-5. Applies `learning_updates` deltas to `coach_learnings` (`_apply_learning_updates`) — at
-   evaluation time, independent of whether the workout changes are applied.
+1. `CoachService.adapt()` fetches metrics + planned workouts + completed
+   activities in window.
+2. `analyze_adherence()` (`adherence.py`) computes discrepancies (misses,
+   duration/load mismatches, rest violations).
+3. Finds active mesocycle for the target date → sets `meso_end_date` for
+   adaptation range.
+4. Calls `CoachEngine._adapt_logic()` → LLM → `{change_needed, reason,
+   learning_updates[], adapted_workouts[]}`.
+5. Applies `learning_updates` deltas to `coach_learnings`
+   (`_apply_learning_updates`) — at evaluation time, independent of whether the
+   workout changes are applied.
 6. Returns `(reason, proposed_workouts)` — caller decides whether to apply.
-7. If applied: `apply_adaptations()` deletes overridden calendar events + DB rows, saves adapted
-   workouts with `status='modified'`, syncs to Calendar.
+7. If applied: `apply_adaptations()` deletes overridden calendar events + DB
+   rows, saves adapted workouts with `status='modified'`, syncs to Calendar.
 
 ### Data Pull (`data pull`)
-1. `GarminSheetsReader.sync_data()` fetches "Daily Metrics" and "Activities" sheets.
-2. For each day: saves `athlete_metrics_cache` with ACWR computed over 7/28-day windows.
-3. Computes 28-day rolling baseline (RHR, HRV, sleep mean/std) and saves to `athlete_baselines`.
-4. RPE and TSS are read from the sheet; if missing, estimated from `avg_hr` / `lthr`.
-5. `bike_avg_watts` and `zone1_sec`–`zone5_sec` are read from the sheet and stored as-is
-   (NULL when absent). These are included verbatim in the LLM-facing activity formatter
-   (`format_completed_activities` in `coach.py`).
+1. `GarminSheetsReader.sync_data()` fetches "Daily Metrics" and "Activities"
+   sheets.
+2. For each day: saves `athlete_metrics_cache` with ACWR computed over 7/28-day
+   windows.
+3. Computes 28-day rolling baseline (RHR, HRV, sleep mean/std) and saves to
+   `athlete_baselines`.
+4. RPE and TSS are read from the sheet; if missing, estimated from `avg_hr` /
+   `lthr`.
+5. `bike_avg_watts` and `zone1_sec`–`zone5_sec` are read from the sheet and
+   stored as-is (NULL when absent). These are included verbatim in the
+   LLM-facing activity formatter (`format_completed_activities` in `coach.py`).
 
 ### Data Analysis (`data analyze`)
-1. `CoachService.analyze_workouts()` determines target start/end dates automatically based on
-   active and preceding goals if date range parameters are omitted.
-2. Queries the database for completed activities and physiological metrics for that date range.
-3. Groups metrics and activities week-by-week using Monday-commencing ISO weeks.
-4. Queries `CoachEngine._analyze_workouts_logic()` -> LLM -> `{macrocycle_summary,
-   inferred_macrocycle, inferred_mesocycles[], physiological_insights[],
-   learning_updates[]}`.
-5. Applies `learning_updates` deltas to `coach_learnings` (`_apply_learning_updates`).
+1. `CoachService.analyze_workouts()` determines target start/end dates
+   automatically based on active and preceding goals if date range parameters
+   are omitted.
+2. Queries the database for completed activities and physiological metrics for
+   that date range.
+3. Groups metrics and activities week-by-week using Monday-commencing ISO
+   weeks.
+4. Queries `CoachEngine._analyze_workouts_logic()` -> LLM ->
+   `{macrocycle_summary, inferred_macrocycle, inferred_mesocycles[],
+   physiological_insights[], learning_updates[]}`.
+5. Applies `learning_updates` deltas to `coach_learnings`
+   (`_apply_learning_updates`).
 
 ---
 
 ## 11. Terminology: Plans vs. Workouts
 
-- **Plan** = periodization strategy: one macrocycle (per objective) + mesocycle blocks.
-  Commands: `plan generate/show/rm/feedback`.
+- **Plan** = periodization strategy: one macrocycle (per objective) + mesocycle
+  blocks.  Commands: `plan generate/show/rm/feedback`.
 - **Workouts** = daily microcycle activities implementing the mesocycle focus.
   Commands: `workout generate/adapt/push`.
 
-Plan must be generated before workouts. Workouts cover a rolling window from today whose length
-is controlled by the horizon flags on `workout generate` (default: `workout_generate_days` in
-`config.yaml`, falling back to 28 days). `replan()` calls `generate_periodization_plan` then
-`generate_workouts` in one step (always uses the config default).
+Plan must be generated before workouts. Workouts cover a rolling window from
+today whose length is controlled by the horizon flags on `workout generate`
+(default: `workout_generate_days` in `config.yaml`, falling back to 28 days).
+`replan()` calls `generate_periodization_plan` then `generate_workouts` in one
+step (always uses the config default).
 
 ---
 
@@ -578,13 +614,16 @@ ACWR = Acute / Chronic
 
 ### Daily Readiness Signals
 - HRV drops > 1 std below baseline mean → flag potential overtraining
-- RHR rises > 1 std above baseline mean (min +3 bpm) → flag potential overtraining
-- `workout adapt` acts on these signals over the rolling `metrics_history_days` window.
+- RHR rises > 1 std above baseline mean (min +3 bpm) → flag potential
+  overtraining
+- `workout adapt` acts on these signals over the rolling `metrics_history_days`
+  window.
 
 ### Science Guidelines Files
-- `trainmate/science/` — built-in: `acwr.txt`, `periodization.txt`, `recovery_metrics.txt`
-- `science/` — user-provided; empty by default; any `.txt` files added here are injected into
-  every LLM prompt.
+- `trainmate/science/` — built-in: `acwr.txt`, `periodization.txt`,
+  `recovery_metrics.txt`
+- `science/` — user-provided; empty by default; any `.txt` files added here are
+  injected into every LLM prompt.
 
 ---
 
@@ -604,8 +643,9 @@ venv/bin/python -m unittest discover -s tests -p "test_*.py"
 | `tests/test_sheets.py`         | Google Sheets sync logic                                        |
 | `tests/test_utils.py`          | `adherence.py` + `util.py` helpers                              |
 
-Tests inject a fresh in-memory SQLite DB by assigning `test_db` to module-level `db` variables
-*before* importing the singletons. `openrouter_client` is mocked via `@patch`.
+Tests inject a fresh in-memory SQLite DB by assigning `test_db` to module-level
+`db` variables *before* importing the singletons. `openrouter_client` is mocked
+via `@patch`.
 
 Integration / manual test scripts (not part of the test suite):
 - `tests/run_integration.py`, `tests/run_sheets.py`, `tests/run_calendar.py`
