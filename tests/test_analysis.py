@@ -132,6 +132,27 @@ class TestWorkoutAnalysis(unittest.TestCase):
         self.assertIn("FTP Race Test", user_payload)
         self.assertIn("avg_hrv\": 75.0", user_payload)
 
+    @patch("trainmate.coach.openrouter_client")
+    def test_existing_learnings_injected_into_prompt(self, mock_client):
+        # Existing observations must appear in the analyze prompt (with ids) so the
+        # model can revise/reinforce them instead of only re-adding duplicates.
+        lid = test_db.add_learning(
+            "Recovers slowly after back-to-back hard days",
+            sports="running", confidence="moderate"
+        )
+        mock_client.complete.return_value = {
+            "macrocycle_summary": "x", "learning_updates": []
+        }
+
+        coach_service.analyze_workouts(
+            from_date_str="2026-06-01", until_date_str="2026-06-07"
+        )
+
+        system_prompt = mock_client.complete.call_args[0][0]
+        self.assertIn("COACH MEMORY", system_prompt)
+        self.assertIn(f"[{lid}|running|moderate]", system_prompt)
+        self.assertIn("Recovers slowly after back-to-back hard days", system_prompt)
+
 
 if __name__ == "__main__":
     unittest.main()

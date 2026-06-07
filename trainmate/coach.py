@@ -662,6 +662,7 @@ Adherence Discrepancies & Violations:
         self, objectives: List[Objective], guidelines: str,
         profile: Optional[Dict[str, Any]],
         weekly_summaries: List[Dict[str, Any]],
+        learnings: str,
         context: Optional[str] = None
     ) -> Dict[str, Any]:
         """Queries LLM to reverse-engineer training cycles from weekly summaries."""
@@ -723,6 +724,14 @@ Adherence Discrepancies & Violations:
         system_prompt += (
             f"\nATHLETE GOALS IN OR AFTER THIS PERIOD:\n"
             f"{obj_text if obj_text else 'No objectives.'}\n"
+        )
+
+        # Show existing observations so the model can revise/reinforce/retire them by
+        # [id] rather than only re-adding near-duplicates on every run.
+        system_prompt += (
+            "\nCOACH MEMORY — existing athlete observations "
+            "(reference by [id] when revising, reinforcing, or retiring):\n"
+            f"{learnings}\n"
         )
 
         system_prompt += f"\n{custom_task}\n"
@@ -1582,6 +1591,7 @@ class CoachService:
             guidelines=guidelines,
             profile=profile,
             weekly_summaries=weekly_summaries,
+            learnings=self._get_learnings_text(),
             context=context
         )
 

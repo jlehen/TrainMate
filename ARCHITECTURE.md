@@ -134,7 +134,10 @@ existing learning cannot lose it. Each learning carries a **sport scope** (`spor
 `db.learning_is_dormant()`. `get_learnings()` annotates each record with a `dormant` flag; dormant
 records stay in the DB and show in `status` (marked) but are **excluded from prompts** until a
 `revise`/`reinforce` refreshes them. `CoachService._get_learnings_text()` renders only active
-learnings as `[id|sports|confidence] text`.
+learnings as `[id|sports|confidence] text`. Every flow that emits `learning_updates` (generate and
+analyze) also injects this rendered block into its prompt — generate/adapt via `_build_system_prompt`,
+analyze under its own `COACH MEMORY` heading — so the model can `revise`/`reinforce`/`retire` by
+`[id]` instead of blindly re-adding near-duplicates on repeated runs.
 
 ### `CoachService`
 **Orchestrator — owns all DB and calendar access.** Exposes the public API called by the UIs.
