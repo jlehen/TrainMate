@@ -1,6 +1,6 @@
 # Code
 - Read ARCHITECTURE.md to ramp up on the code structure.
-- When changing code, update ARCHITECTURE.md if appropriate.
+- When changing code, always update ARCHITECTURE.md if appropriate.
 
 # VCS policy
 - Never commits without being explicitly asked by the user.
