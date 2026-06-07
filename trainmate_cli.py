@@ -415,6 +415,32 @@ def main() -> None:
         help="Push workouts for a goal's plan duration (uses active goal if ID omitted)"
     )
 
+    # workout swap
+    w_swap = workout_subparsers.add_parser(
+        "swap", aliases=["s"],
+        help="Swap workouts between two dates (or two IDs), with recovery checks"
+    )
+    w_swap.add_argument(
+        "date1", nargs="?", help="First date to swap (YYYY-MM-DD)"
+    )
+    w_swap.add_argument(
+        "date2", nargs="?", help="Second date to swap (YYYY-MM-DD)"
+    )
+    w_swap.add_argument(
+        "--id1", type=int, help="First workout ID (use together with --id2)"
+    )
+    w_swap.add_argument(
+        "--id2", type=int, help="Second workout ID (use together with --id1)"
+    )
+    w_swap.add_argument(
+        "--no-sync", action="store_true", dest="no_sync",
+        help="Do not sync the swapped workouts to Google Calendar"
+    )
+    w_swap.add_argument(
+        "-y", "--force", action="store_true", dest="force",
+        help="Apply the swap without prompting, even if warnings are raised"
+    )
+
 
 
     # workout wipe
@@ -545,6 +571,8 @@ def main() -> None:
             run_workout_adapt(args)
         elif sub in ("push", "p"):
             run_workout_push(args)
+        elif sub in ("swap", "s"):
+            run_workout_swap(args)
         elif sub == "wipe":
             run_workout_wipe(args)
     elif cmd in ("data", "d"):
@@ -1850,6 +1878,94 @@ def run_workout_rm(args: argparse.Namespace) -> None:
     print(green(
         f"Workout with ID {args.id} ('{workout['title']}') removed successfully."
     ))
+
+
+def _resolve_swap_ops(args: argparse.Namespace) -> list | None:
+    """Turns CLI args into swap operations, or returns None on a usage/lookup error."""
+    using_ids = args.id1 is not None or args.id2 is not None
+    using_dates = bool(args.date1 or args.date2)
+
+    if using_ids and using_dates:
+        print(red("Provide either two dates or --id1/--id2, not both."))
+        return None
+
+    if using_ids:
+        if args.id1 is None or args.id2 is None:
+            print(red("Both --id1 and --id2 are required for an ID-based swap."))
+            return None
+        w1 = db.get_workout_by_id(args.id1)
+        w2 = db.get_workout_by_id(args.id2)
+        if not w1:
+            print(red(f"Workout with ID {args.id1} not found."))
+            return None
+        if not w2:
+            print(red(f"Workout with ID {args.id2} not found."))
+            return None
+        if w1['date'] == w2['date']:
+            print(yellow("Both workouts are already on the same date; nothing to swap."))
+            return None
+        print(
+            f"Swapping [{w1['id']}] {w1['title']} ({w1['date']}) <-> "
+            f"[{w2['id']}] {w2['title']} ({w2['date']})"
+        )
+        return [
+            {'id': w1['id'], 'new_date': w2['date']},
+            {'id': w2['id'], 'new_date': w1['date']},
+        ]
+
+    if args.date1 and args.date2:
+        for d in (args.date1, args.date2):
+            try:
+                datetime.strptime(d, "%Y-%m-%d")
+            except ValueError:
+                print(red(f"Invalid date format: '{d}'. Use YYYY-MM-DD."))
+                return None
+        if args.date1 == args.date2:
+            print(yellow("The two dates are identical; nothing to swap."))
+            return None
+        on_1 = db.get_workouts(start_date=args.date1, end_date=args.date1)
+        on_2 = db.get_workouts(start_date=args.date2, end_date=args.date2)
+        if not on_1 and not on_2:
+            print(yellow(
+                f"No workouts on either {args.date1} or {args.date2}; nothing to swap."
+            ))
+            return None
+        desc_1 = ", ".join(w['title'] for w in on_1) or "(rest)"
+        desc_2 = ", ".join(w['title'] for w in on_2) or "(rest)"
+        print(f"Swapping {args.date1} [{desc_1}] <-> {args.date2} [{desc_2}]")
+        return (
+            [{'id': w['id'], 'new_date': args.date2} for w in on_1]
+            + [{'id': w['id'], 'new_date': args.date1} for w in on_2]
+        )
+
+    print(red("Specify two dates (e.g. 'workout swap 2026-06-09 2026-06-11') "
+              "or --id1 and --id2."))
+    return None
+
+
+def run_workout_swap(args: argparse.Namespace) -> None:
+    """Exchanges workouts between two dates or two IDs, with recovery validation."""
+    ops = _resolve_swap_ops(args)
+    if not ops:
+        return
+
+    warnings = coach_service.validate_swap(ops)
+    if warnings:
+        print(bold(yellow("\nSwap warnings:")))
+        for msg in warnings:
+            print(yellow(f"  - {msg}"))
+        if not args.force:
+            confirm = input("\nProceed with the swap anyway? [y/N]: ").strip().lower()
+            if confirm != 'y':
+                print("\nSwap cancelled.")
+                return
+
+    updated = coach_service.apply_swap(ops, args.no_sync)
+    print(green(f"\nSwapped {len(updated)} workout(s) successfully."))
+    for w in updated:
+        print(f"  [{w['id']}] {w['title']} -> {w['date']}")
+    if args.no_sync:
+        print(gray("Calendar sync skipped (--no-sync)."))
 
 
 def run_workout_wipe(args: argparse.Namespace) -> None:

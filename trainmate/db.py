@@ -555,6 +555,18 @@ class Database:
             conn.cursor().execute("DELETE FROM workouts WHERE id = ?", (workout_id,))
             conn.commit()
 
+    def update_workout_date(
+        self, workout_id: int, new_date: str, modification_reason: str
+    ) -> None:
+        """Moves a workout to a new date, flagging it as modified and recording why."""
+        with self._get_connection() as conn:
+            conn.execute(
+                "UPDATE workouts SET date = ?, status = 'modified', "
+                "modification_reason = ? WHERE id = ?",
+                (new_date, modification_reason, workout_id)
+            )
+            conn.commit()
+
     # --- Completed Activities ---
     def save_completed_activity(
         self, activity_id: str, date: str, start_time: Optional[str],

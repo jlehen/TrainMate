@@ -436,6 +436,10 @@ Handler functions are named `run_<command>_<subcommand>()` in `trainmate_cli.py`
 | `workout`    | `rm`         | `w r`    | Remove workout by ID                                                     |
 | `workout`    | `adapt`      | `w a`    | Run daily adaptation check (`--date YYYY-MM-DD`, `-y` auto-apply)        |
 | `workout`    | `push`       | `w p`    | Sync planned workouts to Google Calendar                                 |
+| `workout`    | `swap`       | `w s`    | Swap workouts between two dates (`<date1> <date2>`) or two IDs           |
+|              |              |          | (`--id1 X --id2 Y`). Runs recovery checks (consecutive hard             |
+|              |              |          | days, weekly load spikes, mesocycle crossings) and prompts on           |
+|              |              |          | warnings unless `-y`/`--force`. Syncs to Calendar unless `--no-sync`.    |
 | `workout`    | `wipe`       | —        | Delete all workouts                                                      |
 | `data`       | `pull`       | `d pull` | Fetch Garmin metrics and activities from Google Sheets                  |
 | `data`       | `analyze`    | `d a`    | Analyze completed workouts/metrics to detect cycles                      |
@@ -578,7 +582,15 @@ Required fields:
 - **Plan** = periodization strategy: one macrocycle (per objective) + mesocycle
   blocks.  Commands: `plan generate/show/rm/feedback`.
 - **Workouts** = daily microcycle activities implementing the mesocycle focus.
-  Commands: `workout generate/adapt/push`.
+  Commands: `workout generate/adapt/push/swap`.
+
+A `workout swap` exchanges the dates of two workouts (or moves one onto an empty
+rest day). Moved workouts are flagged `status='modified'` with a
+`modification_reason` recording the swap, exactly like an adaptation — so they are
+re-synced by `workout push` and visibly distinguished from untouched `planned`
+ones. Swaps are validated first (`CoachService.validate_swap`): the new schedule is
+simulated and the user is warned about newly-created >2-day high-intensity streaks,
+weekly load spikes (an ACWR proxy), and mesocycle-boundary crossings.
 
 Plan must be generated before workouts. Workouts cover a rolling window from
 today whose length is controlled by the horizon flags on `workout generate`

@@ -451,6 +451,83 @@ class TestTrainMateCLI(unittest.TestCase):
         self.assertIn("Syncing 1 workouts to Google Calendar", stdout)
         mock_calendar.sync_multiple.assert_called_once()
 
+    @patch("trainmate_cli.coach_service")
+    def test_workout_swap_by_date(self, mock_coach):
+        mock_coach.validate_swap.return_value = []
+        mock_coach.apply_swap.return_value = [
+            {"id": 1, "title": "Run A", "date": "2026-06-12"},
+            {"id": 2, "title": "Ride B", "date": "2026-06-10"},
+        ]
+        a = test_db.save_workout(
+            date="2026-06-10", sport_type="running", title="Run A",
+            description="easy", status="planned", rpe=4, tss=30,
+        )
+        b = test_db.save_workout(
+            date="2026-06-12", sport_type="road_biking", title="Ride B",
+            description="easy", status="planned", rpe=4, tss=30,
+        )
+        exit_code, stdout, stderr = self.run_cli(
+            ["workout", "swap", "2026-06-10", "2026-06-12"]
+        )
+        self.assertEqual(exit_code, 0)
+        self.assertIn("Swapped 2 workout(s) successfully", stdout)
+        # Each date's workout is moved to the other date.
+        ops, no_sync = mock_coach.apply_swap.call_args[0]
+        self.assertCountEqual(ops, [
+            {"id": a, "new_date": "2026-06-12"},
+            {"id": b, "new_date": "2026-06-10"},
+        ])
+        self.assertFalse(no_sync)
+
+    @patch("trainmate_cli.coach_service")
+    def test_workout_swap_by_id_no_sync(self, mock_coach):
+        mock_coach.validate_swap.return_value = []
+        mock_coach.apply_swap.return_value = []
+        a = test_db.save_workout(
+            date="2026-06-10", sport_type="running", title="Run A",
+            description="easy", status="planned", rpe=4, tss=30,
+        )
+        b = test_db.save_workout(
+            date="2026-06-12", sport_type="road_biking", title="Ride B",
+            description="easy", status="planned", rpe=4, tss=30,
+        )
+        exit_code, stdout, stderr = self.run_cli(
+            ["workout", "swap", "--id1", str(a), "--id2", str(b), "--no-sync"]
+        )
+        self.assertEqual(exit_code, 0)
+        self.assertIn("Calendar sync skipped", stdout)
+        ops, no_sync = mock_coach.apply_swap.call_args[0]
+        self.assertCountEqual(ops, [
+            {"id": a, "new_date": "2026-06-12"},
+            {"id": b, "new_date": "2026-06-10"},
+        ])
+        self.assertTrue(no_sync)
+
+    @patch("trainmate_cli.coach_service")
+    def test_workout_swap_warning_declined(self, mock_coach):
+        mock_coach.validate_swap.return_value = ["Creates 3 consecutive high days"]
+        a = test_db.save_workout(
+            date="2026-06-10", sport_type="running", title="Run A",
+            description="easy", status="planned", rpe=8, tss=90,
+        )
+        b = test_db.save_workout(
+            date="2026-06-12", sport_type="road_biking", title="Ride B",
+            description="easy", status="planned", rpe=8, tss=90,
+        )
+        # Default input is "n": the swap is cancelled and never applied.
+        exit_code, stdout, stderr = self.run_cli(
+            ["workout", "swap", "2026-06-10", "2026-06-12"]
+        )
+        self.assertEqual(exit_code, 0)
+        self.assertIn("Swap warnings", stdout)
+        self.assertIn("Swap cancelled", stdout)
+        mock_coach.apply_swap.assert_not_called()
+
+    def test_workout_swap_missing_args(self):
+        exit_code, stdout, stderr = self.run_cli(["workout", "swap", "2026-06-10"])
+        self.assertEqual(exit_code, 0)
+        self.assertIn("Specify two dates", stdout)
+
     @patch("trainmate_cli.sheets_reader")
     def test_data_pull_command(self, mock_sheets_reader):
         exit_code, stdout, stderr = self.run_cli(["data", "pull"])
