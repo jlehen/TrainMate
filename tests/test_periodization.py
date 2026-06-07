@@ -85,7 +85,7 @@ class TestPeriodization(unittest.TestCase):
         }
         mock_workouts_response = {
             "reasoning": "Microcycle generated reasoning",
-            "athlete_learnings": "Simulated learnings",
+            "learning_updates": [{"op": "add", "text": "Simulated learnings"}],
             "workouts": [{
                 "date": "2026-06-01", "sport_type": "running",
                 "title": "Base Run", "description": "45 mins zone 2",

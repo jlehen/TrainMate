@@ -102,14 +102,28 @@ or directly by tests).
 | `_get_config_hash()`                 | SHA-256 of `user_profile` + `metrics_history_days`. |
 | `_generate_macrocycle_strategy(...)` | LLM call → `{strategy, mesocycles}`. Label:         |
 |                                      | `periodization_plan`.                               |
-| `_generate_workouts_logic(...)`      | LLM call → `{reasoning, athlete_learnings,          |
+| `_generate_workouts_logic(...)`      | LLM call → `{reasoning, learning_updates[],         |
 |                                      | workouts[]}`. Accepts `num_days` (default 28) which |
 |                                      | drives the horizon in the prompt. Label:            |
 |                                      | `workout_generation`.                               |
 | `_adapt_logic(...)`                  | LLM call → `{change_needed, reason,                 |
 |                                      | adapted_workouts[]}`. Label: `workout_adaptation`.  |
+|                                      | Reads learnings into the prompt but does **not**    |
+|                                      | emit `learning_updates`.                            |
+| `_analyze_workouts_logic(...)`       | LLM call → `{macrocycle_summary,                    |
+|                                      | inferred_macrocycle, inferred_mesocycles[],         |
+|                                      | physiological_insights[], learning_updates[]}`.     |
+|                                      | Reverse-engineers cycles from weekly summaries.     |
+|                                      | Label: `workout_analysis`.                          |
 | `_generate_intermediate_goals(...)`  | LLM call → `{goals[]}` when timeline > 24 weeks.    |
 |                                      | Label: `generate_intermediate_goals`.               |
+
+**Coach learnings via deltas:** `_generate_workouts_logic` and `_analyze_workouts_logic` emit a
+`learning_updates` array (shared prompt field `LEARNING_UPDATES_FIELD`) of incremental ops
+`{"op": "add"|"revise"|"retire", id?, text?}` rather than a full learnings blob. The app owns the
+merge via `CoachService._apply_learning_updates()` → `db.apply_learning_deltas()`, so a model that
+omits an existing learning cannot lose it. `_build_system_prompt` renders current learnings as
+`[id] text` via `CoachService._get_learnings_text()`.
 
 ### `CoachService`
 **Orchestrator — owns all DB and calendar access.** Exposes the public API called by the UIs.
@@ -130,6 +144,10 @@ or directly by tests).
 |                                                     | `(reason, proposed_workouts)`.                                      |
 | `apply_adaptations(proposed, reason, start, end)`   | Deletes overridden workouts (+ calendar events), saves adapted      |
 |                                                     | workouts, syncs to Calendar.                                        |
+| `analyze_workouts(from, until, days, weeks, context)`| Reverse-engineers past training cycles from completed activities   |
+|                                                     | + metrics. Auto-resolves the date range from active/preceding       |
+|                                                     | goals when omitted. Calls `CoachEngine._analyze_workouts_logic()`,  |
+|                                                     | then applies returned `learning_updates` to `coach_learnings`.      |
 | `delete_plan(objective_id)`                         | Deletes macrocycle + mesocycles for that objective (cascades in     |
 |                                                     | DB).                                                                |
 | `_get_config_hash()`                                | Delegates to `CoachEngine._get_config_hash()`. Used by CLI/web to   |
@@ -173,9 +191,12 @@ from trainmate.coach import coach_service
 **Metrics & Baselines:** `save_metric_cache` (upsert), `get_metrics_cache(start_date, end_date)`,
 `save_baseline`, `get_baseline(date)` (returns closest prior baseline), `wipe_metrics`
 
-**Coach Memory:** `save_coach_memory(key, value)` (upsert), `get_coach_memory(key)`.
-Key in use: `athlete_learnings` (free-text observations). Periodization strategy lives in
-the `macrocycles` table, not here.
+**Coach Learnings:** `get_learnings()`, `add_learning(text)`, `update_learning(id, text)`,
+`delete_learning(id)`, `apply_learning_deltas(deltas)`. Discrete, addressable athlete-observation
+records (table `coach_learnings`), updated incrementally via LLM deltas. `apply_learning_deltas`
+runs all ops in one transaction and silently skips malformed deltas. A one-time migration seeds
+from the legacy `coach_memory.athlete_learnings` blob if present (the old table is left in place,
+not dropped). Periodization strategy lives in the `macrocycles` table, not here.
 
 **Macrocycles/Mesocycles:** `save_macrocycle` (deletes existing for objective, then inserts),
 `get_macrocycle_for_objective(objective_id)`, `get_last_macrocycle()`,
@@ -275,14 +296,17 @@ SQLite database at `trainmate.db` (path from `config.db_path`).
 | `sleep_baseline_mean`       | REAL    |
 | `sleep_baseline_std`        | REAL    |
 
-### coach_\memory
-Key-value store for LLM-updated coach notes.
+### coach_\learnings
+Discrete, addressable athlete-observation records, updated incrementally via LLM deltas
+(`add`/`revise`/`retire`). Replaces the legacy key-value `coach_memory` table (kept on existing
+DBs for migration, not dropped).
 
-| Column       | Type    | Notes                                          |
-|--------------|---------|------------------------------------------------|
-| `key`        | TEXT PK | `athlete_learnings`                            |
-| `value`      | TEXT    | LLM-generated text blob                        |
-| `updated_at` | TEXT    | ISO timestamp                                  |
+| Column       | Type       | Notes                                       |
+|--------------|------------|---------------------------------------------|
+| `id`         | INTEGER PK | Referenced by `revise`/`retire` deltas      |
+| `text`       | TEXT       | LLM-generated observation                   |
+| `created_at` | TEXT       | ISO timestamp                               |
+| `updated_at` | TEXT       | ISO timestamp                               |
 
 ### macrocycles
 | Column            | Type                  | Notes                                            |
@@ -336,7 +360,7 @@ Handler functions are named `run_<command>_<subcommand>()` in `trainmate_cli.py`
 
 | Command      | Subcommand   | Alias    | Description                                                              |
 |--------------|--------------|----------|--------------------------------------------------------------------------|
-| `status`     | —            | `s`      | Show active goals, recent metrics, coach memory                          |
+| `status`     | —            | `s`      | Show active goals, recent metrics, coach learnings                       |
 | `goal`       | `add`        | `g a`    | Add objective (`--title`, `--date`, `--sport`, `--desc`, `--priority`)   |
 | `goal`       | `edit`       | `g e`    | Edit objective by ID                                                     |
 | `goal`       | `rm`         | `g r`    | Remove objective by ID                                                   |
@@ -388,7 +412,8 @@ Flask server at `trainmate_web.py`, runs on port 5000. Static files served from 
 
 | Method      | Path                            | Description                                  |
 |-------------|---------------------------------|----------------------------------------------|
-| GET         | `/api/status`                   | Active goal, latest metrics, coach memory,   |
+| GET         | `/api/status`                   | Active goal, latest metrics, coach learnings |
+|             |                                 | (under `coach_memory.learnings`),            |
 |             |                                 | macrocycle+mesocycles                        |
 | GET/POST    | `/api/objectives`               | List all / create objective                  |
 | DELETE/PUT  | `/api/objectives/<id>`          | Delete or update objective                   |
@@ -454,8 +479,8 @@ Required fields:
    `num_days` from `(end_date − today)`.
 3. Fetches metrics history (last `metrics_history_days` days) + baseline.
 4. Calls `CoachEngine._generate_workouts_logic(num_days=...)` → LLM →
-   `{reasoning, athlete_learnings, workouts[]}`.
-5. Saves `athlete_learnings` to `coach_memory`.
+   `{reasoning, learning_updates[], workouts[]}`.
+5. Applies `learning_updates` deltas to `coach_learnings` (`_apply_learning_updates`).
 6. Clears future unsynced workouts (`clear_future_workouts`), then saves new workouts.
 
 ### Daily Adaptation (`workout adapt`)
@@ -484,8 +509,8 @@ Required fields:
 3. Groups metrics and activities week-by-week using Monday-commencing ISO weeks.
 4. Queries `CoachEngine._analyze_workouts_logic()` -> LLM -> `{macrocycle_summary,
    inferred_macrocycle, inferred_mesocycles[], physiological_insights[],
-   learnings_for_coach_memory}`.
-5. Updates the coach's memory with any newly discovered `athlete_learnings`.
+   learning_updates[]}`.
+5. Applies `learning_updates` deltas to `coach_learnings` (`_apply_learning_updates`).
 
 ---
 

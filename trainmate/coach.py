@@ -11,6 +11,19 @@ from trainmate.types import Objective, LifeEvent, Workout, CompletedActivity
 from trainmate.adherence import analyze_adherence
 
 
+# Shared JSON-output instruction for incrementally updating coach memory. The LLM
+# emits only deltas; the app owns the merge so unchanged observations are never lost.
+LEARNING_UPDATES_FIELD = (
+    '  "learning_updates": [\n'
+    "    // Optional. Incremental updates to athlete observations; each item is one of:\n"
+    '    //   {"op": "add", "text": "New observation."},\n'
+    '    //   {"op": "revise", "id": 3, "text": "Reworded observation #3."},\n'
+    '    //   {"op": "retire", "id": 5}\n'
+    "    // Existing observations persist automatically; do NOT repeat unchanged ones.\n"
+    "    // Reference existing observations by the [id] shown under COACH MEMORY.\n"
+)
+
+
 def format_metrics_history(metrics: List[Dict[str, Any]]) -> str:
     """Formats metrics cache history to a readable block for LLM prompts."""
     metrics_lines = []
@@ -227,7 +240,7 @@ COACH MEMORY & ACTIVE PERIODIZATION STRATEGY:
 {strategy}
 - Mesocycles making up the macro-cycle:
 {meso_text}
-- Athlete-Specific Observations:
+- Athlete-Specific Observations (reference by [id] when revising or retiring):
 {learnings}
 
 ATHLETE PROFILE & PREFERENCES:
@@ -431,8 +444,8 @@ You MUST respond with a JSON object containing:
             "{\n"
             '  "reasoning": "Explain the microcycle design, detailing how workouts align with the active\n'
             '    mesocycle focus.",\n'
-            '  "athlete_learnings": "Update athlete observations text blob based on metrics or status\n'
-            '    if any.",\n'
+            + LEARNING_UPDATES_FIELD +
+            "  ],\n"
             '  "workouts": [\n'
             "    {\n"
             '      "date": "YYYY-MM-DD",\n'
@@ -672,7 +685,8 @@ Adherence Discrepancies & Violations:
             '  "physiological_insights": [\n'
             '    "Physiological response observations (e.g., HRV/RHR trends vs load)."\n'
             "  ],\n"
-            '  "learnings_for_coach_memory": "Key insights to store in coach memory."\n'
+            + LEARNING_UPDATES_FIELD +
+            "  ]\n"
             "}\n"
         )
 
@@ -847,6 +861,20 @@ class CoachService:
             meso_text = "  - Not established yet."
         return strategy, meso_text
 
+    def _get_learnings_text(self) -> str:
+        """Renders stored athlete observations as an id-tagged block for prompts."""
+        learnings = self._db.get_learnings()
+        if not learnings:
+            return (
+                "No observations yet. Over time, observe the athlete's responses to "
+                "training volume and intensity."
+            )
+        return "\n".join(f"  [{l['id']}] {l['text']}" for l in learnings)
+
+    def _apply_learning_updates(self, data: Dict[str, Any]) -> None:
+        """Applies incremental learning deltas returned by the LLM, if any."""
+        self._db.apply_learning_deltas(data.get("learning_updates") or [])
+
     def _get_coach_system_prompt(
         self, objectives: List[Objective], lifeevents: List[LifeEvent],
         custom_task: str = "", objective_id: Optional[int] = None
@@ -855,10 +883,7 @@ class CoachService:
         strategy, meso_text = self._get_active_strategy_and_meso_text(
             objectives, objective_id=objective_id
         )
-        learnings = self._db.get_coach_memory("athlete_learnings") or (
-            "No observations yet. Over time, observe the athlete's responses to "
-            "training volume and intensity."
-        )
+        learnings = self._get_learnings_text()
         profile = config.user_profile
         return self.engine._build_system_prompt(
             objectives=objectives,
@@ -1108,10 +1133,7 @@ class CoachService:
         strategy, meso_text = self._get_active_strategy_and_meso_text(
             objectives, objective_id=objective_id
         )
-        learnings = self._db.get_coach_memory("athlete_learnings") or (
-            "No observations yet. Over time, observe the athlete's responses to "
-            "training volume and intensity."
-        )
+        learnings = self._get_learnings_text()
 
         # Retrieve recent history context
         history_days = config.metrics_history_days
@@ -1141,9 +1163,8 @@ class CoachService:
             baseline=baseline
         )
 
-        # Save learnings to memory
-        if "athlete_learnings" in plan_data:
-            self._db.save_coach_memory("athlete_learnings", plan_data["athlete_learnings"])
+        # Apply incremental learning updates to coach memory
+        self._apply_learning_updates(plan_data)
 
         # Save workouts to database
         workouts = plan_data.get("workouts", [])
@@ -1257,10 +1278,7 @@ class CoachService:
         strategy, meso_text = self._get_active_strategy_and_meso_text(
             objectives, objective_id=objective_id
         )
-        learnings = self._db.get_coach_memory("athlete_learnings") or (
-            "No observations yet. Over time, observe the athlete's responses to "
-            "training volume and intensity."
-        )
+        learnings = self._get_learnings_text()
         lifeevents = self._db.get_lifeevents(start_after=target_date_str)
 
         decision = self.engine._adapt_logic(
@@ -1554,11 +1572,8 @@ class CoachService:
             context=context
         )
 
-        # Save learnings to memory if present in LLM response
-        if "learnings_for_coach_memory" in decision and decision["learnings_for_coach_memory"]:
-            self._db.save_coach_memory(
-                "athlete_learnings", decision["learnings_for_coach_memory"]
-            )
+        # Apply incremental learning updates to coach memory
+        self._apply_learning_updates(decision)
 
         return decision
 

@@ -75,7 +75,12 @@ async function fetchStatus() {
         
         // Update Coach Memory
         const learningsEl = document.getElementById("memory-learnings");
-        learningsEl.innerText = data.coach_memory.learnings || "No observations cached yet.";
+        const learnings = data.coach_memory.learnings;
+        if (learnings && learnings.length > 0) {
+            learningsEl.innerText = learnings.map(l => `[${l.id}] ${l.text}`).join("\n");
+        } else {
+            learningsEl.innerText = "No observations cached yet.";
+        }
         
         // Update Strategy Card
         const strategyCard = document.getElementById("strategy-card");

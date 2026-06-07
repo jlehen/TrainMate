@@ -55,7 +55,7 @@ class TestWorkoutAnalysis(unittest.TestCase):
             "inferred_macrocycle": {"overall_focus": "aerobic base"},
             "inferred_mesocycles": [],
             "physiological_insights": [],
-            "learnings_for_coach_memory": "No new learnings"
+            "learning_updates": []
         }
 
         # Analyze workouts without explicit range -> should start on 2026-06-02 (day after Goal Preceding)
@@ -111,7 +111,7 @@ class TestWorkoutAnalysis(unittest.TestCase):
 
         mock_client.complete.return_value = {
             "macrocycle_summary": "Simulated aggregation summary",
-            "learnings_for_coach_memory": "Athlete responds well to FTP tests."
+            "learning_updates": [{"op": "add", "text": "Athlete responds well to FTP tests."}]
         }
 
         # Analyze the week
@@ -121,8 +121,9 @@ class TestWorkoutAnalysis(unittest.TestCase):
         self.assertEqual(result["macrocycle_summary"], "Simulated aggregation summary")
 
         # Verify learnings updated in memory
-        saved_learnings = test_db.get_coach_memory("athlete_learnings")
-        self.assertEqual(saved_learnings, "Athlete responds well to FTP tests.")
+        saved_learnings = test_db.get_learnings()
+        self.assertEqual(len(saved_learnings), 1)
+        self.assertEqual(saved_learnings[0]["text"], "Athlete responds well to FTP tests.")
 
         # Verify mock complete call payloads
         user_payload = mock_client.complete.call_args[0][1]

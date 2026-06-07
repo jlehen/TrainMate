@@ -389,7 +389,7 @@ class TestTrainMateCLI(unittest.TestCase):
             title="London Marathon", target_date="2026-09-20",
             sport_type="running", priority=1,
         )
-        test_db.save_coach_memory("athlete_learnings", "Rest well on Fridays")
+        test_db.add_learning("Rest well on Fridays")
 
         exit_code, stdout, stderr = self.run_cli(["status"])
         self.assertEqual(exit_code, 0)
@@ -399,7 +399,7 @@ class TestTrainMateCLI(unittest.TestCase):
         self.assertIn("Overnight HRV: 82 ms", stdout)
         self.assertIn("ACWR       : 1.14", stdout)
         self.assertIn("Baselines (28-day)", stdout)
-        self.assertIn("Learnings:\n  Rest well on Fridays", stdout)
+        self.assertIn("[1]\n    Rest well on Fridays", stdout)
 
         test_db.add_lifeevent(
             title="Ibiza Trip", start_date="2026-07-01", end_date="2026-07-08",
@@ -841,7 +841,9 @@ class TestTrainMateCLI(unittest.TestCase):
             "physiological_insights": [
                 "HRV was stable during peak volume."
             ],
-            "learnings_for_coach_memory": "Responds well to volume"
+            "learning_updates": [
+                {"op": "add", "text": "Responds well to volume"}
+            ]
         }
 
         exit_code, stdout, stderr = self.run_cli([

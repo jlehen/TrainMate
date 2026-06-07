@@ -33,7 +33,7 @@ def get_status() -> Any:
     # Get last baseline
     last_baseline = db.get_baseline(last_metrics['date']) if last_metrics else None
     
-    learnings = db.get_coach_memory("athlete_learnings")
+    learnings = db.get_learnings()
 
     macrocycle = None
     mesocycles = []

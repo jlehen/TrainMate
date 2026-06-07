@@ -716,10 +716,14 @@ def run_status(verbose: bool = False) -> None:
         print(yellow("\nRecent Garmin Metrics: No cached metrics. Run 'data pull' first."))
 
     # Coach Memory
-    learnings = db.get_coach_memory("athlete_learnings")
+    learnings = db.get_learnings()
     print(bold("\nCoach Memory:"))
-
-    print(format_labeled_block("- Learnings:", learnings or 'None yet'))
+    if learnings:
+        print("- Learnings:")
+        for l in learnings:
+            print(format_labeled_block(f"  [{l['id']}]", l['text']))
+    else:
+        print(format_labeled_block("- Learnings:", "None yet"))
 
     if verbose:
         goals = db.get_objectives()
@@ -1952,12 +1956,18 @@ def run_data_analyze(args: argparse.Namespace) -> None:
             for insight in result["physiological_insights"]:
                 print(f"  - {insight}")
 
-        # Coach learnings
-        if "learnings_for_coach_memory" in result and result["learnings_for_coach_memory"]:
-            print(format_labeled_block(
-                bold(cyan("\nCoach Observations (Saved to memory):")),
-                result["learnings_for_coach_memory"]
-            ))
+        # Coach learnings (incremental updates applied to memory)
+        updates = result.get("learning_updates")
+        if updates:
+            print(bold(cyan("\nCoach Observations (Saved to memory):")))
+            for u in updates:
+                op = u.get("op")
+                if op == "add":
+                    print(f"  + {u.get('text', '')}")
+                elif op == "revise":
+                    print(f"  ~ [{u.get('id')}] {u.get('text', '')}")
+                elif op == "retire":
+                    print(f"  - retired [{u.get('id')}]")
 
         print(bold(cyan("\n==========================================")))
 

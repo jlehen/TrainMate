@@ -182,14 +182,35 @@ class Database:
                 )
             """)
             
-            # Coach memory table
+            # Coach learnings: discrete, addressable athlete-observation records.
+            # The LLM updates these incrementally via deltas (see apply_learning_deltas)
+            # rather than overwriting a single blob.
             cursor.execute("""
-                CREATE TABLE IF NOT EXISTS coach_memory (
-                    key TEXT PRIMARY KEY,
-                    value TEXT,
-                    updated_at TEXT
+                CREATE TABLE IF NOT EXISTS coach_learnings (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    text TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
                 )
             """)
+
+            # One-time migration: seed from the legacy coach_memory blob if present.
+            cursor.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name='coach_memory'"
+            )
+            if cursor.fetchone():
+                cursor.execute("SELECT COUNT(*) AS n FROM coach_learnings")
+                if cursor.fetchone()['n'] == 0:
+                    cursor.execute(
+                        "SELECT value FROM coach_memory WHERE key='athlete_learnings'"
+                    )
+                    row = cursor.fetchone()
+                    if row and row['value'] and row['value'].strip():
+                        now = datetime.now(timezone.utc).isoformat()
+                        cursor.execute(
+                            "INSERT INTO coach_learnings (text, created_at, updated_at) "
+                            "VALUES (?, ?, ?)", (row['value'].strip(), now, now)
+                        )
 
             # Macrocycles table
             cursor.execute("""
@@ -639,28 +660,81 @@ class Database:
             row = cursor.fetchone()
             return dict(row) if row else None  # type: ignore
 
-    # --- Coach Memory ---
-    def save_coach_memory(self, key: str, value: str) -> None:
-        """Saves or updates coach observations/philosophy memories."""
-        updated_at = datetime.now(timezone.utc).isoformat()
+    # --- Coach Learnings ---
+    def get_learnings(self) -> List[Dict[str, Any]]:
+        """Returns all athlete-observation records ordered by id."""
         with self._get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute("""
-                INSERT INTO coach_memory (key, value, updated_at)
-                VALUES (?, ?, ?)
-                ON CONFLICT(key) DO UPDATE SET
-                    value=excluded.value,
-                    updated_at=excluded.updated_at
-            """, (key, value, updated_at))
-            conn.commit()
+            cursor.execute(
+                "SELECT id, text, created_at, updated_at FROM coach_learnings ORDER BY id"
+            )
+            return [dict(row) for row in cursor.fetchall()]
 
-    def get_coach_memory(self, key: str) -> Optional[str]:
-        """Fetches a specific memory value by its key name."""
+    def add_learning(self, text: str) -> int:
+        """Adds a single athlete-observation record and returns its id."""
+        now = datetime.now(timezone.utc).isoformat()
         with self._get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute("SELECT value FROM coach_memory WHERE key = ?", (key,))
-            row = cursor.fetchone()
-            return row['value'] if row else None
+            cursor.execute(
+                "INSERT INTO coach_learnings (text, created_at, updated_at) "
+                "VALUES (?, ?, ?)", (text, now, now)
+            )
+            return cursor.lastrowid
+
+    def update_learning(self, learning_id: int, text: str) -> None:
+        """Revises the text of an existing observation record."""
+        now = datetime.now(timezone.utc).isoformat()
+        with self._get_connection() as conn:
+            conn.execute(
+                "UPDATE coach_learnings SET text=?, updated_at=? WHERE id=?",
+                (text, now, learning_id)
+            )
+
+    def delete_learning(self, learning_id: int) -> None:
+        """Removes an observation record."""
+        with self._get_connection() as conn:
+            conn.execute("DELETE FROM coach_learnings WHERE id=?", (learning_id,))
+
+    def apply_learning_deltas(self, deltas: List[Dict[str, Any]]) -> None:
+        """Applies a list of incremental learning operations in one transaction.
+
+        Each delta is one of:
+          {"op": "add", "text": "..."}
+          {"op": "revise", "id": <int>, "text": "..."}
+          {"op": "retire", "id": <int>}
+        Malformed deltas (empty text, missing id, unknown op) are skipped so a
+        partially-valid LLM response still applies its valid operations.
+        """
+        if not deltas:
+            return
+        now = datetime.now(timezone.utc).isoformat()
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            for delta in deltas:
+                if not isinstance(delta, dict):
+                    continue
+                op = delta.get("op")
+                if op == "add":
+                    text = (delta.get("text") or "").strip()
+                    if text:
+                        cursor.execute(
+                            "INSERT INTO coach_learnings (text, created_at, updated_at) "
+                            "VALUES (?, ?, ?)", (text, now, now)
+                        )
+                elif op == "revise":
+                    text = (delta.get("text") or "").strip()
+                    learning_id = delta.get("id")
+                    if text and learning_id is not None:
+                        cursor.execute(
+                            "UPDATE coach_learnings SET text=?, updated_at=? WHERE id=?",
+                            (text, now, learning_id)
+                        )
+                elif op == "retire":
+                    learning_id = delta.get("id")
+                    if learning_id is not None:
+                        cursor.execute(
+                            "DELETE FROM coach_learnings WHERE id=?", (learning_id,)
+                        )
 
     # --- Macrocycles & Mesocycles ---
     def get_macrocycle_for_objective(self, objective_id: int) -> Optional[Macrocycle]:
