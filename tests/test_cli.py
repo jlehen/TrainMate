@@ -948,7 +948,9 @@ class TestTrainMateCLI(unittest.TestCase):
             until_date_str="2026-03-31",
             days=None,
             weeks=None,
-            context="Felt good"
+            context="Felt good",
+            force=False,
+            inspect=False,
         )
 
 

@@ -203,6 +203,42 @@ class TestPeriodization(unittest.TestCase):
             system_prompt,
         )
 
+    @patch("trainmate.coach.openrouter_client")
+    def test_plan_generate_injects_planned_vs_actual(self, mock_client):
+        # Option A (DESIGN_backward_evaluation.md §6): the prior plan's elapsed blocks are
+        # compared against what was actually completed, and fed into the strategy prompt.
+        obj_id = test_db.add_objective(
+            title="Zurich Marathon", target_date="2026-10-15",
+            sport_type="running", priority=1,
+        )
+        test_db.save_macrocycle(
+            objective_id=obj_id, strategy="Old strategy",
+            goals_hash="g", lifeevents_hash="l",
+            mesocycles=[{
+                "name": "Base Building", "start_date": "2026-06-01",
+                "end_date": "2026-06-28", "focus": "Aerobic conditioning",
+            }],
+        )
+        # A completed session inside that elapsed block.
+        test_db.save_completed_activity(
+            activity_id="a1", date="2026-06-01", start_time="08:00:00",
+            activity_name="Base Run", activity_type="running",
+            duration_sec=3600.0, distance_km=10.0, elevation_gain_m=50.0,
+            avg_hr=140, max_hr=160, rpe=5, tss=60.0,
+        )
+        mock_client.complete.return_value = {
+            "strategy": "New strategy", "mesocycles": [{
+                "name": "Build", "start_date": "2026-06-08",
+                "end_date": "2026-10-15", "focus": "Threshold",
+            }],
+        }
+        coach_service.generate_periodization_plan(force=True, objective_id=obj_id)
+        system_prompt = mock_client.complete.call_args[0][0]
+        self.assertIn("PRIOR TRAINING REVIEW:", system_prompt)
+        self.assertIn("PLANNED vs ACTUAL", system_prompt)
+        self.assertIn("Aerobic conditioning", system_prompt)
+        self.assertIn("1 sessions", system_prompt)
+
     def test_system_prompt_inserts_athlete_profile(self):
         test_profile = {
             "name": "Jane Doe",

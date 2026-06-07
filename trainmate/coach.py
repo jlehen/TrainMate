@@ -305,12 +305,53 @@ UPCOMING LIFE EVENTS:
         serialized = json.dumps(data_to_hash, sort_keys=True)
         return hashlib.sha256(serialized.encode('utf-8')).hexdigest()
 
+    def _get_evidence_fingerprint(
+        self, completed_activities: List[CompletedActivity],
+        metrics: List[Dict[str, Any]], window_start: str, window_end: str
+    ) -> str:
+        """Fingerprints the *evidence* a backward evaluation reconstructs from — the
+        completed activities + daily metrics within a window — so a re-run over unchanged
+        data can be detected (see DESIGN_backward_evaluation.md §5, §8).
+
+        We hash the load-bearing fields (not just activity ids) so that a re-pull which
+        *corrects* a value also shifts the fingerprint. Hashing the concrete activity-id
+        set rather than only the date range narrows the overlapping/shrinking-window edge
+        (§7).
+
+        DELIBERATE OMISSION (§11): the prompt text and science/*.txt files are NOT hashed.
+        Editing a prompt or guideline will therefore reuse a stale reconstruction until the
+        underlying data changes; `--force` is the manual escape hatch. This is a chosen
+        trade-off, not an oversight — revisit if prompt iteration becomes common.
+        """
+        act_digest = sorted(
+            {
+                (
+                    a.get('activity_id'), a.get('date'), a.get('activity_type'),
+                    a.get('duration_sec'), a.get('tss'), a.get('rpe'),
+                    a.get('zone1_sec'), a.get('zone2_sec'), a.get('zone3_sec'),
+                    a.get('zone4_sec'), a.get('zone5_sec'),
+                )
+                for a in completed_activities
+            }
+        )
+        met_digest = sorted(
+            (m.get('date'), m.get('rhr'), m.get('hrv'), m.get('sleep_score'),
+             m.get('acwr'))
+            for m in metrics
+        )
+        serialized = json.dumps(
+            {'window': [window_start, window_end],
+             'activities': act_digest, 'metrics': met_digest},
+            sort_keys=True
+        )
+        return hashlib.sha256(serialized.encode('utf-8')).hexdigest()
+
     def _generate_macrocycle_strategy(
         self, next_goal: Objective, objectives: List[Objective],
         lifeevents: List[LifeEvent], today_str: str, guidelines: str,
         profile: Optional[Dict[str, Any]], previous_strategy_text: Optional[str] = None,
         plan_start_str: Optional[str] = None, athlete_feedback: Optional[str] = None,
-        history_summary: Optional[str] = None
+        history_summary: Optional[str] = None, prior_training_text: Optional[str] = None
     ) -> Dict[str, Any]:
         """Queries LLM to determine the overall macrocycle strategy and mesocycle blocks."""
         plan_start = plan_start_str or today_str
@@ -405,6 +446,11 @@ You MUST respond with a JSON object containing:
             system_prompt += (
                 f"\nATHLETE RECENT TRAINING SUMMARY (PAST 15 DAYS):\n{history_summary}\n"
             )
+        # Planned-vs-actual review of the prior plan + any inferred reconstruction, fed as
+        # read-only context so the new plan is grounded in demonstrated reality rather than
+        # an idealized template (DESIGN_backward_evaluation.md §6, Option A).
+        if prior_training_text:
+            system_prompt += f"\nPRIOR TRAINING REVIEW:\n{prior_training_text}\n"
         system_prompt += (
             f"\nACTIVE ATHLETE GOALS (CHRONOLOGICAL):\n"
             f"{obj_text if obj_text else 'No active goals.'}\n\n"
@@ -451,8 +497,10 @@ You MUST respond with a JSON object containing:
             "{\n"
             '  "reasoning": "Explain the microcycle design, detailing how workouts align with the active\n'
             '    mesocycle focus.",\n'
-            + LEARNING_UPDATES_FIELD +
-            "  ],\n"
+            # Workout generation is read-only w.r.t. coach learnings (see
+            # DESIGN_backward_evaluation.md §11): it consumes the rendered learnings in the
+            # system prompt but authors none. Tactical/recent observations are better
+            # captured by `adapt`, durable ones by `analyze`. Hence no learning_updates here.
             '  "workouts": [\n'
             "    {\n"
             '      "date": "YYYY-MM-DD",\n'
@@ -844,6 +892,81 @@ class CoachService:
 
         return "\n".join(lines)
 
+    def _build_prior_training_context(
+        self, prior_macro: Optional[Dict[str, Any]], today_str: str
+    ) -> Optional[str]:
+        """Builds a read-only "planned vs actual" review for the strategy prompt
+        (DESIGN_backward_evaluation.md §6, Option A).
+
+        Anchored on the prior plan's *elapsed* mesocycle windows (§6): each planned block's
+        focus is shown beside what the athlete actually did in that window (sessions,
+        volume, TSS, zone split) so the model can judge whether the block's intent
+        materialized. If a cached backward-evaluation reconstruction exists (from `data
+        analyze`), its summary + physiological insights are appended — reused without
+        another LLM call (§10). Returns None if there is nothing to report.
+
+        This does NOT write to any `feedback` field: under Option A the assessment is
+        prompt context only, sidestepping the feedback-lifecycle collision (§11).
+        """
+        sections: List[str] = []
+
+        if prior_macro:
+            block_lines = []
+            for m in self._db.get_mesocycles_for_macrocycle(prior_macro['id']):
+                if m['start_date'] > today_str:
+                    continue  # future block; nothing actual to compare yet
+                win_end = min(m['end_date'], today_str)
+                acts = self._db.get_completed_activities(m['start_date'], win_end)
+                if not acts:
+                    block_lines.append(
+                        f"- {m['name']} ({m['start_date']}..{win_end}): planned focus "
+                        f"\"{m['focus']}\" — no completed activities recorded."
+                    )
+                    continue
+                hours = sum((a.get('duration_sec') or 0.0) for a in acts) / 3600.0
+                tss = sum((a.get('tss') or 0.0) for a in acts)
+                z12 = sum(
+                    (a.get('zone1_sec') or 0) + (a.get('zone2_sec') or 0) for a in acts
+                )
+                z3 = sum((a.get('zone3_sec') or 0) for a in acts)
+                z45 = sum(
+                    (a.get('zone4_sec') or 0) + (a.get('zone5_sec') or 0) for a in acts
+                )
+                zone_note = ""
+                if (z12 + z3 + z45) > 0:
+                    zone_note = (
+                        f", zones Z1-2/Z3/Z4-5 = {z12 // 60}/{z3 // 60}/{z45 // 60} min"
+                    )
+                block_lines.append(
+                    f"- {m['name']} ({m['start_date']}..{win_end}): planned focus "
+                    f"\"{m['focus']}\" — actual: {len(acts)} sessions, {hours:.1f}h, "
+                    f"{tss:.0f} TSS{zone_note}."
+                )
+            if block_lines:
+                sections.append(
+                    "PLANNED vs ACTUAL (elapsed blocks of the prior plan — judge whether "
+                    "each block's intent materialized):\n" + "\n".join(block_lines)
+                )
+
+        cached = self._db.get_analysis_cache("long")
+        recon = cached.get("reconstruction") if cached else None
+        if recon:
+            recon_lines = []
+            if recon.get("macrocycle_summary"):
+                recon_lines.append(f"Summary: {recon['macrocycle_summary']}")
+            for ins in (recon.get("physiological_insights") or []):
+                recon_lines.append(f"- {ins}")
+            if recon_lines:
+                window = ""
+                if cached.get("window_start") and cached.get("window_end"):
+                    window = f" ({cached['window_start']}..{cached['window_end']})"
+                sections.append(
+                    f"INFERRED FROM PAST TRAINING{window} (latest data analysis):\n"
+                    + "\n".join(recon_lines)
+                )
+
+        return "\n\n".join(sections) if sections else None
+
     def _get_config_hash(self) -> str:
         return self.engine._get_config_hash()
 
@@ -900,9 +1023,18 @@ class CoachService:
             for l in learnings
         )
 
-    def _apply_learning_updates(self, data: Dict[str, Any]) -> None:
-        """Applies incremental learning deltas returned by the LLM, if any."""
-        self._db.apply_learning_deltas(data.get("learning_updates") or [])
+    def _apply_learning_updates(
+        self, data: Dict[str, Any], suppress_reinforcement: bool = False
+    ) -> None:
+        """Applies incremental learning deltas returned by the LLM, if any.
+
+        `suppress_reinforcement` is forwarded to the merge layer: pass True when the deltas
+        were derived from unchanged evidence so re-reading cannot ratchet confidence/recency
+        (see db.apply_learning_deltas and DESIGN_backward_evaluation.md §8)."""
+        self._db.apply_learning_deltas(
+            data.get("learning_updates") or [],
+            suppress_reinforcement=suppress_reinforcement,
+        )
 
     def _get_coach_system_prompt(
         self, objectives: List[Objective], lifeevents: List[LifeEvent],
@@ -1086,6 +1218,14 @@ class CoachService:
             guidelines = self._load_science_guidelines()
             profile = config.user_profile
             history_summary = self._get_recent_history_summary(today_str)
+            # Planned-vs-actual review of the prior plan (+ cached reconstruction) fed as
+            # read-only context (Option A). `prev_macro` here is the existing plan being
+            # replaced, or the preceding goal's plan when there is none.
+            prior_training_text = self._build_prior_training_context(prev_macro, today_str)
+            if prior_training_text:
+                print("\n=== PRIOR TRAINING REVIEW (planned vs actual) ===")
+                print(prior_training_text)
+                print("==================================================\n")
             macro_data = self.engine._generate_macrocycle_strategy(
                 next_goal=next_goal,
                 objectives=objectives,
@@ -1096,7 +1236,8 @@ class CoachService:
                 previous_strategy_text=prev_strategy_text,
                 plan_start_str=plan_start_date.strftime("%Y-%m-%d"),
                 athlete_feedback=feedback_text,
-                history_summary=history_summary
+                history_summary=history_summary,
+                prior_training_text=prior_training_text
             )
             strategy = macro_data.get("strategy", "Endurance preparation strategy.")
             mesocycles = macro_data.get("mesocycles", [])
@@ -1192,8 +1333,9 @@ class CoachService:
             baseline=baseline
         )
 
-        # Apply incremental learning updates to coach learnings
-        self._apply_learning_updates(plan_data)
+        # NOTE: workout generation is read-only w.r.t. coach learnings (see
+        # DESIGN_backward_evaluation.md §11) — it does not apply learning_updates. Durable
+        # memory is authored only by `analyze` and `plan generate`.
 
         # Save workouts to database
         workouts = plan_data.get("workouts", [])
@@ -1572,9 +1714,20 @@ class CoachService:
     def analyze_workouts(
         self, from_date_str: Optional[str] = None, until_date_str: Optional[str] = None,
         days: Optional[int] = None, weeks: Optional[int] = None,
-        context: Optional[str] = None
+        context: Optional[str] = None, force: bool = False, inspect: bool = False
     ) -> Dict[str, Any]:
-        """Analyzes historical workouts and physiological metrics using LLM."""
+        """Analyzes historical workouts and physiological metrics using LLM.
+
+        Backward-evaluation reuse (DESIGN_backward_evaluation.md §5, §8, §9):
+        - The reconstruction is cached under the 'long' horizon, keyed by an evidence
+          fingerprint. If the evidence is unchanged since the last run and `force` is
+          False, the cached reconstruction is returned without an LLM call.
+        - `force` bypasses *reuse* only (recompute even if unchanged); it never bypasses
+          the reinforcement integrity invariant — a forced re-run over unchanged evidence
+          still suppresses the confidence/recency ratchet.
+        - `inspect` is read-only: it renders the reconstruction but writes neither coach
+          learnings nor the cache.
+        """
         until_date = datetime.now(timezone.utc).date()
         if until_date_str:
             until_date = datetime.strptime(until_date_str, "%Y-%m-%d").date()
@@ -1617,6 +1770,18 @@ class CoachService:
         completed_activities = self._db.get_completed_activities(
             start_date=from_str, end_date=until_str
         )
+
+        # Reuse path: if the evidence is unchanged since the last analysis, return the
+        # cached reconstruction instead of paying for another LLM pass (unless --force).
+        fingerprint = self.engine._get_evidence_fingerprint(
+            completed_activities, metrics, from_str, until_str
+        )
+        cached = self._db.get_analysis_cache("long")
+        evidence_unchanged = bool(cached and cached.get("fingerprint") == fingerprint)
+        if evidence_unchanged and not force and cached.get("reconstruction"):
+            print("Evidence unchanged since last analysis; reusing cached reconstruction "
+                  "(use --force to recompute).")
+            return cached["reconstruction"]
 
         # Group by ISO week (Monday date string)
         weeks_data: Dict[str, Dict[str, Any]] = {}
@@ -1757,8 +1922,21 @@ class CoachService:
             context=context
         )
 
-        # Apply incremental learning updates to coach learnings
-        self._apply_learning_updates(decision)
+        if not inspect:
+            # Apply learning deltas. On a forced re-run over unchanged evidence, honour the
+            # integrity invariant (§8): suppress the reinforcement ratchet so re-reading the
+            # same data cannot inflate confidence or reset decay.
+            self._apply_learning_updates(
+                decision, suppress_reinforcement=evidence_unchanged
+            )
+            # Cache the reconstruction (everything but the point-in-time deltas) so future
+            # runs — and `plan generate` — can reuse it without another LLM call.
+            reconstruction = {
+                k: v for k, v in decision.items() if k != "learning_updates"
+            }
+            self._db.save_analysis_cache(
+                "long", fingerprint, from_str, until_str, reconstruction
+            )
 
         return decision
 

@@ -132,6 +132,73 @@ class TestWorkoutAnalysis(unittest.TestCase):
         self.assertIn("FTP Race Test", user_payload)
         self.assertIn("avg_hrv\": 75.0", user_payload)
 
+    def _seed_activity(self):
+        test_db.save_completed_activity(
+            activity_id="a1", date="2026-06-03", start_time="08:00:00",
+            activity_name="Ride", activity_type="road_biking",
+            duration_sec=3600.0, distance_km=20.0, elevation_gain_m=100.0,
+            avg_hr=130, max_hr=150, rpe=5, tss=60.0,
+        )
+
+    @patch("trainmate.coach.openrouter_client")
+    def test_reuse_skips_llm_when_evidence_unchanged(self, mock_client):
+        """A second analyze over unchanged evidence reuses the cached reconstruction
+        instead of calling the LLM again (DESIGN_backward_evaluation.md §5)."""
+        self._seed_activity()
+        mock_client.complete.return_value = {
+            "macrocycle_summary": "summary",
+            "inferred_macrocycle": {"overall_focus": "base"},
+            "learning_updates": [],
+        }
+        coach_service.analyze_workouts(
+            from_date_str="2026-06-01", until_date_str="2026-06-07"
+        )
+        reused = coach_service.analyze_workouts(
+            from_date_str="2026-06-01", until_date_str="2026-06-07"
+        )
+        self.assertEqual(mock_client.complete.call_count, 1)
+        self.assertEqual(reused["macrocycle_summary"], "summary")
+
+    @patch("trainmate.coach.openrouter_client")
+    def test_force_recomputes_and_suppresses_reinforcement(self, mock_client):
+        """--force recomputes over unchanged evidence but must NOT re-ratchet recency
+        (the integrity invariant survives force; §8, §9)."""
+        lid = test_db.add_learning("Observation")
+        self._seed_activity()
+        mock_client.complete.return_value = {
+            "macrocycle_summary": "s",
+            "learning_updates": [{"op": "reinforce", "id": lid}],
+        }
+        coach_service.analyze_workouts(
+            from_date_str="2026-06-01", until_date_str="2026-06-07"
+        )
+        # Backdate recency; a forced re-run over unchanged evidence must leave it as-is.
+        sentinel = "2000-01-01T00:00:00+00:00"
+        with test_db._get_connection() as conn:
+            conn.execute(
+                "UPDATE coach_learnings SET last_reinforced_at=? WHERE id=?",
+                (sentinel, lid),
+            )
+        coach_service.analyze_workouts(
+            from_date_str="2026-06-01", until_date_str="2026-06-07", force=True
+        )
+        self.assertEqual(mock_client.complete.call_count, 2)  # force recomputed
+        self.assertEqual(test_db.get_learnings()[0]["last_reinforced_at"], sentinel)
+
+    @patch("trainmate.coach.openrouter_client")
+    def test_inspect_writes_nothing(self, mock_client):
+        """--inspect renders but writes neither learnings nor the cache (§9)."""
+        self._seed_activity()
+        mock_client.complete.return_value = {
+            "macrocycle_summary": "s",
+            "learning_updates": [{"op": "add", "text": "New obs"}],
+        }
+        coach_service.analyze_workouts(
+            from_date_str="2026-06-01", until_date_str="2026-06-07", inspect=True
+        )
+        self.assertEqual(len(test_db.get_learnings()), 0)
+        self.assertIsNone(test_db.get_analysis_cache("long"))
+
     @patch("trainmate.coach.openrouter_client")
     def test_existing_learnings_injected_into_prompt(self, mock_client):
         # Existing observations must appear in the analyze prompt (with ids) so the

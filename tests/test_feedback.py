@@ -200,6 +200,37 @@ class TestFeedback(unittest.TestCase):
         self.assertIn("Macrocycle Feedback:\n  overall too easy", stdout)
         self.assertIn("Mesocycle Feedback:\n    more speed", stdout)
 
+    @patch("trainmate_cli._edit_text_in_editor")
+    def test_cli_feedback_edit(self, mock_editor):
+        obj_id = test_db.add_objective(
+            title="Zurich Marathon", target_date="2026-10-15",
+            sport_type="running", priority=1,
+        )
+        macro_id = test_db.save_macrocycle(
+            objective_id=obj_id, strategy="s", goals_hash="g", lifeevents_hash="l",
+            mesocycles=[{"name": "Base", "start_date": "2026-06-01",
+                         "end_date": "2026-06-28", "focus": "Z2"}],
+        )
+        test_db.update_macrocycle_feedback(macro_id, "old note")
+
+        # --edit opens the editor seeded with the current feedback and saves the result.
+        mock_editor.return_value = "edited note"
+        exit_code, stdout, stderr = self.run_cli(["plan", "feedback", "--macro", "--edit"])
+        self.assertEqual(exit_code, 0)
+        mock_editor.assert_called_once_with("old note")
+        self.assertEqual(
+            test_db.get_macrocycle_for_objective(obj_id)["feedback"], "edited note"
+        )
+
+        # An aborted edit (editor returns None) leaves the feedback untouched.
+        mock_editor.reset_mock()
+        mock_editor.return_value = None
+        exit_code, stdout, stderr = self.run_cli(["plan", "feedback", "--macro", "--edit"])
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(
+            test_db.get_macrocycle_for_objective(obj_id)["feedback"], "edited note"
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -104,9 +104,10 @@ Module-level function. Concatenates all `*.txt` files from `trainmate/science/`
 | `_get_config_hash()`                 | SHA-256 of `user_profile` + `metrics_history_days`. |
 | `_generate_macrocycle_strategy(...)` | LLM call → `{strategy, mesocycles}`. Label:         |
 |                                      | `periodization_plan`.                               |
-| `_generate_workouts_logic(...)`      | LLM call → `{reasoning, learning_updates[],         |
-|                                      | workouts[]}`. Accepts `num_days` (default 28) which |
-|                                      | drives the horizon in the prompt. Label:            |
+| `_generate_workouts_logic(...)`      | LLM call → `{reasoning, workouts[]}`. **Read-only** |
+|                                      | w.r.t. learnings — emits no `learning_updates`      |
+|                                      | (DESIGN_backward_evaluation.md §11). Accepts        |
+|                                      | `num_days` (default 28) driving the horizon. Label: |
 |                                      | `workout_generation`.                               |
 | `_adapt_logic(...)`                  | LLM call → `{change_needed, reason,                 |
 |                                      | learning_updates[], adapted_workouts[]}`. Label:    |
@@ -119,10 +120,11 @@ Module-level function. Concatenates all `*.txt` files from `trainmate/science/`
 | `_generate_intermediate_goals(...)`  | LLM call → `{goals[]}` when timeline > 24 weeks.    |
 |                                      | Label: `generate_intermediate_goals`.               |
 
-**Coach learnings via deltas:** `_generate_workouts_logic`,
-`_analyze_workouts_logic`, and `_adapt_logic` emit a `learning_updates` array
-(shared prompt field `LEARNING_UPDATES_FIELD`) of incremental ops rather than a
-full learnings blob. The app owns the merge via
+**Coach learnings via deltas:** `_analyze_workouts_logic` and `_adapt_logic` emit
+a `learning_updates` array (shared prompt field `LEARNING_UPDATES_FIELD`) of
+incremental ops rather than a full learnings blob. (`_generate_workouts_logic`
+is **read-only** — it consumes learnings but emits none; see
+DESIGN_backward_evaluation.md §11.) The app owns the merge via
 `CoachService._apply_learning_updates()` → `db.apply_learning_deltas()`, so a
 model that omits an existing learning cannot lose it. Each learning carries a
 **sport scope** (`sports`: comma-list or `general`) and a **confidence** level
@@ -138,13 +140,24 @@ confidence-based budget (`db.LEARNING_STALENESS_DAYS`: tentative 21d / moderate
 annotates each record with a `dormant` flag; dormant records stay in the DB and
 show in `status` (marked) but are **excluded from prompts** until a
 `revise`/`reinforce` refreshes them. `CoachService._get_learnings_text()` renders
-only active learnings as `[id|sports|confidence] text`. Every flow that emits
-`learning_updates` (generate, analyze, adapt) also injects this rendered block
-into its prompt — generate/adapt via `_build_system_prompt`, analyze under its
-own `COACH LEARNINGS` heading — so the model can `revise`/`reinforce`/`retire` by
-`[id]` instead of blindly re-adding near-duplicates on repeated runs.
-`CoachService.adapt()` applies the deltas at evaluation time (regardless of
-whether the proposed workout changes are later applied).
+only active learnings as `[id|sports|confidence] text`. Every flow that *uses*
+learnings (generate, analyze, adapt) injects this rendered block into its prompt
+— generate/adapt via `_build_system_prompt`, analyze under its own `COACH
+LEARNINGS` heading — so the two delta-emitting flows (analyze, adapt) can
+`revise`/`reinforce`/`retire` by `[id]` instead of blindly re-adding
+near-duplicates on repeated runs. `CoachService.adapt()` applies the deltas at
+evaluation time (regardless of whether the proposed workout changes are later
+applied).
+
+**Reinforcement integrity (`suppress_reinforcement`):**
+`db.apply_learning_deltas(deltas, suppress_reinforcement=False)` accepts a flag
+that, when True, drops the purely-ratcheting effects so re-reading *unchanged*
+evidence cannot inflate confidence or reset decay — `reinforce` is skipped and
+`revise` keeps content edits but not the recency refresh, while `add`/`retire`
+still apply. The evidence fingerprint that decides "unchanged" is
+`CoachEngine._get_evidence_fingerprint(activities, metrics, window)`; the cached
+reconstruction it gates lives in the `analysis_cache` table. Full model in
+DESIGN_backward_evaluation.md §5, §8.
 
 ### `CoachService`
 **Orchestrator — owns all DB and calendar access.** Exposes the public API
@@ -166,10 +179,19 @@ called by the UIs.
 |                                                     | `(reason, proposed_workouts)`.                                      |
 | `apply_adaptations(proposed, reason, start, end)`   | Deletes overridden workouts (+ calendar events), saves adapted      |
 |                                                     | workouts, syncs to Calendar.                                        |
-| `analyze_workouts(from, until, days, weeks, context)`| Reverse-engineers past training cycles from completed activities   |
-|                                                     | + metrics. Auto-resolves the date range from active/preceding       |
-|                                                     | goals when omitted. Calls `CoachEngine._analyze_workouts_logic()`,  |
-|                                                     | then applies returned `learning_updates` to `coach_learnings`.      |
+| `analyze_workouts(from, until, days, weeks, context, force, inspect)`| Reverse-engineers past training cycles from completed   |
+|                                                     | activities + metrics. Auto-resolves the date range from             |
+|                                                     | active/preceding goals when omitted. **Reuses** the `analysis_cache`|
+|                                                     | when the evidence fingerprint is unchanged (skips the LLM); `force` |
+|                                                     | recomputes anyway (a forced unchanged re-run still suppresses the   |
+|                                                     | reinforcement ratchet); `inspect` renders without writing learnings |
+|                                                     | or cache. Otherwise calls `CoachEngine._analyze_workouts_logic()`,  |
+|                                                     | applies `learning_updates`, and caches the reconstruction. See      |
+|                                                     | DESIGN_backward_evaluation.md §5, §8, §9.                           |
+| `_build_prior_training_context(prior_macro, today)` | Builds the read-only "planned vs actual" review injected into the   |
+|                                                     | `plan generate` strategy prompt (Option A, §6). Anchored on the     |
+|                                                     | prior plan's elapsed mesocycle windows; folds in the cached         |
+|                                                     | reconstruction's insights. Writes no `feedback` field.             |
 | `delete_plan(objective_id)`                         | Deletes macrocycle + mesocycles for that objective (cascades in     |
 |                                                     | DB).                                                                |
 | `_get_config_hash()`                                | Delegates to `CoachEngine._get_config_hash()`. Used by CLI/web to   |
@@ -217,20 +239,30 @@ from trainmate.coach import coach_service
 
 **Metrics & Baselines:** `save_metric_cache` (upsert),
 `get_metrics_cache(start_date, end_date)`, `save_baseline`,
-`get_baseline(date)` (returns closest prior baseline), `wipe_metrics`
+`get_baseline(date)` (returns closest prior baseline), `wipe_metrics` (also
+clears `analysis_cache`, which is evidence-derived)
 
 **Coach Learnings:** `get_learnings()` (each record annotated with a computed
 `dormant` flag), `add_learning(text, sports='general',
 confidence='tentative')`, `update_learning(id, text)`, `delete_learning(id)`,
-`apply_learning_deltas(deltas)`. Discrete, addressable athlete-observation
-records (table `coach_learnings`) enriched with sport scope, confidence, and
-recency; updated incrementally via LLM deltas
+`apply_learning_deltas(deltas, suppress_reinforcement=False)`. Discrete,
+addressable athlete-observation records (table `coach_learnings`) enriched with
+sport scope, confidence, and recency; updated incrementally via LLM deltas
 (`add`/`revise`/`reinforce`/`retire`). `apply_learning_deltas` runs all ops in
 one transaction and silently skips malformed deltas (and invalid confidence
-values). Module-level helpers: `normalize_sports()`, `valid_confidence()`,
-`learning_is_dormant()`, constants `CONFIDENCE_LEVELS` /
+values); `suppress_reinforcement` drops the ratcheting effects on unchanged
+evidence (see section 3). Module-level helpers: `normalize_sports()`,
+`valid_confidence()`, `learning_is_dormant()`, constants `CONFIDENCE_LEVELS` /
 `LEARNING_STALENESS_DAYS` (see section 3 for the delta/decay model).
 Periodization strategy lives in the `macrocycles` table, not here.
+
+**Analysis Cache:** `save_analysis_cache(horizon, fingerprint, window_start,
+window_end, reconstruction)` (upsert, one row per `horizon`),
+`get_analysis_cache(horizon)` (returns the row with `reconstruction` parsed from
+JSON, or `None`), `wipe_analysis_cache()`. Caches a backward-evaluation
+reconstruction keyed by an evidence fingerprint so a re-run over unchanged data
+reuses it instead of re-calling the LLM (table `analysis_cache`; see
+DESIGN_backward_evaluation.md §5.1).
 
 **Macrocycles/Mesocycles:** `save_macrocycle` (deletes existing for objective,
 then inserts), `get_macrocycle_for_objective(objective_id)`,
@@ -369,6 +401,21 @@ confidence, and recency (see section 3 for the decay model).
 | `focus`         | TEXT                    | E.g. "Zone 2 aerobic base, high volume" |
 | `feedback`      | TEXT                    | Athlete feedback for next replanning    |
 
+### analysis\_cache
+Cached backward-evaluation reconstruction (inferred cycles + insights), keyed by
+an evidence fingerprint. One row per `horizon`; cleared by `wipe_metrics`. See
+DESIGN_backward_evaluation.md §5.1.
+
+| Column           | Type       | Notes                                              |
+|------------------|------------|----------------------------------------------------|
+| `id`             | INTEGER PK |                                                    |
+| `horizon`        | TEXT       | `long` \| `short` — UNIQUE; the cache slot         |
+| `fingerprint`    | TEXT       | Hash of activity-id set + metrics + window         |
+| `window_start`   | TEXT       | YYYY-MM-DD                                         |
+| `window_end`     | TEXT       | YYYY-MM-DD                                         |
+| `reconstruction` | TEXT       | JSON: inferred cycles + physiological insights     |
+| `created_at`     | TEXT       | ISO timestamp                                      |
+
 ---
 
 ## 6. Singletons
@@ -413,7 +460,8 @@ Handler functions are named `run_<command>_<subcommand>()` in `trainmate_cli.py`
 | `plan`       | `generate`   | `p g`    | Generate/reuse macrocycle+mesocycles (`-f` to force, `--goal ID`)        |
 | `plan`       | `show`       | `p s`    | Show active periodization plan                                           |
 | `plan`       | `rm`         | `p d`    | Delete plan for a goal ID                                                |
-| `plan`       | `feedback`   | `p f`    | Add feedback (`--macro` or `--meso ID`, `--goal ID`, text)               |
+| `plan`       | `feedback`   | `p f`    | Add feedback (`--macro` or `--meso ID`, `--goal ID`, text;              |
+|              |              |          | `--edit` opens `$EDITOR` seeded with current feedback)                  |
 | `plan`       | `wipe`       | —        | Delete all plans                                                         |
 | `workout`    | `list`       | `w l`    | Show planned workouts (`--type TYPE`, `--days N`,        |
 |              |              |          | `--weeks N`, `--from DATE`, `--until DATE`,              |
@@ -443,7 +491,8 @@ Handler functions are named `run_<command>_<subcommand>()` in `trainmate_cli.py`
 | `workout`    | `wipe`       | —        | Delete all workouts                                                      |
 | `data`       | `pull`       | `d pull` | Fetch Garmin metrics and activities from Google Sheets                  |
 | `data`       | `analyze`    | `d a`    | Analyze completed workouts/metrics to detect cycles                      |
-|              |              |          | (`--from`, `--until`, `--days`, `--weeks`, `--context`)                  |
+|              |              |          | (`--from`, `--until`, `--days`, `--weeks`, `--context`,                  |
+|              |              |          | `--force` to recompute, `--inspect` for read-only)                      |
 | `data`       | `wipe`       | —        | Delete all metrics, baselines, completed activities                      |
 
 ---
@@ -511,8 +560,12 @@ Required fields:
    life events.
 2. Computes `goals_hash`, `lifeevents_hash`, `config_hash`.
 3. If existing macrocycle has matching hashes and `force=False` → reuse.
-4. Otherwise: calls `CoachEngine._generate_macrocycle_strategy()` → LLM →
-   `{strategy, mesocycles}`.
+4. Otherwise: builds a read-only **planned-vs-actual review** of the prior plan
+   via `_build_prior_training_context()` (Option A — anchored on the prior plan's
+   elapsed mesocycle windows, plus the cached reconstruction's insights; written
+   to no `feedback` field), prints it, and passes it as `prior_training_text` into
+   `CoachEngine._generate_macrocycle_strategy()` → LLM → `{strategy, mesocycles}`.
+   See DESIGN_backward_evaluation.md §6.
 5. If timeline > 24 weeks: calls `CoachEngine._generate_intermediate_goals()`
    first, saves intermediate objectives, then re-runs with the first goal.
 6. Saves new macrocycle + mesocycles to DB (old ones deleted via
@@ -526,10 +579,10 @@ Required fields:
    computes `num_days` from `(end_date − today)`.
 3. Fetches metrics history (last `metrics_history_days` days) + baseline.
 4. Calls `CoachEngine._generate_workouts_logic(num_days=...)` → LLM →
-   `{reasoning, learning_updates[], workouts[]}`.
-5. Applies `learning_updates` deltas to `coach_learnings`
-   (`_apply_learning_updates`).
-6. Clears future unsynced workouts (`clear_future_workouts`), then saves new
+   `{reasoning, workouts[]}`. **Read-only** w.r.t. coach learnings — it consumes
+   the rendered learnings in its prompt but emits/applies no `learning_updates`
+   (DESIGN_backward_evaluation.md §11).
+5. Clears future unsynced workouts (`clear_future_workouts`), then saves new
    workouts.
 
 ### Daily Adaptation (`workout adapt`)
@@ -567,13 +620,17 @@ Required fields:
    are omitted.
 2. Queries the database for completed activities and physiological metrics for
    that date range.
-3. Groups metrics and activities week-by-week using Monday-commencing ISO
-   weeks.
-4. Queries `CoachEngine._analyze_workouts_logic()` -> LLM ->
+3. Computes the evidence fingerprint and checks `analysis_cache['long']`. If the
+   fingerprint matches and `--force` is absent → returns the cached reconstruction
+   (no LLM call). `--force` recomputes regardless.
+4. Groups metrics and activities week-by-week using Monday-commencing ISO weeks.
+5. Queries `CoachEngine._analyze_workouts_logic()` -> LLM ->
    `{macrocycle_summary, inferred_macrocycle, inferred_mesocycles[],
    physiological_insights[], learning_updates[]}`.
-5. Applies `learning_updates` deltas to `coach_learnings`
-   (`_apply_learning_updates`).
+6. Unless `--inspect`: applies `learning_updates` deltas (with
+   `suppress_reinforcement=True` when the evidence was unchanged) and caches the
+   reconstruction in `analysis_cache`. `--inspect` renders but writes nothing.
+   See DESIGN_backward_evaluation.md §5, §8, §9.
 
 ---
 

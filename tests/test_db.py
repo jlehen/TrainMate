@@ -208,6 +208,78 @@ class TestDatabase(unittest.TestCase):
         revived = test_db.get_learnings()[0]
         self.assertFalse(revived["dormant"])
 
+    def test_reinforcement_suppressed_on_unchanged_evidence(self):
+        """The integrity invariant (DESIGN_backward_evaluation.md §8): on unchanged
+        evidence, `reinforce` is a no-op and `revise` keeps content but not recency, while
+        `add`/`retire` still apply."""
+        lid = test_db.add_learning("Tentative observation")  # 21-day budget
+        # Make it dormant so a (suppressed) reinforce would visibly revive it if applied.
+        old = (datetime.now(timezone.utc) - timedelta(days=30)).isoformat()
+        with test_db._get_connection() as conn:
+            conn.execute(
+                "UPDATE coach_learnings SET last_reinforced_at=? WHERE id=?", (old, lid)
+            )
+
+        # reinforce is dropped -> still dormant, recency unchanged.
+        test_db.apply_learning_deltas(
+            [{"op": "reinforce", "id": lid}], suppress_reinforcement=True
+        )
+        learning = test_db.get_learnings()[0]
+        self.assertTrue(learning["dormant"])
+        self.assertEqual(learning["last_reinforced_at"], old)
+
+        # revise applies the text edit but does NOT refresh recency (still dormant).
+        test_db.apply_learning_deltas(
+            [{"op": "revise", "id": lid, "text": "Reworded observation"}],
+            suppress_reinforcement=True,
+        )
+        learning = test_db.get_learnings()[0]
+        self.assertEqual(learning["text"], "Reworded observation")
+        self.assertEqual(learning["last_reinforced_at"], old)
+        self.assertTrue(learning["dormant"])
+
+        # add and retire are unaffected by suppression.
+        test_db.apply_learning_deltas(
+            [{"op": "add", "text": "Newly surfaced"}], suppress_reinforcement=True
+        )
+        texts = {l["text"] for l in test_db.get_learnings()}
+        self.assertIn("Newly surfaced", texts)
+        test_db.apply_learning_deltas(
+            [{"op": "retire", "id": lid}], suppress_reinforcement=True
+        )
+        self.assertNotIn(lid, {l["id"] for l in test_db.get_learnings()})
+
+    def test_analysis_cache_upsert_and_retention(self):
+        """One row per horizon; saving again overwrites the slot. `reconstruction`
+        round-trips through JSON (DESIGN_backward_evaluation.md §5.1)."""
+        self.assertIsNone(test_db.get_analysis_cache("long"))
+
+        recon = {"inferred_macrocycle": {"overall_focus": "Base"},
+                 "physiological_insights": ["HRV stable"]}
+        test_db.save_analysis_cache(
+            "long", "fp-1", "2026-01-01", "2026-03-31", recon
+        )
+        row = test_db.get_analysis_cache("long")
+        self.assertEqual(row["fingerprint"], "fp-1")
+        self.assertEqual(row["window_start"], "2026-01-01")
+        self.assertEqual(row["reconstruction"], recon)
+
+        # Re-saving the same horizon overwrites (one-row-per-horizon retention).
+        test_db.save_analysis_cache("long", "fp-2", "2026-01-01", "2026-04-30", {"x": 1})
+        row = test_db.get_analysis_cache("long")
+        self.assertEqual(row["fingerprint"], "fp-2")
+        self.assertEqual(row["reconstruction"], {"x": 1})
+
+        # Horizons are independent slots.
+        test_db.save_analysis_cache("short", "fp-s", "2026-04-01", "2026-04-30", {"y": 2})
+        self.assertEqual(test_db.get_analysis_cache("short")["fingerprint"], "fp-s")
+        self.assertEqual(test_db.get_analysis_cache("long")["fingerprint"], "fp-2")
+
+        # wipe_metrics also clears the reconstruction cache (evidence-derived).
+        test_db.wipe_metrics()
+        self.assertIsNone(test_db.get_analysis_cache("long"))
+        self.assertIsNone(test_db.get_analysis_cache("short"))
+
     def test_learning_helpers(self):
         self.assertEqual(normalize_sports(None), "general")
         self.assertEqual(normalize_sports(""), "general")

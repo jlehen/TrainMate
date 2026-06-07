@@ -1,5 +1,6 @@
 import sqlite3
 import os
+import json
 from datetime import datetime, timedelta, timezone
 from typing import Any, Optional, List, Dict, Generator
 from contextlib import contextmanager
@@ -302,7 +303,27 @@ class Database:
                     FOREIGN KEY (macrocycle_id) REFERENCES macrocycles(id) ON DELETE CASCADE
                 )
             """)
-            
+
+            # Backward-evaluation reconstruction cache (see DESIGN_backward_evaluation.md
+            # §5.1). Each row is a cached reconstruction (inferred cycles + physiological
+            # insights) of a past training window, keyed by an *evidence fingerprint* so
+            # that a re-run over unchanged data can reuse it instead of paying for another
+            # LLM pass. Retention is one row per `horizon` (UNIQUE): a new data pull shifts
+            # the fingerprint and overwrites the slot, because we only ever want the current
+            # reconstruction. The whole reconstruction is stored as one JSON blob — nothing
+            # queries inside it; it is fetched whole, fed to a prompt, or rendered.
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS analysis_cache (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    horizon TEXT NOT NULL UNIQUE, -- 'long' | 'short' — the cache slot
+                    fingerprint TEXT NOT NULL,    -- hash of activity-id set + metrics + window
+                    window_start TEXT,
+                    window_end TEXT,
+                    reconstruction TEXT NOT NULL, -- JSON: inferred cycles + insights
+                    created_at TEXT NOT NULL
+                )
+            """)
+
             conn.commit()
 
     # --- Objectives CRUD ---
@@ -768,7 +789,9 @@ class Database:
         with self._get_connection() as conn:
             conn.execute("DELETE FROM coach_learnings WHERE id=?", (learning_id,))
 
-    def apply_learning_deltas(self, deltas: List[Dict[str, Any]]) -> None:
+    def apply_learning_deltas(
+        self, deltas: List[Dict[str, Any]], suppress_reinforcement: bool = False
+    ) -> None:
         """Applies a list of incremental learning operations in one transaction.
 
         Each delta is one of:
@@ -780,6 +803,17 @@ class Database:
         `reinforce` refresh recency (last_reinforced_at), so a reaffirmed learning leaves
         the dormant state. Invalid confidence values and malformed deltas (empty text,
         missing id, unknown op) are skipped so a partially-valid response still applies.
+
+        Reinforcement integrity invariant (see DESIGN_backward_evaluation.md §8). When
+        `suppress_reinforcement` is True — i.e. these deltas were derived from *unchanged*
+        evidence (a forced re-run over a window whose fingerprint already produced
+        learnings) — the purely-ratcheting effects are dropped so re-reading the same data
+        cannot inflate confidence or reset the decay clock:
+          - `reinforce` ops are skipped entirely.
+          - `revise` ops still apply content (text/sports/confidence) but do NOT refresh
+            `last_reinforced_at`.
+          - `add` and `retire` are unaffected: a learning newly surfaced or retired from
+            the same evidence is genuinely new knowledge, not a double-count.
         """
         if not deltas:
             return
@@ -805,8 +839,9 @@ class Database:
                     learning_id = delta.get("id")
                     if learning_id is None:
                         continue
-                    # Apply only the fields the model supplied; a revise reflects fresh
-                    # evidence, so refresh recency too.
+                    # Apply only the fields the model supplied. A revise normally reflects
+                    # fresh evidence, so it refreshes recency — but not when the evidence is
+                    # unchanged (suppress_reinforcement), where only the content edit stands.
                     sets, params = [], []
                     text = (delta.get("text") or "").strip()
                     if text:
@@ -821,12 +856,19 @@ class Database:
                         params.append(confidence)
                     if not sets:
                         continue
-                    sets += ["updated_at=?", "last_reinforced_at=?"]
-                    params += [now, now, learning_id]
+                    sets.append("updated_at=?")
+                    params.append(now)
+                    if not suppress_reinforcement:
+                        sets.append("last_reinforced_at=?")
+                        params.append(now)
+                    params.append(learning_id)
                     cursor.execute(
                         f"UPDATE coach_learnings SET {', '.join(sets)} WHERE id=?", params
                     )
                 elif op == "reinforce":
+                    # Pure ratchet: the only spurious op on unchanged evidence.
+                    if suppress_reinforcement:
+                        continue
                     learning_id = delta.get("id")
                     if learning_id is None:
                         continue
@@ -845,6 +887,58 @@ class Database:
                         cursor.execute(
                             "DELETE FROM coach_learnings WHERE id=?", (learning_id,)
                         )
+
+    # --- Backward-evaluation reconstruction cache ---
+    # See DESIGN_backward_evaluation.md §5.1. One row per `horizon`; callers compare the
+    # stored `fingerprint` against a freshly computed one to decide reuse vs recompute.
+    def save_analysis_cache(
+        self, horizon: str, fingerprint: str, window_start: Optional[str],
+        window_end: Optional[str], reconstruction: Dict[str, Any]
+    ) -> None:
+        """Upserts the reconstruction for a horizon slot ('long' | 'short').
+
+        Overwrites whatever was cached for that horizon (one-row-per-horizon retention):
+        a new fingerprint means the underlying evidence changed, and we only keep the
+        current reconstruction. `reconstruction` is stored as a JSON blob.
+        """
+        now = datetime.now(timezone.utc).isoformat()
+        payload = json.dumps(reconstruction)
+        with self._get_connection() as conn:
+            conn.execute(
+                "INSERT INTO analysis_cache (horizon, fingerprint, window_start, "
+                "window_end, reconstruction, created_at) VALUES (?, ?, ?, ?, ?, ?) "
+                "ON CONFLICT(horizon) DO UPDATE SET "
+                "fingerprint=excluded.fingerprint, window_start=excluded.window_start, "
+                "window_end=excluded.window_end, reconstruction=excluded.reconstruction, "
+                "created_at=excluded.created_at",
+                (horizon, fingerprint, window_start, window_end, payload, now)
+            )
+            conn.commit()
+
+    def get_analysis_cache(self, horizon: str) -> Optional[Dict[str, Any]]:
+        """Returns the cached row for a horizon (with `reconstruction` parsed back to a
+        dict), or None. The caller decides reuse by matching `fingerprint`."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT horizon, fingerprint, window_start, window_end, reconstruction, "
+                "created_at FROM analysis_cache WHERE horizon = ?", (horizon,)
+            )
+            row = cursor.fetchone()
+        if not row:
+            return None
+        result = dict(row)
+        try:
+            result["reconstruction"] = json.loads(result["reconstruction"])
+        except (ValueError, TypeError):
+            result["reconstruction"] = None
+        return result
+
+    def wipe_analysis_cache(self) -> None:
+        """Deletes all cached reconstructions."""
+        with self._get_connection() as conn:
+            conn.cursor().execute("DELETE FROM analysis_cache")
+            conn.commit()
 
     # --- Macrocycles & Mesocycles ---
     def get_macrocycle_for_objective(self, objective_id: int) -> Optional[Macrocycle]:
@@ -1023,12 +1117,17 @@ class Database:
             conn.commit()
 
     def wipe_metrics(self) -> None:
-        """Deletes all metrics, baselines, and completed activities from the database."""
+        """Deletes all metrics, baselines, and completed activities from the database.
+
+        Also clears the analysis cache: its reconstructions are derived from exactly this
+        evidence, so they are meaningless once the evidence is gone.
+        """
         with self._get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("DELETE FROM completed_activities")
             cursor.execute("DELETE FROM athlete_metrics_cache")
             cursor.execute("DELETE FROM athlete_baselines")
+            cursor.execute("DELETE FROM analysis_cache")
             conn.commit()
 
 # Singleton instance
