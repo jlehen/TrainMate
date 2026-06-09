@@ -389,7 +389,7 @@ class Database:
     ) -> List[Objective]:
         """Fetches active objectives strictly before target_date, up to history_days ago."""
         if history_days is None:
-            history_days = config.goals_history_days
+            history_days = config.goals_lookback_days
         
         # Calculate the lower bound date
         from datetime import datetime, timedelta, timezone # imported locally to avoid modifying imports block

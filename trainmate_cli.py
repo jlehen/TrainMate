@@ -1349,7 +1349,7 @@ def _ensure_recent_data(end_date: Optional[str] = None) -> None:
     auto-pulling small/recent gaps and surfacing large backfills as a command. Warns
     if today's metrics are still unavailable afterward."""
     end_date = end_date or _today_str()
-    history_days = config.metrics_history_days
+    history_days = config.metrics_lookback_days
     start_date = (
         datetime.strptime(end_date, "%Y-%m-%d").date() - timedelta(days=history_days - 1)
     ).strftime("%Y-%m-%d")
@@ -1374,7 +1374,7 @@ def run_workout_adapt(args: argparse.Namespace) -> None:
 
     # Display rolling trajectory
     try:
-        history_days = config.metrics_history_days
+        history_days = config.metrics_lookback_days
         date_obj = datetime.strptime(date_str, "%Y-%m-%d").date()
         start_date = (date_obj - timedelta(days=history_days - 1)).strftime("%Y-%m-%d")
         metrics_history = db.get_metrics_cache(start_date=start_date, end_date=date_str)

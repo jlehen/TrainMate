@@ -46,7 +46,7 @@ class TestAdaptation(unittest.TestCase):
 
         with patch.dict(trainmate.coach.config.data, {
             "user_profile": test_profile,
-            "metrics_history_days": 3,
+            "metrics_lookback_days": 3,
             "low_load_threshold": 10.0,
         }):
             mock_client.complete.return_value = {
@@ -112,7 +112,7 @@ class TestAdaptation(unittest.TestCase):
         test_profile = {"lthr": 165, "max_hr": 185}
         with patch.dict(trainmate.coach.config.data, {
             "user_profile": test_profile,
-            "metrics_history_days": 3,
+            "metrics_lookback_days": 3,
             "low_load_threshold": 10.0,
         }):
             # Pre-existing observation the model can reinforce by [id].

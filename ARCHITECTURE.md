@@ -103,7 +103,7 @@ Module-level function. Concatenates all `*.txt` files from `trainmate/science/`
 |                                      | prompt segment.                                     |
 | `_get_goals_hash(objectives)`        | SHA-256 of sorted objectives list.                  |
 | `_get_lifeevents_hash(lifeevents)`   | SHA-256 of sorted life events list.                 |
-| `_get_config_hash()`                 | SHA-256 of `user_profile` + `metrics_history_days`. |
+| `_get_config_hash()`                 | SHA-256 of `user_profile` + `metrics_lookback_days`. |
 | `_generate_macrocycle_strategy(...)` | LLM call → `{strategy, mesocycles}`. Label:         |
 |                                      | `periodization_plan`.                               |
 | `_generate_workouts_logic(...)`      | LLM call → `{reasoning, workouts[]}`. **Read-only** |
@@ -401,7 +401,7 @@ confidence, and recency (see section 3 for the decay model).
 | `goals_hash`      | TEXT                  | SHA-256 of objectives at generation time         |
 | `lifeevents_hash` | TEXT                  | SHA-256 of life events at generation time        |
 | `config_hash`     | TEXT                  | SHA-256 of `user_profile` +                      |
-|                   |                       | `metrics_history_days`                           |
+|                   |                       | `metrics_lookback_days`                          |
 | `created_at`      | TEXT                  | ISO timestamp                                    |
 | `feedback`        | TEXT                  | Athlete feedback for next replanning             |
 
@@ -557,7 +557,7 @@ Required fields:
 | `garmin_refresh_minutes` / `garmin_mutable_days` / `garmin_backfill_prompt_days` / `garmin_initial_backfill_days` / `garmin_throttle_seconds` | — | Auto-ensure tuning (see §8) |
 | `service_account_file` | str  | Path to service account JSON (default:                        |
 |                        |      | `service_account.json`)                                       |
-| `metrics_history_days`  | int  | Rolling window for adaptation (default: 15)                  |
+| `metrics_lookback_days`  | int  | Rolling window for adaptation (default: 15)                  |
 | `workout_generate_days` | int  | Default horizon for `workout generate` (default: 28)         |
 | `low_load_threshold`    | float| Workload score below which an activity is "minor"            |
 |                         |      | (default: 25). Controls two behaviors: (1) matched-activity  |
@@ -597,7 +597,7 @@ Required fields:
    `--until-mesocycle ID` → `config.workout_generate_days` (default 28).
 2. `CoachService.generate_workouts(end_date=...)` verifies a macrocycle exists,
    computes `num_days` from `(end_date − today)`.
-3. Fetches metrics history (last `metrics_history_days` days) + baseline.
+3. Fetches metrics history (last `metrics_lookback_days` days) + baseline.
 4. Calls `CoachEngine._generate_workouts_logic(num_days=...)` → LLM →
    `{reasoning, workouts[]}`. **Read-only** w.r.t. coach learnings — it consumes
    the rendered learnings in its prompt but emits/applies no `learning_updates`
@@ -714,7 +714,7 @@ ACWR = Acute / Chronic
 - HRV drops > 1 std below baseline mean → flag potential overtraining
 - RHR rises > 1 std above baseline mean (min +3 bpm) → flag potential
   overtraining
-- `workout adapt` acts on these signals over the rolling `metrics_history_days`
+- `workout adapt` acts on these signals over the rolling `metrics_lookback_days`
   window.
 
 ### Science Guidelines Files

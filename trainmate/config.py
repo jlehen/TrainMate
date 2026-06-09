@@ -87,14 +87,14 @@ class Config:
         return profile
 
     @property
-    def metrics_history_days(self) -> int:
+    def metrics_lookback_days(self) -> int:
         """Gets the number of days of metrics history to look at, defaulting to 15."""
-        return self.get("metrics_history_days", 15)
+        return self.get("metrics_lookback_days", 15)
 
     @property
-    def goals_history_days(self) -> int:
+    def goals_lookback_days(self) -> int:
         """Gets the number of days into the past to look for preceding goals, defaulting to 90."""
-        return self.get("goals_history_days", 90)
+        return self.get("goals_lookback_days", 90)
 
     @property
     def workout_generate_days(self) -> int:

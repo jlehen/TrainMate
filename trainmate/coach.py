@@ -301,7 +301,7 @@ UPCOMING LIFE EVENTS:
         """Computes a hash representation of the relevant user config to check for updates."""
         data_to_hash = {
             'user_profile': config.user_profile,
-            'metrics_history_days': config.metrics_history_days
+            'metrics_lookback_days': config.metrics_lookback_days
         }
         serialized = json.dumps(data_to_hash, sort_keys=True)
         return hashlib.sha256(serialized.encode('utf-8')).hexdigest()
@@ -1307,7 +1307,7 @@ class CoachService:
         learnings = self._get_learnings_text()
 
         # Retrieve recent history context
-        history_days = config.metrics_history_days
+        history_days = config.metrics_lookback_days
         start_date_obj = today_date_obj - timedelta(days=history_days - 1)
         start_date_str = start_date_obj.strftime("%Y-%m-%d")
 
@@ -1405,7 +1405,7 @@ class CoachService:
         target_date_obj = datetime.strptime(target_date_str, "%Y-%m-%d").date()
 
         # Fetch metrics history window
-        history_days = config.metrics_history_days
+        history_days = config.metrics_lookback_days
         start_date_obj = target_date_obj - timedelta(days=history_days - 1)
         start_date_str = start_date_obj.strftime("%Y-%m-%d")
 
