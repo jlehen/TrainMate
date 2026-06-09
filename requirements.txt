@@ -1,0 +1,11 @@
+# Core
+Flask>=3.0
+PyYAML>=6.0
+requests>=2.31
+
+# Google Calendar sync (service account)
+google-api-python-client>=2.0
+google-auth>=2.0
+
+# Garmin Connect (direct daily-metrics & activity sync)
+garminconnect>=0.2.0

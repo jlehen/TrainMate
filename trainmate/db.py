@@ -5,6 +5,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Optional, List, Dict, Generator
 from contextlib import contextmanager
 from trainmate.config import config
+from trainmate.util import today_date
 from trainmate.types import (
     Objective, LifeEvent, Workout, AthleteMetric, AthleteBaseline, Macrocycle, Mesocycle,
     CompletedActivity
@@ -324,6 +325,18 @@ class Database:
                 )
             """)
 
+            # Sync watermark: how far Garmin data has been pulled, and when.
+            # through_date is the FORWARD high-water mark (local YYYY-MM-DD); a
+            # backward backfill never regresses it. last_pull_utc is an INSTANT
+            # (UTC ISO) compared against now for the freshness interval.
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS sync_state (
+                    key            TEXT PRIMARY KEY,
+                    through_date   TEXT,
+                    last_pull_utc  TEXT
+                )
+            """)
+
             conn.commit()
 
     # --- Objectives CRUD ---
@@ -381,7 +394,7 @@ class Database:
         # Calculate the lower bound date
         from datetime import datetime, timedelta, timezone # imported locally to avoid modifying imports block
         target_date_obj = datetime.strptime(target_date, "%Y-%m-%d").date()
-        today = datetime.now(timezone.utc).date()
+        today = today_date()
         reference_date = min(today, target_date_obj)
         lower_bound_obj = reference_date - timedelta(days=history_days)
         lower_bound_str = lower_bound_obj.strftime("%Y-%m-%d")
@@ -753,6 +766,58 @@ class Database:
             )
             row = cursor.fetchone()
             return dict(row) if row else None  # type: ignore
+
+    # --- Sync watermark ---
+    def get_sync_state(self, key: str = "garmin") -> Optional[Dict[str, Any]]:
+        """Returns the {through_date, last_pull_utc} watermark for a source, or None."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT key, through_date, last_pull_utc FROM sync_state WHERE key = ?",
+                (key,),
+            )
+            row = cursor.fetchone()
+            return dict(row) if row else None  # type: ignore
+
+    def set_sync_state(
+        self, through_date: Optional[str], last_pull_utc: str, key: str = "garmin"
+    ) -> None:
+        """Upserts the watermark. through_date only ever advances (forward high-water
+        mark); a backward backfill passes the existing value through unchanged."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                INSERT INTO sync_state (key, through_date, last_pull_utc)
+                VALUES (?, ?, ?)
+                ON CONFLICT(key) DO UPDATE SET
+                    through_date=excluded.through_date,
+                    last_pull_utc=excluded.last_pull_utc
+                """,
+                (key, through_date, last_pull_utc),
+            )
+            conn.commit()
+
+    def get_metric_dates(
+        self, start_date: Optional[str] = None, end_date: Optional[str] = None
+    ) -> List[str]:
+        """Returns the sorted list of dates present in the metrics cache (optionally in a
+        range). A row exists for every pulled day — even all-null ones — so this set is
+        the record of what has been pulled, distinguishing 'pulled, empty' from 'never
+        pulled' (see DESIGN_garmin_direct_pull.md §5)."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            if start_date and end_date:
+                cursor.execute(
+                    "SELECT date FROM athlete_metrics_cache "
+                    "WHERE date >= ? AND date <= ? ORDER BY date ASC",
+                    (start_date, end_date),
+                )
+            else:
+                cursor.execute(
+                    "SELECT date FROM athlete_metrics_cache ORDER BY date ASC"
+                )
+            return [row["date"] for row in cursor.fetchall()]
 
     # --- Coach Learnings ---
     def get_learnings(self) -> List[Dict[str, Any]]:
@@ -1139,6 +1204,7 @@ class Database:
             cursor.execute("DELETE FROM athlete_metrics_cache")
             cursor.execute("DELETE FROM athlete_baselines")
             cursor.execute("DELETE FROM analysis_cache")
+            cursor.execute("DELETE FROM sync_state")
             conn.commit()
 
 # Singleton instance

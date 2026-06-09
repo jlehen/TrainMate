@@ -12,6 +12,7 @@ _ALL_TABLES = [
     "athlete_baselines",
     "coach_learnings",
     "analysis_cache",
+    "sync_state",
     "lifeevents",
     "objectives",
 ]

@@ -1,7 +1,7 @@
 import os
 import json
 import hashlib
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from typing import Any, List, Optional, Tuple, Dict
 from trainmate.config import config
 from trainmate.db import db
@@ -9,6 +9,7 @@ from trainmate.openrouter import openrouter_client
 from trainmate.google_calendar import calendar_syncer
 from trainmate.types import Objective, LifeEvent, Workout, CompletedActivity
 from trainmate.adherence import analyze_adherence
+from trainmate.util import today_str as _today_str, today_date as _today_date
 
 
 # Shared JSON-output instruction for incrementally updating coach learnings. The LLM
@@ -129,7 +130,7 @@ class CoachEngine:
         if "name" in profile:
             lines.append(f"- Name: {profile['name']}")
         if "birth_year" in profile:
-            current_year = datetime.now(timezone.utc).year
+            current_year = _today_date().year
             age = current_year - profile['birth_year']
             lines.append(f"- Birth Year: {profile['birth_year']} (Age: {age})")
         if "max_hr" in profile:
@@ -1078,7 +1079,7 @@ class CoachService:
                 return "No active goals found. TrainMate needs at least one objective.", []
 
         # Get future life events
-        today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        today_str = _today_str()
         today_date = datetime.strptime(today_str, "%Y-%m-%d").date()
 
         # Determine plan start date based on preceding goals with plans
@@ -1285,7 +1286,7 @@ class CoachService:
                 "Please generate a periodization plan first."
             )
 
-        today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        today_str = _today_str()
         today_date_obj = datetime.strptime(today_str, "%Y-%m-%d").date()
 
         if end_date is not None:
@@ -1399,7 +1400,7 @@ class CoachService:
     def adapt(self, target_date_str: Optional[str] = None) -> Tuple[str, List[Workout]]:
         """Evaluates metrics/activities over a rolling window and adapts mesocycle if needed."""
         if not target_date_str:
-            target_date_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+            target_date_str = _today_str()
 
         target_date_obj = datetime.strptime(target_date_str, "%Y-%m-%d").date()
 
@@ -1736,7 +1737,7 @@ class CoachService:
         - `inspect` is read-only: it renders the reconstruction but writes neither coach
           learnings nor the cache.
         """
-        until_date = datetime.now(timezone.utc).date()
+        until_date = _today_date()
         if until_date_str:
             until_date = datetime.strptime(until_date_str, "%Y-%m-%d").date()
 
@@ -1773,6 +1774,11 @@ class CoachService:
         until_str = until_date.strftime("%Y-%m-%d")
 
         print(f"Analyzing activities from {from_str} to {until_str}...")
+
+        # Ensure Garmin data covers the analysis window (auto-pull recent/small gaps,
+        # surface a command for large backfills) before reading it.
+        from trainmate import garmin
+        garmin.ensure_data(from_str, until_str)
 
         metrics = self._db.get_metrics_cache(start_date=from_str, end_date=until_str)
         completed_activities = self._db.get_completed_activities(

@@ -247,9 +247,9 @@ class TestTrainMateCLI(unittest.TestCase):
         self.assertEqual(exit_code, 0)
         self.assertIn("No fields to update", stdout)
 
-    @patch("trainmate_cli.sheets_reader")
+    @patch("trainmate_cli.garmin")
     @patch("trainmate_cli.coach_service")
-    def test_workout_commands(self, mock_coach, mock_sheets_reader):
+    def test_workout_commands(self, mock_coach, mock_garmin):
         mock_coach.adapt.return_value = (
             "Metrics are green",
             [{
@@ -287,9 +287,9 @@ class TestTrainMateCLI(unittest.TestCase):
             f"Workout with ID {w_id} ('Interval Session') removed successfully", stdout
         )
 
-    @patch("trainmate_cli.sheets_reader")
+    @patch("trainmate_cli.garmin")
     @patch("trainmate_cli.coach_service")
-    def test_plan_commands(self, mock_coach, mock_sheets_reader):
+    def test_plan_commands(self, mock_coach, mock_garmin):
         mock_coach.generate_periodization_plan.return_value = (
             "Test coaching plan strategy",
             [{"name": "Base Building", "start_date": "2026-06-01", "end_date": "2026-06-28"}],
@@ -528,11 +528,11 @@ class TestTrainMateCLI(unittest.TestCase):
         self.assertEqual(exit_code, 0)
         self.assertIn("Specify two dates", stdout)
 
-    @patch("trainmate_cli.sheets_reader")
-    def test_data_pull_command(self, mock_sheets_reader):
+    @patch("trainmate_cli.garmin")
+    def test_data_pull_command(self, mock_garmin):
         exit_code, stdout, stderr = self.run_cli(["data", "pull"])
         self.assertEqual(exit_code, 0)
-        mock_sheets_reader.sync_data.assert_called_once()
+        mock_garmin.pull.assert_called_once()
 
     def test_invalid_command(self):
         exit_code, stdout, stderr = self.run_cli(["invalidcmd"])
@@ -554,8 +554,11 @@ class TestTrainMateCLI(unittest.TestCase):
         self.assertIn(f"Workout with ID {w_id} ('Synced Run') removed successfully", stdout)
         mock_calendar.delete_workout_event.assert_called_once_with("mock_event_123")
 
-    @patch("trainmate_cli.sheets_reader")
-    def test_plan_workout_data_pull_prompt(self, mock_sheets_reader):
+    @patch("trainmate_cli.garmin")
+    def test_plan_show_never_pulls(self, mock_garmin):
+        # `plan show` is a pure read: it must never prompt or trigger a Garmin pull,
+        # whether or not metrics exist (auto-ensure lives on the generating/adapting
+        # commands, not on read-only views).
         test_db.save_metric_cache(
             date="2026-06-03", rhr=50, hrv=75, sleep_score=80, stress=20
         )
@@ -563,19 +566,16 @@ class TestTrainMateCLI(unittest.TestCase):
             exit_code, stdout, stderr = self.run_cli(["plan", "show"])
             self.assertEqual(exit_code, 0)
             mock_input.assert_not_called()
-            mock_sheets_reader.sync_data.assert_not_called()
+            mock_garmin.pull.assert_not_called()
+            mock_garmin.ensure_data.assert_not_called()
 
         with test_db._get_connection() as conn:
             conn.execute("DELETE FROM athlete_metrics_cache")
             conn.commit()
 
-        exit_code, stdout, stderr = self.run_cli(["plan", "show"], input_value="n")
+        exit_code, stdout, stderr = self.run_cli(["plan", "show"])
         self.assertEqual(exit_code, 0)
-        mock_sheets_reader.sync_data.assert_not_called()
-
-        exit_code, stdout, stderr = self.run_cli(["plan", "show"], input_value="y")
-        self.assertEqual(exit_code, 0)
-        mock_sheets_reader.sync_data.assert_called_once()
+        mock_garmin.pull.assert_not_called()
 
     def test_goal_wipe(self):
         test_db.add_objective(

@@ -5,9 +5,9 @@ import sys
 import tempfile
 import textwrap
 from typing import Optional
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timedelta
 from trainmate.db import db
-from trainmate.google_sheets import sheets_reader
+from trainmate import garmin
 from trainmate.google_calendar import calendar_syncer
 from trainmate.coach import coach_service
 from trainmate.adherence import analyze_adherence
@@ -15,7 +15,7 @@ from trainmate.config import config
 from trainmate.util import (
     bold, dim, green, red, yellow, cyan, blue, magenta, gray,
     color_acwr, visible_len, pad_visible, wrap_text, format_labeled_text,
-    format_labeled_block
+    format_labeled_block, today_str as _today_str, today_date as _today_date,
 )
 
 
@@ -469,9 +469,32 @@ def main() -> None:
     )
     
     # data pull
-    data_subparsers.add_parser(
+    d_pull = data_subparsers.add_parser(
         "pull",
-        help="Fetch latest activities and metrics from Sheets"
+        help="Fetch latest activities and metrics directly from Garmin Connect"
+    )
+    d_pull.add_argument(
+        "--days", type=int, default=2, metavar="N",
+        help="Number of days to pull, ending today (default: 2)"
+    )
+    d_pull.add_argument(
+        "--start-date", dest="start_date", metavar="YYYY-MM-DD",
+        help="Start date for an explicit range (overrides --days)"
+    )
+    d_pull.add_argument(
+        "--end-date", dest="end_date", metavar="YYYY-MM-DD",
+        help="End date for an explicit range (defaults to today)"
+    )
+    d_pull.add_argument(
+        "--sleep", type=float, dest="sleep", metavar="SECONDS",
+        help="Throttle: seconds to sleep between Garmin calls (default from config)"
+    )
+    pull_group = d_pull.add_mutually_exclusive_group()
+    pull_group.add_argument(
+        "--metrics-only", action="store_true", help="Pull daily metrics only"
+    )
+    pull_group.add_argument(
+        "--activities-only", action="store_true", help="Pull activities only"
     )
 
     # data analyze
@@ -522,19 +545,6 @@ def main() -> None:
         sys.exit(1)
         
     cmd = args.command.lower()
-
-    if cmd in ("plan", "p", "workout", "w"):
-        metrics = db.get_metrics_cache()
-        if not metrics:
-            try:
-                confirm = input(
-                    "Garmin data has not been pulled yet. "
-                    "Would you like to pull it now? [y/N]: "
-                ).strip().lower()
-            except EOFError:
-                confirm = 'n'
-            if confirm in ('y', 'yes'):
-                run_data_pull()
 
     if cmd in ("status", "s"):
         run_status(verbose=args.verbose)
@@ -597,7 +607,7 @@ def main() -> None:
             sys.exit(1)
         sub = args.subcommand.lower()
         if sub == "pull":
-            run_data_pull()
+            run_data_pull(args)
         elif sub in ("analyze", "a"):
             run_data_analyze(args)
         elif sub == "wipe":
@@ -629,6 +639,7 @@ def main() -> None:
 
 def run_status(verbose: bool = False) -> None:
     """Displays current athlete goals, Garmin metrics, baselines, and memories."""
+    _ensure_recent_data()
     print(bold(cyan("=== TRAINMATE ATHLETE STATUS ===")))
     
     # Active Goal & Periodization Strategy
@@ -639,7 +650,7 @@ def run_status(verbose: bool = False) -> None:
         sport_str = next_goal['sport_type'].upper()
         
         # Calculate days remaining
-        today = datetime.now(timezone.utc).date()
+        today = _today_date()
         target_date = datetime.strptime(next_goal['target_date'], "%Y-%m-%d").date()
         days_rem = (target_date - today).days
         days_rem_str = f" ({days_rem} days remaining)" if days_rem >= 0 else ""
@@ -1014,6 +1025,7 @@ def run_lifeevent_wipe(args: argparse.Namespace) -> None:
 def run_plan_generate(args: argparse.Namespace) -> None:
     """Executes the AI periodization strategy plan generation command."""
     # Make sure we have latest metrics cached
+    _ensure_recent_data()
     metrics = db.get_metrics_cache()
     if not metrics:
         print(yellow("Warning: Metrics cache is empty. Proceeding without Garmin metrics."))
@@ -1107,7 +1119,7 @@ def run_plan_show(args: argparse.Namespace) -> None:
     print()
     print(bold("Mesocycle Timeline:"))
     
-    today = datetime.now(timezone.utc).date()
+    today = _today_date()
     
     for m in mesocycles:
         start = datetime.strptime(m['start_date'], "%Y-%m-%d").date()
@@ -1332,36 +1344,33 @@ def run_plan_feedback(args: argparse.Namespace) -> None:
 # Workout Command
 # ==============================================================================
 
-def _ensure_metrics_current() -> None:
-    """Pulls metrics from Sheets if today's data is absent, then warns if still missing."""
-    today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+def _ensure_recent_data(end_date: Optional[str] = None) -> None:
+    """Ensures Garmin data covering the recent metrics window is present and fresh,
+    auto-pulling small/recent gaps and surfacing large backfills as a command. Warns
+    if today's metrics are still unavailable afterward."""
+    end_date = end_date or _today_str()
+    history_days = config.metrics_history_days
+    start_date = (
+        datetime.strptime(end_date, "%Y-%m-%d").date() - timedelta(days=history_days - 1)
+    ).strftime("%Y-%m-%d")
+    garmin.ensure_data(start_date, end_date)
 
-    def _today_present() -> bool:
-        rows = db.get_metrics_cache(start_date=today_str, end_date=today_str)
-        if not rows:
-            return False
-        m = rows[0]
-        return not (
-            m.get('rhr') is None
-            and m.get('hrv') is None
-            and m.get('sleep_score') is None
-            and m.get('stress') is None
+    today = _today_str()
+    if end_date == today:
+        rows = db.get_metrics_cache(start_date=today, end_date=today)
+        present = bool(rows) and not (
+            rows[0].get('rhr') is None and rows[0].get('hrv') is None
+            and rows[0].get('sleep_score') is None and rows[0].get('stress') is None
         )
-
-    if not _today_present():
-        print("Syncing latest data from Google Sheets...")
-        run_data_pull()
-        if not _today_present():
-            print(yellow(
-                f"Warning: Garmin metrics for the current date ({today_str}) are missing."
-            ))
+        if not present:
+            print(yellow(f"Note: Garmin metrics for today ({today}) are not available yet."))
 
 
 def run_workout_adapt(args: argparse.Namespace) -> None:
     # Executes the daily workout Garmin adaptation checks command.
-    date_str = args.date or datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    date_str = args.date or _today_str()
 
-    _ensure_metrics_current()
+    _ensure_recent_data(date_str)
 
     # Display rolling trajectory
     try:
@@ -1486,7 +1495,7 @@ def _resolve_workout_end_date(
     args: argparse.Namespace, resolved_goal: dict | None
 ) -> str | None:
     """Returns the end date string for workout generation based on CLI horizon flags."""
-    today = datetime.now(timezone.utc).date()
+    today = _today_date()
 
     if getattr(args, 'horizon_days', None) is not None:
         return (today + timedelta(days=args.horizon_days)).strftime("%Y-%m-%d")
@@ -1528,7 +1537,7 @@ def _resolve_workout_end_date(
 
 def run_workout_generate(args: argparse.Namespace) -> None:
     """Executes the AI workout generation command based on active strategy."""
-    _ensure_metrics_current()
+    _ensure_recent_data()
 
     try:
         objectives = db.get_objectives(status='active')
@@ -1589,7 +1598,7 @@ def _resolve_workout_date_range(
     args: argparse.Namespace,
 ) -> tuple[str | None, str | None]:
     """Resolves (start_date, end_date) from the shared date-filter CLI args."""
-    today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    today_str = _today_str()
 
     # Resolve start_date
     start_date = None
@@ -1738,8 +1747,8 @@ def run_workout_list(args: argparse.Namespace) -> None:
 
 def run_workout_compare(args: argparse.Namespace) -> None:
     """Compares planned workouts against completed activities for the given date range."""
-    today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-    today_obj = datetime.now(timezone.utc).date()
+    today_str = _today_str()
+    today_obj = _today_date()
 
     start_date, end_date = _resolve_workout_date_range(args)
 
@@ -1891,7 +1900,7 @@ def run_workout_compare(args: argparse.Namespace) -> None:
 
 def run_workout_push(args: argparse.Namespace) -> None:
     """Synchronizes planned workouts with Google Calendar."""
-    today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    today_str = _today_str()
     force = getattr(args, 'force', False)
 
     start_date, end_date = _resolve_workout_date_range(args)
@@ -2065,12 +2074,34 @@ def run_workout_wipe(args: argparse.Namespace) -> None:
 # Data Command
 # ==============================================================================
 
-def run_data_pull() -> None:
-    """Pulls athlete metrics and activities from Google Sheets."""
+def run_data_pull(args: argparse.Namespace) -> None:
+    """Pulls athlete metrics and activities directly from Garmin Connect.
+
+    Explicit/manual pull: does exactly the range asked for (mirrors GarminScraper's
+    options) and advances the watermark. The watermark/auto-ensure logic lives in
+    garmin.ensure_data, which commands call when reading.
+    """
+    end_date = args.end_date or _today_str()
+    if args.start_date:
+        start_date = args.start_date
+    else:
+        days = max(1, args.days)
+        start_date = (
+            datetime.strptime(end_date, "%Y-%m-%d").date() - timedelta(days=days - 1)
+        ).strftime("%Y-%m-%d")
+
     try:
-        sheets_reader.sync_data()
+        garmin.pull(
+            start_date, end_date,
+            metrics=not args.activities_only,
+            activities=not args.metrics_only,
+            throttle=args.sleep,
+        )
+    except garmin.GarminAuthRequired as e:
+        print(red(f"Garmin authentication required: {e}"))
+        print(yellow("Run this command in an interactive terminal to complete MFA."))
     except Exception as e:
-        print(red(f"Error syncing Google Sheets: {e}"))
+        print(red(f"Error pulling from Garmin: {e}"))
 
 
 def run_data_wipe(args: argparse.Namespace) -> None:

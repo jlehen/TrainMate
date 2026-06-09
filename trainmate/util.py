@@ -2,9 +2,26 @@ import os
 import re
 import sys
 import textwrap
+from datetime import date
 
 # ANSI escape codes for terminal coloring
 ANSI_ESCAPE = re.compile(r'(?:\033|\x1b)\[[0-9;]*m')
+
+
+def today_date() -> date:
+    """Returns today's date in the machine's local timezone.
+
+    Garmin keys daily metrics and activities on the athlete's local calendar
+    date, so every "what day is it" computation must use local time rather than
+    UTC (a UTC frontier drifts a day at the boundary hours). Instants stored for
+    comparison (created_at, last-pull timestamps) stay in UTC elsewhere.
+    """
+    return date.today()
+
+
+def today_str() -> str:
+    """Returns today's local calendar date as a YYYY-MM-DD string."""
+    return today_date().strftime("%Y-%m-%d")
 
 
 def is_color_enabled() -> bool:

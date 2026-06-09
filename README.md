@@ -12,8 +12,8 @@ Calendar.
   based on user goals, events, and fitness profile.
 - **Daily Adaptation**: Adjusts workouts daily using resting heart rate, HRV,
   and sleep metrics.
-- **Garmin Integration**: Syncs daily metrics and completed activities from
-  Garmin (via Google Sheets).
+- **Garmin Integration**: Syncs daily metrics and completed activities directly
+  from Garmin Connect, tracking a watermark so reads auto-refresh recent data.
 - **Calendar Sync**: Automatically schedules and updates planned workouts in
   Google Calendar.
 - **Coach Learnings**: The system learns from your performance and adaptations
@@ -35,19 +35,20 @@ internals work, see the [Architecture Document](ARCHITECTURE.md).
 
 ### Prerequisites
 
-- Python 3.8+
+- Python 3.8+ (install dependencies with `pip install -r requirements.txt`)
 - [OpenRouter API key](https://openrouter.ai/) for LLM access
-- A Google Service Account with access to a Google Sheet (for Garmin data) and
-  Google Calendar
+- A Garmin Connect account (for daily metrics and activities)
+- A Google Service Account with access to your Google Calendar (for workout sync)
 
 ### Configuration
 
 Edit `config.yaml` to include your specific IDs and profile (use
 `config_template.yaml` as a base). You will need:
 - `openrouter_api_key`
-- `google_sheet_id`
 - `google_calendar_id`
 - A valid `service_account.json` file in the root directory.
+- Garmin credentials via the `GARMIN_EMAIL` and `GARMIN_PASSWORD` environment
+  variables (FTP/LTHR come from `user_profile`).
 
 ### Basic Usage (CLI)
 

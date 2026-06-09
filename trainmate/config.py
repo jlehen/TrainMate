@@ -38,11 +38,6 @@ class Config:
         return key
 
     @property
-    def google_sheet_id(self) -> Optional[str]:
-        """Gets the Google Spreadsheet ID for athlete Garmin metrics."""
-        return self.get("google_sheet_id")
-
-    @property
     def google_calendar_id(self) -> Optional[str]:
         """Gets the target Google Calendar ID for training events."""
         return self.get("google_calendar_id")
@@ -115,6 +110,51 @@ class Config:
         (2) display unplanned activities as '(minor)' rather than 'UNPLANNED'.
         """
         return float(self.get("low_load_threshold", 25.0))
+
+    # --- Garmin direct-pull knobs (see DESIGN_garmin_direct_pull.md §13) ---
+    @property
+    def garmin_email(self) -> Optional[str]:
+        """Garmin Connect login email. Prefers env, falls back to config.yaml."""
+        return os.environ.get("GARMIN_EMAIL") or self.get("garmin_email")
+
+    @property
+    def garmin_password(self) -> Optional[str]:
+        """Garmin Connect password. Prefers env, falls back to config.yaml."""
+        return os.environ.get("GARMIN_PASSWORD") or self.get("garmin_password")
+
+    @property
+    def garmin_token_store(self) -> str:
+        """Directory where garminconnect persists OAuth tokens (default ~/.garminconnect)."""
+        path = os.environ.get("GARMIN_TOKEN_STORE") or self.get("garmin_token_store")
+        if not path:
+            path = os.path.join(os.path.expanduser("~"), ".garminconnect")
+        return os.path.expanduser(path)
+
+    @property
+    def garmin_refresh_minutes(self) -> int:
+        """Minimum minutes between automatic Garmin hits before a refresh re-pulls (default 120)."""
+        return int(self.get("garmin_refresh_minutes", 120))
+
+    @property
+    def garmin_mutable_days(self) -> int:
+        """Trailing days a forward-refresh re-fetches for late-finalizing data (default 3)."""
+        return int(self.get("garmin_mutable_days", 3))
+
+    @property
+    def garmin_backfill_prompt_days(self) -> int:
+        """Backward-gap size above which a backfill is surfaced as a command rather than
+        run automatically; also gates interior gaps (default 30)."""
+        return int(self.get("garmin_backfill_prompt_days", 30))
+
+    @property
+    def garmin_initial_backfill_days(self) -> int:
+        """Range used to build the cold-start backfill command (default 90)."""
+        return int(self.get("garmin_initial_backfill_days", 90))
+
+    @property
+    def garmin_throttle_seconds(self) -> float:
+        """Default sleep between Garmin API calls; --sleep overrides on `data pull` (default 0.2)."""
+        return float(self.get("garmin_throttle_seconds", 0.2))
 
 # Singleton instance
 config = Config()

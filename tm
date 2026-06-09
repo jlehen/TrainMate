@@ -8,7 +8,7 @@ SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 if [ ! -d "$SCRIPT_DIR/venv" ]; then
     echo "Initializing virtual environment..."
     python3 -m venv "$SCRIPT_DIR/venv"
-    echo "Initialization complete! (Note: dependencies must be installed manually as there is no requirements.txt)"
+    echo "Initialization complete! Install dependencies: venv/bin/pip install -r requirements.txt"
 fi
 
 # Run the python script with the passed arguments

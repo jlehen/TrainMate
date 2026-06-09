@@ -3,7 +3,6 @@ from flask import Flask, jsonify, request, send_from_directory
 from datetime import datetime, timezone
 from typing import Any, Dict
 from trainmate.db import db
-from trainmate.google_sheets import sheets_reader
 from trainmate.google_calendar import calendar_syncer
 from trainmate.coach import coach_service
 from trainmate.config import config
@@ -45,6 +44,11 @@ def get_status() -> Any:
             current_hash = coach_service._get_config_hash()
             config_mismatch = macrocycle.get('config_hash') != current_hash
             
+    # The web app is a pure reader — it never pulls from Garmin (see
+    # DESIGN_garmin_direct_pull.md §11). Surface the watermark so the UI can show
+    # how fresh the cached data is; the CLI (or a cron `data pull`) owns syncing.
+    sync_state = db.get_sync_state()
+
     return jsonify({
         "next_goal": next_goal,
         "last_metrics": last_metrics,
@@ -54,7 +58,8 @@ def get_status() -> Any:
         },
         "macrocycle": macrocycle,
         "mesocycles": mesocycles,
-        "config_mismatch": config_mismatch
+        "config_mismatch": config_mismatch,
+        "sync_state": sync_state
     })
 
 @app.route("/api/objectives", methods=["GET", "POST"])
@@ -256,13 +261,14 @@ def sync_calendar() -> Any:
         return jsonify({"error": str(e)}), 500
 
 @app.route("/api/metrics/pull", methods=["POST"])
-def sync_sheets() -> Any:
-    """API endpoint to fetch Garmin daily metrics from Google Sheets."""
-    try:
-        sheets_reader.sync_data()
-        return jsonify({"message": "Garmin metrics synchronized from Google Sheets."})
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+def sync_metrics() -> Any:
+    """Garmin pulls are CLI-only (the web app is a pure reader, see
+    DESIGN_garmin_direct_pull.md §11). Garmin login can require an interactive MFA
+    prompt, so syncing must run in a terminal."""
+    return jsonify({
+        "error": "Garmin sync runs from the CLI, not the web app.",
+        "command": "python trainmate_cli.py data pull"
+    }), 409
 
 @app.route("/api/metrics", methods=["GET"])
 def get_metrics() -> Any:

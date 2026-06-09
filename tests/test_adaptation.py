@@ -11,12 +11,10 @@ TEST_DB_PATH = os.path.join(os.path.dirname(__file__), "test_trainmate_adaptatio
 from trainmate.db import Database
 import trainmate.db
 import trainmate.coach
-import trainmate.google_sheets
 
 test_db = Database(db_path=TEST_DB_PATH)
 trainmate.db.db = test_db
 trainmate.coach.db = test_db
-trainmate.google_sheets.db = test_db
 
 from trainmate.coach import coach_service
 
@@ -30,7 +28,6 @@ class TestAdaptation(unittest.TestCase):
         test_db = Database(db_path=TEST_DB_PATH)
         trainmate.db.db = test_db
         trainmate.coach.db = test_db
-        trainmate.google_sheets.db = test_db
 
     @classmethod
     def tearDownClass(cls):

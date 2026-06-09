@@ -32,7 +32,7 @@ be pushed to Google Calendar.
   +---------------------------v----------------------+
   |              Data & Integration Layer            |
   |  trainmate/db.py            (SQLite CRUD)        |
-  |  trainmate/google_sheets.py (Garmin metrics pull)|
+  |  trainmate/garmin.py        (Garmin direct pull) |
   |  trainmate/google_calendar.py (Calendar sync)    |
   +--------------------------------------------------+
 ```
@@ -52,7 +52,7 @@ classes themselves.
 | `trainmate_cli.py`   | argparse CLI; dispatches to handler functions `run_*()`. No          |
 |                      | business logic.                                                      |
 | `trainmate_web.py`   | Flask REST API; thin handler functions calling `db`,                 |
-|                      | `coach_service`, `sheets_reader`, `calendar_syncer`.                 |
+|                      | `coach_service`, `calendar_syncer` (pure reader — never pulls).      |
 
 ### Package `trainmate/`
 
@@ -68,8 +68,10 @@ classes themselves.
 |                      |                      | pure logic.                                      |
 | `openrouter.py`      | `openrouter_client`  | HTTP client for OpenRouter; always expects       |
 |                      |                      | `json_object` response.                          |
-| `google_sheets.py`   | `sheets_reader`      | Reads Google Sheets; saves metrics + completed   |
-|                      |                      | activities to DB.                                |
+| `garmin.py`          | module functions     | Logs into Garmin Connect; pulls metrics +        |
+|                      |                      | activities to DB, recomputes derived metrics,    |
+|                      |                      | maintains the `sync_state` watermark, and        |
+|                      |                      | `ensure_data()` auto-refreshes on read.          |
 | `google_calendar.py` | `calendar_syncer`    | Creates/updates/deletes all-day Google Calendar  |
 |                      |                      | events for workouts.                             |
 | `adherence.py`       | —                    | `analyze_adherence()` pure function; compares    |
@@ -328,9 +330,9 @@ SQLite database at `trainmate.db` (path from `config.db_path`).
 | `elevation_gain_m`  | REAL    |                                                    |
 | `avg_hr`            | INTEGER |                                                    |
 | `max_hr`            | INTEGER |                                                    |
-| `rpe`               | INTEGER | From sheet; estimated if missing                   |
-| `tss`               | REAL    | From sheet; estimated if missing                   |
-| `bike_avg_watts`    | INTEGER | From sheet; NULL for non-bike activities           |
+| `rpe`               | INTEGER | From Garmin (directWorkoutRpe); estimated if missing |
+| `tss`               | REAL    | Computed from power/HR; estimated if missing       |
+| `bike_avg_watts`    | INTEGER | From Garmin; NULL for non-bike activities          |
 | `zone1_sec`         | INTEGER | Time in HR/power zone 1 (seconds); NULL if missing |
 | `zone2_sec`         | INTEGER | Time in HR/power zone 2 (seconds); NULL if missing |
 | `zone3_sec`         | INTEGER | Time in HR/power zone 3 (seconds); NULL if missing |
@@ -350,7 +352,8 @@ SQLite database at `trainmate.db` (path from `config.db_path`).
 | `acwr`            | REAL    | acute / chronic        |
 
 ### athlete_\baselines
-28-day rolling baseline computed during `sheets_reader.sync_data()`.
+28-day rolling baseline computed during `garmin.recompute_derived()` (a full
+sweep run after every pull).
 
 | Column                      | Type    |
 |-----------------------------|---------|
@@ -361,6 +364,18 @@ SQLite database at `trainmate.db` (path from `config.db_path`).
 | `hrv_baseline_std`          | REAL    |
 | `sleep_baseline_mean`       | REAL    |
 | `sleep_baseline_std`        | REAL    |
+
+### sync_\state
+Garmin pull watermark (one row, `key='garmin'`). `through_date` is the forward
+high-water mark (local YYYY-MM-DD) and only ever advances; `last_pull_utc` is an
+instant compared against now for the freshness interval. See section 8 (Data
+Pull) and `DESIGN_garmin_direct_pull.md`.
+
+| Column          | Type    | Notes                                       |
+|-----------------|---------|---------------------------------------------|
+| `key`           | TEXT PK | Source key, e.g. `garmin`                   |
+| `through_date`  | TEXT    | Forward high-water mark (local YYYY-MM-DD)  |
+| `last_pull_utc` | TEXT    | ISO instant of last successful Garmin pull  |
 
 ### coach_\learnings
 Discrete, addressable athlete-observation records, updated incrementally via LLM
@@ -427,13 +442,17 @@ from trainmate.config import config          # Config
 from trainmate.db import db                  # Database
 from trainmate.coach import coach_service    # CoachService
 from trainmate.openrouter import openrouter_client  # OpenRouterClient
-from trainmate.google_sheets import sheets_reader   # GarminSheetsReader
 from trainmate.google_calendar import calendar_syncer  # CalendarSyncer
+from trainmate import garmin                     # module functions (pull, ensure_data, …)
 ```
+
+`trainmate/garmin.py` exposes module-level functions rather than a singleton:
+`pull()`, `ensure_data()`, `recompute_derived()`, plus the `GarminClient` class
+and `GarminAuthRequired`.
 
 For tests, the DB singleton can be overridden by patching the module-level `db`
 variable in affected modules (see `tests/test_adaptation.py` for the pattern:
-assign `test_db` to `trainmate.coach.db`, `trainmate.google_sheets.db`, etc.
+assign `test_db` to `trainmate.coach.db`, `trainmate.garmin.db`, etc.
 before importing the singletons).
 
 ---
@@ -489,7 +508,7 @@ Handler functions are named `run_<command>_<subcommand>()` in `trainmate_cli.py`
 |              |              |          | days, weekly load spikes, mesocycle crossings) and prompts on           |
 |              |              |          | warnings unless `-y`/`--force`. Syncs to Calendar unless `--no-sync`.    |
 | `workout`    | `wipe`       | —        | Delete all workouts                                                      |
-| `data`       | `pull`       | `d pull` | Fetch Garmin metrics and activities from Google Sheets                  |
+| `data`       | `pull`       | `d pull` | Fetch metrics and activities directly from Garmin (`--days`/`--start-date`/`--end-date`/`--metrics-only`/`--activities-only`/`--sleep`) |
 | `data`       | `analyze`    | `d a`    | Analyze completed workouts/metrics to detect cycles                      |
 |              |              |          | (`--from`, `--until`, `--days`, `--weeks`, `--context`,                  |
 |              |              |          | `--force` to recompute, `--inspect` for read-only)                      |
@@ -519,7 +538,7 @@ Flask server at `trainmate_web.py`, runs on port 5000. Static files served from
 | POST        | `/api/workouts/generate`        | Generate workouts (`{goal_id?}`)             |
 | POST        | `/api/adapt`                    | Run daily adaptation (`{date?}`)             |
 | POST        | `/api/workouts/push`            | Sync workouts to Google Calendar             |
-| POST        | `/api/metrics/pull`             | Pull Garmin metrics from Google Sheets       |
+| POST        | `/api/metrics/pull`             | Returns 409 — Garmin pulls are CLI-only      |
 | GET         | `/api/metrics`                  | Last 30 days of cached metrics               |
 
 
@@ -533,8 +552,9 @@ Required fields:
 |------------------------|------|---------------------------------------------------------------|
 | `openrouter_api_key`   | str  | Also readable from `OPENROUTER_API_KEY` env var               |
 | `openrouter_model`     | str  | Default: `google/gemini-3.5-flash`                            |
-| `google_sheet_id`      | str  | Spreadsheet ID for Garmin metrics                             |
 | `google_calendar_id`   | str  | Target calendar ID                                            |
+| `garmin_email` / `garmin_password` | str | Garmin login; prefer `GARMIN_EMAIL`/`GARMIN_PASSWORD` env |
+| `garmin_refresh_minutes` / `garmin_mutable_days` / `garmin_backfill_prompt_days` / `garmin_initial_backfill_days` / `garmin_throttle_seconds` | — | Auto-ensure tuning (see §8) |
 | `service_account_file` | str  | Path to service account JSON (default:                        |
 |                        |      | `service_account.json`)                                       |
 | `metrics_history_days`  | int  | Rolling window for adaptation (default: 15)                  |
@@ -601,18 +621,30 @@ Required fields:
 7. If applied: `apply_adaptations()` deletes overridden calendar events + DB
    rows, saves adapted workouts with `status='modified'`, syncs to Calendar.
 
-### Data Pull (`data pull`)
-1. `GarminSheetsReader.sync_data()` fetches "Daily Metrics" and "Activities"
-   sheets.
-2. For each day: saves `athlete_metrics_cache` with ACWR computed over 7/28-day
-   windows.
-3. Computes 28-day rolling baseline (RHR, HRV, sleep mean/std) and saves to
-   `athlete_baselines`.
-4. RPE and TSS are read from the sheet; if missing, estimated from `avg_hr` /
-   `lthr`.
-5. `bike_avg_watts` and `zone1_sec`–`zone5_sec` are read from the sheet and
-   stored as-is (NULL when absent). These are included verbatim in the
-   LLM-facing activity formatter (`format_completed_activities` in `coach.py`).
+### Data Pull (`data pull`) and auto-ensure
+Data is pulled **directly from Garmin Connect** (`trainmate/garmin.py`); the
+former Google Sheets path is gone. Full design: `DESIGN_garmin_direct_pull.md`.
+
+1. `garmin.pull(start, end)` logs into Garmin (token persistence; TTY-gated MFA),
+   fetches activities (computing TSS from power/HR and reading `directWorkoutRpe`,
+   estimating either if missing) and daily metrics. It writes a row to
+   `athlete_metrics_cache` for **every day in range — even all-null ones** — so
+   the table's date coverage records what has been pulled.
+2. `garmin.recompute_derived()` runs a **full sweep** over all cached days:
+   acute/chronic workload + ACWR (7/28-day windows) and the 28-day RHR/HRV/sleep
+   baseline. A full sweep is cheap locally and avoids windowed-recompute bugs.
+3. The `sync_state` watermark advances (`through_date` forward only,
+   `last_pull_utc` = now).
+4. `bike_avg_watts` and `zone1_sec`–`zone5_sec` come from Garmin (NULL when
+   absent) and feed `format_completed_activities` in `coach.py` verbatim.
+
+**Auto-ensure.** Read-side commands call `garmin.ensure_data(start, end)` at
+entry (idempotent per process via an in-memory memo). It pulls the
+28-day-padded required window where the gap is small/recent and **prints a
+copy-pastable `data pull` command for large backfills** (cold start, big
+forward/backward gaps), always continuing with cached data. Calendar dates use
+the machine-local timezone (`util.today_str`/`today_date`); stored instants stay
+UTC. The web app never calls this — it is a pure reader (see §1).
 
 ### Data Analysis (`data analyze`)
 1. `CoachService.analyze_workouts()` determines target start/end dates
@@ -706,7 +738,7 @@ venv/bin/python -m unittest discover -s tests -p "test_*.py"
 | `tests/test_cli.py`            | CLI command dispatch + output                                   |
 | `tests/test_feedback.py`       | Feedback saving + use in replanning                             |
 | `tests/test_periodization.py`  | `generate_periodization_plan`, `generate_workouts`, hash logic  |
-| `tests/test_sheets.py`         | Google Sheets sync logic                                        |
+| `tests/test_garmin.py`         | Garmin transforms, watermark/auto-ensure policy, recompute      |
 | `tests/test_utils.py`          | `adherence.py` + `util.py` helpers                              |
 
 Tests inject a fresh in-memory SQLite DB by assigning `test_db` to module-level
@@ -714,4 +746,4 @@ Tests inject a fresh in-memory SQLite DB by assigning `test_db` to module-level
 via `@patch`.
 
 Integration / manual test scripts (not part of the test suite):
-- `tests/run_integration.py`, `tests/run_sheets.py`, `tests/run_calendar.py`
+- `tests/run_integration.py`, `tests/run_calendar.py`
