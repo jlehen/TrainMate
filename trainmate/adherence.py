@@ -122,8 +122,15 @@ def analyze_adherence(
                     p_tss = w.get("tss") or 0
                     exp_load = p_tss + p_rpe * (p_duration / 60.0)
 
-                    # Low-load activities get a wider tolerance
-                    tolerance = 0.50 if act_load < low_load_threshold else 0.30
+                    # Determine dynamic tolerance based on expected workload (exp_load)
+                    if exp_load <= 20.0:
+                        tolerance = 0.50
+                    elif exp_load >= 100.0:
+                        tolerance = 0.15
+                    else:
+                        # Linear interpolation between 20.0 (50% tol) and 100.0 (15% tol)
+                        fraction = (exp_load - 20.0) / (100.0 - 20.0)
+                        tolerance = 0.50 - fraction * (0.50 - 0.15)
                     tol_pct = f"+/-{tolerance*100:.0f}%"
 
                     disc_reasons = []

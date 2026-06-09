@@ -566,10 +566,10 @@ Required fields:
 | `metrics_lookback_days`  | int  | Rolling window for adaptation (default: 15)                  |
 | `workout_generate_days` | int  | Default horizon for `workout generate` (default: 28)         |
 | `low_load_threshold`    | float| Workload score below which an activity is "minor"            |
-|                         |      | (default: 25). Controls two behaviors: (1) matched-activity  |
-|                         |      | mismatch tolerance widens to 50% instead of 30%, and (2)     |
-|                         |      | unplanned activities are shown as `(minor)` (gray) rather    |
-|                         |      | than `UNPLANNED` (yellow) in `workout compare`.              |
+|                         |      | (default: 25). Controls rest-day violations and unplanned    |
+|                         |      | activity visibility (shown as gray/minor if below threshold,  |
+|                         |      | yellow/unplanned if above). Mismatch tolerance for planned   |
+|                         |      | workouts is dynamically computed from expected workload.     |
 | `user_profile`          | dict | Must contain `lthr` or `ftp` (see below)                     |
 
 `user_profile` keys: `name`, `birth_year`, `max_hr`, `lthr`, `ftp`,
