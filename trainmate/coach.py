@@ -66,7 +66,14 @@ def format_completed_activities(completed_activities: List[CompletedActivity]) -
             if act.get(f'zone{i}_sec') is not None
         ]
         if zone_parts:
-            extras.append(f"Zones: {', '.join(zone_parts)}")
+            extras.append(f"HR Zones: {', '.join(zone_parts)}")
+        power_zone_parts = [
+            f"PZ{i}={act[f'power_zone{i}_sec'] // 60}m"
+            for i in range(1, 8)
+            if act.get(f'power_zone{i}_sec') is not None
+        ]
+        if power_zone_parts:
+            extras.append(f"Power Zones: {', '.join(power_zone_parts)}")
         if extras:
             line += " | " + ", ".join(extras)
         completed_list.append(line)
@@ -933,10 +940,29 @@ class CoachService:
                 z45 = sum(
                     (a.get('zone4_sec') or 0) + (a.get('zone5_sec') or 0) for a in acts
                 )
+                # Power zones use Garmin's 7-zone model, grouped polarized like HR:
+                # Z1-2 easy / Z3-4 threshold / Z5-7 hard.
+                pz12 = sum(
+                    (a.get('power_zone1_sec') or 0) + (a.get('power_zone2_sec') or 0)
+                    for a in acts
+                )
+                pz34 = sum(
+                    (a.get('power_zone3_sec') or 0) + (a.get('power_zone4_sec') or 0)
+                    for a in acts
+                )
+                pz567 = sum(
+                    (a.get('power_zone5_sec') or 0) + (a.get('power_zone6_sec') or 0)
+                    + (a.get('power_zone7_sec') or 0) for a in acts
+                )
                 zone_note = ""
                 if (z12 + z3 + z45) > 0:
-                    zone_note = (
-                        f", zones Z1-2/Z3/Z4-5 = {z12 // 60}/{z3 // 60}/{z45 // 60} min"
+                    zone_note += (
+                        f", HR zones Z1-2/Z3/Z4-5 = {z12 // 60}/{z3 // 60}/{z45 // 60} min"
+                    )
+                if (pz12 + pz34 + pz567) > 0:
+                    zone_note += (
+                        f", power zones Z1-2/Z3-4/Z5-7 = "
+                        f"{pz12 // 60}/{pz34 // 60}/{pz567 // 60} min"
                     )
                 block_lines.append(
                     f"- {m['name']} ({m['start_date']}..{win_end}): planned focus "
@@ -1856,6 +1882,20 @@ class CoachService:
                 for act in w_activities
             )
 
+            # Power zones (Garmin 7-zone model), grouped polarized like HR.
+            pz1_pz2_sec = sum(
+                (act.get('power_zone1_sec') or 0) + (act.get('power_zone2_sec') or 0)
+                for act in w_activities
+            )
+            pz3_pz4_sec = sum(
+                (act.get('power_zone3_sec') or 0) + (act.get('power_zone4_sec') or 0)
+                for act in w_activities
+            )
+            pz5_pz7_sec = sum(
+                (act.get('power_zone5_sec') or 0) + (act.get('power_zone6_sec') or 0)
+                + (act.get('power_zone7_sec') or 0) for act in w_activities
+            )
+
             avg_rpe = 0.0
             rpes = [act['rpe'] for act in w_activities if act.get('rpe') is not None]
             if rpes:
@@ -1910,6 +1950,13 @@ class CoachService:
                     "Z3": z3_sec,
                     "Z4_Z5": z4_z5_sec
                 },
+                # Only emitted when some activity recorded power-zone data, so its
+                # absence means "no power meter" rather than "no hard riding".
+                "power_zone_distribution_sec": {
+                    "Z1_Z2": pz1_pz2_sec,
+                    "Z3_Z4": pz3_pz4_sec,
+                    "Z5_Z7": pz5_pz7_sec
+                } if (pz1_pz2_sec + pz3_pz4_sec + pz5_pz7_sec) > 0 else None,
                 "avg_rhr": round(avg_rhr, 1) if avg_rhr is not None else None,
                 "avg_hrv": round(avg_hrv, 1) if avg_hrv is not None else None,
                 "max_acwr": round(max_acwr, 2) if max_acwr is not None else None,
