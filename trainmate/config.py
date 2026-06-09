@@ -114,18 +114,19 @@ class Config:
     # --- Garmin direct-pull knobs (see DESIGN_garmin_direct_pull.md §13) ---
     @property
     def garmin_email(self) -> Optional[str]:
-        """Garmin Connect login email. Prefers env, falls back to config.yaml."""
-        return os.environ.get("GARMIN_EMAIL") or self.get("garmin_email")
+        """Garmin Connect login email. Read from config.yaml only — credentials are
+        kept out of the environment (config.yaml is gitignored)."""
+        return self.get("garmin_email")
 
     @property
     def garmin_password(self) -> Optional[str]:
-        """Garmin Connect password. Prefers env, falls back to config.yaml."""
-        return os.environ.get("GARMIN_PASSWORD") or self.get("garmin_password")
+        """Garmin Connect password. Read from config.yaml only (see garmin_email)."""
+        return self.get("garmin_password")
 
     @property
     def garmin_token_store(self) -> str:
         """Directory where garminconnect persists OAuth tokens (default ~/.garminconnect)."""
-        path = os.environ.get("GARMIN_TOKEN_STORE") or self.get("garmin_token_store")
+        path = self.get("garmin_token_store")
         if not path:
             path = os.path.join(os.path.expanduser("~"), ".garminconnect")
         return os.path.expanduser(path)

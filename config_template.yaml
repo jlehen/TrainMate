@@ -3,10 +3,9 @@ google_calendar_id: "a05efe90aef057e16bf8f423500dda43244ae61b3bd1a9990f55cade1f4
 openrouter_model: "google/gemini-3.5-flash"
 service_account_file: "service_account.json"
 metrics_history_days: 15
-
-# Garmin Connect: set GARMIN_EMAIL / GARMIN_PASSWORD as environment variables
-# (preferred), or garmin_email / garmin_password here. FTP/LTHR come from
-# user_profile below. Optional auto-sync tuning (defaults shown):
+garmin_email: "you@example.com"
+garmin_password: "your-garmin-password"
+# Optional auto-sync tuning (defaults shown):
 # garmin_refresh_minutes: 120
 # garmin_mutable_days: 3
 # garmin_backfill_prompt_days: 30

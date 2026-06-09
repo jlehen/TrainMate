@@ -47,8 +47,8 @@ Edit `config.yaml` to include your specific IDs and profile (use
 - `openrouter_api_key`
 - `google_calendar_id`
 - A valid `service_account.json` file in the root directory.
-- Garmin credentials via the `GARMIN_EMAIL` and `GARMIN_PASSWORD` environment
-  variables (FTP/LTHR come from `user_profile`).
+- `garmin_email` and `garmin_password` (config.yaml is gitignored, keeping
+  credentials out of the environment; FTP/LTHR come from `user_profile`).
 
 ### Basic Usage (CLI)
 

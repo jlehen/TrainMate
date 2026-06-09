@@ -82,8 +82,8 @@ class GarminClient:
 
         if not self.email or not self.password:
             raise RuntimeError(
-                "Garmin credentials are not configured. Set GARMIN_EMAIL and "
-                "GARMIN_PASSWORD (env) or garmin_email/garmin_password in config.yaml."
+                "Garmin credentials are not configured. Set garmin_email and "
+                "garmin_password in config.yaml."
             )
 
         def prompt_mfa() -> str:

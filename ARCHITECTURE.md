@@ -553,7 +553,7 @@ Required fields:
 | `openrouter_api_key`   | str  | Also readable from `OPENROUTER_API_KEY` env var               |
 | `openrouter_model`     | str  | Default: `google/gemini-3.5-flash`                            |
 | `google_calendar_id`   | str  | Target calendar ID                                            |
-| `garmin_email` / `garmin_password` | str | Garmin login; prefer `GARMIN_EMAIL`/`GARMIN_PASSWORD` env |
+| `garmin_email` / `garmin_password` | str | Garmin login; config.yaml only (kept out of the environment) |
 | `garmin_refresh_minutes` / `garmin_mutable_days` / `garmin_backfill_prompt_days` / `garmin_initial_backfill_days` / `garmin_throttle_seconds` | — | Auto-ensure tuning (see §8) |
 | `service_account_file` | str  | Path to service account JSON (default:                        |
 |                        |      | `service_account.json`)                                       |

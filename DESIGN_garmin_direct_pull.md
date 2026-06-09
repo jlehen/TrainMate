@@ -278,9 +278,11 @@ the UI can show freshness. All Garmin contact is owned by the CLI (optionally a
 cron `data pull`). This avoids per-request latency, keeps auth out of the request
 path entirely, and sidesteps token-store write races between server and CLI.
 
-**Config & secrets.** Garmin credentials via env `GARMIN_EMAIL` /
-`GARMIN_PASSWORD` (like the OpenRouter key). FTP/LTHR are reused from the existing
-`config.yaml` `user_profile` (so TSS is computed in TrainMate and the
+**Config & secrets.** Garmin credentials live in `config.yaml`
+(`garmin_email` / `garmin_password`) and are **not** read from the environment —
+`config.yaml` is gitignored, and keeping them out of env avoids leaking
+credentials into process listings and shell history. FTP/LTHR are reused from the
+existing `config.yaml` `user_profile` (so TSS is computed in TrainMate and the
 GarminScraper `.env` duplication disappears). Token store defaults to
 `~/.garminconnect`.
 

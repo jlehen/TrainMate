@@ -84,23 +84,24 @@ class TestEnsureData(unittest.TestCase):
     def setUp(self):
         clear_all_tables(test_db)
         garmin.reset_memo()
-        self.env = patch.dict(
-            os.environ, {"GARMIN_EMAIL": "a@b.c", "GARMIN_PASSWORD": "pw"}
+        # Credentials come from config.yaml only; inject test creds into config.data.
+        self.creds = patch.dict(
+            garmin.config.data, {"garmin_email": "a@b.c", "garmin_password": "pw"}
         )
-        self.env.start()
+        self.creds.start()
 
     def tearDown(self):
-        self.env.stop()
+        self.creds.stop()
         garmin.reset_memo()
 
     def test_no_credentials_skips_silently(self):
-        self.env.stop()  # remove creds for this test
-        with patch.dict(os.environ, {}, clear=True), patch.object(garmin, "pull") as mock_pull:
+        self.creds.stop()  # remove creds for this test
+        with patch.dict(garmin.config.data, {}, clear=True), patch.object(garmin, "pull") as mock_pull:
             with patch("builtins.print") as mock_print:
                 garmin.ensure_data(_d(-5), _d(0))
             mock_pull.assert_not_called()
             mock_print.assert_not_called()
-        self.env.start()  # restore for tearDown symmetry
+        self.creds.start()  # restore for tearDown symmetry
 
     def test_cold_start_surfaces_command_without_pulling(self):
         with patch.object(garmin, "pull") as mock_pull:
