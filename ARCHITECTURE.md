@@ -1,17 +1,18 @@
 # TrainMate Architecture & System Manifest
 
-This document is the primary reference for coding agents. Read it before reading
-source files — in most cases it will be sufficient. Read a source file only when you
-need to change it or when a specific detail is not covered here.
+This document is the primary reference for coding agents. Read it before
+reading source files — in most cases it will be sufficient. Read a source file
+only when you need to change it or when a specific detail is not covered here.
 
 ---
 
 ## 1. System Overview
 
-TrainMate is a local AI sports-science coaching application. The user configures goals and life
-events; TrainMate generates periodized training plans (macrocycle → mesocycles) and workout
-schedules (microcycles), then adapts them daily based on Garmin metrics. Plans and workouts can
-be pushed to Google Calendar.
+TrainMate is a local AI sports-science coaching application. The user
+configures goals and life events; TrainMate generates periodized training plans
+(macrocycle → mesocycles) and workout schedules (microcycles), then adapts them
+daily based on Garmin metrics. Plans and workouts can be pushed to Google
+Calendar.
 
 ```
   +--------------------------------------------------+
@@ -131,21 +132,25 @@ DESIGN_backward_evaluation.md §11.) The app owns the merge via
 model that omits an existing learning cannot lose it. Each learning carries a
 **sport scope** (`sports`: comma-list or `general`) and a **confidence** level
 (`tentative` | `moderate` | `established`). The four ops:
-- `{"op": "add", text, sports?, confidence?}` — new record (defaults `general`/`tentative`).
-- `{"op": "revise", id, text?, sports?, confidence?}` — change supplied fields; refreshes recency.
-- `{"op": "reinforce", id, confidence?}` — reaffirm without rewording; refreshes recency.
+- `{"op": "add", text, sports?, confidence?}` — new record (defaults
+  `general`/`tentative`).
+- `{"op": "revise", id, text?, sports?, confidence?}` — change supplied fields;
+  refreshes recency.
+- `{"op": "reinforce", id, confidence?}` — reaffirm without rewording;
+  refreshes recency.
 - `{"op": "retire", id}` — hard delete.
 
 **Decay (soft):** a learning is *dormant* once it goes unreinforced past a
 confidence-based budget (`db.LEARNING_STALENESS_DAYS`: tentative 21d / moderate
-60d / established 180d), computed by `db.learning_is_dormant()`. `get_learnings()`
-annotates each record with a `dormant` flag; dormant records stay in the DB and
-show in `status` (marked) but are **excluded from prompts** until a
-`revise`/`reinforce` refreshes them. `CoachService._get_learnings_text()` renders
-only active learnings as `[id|sports|confidence] text`. Every flow that *uses*
-learnings (generate, analyze, adapt) injects this rendered block into its prompt
-— generate/adapt via `_build_system_prompt`, analyze under its own `COACH
-LEARNINGS` heading — so the two delta-emitting flows (analyze, adapt) can
+60d / established 180d), computed by `db.learning_is_dormant()`.
+`get_learnings()` annotates each record with a `dormant` flag; dormant records
+stay in the DB and show in `status` (marked) but are **excluded from prompts**
+until a `revise`/`reinforce` refreshes them.
+`CoachService._get_learnings_text()` renders only active learnings as
+`[id|sports|confidence] text`. Every flow that *uses* learnings (generate,
+analyze, adapt) injects this rendered block into its prompt — generate/adapt
+via `_build_system_prompt`, analyze under its own `COACH LEARNINGS` heading —
+so the two delta-emitting flows (analyze, adapt) can
 `revise`/`reinforce`/`retire` by `[id]` instead of blindly re-adding
 near-duplicates on repeated runs. `CoachService.adapt()` applies the deltas at
 evaluation time (regardless of whether the proposed workout changes are later
@@ -157,9 +162,9 @@ that, when True, drops the purely-ratcheting effects so re-reading *unchanged*
 evidence cannot inflate confidence or reset decay — `reinforce` is skipped and
 `revise` keeps content edits but not the recency refresh, while `add`/`retire`
 still apply. The evidence fingerprint that decides "unchanged" is
-`CoachEngine._get_evidence_fingerprint(activities, metrics, window)`; the cached
-reconstruction it gates lives in the `analysis_cache` table. Full model in
-DESIGN_backward_evaluation.md §5, §8.
+`CoachEngine._get_evidence_fingerprint(activities, metrics, window)`; the
+cached reconstruction it gates lives in the `analysis_cache` table. Full model
+in DESIGN_backward_evaluation.md §5, §8.
 
 ### `CoachService`
 **Orchestrator — owns all DB and calendar access.** Exposes the public API
@@ -260,8 +265,8 @@ Periodization strategy lives in the `macrocycles` table, not here.
 
 **Analysis Cache:** `save_analysis_cache(horizon, fingerprint, window_start,
 window_end, reconstruction)` (upsert, one row per `horizon`),
-`get_analysis_cache(horizon)` (returns the row with `reconstruction` parsed from
-JSON, or `None`), `wipe_analysis_cache()`. Caches a backward-evaluation
+`get_analysis_cache(horizon)` (returns the row with `reconstruction` parsed
+from JSON, or `None`), `wipe_analysis_cache()`. Caches a backward-evaluation
 reconstruction keyed by an evidence fingerprint so a re-run over unchanged data
 reuses it instead of re-calling the LLM (table `analysis_cache`; see
 DESIGN_backward_evaluation.md §5.1).
@@ -435,7 +440,8 @@ DESIGN_backward_evaluation.md §5.1.
 
 ## 6. Singletons
 
-All modules export a singleton at the bottom. Import these, never instantiate the classes:
+All modules export a singleton at the bottom. Import these, never instantiate
+the classes:
 
 ```python
 from trainmate.config import config          # Config
@@ -452,8 +458,8 @@ and `GarminAuthRequired`.
 
 For tests, the DB singleton can be overridden by patching the module-level `db`
 variable in affected modules (see `tests/test_adaptation.py` for the pattern:
-assign `test_db` to `trainmate.coach.db`, `trainmate.garmin.db`, etc.
-before importing the singletons).
+assign `test_db` to `trainmate.coach.db`, `trainmate.garmin.db`, etc.  before
+importing the singletons).
 
 ---
 
@@ -581,11 +587,11 @@ Required fields:
 2. Computes `goals_hash`, `lifeevents_hash`, `config_hash`.
 3. If existing macrocycle has matching hashes and `force=False` → reuse.
 4. Otherwise: builds a read-only **planned-vs-actual review** of the prior plan
-   via `_build_prior_training_context()` (Option A — anchored on the prior plan's
-   elapsed mesocycle windows, plus the cached reconstruction's insights; written
-   to no `feedback` field), prints it, and passes it as `prior_training_text` into
-   `CoachEngine._generate_macrocycle_strategy()` → LLM → `{strategy, mesocycles}`.
-   See DESIGN_backward_evaluation.md §6.
+   via `_build_prior_training_context()` (Option A — anchored on the prior
+   plan's elapsed mesocycle windows, plus the cached reconstruction's insights;
+   written to no `feedback` field), prints it, and passes it as
+   `prior_training_text` into `CoachEngine._generate_macrocycle_strategy()` →
+   LLM → `{strategy, mesocycles}`.  See DESIGN_backward_evaluation.md §6.
 5. If timeline > 24 weeks: calls `CoachEngine._generate_intermediate_goals()`
    first, saves intermediate objectives, then re-runs with the first goal.
 6. Saves new macrocycle + mesocycles to DB (old ones deleted via
@@ -599,9 +605,9 @@ Required fields:
    computes `num_days` from `(end_date − today)`.
 3. Fetches metrics history (last `metrics_lookback_days` days) + baseline.
 4. Calls `CoachEngine._generate_workouts_logic(num_days=...)` → LLM →
-   `{reasoning, workouts[]}`. **Read-only** w.r.t. coach learnings — it consumes
-   the rendered learnings in its prompt but emits/applies no `learning_updates`
-   (DESIGN_backward_evaluation.md §11).
+   `{reasoning, workouts[]}`. **Read-only** w.r.t. coach learnings — it
+   consumes the rendered learnings in its prompt but emits/applies no
+   `learning_updates` (DESIGN_backward_evaluation.md §11).
 5. Clears future unsynced workouts (`clear_future_workouts`), then saves new
    workouts.
 
@@ -621,18 +627,19 @@ Required fields:
 7. If applied: `apply_adaptations()` deletes overridden calendar events + DB
    rows, saves adapted workouts with `status='modified'`, syncs to Calendar.
 
-### Data Pull (`data pull`) and auto-ensure
-Data is pulled **directly from Garmin Connect** (`trainmate/garmin.py`); the
-former Google Sheets path is gone. Full design: `DESIGN_garmin_direct_pull.md`.
+### Data Pull (`data pull`) and auto-ensure Data is pulled **directly from
+Garmin Connect** (`trainmate/garmin.py`); the former Google Sheets path is
+gone. Full design: `DESIGN_garmin_direct_pull.md`.
 
-1. `garmin.pull(start, end)` logs into Garmin (token persistence; TTY-gated MFA),
-   fetches activities (computing TSS from power/HR and reading `directWorkoutRpe`,
-   estimating either if missing) and daily metrics. It writes a row to
-   `athlete_metrics_cache` for **every day in range — even all-null ones** — so
-   the table's date coverage records what has been pulled.
+1. `garmin.pull(start, end)` logs into Garmin (token persistence; TTY-gated
+   MFA), fetches activities (computing TSS from power/HR and reading
+   `directWorkoutRpe`, estimating either if missing) and daily metrics. It
+   writes a row to `athlete_metrics_cache` for **every day in range — even
+   all-null ones** — so the table's date coverage records what has been pulled.
 2. `garmin.recompute_derived()` runs a **full sweep** over all cached days:
-   acute/chronic workload + ACWR (7/28-day windows) and the 28-day RHR/HRV/sleep
-   baseline. A full sweep is cheap locally and avoids windowed-recompute bugs.
+   acute/chronic workload + ACWR (7/28-day windows) and the 28-day
+   RHR/HRV/sleep baseline. A full sweep is cheap locally and avoids
+   windowed-recompute bugs.
 3. The `sync_state` watermark advances (`through_date` forward only,
    `last_pull_utc` = now).
 4. `bike_avg_watts` and `zone1_sec`–`zone5_sec` come from Garmin (NULL when
@@ -643,8 +650,8 @@ entry (idempotent per process via an in-memory memo). It pulls the
 28-day-padded required window where the gap is small/recent and **prints a
 copy-pastable `data pull` command for large backfills** (cold start, big
 forward/backward gaps), always continuing with cached data. Calendar dates use
-the machine-local timezone (`util.today_str`/`today_date`); stored instants stay
-UTC. The web app never calls this — it is a pure reader (see §1).
+the machine-local timezone (`util.today_str`/`today_date`); stored instants
+stay UTC. The web app never calls this — it is a pure reader (see §1).
 
 ### Data Analysis (`data analyze`)
 1. `CoachService.analyze_workouts()` determines target start/end dates
@@ -652,17 +659,18 @@ UTC. The web app never calls this — it is a pure reader (see §1).
    are omitted.
 2. Queries the database for completed activities and physiological metrics for
    that date range.
-3. Computes the evidence fingerprint and checks `analysis_cache['long']`. If the
-   fingerprint matches and `--force` is absent → returns the cached reconstruction
-   (no LLM call). `--force` recomputes regardless.
-4. Groups metrics and activities week-by-week using Monday-commencing ISO weeks.
+3. Computes the evidence fingerprint and checks `analysis_cache['long']`. If
+   the fingerprint matches and `--force` is absent → returns the cached
+   reconstruction (no LLM call). `--force` recomputes regardless.
+4. Groups metrics and activities week-by-week using Monday-commencing ISO
+   weeks.
 5. Queries `CoachEngine._analyze_workouts_logic()` -> LLM ->
    `{macrocycle_summary, inferred_macrocycle, inferred_mesocycles[],
    physiological_insights[], learning_updates[]}`.
 6. Unless `--inspect`: applies `learning_updates` deltas (with
-   `suppress_reinforcement=True` when the evidence was unchanged) and caches the
-   reconstruction in `analysis_cache`. `--inspect` renders but writes nothing.
-   See DESIGN_backward_evaluation.md §5, §8, §9.
+   `suppress_reinforcement=True` when the evidence was unchanged) and caches
+   the reconstruction in `analysis_cache`. `--inspect` renders but writes
+   nothing.  See DESIGN_backward_evaluation.md §5, §8, §9.
 
 ---
 
@@ -673,13 +681,14 @@ UTC. The web app never calls this — it is a pure reader (see §1).
 - **Workouts** = daily microcycle activities implementing the mesocycle focus.
   Commands: `workout generate/adapt/push/swap`.
 
-A `workout swap` exchanges the dates of two workouts (or moves one onto an empty
-rest day). Moved workouts are flagged `status='modified'` with a
-`modification_reason` recording the swap, exactly like an adaptation — so they are
-re-synced by `workout push` and visibly distinguished from untouched `planned`
-ones. Swaps are validated first (`CoachService.validate_swap`): the new schedule is
-simulated and the user is warned about newly-created >2-day high-intensity streaks,
-weekly load spikes (an ACWR proxy), and mesocycle-boundary crossings.
+A `workout swap` exchanges the dates of two workouts (or moves one onto an
+empty rest day). Moved workouts are flagged `status='modified'` with a
+`modification_reason` recording the swap, exactly like an adaptation — so they
+are re-synced by `workout push` and visibly distinguished from untouched
+`planned` ones. Swaps are validated first (`CoachService.validate_swap`): the
+new schedule is simulated and the user is warned about newly-created >2-day
+high-intensity streaks, weekly load spikes (an ACWR proxy), and
+mesocycle-boundary crossings.
 
 Plan must be generated before workouts. Workouts cover a rolling window from
 today whose length is controlled by the horizon flags on `workout generate`
@@ -691,21 +700,15 @@ step (always uses the config default).
 
 ## 12. Sports Science & Coaching Mathematics
 
-### Workload per activity
-```
-Workload = TSS + RPE × (duration_sec / 3600)
-```
+### Workload per activity ``` Workload = TSS + RPE × (duration_sec / 3600) ```
 
-### Acute Workload (7 days)
-Sum of daily workloads over the past 7 days (current day included).
+### Acute Workload (7 days) Sum of daily workloads over the past 7 days
+(current day included).
 
-### Chronic Workload (28 days)
-Sum of workloads over past 28 days ÷ 4 (≈ average weekly load).
+### Chronic Workload (28 days) Sum of workloads over past 28 days ÷ 4 (≈
+average weekly load).
 
-### ACWR
-```
-ACWR = Acute / Chronic
-```
+### ACWR ``` ACWR = Acute / Chronic ```
 - < 0.8: under-training
 - 0.8–1.3: "sweet spot"
 - > 1.5: elevated injury risk
@@ -714,8 +717,8 @@ ACWR = Acute / Chronic
 - HRV drops > 1 std below baseline mean → flag potential overtraining
 - RHR rises > 1 std above baseline mean (min +3 bpm) → flag potential
   overtraining
-- `workout adapt` acts on these signals over the rolling `metrics_lookback_days`
-  window.
+- `workout adapt` acts on these signals over the rolling
+  `metrics_lookback_days` window.
 
 ### Science Guidelines Files
 - `trainmate/science/` — built-in: `acwr.txt`, `periodization.txt`,
