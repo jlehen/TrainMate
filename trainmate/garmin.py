@@ -145,22 +145,49 @@ class GarminClient:
             print(red(f"Error fetching activities {start_date}..{end_date}: {e}"))
             return []
 
+    @staticmethod
+    def _parse_zone_entries(data: Any, num_zones: int, prefix: str) -> Dict[str, int]:
+        """Parses a Garmin *TimeInZones payload into {prefix}{n}_sec seconds.
+
+        Both the HR and power endpoints return the same shape: a list (or a dict
+        wrapping it under hrZoneDTO) of per-zone records with a zone number and a
+        seconds-in-zone field under one of a couple of key spellings.
+        """
+        zones = {f"{prefix}{i}_sec": 0 for i in range(1, num_zones + 1)}
+        entries = data if isinstance(data, list) else (
+            data.get("hrZoneDTO") if isinstance(data, dict) else None)
+        for z in entries or []:
+            if not isinstance(z, dict):
+                continue
+            zid = z.get("zoneNumber") or z.get("zoneId")
+            secs = z.get("secsInZone") or z.get("timeInZone", 0)
+            if zid in range(1, num_zones + 1):
+                zones[f"{prefix}{zid}_sec"] = int(float(secs))
+        return zones
+
     def get_activity_hr_zones(self, activity_id: Any) -> Dict[str, int]:
         """Seconds spent in each HR zone (1-5) for an activity."""
-        zones = {f"zone{i}_sec": 0 for i in range(1, 6)}
         try:
             data = self.api.get_activity_hr_in_timezones(activity_id)
-            entries = data if isinstance(data, list) else (data.get("hrZoneDTO") if isinstance(data, dict) else None)
-            for z in entries or []:
-                if not isinstance(z, dict):
-                    continue
-                zid = z.get("zoneNumber") or z.get("zoneId")
-                secs = z.get("secsInZone") or z.get("timeInZone", 0)
-                if zid in (1, 2, 3, 4, 5):
-                    zones[f"zone{zid}_sec"] = int(float(secs))
+            return self._parse_zone_entries(data, 5, "zone")
+        except Exception:
+            return {f"zone{i}_sec": 0 for i in range(1, 6)}
+
+    def get_activity_power_zones(self, activity_id: Any) -> Dict[str, Optional[int]]:
+        """Seconds spent in each power zone (Garmin's 7-zone model) for an activity.
+
+        Power zones only exist for activities recorded with a power meter (cycling).
+        Returns all-None when no power-zone data is available, so the columns stay
+        NULL rather than a misleading zero for non-power activities.
+        """
+        try:
+            data = self.api.get_activity_power_in_timezones(activity_id)
+            parsed = self._parse_zone_entries(data, 7, "power_zone")
+            if any(v for v in parsed.values()):
+                return parsed  # type: ignore[return-value]
         except Exception:
             pass
-        return zones
+        return {f"power_zone{i}_sec": None for i in range(1, 8)}
 
     def get_activity_rpe(self, activity_id: Any) -> Optional[float]:
         """Fetches manually-entered RPE on a 1-10 scale, or None if unspecified."""
@@ -282,6 +309,13 @@ def _ingest_activities(client: GarminClient, start: str, end: str, throttle: flo
             tss = est_tss if tss is None else tss
 
         zones = client.get_activity_hr_zones(activity_id) if avg_hr is not None else {f"zone{i}_sec": 0 for i in range(1, 6)}
+        # Power zones only exist when a power meter was recording (cycling); skip
+        # the extra API call otherwise and leave the columns NULL.
+        power_zones = (
+            client.get_activity_power_zones(activity_id)
+            if bike_avg_watts is not None
+            else {f"power_zone{i}_sec": None for i in range(1, 8)}
+        )
 
         db.save_completed_activity(
             activity_id=activity_id, date=date_str, start_time=start_time,
@@ -290,7 +324,7 @@ def _ingest_activities(client: GarminClient, start: str, end: str, throttle: flo
             distance_km=_safe_round((act.get("distance") or 0) / 1000.0, 2),
             elevation_gain_m=_safe_round(act.get("elevationGain")),
             avg_hr=avg_hr, max_hr=act.get("maxHR"), rpe=int(rpe), tss=float(tss),
-            bike_avg_watts=bike_avg_watts, **zones,
+            bike_avg_watts=bike_avg_watts, **zones, **power_zones,
         )
         if throttle:
             time.sleep(throttle)

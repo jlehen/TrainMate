@@ -54,6 +54,13 @@ class CompletedActivity(TypedDict):
     zone3_sec: Optional[int]
     zone4_sec: Optional[int]
     zone5_sec: Optional[int]
+    power_zone1_sec: Optional[int]
+    power_zone2_sec: Optional[int]
+    power_zone3_sec: Optional[int]
+    power_zone4_sec: Optional[int]
+    power_zone5_sec: Optional[int]
+    power_zone6_sec: Optional[int]
+    power_zone7_sec: Optional[int]
 
 class AthleteMetric(TypedDict):
     """Represents Garmin health/performance metrics cached for a specific day."""

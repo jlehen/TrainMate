@@ -54,6 +54,54 @@ class TestGarminTransforms(unittest.TestCase):
             self.assertEqual(garmin.estimate_rpe_tss("rest", 3600.0, None), (0, 0.0))
 
 
+class TestZoneParsing(unittest.TestCase):
+    def _client(self):
+        return garmin.GarminClient(email="x", password="y", token_store_dir="/tmp")
+
+    def test_parse_zone_entries_handles_key_spellings(self):
+        data = [
+            {"zoneNumber": 1, "secsInZone": 60},
+            {"zoneId": 3, "timeInZone": 120},  # alternate spellings
+            {"zoneNumber": 8, "secsInZone": 99},  # out of range -> ignored
+        ]
+        zones = garmin.GarminClient._parse_zone_entries(data, 7, "power_zone")
+        self.assertEqual(zones["power_zone1_sec"], 60)
+        self.assertEqual(zones["power_zone3_sec"], 120)
+        self.assertEqual(zones["power_zone7_sec"], 0)
+        self.assertNotIn("power_zone8_sec", zones)
+
+    def test_get_activity_power_zones_returns_seconds(self):
+        client = self._client()
+        client.api = type("Api", (), {})()
+        client.api.get_activity_power_in_timezones = lambda aid: [
+            {"zoneNumber": 2, "secsInZone": 300},
+            {"zoneNumber": 4, "secsInZone": 150},
+        ]
+        zones = client.get_activity_power_zones("123")
+        self.assertEqual(zones["power_zone2_sec"], 300)
+        self.assertEqual(zones["power_zone4_sec"], 150)
+        self.assertEqual(zones["power_zone1_sec"], 0)
+
+    def test_get_activity_power_zones_all_none_when_empty(self):
+        client = self._client()
+        client.api = type("Api", (), {})()
+        client.api.get_activity_power_in_timezones = lambda aid: []
+        zones = client.get_activity_power_zones("123")
+        self.assertTrue(all(v is None for v in zones.values()))
+        self.assertEqual(set(zones), {f"power_zone{i}_sec" for i in range(1, 8)})
+
+    def test_get_activity_power_zones_all_none_on_error(self):
+        client = self._client()
+        client.api = type("Api", (), {})()
+
+        def boom(aid):
+            raise RuntimeError("no power data")
+
+        client.api.get_activity_power_in_timezones = boom
+        zones = client.get_activity_power_zones("123")
+        self.assertTrue(all(v is None for v in zones.values()))
+
+
 class TestRecomputeDerived(unittest.TestCase):
     def setUp(self):
         clear_all_tables(test_db)

@@ -198,6 +198,14 @@ class Database:
                 "zone3_sec INTEGER DEFAULT NULL",
                 "zone4_sec INTEGER DEFAULT NULL",
                 "zone5_sec INTEGER DEFAULT NULL",
+                # Power zones use Garmin's 7-zone model (cycling with a power meter).
+                "power_zone1_sec INTEGER DEFAULT NULL",
+                "power_zone2_sec INTEGER DEFAULT NULL",
+                "power_zone3_sec INTEGER DEFAULT NULL",
+                "power_zone4_sec INTEGER DEFAULT NULL",
+                "power_zone5_sec INTEGER DEFAULT NULL",
+                "power_zone6_sec INTEGER DEFAULT NULL",
+                "power_zone7_sec INTEGER DEFAULT NULL",
             ]:
                 try:
                     cursor.execute(f"ALTER TABLE completed_activities ADD COLUMN {col}")
@@ -620,7 +628,11 @@ class Database:
         max_hr: Optional[int], rpe: int, tss: float,
         bike_avg_watts: Optional[int] = None, zone1_sec: Optional[int] = None,
         zone2_sec: Optional[int] = None, zone3_sec: Optional[int] = None,
-        zone4_sec: Optional[int] = None, zone5_sec: Optional[int] = None
+        zone4_sec: Optional[int] = None, zone5_sec: Optional[int] = None,
+        power_zone1_sec: Optional[int] = None, power_zone2_sec: Optional[int] = None,
+        power_zone3_sec: Optional[int] = None, power_zone4_sec: Optional[int] = None,
+        power_zone5_sec: Optional[int] = None, power_zone6_sec: Optional[int] = None,
+        power_zone7_sec: Optional[int] = None
     ) -> None:
         """Saves a completed Garmin activity, updating it if it already exists."""
         with self._get_connection() as conn:
@@ -630,8 +642,11 @@ class Database:
                     activity_id, date, start_time, activity_name, activity_type,
                     duration_sec, distance_km, elevation_gain_m, avg_hr, max_hr,
                     rpe, tss, bike_avg_watts, zone1_sec, zone2_sec, zone3_sec,
-                    zone4_sec, zone5_sec
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    zone4_sec, zone5_sec, power_zone1_sec, power_zone2_sec,
+                    power_zone3_sec, power_zone4_sec, power_zone5_sec,
+                    power_zone6_sec, power_zone7_sec
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                          ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(activity_id) DO UPDATE SET
                     date=excluded.date,
                     start_time=excluded.start_time,
@@ -649,11 +664,20 @@ class Database:
                     zone2_sec=excluded.zone2_sec,
                     zone3_sec=excluded.zone3_sec,
                     zone4_sec=excluded.zone4_sec,
-                    zone5_sec=excluded.zone5_sec
+                    zone5_sec=excluded.zone5_sec,
+                    power_zone1_sec=excluded.power_zone1_sec,
+                    power_zone2_sec=excluded.power_zone2_sec,
+                    power_zone3_sec=excluded.power_zone3_sec,
+                    power_zone4_sec=excluded.power_zone4_sec,
+                    power_zone5_sec=excluded.power_zone5_sec,
+                    power_zone6_sec=excluded.power_zone6_sec,
+                    power_zone7_sec=excluded.power_zone7_sec
             """, (activity_id, date, start_time, activity_name, activity_type,
                   duration_sec, distance_km, elevation_gain_m, avg_hr, max_hr,
                   rpe, tss, bike_avg_watts, zone1_sec, zone2_sec, zone3_sec,
-                  zone4_sec, zone5_sec))
+                  zone4_sec, zone5_sec, power_zone1_sec, power_zone2_sec,
+                  power_zone3_sec, power_zone4_sec, power_zone5_sec,
+                  power_zone6_sec, power_zone7_sec))
             conn.commit()
 
     def get_completed_activities(
