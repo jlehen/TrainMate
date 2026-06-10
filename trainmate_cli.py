@@ -596,6 +596,10 @@ def main() -> None:
         "--csv", action="store_true", dest="csv",
         help="Output data as CSV for script consumption"
     )
+    d_sm.add_argument(
+        "-a", "--all", action="store_true", dest="all",
+        help="Show all cached athlete metrics"
+    )
 
     # data show-activities
     d_sa = data_subparsers.add_parser(
@@ -643,8 +647,12 @@ def main() -> None:
         help="Skip pull check from Garmin, reading purely from SQLite cache"
     )
     d_sa.add_argument(
-        "--csv", action="store_true", dest="csv",
-        help="Output data as CSV for script consumption"
+         "--csv", action="store_true", dest="csv",
+         help="Output data as CSV for script consumption"
+     )
+    d_sa.add_argument(
+        "-a", "--all", action="store_true", dest="all",
+        help="Show all cached completed activities"
     )
 
     # data wipe
@@ -2258,8 +2266,11 @@ def run_data_wipe(args: argparse.Namespace) -> None:
 
 def _resolve_historical_date_range(
     args: argparse.Namespace, default_days: int = 7
-) -> tuple[str, str]:
+) -> tuple[Optional[str], Optional[str]]:
     """Resolves (start_date, end_date) for historical queries, looking back by default."""
+    if getattr(args, 'all', False):
+        return None, None
+
     today_str = _today_str()
 
     # Determine end_date (default is today_str, capped/anchored by until/mesocycle/goal)
@@ -2361,7 +2372,7 @@ def run_data_show_metrics(args: argparse.Namespace) -> None:
     """Displays athlete metrics over the resolved date range."""
     start_date, end_date = _resolve_historical_date_range(args, default_days=7)
 
-    if not getattr(args, 'no_pull', False):
+    if not getattr(args, 'no_pull', False) and not getattr(args, 'all', False):
         try:
             garmin.ensure_data(start_date, end_date)
         except Exception as e:
@@ -2373,7 +2384,8 @@ def run_data_show_metrics(args: argparse.Namespace) -> None:
         _show_metrics_csv(metrics_history)
         return
 
-    print(bold(cyan(f"\n=== ATHLETE METRICS ({start_date} to {end_date}) ===")))
+    range_str = f"{start_date} to {end_date}" if start_date and end_date else "All Time"
+    print(bold(cyan(f"\n=== ATHLETE METRICS ({range_str}) ===")))
     if not metrics_history:
         print("No metrics cached in this range.")
         return
@@ -2483,7 +2495,7 @@ def run_data_show_activities(args: argparse.Namespace) -> None:
     """Displays completed activities over the resolved date range."""
     start_date, end_date = _resolve_historical_date_range(args, default_days=7)
 
-    if not getattr(args, 'no_pull', False):
+    if not getattr(args, 'no_pull', False) and not getattr(args, 'all', False):
         try:
             garmin.ensure_data(start_date, end_date)
         except Exception as e:
@@ -2504,7 +2516,8 @@ def run_data_show_activities(args: argparse.Namespace) -> None:
         return
 
 
-    print(bold(cyan(f"\n=== COMPLETED ACTIVITIES ({start_date} to {end_date}) ===")))
+    range_str = f"{start_date} to {end_date}" if start_date and end_date else "All Time"
+    print(bold(cyan(f"\n=== COMPLETED ACTIVITIES ({range_str}) ===")))
     if not activities:
         print("No completed activities found in this range.")
         return

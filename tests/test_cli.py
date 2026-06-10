@@ -979,6 +979,15 @@ class TestTrainMateCLI(unittest.TestCase):
         self.assertEqual(exit_code, 0)
         mock_garmin.ensure_data.assert_not_called()
 
+        mock_garmin.ensure_data.reset_mock()
+        exit_code, stdout, stderr = self.run_cli([
+            "data", "show-metrics", "--all"
+        ])
+        self.assertEqual(exit_code, 0)
+        self.assertIn("=== ATHLETE METRICS (All Time) ===", stdout)
+        self.assertIn("2026-06-03", stdout)
+        mock_garmin.ensure_data.assert_not_called()
+
     @patch("trainmate_cli.garmin")
     def test_data_show_activities_command(self, mock_garmin):
         test_db.save_completed_activity(
@@ -1011,6 +1020,16 @@ class TestTrainMateCLI(unittest.TestCase):
         self.assertEqual(exit_code, 0)
         self.assertNotIn("Morning Ride", stdout)
         self.assertIn("Morning Run", stdout)
+
+        mock_garmin.ensure_data.reset_mock()
+        exit_code, stdout, stderr = self.run_cli([
+            "data", "show-activities", "-a"
+        ])
+        self.assertEqual(exit_code, 0)
+        self.assertIn("=== COMPLETED ACTIVITIES (All Time) ===", stdout)
+        self.assertIn("Morning Ride", stdout)
+        self.assertIn("Morning Run", stdout)
+        mock_garmin.ensure_data.assert_not_called()
 
 
 if __name__ == "__main__":
