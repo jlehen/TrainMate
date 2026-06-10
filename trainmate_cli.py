@@ -1,4 +1,5 @@
 import argparse
+import csv as csv_mod
 import os
 import subprocess
 import sys
@@ -591,6 +592,10 @@ def main() -> None:
         "--no-pull", action="store_true", dest="no_pull",
         help="Skip pull check from Garmin, reading purely from SQLite cache"
     )
+    d_sm.add_argument(
+        "--csv", action="store_true", dest="csv",
+        help="Output data as CSV for script consumption"
+    )
 
     # data show-activities
     d_sa = data_subparsers.add_parser(
@@ -636,6 +641,10 @@ def main() -> None:
     d_sa.add_argument(
         "--no-pull", action="store_true", dest="no_pull",
         help="Skip pull check from Garmin, reading purely from SQLite cache"
+    )
+    d_sa.add_argument(
+        "--csv", action="store_true", dest="csv",
+        help="Output data as CSV for script consumption"
     )
 
     # data wipe
@@ -2360,6 +2369,10 @@ def run_data_show_metrics(args: argparse.Namespace) -> None:
 
     metrics_history = db.get_metrics_cache(start_date=start_date, end_date=end_date)
 
+    if getattr(args, 'csv', False):
+        _show_metrics_csv(metrics_history)
+        return
+
     print(bold(cyan(f"\n=== ATHLETE METRICS ({start_date} to {end_date}) ===")))
     if not metrics_history:
         print("No metrics cached in this range.")
@@ -2442,6 +2455,30 @@ def run_data_show_metrics(args: argparse.Namespace) -> None:
     print(gray("((v) suppressed/poor, (^) elevated compared to baseline)\n"))
 
 
+def _show_metrics_csv(metrics_history: list) -> None:
+    """Output metrics as CSV."""
+    writer = csv_mod.writer(sys.stdout)
+    writer.writerow([
+        "date", "hrv", "hrv_baseline", "rhr", "rhr_baseline",
+        "sleep_score", "sleep_baseline", "stress", "acwr",
+        "acute_workload", "chronic_workload",
+    ])
+    for m in metrics_history:
+        base = db.get_baseline(m['date'])
+        hrv_base = None
+        rhr_base = None
+        sleep_base = None
+        if base:
+            hrv_base = base.get('hrv_baseline_mean')
+            rhr_base = base.get('rhr_baseline_mean')
+            sleep_base = base.get('sleep_baseline_mean')
+        writer.writerow([
+            m['date'], m['hrv'], hrv_base, m['rhr'], rhr_base,
+            m['sleep_score'], sleep_base, m['stress'], m['acwr'],
+            m['acute_workload'], m['chronic_workload'],
+        ])
+
+
 def run_data_show_activities(args: argparse.Namespace) -> None:
     """Displays completed activities over the resolved date range."""
     start_date, end_date = _resolve_historical_date_range(args, default_days=7)
@@ -2452,13 +2489,20 @@ def run_data_show_activities(args: argparse.Namespace) -> None:
         except Exception as e:
             print(yellow(f"Warning: Could not ensure recent data: {e}"))
 
-    activities = db.get_completed_activities(start_date=start_date, end_date=end_date)
+    activities = db.get_completed_activities(
+        start_date=start_date, end_date=end_date
+    )
 
     if getattr(args, 'sport_type', None) is not None:
         activities = [
             act for act in activities
             if act['activity_type'].lower() == args.sport_type.lower()
         ]
+
+    if getattr(args, 'csv', False):
+        _show_activities_csv(activities)
+        return
+
 
     print(bold(cyan(f"\n=== COMPLETED ACTIVITIES ({start_date} to {end_date}) ===")))
     if not activities:
@@ -2556,6 +2600,25 @@ def run_data_show_activities(args: argparse.Namespace) -> None:
         f"Distance: {total_distance_km:.1f} km | Elevation: {total_elevation_m:.0f} m | "
         f"TSS: {total_tss:.1f}"
     ))
+
+
+def _show_activities_csv(activities: list) -> None:
+    """Output activities as CSV."""
+    writer = csv_mod.writer(sys.stdout)
+    writer.writerow([
+        "date", "start_time", "activity_type", "activity_name",
+        "duration_sec", "distance_km", "elevation_gain_m",
+        "avg_hr", "max_hr", "bike_avg_watts", "rpe", "tss",
+    ])
+    for act in activities:
+        writer.writerow([
+            act.get('date'), act.get('start_time'),
+            act.get('activity_type'), act.get('activity_name'),
+            act.get('duration_sec'), act.get('distance_km'),
+            act.get('elevation_gain_m'), act.get('avg_hr'),
+            act.get('max_hr'), act.get('bike_avg_watts'),
+            act.get('rpe'), act.get('tss'),
+        ])
 
 
 def run_data_analyze(args: argparse.Namespace) -> None:
