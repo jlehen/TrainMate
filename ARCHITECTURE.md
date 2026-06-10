@@ -511,9 +511,9 @@ Handler functions are named `run_<command>_<subcommand>()` in `trainmate_cli.py`
 | `workout`    | `swap`       | `w s`    | Swap workouts between two dates (`<date1> <date2>`) or two IDs           |
 |              |              |          | (`--id1 X --id2 Y`). Runs recovery checks (consecutive hard             |
 |              |              |          | days, weekly load spikes, mesocycle crossings) and prompts on           |
-|              |              |          | warnings unless `-y`/`--force`. Syncs to Calendar unless `--no-sync`.    |
+|              |              |          | warnings unless `-f`/`--force`. Syncs to Calendar unless `--no-sync`.    |
 | `workout`    | `wipe`       | —        | Delete all workouts                                                      |
-| `data`       | `pull`       | `d pull` | Fetch metrics and activities directly from Garmin (`--days`/`--start-date`/`--end-date`/`--metrics-only`/`--activities-only`/`--sleep`) |
+| `data`       | `pull`       | `d pull` | Fetch metrics and activities directly from Garmin (`--days`/`--from`/`--until`/`--metrics-only`/`--activities-only`/`--sleep`) |
 | `data`       | `analyze`    | `d a`    | Analyze completed workouts/metrics to detect cycles                      |
 |              |              |          | (`--from`, `--until`, `--days`, `--weeks`, `--context`,                  |
 |              |              |          | `--force` to recompute, `--inspect` for read-only)                      |

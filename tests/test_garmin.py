@@ -272,7 +272,7 @@ class TestEnsureData(unittest.TestCase):
                 garmin.ensure_data(_d(-5), _d(0))
             mock_pull.assert_not_called()
             printed = " ".join(str(c.args[0]) for c in mock_print.call_args_list if c.args)
-            self.assertIn("data pull --start-date", printed)
+            self.assertIn("data pull --from", printed)
 
     def test_small_recent_gap_auto_pulls(self):
         # Fully covered history except the recent mutable zone is stale (no watermark).
@@ -292,7 +292,7 @@ class TestEnsureData(unittest.TestCase):
                 garmin.ensure_data(_d(-120), _d(0))
             mock_pull.assert_not_called()
             printed = " ".join(str(c.args[0]) for c in mock_print.call_args_list if c.args)
-            self.assertIn("data pull --start-date", printed)
+            self.assertIn("data pull --from", printed)
 
     def test_fresh_data_no_pull(self):
         for i in range(60, -1, -1):

@@ -445,7 +445,7 @@ def main() -> None:
         help="Do not sync the swapped workouts to Google Calendar"
     )
     w_swap.add_argument(
-        "-y", "--force", action="store_true", dest="force",
+        "-f", "--force", action="store_true", dest="force",
         help="Apply the swap without prompting, even if warnings are raised"
     )
 
@@ -478,11 +478,11 @@ def main() -> None:
         help="Number of days to pull, ending today (default: 2)"
     )
     d_pull.add_argument(
-        "--start-date", dest="start_date", metavar="YYYY-MM-DD",
+        "--from", "--from-date", dest="from_date", metavar="YYYY-MM-DD",
         help="Start date for an explicit range (overrides --days)"
     )
     d_pull.add_argument(
-        "--end-date", dest="end_date", metavar="YYYY-MM-DD",
+        "--until", "--until-date", dest="until_date", metavar="YYYY-MM-DD",
         help="End date for an explicit range (defaults to today)"
     )
     d_pull.add_argument(
@@ -538,11 +538,11 @@ def main() -> None:
              "zone-based model (no Garmin calls needed)"
     )
     d_btss.add_argument(
-        "--start-date", dest="start_date", metavar="YYYY-MM-DD",
+        "--from", "--from-date", dest="from_date", metavar="YYYY-MM-DD",
         help="Only process activities on or after this date"
     )
     d_btss.add_argument(
-        "--end-date", dest="end_date", metavar="YYYY-MM-DD",
+        "--until", "--until-date", dest="until_date", metavar="YYYY-MM-DD",
         help="Only process activities on or before this date"
     )
     d_btss.add_argument(
@@ -2194,9 +2194,9 @@ def run_data_pull(args: argparse.Namespace) -> None:
     options) and advances the watermark. The watermark/auto-ensure logic lives in
     garmin.ensure_data, which commands call when reading.
     """
-    end_date = args.end_date or _today_str()
-    if args.start_date:
-        start_date = args.start_date
+    end_date = args.until_date or _today_str()
+    if args.from_date:
+        start_date = args.from_date
     else:
         days = max(1, args.days)
         start_date = (
@@ -2221,8 +2221,8 @@ def run_data_backfill_tss(args: argparse.Namespace) -> None:
     """Recomputes stored TSS for all cached activities under the current
     zone-based hierarchy, then refreshes derived workload/ACWR."""
     changed = garmin.backfill_tss(
-        start_date=getattr(args, "start_date", None),
-        end_date=getattr(args, "end_date", None),
+        start_date=args.from_date,
+        end_date=args.until_date,
         verbose=getattr(args, "verbose", False),
     )
     print(green(f"Backfill complete. {changed} activities updated."))

@@ -651,7 +651,7 @@ _ensured: Optional[Tuple[str, str]] = None
 
 
 def _pull_command(start: str, end: str) -> str:
-    return f"python trainmate_cli.py data pull --start-date {start} --end-date {end}"
+    return f"python trainmate_cli.py data pull --from {start} --until {end}"
 
 
 def _contiguous_regions(missing: List[str]) -> List[Tuple[str, str]]:

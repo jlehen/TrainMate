@@ -213,7 +213,7 @@ computed dates, e.g.:
 
 ```
 This view needs data back to 2026-02-10, but the database starts at 2026-05-01.
-Run:  python trainmate_cli.py data pull --start-date 2026-02-10 --end-date 2026-04-30
+Run:  python trainmate_cli.py data pull --from 2026-02-10 --until 2026-04-30
 ```
 
 Cold start uses `garmin_initial_backfill_days` (default 90) to compute the
@@ -231,8 +231,8 @@ skips the watermark/auto-ensure logic (it does exactly what is asked, then updat
 the watermark on success):
 
 - `--days N` — last N days (default 2, matching GarminScraper).
-- `--start-date YYYY-MM-DD` / `--end-date YYYY-MM-DD` — explicit range (overrides
-  `--days`; `--end-date` defaults to today).
+- `--from YYYY-MM-DD` / `--until YYYY-MM-DD` — explicit range (overrides
+  `--days`; `--until` defaults to today).
 - `--metrics-only` / `--activities-only` — mutually exclusive, bypass the other
   stream.
 - `--sleep SECONDS` — throttle between Garmin calls (overrides
