@@ -953,6 +953,65 @@ class TestTrainMateCLI(unittest.TestCase):
             inspect=False,
         )
 
+    @patch("trainmate_cli.garmin")
+    def test_data_show_metrics_command(self, mock_garmin):
+        test_db.save_metric_cache(
+            date="2026-06-03", rhr=50, hrv=75, sleep_score=80, stress=20,
+            acute_workload=4.0, chronic_workload=3.5, acwr=1.14
+        )
+        test_db.save_baseline(
+            date="2026-06-03", rhr_mean=50.0, rhr_std=1.5,
+            hrv_mean=78.0, hrv_std=4.0, sleep_mean=82.0, sleep_std=3.0
+        )
+
+        exit_code, stdout, stderr = self.run_cli([
+            "data", "show-metrics", "--from", "2026-06-01", "--until", "2026-06-05"
+        ])
+        self.assertEqual(exit_code, 0)
+        self.assertIn("=== ATHLETE METRICS", stdout)
+        self.assertIn("2026-06-03", stdout)
+        mock_garmin.ensure_data.assert_called_once_with("2026-06-01", "2026-06-05")
+
+        mock_garmin.ensure_data.reset_mock()
+        exit_code, stdout, stderr = self.run_cli([
+            "data", "show-metrics", "--days", "3", "--no-pull"
+        ])
+        self.assertEqual(exit_code, 0)
+        mock_garmin.ensure_data.assert_not_called()
+
+    @patch("trainmate_cli.garmin")
+    def test_data_show_activities_command(self, mock_garmin):
+        test_db.save_completed_activity(
+            activity_id="act_show_1", date="2026-06-03", start_time="09:00",
+            activity_name="Morning Ride", activity_type="road_biking", duration_sec=3600,
+            distance_km=30.0, elevation_gain_m=100.0, avg_hr=130, max_hr=150,
+            rpe=4, tss=50.0
+        )
+        test_db.save_completed_activity(
+            activity_id="act_show_2", date="2026-06-04", start_time="08:00",
+            activity_name="Morning Run", activity_type="running", duration_sec=1800,
+            distance_km=5.0, elevation_gain_m=30.0, avg_hr=140, max_hr=160,
+            rpe=5, tss=20.0
+        )
+
+        exit_code, stdout, stderr = self.run_cli([
+            "data", "show-activities", "--from", "2026-06-01", "--until", "2026-06-05"
+        ])
+        self.assertEqual(exit_code, 0)
+        self.assertIn("=== COMPLETED ACTIVITIES", stdout)
+        self.assertIn("Morning Ride", stdout)
+        self.assertIn("Morning Run", stdout)
+        self.assertIn("Summary: 2 activities | Duration: 1h 30m | Distance: 35.0 km | "
+                      "Elevation: 130 m | TSS: 70.0", stdout)
+
+        exit_code, stdout, stderr = self.run_cli([
+            "data", "show-activities", "--from", "2026-06-01", "--until", "2026-06-05",
+            "--type", "running"
+        ])
+        self.assertEqual(exit_code, 0)
+        self.assertNotIn("Morning Ride", stdout)
+        self.assertIn("Morning Run", stdout)
+
 
 if __name__ == "__main__":
     unittest.main()

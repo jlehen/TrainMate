@@ -550,6 +550,94 @@ def main() -> None:
         help="List activities with low HR-zone coverage that need an RPE"
     )
 
+    # data show-metrics
+    d_sm = data_subparsers.add_parser(
+        "show-metrics", aliases=["sm"],
+        help="Show athlete metrics over a date range"
+    )
+    d_sm.add_argument(
+        "--days", type=int, dest="days", metavar="N",
+        help="Show metrics for N days"
+    )
+    d_sm.add_argument(
+        "--weeks", type=float, dest="weeks", metavar="N",
+        help="Show metrics for N weeks"
+    )
+    d_sm.add_argument(
+        "--from", "--from-date", dest="from_date",
+        help="Show metrics starting from DATE (YYYY-MM-DD)"
+    )
+    d_sm.add_argument(
+        "--until", "--until-date", dest="until_date",
+        help="Show metrics until DATE (YYYY-MM-DD)"
+    )
+    d_sm.add_argument(
+        "--from-mesocycle", action="store_true", dest="from_meso",
+        help="Show metrics starting from the start of the current mesocycle"
+    )
+    d_sm.add_argument(
+        "--until-mesocycle", type=int, nargs="?", const=-1, dest="until_meso_id",
+        metavar="ID", help="Show metrics until the end of a mesocycle"
+    )
+    d_sm.add_argument(
+        "--mesocycle", type=int, nargs="?", const=-1, dest="meso_id",
+        metavar="ID", help="Show metrics within a mesocycle"
+    )
+    d_sm.add_argument(
+        "--goal", "--goal-id", type=int, nargs="?", const=-1, dest="goal_id",
+        metavar="ID", help="Show metrics for a goal's plan duration"
+    )
+    d_sm.add_argument(
+        "--no-pull", action="store_true", dest="no_pull",
+        help="Skip pull check from Garmin, reading purely from SQLite cache"
+    )
+
+    # data show-activities
+    d_sa = data_subparsers.add_parser(
+        "show-activities", aliases=["sa"],
+        help="Show completed activities over a date range"
+    )
+    d_sa.add_argument(
+        "--days", type=int, dest="days", metavar="N",
+        help="Show activities for N days"
+    )
+    d_sa.add_argument(
+        "--weeks", type=float, dest="weeks", metavar="N",
+        help="Show activities for N weeks"
+    )
+    d_sa.add_argument(
+        "--from", "--from-date", dest="from_date",
+        help="Show activities starting from DATE (YYYY-MM-DD)"
+    )
+    d_sa.add_argument(
+        "--until", "--until-date", dest="until_date",
+        help="Show activities until DATE (YYYY-MM-DD)"
+    )
+    d_sa.add_argument(
+        "--from-mesocycle", action="store_true", dest="from_meso",
+        help="Show activities starting from the start of the current mesocycle"
+    )
+    d_sa.add_argument(
+        "--until-mesocycle", type=int, nargs="?", const=-1, dest="until_meso_id",
+        metavar="ID", help="Show activities until the end of a mesocycle"
+    )
+    d_sa.add_argument(
+        "--mesocycle", type=int, nargs="?", const=-1, dest="meso_id",
+        metavar="ID", help="Show activities within a mesocycle"
+    )
+    d_sa.add_argument(
+        "--goal", "--goal-id", type=int, nargs="?", const=-1, dest="goal_id",
+        metavar="ID", help="Show activities for a goal's plan duration"
+    )
+    d_sa.add_argument(
+        "--type", "--sport-type", dest="sport_type",
+        help="Filter activities by sport type"
+    )
+    d_sa.add_argument(
+        "--no-pull", action="store_true", dest="no_pull",
+        help="Skip pull check from Garmin, reading purely from SQLite cache"
+    )
+
     # data wipe
     d_wipe = data_subparsers.add_parser(
         "wipe", help="Wipe all metrics and completed activities from the database"
@@ -631,6 +719,10 @@ def main() -> None:
             run_data_analyze(args)
         elif sub == "backfill-tss":
             run_data_backfill_tss(args)
+        elif sub in ("show-metrics", "sm"):
+            run_data_show_metrics(args)
+        elif sub in ("show-activities", "sa"):
+            run_data_show_activities(args)
         elif sub == "wipe":
             run_data_wipe(args)
     elif cmd in ("plan", "p"):
@@ -2153,6 +2245,317 @@ def run_data_wipe(args: argparse.Namespace) -> None:
 
     db.wipe_metrics()
     print(green("All metrics, baselines, and completed activities wiped successfully."))
+
+
+def _resolve_historical_date_range(
+    args: argparse.Namespace, default_days: int = 7
+) -> tuple[str, str]:
+    """Resolves (start_date, end_date) for historical queries, looking back by default."""
+    today_str = _today_str()
+
+    # Determine end_date (default is today_str, capped/anchored by until/mesocycle/goal)
+    end_date = today_str
+    if getattr(args, 'until_date', None) is not None:
+        end_date = args.until_date
+    elif getattr(args, 'until_meso_id', None) is not None:
+        meso_id = args.until_meso_id
+        if meso_id == -1:
+            active_meso = db.get_active_mesocycle(today_str)
+            if not active_meso:
+                print(red("Error: No active mesocycle found."))
+                sys.exit(1)
+            meso = active_meso
+        else:
+            meso = db.get_mesocycle(meso_id)
+            if not meso:
+                print(red(f"Error: Mesocycle with ID {meso_id} not found."))
+                sys.exit(1)
+        end_date = meso['end_date']
+    elif getattr(args, 'meso_id', None) is not None:
+        meso_id = args.meso_id
+        if meso_id == -1:
+            active_meso = db.get_active_mesocycle(today_str)
+            if not active_meso:
+                print(red("Error: No active mesocycle found."))
+                sys.exit(1)
+            meso = active_meso
+        else:
+            meso = db.get_mesocycle(meso_id)
+            if not meso:
+                print(red(f"Error: Mesocycle with ID {meso_id} not found."))
+                sys.exit(1)
+        end_date = meso['end_date']
+    elif getattr(args, 'goal_id', None) is not None:
+        goal_id = args.goal_id
+        if goal_id == -1:
+            active_goal = db.get_active_objective()
+            if not active_goal:
+                print(red("Error: No active goal found."))
+                sys.exit(1)
+            goal_id = active_goal['id']
+        macro = db.get_macrocycle_for_objective(goal_id)
+        if not macro:
+            print(red(f"Error: No plan exists for Goal ID {goal_id}."))
+            sys.exit(1)
+        mesos = db.get_mesocycles_for_macrocycle(macro['id'])
+        if not mesos:
+            print(red(f"Error: No mesocycles found for Goal ID {goal_id}."))
+            sys.exit(1)
+        end_date = max(m['end_date'] for m in mesos)
+
+    # Validate end_date format
+    try:
+        end_date_obj = datetime.strptime(end_date, "%Y-%m-%d").date()
+    except ValueError:
+        print(red(f"Invalid date format for end date: '{end_date}'. Use YYYY-MM-DD."))
+        sys.exit(1)
+
+    # Determine start_date
+    start_date = None
+    if getattr(args, 'from_date', None) is not None:
+        start_date = args.from_date
+    elif getattr(args, 'from_meso', False):
+        active_meso = db.get_active_mesocycle(today_str)
+        if not active_meso:
+            print(red("Error: No active mesocycle found to start from."))
+            sys.exit(1)
+        start_date = active_meso['start_date']
+    elif getattr(args, 'meso_id', None) is not None:
+        start_date = meso['start_date']
+    elif getattr(args, 'goal_id', None) is not None:
+        start_date = min(m['start_date'] for m in mesos)
+
+    # If start_date is still not resolved, resolve it via days/weeks lookback from end_date
+    if start_date is None:
+        days = getattr(args, 'days', None)
+        weeks = getattr(args, 'weeks', None)
+        if days is not None:
+            start_date_obj = end_date_obj - timedelta(days=days - 1)
+        elif weeks is not None:
+            ndays = max(1, round(weeks * 7))
+            start_date_obj = end_date_obj - timedelta(days=ndays - 1)
+        else:
+            start_date_obj = end_date_obj - timedelta(days=default_days - 1)
+        start_date = start_date_obj.strftime("%Y-%m-%d")
+
+    # Validate start_date format
+    try:
+        datetime.strptime(start_date, "%Y-%m-%d")
+    except ValueError:
+        print(red(f"Invalid date format for start date: '{start_date}'. Use YYYY-MM-DD."))
+        sys.exit(1)
+
+    return start_date, end_date
+
+
+def run_data_show_metrics(args: argparse.Namespace) -> None:
+    """Displays athlete metrics over the resolved date range."""
+    start_date, end_date = _resolve_historical_date_range(args, default_days=7)
+
+    if not getattr(args, 'no_pull', False):
+        try:
+            garmin.ensure_data(start_date, end_date)
+        except Exception as e:
+            print(yellow(f"Warning: Could not ensure recent data: {e}"))
+
+    metrics_history = db.get_metrics_cache(start_date=start_date, end_date=end_date)
+
+    print(bold(cyan(f"\n=== ATHLETE METRICS ({start_date} to {end_date}) ===")))
+    if not metrics_history:
+        print("No metrics cached in this range.")
+        return
+
+    print(bold(
+        f"{'Date':<12} | {'HRV':<8} | {'HRV Base':<9} | {'RHR':<8} | {'RHR Base':<8} | "
+        f"{'Sleep':<8} | {'Sleep Base':<10} | {'Stress':<6} | {'ACWR':<5} | "
+        f"{'Acute':<7} | {'Chronic':<7}"
+    ))
+    print(gray("-" * 107))
+
+    for m in metrics_history:
+        base = db.get_baseline(m['date'])
+
+        hrv_val = m['hrv']
+        rhr_val = m['rhr']
+        sleep_val = m['sleep_score']
+        stress_val = m['stress']
+        acwr_val = m['acwr']
+        acute_val = m['acute_workload']
+        chronic_val = m['chronic_workload']
+
+        hrv_str = str(hrv_val) if hrv_val is not None else "N/A"
+        rhr_str = str(rhr_val) if rhr_val is not None else "N/A"
+        sleep_str = str(sleep_val) if sleep_val is not None else "N/A"
+        stress_str = str(stress_val) if stress_val is not None else "N/A"
+        acwr_str = color_acwr(acwr_val) if acwr_val is not None else "N/A"
+        acute_str = f"{acute_val:.1f}" if acute_val is not None else "N/A"
+        chronic_str = f"{chronic_val:.1f}" if chronic_val is not None else "N/A"
+
+        hrv_base_str = "N/A"
+        rhr_base_str = "N/A"
+        sleep_base_str = "N/A"
+
+        if base:
+            if hrv_val is not None and base['hrv_baseline_mean'] is not None:
+                sd = base['hrv_baseline_std'] or 1.0
+                if hrv_val < (base['hrv_baseline_mean'] - sd):
+                    hrv_str = red(f"{hrv_val} (v)")
+                else:
+                    hrv_str = green(str(hrv_val))
+            if base['hrv_baseline_mean'] is not None:
+                hrv_base_str = f"{base['hrv_baseline_mean']:.1f}"
+
+            if rhr_val is not None and base['rhr_baseline_mean'] is not None:
+                sd = base['rhr_baseline_std'] or 1.0
+                if rhr_val > (base['rhr_baseline_mean'] + max(3.0, sd)):
+                    rhr_str = red(f"{rhr_val} (^)")
+                else:
+                    rhr_str = green(str(rhr_val))
+            if base['rhr_baseline_mean'] is not None:
+                rhr_base_str = f"{base['rhr_baseline_mean']:.1f}"
+
+            if sleep_val is not None:
+                if sleep_val < 60:
+                    sleep_str = red(f"{sleep_val} (v)")
+                else:
+                    sleep_str = green(str(sleep_val))
+            if base['sleep_baseline_mean'] is not None:
+                sleep_base_str = f"{base['sleep_baseline_mean']:.1f}"
+
+        date_col = pad_visible(m['date'], 12)
+        hrv_col = pad_visible(hrv_str, 8)
+        hrv_base_col = pad_visible(hrv_base_str, 9)
+        rhr_col = pad_visible(rhr_str, 8)
+        rhr_base_col = pad_visible(rhr_base_str, 8)
+        sleep_col = pad_visible(sleep_str, 8)
+        sleep_base_col = pad_visible(sleep_base_str, 10)
+        stress_col = pad_visible(stress_str, 6)
+        acwr_col = pad_visible(acwr_str, 5)
+        acute_col = pad_visible(acute_str, 7)
+        chronic_col = pad_visible(chronic_str, 7)
+
+        print(
+            f"{date_col} | {hrv_col} | {hrv_base_col} | {rhr_col} | {rhr_base_col} | "
+            f"{sleep_col} | {sleep_base_col} | {stress_col} | {acwr_col} | "
+            f"{acute_col} | {chronic_col}"
+        )
+    print(gray("((v) suppressed/poor, (^) elevated compared to baseline)\n"))
+
+
+def run_data_show_activities(args: argparse.Namespace) -> None:
+    """Displays completed activities over the resolved date range."""
+    start_date, end_date = _resolve_historical_date_range(args, default_days=7)
+
+    if not getattr(args, 'no_pull', False):
+        try:
+            garmin.ensure_data(start_date, end_date)
+        except Exception as e:
+            print(yellow(f"Warning: Could not ensure recent data: {e}"))
+
+    activities = db.get_completed_activities(start_date=start_date, end_date=end_date)
+
+    if getattr(args, 'sport_type', None) is not None:
+        activities = [
+            act for act in activities
+            if act['activity_type'].lower() == args.sport_type.lower()
+        ]
+
+    print(bold(cyan(f"\n=== COMPLETED ACTIVITIES ({start_date} to {end_date}) ===")))
+    if not activities:
+        print("No completed activities found in this range.")
+        return
+
+    print(bold(
+        f"{'Date':<12} | {'Time':<8} | {'Type':<20} | {'Name':<25} | "
+        f"{'Duration':<8} | {'Distance':<9} | {'Elev':<6} | {'Avg HR':<6} | "
+        f"{'Max HR':<6} | {'Avg Watts':<9} | {'RPE':<4} | {'TSS':<6}"
+    ))
+    print(gray("-" * 131))
+
+    for act in activities:
+        dur_sec = act.get('duration_sec') or 0.0
+        h = int(dur_sec // 3600)
+        m = int((dur_sec % 3600) // 60)
+        s = int(dur_sec % 60)
+        dur_str = f"{h:02d}:{m:02d}:{s:02d}" if h > 0 else f"{m:02d}:{s:02d}"
+
+        name_str = act.get('activity_name') or ""
+        if len(name_str) > 25:
+            name_str = name_str[:22] + "..."
+
+        dist_val = act.get('distance_km')
+        dist_str = f"{dist_val:.1f} km" if dist_val is not None else "0.0 km"
+
+        elev_val = act.get('elevation_gain_m')
+        elev_str = f"{elev_val:.0f} m" if elev_val is not None else "0 m"
+
+        avg_hr = act.get('avg_hr')
+        avg_hr_str = str(avg_hr) if avg_hr is not None else "N/A"
+
+        max_hr = act.get('max_hr')
+        max_hr_str = str(max_hr) if max_hr is not None else "N/A"
+
+        watts = act.get('bike_avg_watts')
+        watts_str = f"{watts} W" if watts is not None else "N/A"
+
+        rpe_val = act.get('rpe')
+        rpe_str = str(rpe_val) if rpe_val is not None else "N/A"
+
+        tss_val = act.get('tss')
+        tss_str = f"{tss_val:.1f}" if tss_val is not None else "0.0"
+
+        start_time = act.get('start_time') or ""
+        if " " in start_time:
+            time_str = start_time.split(" ", 1)[1]
+        elif "T" in start_time:
+            time_str = start_time.split("T", 1)[1]
+            if "+" in time_str:
+                time_str = time_str.split("+", 1)[0]
+            elif "-" in time_str:
+                time_str = time_str.split("-", 1)[0]
+            elif "Z" in time_str:
+                time_str = time_str.split("Z", 1)[0]
+        else:
+            time_str = start_time or "N/A"
+        if len(time_str) > 8:
+            time_str = time_str[:8]
+
+        date_col = pad_visible(act['date'], 12)
+        time_col = pad_visible(time_str, 8)
+        type_col = pad_visible(act['activity_type'].upper(), 20)
+        name_col = pad_visible(name_str, 25)
+        dur_col = pad_visible(dur_str, 8)
+        dist_col = pad_visible(dist_str, 9)
+        elev_col = pad_visible(elev_str, 6)
+        avg_hr_col = pad_visible(avg_hr_str, 6)
+        max_hr_col = pad_visible(max_hr_str, 6)
+        watts_col = pad_visible(watts_str, 9)
+        rpe_col = pad_visible(rpe_str, 4)
+        tss_col = pad_visible(tss_str, 6)
+
+        print(
+            f"{date_col} | {time_col} | {type_col} | {name_col} | "
+            f"{dur_col} | {dist_col} | {elev_col} | {avg_hr_col} | "
+            f"{max_hr_col} | {watts_col} | {rpe_col} | {tss_col}"
+        )
+
+    # Summary footer
+    total_count = len(activities)
+    total_duration_sec = sum(act.get('duration_sec') or 0.0 for act in activities)
+    total_distance_km = sum(act.get('distance_km') or 0.0 for act in activities)
+    total_elevation_m = sum(act.get('elevation_gain_m') or 0.0 for act in activities)
+    total_tss = sum(act.get('tss') or 0.0 for act in activities)
+
+    tot_h = int(total_duration_sec // 3600)
+    tot_m = int((total_duration_sec % 3600) // 60)
+    tot_dur_str = f"{tot_h}h {tot_m}m" if tot_h > 0 else f"{tot_m}m"
+
+    print(gray("-" * 131))
+    print(bold(
+        f"Summary: {total_count} activities | Duration: {tot_dur_str} | "
+        f"Distance: {total_distance_km:.1f} km | Elevation: {total_elevation_m:.0f} m | "
+        f"TSS: {total_tss:.1f}"
+    ))
 
 
 def run_data_analyze(args: argparse.Namespace) -> None:

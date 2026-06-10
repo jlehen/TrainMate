@@ -517,6 +517,10 @@ Handler functions are named `run_<command>_<subcommand>()` in `trainmate_cli.py`
 | `data`       | `analyze`    | `d a`    | Analyze completed workouts/metrics to detect cycles                      |
 |              |              |          | (`--from`, `--until`, `--days`, `--weeks`, `--context`,                  |
 |              |              |          | `--force` to recompute, `--inspect` for read-only)                      |
+| `data`       | `show-metrics` | `d sm` / `sm` | Show athlete metrics over a date range. Supports standard |
+|              |              |          | date range options and `--no-pull` to bypass Garmin sync. |
+| `data`       | `show-activities` | `d sa` / `sa` | Show completed activities over a date range. Supports |
+|              |              |          | date options, `--type` filter, and `--no-pull`.          |
 | `data`       | `backfill-tss` | —      | Recompute the measured `tss` for all stored activities under the current zone model (no Garmin calls), then refresh derived workload |
 | `data`       | `wipe`       | —        | Delete all metrics, baselines, completed activities                      |
 
