@@ -35,10 +35,18 @@ def main() -> None:
     
     subparsers = parser.add_subparsers(dest="command", help="Available commands")
     
+    # Common parser for commands that support bypassing the Garmin pull
+    pull_bypass_parser = argparse.ArgumentParser(add_help=False)
+    pull_bypass_parser.add_argument(
+        "--no-pull", action="store_true", dest="no_pull",
+        help="Skip pull check from Garmin, reading purely from SQLite cache"
+    )
+
     # status command
     status_parser = subparsers.add_parser(
         "status",
         aliases=["s"],
+        parents=[pull_bypass_parser],
         help="Show current athlete status, active goals, recent metrics, and memories"
     )
     status_parser.add_argument(
@@ -169,6 +177,7 @@ def main() -> None:
     # plan generate
     p_gen = plan_subparsers.add_parser(
         "generate", aliases=["g"],
+        parents=[pull_bypass_parser],
         help=(
             "Generate or adapt the periodized training plan strategy "
             "(macrocycles & mesocycles)"
@@ -291,7 +300,8 @@ def main() -> None:
     
     # workout compare
     w_cmp = workout_subparsers.add_parser(
-        "compare", aliases=["c"], help="Compare planned workouts against completed activities"
+        "compare", aliases=["c"], parents=[pull_bypass_parser],
+        help="Compare planned workouts against completed activities"
     )
     w_cmp.add_argument(
         "--type", "--sport-type", dest="sport_type",
@@ -333,6 +343,7 @@ def main() -> None:
     # workout generate
     p_w_gen = workout_subparsers.add_parser(
         "generate", aliases=["g"],
+        parents=[pull_bypass_parser],
         help="Generate workouts (microcycles) based on the active strategy"
     )
     p_w_gen.add_argument(
@@ -370,6 +381,7 @@ def main() -> None:
     # workout adapt
     w_adapt = workout_subparsers.add_parser(
         "adapt", aliases=["a"],
+        parents=[pull_bypass_parser],
         help="Run the daily Garmin check for today (syncs adapted workouts to Calendar)"
     )
     w_adapt.add_argument("--date", help="Date in YYYY-MM-DD format (defaults to UTC today)")
@@ -501,6 +513,7 @@ def main() -> None:
     # data analyze
     d_an = data_subparsers.add_parser(
         "analyze", aliases=["a"],
+        parents=[pull_bypass_parser],
         help="Analyze recorded workouts and metrics to determine macrocycle/mesocycles"
     )
     d_an.add_argument(
@@ -554,6 +567,7 @@ def main() -> None:
     # data show-metrics
     d_sm = data_subparsers.add_parser(
         "show-metrics", aliases=["sm"],
+        parents=[pull_bypass_parser],
         help="Show athlete metrics over a date range"
     )
     d_sm.add_argument(
@@ -588,10 +602,7 @@ def main() -> None:
         "--goal", "--goal-id", type=int, nargs="?", const=-1, dest="goal_id",
         metavar="ID", help="Show metrics for a goal's plan duration"
     )
-    d_sm.add_argument(
-        "--no-pull", action="store_true", dest="no_pull",
-        help="Skip pull check from Garmin, reading purely from SQLite cache"
-    )
+
     d_sm.add_argument(
         "--csv", action="store_true", dest="csv",
         help="Output data as CSV for script consumption"
@@ -604,6 +615,7 @@ def main() -> None:
     # data show-activities
     d_sa = data_subparsers.add_parser(
         "show-activities", aliases=["sa"],
+        parents=[pull_bypass_parser],
         help="Show completed activities over a date range"
     )
     d_sa.add_argument(
@@ -642,10 +654,7 @@ def main() -> None:
         "--type", "--sport-type", dest="sport_type",
         help="Filter activities by sport type"
     )
-    d_sa.add_argument(
-        "--no-pull", action="store_true", dest="no_pull",
-        help="Skip pull check from Garmin, reading purely from SQLite cache"
-    )
+
     d_sa.add_argument(
          "--csv", action="store_true", dest="csv",
          help="Output data as CSV for script consumption"
@@ -671,7 +680,7 @@ def main() -> None:
     cmd = args.command.lower()
 
     if cmd in ("status", "s"):
-        run_status(verbose=args.verbose)
+        run_status(verbose=args.verbose, no_pull=args.no_pull)
     elif cmd in ("goal", "g"):
         if not args.subcommand:
             goal_parser.print_help()
@@ -767,9 +776,9 @@ def main() -> None:
 # Status Command
 # ==============================================================================
 
-def run_status(verbose: bool = False) -> None:
+def run_status(verbose: bool = False, no_pull: bool = False) -> None:
     """Displays current athlete goals, Garmin metrics, baselines, and memories."""
-    _ensure_recent_data()
+    _ensure_recent_data(no_pull=no_pull)
     print(bold(cyan("=== TRAINMATE ATHLETE STATUS ===")))
     
     # Active Goal & Periodization Strategy
@@ -1155,7 +1164,7 @@ def run_lifeevent_wipe(args: argparse.Namespace) -> None:
 def run_plan_generate(args: argparse.Namespace) -> None:
     """Executes the AI periodization strategy plan generation command."""
     # Make sure we have latest metrics cached
-    _ensure_recent_data()
+    _ensure_recent_data(no_pull=args.no_pull)
     metrics = db.get_metrics_cache()
     if not metrics:
         print(yellow("Warning: Metrics cache is empty. Proceeding without Garmin metrics."))
@@ -1474,10 +1483,12 @@ def run_plan_feedback(args: argparse.Namespace) -> None:
 # Workout Command
 # ==============================================================================
 
-def _ensure_recent_data(end_date: Optional[str] = None) -> None:
+def _ensure_recent_data(end_date: Optional[str] = None, no_pull: bool = False) -> None:
     """Ensures Garmin data covering the recent metrics window is present and fresh,
     auto-pulling small/recent gaps and surfacing large backfills as a command. Warns
     if today's metrics are still unavailable afterward."""
+    if no_pull:
+        return
     end_date = end_date or _today_str()
     history_days = config.metrics_lookback_days
     start_date = (
@@ -1500,7 +1511,7 @@ def run_workout_adapt(args: argparse.Namespace) -> None:
     # Executes the daily workout Garmin adaptation checks command.
     date_str = args.date or _today_str()
 
-    _ensure_recent_data(date_str)
+    _ensure_recent_data(date_str, no_pull=args.no_pull)
 
     # Display rolling trajectory
     try:
@@ -1667,7 +1678,7 @@ def _resolve_workout_end_date(
 
 def run_workout_generate(args: argparse.Namespace) -> None:
     """Executes the AI workout generation command based on active strategy."""
-    _ensure_recent_data()
+    _ensure_recent_data(no_pull=args.no_pull)
 
     try:
         objectives = db.get_objectives(status='active')
@@ -1905,6 +1916,12 @@ def run_workout_compare(args: argparse.Namespace) -> None:
     # Cap end_date at today — we can only compare past/present activities
     if end_date is None or end_date > today_str:
         end_date = today_str
+
+    if not getattr(args, 'no_pull', False):
+        try:
+            garmin.ensure_data(start_date, end_date)
+        except Exception as e:
+            print(yellow(f"Warning: Could not ensure recent data: {e}"))
 
     all_workouts = db.get_workouts(start_date=start_date, end_date=end_date)
     activities = db.get_completed_activities(start_date=start_date, end_date=end_date)
@@ -2644,6 +2661,7 @@ def run_data_analyze(args: argparse.Namespace) -> None:
             context=args.context,
             force=args.force,
             inspect=args.inspect,
+            no_pull=args.no_pull,
         )
 
         print(bold(cyan("\n=== HISTORICAL WORKOUT ANALYSIS REPORT ===")))

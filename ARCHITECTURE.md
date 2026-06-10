@@ -671,9 +671,10 @@ gone. Full design: `DESIGN_garmin_direct_pull.md`.
 entry (idempotent per process via an in-memory memo). It pulls the
 28-day-padded required window where the gap is small/recent and **prints a
 copy-pastable `data pull` command for large backfills** (cold start, big
-forward/backward gaps), always continuing with cached data. Calendar dates use
-the machine-local timezone (`util.today_str`/`today_date`); stored instants
-stay UTC. The web app never calls this — it is a pure reader (see §1).
+forward/backward gaps), always continuing with cached data. These commands support
+the `--no-pull` option to bypass the sync check and read purely from the local SQLite
+cache. Calendar dates use the machine-local timezone (`util.today_str`/`today_date`);
+stored instants stay UTC. The web app never calls this — it is a pure reader (see §1).
 
 ### Data Analysis (`data analyze`)
 1. `CoachService.analyze_workouts()` determines target start/end dates

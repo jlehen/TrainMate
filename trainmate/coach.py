@@ -1752,7 +1752,8 @@ class CoachService:
     def analyze_workouts(
         self, from_date_str: Optional[str] = None, until_date_str: Optional[str] = None,
         days: Optional[int] = None, weeks: Optional[int] = None,
-        context: Optional[str] = None, force: bool = False, inspect: bool = False
+        context: Optional[str] = None, force: bool = False, inspect: bool = False,
+        no_pull: bool = False
     ) -> Dict[str, Any]:
         """Analyzes historical workouts and physiological metrics using LLM.
 
@@ -1805,9 +1806,10 @@ class CoachService:
         print(f"Analyzing activities from {from_str} to {until_str}...")
 
         # Ensure Garmin data covers the analysis window (auto-pull recent/small gaps,
-        # surface a command for large backfills) before reading it.
-        from trainmate import garmin
-        garmin.ensure_data(from_str, until_str)
+        # surface a command for large backfills) before reading it unless no_pull is True.
+        if not no_pull:
+            from trainmate import garmin
+            garmin.ensure_data(from_str, until_str)
 
         metrics = self._db.get_metrics_cache(start_date=from_str, end_date=until_str)
         completed_activities = self._db.get_completed_activities(

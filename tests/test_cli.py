@@ -951,6 +951,7 @@ class TestTrainMateCLI(unittest.TestCase):
             context="Felt good",
             force=False,
             inspect=False,
+            no_pull=False,
         )
 
     @patch("trainmate_cli.garmin")
@@ -1030,6 +1031,43 @@ class TestTrainMateCLI(unittest.TestCase):
         self.assertIn("Morning Ride", stdout)
         self.assertIn("Morning Run", stdout)
         mock_garmin.ensure_data.assert_not_called()
+
+    @patch("trainmate_cli.garmin")
+    @patch("trainmate_cli.coach_service")
+    def test_no_pull_behavior_across_commands(self, mock_coach, mock_garmin):
+        # 1. workout compare without --no-pull
+        exit_code, stdout, stderr = self.run_cli(["workout", "compare", "--days", "3"])
+        self.assertEqual(exit_code, 0)
+        mock_garmin.ensure_data.assert_called_once()
+
+        # 2. workout compare with --no-pull
+        mock_garmin.ensure_data.reset_mock()
+        exit_code, stdout, stderr = self.run_cli(
+            ["workout", "compare", "--days", "3", "--no-pull"]
+        )
+        self.assertEqual(exit_code, 0)
+        mock_garmin.ensure_data.assert_not_called()
+
+        # 3. status with --no-pull
+        mock_garmin.ensure_data.reset_mock()
+        exit_code, stdout, stderr = self.run_cli(["status", "--no-pull"])
+        self.assertEqual(exit_code, 0)
+        mock_garmin.ensure_data.assert_not_called()
+
+        # 4. plan generate with --no-pull
+        mock_garmin.ensure_data.reset_mock()
+        exit_code, stdout, stderr = self.run_cli(["plan", "generate", "--no-pull"])
+        self.assertEqual(exit_code, 0)
+        mock_garmin.ensure_data.assert_not_called()
+
+        # 5. data analyze with --no-pull
+        mock_garmin.ensure_data.reset_mock()
+        exit_code, stdout, stderr = self.run_cli(
+            ["data", "analyze", "--from", "2026-06-01", "--no-pull"]
+        )
+        self.assertEqual(exit_code, 0)
+        mock_coach.analyze_workouts.assert_called_once()
+        self.assertTrue(mock_coach.analyze_workouts.call_args[1].get("no_pull"))
 
 
 if __name__ == "__main__":
