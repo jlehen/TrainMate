@@ -789,8 +789,8 @@ class TestTrainMateCLI(unittest.TestCase):
         self.assertEqual(exit_code, 0)
         self.assertIn("Today Run", stdout)
         self.assertIn("Tomorrow Ride", stdout)
-        self.assertIn("Past Yoga", stdout)
-        self.assertIn("Future Lift", stdout)
+        self.assertNotIn("Past Yoga", stdout)
+        self.assertNotIn("Future Lift", stdout)
 
         exit_code, stdout, stderr = self.run_cli(["workout", "list", "--type", "running"])
         self.assertEqual(exit_code, 0)

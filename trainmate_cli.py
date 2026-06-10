@@ -1702,6 +1702,17 @@ def run_workout_list(args: argparse.Namespace) -> None:
     """Lists stored workouts chronologically, with optional date, goal, or type filters."""
     start_date, end_date = _resolve_workout_date_range(args)
 
+    # If no date options were provided...
+    if start_date is None and end_date is None:
+        today = _today_date()
+        start_date = today.strftime("%Y-%m-%d")
+        if getattr(args, "sport_type", None):
+            # Only sport_type provided: from today onwards
+            end_date = None
+        else:
+            # No options at all: from today for the next 7 days
+            end_date = (today + timedelta(days=7)).strftime("%Y-%m-%d")
+
     # Fetch workouts using our extended db.get_workouts
     workouts = db.get_workouts(
         start_date=start_date,

@@ -501,7 +501,8 @@ Handler functions are named `run_<command>_<subcommand>()` in `trainmate_cli.py`
 | `workout`    | `list`       | `w l`    | Show planned workouts (`--type TYPE`, `--days N`,        |
 |              |              |          | `--weeks N`, `--from DATE`, `--until DATE`,              |
 |              |              |          | `--from-mesocycle`, `--until-mesocycle [ID]`,            |
-|              |              |          | `--mesocycle [ID]`, `--goal [ID]`)                       |
+|              |              |          | `--mesocycle [ID]`, `--goal [ID]`). Defaults to showing  |
+|              |              |          | workouts from today for the next 7 days if no options.   |
 | `workout`    | `compare`    | `w c`    | Compare planned workouts vs completed activities.        |
 |              |              |          | Calls `analyze_adherence()` and prints PLANNED/ACTUAL    |
 |              |              |          | per day; flags missed sessions (red), rest violations    |
