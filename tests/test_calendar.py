@@ -1,0 +1,90 @@
+import os
+import unittest
+from datetime import datetime, timedelta, timezone
+from unittest.mock import patch, MagicMock
+
+TEST_DB_PATH = os.path.join(os.path.dirname(__file__), "test_trainmate_calendar.db")
+
+from trainmate.db import Database
+import trainmate.db
+import trainmate.google_calendar
+from trainmate.google_calendar import calendar_syncer
+
+test_db = Database(db_path=TEST_DB_PATH)
+trainmate.db.db = test_db
+trainmate.google_calendar.db = test_db
+
+class TestCalendarSync(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        if os.path.exists(TEST_DB_PATH):
+            os.remove(TEST_DB_PATH)
+        global test_db
+        test_db = Database(db_path=TEST_DB_PATH)
+        trainmate.db.db = test_db
+        trainmate.google_calendar.db = test_db
+
+    @classmethod
+    def tearDownClass(cls):
+        if os.path.exists(TEST_DB_PATH):
+            try:
+                os.remove(TEST_DB_PATH)
+            except OSError:
+                pass
+
+    def setUp(self):
+        from tests.helpers import clear_all_tables
+        clear_all_tables(test_db)
+
+    def test_sync_workout_adapted_description_order(self):
+        # Setup workout dictionary with adaptation details
+        workout = {
+            "date": "2026-06-12",
+            "sport_type": "running",
+            "title": "Easy Run",
+            "description": "Short 20 min recovery jog.",
+            "original_description": "Long 60 min intervals.",
+            "modification_reason": "Swapped with yoga due to fatigue.",
+            "duration_minutes": 20,
+            "tss": 15,
+            "google_event_id": None
+        }
+
+        # Mock the event insert API response
+        mock_service = MagicMock()
+        mock_event_result = {"id": "evt-new-123", "htmlLink": "http://calendar/event/1"}
+        mock_service.events().insert().execute.return_value = mock_event_result
+
+        # Run the sync with patched service
+        with patch.object(calendar_syncer, "service", mock_service):
+            event_id = calendar_syncer.sync_workout(workout)
+
+        # Verify returned event ID
+        self.assertEqual(event_id, "evt-new-123")
+
+        # Find the call that has the body parameter
+        insert_calls = [
+            call for call in mock_service.events().insert.call_args_list
+            if call.kwargs.get("body")
+        ]
+        self.assertEqual(len(insert_calls), 1)
+        body = insert_calls[0].kwargs["body"]
+        self.assertEqual(body.get("summary"), "[Adapted] Easy Run")
+        
+        # Verify the description order: Adapted first, then Originally, then Reason
+        desc = body.get("description", "")
+        self.assertIn("Duration: 20m | TSS: 15", desc)
+        self.assertIn("Adapted:\nShort 20 min recovery jog.", desc)
+        self.assertIn("Originally:\nLong 60 min intervals.", desc)
+        self.assertIn("Reason:\nSwapped with yoga due to fatigue.", desc)
+        
+        # Check that "Adapted:" comes BEFORE "Originally:"
+        adapted_idx = desc.index("Adapted:")
+        originally_idx = desc.index("Originally:")
+        self.assertTrue(
+            adapted_idx < originally_idx,
+            "Adapted description should come first"
+        )
+
+if __name__ == "__main__":
+    unittest.main()

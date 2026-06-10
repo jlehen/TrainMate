@@ -52,8 +52,8 @@ class CalendarSyncer:
         if is_modified:
             summary = f"[Adapted] {title}"
             event_description = (
-                f"Originally:\n{orig_description}\n\n"
                 f"Adapted:\n{description}\n\n"
+                f"Originally:\n{orig_description}\n\n"
                 f"Reason:\n{mod_reason}"
             )
         else:
