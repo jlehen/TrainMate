@@ -1374,12 +1374,12 @@ class CoachService:
         # synced workouts: their Google Calendar events are deleted first so the old plan
         # doesn't linger on the calendar.
         for ew in self._db.get_workouts(start_date=today_str):
-            if ew.get('google_event_id') and ew['status'] == 'synced':
+            if ew.get('google_event_id'):
                 try:
                     self._calendar_syncer.delete_workout_event(ew['google_event_id'])
                 except Exception as e:
                     print(f"Error deleting Google Calendar event: {e}")
-        self._db.clear_future_workouts(today_str, include_synced=True)
+        self._db.clear_future_workouts(today_str, include_calendar_events=True)
 
         saved_workouts: List[Workout] = []
         for w in workouts:
@@ -1388,7 +1388,7 @@ class CoachService:
                 sport_type=w['sport_type'],
                 title=w['title'],
                 description=w['description'],
-                status='planned',
+                synced=False,
                 duration_minutes=w.get('duration_minutes'),
                 rpe=w.get('rpe'),
                 tss=w.get('tss')
@@ -1400,7 +1400,7 @@ class CoachService:
                 'title': w['title'],
                 'description': w['description'],
                 'original_description': w['description'],
-                'status': 'planned',
+                'synced': False,
                 'modification_reason': None,
                 'google_event_id': None,
                 'duration_minutes': w.get('duration_minutes'),
@@ -1528,7 +1528,7 @@ class CoachService:
                 'title': w['title'],
                 'description': w['description'],
                 'original_description': w['description'],
-                'status': 'planned',
+                'synced': False,
                 'modification_reason': reason,
                 'google_event_id': None,
                 'duration_minutes': w.get('duration_minutes'),
@@ -1560,7 +1560,7 @@ class CoachService:
                 if ew['sport_type'] not in proposed_sports:
                     print(f"Removing overridden workout: {ew['title']} ({ew['sport_type']}) "
                           f"on {ew_date}")
-                    if ew.get('google_event_id') and ew['status'] == 'synced':
+                    if ew.get('google_event_id'):
                         try:
                             self._calendar_syncer.delete_workout_event(ew['google_event_id'])
                         except Exception as e:
@@ -1582,7 +1582,7 @@ class CoachService:
                 title=w['title'],
                 description=w['description'],
                 original_description=orig_desc or w['description'],
-                status='modified',
+                synced=False,
                 modification_reason=reason,
                 google_event_id=ge_id,
                 duration_minutes=w.get('duration_minutes'),

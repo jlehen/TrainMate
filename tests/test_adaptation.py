@@ -212,7 +212,7 @@ class TestAdaptation(unittest.TestCase):
 
         self.assertEqual(test_db.get_workout_by_id(a)["date"], "2026-06-12")
         self.assertEqual(test_db.get_workout_by_id(b)["date"], "2026-06-10")
-        self.assertEqual(test_db.get_workout_by_id(a)["status"], "modified")
+        self.assertIsNotNone(test_db.get_workout_by_id(a)["modification_reason"])
         self.assertEqual(len(updated), 2)
         self.assertEqual(syncer.sync_workout.call_count, 2)
 

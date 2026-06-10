@@ -1856,10 +1856,10 @@ def run_workout_list(args: argparse.Namespace) -> None:
         
     for w in workouts:
         mod_marker = ""
-        if w['status'] == 'modified' or w['modification_reason']:
+        if w['modification_reason']:
             mod_marker = bold(yellow(" [ADAPTED]"))
         sync_marker = ""
-        if w['status'] == 'synced':
+        if w['synced']:
             sync_marker = bold(green(" [SYNCED]"))
         duration = w.get('duration_minutes')
         tss = w.get('tss')
@@ -2044,8 +2044,7 @@ def run_workout_push(args: argparse.Namespace) -> None:
         sport_type=getattr(args, 'sport_type', None),
     )
 
-    eligible_statuses = ('planned', 'modified', 'synced') if force else ('planned', 'modified')
-    to_push = [w for w in all_workouts if w['status'] in eligible_statuses]
+    to_push = all_workouts if force else [w for w in all_workouts if not w['synced']]
 
     if not to_push:
         if force:
@@ -2073,7 +2072,7 @@ def run_workout_rm(args: argparse.Namespace) -> None:
         print(red(f"Workout with ID {args.id} not found."))
         return
         
-    if workout.get('google_event_id') and workout.get('status') == 'synced':
+    if workout.get('google_event_id'):
         print("Workout is synced to Google Calendar. Attempting to delete calendar event...")
         if workout['google_event_id'] is not None:
             calendar_syncer.delete_workout_event(workout['google_event_id'])

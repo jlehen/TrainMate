@@ -243,7 +243,7 @@ def sync_calendar() -> Any:
     today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     planned_workouts = db.get_workouts(start_date=today_str)
     # Get unsynced workouts
-    unsynced = [w for w in planned_workouts if w['status'] in ('planned', 'modified')]
+    unsynced = [w for w in planned_workouts if not w['synced']]
     
     if not unsynced:
         return jsonify({

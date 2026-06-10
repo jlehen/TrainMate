@@ -335,7 +335,7 @@ class TestPeriodization(unittest.TestCase):
         future = (datetime.now(timezone.utc) + timedelta(days=5)).strftime("%Y-%m-%d")
         test_db.save_workout(
             date=future, sport_type="running", title="Old Plan Run",
-            description="stale", status="synced", google_event_id="evt-old-123",
+            description="stale", synced=True, google_event_id="evt-old-123",
         )
 
         mock_client.complete.reset_mock()
@@ -354,6 +354,49 @@ class TestPeriodization(unittest.TestCase):
         self.assertEqual(titles, ["New Run"])
         # Its Google Calendar event was deleted.
         mock_calendar.delete_workout_event.assert_called_once_with("evt-old-123")
+
+    @patch("trainmate.coach.calendar_syncer")
+    @patch("trainmate.coach.openrouter_client")
+    def test_generate_workouts_clears_stale_unsynced_calendar_workouts(
+        self, mock_client, mock_calendar
+    ):
+        """A workout that was pushed then adapted/swapped (synced=0 but with a
+        google_event_id) must still have its Calendar event deleted on regenerate —
+        i.e. cleanup keys on google_event_id, not the sync flag (orphan guard)."""
+        test_db.add_objective(
+            title="Zurich Marathon", target_date="2026-10-15",
+            sport_type="running", priority=1,
+        )
+
+        mock_client.complete.return_value = {
+            "strategy": "Strategy", "mesocycles": [{
+                "name": "Base", "start_date": "2026-06-01",
+                "end_date": "2026-06-28", "focus": "Base",
+            }],
+        }
+        coach_service.generate_periodization_plan(force=False)
+
+        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        future = (datetime.now(timezone.utc) + timedelta(days=5)).strftime("%Y-%m-%d")
+        # On the calendar (google_event_id) but pending re-push after an adaptation.
+        test_db.save_workout(
+            date=future, sport_type="running", title="Adapted Run",
+            description="adapted", synced=False, google_event_id="evt-stale-456",
+            modification_reason="swapped",
+        )
+
+        mock_client.complete.reset_mock()
+        mock_client.complete.return_value = {
+            "reasoning": "New plan", "workouts": [{
+                "date": today, "sport_type": "running",
+                "title": "New Run", "description": "fresh",
+            }],
+        }
+        coach_service.generate_workouts()
+
+        remaining = test_db.get_workouts(start_date=today)
+        self.assertEqual([w["title"] for w in remaining], ["New Run"])
+        mock_calendar.delete_workout_event.assert_called_once_with("evt-stale-456")
 
     @patch("trainmate.coach.config")
     def test_load_science_guidelines(self, mock_config):

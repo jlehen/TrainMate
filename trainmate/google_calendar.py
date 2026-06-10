@@ -39,7 +39,6 @@ class CalendarSyncer:
         title = workout['title']
         description = workout['description']
         orig_description = workout.get('original_description') or description
-        status = workout.get('status', 'planned')
         mod_reason = workout.get('modification_reason')
         google_event_id = workout.get('google_event_id')
 
@@ -49,7 +48,7 @@ class CalendarSyncer:
         end_date_str = end_date.strftime("%Y-%m-%d")
 
         # Format Summary and Description
-        is_modified = status == 'modified' or bool(mod_reason)
+        is_modified = bool(mod_reason)
         if is_modified:
             summary = f"[Adapted] {title}"
             event_description = (
@@ -114,7 +113,7 @@ class CalendarSyncer:
                     title=title,
                     description=description or "",
                     original_description=orig_description,
-                    status='synced',
+                    synced=True,
                     modification_reason=mod_reason,
                     google_event_id=google_event_id
                 )
@@ -152,7 +151,7 @@ class CalendarSyncer:
                 title=title,
                 description=description or "",
                 original_description=orig_description,
-                status='synced',
+                synced=True,
                 modification_reason=mod_reason,
                 google_event_id=new_event_id
             )

@@ -42,7 +42,7 @@ def main() -> None:
         sport_type="running",
         title="Aerobic Base Run",
         description="45 minutes in HR Zone 2 (130-145 bpm). Steady flat pace.",
-        status="planned"
+        synced=False
     )
     
     # Workout 2: Modified session
@@ -52,7 +52,7 @@ def main() -> None:
         title="Active Recovery Spin",
         description="30 minutes of light cycling. Keep heart rate below 110 bpm.",
         original_description="90 minutes endurance road cycling with hill climbs.",
-        status="modified",
+        synced=False,
         modification_reason="HRV average dropped 1.2 SD below chronic baseline."
     )
     
@@ -72,7 +72,8 @@ def main() -> None:
         print("Database verify sync status:")
         for w in synced_workouts:
             print(
-                f"- Date: {w['date']} | Status: {w['status']} | "
+                f"- Date: {w['date']} | Synced: {w['synced']} | "
+                f"Adapted: {bool(w['modification_reason'])} | "
                 f"Google Event ID: {w['google_event_id']}"
             )
             

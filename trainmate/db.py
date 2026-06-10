@@ -150,8 +150,8 @@ class Database:
                     title TEXT NOT NULL,
                     description TEXT,
                     original_description TEXT,
-                    status TEXT DEFAULT 'planned', -- 'planned', 'modified', 'synced'
-                    modification_reason TEXT,
+                    synced INTEGER DEFAULT 0, -- 0 = pending push, 1 = calendar current
+                    modification_reason TEXT, -- non-NULL <=> adapted/swapped
                     google_event_id TEXT
                 )
             """)
@@ -169,6 +169,15 @@ class Database:
                 pass
             try:
                 cursor.execute("ALTER TABLE workouts ADD COLUMN tss INTEGER DEFAULT NULL")
+            except sqlite3.OperationalError:
+                pass
+            # Migrate the conflated `status` enum into an orthogonal `synced` flag.
+            # The adaptation axis already lives in modification_reason; only the sync
+            # axis needs its own column. On a fresh DB the ALTER fails (column already
+            # exists from CREATE TABLE) and the backfill is skipped — correct, no rows.
+            try:
+                cursor.execute("ALTER TABLE workouts ADD COLUMN synced INTEGER DEFAULT 0")
+                cursor.execute("UPDATE workouts SET synced = 1 WHERE status = 'synced'")
             except sqlite3.OperationalError:
                 pass
 
@@ -497,7 +506,7 @@ class Database:
     # --- Workouts CRUD ---
     def save_workout(
         self, date: str, sport_type: str, title: str, description: str,
-        original_description: Optional[str] = None, status: str = 'planned',
+        original_description: Optional[str] = None, synced: bool = False,
         modification_reason: Optional[str] = None, google_event_id: Optional[str] = None,
         duration_minutes: Optional[int] = None, rpe: Optional[int] = None,
         tss: Optional[int] = None
@@ -517,23 +526,23 @@ class Database:
                     UPDATE workouts
                     SET title = ?, description = ?,
                         original_description = COALESCE(?, original_description),
-                        status = ?, modification_reason = ?, google_event_id = ?,
+                        synced = ?, modification_reason = ?, google_event_id = ?,
                         duration_minutes = COALESCE(?, duration_minutes),
                         rpe = COALESCE(?, rpe),
                         tss = COALESCE(?, tss)
                     WHERE id = ?
-                """, (title, description, original_description, status,
+                """, (title, description, original_description, int(synced),
                       modification_reason, ge_id, duration_minutes, rpe, tss,
                       workout_id))
             else:
                 cursor.execute("""
                     INSERT INTO workouts (
                         date, sport_type, title, description, original_description,
-                        status, modification_reason, google_event_id,
+                        synced, modification_reason, google_event_id,
                         duration_minutes, rpe, tss
                     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (date, sport_type, title, description,
-                      original_description or description, status,
+                      original_description or description, int(synced),
                       modification_reason, google_event_id, duration_minutes,
                       rpe, tss))
                 workout_id = cursor.lastrowid
@@ -575,21 +584,25 @@ class Database:
             cursor.execute(query, params)
             return [dict(row) for row in cursor.fetchall()]  # type: ignore
 
-    def clear_future_workouts(self, from_date: str, include_synced: bool = False) -> None:
+    def clear_future_workouts(
+        self, from_date: str, include_calendar_events: bool = False
+    ) -> None:
         """Deletes future workouts from the database.
 
-        By default synced workouts are spared (so their Google Calendar events are not
-        orphaned). Pass include_synced=True to remove them too — callers doing this are
-        responsible for deleting the corresponding Calendar events first.
+        By default workouts that have a Google Calendar event (google_event_id set) are
+        spared, so their events are not orphaned — this is the true "on calendar" signal,
+        independent of whether the event is currently in sync. Pass
+        include_calendar_events=True to remove them too; callers doing this are responsible
+        for deleting the corresponding Calendar events first.
         """
         with self._get_connection() as conn:
-            if include_synced:
+            if include_calendar_events:
                 conn.cursor().execute(
                     "DELETE FROM workouts WHERE date >= ?", (from_date,)
                 )
             else:
                 conn.cursor().execute(
-                    "DELETE FROM workouts WHERE date >= ? AND status != 'synced'",
+                    "DELETE FROM workouts WHERE date >= ? AND google_event_id IS NULL",
                     (from_date,)
                 )
             conn.commit()
@@ -611,10 +624,11 @@ class Database:
     def update_workout_date(
         self, workout_id: int, new_date: str, modification_reason: str
     ) -> None:
-        """Moves a workout to a new date, flagging it as modified and recording why."""
+        """Moves a workout to a new date, flagging it as adapted (modification_reason) and
+        marking it pending re-push (synced = 0)."""
         with self._get_connection() as conn:
             conn.execute(
-                "UPDATE workouts SET date = ?, status = 'modified', "
+                "UPDATE workouts SET date = ?, synced = 0, "
                 "modification_reason = ? WHERE id = ?",
                 (new_date, modification_reason, workout_id)
             )

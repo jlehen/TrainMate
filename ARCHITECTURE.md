@@ -226,8 +226,10 @@ from trainmate.coach import coach_service
 - `save_workout(date, sport_type, ...)` is an **upsert**: it looks up by
   `(date, sport_type)` and updates if found, inserts otherwise. The
   `google_event_id` is preserved unless explicitly passed.
-- `clear_future_workouts(from_date)` deletes future workouts with `status !=
-  'synced'`.
+- `clear_future_workouts(from_date)` deletes future workouts, **sparing any with a
+  `google_event_id`** (the true "on calendar" signal) so their events aren't
+  orphaned; `include_calendar_events=True` removes those too (caller deletes the
+  events first).
 
 ### Key methods by domain
 
@@ -317,12 +319,21 @@ SQLite database at `trainmate.db` (path from `config.db_path`).
 | `description`          | TEXT       | Current description (may be adapted)             |
 | `original_description` | TEXT       | Set once on creation, never overwritten          |
 |                        |            | (COALESCE)                                       |
-| `status`               | TEXT       | `planned`, `modified`, `synced`                  |
-| `modification_reason`  | TEXT       |                                                  |
-| `google_event_id`      | TEXT       |                                                  |
+| `synced`               | INTEGER    | 0/1 — sync axis: 1 = Calendar event current.     |
+|                        |            | Orthogonal to adaptation (see below)             |
+| `modification_reason`  | TEXT       | Adaptation axis: non-NULL ⟺ adapted/swapped      |
+| `google_event_id`      | TEXT       | Non-NULL ⟺ a Calendar event exists (may be stale)|
 | `duration_minutes`     | INTEGER    |                                                  |
 | `rpe`                  | INTEGER    | Expected RPE 1–10                                |
 | `tss`                  | INTEGER    | Expected Training Stress Score                   |
+
+**Workout state is three orthogonal facts, not one enum** (a prior single `status`
+string conflated them): *adapted?* = `modification_reason IS NOT NULL`; *on
+calendar?* = `google_event_id IS NOT NULL`; *Calendar current?* = `synced`. The
+otherwise-unrepresentable "on the calendar but stale, needs re-push" state is
+`synced=0 AND google_event_id IS NOT NULL` — set whenever a pushed workout is later
+adapted (`apply_adaptations`) or swapped (`update_workout_date`). Push eligibility =
+`NOT synced`; calendar cleanup keys on `google_event_id`.
 
 ### completed\_activities
 | Column              | Type    | Notes                                              |
