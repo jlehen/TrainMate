@@ -1,7 +1,7 @@
 import os
 import unittest
 from datetime import date
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from tests.helpers import clear_all_tables
 from trainmate.adherence import analyze_adherence
@@ -109,6 +109,126 @@ class TestAdaptation(unittest.TestCase):
                 prompt_user_content,
             )
             self.assertIn("duration mismatch", prompt_user_content)
+
+    @patch("trainmate.coach.openrouter_client")
+    def test_adapt_records_learning_updates(self, mock_client):
+        test_profile = {"lthr": 165, "max_hr": 185}
+        with patch.dict(trainmate.coach.config.data, {
+            "user_profile": test_profile,
+            "metrics_history_days": 3,
+            "low_load_threshold": 10.0,
+        }):
+            # Pre-existing observation the model can reinforce by [id].
+            lid = test_db.add_learning(
+                "Elevated RHR after consecutive hard days", sports="running"
+            )
+
+            mock_client.complete.return_value = {
+                "change_needed": False,
+                "reason": "On track.",
+                "adapted_workouts": [],
+                "learning_updates": [
+                    {"op": "reinforce", "id": lid, "confidence": "moderate"},
+                    {"op": "add", "text": "Sleep score dips precede HRV suppression",
+                     "sports": "general", "confidence": "tentative"},
+                ],
+            }
+
+            test_db.save_metric_cache("2026-06-03", 56, 42, 60, 35, 14.0, 8.0, 1.75)
+            test_db.save_baseline("2026-06-03", 50.0, 2.0, 60.0, 5.0, 80.0, 5.0)
+
+            reason, proposed = coach_service.adapt("2026-06-03")
+            self.assertEqual(reason, "On track.")
+            self.assertEqual(proposed, [])
+
+            # The adapt prompt offers the learning_updates schema and shows the
+            # existing observation by id (so it can reinforce instead of duplicating).
+            system_prompt = mock_client.complete.call_args[0][0]
+            self.assertIn("learning_updates", system_prompt)
+            self.assertIn(f"[{lid}|running|", system_prompt)
+
+            # Deltas were applied: existing reinforced to 'moderate', new one added.
+            learnings = {l["id"]: l for l in test_db.get_learnings()}
+            self.assertEqual(len(learnings), 2)
+            self.assertEqual(learnings[lid]["confidence"], "moderate")
+            self.assertTrue(any(
+                l["text"] == "Sleep score dips precede HRV suppression"
+                for l in learnings.values()
+            ))
+
+    def _swap_ops_for_dates(self, date1, date2):
+        """Builds swap ops the way the CLI does: exchange all workouts on two dates."""
+        on_1 = test_db.get_workouts(start_date=date1, end_date=date1)
+        on_2 = test_db.get_workouts(start_date=date2, end_date=date2)
+        return (
+            [{"id": w["id"], "new_date": date2} for w in on_1]
+            + [{"id": w["id"], "new_date": date1} for w in on_2]
+        )
+
+    def test_swap_validation_consecutive_hard_days(self):
+        # Week of Mon 2026-06-08. Hard on Mon/Tue, easy Wed, hard Thu.
+        test_db.save_workout("2026-06-08", "running", "Intervals", "hard", rpe=8, tss=80)
+        test_db.save_workout("2026-06-09", "road_biking", "Threshold", "hard", rpe=8, tss=90)
+        test_db.save_workout("2026-06-10", "yoga", "Mobility", "easy", rpe=2, tss=10)
+        test_db.save_workout("2026-06-11", "running", "Tempo", "hard", rpe=8, tss=85)
+
+        # Swapping the easy Wed with the hard Thu makes Mon-Tue-Wed three hard days.
+        ops = self._swap_ops_for_dates("2026-06-10", "2026-06-11")
+        warnings = coach_service.validate_swap(ops)
+        self.assertTrue(
+            any("consecutive high-intensity" in w for w in warnings),
+            f"expected a consecutive-hard-days warning, got {warnings}",
+        )
+
+    def test_swap_validation_safe_swap(self):
+        # Two easy days far from any hard block: swapping them is harmless.
+        test_db.save_workout("2026-06-10", "yoga", "Mobility", "easy", rpe=2, tss=10)
+        test_db.save_workout("2026-06-12", "running", "Recovery", "easy", rpe=3, tss=15)
+        ops = self._swap_ops_for_dates("2026-06-10", "2026-06-12")
+        self.assertEqual(coach_service.validate_swap(ops), [])
+
+    def test_swap_validation_weekly_load_spike(self):
+        # Cross-week swap that shifts a big TSS session into a light week.
+        test_db.save_workout("2026-06-08", "running", "Long", "big", rpe=6, tss=120)
+        test_db.save_workout("2026-06-09", "road_biking", "Long Ride", "big", rpe=6, tss=130)
+        test_db.save_workout("2026-06-15", "yoga", "Mobility", "easy", rpe=2, tss=40)
+
+        ops = self._swap_ops_for_dates("2026-06-09", "2026-06-15")
+        warnings = coach_service.validate_swap(ops)
+        self.assertTrue(
+            any("spike your ACWR" in w for w in warnings),
+            f"expected a weekly load-spike warning, got {warnings}",
+        )
+
+    def test_apply_swap_moves_dates_and_syncs(self):
+        a = test_db.save_workout("2026-06-10", "running", "Run A", "a", rpe=4, tss=30)
+        b = test_db.save_workout("2026-06-12", "road_biking", "Ride B", "b", rpe=4, tss=30)
+        ops = [
+            {"id": a, "new_date": "2026-06-12"},
+            {"id": b, "new_date": "2026-06-10"},
+        ]
+        syncer = Mock()
+        service = trainmate.coach.CoachService(
+            db_instance=test_db, calendar_syncer_instance=syncer
+        )
+        updated = service.apply_swap(ops, no_sync=False)
+
+        self.assertEqual(test_db.get_workout_by_id(a)["date"], "2026-06-12")
+        self.assertEqual(test_db.get_workout_by_id(b)["date"], "2026-06-10")
+        self.assertEqual(test_db.get_workout_by_id(a)["status"], "modified")
+        self.assertEqual(len(updated), 2)
+        self.assertEqual(syncer.sync_workout.call_count, 2)
+
+    def test_apply_swap_no_sync(self):
+        a = test_db.save_workout("2026-06-10", "running", "Run A", "a", rpe=4, tss=30)
+        ops = [{"id": a, "new_date": "2026-06-11"}]
+        syncer = Mock()
+        service = trainmate.coach.CoachService(
+            db_instance=test_db, calendar_syncer_instance=syncer
+        )
+        service.apply_swap(ops, no_sync=True)
+        self.assertEqual(test_db.get_workout_by_id(a)["date"], "2026-06-11")
+        syncer.sync_workout.assert_not_called()
 
     def test_analyze_adherence_direct(self):
         planned = [

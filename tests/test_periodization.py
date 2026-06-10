@@ -85,7 +85,7 @@ class TestPeriodization(unittest.TestCase):
         }
         mock_workouts_response = {
             "reasoning": "Microcycle generated reasoning",
-            "athlete_learnings": "Simulated learnings",
+            "learning_updates": [{"op": "add", "text": "Simulated learnings"}],
             "workouts": [{
                 "date": "2026-06-01", "sport_type": "running",
                 "title": "Base Run", "description": "45 mins zone 2",
@@ -150,7 +150,7 @@ class TestPeriodization(unittest.TestCase):
         self.assertIn("Run long and slow", prompt)
         self.assertIn("Base Building (2026-06-01 to 2026-06-28): Zone 2 runs", prompt)
         self.assertIn("Peak & Taper (2026-06-29 to 2026-07-05): Tapering", prompt)
-        self.assertIn("COACH MEMORY & ACTIVE PERIODIZATION STRATEGY:", prompt)
+        self.assertIn("COACH LEARNINGS & ACTIVE PERIODIZATION STRATEGY:", prompt)
         self.assertIn("START OF SPORTS SCIENCE GUIDELINES", prompt)
         self.assertIn("END OF SPORTS SCIENCE GUIDELINES", prompt)
 
@@ -202,6 +202,42 @@ class TestPeriodization(unittest.TestCase):
             "For context, the PREVIOUS periodization strategy that was in place",
             system_prompt,
         )
+
+    @patch("trainmate.coach.openrouter_client")
+    def test_plan_generate_injects_planned_vs_actual(self, mock_client):
+        # Option A (DESIGN_backward_evaluation.md §6): the prior plan's elapsed blocks are
+        # compared against what was actually completed, and fed into the strategy prompt.
+        obj_id = test_db.add_objective(
+            title="Zurich Marathon", target_date="2026-10-15",
+            sport_type="running", priority=1,
+        )
+        test_db.save_macrocycle(
+            objective_id=obj_id, strategy="Old strategy",
+            goals_hash="g", lifeevents_hash="l",
+            mesocycles=[{
+                "name": "Base Building", "start_date": "2026-06-01",
+                "end_date": "2026-06-28", "focus": "Aerobic conditioning",
+            }],
+        )
+        # A completed session inside that elapsed block.
+        test_db.save_completed_activity(
+            activity_id="a1", date="2026-06-01", start_time="08:00:00",
+            activity_name="Base Run", activity_type="running",
+            duration_sec=3600.0, distance_km=10.0, elevation_gain_m=50.0,
+            avg_hr=140, max_hr=160, rpe=5, tss=60.0,
+        )
+        mock_client.complete.return_value = {
+            "strategy": "New strategy", "mesocycles": [{
+                "name": "Build", "start_date": "2026-06-08",
+                "end_date": "2026-10-15", "focus": "Threshold",
+            }],
+        }
+        coach_service.generate_periodization_plan(force=True, objective_id=obj_id)
+        system_prompt = mock_client.complete.call_args[0][0]
+        self.assertIn("PRIOR TRAINING REVIEW:", system_prompt)
+        self.assertIn("PLANNED vs ACTUAL", system_prompt)
+        self.assertIn("Aerobic conditioning", system_prompt)
+        self.assertIn("1 sessions", system_prompt)
 
     def test_system_prompt_inserts_athlete_profile(self):
         test_profile = {
@@ -273,6 +309,51 @@ class TestPeriodization(unittest.TestCase):
         self.assertEqual(len(workouts), 1)
         self.assertEqual(workouts[0]["title"], "Base Run")
         mock_client.complete.assert_called_once()
+
+    @patch("trainmate.coach.calendar_syncer")
+    @patch("trainmate.coach.openrouter_client")
+    def test_generate_workouts_clears_stale_synced_workouts(
+        self, mock_client, mock_calendar
+    ):
+        """Regenerating workouts must wipe the previous plan's future workouts,
+        including synced ones (and delete their Google Calendar events)."""
+        test_db.add_objective(
+            title="Zurich Marathon", target_date="2026-10-15",
+            sport_type="running", priority=1,
+        )
+
+        mock_client.complete.return_value = {
+            "strategy": "Strategy", "mesocycles": [{
+                "name": "Base", "start_date": "2026-06-01",
+                "end_date": "2026-06-28", "focus": "Base",
+            }],
+        }
+        coach_service.generate_periodization_plan(force=False)
+
+        # Simulate a stale workout from the old plan that was synced to Calendar.
+        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        future = (datetime.now(timezone.utc) + timedelta(days=5)).strftime("%Y-%m-%d")
+        test_db.save_workout(
+            date=future, sport_type="running", title="Old Plan Run",
+            description="stale", status="synced", google_event_id="evt-old-123",
+        )
+
+        mock_client.complete.reset_mock()
+        mock_client.complete.return_value = {
+            "reasoning": "New plan", "workouts": [{
+                "date": today, "sport_type": "running",
+                "title": "New Run", "description": "fresh",
+            }],
+        }
+        coach_service.generate_workouts()
+
+        # The stale synced workout is gone, and only the new workout remains.
+        remaining = test_db.get_workouts(start_date=today)
+        titles = [w["title"] for w in remaining]
+        self.assertNotIn("Old Plan Run", titles)
+        self.assertEqual(titles, ["New Run"])
+        # Its Google Calendar event was deleted.
+        mock_calendar.delete_workout_event.assert_called_once_with("evt-old-123")
 
     @patch("trainmate.coach.config")
     def test_load_science_guidelines(self, mock_config):

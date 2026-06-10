@@ -1,6 +1,10 @@
 import argparse
+import os
+import subprocess
 import sys
+import tempfile
 import textwrap
+from typing import Optional
 from datetime import datetime, timezone, timedelta
 from trainmate.db import db
 from trainmate.google_sheets import sheets_reader
@@ -221,8 +225,12 @@ def main() -> None:
         )
     )
     p_fb.add_argument(
-        "text",
-        help="Feedback content string"
+        "--edit", action="store_true",
+        help="Open $EDITOR seeded with the current feedback (takes no text argument)"
+    )
+    p_fb.add_argument(
+        "text", nargs="?", default=None,
+        help="Feedback content string (omit when using --edit)"
     )
 
     # plan wipe
@@ -415,6 +423,32 @@ def main() -> None:
         help="Push workouts for a goal's plan duration (uses active goal if ID omitted)"
     )
 
+    # workout swap
+    w_swap = workout_subparsers.add_parser(
+        "swap", aliases=["s"],
+        help="Swap workouts between two dates (or two IDs), with recovery checks"
+    )
+    w_swap.add_argument(
+        "date1", nargs="?", help="First date to swap (YYYY-MM-DD)"
+    )
+    w_swap.add_argument(
+        "date2", nargs="?", help="Second date to swap (YYYY-MM-DD)"
+    )
+    w_swap.add_argument(
+        "--id1", type=int, help="First workout ID (use together with --id2)"
+    )
+    w_swap.add_argument(
+        "--id2", type=int, help="Second workout ID (use together with --id1)"
+    )
+    w_swap.add_argument(
+        "--no-sync", action="store_true", dest="no_sync",
+        help="Do not sync the swapped workouts to Google Calendar"
+    )
+    w_swap.add_argument(
+        "-y", "--force", action="store_true", dest="force",
+        help="Apply the swap without prompting, even if warnings are raised"
+    )
+
 
 
     # workout wipe
@@ -464,6 +498,14 @@ def main() -> None:
     d_an.add_argument(
         "--context", dest="context",
         help="Optional text context detailing subjective athlete notes (travel, illness, etc.)"
+    )
+    d_an.add_argument(
+        "-f", "--force", action="store_true",
+        help="Recompute even if the evidence is unchanged (bypass the analysis cache)"
+    )
+    d_an.add_argument(
+        "--inspect", action="store_true",
+        help="Read-only: show the analysis without writing coach learnings or the cache"
     )
 
     # data wipe
@@ -545,6 +587,8 @@ def main() -> None:
             run_workout_adapt(args)
         elif sub in ("push", "p"):
             run_workout_push(args)
+        elif sub in ("swap", "s"):
+            run_workout_swap(args)
         elif sub == "wipe":
             run_workout_wipe(args)
     elif cmd in ("data", "d"):
@@ -715,13 +759,20 @@ def run_status(verbose: bool = False) -> None:
     else:
         print(yellow("\nRecent Garmin Metrics: No cached metrics. Run 'data pull' first."))
 
-    # Coach Memory
-    strategy = db.get_coach_memory("training_strategy")
-    learnings = db.get_coach_memory("athlete_learnings")
-    print(bold("\nCoach Memory:"))
-    
-    print(format_labeled_block("- Strategy:", strategy or 'Not established'))
-    print(format_labeled_block("- Learnings:", learnings or 'None yet'))
+    # Coach Learnings
+    learnings = db.get_learnings()
+    print(bold("\nCoach Learnings:"))
+    if learnings:
+        print("- Learnings:")
+        for l in learnings:
+            tag = f"  [{l['id']}|{l.get('sports') or 'general'}|{l.get('confidence') or 'tentative'}]"
+            if l.get("dormant"):
+                # Decayed: kept on record but no longer fed to the coach until reaffirmed.
+                print(format_labeled_block(gray(tag), gray(f"{l['text']} (dormant)")))
+            else:
+                print(format_labeled_block(tag, l['text']))
+    else:
+        print(format_labeled_block("- Learnings:", "None yet"))
 
     if verbose:
         goals = db.get_objectives()
@@ -1170,12 +1221,61 @@ def run_plan_wipe(args: argparse.Namespace) -> None:
     print(green("All periodization plans wiped successfully."))
 
 
-def run_plan_feedback(args: argparse.Namespace) -> None:
-    """Saves athlete feedback for a macrocycle or specific mesocycle."""
-    if not args.text:
-        print(red("Error: Feedback text cannot be empty."))
-        sys.exit(1)
+def _edit_text_in_editor(initial: str) -> Optional[str]:
+    """Opens $EDITOR (falling back to vi) seeded with `initial`, returns the saved text.
 
+    Returns None if the editor exits non-zero (treated as an abort). Trailing newlines are
+    stripped. Used by `plan feedback --edit`.
+    """
+    editor = os.environ.get("EDITOR") or os.environ.get("VISUAL") or "vi"
+    with tempfile.NamedTemporaryFile(
+        mode="w", suffix=".txt", prefix="trainmate-feedback-", delete=False
+    ) as tf:
+        tf.write(initial or "")
+        path = tf.name
+    try:
+        result = subprocess.run([editor, path])
+        if result.returncode != 0:
+            print(red(f"Editor exited with status {result.returncode}; feedback unchanged."))
+            return None
+        with open(path, "r", encoding="utf-8") as f:
+            return f.read().rstrip("\n")
+    finally:
+        try:
+            os.unlink(path)
+        except OSError:
+            pass
+
+
+def _resolve_feedback_text(args: argparse.Namespace, current: Optional[str]) -> Optional[str]:
+    """Returns the feedback text to save: either the editor result (--edit, seeded with the
+    current value) or the positional `text`. Returns None to signal 'do not save' (aborted
+    edit or empty input)."""
+    if args.edit:
+        new_text = _edit_text_in_editor(current or "")
+        if new_text is None:
+            return None
+        if not new_text.strip():
+            print(red("Error: Feedback is empty; nothing saved."))
+            return None
+        return new_text
+    if not args.text:
+        print(red("Error: Feedback text cannot be empty (or use --edit)."))
+        sys.exit(1)
+    return args.text
+
+
+_FEEDBACK_REGEN_NOTE = (
+    "Note: You must regenerate the periodization plan to apply this feedback.\n"
+    "Run 'plan generate --force' (or with '--goal <ID> --force') to update the plan."
+)
+
+
+def run_plan_feedback(args: argparse.Namespace) -> None:
+    """Saves athlete feedback for a macrocycle or specific mesocycle.
+
+    With --edit, opens $EDITOR seeded with the current feedback instead of taking text.
+    """
     if not args.macro and not args.meso:
         print(red("Error: You must specify --macro or --meso <id>."))
         sys.exit(1)
@@ -1186,14 +1286,14 @@ def run_plan_feedback(args: argparse.Namespace) -> None:
         if not meso:
             print(red(f"Mesocycle with ID {args.meso} not found."))
             sys.exit(1)
-        db.update_mesocycle_feedback(args.meso, args.text)
+        text = _resolve_feedback_text(args, meso.get('feedback'))
+        if text is None:
+            return
+        db.update_mesocycle_feedback(args.meso, text)
         print(green(
             f"Feedback successfully saved for Mesocycle ID {args.meso} ('{meso['name']}')."
         ))
-        print(yellow(
-            "Note: You must regenerate the periodization plan to apply this feedback.\n"
-            "Run 'plan generate --force' (or with '--goal <ID> --force') to update the plan."
-        ))
+        print(yellow(_FEEDBACK_REGEN_NOTE))
         return
 
     # 2. Handle macrocycle feedback. Find target goal first.
@@ -1217,15 +1317,15 @@ def run_plan_feedback(args: argparse.Namespace) -> None:
         print(yellow(f"No active periodization plan exists for goal '{next_goal['title']}'."))
         sys.exit(1)
 
-    db.update_macrocycle_feedback(macro['id'], args.text)
+    text = _resolve_feedback_text(args, macro.get('feedback'))
+    if text is None:
+        return
+    db.update_macrocycle_feedback(macro['id'], text)
     print(green(
         f"Feedback successfully saved for Macrocycle ID {macro['id']} "
         f"(Goal: '{next_goal['title']}')."
     ))
-    print(yellow(
-        "Note: You must regenerate the periodization plan to apply this feedback.\n"
-        "Run 'plan generate --force' (or with '--goal <ID> --force') to update the plan."
-    ))
+    print(yellow(_FEEDBACK_REGEN_NOTE))
 
 
 # ==============================================================================
@@ -1845,6 +1945,94 @@ def run_workout_rm(args: argparse.Namespace) -> None:
     ))
 
 
+def _resolve_swap_ops(args: argparse.Namespace) -> list | None:
+    """Turns CLI args into swap operations, or returns None on a usage/lookup error."""
+    using_ids = args.id1 is not None or args.id2 is not None
+    using_dates = bool(args.date1 or args.date2)
+
+    if using_ids and using_dates:
+        print(red("Provide either two dates or --id1/--id2, not both."))
+        return None
+
+    if using_ids:
+        if args.id1 is None or args.id2 is None:
+            print(red("Both --id1 and --id2 are required for an ID-based swap."))
+            return None
+        w1 = db.get_workout_by_id(args.id1)
+        w2 = db.get_workout_by_id(args.id2)
+        if not w1:
+            print(red(f"Workout with ID {args.id1} not found."))
+            return None
+        if not w2:
+            print(red(f"Workout with ID {args.id2} not found."))
+            return None
+        if w1['date'] == w2['date']:
+            print(yellow("Both workouts are already on the same date; nothing to swap."))
+            return None
+        print(
+            f"Swapping [{w1['id']}] {w1['title']} ({w1['date']}) <-> "
+            f"[{w2['id']}] {w2['title']} ({w2['date']})"
+        )
+        return [
+            {'id': w1['id'], 'new_date': w2['date']},
+            {'id': w2['id'], 'new_date': w1['date']},
+        ]
+
+    if args.date1 and args.date2:
+        for d in (args.date1, args.date2):
+            try:
+                datetime.strptime(d, "%Y-%m-%d")
+            except ValueError:
+                print(red(f"Invalid date format: '{d}'. Use YYYY-MM-DD."))
+                return None
+        if args.date1 == args.date2:
+            print(yellow("The two dates are identical; nothing to swap."))
+            return None
+        on_1 = db.get_workouts(start_date=args.date1, end_date=args.date1)
+        on_2 = db.get_workouts(start_date=args.date2, end_date=args.date2)
+        if not on_1 and not on_2:
+            print(yellow(
+                f"No workouts on either {args.date1} or {args.date2}; nothing to swap."
+            ))
+            return None
+        desc_1 = ", ".join(w['title'] for w in on_1) or "(rest)"
+        desc_2 = ", ".join(w['title'] for w in on_2) or "(rest)"
+        print(f"Swapping {args.date1} [{desc_1}] <-> {args.date2} [{desc_2}]")
+        return (
+            [{'id': w['id'], 'new_date': args.date2} for w in on_1]
+            + [{'id': w['id'], 'new_date': args.date1} for w in on_2]
+        )
+
+    print(red("Specify two dates (e.g. 'workout swap 2026-06-09 2026-06-11') "
+              "or --id1 and --id2."))
+    return None
+
+
+def run_workout_swap(args: argparse.Namespace) -> None:
+    """Exchanges workouts between two dates or two IDs, with recovery validation."""
+    ops = _resolve_swap_ops(args)
+    if not ops:
+        return
+
+    warnings = coach_service.validate_swap(ops)
+    if warnings:
+        print(bold(yellow("\nSwap warnings:")))
+        for msg in warnings:
+            print(yellow(f"  - {msg}"))
+        if not args.force:
+            confirm = input("\nProceed with the swap anyway? [y/N]: ").strip().lower()
+            if confirm != 'y':
+                print("\nSwap cancelled.")
+                return
+
+    updated = coach_service.apply_swap(ops, args.no_sync)
+    print(green(f"\nSwapped {len(updated)} workout(s) successfully."))
+    for w in updated:
+        print(f"  [{w['id']}] {w['title']} -> {w['date']}")
+    if args.no_sync:
+        print(gray("Calendar sync skipped (--no-sync)."))
+
+
 def run_workout_wipe(args: argparse.Namespace) -> None:
     """Wipes all workouts from the database and Google Calendar after confirmation."""
     if not args.yes:
@@ -1912,7 +2100,9 @@ def run_data_analyze(args: argparse.Namespace) -> None:
             until_date_str=args.until_date,
             days=args.days,
             weeks=args.weeks,
-            context=args.context
+            context=args.context,
+            force=args.force,
+            inspect=args.inspect,
         )
 
         print(bold(cyan("\n=== HISTORICAL WORKOUT ANALYSIS REPORT ===")))
@@ -1954,12 +2144,43 @@ def run_data_analyze(args: argparse.Namespace) -> None:
             for insight in result["physiological_insights"]:
                 print(f"  - {insight}")
 
-        # Coach learnings
-        if "learnings_for_coach_memory" in result and result["learnings_for_coach_memory"]:
-            print(format_labeled_block(
-                bold(cyan("\nCoach Observations (Saved to memory):")),
-                result["learnings_for_coach_memory"]
-            ))
+        # Coach learnings (incremental updates applied to learnings)
+        updates = result.get("learning_updates")
+        if updates:
+            header = (
+                "Coach Observations (NOT saved — inspect mode):" if args.inspect
+                else "Coach Observations (Saved to learnings):"
+            )
+            print(bold(cyan("\n" + header)))
+            try:
+                learnings_map = {l['id']: l for l in db.get_learnings()}
+            except Exception:
+                learnings_map = {}
+            for u in updates:
+                op = u.get("op")
+                meta = []
+                if u.get("sports"):
+                    meta.append(u["sports"])
+                if u.get("confidence"):
+                    meta.append(u["confidence"])
+                suffix = f" ({', '.join(meta)})" if meta else ""
+                if op == "add":
+                    print(f"  + {u.get('text', '')}{suffix}")
+                elif op == "revise":
+                    print(f"  ~ [{u.get('id')}] {u.get('text', '')}{suffix}")
+                elif op == "reinforce":
+                    learning_id = u.get("id")
+                    learning_text = ""
+                    if learning_id is not None and learning_id in learnings_map:
+                        learning_text = learnings_map[learning_id]['text']
+                    
+                    tag = f"  ↑ reinforced [{learning_id}]{suffix}"
+                    if learning_text:
+                        print(format_labeled_block(tag, learning_text))
+                    else:
+                        print(tag)
+                elif op == "retire":
+                    print(f"  - retired [{u.get('id')}]")
 
         print(bold(cyan("\n==========================================")))
 

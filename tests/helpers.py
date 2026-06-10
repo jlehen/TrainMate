@@ -10,7 +10,8 @@ _ALL_TABLES = [
     "completed_activities",
     "athlete_metrics_cache",
     "athlete_baselines",
-    "coach_memory",
+    "coach_learnings",
+    "analysis_cache",
     "lifeevents",
     "objectives",
 ]

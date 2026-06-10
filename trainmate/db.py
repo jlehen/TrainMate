@@ -1,6 +1,7 @@
 import sqlite3
 import os
-from datetime import datetime, timezone
+import json
+from datetime import datetime, timedelta, timezone
 from typing import Any, Optional, List, Dict, Generator
 from contextlib import contextmanager
 from trainmate.config import config
@@ -8,6 +9,53 @@ from trainmate.types import (
     Objective, LifeEvent, Workout, AthleteMetric, AthleteBaseline, Macrocycle, Mesocycle,
     CompletedActivity
 )
+
+# Coach-learning enrichment (Phase 2).
+# Ordered confidence levels the LLM assigns to each observation.
+CONFIDENCE_LEVELS = ("tentative", "moderate", "established")
+
+# A learning is "dormant" — kept in the DB but excluded from LLM prompts — once it
+# has gone unreinforced for longer than the budget for its confidence level. Decay is
+# soft: a dormant learning revives the moment it is reinforced again.
+LEARNING_STALENESS_DAYS = {
+    "tentative": 21,
+    "moderate": 60,
+    "established": 180,
+}
+
+
+def normalize_sports(value: Any) -> str:
+    """Normalizes a sport-scope value (list or comma string) to a comma-joined,
+    lowercased string; empty/missing becomes 'general'."""
+    if not value:
+        return "general"
+    if isinstance(value, (list, tuple)):
+        parts = [str(s).strip().lower() for s in value if str(s).strip()]
+    else:
+        parts = [s.strip().lower() for s in str(value).split(",") if s.strip()]
+    return ",".join(parts) if parts else "general"
+
+
+def valid_confidence(value: Any) -> Optional[str]:
+    """Returns the confidence value if it is a recognized level, else None."""
+    return value if value in CONFIDENCE_LEVELS else None
+
+
+def learning_is_dormant(learning: Dict[str, Any], now: Optional[datetime] = None) -> bool:
+    """True if a learning has gone unreinforced past its confidence-based budget."""
+    now = now or datetime.now(timezone.utc)
+    ref = learning.get("last_reinforced_at") or learning.get("created_at")
+    if not ref:
+        return False
+    try:
+        ref_dt = datetime.fromisoformat(ref)
+    except (ValueError, TypeError):
+        return False
+    budget = LEARNING_STALENESS_DAYS.get(
+        learning.get("confidence") or "tentative", LEARNING_STALENESS_DAYS["tentative"]
+    )
+    return (now - ref_dt) > timedelta(days=budget)
+
 
 class Database:
     """Handles all database schema setups and operations using SQLite."""
@@ -182,14 +230,38 @@ class Database:
                 )
             """)
             
-            # Coach memory table
+            # Coach learnings: discrete, addressable athlete-observation records.
+            # The LLM updates these incrementally via deltas (see apply_learning_deltas)
+            # rather than overwriting a single blob.
             cursor.execute("""
-                CREATE TABLE IF NOT EXISTS coach_memory (
-                    key TEXT PRIMARY KEY,
-                    value TEXT,
-                    updated_at TEXT
+                CREATE TABLE IF NOT EXISTS coach_learnings (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    text TEXT NOT NULL,
+                    sports TEXT NOT NULL DEFAULT 'general',
+                    confidence TEXT NOT NULL DEFAULT 'tentative',
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    last_reinforced_at TEXT
                 )
             """)
+
+            # Phase 2 enrichment: add sport-scope, confidence, and recency columns to
+            # coach_learnings created before they existed.
+            for col in [
+                "sports TEXT NOT NULL DEFAULT 'general'",
+                "confidence TEXT NOT NULL DEFAULT 'tentative'",
+                "last_reinforced_at TEXT",
+            ]:
+                try:
+                    cursor.execute(f"ALTER TABLE coach_learnings ADD COLUMN {col}")
+                except sqlite3.OperationalError:
+                    pass  # Column already exists.
+            # Backfill recency for migrated rows: treat creation as the last reinforcement.
+            cursor.execute(
+                "UPDATE coach_learnings SET last_reinforced_at = created_at "
+                "WHERE last_reinforced_at IS NULL"
+            )
+
 
             # Macrocycles table
             cursor.execute("""
@@ -231,7 +303,27 @@ class Database:
                     FOREIGN KEY (macrocycle_id) REFERENCES macrocycles(id) ON DELETE CASCADE
                 )
             """)
-            
+
+            # Backward-evaluation reconstruction cache (see DESIGN_backward_evaluation.md
+            # §5.1). Each row is a cached reconstruction (inferred cycles + physiological
+            # insights) of a past training window, keyed by an *evidence fingerprint* so
+            # that a re-run over unchanged data can reuse it instead of paying for another
+            # LLM pass. Retention is one row per `horizon` (UNIQUE): a new data pull shifts
+            # the fingerprint and overwrites the slot, because we only ever want the current
+            # reconstruction. The whole reconstruction is stored as one JSON blob — nothing
+            # queries inside it; it is fetched whole, fed to a prompt, or rendered.
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS analysis_cache (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    horizon TEXT NOT NULL UNIQUE, -- 'long' | 'short' — the cache slot
+                    fingerprint TEXT NOT NULL,    -- hash of activity-id set + metrics + window
+                    window_start TEXT,
+                    window_end TEXT,
+                    reconstruction TEXT NOT NULL, -- JSON: inferred cycles + insights
+                    created_at TEXT NOT NULL
+                )
+            """)
+
             conn.commit()
 
     # --- Objectives CRUD ---
@@ -462,12 +554,23 @@ class Database:
             cursor.execute(query, params)
             return [dict(row) for row in cursor.fetchall()]  # type: ignore
 
-    def clear_future_workouts(self, from_date: str) -> None:
-        """Deletes future workouts that are not already synced with Google Calendar."""
+    def clear_future_workouts(self, from_date: str, include_synced: bool = False) -> None:
+        """Deletes future workouts from the database.
+
+        By default synced workouts are spared (so their Google Calendar events are not
+        orphaned). Pass include_synced=True to remove them too — callers doing this are
+        responsible for deleting the corresponding Calendar events first.
+        """
         with self._get_connection() as conn:
-            conn.cursor().execute(
-                "DELETE FROM workouts WHERE date >= ? AND status != 'synced'", (from_date,)
-            )
+            if include_synced:
+                conn.cursor().execute(
+                    "DELETE FROM workouts WHERE date >= ?", (from_date,)
+                )
+            else:
+                conn.cursor().execute(
+                    "DELETE FROM workouts WHERE date >= ? AND status != 'synced'",
+                    (from_date,)
+                )
             conn.commit()
 
     def get_workout_by_id(self, workout_id: int) -> Optional[Workout]:
@@ -482,6 +585,18 @@ class Database:
         """Deletes a workout by ID."""
         with self._get_connection() as conn:
             conn.cursor().execute("DELETE FROM workouts WHERE id = ?", (workout_id,))
+            conn.commit()
+
+    def update_workout_date(
+        self, workout_id: int, new_date: str, modification_reason: str
+    ) -> None:
+        """Moves a workout to a new date, flagging it as modified and recording why."""
+        with self._get_connection() as conn:
+            conn.execute(
+                "UPDATE workouts SET date = ?, status = 'modified', "
+                "modification_reason = ? WHERE id = ?",
+                (new_date, modification_reason, workout_id)
+            )
             conn.commit()
 
     # --- Completed Activities ---
@@ -639,28 +754,202 @@ class Database:
             row = cursor.fetchone()
             return dict(row) if row else None  # type: ignore
 
-    # --- Coach Memory ---
-    def save_coach_memory(self, key: str, value: str) -> None:
-        """Saves or updates coach observations/philosophy memories."""
-        updated_at = datetime.now(timezone.utc).isoformat()
+    # --- Coach Learnings ---
+    def get_learnings(self) -> List[Dict[str, Any]]:
+        """Returns all athlete-observation records ordered by id. Each record carries a
+        computed `dormant` flag (True once it has decayed past its confidence budget)."""
         with self._get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute("""
-                INSERT INTO coach_memory (key, value, updated_at)
-                VALUES (?, ?, ?)
-                ON CONFLICT(key) DO UPDATE SET
-                    value=excluded.value,
-                    updated_at=excluded.updated_at
-            """, (key, value, updated_at))
+            cursor.execute(
+                "SELECT id, text, sports, confidence, created_at, updated_at, "
+                "last_reinforced_at FROM coach_learnings ORDER BY id"
+            )
+            learnings = [dict(row) for row in cursor.fetchall()]
+        now = datetime.now(timezone.utc)
+        for learning in learnings:
+            learning["dormant"] = learning_is_dormant(learning, now)
+        return learnings
+
+    def add_learning(
+        self, text: str, sports: str = "general", confidence: str = "tentative"
+    ) -> int:
+        """Adds a single athlete-observation record and returns its id."""
+        now = datetime.now(timezone.utc).isoformat()
+        sports = normalize_sports(sports)
+        confidence = valid_confidence(confidence) or "tentative"
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "INSERT INTO coach_learnings (text, sports, confidence, created_at, "
+                "updated_at, last_reinforced_at) VALUES (?, ?, ?, ?, ?, ?)",
+                (text, sports, confidence, now, now, now)
+            )
+            return cursor.lastrowid
+
+    def update_learning(self, learning_id: int, text: str) -> None:
+        """Revises the text of an existing observation record."""
+        now = datetime.now(timezone.utc).isoformat()
+        with self._get_connection() as conn:
+            conn.execute(
+                "UPDATE coach_learnings SET text=?, updated_at=? WHERE id=?",
+                (text, now, learning_id)
+            )
+
+    def delete_learning(self, learning_id: int) -> None:
+        """Removes an observation record."""
+        with self._get_connection() as conn:
+            conn.execute("DELETE FROM coach_learnings WHERE id=?", (learning_id,))
+
+    def apply_learning_deltas(
+        self, deltas: List[Dict[str, Any]], suppress_reinforcement: bool = False
+    ) -> None:
+        """Applies a list of incremental learning operations in one transaction.
+
+        Each delta is one of:
+          {"op": "add", "text": "...", "sports"?: "...", "confidence"?: "..."}
+          {"op": "revise", "id": <int>, "text"?: "...", "sports"?: "...", "confidence"?: "..."}
+          {"op": "reinforce", "id": <int>, "confidence"?: "..."}
+          {"op": "retire", "id": <int>}
+        `add` defaults sports to 'general' and confidence to 'tentative'. `revise` and
+        `reinforce` refresh recency (last_reinforced_at), so a reaffirmed learning leaves
+        the dormant state. Invalid confidence values and malformed deltas (empty text,
+        missing id, unknown op) are skipped so a partially-valid response still applies.
+
+        Reinforcement integrity invariant (see DESIGN_backward_evaluation.md §8). When
+        `suppress_reinforcement` is True — i.e. these deltas were derived from *unchanged*
+        evidence (a forced re-run over a window whose fingerprint already produced
+        learnings) — the purely-ratcheting effects are dropped so re-reading the same data
+        cannot inflate confidence or reset the decay clock:
+          - `reinforce` ops are skipped entirely.
+          - `revise` ops still apply content (text/sports/confidence) but do NOT refresh
+            `last_reinforced_at`.
+          - `add` and `retire` are unaffected: a learning newly surfaced or retired from
+            the same evidence is genuinely new knowledge, not a double-count.
+        """
+        if not deltas:
+            return
+        now = datetime.now(timezone.utc).isoformat()
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            for delta in deltas:
+                if not isinstance(delta, dict):
+                    continue
+                op = delta.get("op")
+                if op == "add":
+                    text = (delta.get("text") or "").strip()
+                    if text:
+                        cursor.execute(
+                            "INSERT INTO coach_learnings (text, sports, confidence, "
+                            "created_at, updated_at, last_reinforced_at) "
+                            "VALUES (?, ?, ?, ?, ?, ?)",
+                            (text, normalize_sports(delta.get("sports")),
+                             valid_confidence(delta.get("confidence")) or "tentative",
+                             now, now, now)
+                        )
+                elif op == "revise":
+                    learning_id = delta.get("id")
+                    if learning_id is None:
+                        continue
+                    # Apply only the fields the model supplied. A revise normally reflects
+                    # fresh evidence, so it refreshes recency — but not when the evidence is
+                    # unchanged (suppress_reinforcement), where only the content edit stands.
+                    sets, params = [], []
+                    text = (delta.get("text") or "").strip()
+                    if text:
+                        sets.append("text=?")
+                        params.append(text)
+                    if delta.get("sports"):
+                        sets.append("sports=?")
+                        params.append(normalize_sports(delta.get("sports")))
+                    confidence = valid_confidence(delta.get("confidence"))
+                    if confidence:
+                        sets.append("confidence=?")
+                        params.append(confidence)
+                    if not sets:
+                        continue
+                    sets.append("updated_at=?")
+                    params.append(now)
+                    if not suppress_reinforcement:
+                        sets.append("last_reinforced_at=?")
+                        params.append(now)
+                    params.append(learning_id)
+                    cursor.execute(
+                        f"UPDATE coach_learnings SET {', '.join(sets)} WHERE id=?", params
+                    )
+                elif op == "reinforce":
+                    # Pure ratchet: the only spurious op on unchanged evidence.
+                    if suppress_reinforcement:
+                        continue
+                    learning_id = delta.get("id")
+                    if learning_id is None:
+                        continue
+                    sets, params = ["last_reinforced_at=?"], [now]
+                    confidence = valid_confidence(delta.get("confidence"))
+                    if confidence:
+                        sets += ["confidence=?", "updated_at=?"]
+                        params += [confidence, now]
+                    params.append(learning_id)
+                    cursor.execute(
+                        f"UPDATE coach_learnings SET {', '.join(sets)} WHERE id=?", params
+                    )
+                elif op == "retire":
+                    learning_id = delta.get("id")
+                    if learning_id is not None:
+                        cursor.execute(
+                            "DELETE FROM coach_learnings WHERE id=?", (learning_id,)
+                        )
+
+    # --- Backward-evaluation reconstruction cache ---
+    # See DESIGN_backward_evaluation.md §5.1. One row per `horizon`; callers compare the
+    # stored `fingerprint` against a freshly computed one to decide reuse vs recompute.
+    def save_analysis_cache(
+        self, horizon: str, fingerprint: str, window_start: Optional[str],
+        window_end: Optional[str], reconstruction: Dict[str, Any]
+    ) -> None:
+        """Upserts the reconstruction for a horizon slot ('long' | 'short').
+
+        Overwrites whatever was cached for that horizon (one-row-per-horizon retention):
+        a new fingerprint means the underlying evidence changed, and we only keep the
+        current reconstruction. `reconstruction` is stored as a JSON blob.
+        """
+        now = datetime.now(timezone.utc).isoformat()
+        payload = json.dumps(reconstruction)
+        with self._get_connection() as conn:
+            conn.execute(
+                "INSERT INTO analysis_cache (horizon, fingerprint, window_start, "
+                "window_end, reconstruction, created_at) VALUES (?, ?, ?, ?, ?, ?) "
+                "ON CONFLICT(horizon) DO UPDATE SET "
+                "fingerprint=excluded.fingerprint, window_start=excluded.window_start, "
+                "window_end=excluded.window_end, reconstruction=excluded.reconstruction, "
+                "created_at=excluded.created_at",
+                (horizon, fingerprint, window_start, window_end, payload, now)
+            )
             conn.commit()
 
-    def get_coach_memory(self, key: str) -> Optional[str]:
-        """Fetches a specific memory value by its key name."""
+    def get_analysis_cache(self, horizon: str) -> Optional[Dict[str, Any]]:
+        """Returns the cached row for a horizon (with `reconstruction` parsed back to a
+        dict), or None. The caller decides reuse by matching `fingerprint`."""
         with self._get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute("SELECT value FROM coach_memory WHERE key = ?", (key,))
+            cursor.execute(
+                "SELECT horizon, fingerprint, window_start, window_end, reconstruction, "
+                "created_at FROM analysis_cache WHERE horizon = ?", (horizon,)
+            )
             row = cursor.fetchone()
-            return row['value'] if row else None
+        if not row:
+            return None
+        result = dict(row)
+        try:
+            result["reconstruction"] = json.loads(result["reconstruction"])
+        except (ValueError, TypeError):
+            result["reconstruction"] = None
+        return result
+
+    def wipe_analysis_cache(self) -> None:
+        """Deletes all cached reconstructions."""
+        with self._get_connection() as conn:
+            conn.cursor().execute("DELETE FROM analysis_cache")
+            conn.commit()
 
     # --- Macrocycles & Mesocycles ---
     def get_macrocycle_for_objective(self, objective_id: int) -> Optional[Macrocycle]:
@@ -839,12 +1128,17 @@ class Database:
             conn.commit()
 
     def wipe_metrics(self) -> None:
-        """Deletes all metrics, baselines, and completed activities from the database."""
+        """Deletes all metrics, baselines, and completed activities from the database.
+
+        Also clears the analysis cache: its reconstructions are derived from exactly this
+        evidence, so they are meaningless once the evidence is gone.
+        """
         with self._get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("DELETE FROM completed_activities")
             cursor.execute("DELETE FROM athlete_metrics_cache")
             cursor.execute("DELETE FROM athlete_baselines")
+            cursor.execute("DELETE FROM analysis_cache")
             conn.commit()
 
 # Singleton instance

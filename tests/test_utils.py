@@ -1,4 +1,5 @@
 import unittest
+from unittest.mock import patch
 from trainmate.util import wrap_text, visible_len, pad_visible, color_acwr, format_labeled_text
 
 
@@ -60,7 +61,8 @@ class TestUtils(unittest.TestCase):
         )
         
         # Test with color function
-        formatted_colored = format_labeled_text(label, text, width=40, color_fn=yellow)
+        with patch("trainmate.util.is_color_enabled", return_value=True):
+            formatted_colored = format_labeled_text(label, text, width=40, color_fn=yellow)
         self.assertIn("\033[33mThis is a daily adaptation", formatted_colored)
         self.assertIn("values are drop.\033[0m", formatted_colored)
 

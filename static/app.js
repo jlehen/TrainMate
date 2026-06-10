@@ -74,10 +74,13 @@ async function fetchStatus() {
         updateMetrics(data.last_metrics, data.last_baseline);
         
         // Update Coach Memory
-        const strategyEl = document.getElementById("memory-strategy");
         const learningsEl = document.getElementById("memory-learnings");
-        strategyEl.innerText = data.coach_memory.strategy || "No strategy established yet. Replan to generate one.";
-        learningsEl.innerText = data.coach_memory.learnings || "No observations cached yet.";
+        const learnings = data.coach_memory.learnings;
+        if (learnings && learnings.length > 0) {
+            learningsEl.innerText = learnings.map(l => `[${l.id}] ${l.text}`).join("\n");
+        } else {
+            learningsEl.innerText = "No observations cached yet.";
+        }
         
         // Update Strategy Card
         const strategyCard = document.getElementById("strategy-card");

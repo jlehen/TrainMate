@@ -389,8 +389,7 @@ class TestTrainMateCLI(unittest.TestCase):
             title="London Marathon", target_date="2026-09-20",
             sport_type="running", priority=1,
         )
-        test_db.save_coach_memory("training_strategy", "Focus on aerobic base")
-        test_db.save_coach_memory("athlete_learnings", "Rest well on Fridays")
+        learning_id = test_db.add_learning("Rest well on Fridays")
 
         exit_code, stdout, stderr = self.run_cli(["status"])
         self.assertEqual(exit_code, 0)
@@ -400,8 +399,7 @@ class TestTrainMateCLI(unittest.TestCase):
         self.assertIn("Overnight HRV: 82 ms", stdout)
         self.assertIn("ACWR       : 1.14", stdout)
         self.assertIn("Baselines (28-day)", stdout)
-        self.assertIn("Strategy:\n  Focus on aerobic base", stdout)
-        self.assertIn("Learnings:\n  Rest well on Fridays", stdout)
+        self.assertIn(f"[{learning_id}|general|tentative]\n    Rest well on Fridays", stdout)
 
         test_db.add_lifeevent(
             title="Ibiza Trip", start_date="2026-07-01", end_date="2026-07-08",
@@ -452,6 +450,83 @@ class TestTrainMateCLI(unittest.TestCase):
         self.assertEqual(exit_code, 0)
         self.assertIn("Syncing 1 workouts to Google Calendar", stdout)
         mock_calendar.sync_multiple.assert_called_once()
+
+    @patch("trainmate_cli.coach_service")
+    def test_workout_swap_by_date(self, mock_coach):
+        mock_coach.validate_swap.return_value = []
+        mock_coach.apply_swap.return_value = [
+            {"id": 1, "title": "Run A", "date": "2026-06-12"},
+            {"id": 2, "title": "Ride B", "date": "2026-06-10"},
+        ]
+        a = test_db.save_workout(
+            date="2026-06-10", sport_type="running", title="Run A",
+            description="easy", status="planned", rpe=4, tss=30,
+        )
+        b = test_db.save_workout(
+            date="2026-06-12", sport_type="road_biking", title="Ride B",
+            description="easy", status="planned", rpe=4, tss=30,
+        )
+        exit_code, stdout, stderr = self.run_cli(
+            ["workout", "swap", "2026-06-10", "2026-06-12"]
+        )
+        self.assertEqual(exit_code, 0)
+        self.assertIn("Swapped 2 workout(s) successfully", stdout)
+        # Each date's workout is moved to the other date.
+        ops, no_sync = mock_coach.apply_swap.call_args[0]
+        self.assertCountEqual(ops, [
+            {"id": a, "new_date": "2026-06-12"},
+            {"id": b, "new_date": "2026-06-10"},
+        ])
+        self.assertFalse(no_sync)
+
+    @patch("trainmate_cli.coach_service")
+    def test_workout_swap_by_id_no_sync(self, mock_coach):
+        mock_coach.validate_swap.return_value = []
+        mock_coach.apply_swap.return_value = []
+        a = test_db.save_workout(
+            date="2026-06-10", sport_type="running", title="Run A",
+            description="easy", status="planned", rpe=4, tss=30,
+        )
+        b = test_db.save_workout(
+            date="2026-06-12", sport_type="road_biking", title="Ride B",
+            description="easy", status="planned", rpe=4, tss=30,
+        )
+        exit_code, stdout, stderr = self.run_cli(
+            ["workout", "swap", "--id1", str(a), "--id2", str(b), "--no-sync"]
+        )
+        self.assertEqual(exit_code, 0)
+        self.assertIn("Calendar sync skipped", stdout)
+        ops, no_sync = mock_coach.apply_swap.call_args[0]
+        self.assertCountEqual(ops, [
+            {"id": a, "new_date": "2026-06-12"},
+            {"id": b, "new_date": "2026-06-10"},
+        ])
+        self.assertTrue(no_sync)
+
+    @patch("trainmate_cli.coach_service")
+    def test_workout_swap_warning_declined(self, mock_coach):
+        mock_coach.validate_swap.return_value = ["Creates 3 consecutive high days"]
+        a = test_db.save_workout(
+            date="2026-06-10", sport_type="running", title="Run A",
+            description="easy", status="planned", rpe=8, tss=90,
+        )
+        b = test_db.save_workout(
+            date="2026-06-12", sport_type="road_biking", title="Ride B",
+            description="easy", status="planned", rpe=8, tss=90,
+        )
+        # Default input is "n": the swap is cancelled and never applied.
+        exit_code, stdout, stderr = self.run_cli(
+            ["workout", "swap", "2026-06-10", "2026-06-12"]
+        )
+        self.assertEqual(exit_code, 0)
+        self.assertIn("Swap warnings", stdout)
+        self.assertIn("Swap cancelled", stdout)
+        mock_coach.apply_swap.assert_not_called()
+
+    def test_workout_swap_missing_args(self):
+        exit_code, stdout, stderr = self.run_cli(["workout", "swap", "2026-06-10"])
+        self.assertEqual(exit_code, 0)
+        self.assertIn("Specify two dates", stdout)
 
     @patch("trainmate_cli.sheets_reader")
     def test_data_pull_command(self, mock_sheets_reader):
@@ -823,6 +898,8 @@ class TestTrainMateCLI(unittest.TestCase):
 
     @patch("trainmate_cli.coach_service")
     def test_data_analyze_command(self, mock_coach):
+        learning_id = test_db.add_learning("Athlete responds well to high sleep score")
+
         mock_coach.analyze_workouts.return_value = {
             "macrocycle_summary": "Simulated base building results",
             "inferred_macrocycle": {
@@ -843,7 +920,14 @@ class TestTrainMateCLI(unittest.TestCase):
             "physiological_insights": [
                 "HRV was stable during peak volume."
             ],
-            "learnings_for_coach_memory": "Responds well to volume"
+            "learning_updates": [
+                {"op": "add", "text": "Responds well to volume"},
+                {
+                    "op": "reinforce",
+                    "id": learning_id,
+                    "confidence": "established"
+                }
+            ]
         }
 
         exit_code, stdout, stderr = self.run_cli([
@@ -855,14 +939,18 @@ class TestTrainMateCLI(unittest.TestCase):
         self.assertIn("Macrocycle Focus: aerobic base building", stdout)
         self.assertIn("Base Building Phase", stdout)
         self.assertIn("HRV was stable during peak volume", stdout)
-        self.assertIn("Coach Observations (Saved to memory):", stdout)
+        self.assertIn("Coach Observations (Saved to learnings):", stdout)
         self.assertIn("Responds well to volume", stdout)
+        self.assertIn("reinforced", stdout)
+        self.assertIn("Athlete responds well to high sleep score", stdout)
         mock_coach.analyze_workouts.assert_called_once_with(
             from_date_str="2026-01-01",
             until_date_str="2026-03-31",
             days=None,
             weeks=None,
-            context="Felt good"
+            context="Felt good",
+            force=False,
+            inspect=False,
         )
 
 

@@ -11,6 +11,26 @@ from trainmate.types import Objective, LifeEvent, Workout, CompletedActivity
 from trainmate.adherence import analyze_adherence
 
 
+# Shared JSON-output instruction for incrementally updating coach learnings. The LLM
+# emits only deltas; the app owns the merge so unchanged observations are never lost.
+LEARNING_UPDATES_FIELD = (
+    '  "learning_updates": [\n'
+    "    // Optional. Incremental updates to athlete observations; each item is one of:\n"
+    '    //   {"op": "add", "text": "New observation.", "sports": "running", "confidence": "tentative"},\n'
+    '    //   {"op": "revise", "id": 3, "text": "Reworded observation #3.", "confidence": "moderate"},\n'
+    '    //   {"op": "reinforce", "id": 4, "confidence": "established"},\n'
+    '    //   {"op": "retire", "id": 5}\n'
+    '    // "sports": comma-separated sport(s) the observation applies to (e.g. "running,road_biking"),\n'
+    '    //   or "general" if not sport-specific. Defaults to "general".\n'
+    '    // "confidence": how well-established the observation is — "tentative" | "moderate" |\n'
+    '    //   "established". Defaults to "tentative". Raise it as repeated evidence accumulates.\n'
+    "    // Use \"reinforce\" when you still see evidence for an existing observation but its\n"
+    "    //   wording needs no change — this keeps it fresh (unreinforced observations fade over time).\n"
+    "    // Existing observations persist automatically; do NOT repeat unchanged ones.\n"
+    "    // Reference existing observations by the [id] shown under COACH LEARNINGS.\n"
+)
+
+
 def format_metrics_history(metrics: List[Dict[str, Any]]) -> str:
     """Formats metrics cache history to a readable block for LLM prompts."""
     metrics_lines = []
@@ -222,12 +242,12 @@ START OF SPORTS SCIENCE GUIDELINES
 END OF SPORTS SCIENCE GUIDELINES
 ================================================================================
 
-COACH MEMORY & ACTIVE PERIODIZATION STRATEGY:
+COACH LEARNINGS & ACTIVE PERIODIZATION STRATEGY:
 - Established Training Strategy for the current macro-cycle:
 {strategy}
 - Mesocycles making up the macro-cycle:
 {meso_text}
-- Athlete-Specific Observations:
+- Athlete-Specific Observations (reference by [id] when revising or retiring):
 {learnings}
 
 ATHLETE PROFILE & PREFERENCES:
@@ -285,12 +305,53 @@ UPCOMING LIFE EVENTS:
         serialized = json.dumps(data_to_hash, sort_keys=True)
         return hashlib.sha256(serialized.encode('utf-8')).hexdigest()
 
+    def _get_evidence_fingerprint(
+        self, completed_activities: List[CompletedActivity],
+        metrics: List[Dict[str, Any]], window_start: str, window_end: str
+    ) -> str:
+        """Fingerprints the *evidence* a backward evaluation reconstructs from — the
+        completed activities + daily metrics within a window — so a re-run over unchanged
+        data can be detected (see DESIGN_backward_evaluation.md §5, §8).
+
+        We hash the load-bearing fields (not just activity ids) so that a re-pull which
+        *corrects* a value also shifts the fingerprint. Hashing the concrete activity-id
+        set rather than only the date range narrows the overlapping/shrinking-window edge
+        (§7).
+
+        DELIBERATE OMISSION (§11): the prompt text and science/*.txt files are NOT hashed.
+        Editing a prompt or guideline will therefore reuse a stale reconstruction until the
+        underlying data changes; `--force` is the manual escape hatch. This is a chosen
+        trade-off, not an oversight — revisit if prompt iteration becomes common.
+        """
+        act_digest = sorted(
+            {
+                (
+                    a.get('activity_id'), a.get('date'), a.get('activity_type'),
+                    a.get('duration_sec'), a.get('tss'), a.get('rpe'),
+                    a.get('zone1_sec'), a.get('zone2_sec'), a.get('zone3_sec'),
+                    a.get('zone4_sec'), a.get('zone5_sec'),
+                )
+                for a in completed_activities
+            }
+        )
+        met_digest = sorted(
+            (m.get('date'), m.get('rhr'), m.get('hrv'), m.get('sleep_score'),
+             m.get('acwr'))
+            for m in metrics
+        )
+        serialized = json.dumps(
+            {'window': [window_start, window_end],
+             'activities': act_digest, 'metrics': met_digest},
+            sort_keys=True
+        )
+        return hashlib.sha256(serialized.encode('utf-8')).hexdigest()
+
     def _generate_macrocycle_strategy(
         self, next_goal: Objective, objectives: List[Objective],
         lifeevents: List[LifeEvent], today_str: str, guidelines: str,
         profile: Optional[Dict[str, Any]], previous_strategy_text: Optional[str] = None,
         plan_start_str: Optional[str] = None, athlete_feedback: Optional[str] = None,
-        history_summary: Optional[str] = None
+        history_summary: Optional[str] = None, prior_training_text: Optional[str] = None
     ) -> Dict[str, Any]:
         """Queries LLM to determine the overall macrocycle strategy and mesocycle blocks."""
         plan_start = plan_start_str or today_str
@@ -385,6 +446,11 @@ You MUST respond with a JSON object containing:
             system_prompt += (
                 f"\nATHLETE RECENT TRAINING SUMMARY (PAST 15 DAYS):\n{history_summary}\n"
             )
+        # Planned-vs-actual review of the prior plan + any inferred reconstruction, fed as
+        # read-only context so the new plan is grounded in demonstrated reality rather than
+        # an idealized template (DESIGN_backward_evaluation.md §6, Option A).
+        if prior_training_text:
+            system_prompt += f"\nPRIOR TRAINING REVIEW:\n{prior_training_text}\n"
         system_prompt += (
             f"\nACTIVE ATHLETE GOALS (CHRONOLOGICAL):\n"
             f"{obj_text if obj_text else 'No active goals.'}\n\n"
@@ -431,8 +497,10 @@ You MUST respond with a JSON object containing:
             "{\n"
             '  "reasoning": "Explain the microcycle design, detailing how workouts align with the active\n'
             '    mesocycle focus.",\n'
-            '  "athlete_learnings": "Update athlete observations text blob based on metrics or status\n'
-            '    if any.",\n'
+            # Workout generation is read-only w.r.t. coach learnings (see
+            # DESIGN_backward_evaluation.md §11): it consumes the rendered learnings in the
+            # system prompt but authors none. Tactical/recent observations are better
+            # captured by `adapt`, durable ones by `analyze`. Hence no learning_updates here.
             '  "workouts": [\n'
             "    {\n"
             '      "date": "YYYY-MM-DD",\n'
@@ -516,24 +584,31 @@ the active mesocycle block (from {target_date_str} to {meso_end_date_str}).
 - If they are fully recovered and on track, keep the plan as scheduled or make minor
   optimal adjustments.
 
-You MUST respond with a JSON object containing:
-{{
-  "change_needed": true | false,
-  "reason": "Swapping tempo run to rest.",
-  "adapted_workouts": [
-    {{
-      "date": "YYYY-MM-DD",
-      "sport_type": "running" | "road_biking" | "hiking" | "strength_training" |
-        "yoga" | "ski_touring" | "rest",
-      "title": "Adapted Workout Title",
-      "description": "Adapted description of intensity, duration, heart rate zones, and goals.",
-      "duration_minutes": 45,
-      "rpe": 5,
-      "tss": 30.0
-    }}
-  ]
-}}
-"""
+If this window reveals a durable insight about how the athlete responds to training
+(recovery patterns, load tolerance, recurring adherence/injury signals), record it via
+learning_updates — prefer reinforcing or revising an existing observation by [id] over
+adding a near-duplicate. Do not record one-off, day-specific noise.
+""" + (
+            "You MUST respond with a JSON object containing:\n"
+            "{\n"
+            '  "change_needed": true | false,\n'
+            '  "reason": "Swapping tempo run to rest.",\n'
+            + LEARNING_UPDATES_FIELD +
+            "  ],\n"
+            '  "adapted_workouts": [\n'
+            "    {\n"
+            '      "date": "YYYY-MM-DD",\n'
+            '      "sport_type": "running" | "road_biking" | "hiking" | "strength_training" |\n'
+            '        "yoga" | "ski_touring" | "rest",\n'
+            '      "title": "Adapted Workout Title",\n'
+            '      "description": "Adapted description of intensity, duration, heart rate zones, and goals.",\n'
+            '      "duration_minutes": 45,\n'
+            '      "rpe": 5,\n'
+            '      "tss": 30.0\n'
+            "    }\n"
+            "  ]\n"
+            "}\n"
+        )
         system_prompt = self._build_system_prompt(
             objectives=objectives,
             lifeevents=lifeevents,
@@ -642,6 +717,7 @@ Adherence Discrepancies & Violations:
         self, objectives: List[Objective], guidelines: str,
         profile: Optional[Dict[str, Any]],
         weekly_summaries: List[Dict[str, Any]],
+        learnings: str,
         context: Optional[str] = None
     ) -> Dict[str, Any]:
         """Queries LLM to reverse-engineer training cycles from weekly summaries."""
@@ -672,7 +748,8 @@ Adherence Discrepancies & Violations:
             '  "physiological_insights": [\n'
             '    "Physiological response observations (e.g., HRV/RHR trends vs load)."\n'
             "  ],\n"
-            '  "learnings_for_coach_memory": "Key insights to store in coach memory."\n'
+            + LEARNING_UPDATES_FIELD +
+            "  ]\n"
             "}\n"
         )
 
@@ -702,6 +779,14 @@ Adherence Discrepancies & Violations:
         system_prompt += (
             f"\nATHLETE GOALS IN OR AFTER THIS PERIOD:\n"
             f"{obj_text if obj_text else 'No objectives.'}\n"
+        )
+
+        # Show existing observations so the model can revise/reinforce/retire them by
+        # [id] rather than only re-adding near-duplicates on every run.
+        system_prompt += (
+            "\nCOACH LEARNINGS — existing athlete observations "
+            "(reference by [id] when revising, reinforcing, or retiring):\n"
+            f"{learnings}\n"
         )
 
         system_prompt += f"\n{custom_task}\n"
@@ -807,6 +892,81 @@ class CoachService:
 
         return "\n".join(lines)
 
+    def _build_prior_training_context(
+        self, prior_macro: Optional[Dict[str, Any]], today_str: str
+    ) -> Optional[str]:
+        """Builds a read-only "planned vs actual" review for the strategy prompt
+        (DESIGN_backward_evaluation.md §6, Option A).
+
+        Anchored on the prior plan's *elapsed* mesocycle windows (§6): each planned block's
+        focus is shown beside what the athlete actually did in that window (sessions,
+        volume, TSS, zone split) so the model can judge whether the block's intent
+        materialized. If a cached backward-evaluation reconstruction exists (from `data
+        analyze`), its summary + physiological insights are appended — reused without
+        another LLM call (§10). Returns None if there is nothing to report.
+
+        This does NOT write to any `feedback` field: under Option A the assessment is
+        prompt context only, sidestepping the feedback-lifecycle collision (§11).
+        """
+        sections: List[str] = []
+
+        if prior_macro:
+            block_lines = []
+            for m in self._db.get_mesocycles_for_macrocycle(prior_macro['id']):
+                if m['start_date'] > today_str:
+                    continue  # future block; nothing actual to compare yet
+                win_end = min(m['end_date'], today_str)
+                acts = self._db.get_completed_activities(m['start_date'], win_end)
+                if not acts:
+                    block_lines.append(
+                        f"- {m['name']} ({m['start_date']}..{win_end}): planned focus "
+                        f"\"{m['focus']}\" — no completed activities recorded."
+                    )
+                    continue
+                hours = sum((a.get('duration_sec') or 0.0) for a in acts) / 3600.0
+                tss = sum((a.get('tss') or 0.0) for a in acts)
+                z12 = sum(
+                    (a.get('zone1_sec') or 0) + (a.get('zone2_sec') or 0) for a in acts
+                )
+                z3 = sum((a.get('zone3_sec') or 0) for a in acts)
+                z45 = sum(
+                    (a.get('zone4_sec') or 0) + (a.get('zone5_sec') or 0) for a in acts
+                )
+                zone_note = ""
+                if (z12 + z3 + z45) > 0:
+                    zone_note = (
+                        f", zones Z1-2/Z3/Z4-5 = {z12 // 60}/{z3 // 60}/{z45 // 60} min"
+                    )
+                block_lines.append(
+                    f"- {m['name']} ({m['start_date']}..{win_end}): planned focus "
+                    f"\"{m['focus']}\" — actual: {len(acts)} sessions, {hours:.1f}h, "
+                    f"{tss:.0f} TSS{zone_note}."
+                )
+            if block_lines:
+                sections.append(
+                    "PLANNED vs ACTUAL (elapsed blocks of the prior plan — judge whether "
+                    "each block's intent materialized):\n" + "\n".join(block_lines)
+                )
+
+        cached = self._db.get_analysis_cache("long")
+        recon = cached.get("reconstruction") if cached else None
+        if recon:
+            recon_lines = []
+            if recon.get("macrocycle_summary"):
+                recon_lines.append(f"Summary: {recon['macrocycle_summary']}")
+            for ins in (recon.get("physiological_insights") or []):
+                recon_lines.append(f"- {ins}")
+            if recon_lines:
+                window = ""
+                if cached.get("window_start") and cached.get("window_end"):
+                    window = f" ({cached['window_start']}..{cached['window_end']})"
+                sections.append(
+                    f"INFERRED FROM PAST TRAINING{window} (latest data analysis):\n"
+                    + "\n".join(recon_lines)
+                )
+
+        return "\n\n".join(sections) if sections else None
+
     def _get_config_hash(self) -> str:
         return self.engine._get_config_hash()
 
@@ -840,12 +1000,41 @@ class CoachService:
                         f"{m['end_date']}): {m['focus']}\n"
                     )
         if not strategy:
-            strategy = self._db.get_coach_memory("training_strategy") or (
+            strategy = (
                 "Not established yet. Establish an endurance-focused training strategy "
                 "based on goals."
             )
             meso_text = "  - Not established yet."
         return strategy, meso_text
+
+    def _get_learnings_text(self) -> str:
+        """Renders active athlete observations as a tagged block for prompts. Each line is
+        `[id|sports|confidence] text`. Dormant (decayed) observations are omitted so stale
+        notes stop influencing planning until reaffirmed."""
+        learnings = [l for l in self._db.get_learnings() if not l.get("dormant")]
+        if not learnings:
+            return (
+                "No observations yet. Over time, observe the athlete's responses to "
+                "training volume and intensity."
+            )
+        return "\n".join(
+            f"  [{l['id']}|{l.get('sports') or 'general'}|"
+            f"{l.get('confidence') or 'tentative'}] {l['text']}"
+            for l in learnings
+        )
+
+    def _apply_learning_updates(
+        self, data: Dict[str, Any], suppress_reinforcement: bool = False
+    ) -> None:
+        """Applies incremental learning deltas returned by the LLM, if any.
+
+        `suppress_reinforcement` is forwarded to the merge layer: pass True when the deltas
+        were derived from unchanged evidence so re-reading cannot ratchet confidence/recency
+        (see db.apply_learning_deltas and DESIGN_backward_evaluation.md §8)."""
+        self._db.apply_learning_deltas(
+            data.get("learning_updates") or [],
+            suppress_reinforcement=suppress_reinforcement,
+        )
 
     def _get_coach_system_prompt(
         self, objectives: List[Objective], lifeevents: List[LifeEvent],
@@ -855,10 +1044,7 @@ class CoachService:
         strategy, meso_text = self._get_active_strategy_and_meso_text(
             objectives, objective_id=objective_id
         )
-        learnings = self._db.get_coach_memory("athlete_learnings") or (
-            "No observations yet. Over time, observe the athlete's responses to "
-            "training volume and intensity."
-        )
+        learnings = self._get_learnings_text()
         profile = config.user_profile
         return self.engine._build_system_prompt(
             objectives=objectives,
@@ -1032,6 +1218,14 @@ class CoachService:
             guidelines = self._load_science_guidelines()
             profile = config.user_profile
             history_summary = self._get_recent_history_summary(today_str)
+            # Planned-vs-actual review of the prior plan (+ cached reconstruction) fed as
+            # read-only context (Option A). `prev_macro` here is the existing plan being
+            # replaced, or the preceding goal's plan when there is none.
+            prior_training_text = self._build_prior_training_context(prev_macro, today_str)
+            if prior_training_text:
+                print("\n=== PRIOR TRAINING REVIEW (planned vs actual) ===")
+                print(prior_training_text)
+                print("==================================================\n")
             macro_data = self.engine._generate_macrocycle_strategy(
                 next_goal=next_goal,
                 objectives=objectives,
@@ -1042,7 +1236,8 @@ class CoachService:
                 previous_strategy_text=prev_strategy_text,
                 plan_start_str=plan_start_date.strftime("%Y-%m-%d"),
                 athlete_feedback=feedback_text,
-                history_summary=history_summary
+                history_summary=history_summary,
+                prior_training_text=prior_training_text
             )
             strategy = macro_data.get("strategy", "Endurance preparation strategy.")
             mesocycles = macro_data.get("mesocycles", [])
@@ -1108,10 +1303,7 @@ class CoachService:
         strategy, meso_text = self._get_active_strategy_and_meso_text(
             objectives, objective_id=objective_id
         )
-        learnings = self._db.get_coach_memory("athlete_learnings") or (
-            "No observations yet. Over time, observe the athlete's responses to "
-            "training volume and intensity."
-        )
+        learnings = self._get_learnings_text()
 
         # Retrieve recent history context
         history_days = config.metrics_history_days
@@ -1141,15 +1333,23 @@ class CoachService:
             baseline=baseline
         )
 
-        # Save learnings to memory
-        if "athlete_learnings" in plan_data:
-            self._db.save_coach_memory("athlete_learnings", plan_data["athlete_learnings"])
+        # NOTE: workout generation is read-only w.r.t. coach learnings (see
+        # DESIGN_backward_evaluation.md §11) — it does not apply learning_updates. Durable
+        # memory is authored only by `analyze` and `plan generate`.
 
         # Save workouts to database
         workouts = plan_data.get("workouts", [])
 
-        # Clear future unsynced workouts to prevent overlapping plans
-        self._db.clear_future_workouts(today_str)
+        # Clear future workouts from the previous plan to prevent overlap. This includes
+        # synced workouts: their Google Calendar events are deleted first so the old plan
+        # doesn't linger on the calendar.
+        for ew in self._db.get_workouts(start_date=today_str):
+            if ew.get('google_event_id') and ew['status'] == 'synced':
+                try:
+                    self._calendar_syncer.delete_workout_event(ew['google_event_id'])
+                except Exception as e:
+                    print(f"Error deleting Google Calendar event: {e}")
+        self._db.clear_future_workouts(today_str, include_synced=True)
 
         saved_workouts: List[Workout] = []
         for w in workouts:
@@ -1257,10 +1457,7 @@ class CoachService:
         strategy, meso_text = self._get_active_strategy_and_meso_text(
             objectives, objective_id=objective_id
         )
-        learnings = self._db.get_coach_memory("athlete_learnings") or (
-            "No observations yet. Over time, observe the athlete's responses to "
-            "training volume and intensity."
-        )
+        learnings = self._get_learnings_text()
         lifeevents = self._db.get_lifeevents(start_after=target_date_str)
 
         decision = self.engine._adapt_logic(
@@ -1282,11 +1479,10 @@ class CoachService:
             discrepancies=discrepancies
         )
 
-        # Update memories if present
-        if "training_strategy" in decision and decision["training_strategy"]:
-            self._db.save_coach_memory("training_strategy", decision["training_strategy"])
-        if "athlete_learnings" in decision and decision["athlete_learnings"]:
-            self._db.save_coach_memory("athlete_learnings", decision["athlete_learnings"])
+        # Record any durable observations the adaptation surfaced. Done at evaluation
+        # time (not apply time) since the insight stands regardless of whether the
+        # proposed workout changes are ultimately applied.
+        self._apply_learning_updates(decision)
 
         reason = decision.get("reason", "No adaptation needed.")
         adapted = []
@@ -1373,12 +1569,173 @@ class CoachService:
                     print(f"Error syncing {w['title']} to Google Calendar: {e}")
 
 
+    # --- Workout swapping ---
+    @staticmethod
+    def _is_high_intensity(workout: Dict[str, Any]) -> bool:
+        """A day is taxing if its session hits RPE >= 7 or TSS >= 100."""
+        return (workout.get('rpe') or 0) >= 7 or (workout.get('tss') or 0) >= 100
+
+    @staticmethod
+    def _consecutive_runs(dates: set) -> List[List[str]]:
+        """Groups a set of YYYY-MM-DD strings into runs of consecutive calendar days."""
+        runs: List[List[str]] = []
+        current: List[str] = []
+        prev = None
+        for ds in sorted(dates):
+            d = datetime.strptime(ds, "%Y-%m-%d").date()
+            if prev is not None and (d - prev).days == 1:
+                current.append(ds)
+            else:
+                if current:
+                    runs.append(current)
+                current = [ds]
+            prev = d
+        if current:
+            runs.append(current)
+        return runs
+
+    @staticmethod
+    def _week_of(date_str: str) -> str:
+        """Returns the Monday (ISO week start) for a date, as YYYY-MM-DD."""
+        d = datetime.strptime(date_str, "%Y-%m-%d").date()
+        return (d - timedelta(days=d.weekday())).strftime("%Y-%m-%d")
+
+    def validate_swap(self, swap_ops: List[Dict[str, Any]]) -> List[str]:
+        """Simulates a proposed swap and returns sports-science warnings.
+
+        Each op is ``{'id': <workout id>, 'new_date': 'YYYY-MM-DD'}``. Checks for
+        newly-created stretches of >2 consecutive high-intensity days, weekly load
+        spikes (an ACWR proxy), and mesocycle-boundary crossings. An empty list means
+        the swap looks safe.
+        """
+        warnings: List[str] = []
+        if not swap_ops:
+            return warnings
+
+        # Resolve the workouts actually being moved.
+        moves = []  # (workout, new_date)
+        for op in swap_ops:
+            w = self._db.get_workout_by_id(op['id'])
+            if w:
+                moves.append((w, op['new_date']))
+        if not moves:
+            return warnings
+
+        affected = set()
+        for w, new_date in moves:
+            affected.add(w['date'])
+            affected.add(new_date)
+
+        # Pull a window wide enough to see the days surrounding the swap.
+        dmin = datetime.strptime(min(affected), "%Y-%m-%d").date()
+        dmax = datetime.strptime(max(affected), "%Y-%m-%d").date()
+        win_start = (dmin - timedelta(days=7)).strftime("%Y-%m-%d")
+        win_end = (dmax + timedelta(days=7)).strftime("%Y-%m-%d")
+        existing = self._db.get_workouts(start_date=win_start, end_date=win_end)
+
+        override = {op['id']: op['new_date'] for op in swap_ops}
+        post = []
+        for w in existing:
+            wc = dict(w)
+            if wc['id'] in override:
+                wc['date'] = override[wc['id']]
+            post.append(wc)
+
+        # 1. Consecutive high-intensity days created by the swap.
+        pre_high = {w['date'] for w in existing if self._is_high_intensity(w)}
+        post_high = {w['date'] for w in post if self._is_high_intensity(w)}
+        pre_max = max((len(r) for r in self._consecutive_runs(pre_high)), default=0)
+        for run in self._consecutive_runs(post_high):
+            if len(run) >= 3 and len(run) > pre_max and affected & set(run):
+                warnings.append(
+                    f"Creates {len(run)} consecutive high-intensity days "
+                    f"({run[0]} to {run[-1]}); consider spacing hard sessions out."
+                )
+                break
+
+        # 2. Weekly load spike (ACWR proxy). Only cross-week swaps shift weekly totals.
+        pre_weekly: Dict[str, float] = {}
+        post_weekly: Dict[str, float] = {}
+        for w in existing:
+            pre_weekly[self._week_of(w['date'])] = (
+                pre_weekly.get(self._week_of(w['date']), 0.0) + (w.get('tss') or 0)
+            )
+        for w in post:
+            post_weekly[self._week_of(w['date'])] = (
+                post_weekly.get(self._week_of(w['date']), 0.0) + (w.get('tss') or 0)
+            )
+        for week in sorted(set(pre_weekly) | set(post_weekly)):
+            before = pre_weekly.get(week, 0.0)
+            after = post_weekly.get(week, 0.0)
+            delta = after - before
+            if before > 0 and delta > 0 and delta / before > 0.30 and delta >= 50:
+                warnings.append(
+                    f"Week of {week}: planned load rises {before:.0f} -> {after:.0f} "
+                    f"TSS (+{delta / before * 100:.0f}%), which may spike your ACWR."
+                )
+
+        # 3. Mesocycle boundary crossings.
+        for w, new_date in moves:
+            if w['date'] == new_date:
+                continue
+            old_meso = self._db.get_active_mesocycle(w['date'])
+            new_meso = self._db.get_active_mesocycle(new_date)
+            old_id = old_meso['id'] if old_meso else None
+            new_id = new_meso['id'] if new_meso else None
+            if old_id != new_id:
+                warnings.append(
+                    f"Moving '{w['title']}' from {w['date']} to {new_date} crosses a "
+                    f"mesocycle boundary; it may no longer match the block's focus."
+                )
+
+        return warnings
+
+    def apply_swap(
+        self, swap_ops: List[Dict[str, Any]], no_sync: bool = False
+    ) -> List[Dict[str, Any]]:
+        """Applies the date changes for a swap and syncs the moved workouts.
+
+        Reads each workout's original date before moving it (ops reference distinct ids,
+        so reads stay correct across the loop). Returns the updated workout records.
+        """
+        updated_workouts = []
+        for op in swap_ops:
+            workout = self._db.get_workout_by_id(op['id'])
+            if not workout:
+                continue
+            reason = f"Swapped from {workout['date']} to {op['new_date']}"
+            self._db.update_workout_date(op['id'], op['new_date'], reason)
+            moved = self._db.get_workout_by_id(op['id'])
+            if moved:
+                updated_workouts.append(moved)
+
+        if not no_sync:
+            for moved in updated_workouts:
+                try:
+                    self._calendar_syncer.sync_workout(moved)
+                except Exception as e:
+                    print(f"Error syncing {moved['title']} to Google Calendar: {e}")
+
+        return updated_workouts
+
+
     def analyze_workouts(
         self, from_date_str: Optional[str] = None, until_date_str: Optional[str] = None,
         days: Optional[int] = None, weeks: Optional[int] = None,
-        context: Optional[str] = None
+        context: Optional[str] = None, force: bool = False, inspect: bool = False
     ) -> Dict[str, Any]:
-        """Analyzes historical workouts and physiological metrics using LLM."""
+        """Analyzes historical workouts and physiological metrics using LLM.
+
+        Backward-evaluation reuse (DESIGN_backward_evaluation.md §5, §8, §9):
+        - The reconstruction is cached under the 'long' horizon, keyed by an evidence
+          fingerprint. If the evidence is unchanged since the last run and `force` is
+          False, the cached reconstruction is returned without an LLM call.
+        - `force` bypasses *reuse* only (recompute even if unchanged); it never bypasses
+          the reinforcement integrity invariant — a forced re-run over unchanged evidence
+          still suppresses the confidence/recency ratchet.
+        - `inspect` is read-only: it renders the reconstruction but writes neither coach
+          learnings nor the cache.
+        """
         until_date = datetime.now(timezone.utc).date()
         if until_date_str:
             until_date = datetime.strptime(until_date_str, "%Y-%m-%d").date()
@@ -1421,6 +1778,18 @@ class CoachService:
         completed_activities = self._db.get_completed_activities(
             start_date=from_str, end_date=until_str
         )
+
+        # Reuse path: if the evidence is unchanged since the last analysis, return the
+        # cached reconstruction instead of paying for another LLM pass (unless --force).
+        fingerprint = self.engine._get_evidence_fingerprint(
+            completed_activities, metrics, from_str, until_str
+        )
+        cached = self._db.get_analysis_cache("long")
+        evidence_unchanged = bool(cached and cached.get("fingerprint") == fingerprint)
+        if evidence_unchanged and not force and cached.get("reconstruction"):
+            print("Evidence unchanged since last analysis; reusing cached reconstruction "
+                  "(use --force to recompute).")
+            return cached["reconstruction"]
 
         # Group by ISO week (Monday date string)
         weeks_data: Dict[str, Dict[str, Any]] = {}
@@ -1557,13 +1926,24 @@ class CoachService:
             guidelines=guidelines,
             profile=profile,
             weekly_summaries=weekly_summaries,
+            learnings=self._get_learnings_text(),
             context=context
         )
 
-        # Save learnings to memory if present in LLM response
-        if "learnings_for_coach_memory" in decision and decision["learnings_for_coach_memory"]:
-            self._db.save_coach_memory(
-                "athlete_learnings", decision["learnings_for_coach_memory"]
+        if not inspect:
+            # Apply learning deltas. On a forced re-run over unchanged evidence, honour the
+            # integrity invariant (§8): suppress the reinforcement ratchet so re-reading the
+            # same data cannot inflate confidence or reset decay.
+            self._apply_learning_updates(
+                decision, suppress_reinforcement=evidence_unchanged
+            )
+            # Cache the reconstruction (everything but the point-in-time deltas) so future
+            # runs — and `plan generate` — can reuse it without another LLM call.
+            reconstruction = {
+                k: v for k, v in decision.items() if k != "learning_updates"
+            }
+            self._db.save_analysis_cache(
+                "long", fingerprint, from_str, until_str, reconstruction
             )
 
         return decision
