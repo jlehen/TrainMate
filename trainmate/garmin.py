@@ -594,14 +594,18 @@ def recompute_derived() -> None:
             )
 
 
-def backfill_tss() -> int:
+def backfill_tss(
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    verbose: bool = False,
+) -> int:
     """Recomputes the measured TSS (power TSS or hrTSS) for every cached activity
     and rewrites the stored value. Activities keep their raw zone seconds, so
     this needs no Garmin calls. Returns the number of rows whose TSS changed, and
     refreshes derived workload/ACWR (which run off the on-the-fly load)."""
-    activities = db.get_completed_activities()
+    activities = db.get_completed_activities(start_date=start_date, end_date=end_date)
     changed = 0
-    underestimated = 0
+    sparse: List[Dict[str, Any]] = []
     for act in activities:
         new_tss = measured_tss(act, act)
         old_tss = act.get("tss")
@@ -615,14 +619,23 @@ def backfill_tss() -> int:
             act, act, act.get("rpe"), act.get("duration_sec") or 0.0
         )
         if warning:
-            underestimated += 1
+            sparse.append(act)
     print(f"Recomputed measured TSS for {len(activities)} activities "
           f"({changed} changed).")
-    if underestimated:
+    if sparse:
         print(yellow(
-            f"  {underestimated} activities have low HR-zone coverage and no RPE; "
+            f"  {len(sparse)} activities have low HR-zone coverage and no RPE; "
             "their load is an underestimate. Enter an RPE in Garmin for accuracy."
         ))
+        if verbose:
+            for act in sparse:
+                date = act.get("date", "?")
+                name = act.get("activity_name") or act.get("activity_type", "?")
+                dur_sec = act.get("duration_sec") or 0.0
+                dur_min = int(dur_sec // 60)
+                coverage = _hr_zone_coverage(act, dur_sec)
+                print(f"    {date}  {name}  ({dur_min} min, "
+                      f"HR-zone coverage {coverage:.0%})")
     recompute_derived()
     return changed
 

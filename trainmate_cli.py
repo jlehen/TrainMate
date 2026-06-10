@@ -532,10 +532,22 @@ def main() -> None:
     )
 
     # data backfill-tss
-    data_subparsers.add_parser(
+    d_btss = data_subparsers.add_parser(
         "backfill-tss",
         help="Recompute TSS for all stored activities using the current "
              "zone-based model (no Garmin calls needed)"
+    )
+    d_btss.add_argument(
+        "--start-date", dest="start_date", metavar="YYYY-MM-DD",
+        help="Only process activities on or after this date"
+    )
+    d_btss.add_argument(
+        "--end-date", dest="end_date", metavar="YYYY-MM-DD",
+        help="Only process activities on or before this date"
+    )
+    d_btss.add_argument(
+        "-v", "--verbose", action="store_true",
+        help="List activities with low HR-zone coverage that need an RPE"
     )
 
     # data wipe
@@ -2116,7 +2128,11 @@ def run_data_pull(args: argparse.Namespace) -> None:
 def run_data_backfill_tss(args: argparse.Namespace) -> None:
     """Recomputes stored TSS for all cached activities under the current
     zone-based hierarchy, then refreshes derived workload/ACWR."""
-    changed = garmin.backfill_tss()
+    changed = garmin.backfill_tss(
+        start_date=getattr(args, "start_date", None),
+        end_date=getattr(args, "end_date", None),
+        verbose=getattr(args, "verbose", False),
+    )
     print(green(f"Backfill complete. {changed} activities updated."))
 
 
