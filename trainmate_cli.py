@@ -531,6 +531,13 @@ def main() -> None:
         help="Read-only: show the analysis without writing coach learnings or the cache"
     )
 
+    # data backfill-tss
+    data_subparsers.add_parser(
+        "backfill-tss",
+        help="Recompute TSS for all stored activities using the current "
+             "zone-based model (no Garmin calls needed)"
+    )
+
     # data wipe
     d_wipe = data_subparsers.add_parser(
         "wipe", help="Wipe all metrics and completed activities from the database"
@@ -610,6 +617,8 @@ def main() -> None:
             run_data_pull(args)
         elif sub in ("analyze", "a"):
             run_data_analyze(args)
+        elif sub == "backfill-tss":
+            run_data_backfill_tss(args)
         elif sub == "wipe":
             run_data_wipe(args)
     elif cmd in ("plan", "p"):
@@ -2102,6 +2111,13 @@ def run_data_pull(args: argparse.Namespace) -> None:
         print(yellow("Run this command in an interactive terminal to complete MFA."))
     except Exception as e:
         print(red(f"Error pulling from Garmin: {e}"))
+
+
+def run_data_backfill_tss(args: argparse.Namespace) -> None:
+    """Recomputes stored TSS for all cached activities under the current
+    zone-based hierarchy, then refreshes derived workload/ACWR."""
+    changed = garmin.backfill_tss()
+    print(green(f"Backfill complete. {changed} activities updated."))
 
 
 def run_data_wipe(args: argparse.Namespace) -> None:

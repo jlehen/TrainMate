@@ -28,30 +28,97 @@ def tearDownModule():
 
 
 class TestGarminTransforms(unittest.TestCase):
-    def test_calculate_tss_prefers_power(self):
-        act = {"duration": 3600, "avgPower": 200, "averageHR": 150}
-        # IF = 200/200 = 1.0 -> 100 * 1h * 1.0^2 = 100
-        self.assertEqual(garmin.calculate_tss(act, ftp=200, lthr=160), 100.0)
+    @staticmethod
+    def _no_power():
+        return {f"power_zone{i}_sec": None for i in range(1, 8)}
 
-    def test_calculate_tss_falls_back_to_hr(self):
-        act = {"duration": 3600, "averageHR": 160}
-        # IF = 160/160 = 1.0 -> 100
-        self.assertEqual(garmin.calculate_tss(act, ftp=None, lthr=160), 100.0)
+    @staticmethod
+    def _no_hr():
+        return {f"zone{i}_sec": 0 for i in range(1, 6)}
 
-    def test_calculate_tss_none_when_uncomputable(self):
-        self.assertIsNone(garmin.calculate_tss({"duration": 0}, 200, 160))
-        self.assertIsNone(garmin.calculate_tss({"duration": 3600}, None, None))
+    # --- measured_tss: the stored objective measurement -------------------
+    def test_measured_tss_prefers_power(self):
+        power = self._no_power()
+        power["power_zone2_sec"] = 1800   # 1800 * 0.0117 = 21.06
+        power["power_zone3_sec"] = 1800   # 1800 * 0.0178 = 32.04
+        hr = {f"zone{i}_sec": 720 for i in range(1, 6)}  # present but power wins
+        self.assertEqual(garmin.measured_tss(power, hr), 53.1)
 
-    def test_estimate_rpe_tss_uses_profile_lthr(self):
-        with patch.dict(garmin.config.data, {"user_profile": {"lthr": 160}}):
-            rpe, tss = garmin.estimate_rpe_tss("running", 3600.0, 160)
-            self.assertEqual(rpe, 8)            # round(1.0 * 8)
-            self.assertAlmostEqual(tss, 100.0)  # 1h * 1.0^2 * 100
+    def test_measured_tss_falls_back_to_hr(self):
+        hr = self._no_hr()
+        hr["zone2_sec"] = 3600            # 3600 * 0.0111 = 39.96
+        self.assertEqual(garmin.measured_tss(self._no_power(), hr), 40.0)
 
-    def test_estimate_rpe_tss_no_hr_defaults(self):
-        with patch.dict(garmin.config.data, {"user_profile": {"lthr": 160}}):
-            self.assertEqual(garmin.estimate_rpe_tss("yoga", 3600.0, None), (2, 15.0))
-            self.assertEqual(garmin.estimate_rpe_tss("rest", 3600.0, None), (0, 0.0))
+    def test_measured_tss_none_without_zones(self):
+        # Pure measurement: no coverage gate, no RPE — None when no zones.
+        self.assertIsNone(garmin.measured_tss(self._no_power(), self._no_hr()))
+
+    # --- compute_load: the fallback hierarchy -----------------------------
+    def test_load_uses_power(self):
+        power = self._no_power()
+        power["power_zone4_sec"] = 3600   # 3600 * 0.0250 = 90.0
+        load, method, warning = garmin.compute_load(
+            power, {f"zone{i}_sec": 720 for i in range(1, 6)}, rpe=6,
+            duration_sec=3600)
+        self.assertEqual((load, method, warning), (90.0, "power", None))
+
+    def test_load_uses_hr_with_good_coverage(self):
+        hr = self._no_hr()
+        hr["zone2_sec"] = 3600            # coverage 1.0
+        load, method, warning = garmin.compute_load(
+            self._no_power(), hr, rpe=4, duration_sec=3600)
+        self.assertEqual((load, method, warning), (40.0, "hr", None))
+
+    def test_load_diverts_sparse_hr_to_user_rpe(self):
+        hr = self._no_hr()
+        hr["zone1_sec"] = 300            # coverage 0.083 < 0.5
+        load, method, warning = garmin.compute_load(
+            self._no_power(), hr, rpe=3, duration_sec=3600)
+        self.assertEqual((load, method, warning), (30.0, "rpe", None))
+
+    def test_load_sparse_hr_no_rpe_warns_and_keeps_hr(self):
+        hr = self._no_hr()
+        hr["zone1_sec"] = 300            # coverage 0.083, hrTSS = 1.65 -> 1.6/1.7
+        load, method, warning = garmin.compute_load(
+            self._no_power(), hr, rpe=None, duration_sec=3600)
+        self.assertEqual(method, "hr_sparse")
+        self.assertIsNotNone(warning)
+        self.assertAlmostEqual(load, round(300 * 0.0055, 1))
+
+    def test_load_no_data_no_rpe_warns_zero(self):
+        load, method, warning = garmin.compute_load(
+            self._no_power(), self._no_hr(), rpe=None, duration_sec=3600)
+        self.assertEqual(load, 0.0)
+        self.assertEqual(method, "none")
+        self.assertIsNotNone(warning)
+
+    def test_load_no_zones_uses_rpe(self):
+        load, method, warning = garmin.compute_load(
+            self._no_power(), self._no_hr(), rpe=5, duration_sec=3600)
+        self.assertEqual((load, method, warning), (50.0, "rpe", None))
+
+    # --- rpe_divergence: hidden-fatigue flag ------------------------------
+    @staticmethod
+    def _hr_activity(**overrides):
+        act = {f"zone{i}_sec": 0 for i in range(1, 6)}
+        act.update({f"power_zone{i}_sec": None for i in range(1, 8)})
+        act.update({"duration_sec": 3600, "rpe": None, "tss": None})
+        act.update(overrides)
+        return act
+
+    def test_rpe_divergence_flags_when_rpe_exceeds_measured(self):
+        # Measured hrTSS 40 (coverage 1.0); RPE 9 -> sRPE 90 -> ratio 2.25 >= 1.5.
+        act = self._hr_activity(zone2_sec=3600, tss=40.0, rpe=9)
+        self.assertEqual(garmin.rpe_divergence(act), 2.25)
+
+    def test_rpe_divergence_none_without_rpe(self):
+        act = self._hr_activity(zone2_sec=3600, tss=40.0, rpe=None)
+        self.assertIsNone(garmin.rpe_divergence(act))
+
+    def test_rpe_divergence_none_when_load_is_rpe_based(self):
+        # Sparse HR -> load already came from RPE, so there is no divergence.
+        act = self._hr_activity(zone1_sec=300, tss=1.7, rpe=8)  # coverage 0.083
+        self.assertIsNone(garmin.rpe_divergence(act))
 
 
 class TestZoneParsing(unittest.TestCase):
@@ -126,6 +193,54 @@ class TestRecomputeDerived(unittest.TestCase):
         baseline = test_db.get_baseline(_d(0))
         self.assertIsNotNone(baseline)
         self.assertAlmostEqual(baseline["rhr_baseline_mean"], 50.0)
+
+
+class TestBackfillTss(unittest.TestCase):
+    def setUp(self):
+        clear_all_tables(test_db)
+
+    def test_backfill_rewrites_tss_from_zones(self):
+        # Stored TSS is stale (old avg-power model); zone seconds say otherwise.
+        test_db.save_completed_activity(
+            activity_id="a1", date=_d(-1), start_time=None, activity_name="Ride",
+            activity_type="cycling", duration_sec=3600.0, distance_km=30.0,
+            elevation_gain_m=0.0, avg_hr=150, max_hr=170, rpe=6, tss=999.0,
+            power_zone2_sec=1800, power_zone3_sec=1800,  # 21.06 + 32.04 = 53.1
+        )
+
+        changed = garmin.backfill_tss()
+
+        self.assertEqual(changed, 1)
+        row = test_db.get_completed_activities()[0]
+        self.assertEqual(row["tss"], 53.1)
+
+    def test_backfill_stores_measurement_not_rpe(self):
+        # No power, sparse HR, no user RPE. `tss` is the pure measurement, so it
+        # becomes the (low) hrTSS — we never synthesise RPE to inflate it.
+        test_db.save_completed_activity(
+            activity_id="y1", date=_d(-1), start_time=None, activity_name="Yoga",
+            activity_type="yoga", duration_sec=3600.0, distance_km=0.0,
+            elevation_gain_m=0.0, avg_hr=90, max_hr=110, rpe=None, tss=17.2,
+            zone1_sec=120,  # hrTSS = 120 * 0.0055 = 0.66 -> 0.7
+        )
+
+        garmin.backfill_tss()
+
+        row = test_db.get_completed_activities()[0]
+        self.assertEqual(row["tss"], 0.7)
+
+    def test_backfill_clears_tss_without_zones(self):
+        # No zones at all -> measurement is NULL (load comes from RPE on the fly).
+        test_db.save_completed_activity(
+            activity_id="s1", date=_d(-1), start_time=None, activity_name="Lift",
+            activity_type="strength_training", duration_sec=1800.0, distance_km=0.0,
+            elevation_gain_m=0.0, avg_hr=None, max_hr=None, rpe=7, tss=42.0,
+        )
+
+        garmin.backfill_tss()
+
+        row = test_db.get_completed_activities()[0]
+        self.assertIsNone(row["tss"])
 
 
 class TestEnsureData(unittest.TestCase):

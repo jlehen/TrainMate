@@ -9,6 +9,7 @@ from trainmate.openrouter import openrouter_client
 from trainmate.google_calendar import calendar_syncer
 from trainmate.types import Objective, LifeEvent, Workout, CompletedActivity
 from trainmate.adherence import analyze_adherence
+from trainmate.garmin import activity_load, rpe_divergence
 from trainmate.util import today_str as _today_str, today_date as _today_date
 
 
@@ -47,16 +48,18 @@ def format_completed_activities(completed_activities: List[CompletedActivity]) -
     """Formats Garmin completed activities to a readable block for LLM prompts."""
     completed_list = []
     for act in completed_activities:
-        act_load = (
-            (act.get('tss') or 0.0)
-            + (act.get('rpe') or 0) * (act['duration_sec'] / 3600.0)
-        )
         line = (
             f"- {act['date']} ({act['activity_type'].upper()}): "
             f"'{act['activity_name']}' | "
             f"Duration: {act['duration_sec']/60:.0f}m, Avg HR: {act['avg_hr']}, "
-            f"Load: {act_load:.1f}"
+            f"Load: {activity_load(act):.1f}"
         )
+        divergence = rpe_divergence(act)
+        if divergence is not None:
+            line += (
+                f" (RPE {act.get('rpe')} implies ~{divergence:.1f}x the measured "
+                "load: possible hidden fatigue — heat, sleep, muscular damage)"
+            )
         extras = []
         if act.get('bike_avg_watts') is not None:
             extras.append(f"Avg Power: {act['bike_avg_watts']}W")
@@ -932,7 +935,7 @@ class CoachService:
                     )
                     continue
                 hours = sum((a.get('duration_sec') or 0.0) for a in acts) / 3600.0
-                tss = sum((a.get('tss') or 0.0) for a in acts)
+                tss = sum(activity_load(a) for a in acts)
                 z12 = sum(
                     (a.get('zone1_sec') or 0) + (a.get('zone2_sec') or 0) for a in acts
                 )
@@ -1865,7 +1868,7 @@ class CoachService:
             total_duration_hours = sum(
                 (act.get('duration_sec') or 0.0) / 3600.0 for act in w_activities
             )
-            total_tss = sum(act.get('tss') or 0.0 for act in w_activities)
+            total_tss = sum(activity_load(act) for act in w_activities)
 
             sports: Dict[str, int] = {}
             for act in w_activities:

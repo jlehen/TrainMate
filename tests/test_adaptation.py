@@ -316,7 +316,7 @@ class TestAdaptation(unittest.TestCase):
             "title": "Easy Run",
             "duration_minutes": 30,
             "rpe": 2,
-            "tss": 9,  # exp_load = 9 + 2 * 0.5 = 10.0
+            "tss": 10,  # exp_load = planned tss = 10.0
         }]
         # 46.7% duration deviation (30 -> 44 minutes) is within 50%
         completed_low_ok = [{
@@ -326,7 +326,7 @@ class TestAdaptation(unittest.TestCase):
             "activity_type": "running",
             "duration_sec": 44 * 60,
             "rpe": 2,
-            "tss": 9.0,
+            "tss": 10.0,
         }]
         disc, _ = analyze_adherence(
             planned_low, completed_low_ok, date(2026, 6, 1), 1
@@ -341,7 +341,7 @@ class TestAdaptation(unittest.TestCase):
             "activity_type": "running",
             "duration_sec": 46 * 60,
             "rpe": 2,
-            "tss": 9.0,
+            "tss": 10.0,
         }]
         disc, _ = analyze_adherence(
             planned_low, completed_low_err, date(2026, 6, 1), 1
@@ -356,7 +356,7 @@ class TestAdaptation(unittest.TestCase):
             "title": "Long Run",
             "duration_minutes": 120,
             "rpe": 6,
-            "tss": 98,  # exp_load = 98 + 6 * 2 = 110.0
+            "tss": 110,  # exp_load = planned tss = 110.0
         }]
         # 16.7% duration deviation (120 -> 140 minutes) is outside 15%
         completed_high_err = [{
@@ -366,7 +366,7 @@ class TestAdaptation(unittest.TestCase):
             "activity_type": "running",
             "duration_sec": 140 * 60,
             "rpe": 6,
-            "tss": 98.0,
+            "tss": 110.0,
         }]
         disc, _ = analyze_adherence(
             planned_high, completed_high_err, date(2026, 6, 1), 1
@@ -381,7 +381,7 @@ class TestAdaptation(unittest.TestCase):
             "title": "Tempo",
             "duration_minutes": 60,
             "rpe": 5,
-            "tss": 50,  # exp_load = 50 + 5 * 1 = 60.0
+            "tss": 60,  # exp_load = planned tss = 60.0
         }]
         # 30% duration deviation (60 -> 78 minutes) is within 32.5%
         completed_mid_ok = [{
@@ -391,7 +391,7 @@ class TestAdaptation(unittest.TestCase):
             "activity_type": "running",
             "duration_sec": 78 * 60,
             "rpe": 5,
-            "tss": 50.0,
+            "tss": 60.0,
         }]
         disc, _ = analyze_adherence(
             planned_mid, completed_mid_ok, date(2026, 6, 1), 1
@@ -406,7 +406,7 @@ class TestAdaptation(unittest.TestCase):
             "activity_type": "running",
             "duration_sec": 81 * 60,
             "rpe": 5,
-            "tss": 50.0,
+            "tss": 60.0,
         }]
         disc, _ = analyze_adherence(
             planned_mid, completed_mid_err, date(2026, 6, 1), 1

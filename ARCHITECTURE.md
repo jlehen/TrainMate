@@ -72,7 +72,9 @@ classes themselves.
 | `garmin.py`          | module functions     | Logs into Garmin Connect; pulls metrics +        |
 |                      |                      | activities to DB, recomputes derived metrics,    |
 |                      |                      | maintains the `sync_state` watermark, and        |
-|                      |                      | `ensure_data()` auto-refreshes on read.          |
+|                      |                      | `ensure_data()` auto-refreshes on read. Owns the |
+|                      |                      | load model: `measured_tss`, `activity_load`,     |
+|                      |                      | `rpe_divergence` (see §12).                       |
 | `google_calendar.py` | `calendar_syncer`    | Creates/updates/deletes all-day Google Calendar  |
 |                      |                      | events for workouts.                             |
 | `adherence.py`       | —                    | `analyze_adherence()` pure function; compares    |
@@ -335,14 +337,11 @@ SQLite database at `trainmate.db` (path from `config.db_path`).
 | `elevation_gain_m`  | REAL    |                                                    |
 | `avg_hr`            | INTEGER |                                                    |
 | `max_hr`            | INTEGER |                                                    |
-| `rpe`               | INTEGER | From Garmin (directWorkoutRpe); estimated if missing |
-| `tss`               | REAL    | Computed from power/HR; estimated if missing       |
+| `rpe`               | INTEGER | User-entered in Garmin (directWorkoutRpe); NULL if not entered (never synthesised) |
+| `tss`               | REAL    | Measured TSS only: power TSS if a power meter recorded, else hrTSS; NULL if neither. Training *load* is derived on the fly, not stored — see Load model below |
 | `bike_avg_watts`    | INTEGER | From Garmin; NULL for non-bike activities          |
-| `zone1_sec`         | INTEGER | Time in HR/power zone 1 (seconds); NULL if missing |
-| `zone2_sec`         | INTEGER | Time in HR/power zone 2 (seconds); NULL if missing |
-| `zone3_sec`         | INTEGER | Time in HR/power zone 3 (seconds); NULL if missing |
-| `zone4_sec`         | INTEGER | Time in HR/power zone 4 (seconds); NULL if missing |
-| `zone5_sec`         | INTEGER | Time in HR/power zone 5 (seconds); NULL if missing |
+| `zone1_sec`–`zone5_sec`     | INTEGER | Time in each HR zone (seconds); NULL if missing |
+| `power_zone1_sec`–`power_zone7_sec` | INTEGER | Time in each Coggan power zone (seconds); NULL unless a power meter recorded |
 
 ### athlete_\metrics_\cache
 | Column            | Type    | Notes                  |
@@ -518,6 +517,7 @@ Handler functions are named `run_<command>_<subcommand>()` in `trainmate_cli.py`
 | `data`       | `analyze`    | `d a`    | Analyze completed workouts/metrics to detect cycles                      |
 |              |              |          | (`--from`, `--until`, `--days`, `--weeks`, `--context`,                  |
 |              |              |          | `--force` to recompute, `--inspect` for read-only)                      |
+| `data`       | `backfill-tss` | —      | Recompute the measured `tss` for all stored activities under the current zone model (no Garmin calls), then refresh derived workload |
 | `data`       | `wipe`       | —        | Delete all metrics, baselines, completed activities                      |
 
 ---
@@ -570,6 +570,9 @@ Required fields:
 |                         |      | activity visibility (shown as gray/minor if below threshold,  |
 |                         |      | yellow/unplanned if above). Mismatch tolerance for planned   |
 |                         |      | workouts is dynamically computed from expected workload.     |
+| `rpe_divergence_ratio`  | float| sRPE-load ÷ measured-load above which a session is flagged   |
+|                         |      | to the coach as "felt harder than measured" (default: 1.5;   |
+|                         |      | set very high to disable)                                    |
 | `user_profile`          | dict | Must contain `lthr` or `ftp` (see below)                     |
 
 `user_profile` keys: `name`, `birth_year`, `max_hr`, `lthr`, `ftp`,
@@ -632,10 +635,12 @@ Garmin Connect** (`trainmate/garmin.py`); the former Google Sheets path is
 gone. Full design: `DESIGN_garmin_direct_pull.md`.
 
 1. `garmin.pull(start, end)` logs into Garmin (token persistence; TTY-gated
-   MFA), fetches activities (computing TSS from power/HR and reading
-   `directWorkoutRpe`, estimating either if missing) and daily metrics. It
-   writes a row to `athlete_metrics_cache` for **every day in range — even
-   all-null ones** — so the table's date coverage records what has been pulled.
+   MFA), fetches activities (storing the **measured** TSS — power TSS or hrTSS —
+   and the user's `directWorkoutRpe` if entered; neither is synthesised) and
+   daily metrics. It writes a row to `athlete_metrics_cache` for **every day in
+   range — even all-null ones** — so the table's date coverage records what has
+   been pulled. Activities with low HR-zone coverage and no RPE are reported in
+   an aggregated warning (their load is an underestimate).
 2. `garmin.recompute_derived()` runs a **full sweep** over all cached days:
    acute/chronic workload + ACWR (7/28-day windows) and the 28-day
    RHR/HRV/sleep baseline. A full sweep is cheap locally and avoids
@@ -700,7 +705,37 @@ step (always uses the config default).
 
 ## 12. Sports Science & Coaching Mathematics
 
-### Workload per activity ``` Workload = TSS + RPE × (duration_sec / 3600) ```
+### Load model (per activity)
+The stored `tss` column is the **objective measurement only**; the training
+**load** is derived on the fly (`garmin.activity_load`) via a best-available
+fallback — methods are never blended or max-ed:
+
+1. **Power TSS** (Coggan 7-zone, `POWER_ZONE_TSS_PER_SEC`) when a power meter
+   recorded — `TSS/s = IF² × 100 / 3600` per zone (Z6/Z7 extrapolated, Z7 IF
+   capped at 1.60).
+2. **hrTSS** (Friel 5-zone, `HR_ZONE_TSS_PER_SEC`) when HR-zone coverage
+   ≥ `HR_ZONE_COVERAGE_MIN` (0.5). Coverage = Σ(HR-zone secs)/duration; guards
+   against Garmin's HR zone-1 floor zeroing out low-intensity work (yoga, easy
+   walks, lift-served skiing).
+3. **Session RPE** (Foster sRPE = `RPE × 10 × hours`) when the user entered an
+   RPE and power is absent / HR is too sparse. **RPE is user-entered only and
+   never computed from power or HR.**
+
+When method 3 should apply but no RPE was entered, the weak hrTSS (or 0) is kept
+and the activity is counted in an aggregated underestimate warning. There is no
+activity-type special case — coverage + the divergence flag cover strength and
+hybrid sessions (e.g. kettlebell HIIT: hrTSS captures the cardio, divergence
+flags the muscular cost).
+
+### RPE divergence (external vs internal load)
+`garmin.rpe_divergence` flags, to the coach only, sessions where the load came
+from power/HR but the user's RPE implies ≥ `rpe_divergence_ratio` (config,
+default 1.5) × the measured load — i.e. it felt harder than it measured (heat,
+sleep debt, muscular damage). It never inflates the stored load.
+
+### Workload per activity
+`Workload = activity_load(act)` — the single fallback value above (the former
+`TSS + RPE × hours` additive blend was removed).
 
 ### Acute Workload (7 days) Sum of daily workloads over the past 7 days
 (current day included).

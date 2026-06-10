@@ -18,6 +18,11 @@ service_account_file: "service_account.json"
 # planned-vs-actual mismatch tolerance and labels unplanned activities as minor.
 #low_load_threshold: 25.0
 
+# Ratio of RPE-implied load to measured (power/HR) load above which a session is
+# flagged to the coach as "felt harder than it measured" (hidden fatigue: heat,
+# sleep debt, muscular damage, e.g. kettlebell HIIT). Set very high to disable.
+#rpe_divergence_ratio: 1.5
+
 garmin_email: "you@example.com"
 garmin_password: "your-garmin-password"
 

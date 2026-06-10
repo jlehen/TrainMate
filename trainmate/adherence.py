@@ -1,6 +1,8 @@
 from datetime import timedelta
 from typing import List, Dict, Any, Tuple
 
+from trainmate.garmin import activity_load, _rpe_tss
+
 # Maps planned workout types to corresponding Garmin activity types
 SPORT_MAPPING = {
     "running": ["running", "indoor_running", "trail_running", "treadmill_running"],
@@ -12,6 +14,18 @@ SPORT_MAPPING = {
     "yoga": ["yoga", "stretching", "pilates"],
     "ski_touring": ["ski_touring", "backcountry_skiing", "nordic_skiing", "skiing"]
 }
+
+
+def _planned_load(w: Dict[str, Any]) -> float:
+    """Expected load of a planned workout as a single value (mirrors the actual
+    side): the coach's planned TSS, or sRPE (RPE x 10 x hours) when no TSS was
+    assigned. Replaces the former `tss + rpe*hours` blend."""
+    tss = w.get("tss")
+    if tss:
+        return float(tss)
+    rpe = w.get("rpe") or 0
+    duration_min = w.get("duration_minutes") or 0
+    return _rpe_tss(float(rpe), duration_min * 60.0)
 
 
 def analyze_adherence(
@@ -56,15 +70,8 @@ def analyze_adherence(
         day_acts = activities_by_date.get(date_curr, [])
         day_workouts = workouts_by_date.get(date_curr, [])
 
-        # Sort activities by workload descending
-        day_acts = sorted(
-            day_acts,
-            key=lambda x: (
-                (x.get("tss") or 0.0)
-                + (x.get("rpe") or 0) * ((x.get("duration_sec") or 0.0) / 3600.0)
-            ),
-            reverse=True
-        )
+        # Sort activities by load descending
+        day_acts = sorted(day_acts, key=activity_load, reverse=True)
 
         used_act_ids = set()
 
@@ -77,10 +84,7 @@ def analyze_adherence(
                 for act in day_acts:
                     if act["activity_id"] in used_act_ids:
                         continue
-                    act_load = (
-                        (act.get("tss") or 0.0)
-                        + (act.get("rpe") or 0) * (act["duration_sec"] / 3600.0)
-                    )
+                    act_load = activity_load(act)
                     if act_load < low_load_threshold:
                         continue
                     matched_act = act
@@ -111,16 +115,10 @@ def analyze_adherence(
                     )
                 else:
                     act_duration_min = matched_act["duration_sec"] / 60.0
-                    act_load = (
-                        (matched_act.get("tss") or 0.0)
-                        + (matched_act.get("rpe") or 0)
-                        * (matched_act["duration_sec"] / 3600.0)
-                    )
+                    act_load = activity_load(matched_act)
 
                     p_duration = w.get("duration_minutes") or 0
-                    p_rpe = w.get("rpe") or 0
-                    p_tss = w.get("tss") or 0
-                    exp_load = p_tss + p_rpe * (p_duration / 60.0)
+                    exp_load = _planned_load(w)
 
                     # Determine dynamic tolerance based on expected workload (exp_load)
                     if exp_load <= 20.0:
@@ -165,10 +163,7 @@ def analyze_adherence(
         for act in day_acts:
             if act["activity_id"] in used_act_ids:
                 continue
-            act_load = (
-                (act.get("tss") or 0.0)
-                + (act.get("rpe") or 0) * (act["duration_sec"] / 3600.0)
-            )
+            act_load = activity_load(act)
             if act_load >= low_load_threshold:
                 discrepancies.append(
                     f"- {date_curr}: Unplanned Activity! Performed "

@@ -625,7 +625,7 @@ class Database:
         self, activity_id: str, date: str, start_time: Optional[str],
         activity_name: Optional[str], activity_type: str, duration_sec: float,
         distance_km: float, elevation_gain_m: float, avg_hr: Optional[int],
-        max_hr: Optional[int], rpe: int, tss: float,
+        max_hr: Optional[int], rpe: Optional[int], tss: Optional[float],
         bike_avg_watts: Optional[int] = None, zone1_sec: Optional[int] = None,
         zone2_sec: Optional[int] = None, zone3_sec: Optional[int] = None,
         zone4_sec: Optional[int] = None, zone5_sec: Optional[int] = None,
@@ -678,6 +678,17 @@ class Database:
                   zone4_sec, zone5_sec, power_zone1_sec, power_zone2_sec,
                   power_zone3_sec, power_zone4_sec, power_zone5_sec,
                   power_zone6_sec, power_zone7_sec))
+            conn.commit()
+
+    def update_activity_tss(self, activity_id: str, tss: Optional[float]) -> None:
+        """Overwrites the stored measured TSS for one activity (backfill). None
+        clears it (no power/HR data was recorded)."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "UPDATE completed_activities SET tss = ? WHERE activity_id = ?",
+                (None if tss is None else float(tss), str(activity_id)),
+            )
             conn.commit()
 
     def get_completed_activities(

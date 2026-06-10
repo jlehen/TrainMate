@@ -62,13 +62,15 @@ refreshes recent data (and bootstraps/backfills on request) as commands read it.
 
 ```
 Garmin Connect ──[TrainMate: trainmate/garmin.py]──► SQLite
-                  (login + fetch + TSS/RPE/zone transforms,
+                  (login + fetch + measured-TSS / zone parsing / RPE read,
                    then db.save_completed_activity / save_metric_cache / save_baseline)
 ```
 
 The pure logic from GarminScraper — login/token handling, per-day metric
-extraction, per-activity fetch, `calculate_tss`, HR-zone parsing — moves into a
-new `trainmate/garmin.py`. The Sheets **write** side (`sheets_client.py`) and the
+extraction, per-activity fetch, TSS computation, HR-zone parsing — moves into a
+new `trainmate/garmin.py`. (The TSS/load math was subsequently reworked — see the
+Load model note in §4 and ARCHITECTURE.md §12.) The Sheets **write** side
+(`sheets_client.py`) and the
 TrainMate Sheets **read** side (`google_sheets.py::GarminSheetsReader`) both go
 away. The rows that GarminScraper used to shape for the sheet are instead shaped
 for the existing `db.save_*` calls.
@@ -82,11 +84,20 @@ for the existing `db.save_*` calls.
   `get_daily_metrics(date)`, `get_activities(start, end)`,
   `get_activity_hr_zones(id)`, `get_activity_rpe(id)`. Lifted essentially intact
   from `GarminScraper/src/garmin_client.py`.
-- Pure transforms — `calculate_tss(activity, ftp, lthr)`, activity-row mapping,
-  duration formatting. Lifted from `GarminScraper/src/sync.py`.
+- Pure transforms — activity-row mapping, duration formatting, and the load
+  model. **Load model (reworked after the initial port):** the `tss` column
+  stores the *measured* TSS only — power TSS (Coggan 7-zone) if a power meter
+  recorded, else hrTSS (Friel 5-zone), else NULL (`measured_tss`). Training
+  **load** is derived on the fly (`activity_load`) via a best-available fallback:
+  measured TSS when from power or HR with coverage ≥ 0.5, else the user-entered
+  RPE as sRPE (`RPE × 10 × hours`). RPE is **never synthesised**. `rpe_divergence`
+  flags to the coach sessions that felt harder than they measured. Full details:
+  ARCHITECTURE.md §12.
 - A `pull(start_date, end_date, *, metrics=True, activities=True, throttle)`
   orchestration entry that fetches the range and writes via `db.save_*`. This is
   the single engine shared by manual `data pull` and the auto-ensure path.
+- `backfill_tss()` — recomputes the measured `tss` for all stored activities
+  from their saved zone seconds (no Garmin calls); CLI: `data backfill-tss`.
 
 **Removed:** `trainmate/google_sheets.py` (the `GarminSheetsReader` /
 `sheets_reader` singleton). Its derived-metric logic (acute/chronic workload,
@@ -281,9 +292,11 @@ path entirely, and sidesteps token-store write races between server and CLI.
 **Config & secrets.** Garmin credentials live in `config.yaml`
 (`garmin_email` / `garmin_password`) and are **not** read from the environment —
 `config.yaml` is gitignored, and keeping them out of env avoids leaking
-credentials into process listings and shell history. FTP/LTHR are reused from the
-existing `config.yaml` `user_profile` (so TSS is computed in TrainMate and the
-GarminScraper `.env` duplication disappears). Token store defaults to
+credentials into process listings and shell history. The measured TSS is
+computed in TrainMate from Garmin's per-zone seconds via fixed Coggan/Friel
+multipliers (the FTP/LTHR that define those zones live on the Garmin side), so
+the GarminScraper `.env` duplication disappears. FTP/LTHR remain in
+`config.yaml` `user_profile` for coaching context. Token store defaults to
 `~/.garminconnect`.
 
 ---

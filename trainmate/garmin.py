@@ -1,9 +1,11 @@
 """Direct Garmin Connect ingestion.
 
 Replaces the former Google Sheets path: TrainMate logs into Garmin Connect,
-fetches daily metrics and activities, computes TSS/RPE/HR-zones, writes them to
-the SQLite cache, recomputes the derived metrics (workload/ACWR/baselines), and
-maintains a watermark so reads can auto-refresh.
+fetches daily metrics and activities, stores the measured TSS (power TSS or
+hrTSS) and HR/power-zone seconds plus any user-entered RPE, writes them to the
+SQLite cache, recomputes the derived metrics (workload/ACWR/baselines), and
+maintains a watermark so reads can auto-refresh. Training load is derived on
+the fly (see compute_load/activity_load), not stored.
 
 See DESIGN_garmin_direct_pull.md for the full design.
 """
@@ -212,55 +214,177 @@ CYCLING_TERMS = (
 )
 
 
-def calculate_tss(activity: Dict[str, Any], ftp: Optional[float], lthr: Optional[float]) -> Optional[float]:
-    """Estimates TSS from power (preferred) or heart rate. None if not computable."""
-    duration_sec = activity.get("duration") or 0
+# --- Power-zone TSS weights (TSS per second in each zone) -------------------
+# Derived from Dr. Andrew Coggan's power-zone model (Allen & Coggan, "Training
+# and Racing with a Power Meter"). TSS over a steady effort is IF^2 * 100 per
+# hour, so each zone's representative Intensity Factor (IF = fraction of FTP)
+# gives a per-second rate of (IF^2 * 100) / 3600. Garmin records power in this
+# native Coggan 7-zone model:
+#     Z1 Active Recovery   <55% FTP   IF~0.50 -> 0.0069
+#     Z2 Endurance       56-75%       IF~0.65 -> 0.0117
+#     Z3 Tempo           76-90%       IF~0.80 -> 0.0178
+#     Z4 Lactate Thresh  91-105%      IF~0.95 -> 0.0250
+#     Z5 VO2max          106-120%     IF~1.10 -> 0.0333
+#     Z6 Anaerobic       121-150%     IF~1.35 -> 0.0506
+#     Z7 Neuromuscular   >150%        IF~1.60 -> 0.0711  (open-ended; IF capped
+#                                                         at 1.60 as a sane max)
+POWER_ZONE_TSS_PER_SEC = (0.0069, 0.0117, 0.0178, 0.0250, 0.0333, 0.0506, 0.0711)
+
+# --- Heart-rate-zone TSS weights (TSS per second in each zone) --------------
+# Based on Joe Friel's hrTSS methodology ("The Cyclist's Training Bible"):
+# time spent in each HR zone, scaled to Lactate Threshold Heart Rate (LTHR),
+# is assigned a baseline TSS/hour rate per zone. Expressed here per second
+# across Garmin's 5-zone HR model (Z1 recovery -> Z5 above threshold).
+HR_ZONE_TSS_PER_SEC = (0.0055, 0.0111, 0.0166, 0.0222, 0.0277)
+
+# Minimum fraction of an activity's duration that must fall inside an HR zone
+# for hrTSS to be trusted. Garmin's HR zone 1 has a non-zero lower bound, so
+# time spent below it (easy walks, yoga, lift-served skiing) lands in no zone
+# and hrTSS badly undercounts. Below this coverage we defer to RPE instead.
+# Calibrated against the activity history: genuine aerobic sessions cluster at
+# >=0.77 coverage, low-intensity ones at <0.3, with a clean gap at 0.5.
+HR_ZONE_COVERAGE_MIN = 0.5
+
+
+def _zone_tss(
+    zone_sec: Dict[str, Any], prefix: str, weights: Tuple[float, ...]
+) -> Optional[float]:
+    """Weighted sum of seconds-in-zone. None when no zone carries positive
+    time (i.e. the data is absent), so callers can fall through the hierarchy."""
+    total = 0.0
+    have_data = False
+    for i, weight in enumerate(weights, start=1):
+        secs = zone_sec.get(f"{prefix}{i}_sec")
+        if secs:
+            total += float(secs) * weight
+            have_data = True
+    return round(total, 1) if have_data else None
+
+
+def _hr_zone_coverage(hr_zone_sec: Dict[str, Any], duration_sec: float) -> float:
+    """Fraction of the activity recorded inside any HR zone (0.0 when unknown)."""
     if not duration_sec:
+        return 0.0
+    total = sum(float(hr_zone_sec.get(f"zone{i}_sec") or 0) for i in range(1, 6))
+    return total / duration_sec
+
+
+def _rpe_tss(rpe: float, duration_sec: float) -> float:
+    """Session-RPE (sRPE) TSS estimate. Foster (2001), "A new approach to
+    monitoring exercise training", validated for resistance work by Sweet et
+    al. (2004). Maps the Borg CR-10 1-10 scale to duration: (RPE*10) per hour."""
+    return round((rpe * 10.0) * (duration_sec / 3600.0), 1)
+
+
+# Default ratio of RPE-implied load to measured (power/HR) load above which a
+# session is flagged to the coach as "felt harder than it measured" (hidden
+# fatigue: heat, sleep debt, muscular damage). Overridable via config.yaml.
+RPE_DIVERGENCE_RATIO_DEFAULT = 1.5
+
+
+def measured_tss(
+    power_zone_sec: Dict[str, Any], hr_zone_sec: Dict[str, Any]
+) -> Optional[float]:
+    """The objective Training Stress Score actually recorded: power TSS when a
+    power meter was present, else hrTSS. None when neither was recorded. This is
+    a pure measurement (no coverage gate, no RPE) and is what we store in the
+    `tss` column; the training-load fallback is computed separately on the fly."""
+    power = _zone_tss(power_zone_sec, "power_zone", POWER_ZONE_TSS_PER_SEC)
+    if power is not None:
+        return power
+    return _zone_tss(hr_zone_sec, "zone", HR_ZONE_TSS_PER_SEC)
+
+
+def compute_load(
+    power_zone_sec: Dict[str, Any],
+    hr_zone_sec: Dict[str, Any],
+    rpe: Optional[float],
+    duration_sec: float,
+) -> Tuple[float, str, Optional[str]]:
+    """Training load via a best-available fallback (no estimated RPE, no max-ing):
+
+        1. Power TSS                       (Coggan 7-zone)   -> method "power"
+        2. hrTSS, if HR coverage >= MIN    (Friel 5-zone)    -> method "hr"
+        3. Session RPE * duration          (Foster sRPE)     -> method "rpe"
+           (used when power is absent and HR is missing or too sparse to trust)
+
+    When method 3 should apply but the user entered no RPE, we keep the weak
+    hrTSS (or 0) and return a warning string so callers can surface it.
+
+    Returns (load, method, warning). `method` identifies the source; `warning`
+    is a human reason when we fell back to an unreliable estimate for lack of a
+    user RPE, else None. RPE is user-entered only and never synthesised.
+    """
+    power = _zone_tss(power_zone_sec, "power_zone", POWER_ZONE_TSS_PER_SEC)
+    if power is not None:
+        return power, "power", None
+
+    hr = _zone_tss(hr_zone_sec, "zone", HR_ZONE_TSS_PER_SEC)
+    if hr is not None:
+        # Trust hrTSS only when the HR zones cover enough of the session; sparse
+        # coverage means the effort sat below zone 1 (low-intensity work) and
+        # hrTSS undercounts, so prefer the user's RPE when available.
+        if _hr_zone_coverage(hr_zone_sec, duration_sec) >= HR_ZONE_COVERAGE_MIN:
+            return hr, "hr", None
+        if rpe:
+            return _rpe_tss(float(rpe), duration_sec), "rpe", None
+        return hr, "hr_sparse", "low HR-zone coverage and no RPE entered"
+
+    if rpe:
+        return _rpe_tss(float(rpe), duration_sec), "rpe", None
+    return 0.0, "none", "no power, HR, or RPE data"
+
+
+def _has_power_zones(act: Dict[str, Any]) -> bool:
+    return any(act.get(f"power_zone{i}_sec") for i in range(1, 8))
+
+
+def _measurement_is_load(act: Dict[str, Any], duration_sec: float) -> bool:
+    """True when the stored `tss` measurement is the load (came from power, or
+    from HR with adequate coverage), rather than being overridden by RPE."""
+    if _has_power_zones(act):
+        return True
+    has_hr = any(act.get(f"zone{i}_sec") for i in range(1, 6))
+    if not has_hr:
+        return True  # no zone data to second-guess the stored measurement
+    return _hr_zone_coverage(act, duration_sec) >= HR_ZONE_COVERAGE_MIN
+
+
+def activity_load(act: Dict[str, Any]) -> float:
+    """Training load for a stored activity row, derived on the fly. Reads the
+    objective measurement from the `tss` column (power TSS or hrTSS) and applies
+    the fallback: trust it when it came from power or adequately-covered HR;
+    otherwise prefer the user's RPE (sRPE), keeping the weak measurement only
+    when no RPE was entered. RPE-only when there is no measurement at all."""
+    tss = act.get("tss")
+    rpe = act.get("rpe")
+    duration_sec = act.get("duration_sec") or 0.0
+    if tss is not None:
+        if not _measurement_is_load(act, duration_sec) and rpe:
+            return _rpe_tss(float(rpe), duration_sec)
+        return float(tss)
+    if rpe:
+        return _rpe_tss(float(rpe), duration_sec)
+    return 0.0
+
+
+def rpe_divergence(act: Dict[str, Any]) -> Optional[float]:
+    """If the load came from the objective measurement (power/HR) but the user's
+    RPE implies a materially higher load, returns the ratio sRPE_load / measured;
+    else None. Flags strain the meters miss (heat, sleep debt, muscular damage),
+    e.g. kettlebell HIIT. The threshold is config `rpe_divergence_ratio`."""
+    rpe = act.get("rpe")
+    tss = act.get("tss")
+    if not rpe or not tss or tss <= 0:
         return None
-    hours = duration_sec / 3600.0
-
-    avg_power = activity.get("avgPower") or activity.get("averagePower")
-    if avg_power is not None and ftp:
-        try:
-            intensity = float(avg_power) / float(ftp)
-            return round(100.0 * hours * (intensity ** 2), 1)
-        except (ValueError, TypeError, ZeroDivisionError):
-            pass
-
-    avg_hr = activity.get("averageHR")
-    if avg_hr is not None and lthr:
-        try:
-            intensity = float(avg_hr) / float(lthr)
-            return round(100.0 * hours * (intensity ** 2), 1)
-        except (ValueError, TypeError, ZeroDivisionError):
-            pass
-
-    return None
-
-
-def estimate_rpe_tss(sport_type: str, duration_sec: float, avg_hr: Optional[int]) -> Tuple[int, float]:
-    """Fallback RPE/TSS estimate from HR (or sport defaults). Mirrors the prior
-    sheets-reader estimation so behaviour is unchanged when Garmin lacks data."""
-    hours = duration_sec / 3600.0
-    profile = config.user_profile or {}
-    lthr = profile.get("lthr")
-    if not lthr:
-        max_hr = profile.get("max_hr")
-        lthr = int(round(max_hr * 0.85)) if max_hr else 165
-
-    sport = (sport_type or "").lower().replace("_", " ")
-    if not avg_hr or avg_hr <= 0:
-        if "yoga" in sport:
-            return 2, hours * 15.0
-        if "strength" in sport:
-            return 5, hours * 45.0
-        if "rest" in sport:
-            return 0, 0.0
-        return 3, hours * 30.0
-
-    ratio = avg_hr / lthr
-    rpe = max(2, min(int(round(ratio * 8.0)), 10))
-    return rpe, hours * (ratio ** 2) * 100.0
+    duration_sec = act.get("duration_sec") or 0.0
+    if not _measurement_is_load(act, duration_sec):
+        return None  # load already came from RPE; no divergence to flag
+    ratio = _rpe_tss(float(rpe), duration_sec) / float(tss)
+    threshold = float(
+        config.data.get("rpe_divergence_ratio", RPE_DIVERGENCE_RATIO_DEFAULT)
+    )
+    return round(ratio, 2) if ratio >= threshold else None
 
 
 def _safe_round(value: Any, ndigits: int = 1) -> float:
@@ -275,12 +399,9 @@ def _safe_round(value: Any, ndigits: int = 1) -> float:
 # ==============================================================================
 
 def _ingest_activities(client: GarminClient, start: str, end: str, throttle: float) -> None:
-    profile = config.user_profile or {}
-    ftp = profile.get("ftp")
-    lthr = profile.get("lthr")
-
     activities = client.get_activities(start, end)
     print(f"Found {len(activities)} activities in {start}..{end}.")
+    underestimated = 0  # activities whose load is a weak estimate for lack of RPE
     for idx, act in enumerate(activities):
         activity_id = str(act.get("activityId"))
         start_time = act.get("startTimeLocal", "") or ""
@@ -300,14 +421,6 @@ def _ingest_activities(client: GarminClient, start: str, end: str, throttle: flo
                 except (ValueError, TypeError):
                     pass
 
-        tss = calculate_tss(act, ftp, lthr)
-        rpe_raw = client.get_activity_rpe(activity_id)
-        rpe = int(round(rpe_raw)) if rpe_raw else None
-        if rpe is None or tss is None:
-            est_rpe, est_tss = estimate_rpe_tss(type_key, duration_sec, avg_hr)
-            rpe = est_rpe if rpe is None else rpe
-            tss = est_tss if tss is None else tss
-
         zones = client.get_activity_hr_zones(activity_id) if avg_hr is not None else {f"zone{i}_sec": 0 for i in range(1, 6)}
         # Power zones only exist when a power meter was recording (cycling); skip
         # the extra API call otherwise and leave the columns NULL.
@@ -317,17 +430,35 @@ def _ingest_activities(client: GarminClient, start: str, end: str, throttle: flo
             else {f"power_zone{i}_sec": None for i in range(1, 8)}
         )
 
+        # RPE is user-entered only; we never synthesise it from power or HR.
+        rpe_raw = client.get_activity_rpe(activity_id)
+        rpe = int(round(rpe_raw)) if rpe_raw else None
+
+        # Store the objective measurement (power TSS or hrTSS; NULL if neither).
+        # The training-load fallback — which may use RPE — is derived on the fly.
+        tss = measured_tss(power_zones, zones)
+        _load, _method, warning = compute_load(power_zones, zones, rpe, duration_sec)
+        if warning:
+            underestimated += 1
+
         db.save_completed_activity(
             activity_id=activity_id, date=date_str, start_time=start_time,
             activity_name=act.get("activityName", "Unknown Activity"),
             activity_type=type_key, duration_sec=float(duration_sec),
             distance_km=_safe_round((act.get("distance") or 0) / 1000.0, 2),
             elevation_gain_m=_safe_round(act.get("elevationGain")),
-            avg_hr=avg_hr, max_hr=act.get("maxHR"), rpe=int(rpe), tss=float(tss),
+            avg_hr=avg_hr, max_hr=act.get("maxHR"), rpe=rpe, tss=tss,
             bike_avg_watts=bike_avg_watts, **zones, **power_zones,
         )
         if throttle:
             time.sleep(throttle)
+
+    if underestimated:
+        print(yellow(
+            f"  {underestimated} activit{'y' if underestimated == 1 else 'ies'} "
+            "had low HR-zone coverage and no RPE; their load is an underestimate. "
+            "Enter an RPE in Garmin for a better load value."
+        ))
 
 
 def _ingest_metrics(client: GarminClient, start: str, end: str, throttle: float) -> None:
@@ -413,10 +544,9 @@ def recompute_derived() -> None:
     daily_load: Dict[str, float] = {}
     for act in activities:
         date_str = act["date"]
-        tss = act.get("tss") or 0.0
-        rpe = act.get("rpe") or 0
-        duration_sec = act.get("duration_sec") or 0.0
-        daily_load[date_str] = daily_load.get(date_str, 0.0) + tss + rpe * (duration_sec / 3600.0)
+        # One unified load per activity via the fallback hierarchy (power TSS ->
+        # hrTSS -> sRPE), not the old `tss + rpe*hours` blend.
+        daily_load[date_str] = daily_load.get(date_str, 0.0) + activity_load(act)
 
     metrics = db.get_metrics_cache()  # sorted by date asc
     by_date = {m["date"]: m for m in metrics}
@@ -462,6 +592,39 @@ def recompute_derived() -> None:
                 hrv_mean=hrv_mean, hrv_std=hrv_std,
                 sleep_mean=sleep_mean, sleep_std=sleep_std,
             )
+
+
+def backfill_tss() -> int:
+    """Recomputes the measured TSS (power TSS or hrTSS) for every cached activity
+    and rewrites the stored value. Activities keep their raw zone seconds, so
+    this needs no Garmin calls. Returns the number of rows whose TSS changed, and
+    refreshes derived workload/ACWR (which run off the on-the-fly load)."""
+    activities = db.get_completed_activities()
+    changed = 0
+    underestimated = 0
+    for act in activities:
+        new_tss = measured_tss(act, act)
+        old_tss = act.get("tss")
+        if (old_tss is None) != (new_tss is None) or (
+            old_tss is not None and new_tss is not None
+            and abs(float(old_tss) - new_tss) > 1e-6
+        ):
+            db.update_activity_tss(act["activity_id"], new_tss)
+            changed += 1
+        _load, _method, warning = compute_load(
+            act, act, act.get("rpe"), act.get("duration_sec") or 0.0
+        )
+        if warning:
+            underestimated += 1
+    print(f"Recomputed measured TSS for {len(activities)} activities "
+          f"({changed} changed).")
+    if underestimated:
+        print(yellow(
+            f"  {underestimated} activities have low HR-zone coverage and no RPE; "
+            "their load is an underestimate. Enter an RPE in Garmin for accuracy."
+        ))
+    recompute_derived()
+    return changed
 
 
 # ==============================================================================
