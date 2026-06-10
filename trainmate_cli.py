@@ -42,6 +42,51 @@ def main() -> None:
         help="Skip pull check from Garmin, reading purely from SQLite cache"
     )
 
+    # Basic date parser containing base date-filtering options
+    basic_date_parser = argparse.ArgumentParser(add_help=False)
+    basic_date_parser.add_argument(
+        "--days", type=int, dest="days", metavar="N",
+        help="Show/process data for N days"
+    )
+    basic_date_parser.add_argument(
+        "--weeks", type=float, dest="weeks", metavar="N",
+        help="Show/process data for N weeks"
+    )
+    basic_date_parser.add_argument(
+        "--from", "--from-date", dest="from_date",
+        help="Start from DATE (YYYY-MM-DD)"
+    )
+    basic_date_parser.add_argument(
+        "--until", "--until-date", dest="until_date",
+        help="End at DATE (YYYY-MM-DD)"
+    )
+
+    # Extended plan date parser that includes goal and mesocycle level filters
+    plan_date_parser = argparse.ArgumentParser(add_help=False, parents=[basic_date_parser])
+    plan_date_parser.add_argument(
+        "--from-mesocycle", action="store_true", dest="from_meso",
+        help="Start from the beginning of the current mesocycle"
+    )
+    plan_date_parser.add_argument(
+        "--until-mesocycle", type=int, nargs="?", const=-1, dest="until_meso_id",
+        metavar="ID", help="End at the end of a mesocycle (uses current if ID omitted)"
+    )
+    plan_date_parser.add_argument(
+        "--mesocycle", type=int, nargs="?", const=-1, dest="meso_id", metavar="ID",
+        help="Filter within a mesocycle (uses current if ID omitted)"
+    )
+    plan_date_parser.add_argument(
+        "--goal", "--goal-id", type=int, nargs="?", const=-1, dest="goal_id", metavar="ID",
+        help="Filter by a specific goal's plan duration (uses active goal if ID omitted)"
+    )
+
+    # Common parser for sport type filtering
+    sport_type_parser = argparse.ArgumentParser(add_help=False)
+    sport_type_parser.add_argument(
+        "--type", "--sport-type", dest="sport_type",
+        help="Filter by sport type"
+    )
+
     # status command
     status_parser = subparsers.add_parser(
         "status",
@@ -259,85 +304,16 @@ def main() -> None:
     
     # workout list
     w_list = workout_subparsers.add_parser(
-        "list", aliases=["l"], help="Show all planned workouts"
-    )
-    w_list.add_argument(
-        "--type", "--sport-type", dest="sport_type",
-        help="Filter workouts by sport type"
-    )
-    w_list.add_argument(
-        "--days", type=int, dest="days", metavar="N",
-        help="Show workouts for N days"
-    )
-    w_list.add_argument(
-        "--weeks", type=float, dest="weeks", metavar="N",
-        help="Show workouts for N weeks"
-    )
-    w_list.add_argument(
-        "--from", "--from-date", dest="from_date",
-        help="Show workouts starting from DATE (YYYY-MM-DD)"
-    )
-    w_list.add_argument(
-        "--until", "--until-date", dest="until_date",
-        help="Show workouts until DATE (YYYY-MM-DD)"
-    )
-    w_list.add_argument(
-        "--from-mesocycle", action="store_true", dest="from_meso",
-        help="Show workouts starting from the start of the current mesocycle"
-    )
-    w_list.add_argument(
-        "--until-mesocycle", type=int, nargs="?", const=-1, dest="until_meso_id", metavar="ID",
-        help="Show workouts until the end of a mesocycle (uses current if ID omitted)"
-    )
-    w_list.add_argument(
-        "--mesocycle", type=int, nargs="?", const=-1, dest="meso_id", metavar="ID",
-        help="Show workouts within a mesocycle (uses current if ID omitted)"
-    )
-    w_list.add_argument(
-        "--goal", "--goal-id", type=int, nargs="?", const=-1, dest="goal_id", metavar="ID",
-        help="Show workouts for a goal's plan duration (uses active goal if ID omitted)"
+        "list", aliases=["l"],
+        parents=[plan_date_parser, sport_type_parser],
+        help="Show all planned workouts"
     )
     
     # workout compare
     w_cmp = workout_subparsers.add_parser(
-        "compare", aliases=["c"], parents=[pull_bypass_parser],
+        "compare", aliases=["c"],
+        parents=[pull_bypass_parser, plan_date_parser, sport_type_parser],
         help="Compare planned workouts against completed activities"
-    )
-    w_cmp.add_argument(
-        "--type", "--sport-type", dest="sport_type",
-        help="Filter display by sport type"
-    )
-    w_cmp.add_argument(
-        "--days", type=int, dest="days", metavar="N",
-        help="Compare workouts for N days from today"
-    )
-    w_cmp.add_argument(
-        "--weeks", type=float, dest="weeks", metavar="N",
-        help="Compare workouts for N weeks from today"
-    )
-    w_cmp.add_argument(
-        "--from", "--from-date", dest="from_date",
-        help="Compare workouts starting from DATE (YYYY-MM-DD)"
-    )
-    w_cmp.add_argument(
-        "--until", "--until-date", dest="until_date",
-        help="Compare workouts until DATE (YYYY-MM-DD)"
-    )
-    w_cmp.add_argument(
-        "--from-mesocycle", action="store_true", dest="from_meso",
-        help="Compare workouts starting from the start of the current mesocycle"
-    )
-    w_cmp.add_argument(
-        "--until-mesocycle", type=int, nargs="?", const=-1, dest="until_meso_id", metavar="ID",
-        help="Compare workouts until the end of a mesocycle (uses current if ID omitted)"
-    )
-    w_cmp.add_argument(
-        "--mesocycle", type=int, nargs="?", const=-1, dest="meso_id", metavar="ID",
-        help="Compare workouts within a mesocycle (uses current if ID omitted)"
-    )
-    w_cmp.add_argument(
-        "--goal", "--goal-id", type=int, nargs="?", const=-1, dest="goal_id", metavar="ID",
-        help="Compare workouts for a goal's plan duration (uses active goal if ID omitted)"
     )
 
     # workout generate
@@ -393,47 +369,12 @@ def main() -> None:
     # workout push
     w_push = workout_subparsers.add_parser(
         "push", aliases=["p"],
+        parents=[plan_date_parser, sport_type_parser],
         help="Commit local planned workouts to Google Calendar"
     )
     w_push.add_argument(
         "-f", "--force", action="store_true",
         help="Re-push already-synced workouts, overwriting existing calendar entries"
-    )
-    w_push.add_argument(
-        "--type", "--sport-type", dest="sport_type",
-        help="Filter workouts by sport type"
-    )
-    w_push.add_argument(
-        "--days", type=int, dest="days", metavar="N",
-        help="Push workouts for N days from today"
-    )
-    w_push.add_argument(
-        "--weeks", type=float, dest="weeks", metavar="N",
-        help="Push workouts for N weeks from today"
-    )
-    w_push.add_argument(
-        "--from", "--from-date", dest="from_date",
-        help="Push workouts starting from DATE (YYYY-MM-DD)"
-    )
-    w_push.add_argument(
-        "--until", "--until-date", dest="until_date",
-        help="Push workouts until DATE (YYYY-MM-DD)"
-    )
-    w_push.add_argument(
-        "--from-mesocycle", action="store_true", dest="from_meso",
-        help="Push workouts starting from the start of the current mesocycle"
-    )
-    w_push.add_argument(
-        "--until-mesocycle", type=int, nargs="?", const=-1, dest="until_meso_id", metavar="ID",
-        help="Push workouts until the end of a mesocycle (uses current if ID omitted)"
-    )
-    w_push.add_argument(
-        "--mesocycle", type=int, nargs="?", const=-1, dest="meso_id", metavar="ID",
-        help="Push workouts within a mesocycle (uses current if ID omitted)"
-    )
-    w_push.add_argument(
-        "--goal", "--goal-id", type=int, nargs="?", const=-1, dest="goal_id", metavar="ID",
-        help="Push workouts for a goal's plan duration (uses active goal if ID omitted)"
     )
 
     # workout swap
@@ -513,24 +454,8 @@ def main() -> None:
     # data analyze
     d_an = data_subparsers.add_parser(
         "analyze", aliases=["a"],
-        parents=[pull_bypass_parser],
+        parents=[pull_bypass_parser, basic_date_parser],
         help="Analyze recorded workouts and metrics to determine macrocycle/mesocycles"
-    )
-    d_an.add_argument(
-        "--from", "--from-date", dest="from_date",
-        help="Start date of the historical period to analyze (YYYY-MM-DD)"
-    )
-    d_an.add_argument(
-        "--until", "--until-date", dest="until_date",
-        help="End date of the historical period to analyze (YYYY-MM-DD, defaults to today)"
-    )
-    d_an.add_argument(
-        "--days", type=int, dest="days", metavar="N",
-        help="Number of days to analyze looking back from --until"
-    )
-    d_an.add_argument(
-        "--weeks", type=float, dest="weeks", metavar="N",
-        help="Number of weeks to analyze looking back from --until"
     )
     d_an.add_argument(
         "--context", dest="context",
@@ -567,42 +492,9 @@ def main() -> None:
     # data show-metrics
     d_sm = data_subparsers.add_parser(
         "show-metrics", aliases=["sm"],
-        parents=[pull_bypass_parser],
+        parents=[pull_bypass_parser, plan_date_parser],
         help="Show athlete metrics over a date range"
     )
-    d_sm.add_argument(
-        "--days", type=int, dest="days", metavar="N",
-        help="Show metrics for N days"
-    )
-    d_sm.add_argument(
-        "--weeks", type=float, dest="weeks", metavar="N",
-        help="Show metrics for N weeks"
-    )
-    d_sm.add_argument(
-        "--from", "--from-date", dest="from_date",
-        help="Show metrics starting from DATE (YYYY-MM-DD)"
-    )
-    d_sm.add_argument(
-        "--until", "--until-date", dest="until_date",
-        help="Show metrics until DATE (YYYY-MM-DD)"
-    )
-    d_sm.add_argument(
-        "--from-mesocycle", action="store_true", dest="from_meso",
-        help="Show metrics starting from the start of the current mesocycle"
-    )
-    d_sm.add_argument(
-        "--until-mesocycle", type=int, nargs="?", const=-1, dest="until_meso_id",
-        metavar="ID", help="Show metrics until the end of a mesocycle"
-    )
-    d_sm.add_argument(
-        "--mesocycle", type=int, nargs="?", const=-1, dest="meso_id",
-        metavar="ID", help="Show metrics within a mesocycle"
-    )
-    d_sm.add_argument(
-        "--goal", "--goal-id", type=int, nargs="?", const=-1, dest="goal_id",
-        metavar="ID", help="Show metrics for a goal's plan duration"
-    )
-
     d_sm.add_argument(
         "--csv", action="store_true", dest="csv",
         help="Output data as CSV for script consumption"
@@ -615,46 +507,9 @@ def main() -> None:
     # data show-activities
     d_sa = data_subparsers.add_parser(
         "show-activities", aliases=["sa"],
-        parents=[pull_bypass_parser],
+        parents=[pull_bypass_parser, plan_date_parser, sport_type_parser],
         help="Show completed activities over a date range"
     )
-    d_sa.add_argument(
-        "--days", type=int, dest="days", metavar="N",
-        help="Show activities for N days"
-    )
-    d_sa.add_argument(
-        "--weeks", type=float, dest="weeks", metavar="N",
-        help="Show activities for N weeks"
-    )
-    d_sa.add_argument(
-        "--from", "--from-date", dest="from_date",
-        help="Show activities starting from DATE (YYYY-MM-DD)"
-    )
-    d_sa.add_argument(
-        "--until", "--until-date", dest="until_date",
-        help="Show activities until DATE (YYYY-MM-DD)"
-    )
-    d_sa.add_argument(
-        "--from-mesocycle", action="store_true", dest="from_meso",
-        help="Show activities starting from the start of the current mesocycle"
-    )
-    d_sa.add_argument(
-        "--until-mesocycle", type=int, nargs="?", const=-1, dest="until_meso_id",
-        metavar="ID", help="Show activities until the end of a mesocycle"
-    )
-    d_sa.add_argument(
-        "--mesocycle", type=int, nargs="?", const=-1, dest="meso_id",
-        metavar="ID", help="Show activities within a mesocycle"
-    )
-    d_sa.add_argument(
-        "--goal", "--goal-id", type=int, nargs="?", const=-1, dest="goal_id",
-        metavar="ID", help="Show activities for a goal's plan duration"
-    )
-    d_sa.add_argument(
-        "--type", "--sport-type", dest="sport_type",
-        help="Filter activities by sport type"
-    )
-
     d_sa.add_argument(
          "--csv", action="store_true", dest="csv",
          help="Output data as CSV for script consumption"
