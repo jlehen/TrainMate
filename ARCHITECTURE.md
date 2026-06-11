@@ -523,8 +523,8 @@ Handler functions are named `run_<command>_<subcommand>()` in `trainmate_cli.py`
 | `workout`    | `list`       | `w l`    | Show planned workouts (`--type TYPE`, `--days N`,        |
 |              |              |          | `--weeks N`, `--from DATE`, `--until DATE`,              |
 |              |              |          | `--from-mesocycle`, `--until-mesocycle [ID]`,            |
-|              |              |          | `--mesocycle [ID]`, `--goal [ID]`). Defaults to showing  |
-|              |              |          | workouts from today for the next 7 days if no options.   |
+|              |              |          | `--mesocycle [ID]`, `--goal [ID]`, `--removed`).         |
+|              |              |          | Defaults to showing workouts from today for 7 days.      |
 | `workout`    | `compare`    | `w c`    | Compare planned workouts vs completed activities.        |
 |              |              |          | Calls `analyze_adherence()` and prints PLANNED/ACTUAL    |
 |              |              |          | per day; flags missed sessions (red), rest violations    |
@@ -543,6 +543,8 @@ Handler functions are named `run_<command>_<subcommand>()` in `trainmate_cli.py`
 |              |              |          | `removed`, updates Calendar event to be marked deleted; |
 |              |              |          | kept in DB, hidden from list/compare, shown to coach as |
 |              |              |          | a cancellation (with the reason)                        |
+| `workout`    | `restore`    | `w res`  | Restore soft-removed workout by ID. Clears `removed`    |
+|              |              |          | flags and syncs to Calendar to remove `[Deleted]` mark. |
 | `workout`    | `adapt`      | `w a`    | Run daily adaptation check (`--date YYYY-MM-DD`, `-y` auto-apply)        |
 | `workout`    | `push`       | `w p`    | Sync planned workouts to Google Calendar                                 |
 | `workout`    | `swap`       | `w s`    | Swap workouts between two dates (`<date1> <date2>`) or two IDs           |

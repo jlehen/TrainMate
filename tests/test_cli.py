@@ -623,6 +623,20 @@ class TestTrainMateCLI(unittest.TestCase):
         self.assertIn("already removed", stdout)
         mock_calendar.sync_workout.assert_not_called()
 
+        # Verify CLI list command excludes or includes the removed workout depending on --removed.
+        exit_code, stdout, _ = self.run_cli(
+            ["workout", "list", "--from", "2026-06-02", "--until", "2026-06-02"]
+        )
+        self.assertEqual(exit_code, 0)
+        self.assertNotIn("Interval Session", stdout)
+
+        exit_code, stdout, _ = self.run_cli(
+            ["workout", "list", "--from", "2026-06-02", "--until", "2026-06-02", "--removed"]
+        )
+        self.assertEqual(exit_code, 0)
+        self.assertIn("Interval Session", stdout)
+        self.assertIn("[REMOVED]", stdout)
+
     @patch("trainmate_cli.garmin")
     def test_plan_show_never_pulls(self, mock_garmin):
         # `plan show` is a pure read: it must never prompt or trigger a Garmin pull,

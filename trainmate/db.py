@@ -678,6 +678,19 @@ class Database:
             )
             conn.commit()
 
+    def restore_workout(self, workout_id: int) -> None:
+        """Restores a soft-deleted workout.
+        
+        Clears the `removed` and `removed_reason` flags and marks it pending re-push
+        (`synced = 0`) so the Google Calendar event can be un-deleted."""
+        with self._get_connection() as conn:
+            conn.execute(
+                "UPDATE workouts SET removed = 0, removed_reason = NULL, "
+                "synced = 0 WHERE id = ?",
+                (workout_id,)
+            )
+            conn.commit()
+
     def update_workout_date(
         self, workout_id: int, new_date: str, modification_reason: str
     ) -> None:

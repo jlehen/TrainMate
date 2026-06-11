@@ -308,6 +308,10 @@ def main() -> None:
         parents=[plan_date_parser, sport_type_parser],
         help="Show all planned workouts"
     )
+    w_list.add_argument(
+        "--removed", action="store_true",
+        help="Include soft-removed workouts (e.g. to find their ID for restoring)"
+    )
     
     # workout compare
     w_cmp = workout_subparsers.add_parser(
@@ -358,6 +362,12 @@ def main() -> None:
         help="Why the workout is being removed (shown to the coach as a deliberate "
              "cancellation)"
     )
+
+    # workout restore
+    w_restore = workout_subparsers.add_parser(
+        "restore", aliases=["res"], help="Restore a soft-removed workout by ID"
+    )
+    w_restore.add_argument("id", type=int, help="Workout ID to restore")
     
     # workout adapt
     w_adapt = workout_subparsers.add_parser(
@@ -590,6 +600,8 @@ def main() -> None:
             run_workout_generate(args)
         elif sub in ("rm", "r"):
             run_workout_rm(args)
+        elif sub in ("restore", "res"):
+            run_workout_restore(args)
         elif sub in ("adapt", "a"):
             run_workout_adapt(args)
         elif sub in ("push", "p"):
@@ -1726,7 +1738,8 @@ def run_workout_list(args: argparse.Namespace) -> None:
     workouts = db.get_workouts(
         start_date=start_date,
         end_date=end_date,
-        sport_type=args.sport_type
+        sport_type=args.sport_type,
+        include_removed=getattr(args, "removed", False)
     )
     
     print(bold(cyan("=== WORKOUT SCHEDULE ===")))
@@ -1747,13 +1760,16 @@ def run_workout_list(args: argparse.Namespace) -> None:
         sync_marker = ""
         if w['synced']:
             sync_marker = bold(green(" [SYNCED]"))
+        rem_marker = ""
+        if w.get('removed'):
+            rem_marker = bold(red(" [REMOVED]"))
         duration = w.get('duration_minutes')
         tss = w.get('tss')
         duration_str = f" | {duration}min" if duration else ""
         tss_str = f" | TSS {tss}" if tss is not None else ""
         print(
             f"ID: {w['id']} | {cyan(fmt_date(w['date']))} | {magenta(w['sport_type'].upper())} | "
-            f"{bold(w['title'])}{mod_marker}{sync_marker}{duration_str}{tss_str}"
+            f"{bold(w['title'])}{mod_marker}{sync_marker}{rem_marker}{duration_str}{tss_str}"
         )
         print(format_labeled_block("  Description:", w['description']))
         if w.get('modification_reason'):
@@ -1996,6 +2012,33 @@ def run_workout_rm(args: argparse.Namespace) -> None:
     ))
     if args.reason:
         print(f"Reason: {args.reason}")
+
+def run_workout_restore(args: argparse.Namespace) -> None:
+    """Restores a soft-removed workout and updates its Calendar event to remove the
+    deleted mark."""
+    workout = db.get_workout_by_id(args.id)
+    if not workout:
+        print(red(f"Workout with ID {args.id} not found."))
+        return
+
+    if not workout.get('removed'):
+        print(yellow(f"Workout with ID {args.id} ('{workout['title']}') is not removed."))
+        return
+
+    db.restore_workout(args.id)
+
+    if workout.get('google_event_id'):
+        print("Workout is synced to Google Calendar. Updating calendar event...")
+        updated_workout = db.get_workout_by_id(args.id)
+        if updated_workout is not None:
+            try:
+                calendar_syncer.sync_workout(updated_workout)
+            except Exception as e:
+                print(red(f"Warning: Failed to update Google Calendar: {e}"))
+                print(yellow("The workout was restored locally but might still appear deleted on your calendar."))
+                return
+
+    print(green(f"Workout with ID {args.id} restored successfully."))
 
 
 def _resolve_swap_ops(args: argparse.Namespace) -> list | None:
