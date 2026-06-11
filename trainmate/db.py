@@ -2,7 +2,7 @@ import sqlite3
 import os
 import json
 from datetime import datetime, timedelta, timezone
-from typing import Any, Optional, List, Dict, Generator
+from typing import Any, Optional, List, Dict, Generator, Tuple
 from contextlib import contextmanager
 from trainmate.config import config
 from trainmate.util import today_date
@@ -1172,6 +1172,24 @@ class Database:
                 (macrocycle_id,)
             )
             return [dict(row) for row in cursor.fetchall()]  # type: ignore
+
+    def get_mesocycle_ranges(self, start_date: str, end_date: str) -> List[Tuple[str, str]]:
+        """Returns the (start_date, end_date) spans of all mesocycles overlapping the
+        given window, across every objective regardless of status.
+
+        Used to decide whether a date fell inside *any* planned block: an activity on a
+        covered date with no matching workout is a genuine deviation, whereas one outside
+        all coverage is just history the plan never governed (e.g. before tool adoption,
+        or an unplanned off-season stretch). Status is intentionally not filtered — a
+        since-completed objective still planned its dates."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT start_date, end_date FROM mesocycles
+                WHERE start_date <= ? AND end_date >= ?
+                ORDER BY start_date ASC
+            """, (end_date, start_date))
+            return [(row['start_date'], row['end_date']) for row in cursor.fetchall()]
 
     def get_mesocycle(self, mesocycle_id: int) -> Optional[Mesocycle]:
         """Fetches a specific mesocycle by its unique ID."""

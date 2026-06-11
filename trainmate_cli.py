@@ -11,7 +11,7 @@ from trainmate.db import db
 from trainmate import garmin
 from trainmate.google_calendar import calendar_syncer
 from trainmate.coach import coach_service
-from trainmate.adherence import analyze_adherence
+from trainmate.adherence import analyze_adherence, date_covered
 from trainmate.config import config
 from trainmate.util import (
     bold, dim, green, red, yellow, cyan, blue, magenta, gray,
@@ -1925,12 +1925,17 @@ def run_workout_compare(args: argparse.Namespace) -> None:
     end_date_obj = datetime.strptime(end_date, "%Y-%m-%d").date()
     history_days = (end_date_obj - start_date_obj).days + 1
 
-    discrepancies, matching_results = analyze_adherence(
+    # Planned blocks overlapping the window: an activity on a date outside every block
+    # is history no plan governed, shown as informational rather than "unplanned".
+    covered_ranges = db.get_mesocycle_ranges(start_date, end_date)
+
+    discrepancies, matching_results, informational = analyze_adherence(
         planned_workouts=all_workouts,
         completed_activities=activities,
         start_date_obj=start_date_obj,
         history_days=history_days,
         low_load_threshold=config.low_load_threshold,
+        covered_ranges=covered_ranges,
     )
 
     sport_filter = (getattr(args, 'sport_type', None) or "").lower() or None
@@ -2018,10 +2023,12 @@ def run_workout_compare(args: argparse.Namespace) -> None:
         for act in unplanned:
             act_load = garmin.activity_load(act)
             act_str = _fmt_act(act)
-            if act_load >= config.low_load_threshold:
+            if act_load < config.low_load_threshold:
+                print(gray(f"  (minor):    {act_str}"))
+            elif date_covered(date_curr, covered_ranges):
                 print(f"  UNPLANNED:  {yellow(act_str)}")
             else:
-                print(gray(f"  (minor):    {act_str}"))
+                print(gray(f"  (off-plan): {act_str}"))
 
         print(gray("-" * 40))
 
@@ -2039,6 +2046,12 @@ def run_workout_compare(args: argparse.Namespace) -> None:
         print(bold(yellow(f"{n} discrepanc{'ies' if n != 1 else 'y'} found.")))
     else:
         print(bold(green("No discrepancies found. Great adherence!")))
+
+    if informational:
+        print()
+        print(bold(gray("=== OUTSIDE ANY PLAN (informational) ===")))
+        for note in informational:
+            print(gray(note))
 
 
 def run_workout_push(args: argparse.Namespace) -> None:

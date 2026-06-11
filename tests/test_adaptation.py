@@ -385,7 +385,7 @@ class TestAdaptation(unittest.TestCase):
             },
         ]
 
-        discrepancies, matching = analyze_adherence(
+        discrepancies, matching, _ = analyze_adherence(
             planned_workouts=planned,
             completed_activities=completed,
             start_date_obj=date(2026, 6, 1),
@@ -404,6 +404,58 @@ class TestAdaptation(unittest.TestCase):
         self.assertTrue(
             any("Unplanned Activity! Performed 'Extra Run'" in d for d in discrepancies)
         )
+
+    def test_analyze_adherence_coverage_gates_unplanned(self):
+        """An activity with no planned workout is an 'Unplanned Activity!' deviation only
+        when its date falls inside a planned block; outside all coverage it is softened
+        to an informational note instead."""
+        completed = [{
+            "date": "2026-06-04",
+            "activity_id": "act4",
+            "activity_name": "Extra Run",
+            "activity_type": "running",
+            "duration_sec": 1800,
+            "rpe": 6,
+            "tss": 27.0,
+        }]
+
+        # Covered: 2026-06-04 sits inside the planned block -> deviation.
+        disc, _, info = analyze_adherence(
+            planned_workouts=[],
+            completed_activities=completed,
+            start_date_obj=date(2026, 6, 1),
+            history_days=7,
+            low_load_threshold=10.0,
+            covered_ranges=[("2026-06-01", "2026-06-30")],
+        )
+        self.assertTrue(any("Unplanned Activity! Performed 'Extra Run'" in d for d in disc))
+        self.assertEqual(info, [])
+
+        # Uncovered: the block starts after the activity -> informational, not a deviation.
+        disc, _, info = analyze_adherence(
+            planned_workouts=[],
+            completed_activities=completed,
+            start_date_obj=date(2026, 6, 1),
+            history_days=7,
+            low_load_threshold=10.0,
+            covered_ranges=[("2026-06-10", "2026-06-30")],
+        )
+        self.assertEqual(disc, [])
+        self.assertEqual(len(info), 1)
+        self.assertIn("Extra Run", info[0])
+        self.assertIn("no planned block", info[0])
+
+        # No coverage at all (cold start) -> informational.
+        disc, _, info = analyze_adherence(
+            planned_workouts=[],
+            completed_activities=completed,
+            start_date_obj=date(2026, 6, 1),
+            history_days=7,
+            low_load_threshold=10.0,
+            covered_ranges=[],
+        )
+        self.assertEqual(disc, [])
+        self.assertEqual(len(info), 1)
 
     def test_analyze_adherence_variable_tolerance(self):
         # 1. Low expected load (exp_load = 10.0 <= 20.0, tolerance = 50%)
@@ -425,7 +477,7 @@ class TestAdaptation(unittest.TestCase):
             "rpe": 2,
             "tss": 10.0,
         }]
-        disc, _ = analyze_adherence(
+        disc, _, _ = analyze_adherence(
             planned_low, completed_low_ok, date(2026, 6, 1), 1
         )
         self.assertEqual(len(disc), 0, f"Expected no discrepancies, got {disc}")
@@ -440,7 +492,7 @@ class TestAdaptation(unittest.TestCase):
             "rpe": 2,
             "tss": 10.0,
         }]
-        disc, _ = analyze_adherence(
+        disc, _, _ = analyze_adherence(
             planned_low, completed_low_err, date(2026, 6, 1), 1
         )
         self.assertEqual(len(disc), 1)
@@ -465,7 +517,7 @@ class TestAdaptation(unittest.TestCase):
             "rpe": 6,
             "tss": 110.0,
         }]
-        disc, _ = analyze_adherence(
+        disc, _, _ = analyze_adherence(
             planned_high, completed_high_err, date(2026, 6, 1), 1
         )
         self.assertEqual(len(disc), 1)
@@ -490,7 +542,7 @@ class TestAdaptation(unittest.TestCase):
             "rpe": 5,
             "tss": 60.0,
         }]
-        disc, _ = analyze_adherence(
+        disc, _, _ = analyze_adherence(
             planned_mid, completed_mid_ok, date(2026, 6, 1), 1
         )
         self.assertEqual(len(disc), 0, f"Expected no discrepancies, got {disc}")
@@ -505,7 +557,7 @@ class TestAdaptation(unittest.TestCase):
             "rpe": 5,
             "tss": 60.0,
         }]
-        disc, _ = analyze_adherence(
+        disc, _, _ = analyze_adherence(
             planned_mid, completed_mid_err, date(2026, 6, 1), 1
         )
         self.assertEqual(len(disc), 1)
@@ -530,7 +582,7 @@ class TestAdaptation(unittest.TestCase):
             "rpe": 0,
             "tss": 0.0,
         }]
-        disc, _ = analyze_adherence(
+        disc, _, _ = analyze_adherence(
             planned_zero, completed_zero_ok, date(2026, 6, 1), 1
         )
         self.assertEqual(len(disc), 0, f"Expected no discrepancies, got {disc}")
@@ -545,7 +597,7 @@ class TestAdaptation(unittest.TestCase):
             "rpe": 0,
             "tss": 0.0,
         }]
-        disc, _ = analyze_adherence(
+        disc, _, _ = analyze_adherence(
             planned_zero, completed_zero_err, date(2026, 6, 1), 1
         )
         self.assertEqual(len(disc), 1)

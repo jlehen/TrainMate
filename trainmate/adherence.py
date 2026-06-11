@@ -1,7 +1,21 @@
 from datetime import timedelta
-from typing import List, Dict, Any, Tuple
+from typing import List, Dict, Any, Tuple, Optional
 
 from trainmate.garmin import activity_load, _rpe_tss
+
+
+def date_covered(
+    date_str: str, covered_ranges: Optional[List[Tuple[str, str]]]
+) -> bool:
+    """Whether `date_str` falls inside any planned block (mesocycle span).
+
+    `covered_ranges` of None means "assume covered" — preserves the original
+    behavior for callers that don't supply coverage. Dates are YYYY-MM-DD, so
+    lexicographic comparison is chronological."""
+    if covered_ranges is None:
+        return True
+    return any(start <= date_str <= end for start, end in covered_ranges)
+
 
 # Maps planned workout types to corresponding Garmin activity types
 SPORT_MAPPING = {
@@ -34,7 +48,8 @@ def analyze_adherence(
     start_date_obj: Any,
     history_days: int,
     low_load_threshold: float = 25.0,
-) -> Tuple[List[str], List[Dict[str, Any]]]:
+    covered_ranges: Optional[List[Tuple[str, str]]] = None,
+) -> Tuple[List[str], List[Dict[str, Any]], List[str]]:
     """Evaluates planned workouts vs completed Garmin activities over a rolling window.
 
     Calculates adherence discrepancies (missed workouts, duration/workload mismatches, and
@@ -45,14 +60,20 @@ def analyze_adherence(
         completed_activities: List of completed activities in the window.
         start_date_obj: Start date of the evaluation window.
         history_days: Length of the window in days.
+        covered_ranges: (start, end) spans of planned blocks. An activity on a day with
+            no planned workout is reported as a deviation ("Unplanned Activity!") only if
+            its date falls within one of these spans; outside all coverage it is softened
+            to an informational note. None means treat every date as covered.
 
     Returns:
         A tuple containing:
-            - List of text discrepancy messages.
+            - List of text discrepancy messages (deviations from the plan).
             - List of mapping results with date, planned workout, and completed activity.
+            - List of informational notes (activities on dates no plan governed).
     """
     matching_results = []
     discrepancies = []
+    informational = []
 
     # Group completed activities by date
     activities_by_date: Dict[str, List[Dict[str, Any]]] = {}
@@ -164,11 +185,22 @@ def analyze_adherence(
             if act["activity_id"] in used_act_ids:
                 continue
             act_load = activity_load(act)
-            if act_load >= low_load_threshold:
+            if act_load < low_load_threshold:
+                continue
+            if date_covered(date_curr, covered_ranges):
                 discrepancies.append(
                     f"- {date_curr}: Unplanned Activity! Performed "
                     f"'{act['activity_name']}' ({act['activity_type']}) with "
                     f"workload {act_load:.1f} on a day with no planned workouts."
                 )
+            else:
+                # No plan governs this date (e.g. before tool adoption, or an
+                # unplanned off-season stretch). The load still feeds fatigue/ACWR
+                # via completed_activities — surface it as informational, not a deviation.
+                informational.append(
+                    f"- {date_curr}: Performed '{act['activity_name']}' "
+                    f"({act['activity_type']}) with workload {act_load:.1f} on a day "
+                    f"with no planned block."
+                )
 
-    return discrepancies, matching_results
+    return discrepancies, matching_results, informational

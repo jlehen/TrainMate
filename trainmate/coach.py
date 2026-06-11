@@ -592,6 +592,7 @@ You MUST respond with a JSON object containing:
         meso_end_date_str: str, objectives: List[Objective], lifeevents: List[LifeEvent],
         guidelines: str, profile: Optional[Dict[str, Any]], strategy: str,
         meso_text: str, learnings: str, discrepancies: List[str],
+        informational: Optional[List[str]] = None,
         removed_workouts: Optional[List[Workout]] = None
     ) -> Dict[str, Any]:
         """Queries LLM to evaluate metrics/activities and adapt workouts if needed."""
@@ -601,6 +602,9 @@ Analyze the athlete's actual workout adherence and physiological metrics traject
 over the past {history_days} days.
 Review the list of completed activities compared to planned workouts and any
 calculated discrepancies (misses, workload/duration differences, rest violations).
+Activities listed as informational fell on dates no plan governed (e.g. before the
+plan began) — count their load when judging fatigue, but do NOT treat them as
+adherence failures or unplanned deviations.
 Also inspect the rolling baseline reference and the daily metrics sequence to see
 if the athlete shows signs of accumulated fatigue.
 
@@ -669,6 +673,13 @@ adding a near-duplicate. Do not record one-off, day-specific noise.
                 + format_removed_workouts(removed_workouts) + "\n"
             )
 
+        informational_section = ""
+        if informational:
+            informational_section = (
+                "\nActivities Outside Any Plan (informational — load counts, "
+                "but not adherence failures):\n" + "\n".join(informational) + "\n"
+            )
+
         user_content = f"""
 Evaluation Date: {target_date_str}
 Adaptation Range: {target_date_str} to {meso_end_date_str}
@@ -687,7 +698,7 @@ Actual Completed Garmin Activities in Window:
 
 Adherence Discrepancies & Violations:
 {discrepancy_text}
-"""
+{informational_section}"""
         print(f"Querying OpenRouter to evaluate adaptation for the remainder of the mesocycle "
               f"({target_date_str} -> {meso_end_date_str})...")
         decision = openrouter_client.complete(
@@ -1504,13 +1515,19 @@ class CoachService:
         baseline = self._db.get_baseline(target_date_str)
         baseline_str = format_baseline(baseline)
 
+        # Planned blocks overlapping the window. Activities on dates outside every block
+        # are history the plan never governed (e.g. before tool adoption), so they are
+        # reported as informational rather than as "unplanned" deviations.
+        covered_ranges = self._db.get_mesocycle_ranges(start_date_str, target_date_str)
+
         # Match planned workouts vs completed activities and compute discrepancies
-        discrepancies, matching_results = analyze_adherence(
+        discrepancies, matching_results, informational = analyze_adherence(
             planned_workouts=planned_workouts,
             completed_activities=completed_activities,
             start_date_obj=start_date_obj,
             history_days=history_days,
             low_load_threshold=config.low_load_threshold,
+            covered_ranges=covered_ranges,
         )
 
         # Determine mesocycle end date for adaptation range
@@ -1560,6 +1577,7 @@ class CoachService:
             meso_text=meso_text,
             learnings=learnings,
             discrepancies=discrepancies,
+            informational=informational,
             removed_workouts=removed_workouts
         )
 
