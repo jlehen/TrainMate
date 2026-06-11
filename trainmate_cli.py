@@ -350,7 +350,7 @@ def main() -> None:
             "Generate workouts (microcycles) from today, driven by the active "
             "periodization strategy. With no horizon flag, generates "
             "config.workout_generate_days days ahead (28 by default). Saves to the "
-            "database only; run 'workout push' afterward to sync to Google Calendar."
+            f"database only; run '{green('workout push')}' afterward to sync to Google Calendar."
         )
     )
     p_w_gen.add_argument(
@@ -757,8 +757,8 @@ def run_status(verbose: bool = False, no_pull: bool = False) -> None:
             if macro.get('config_hash') != current_hash:
                 print(yellow(
                     "\nWarning: config.yaml has changed since the active periodization plan "
-                    "was generated.\nRun 'plan generate' to regenerate."
-                ))
+                    "was generated.\nRun "
+                ) + green("'plan generate'") + yellow(" to regenerate."))
             
             mesos = db.get_mesocycles_for_macrocycle(macro['id'])
             active_meso = None
@@ -783,7 +783,7 @@ def run_status(verbose: bool = False, no_pull: bool = False) -> None:
         else:
             print(
                 f"{bold('Active Mesocycle')}: "
-                f"No periodization strategy established. Run 'plan generate' first."
+                f"No periodization strategy established. Run '{green('plan generate')}' first."
             )
     else:
         print(
@@ -855,7 +855,11 @@ def run_status(verbose: bool = False, no_pull: bool = False) -> None:
                 f"(std: {baseline['sleep_baseline_std']:.2f})"
             )
     else:
-        print(yellow("\nRecent Garmin Metrics: No cached metrics. Run 'data pull' first."))
+        print(
+            yellow("\nRecent Garmin Metrics: No cached metrics. Run ")
+            + green("'data pull'")
+            + yellow(" first.")
+        )
 
     # Coach Learnings
     learnings = db.get_learnings()
@@ -923,10 +927,11 @@ def run_goal_add(args: argparse.Namespace) -> None:
         priority=args.priority,
         status='active'
     )
-    print(green(
-        f"Goal '{args.title}' added successfully. "
-        f"Run 'plan generate' to generate training cycles."
-    ))
+    print(
+        green(f"Goal '{args.title}' added successfully. Run ")
+        + bold(green("'plan generate'"))
+        + green(" to generate training cycles.")
+    )
 
 
 def run_goal_edit(args: argparse.Namespace) -> None:
@@ -955,10 +960,11 @@ def run_goal_edit(args: argparse.Namespace) -> None:
         return
 
     db.update_objective(args.id, **kwargs)
-    print(green(
-        f"Goal with ID {args.id} updated successfully. "
-        "Run 'plan generate' to regenerate training cycles if needed."
-    ))
+    print(
+        green(f"Goal with ID {args.id} updated successfully. Run ")
+        + bold(green("'plan generate'"))
+        + green(" to regenerate training cycles if needed.")
+    )
 
 
 def run_goal_list() -> None:
@@ -1018,10 +1024,13 @@ def run_lifeevent_add(args: argparse.Namespace) -> None:
         event_type=args.type,
         impact_description=args.desc
     )
-    print(green(
-        f"Life event '{args.title}' logged. "
-        f"This will be factored in when running 'plan generate' or 'workout adapt'."
-    ))
+    print(
+        green(f"Life event '{args.title}' logged. This will be factored in when running ")
+        + bold(green("'plan generate'"))
+        + green(" or ")
+        + bold(green("'workout adapt'"))
+        + green(".")
+    )
 
 
 def run_lifeevent_edit(args: argparse.Namespace) -> None:
@@ -1048,10 +1057,13 @@ def run_lifeevent_edit(args: argparse.Namespace) -> None:
         return
 
     db.update_lifeevent(args.id, **kwargs)
-    print(green(
-        f"Life event with ID {args.id} updated successfully. "
-        "Run 'plan generate' or 'workout adapt' to factor in the changes."
-    ))
+    print(
+        green(f"Life event with ID {args.id} updated successfully. Run ")
+        + bold(green("'plan generate'"))
+        + green(" or ")
+        + bold(green("'workout adapt'"))
+        + green(" to factor in the changes.")
+    )
 
 
 def _lifeevent_print(e: dict, show_impact: bool = True) -> None:
@@ -1166,7 +1178,7 @@ def run_plan_generate(args: argparse.Namespace) -> None:
         if confirm in ('y', 'yes'):
             coach_service.apply_periodization_plan(next_goal['id'], strategy, mesocycles)
             print(green(f"\nGenerated {len(mesocycles)} mesocycles. Save complete."))
-            print("Run 'workout generate' to schedule workouts based on this plan.")
+            print(f"Run '{green('workout generate')}' to schedule workouts based on this plan.")
         else:
             print(yellow("\nPlan discarded."))
 
@@ -1201,7 +1213,7 @@ def run_plan_show(args: argparse.Namespace) -> None:
         print(yellow(
             f"No active macrocycle strategy found for goal '{next_goal['title']}'."
         ))
-        print("Run 'plan generate' to create one.")
+        print(f"Run '{green('plan generate')}' to create one.")
         return
         
     mesocycles = db.get_mesocycles_for_macrocycle(macrocycle['id'])
@@ -1310,8 +1322,8 @@ def run_plan_rm(args: argparse.Namespace) -> None:
         print(yellow(
             "\nWarning: The following subsequent active goals have existing plans that\n"
             "were aligned with the plan you just deleted. You may need to regenerate them\n"
-            "so their dates align correctly (e.g. running 'plan generate --goal <ID> --force'):"
-        ))
+            "so their dates align correctly (e.g. running "
+        ) + green("'plan generate --goal <ID> --force'") + yellow("):"))
         for sg in subsequent_goals_with_plans:
             print(yellow(f" - ID {sg['id']}: '{sg['title']}' (Target date: {sg['target_date']})"))
 
@@ -1378,8 +1390,11 @@ def _resolve_feedback_text(args: argparse.Namespace, current: Optional[str]) -> 
 
 
 _FEEDBACK_REGEN_NOTE = (
-    "Note: You must regenerate the periodization plan to apply this feedback.\n"
-    "Run 'plan generate --force' (or with '--goal <ID> --force') to update the plan."
+    yellow("Note: You must regenerate the periodization plan to apply this feedback.\nRun ")
+    + green("'plan generate --force'")
+    + yellow(" (or with ")
+    + green("'--goal <ID> --force'")
+    + yellow(") to update the plan.")
 )
 
 
@@ -1405,7 +1420,7 @@ def run_plan_feedback(args: argparse.Namespace) -> None:
         print(green(
             f"Feedback successfully saved for Mesocycle ID {args.meso} ('{meso['name']}')."
         ))
-        print(yellow(_FEEDBACK_REGEN_NOTE))
+        print(_FEEDBACK_REGEN_NOTE)
         return
 
     # 2. Handle macrocycle feedback. Find target goal first.
@@ -1437,7 +1452,7 @@ def run_plan_feedback(args: argparse.Namespace) -> None:
         f"Feedback successfully saved for Macrocycle ID {macro['id']} "
         f"(Goal: '{next_goal['title']}')."
     ))
-    print(yellow(_FEEDBACK_REGEN_NOTE))
+    print(_FEEDBACK_REGEN_NOTE)
 
 
 # ==============================================================================
@@ -1657,20 +1672,24 @@ def run_workout_generate(args: argparse.Namespace) -> None:
                     current_hash = coach_service._get_config_hash()
                     if macro.get('config_hash') != current_hash:
                         try:
-                            confirm = input(
-                                "\nWarning: config.yaml has changed since the active "
-                                "periodization plan was generated.\n"
-                                "Generating workouts using the out-of-date plan might "
-                                "result in incorrect training targets.\n"
-                                "It is highly recommended to run 'plan generate' first. "
-                                "Proceed anyway? [y/N]: "
-                            ).strip().lower()
+                            prompt = (
+                                yellow("\nWarning: config.yaml has changed since the active "
+                                       "periodization plan was generated.\n"
+                                       "Generating workouts using the out-of-date plan might "
+                                       "result in incorrect training targets.\n"
+                                       "It is highly recommended to run ")
+                                + green("'plan generate'")
+                                + yellow(" first. Proceed anyway? [y/N]: ")
+                            )
+                            confirm = input(prompt).strip().lower()
                         except EOFError:
                             confirm = 'n'
                         if confirm not in ('y', 'yes'):
-                            print(yellow(
-                                "Workout generation cancelled. Please run 'plan generate' first."
-                            ))
+                            print(
+                                yellow("Workout generation cancelled. Please run ")
+                                + green("'plan generate'")
+                                + yellow(" first.")
+                            )
                             return
                         else:
                             print("Proceeding. Updating configuration hash in database.")
@@ -1690,7 +1709,7 @@ def run_workout_generate(args: argparse.Namespace) -> None:
         print(green(
             f"Generated {len(workouts)} workouts starting from today. Save complete."
         ))
-        print("Run 'workout push' to commit this plan to Google Calendar.")
+        print(f"Run '{green('workout push')}' to commit this plan to Google Calendar.")
     except Exception as e:
         print(red(f"Error during workout generation: {e}"))
 
@@ -2053,9 +2072,9 @@ def run_workout_push(args: argparse.Namespace) -> None:
             print("No workouts found in the specified range.")
         else:
             print(
-                "No new or modified workouts to sync. "
-                "Run 'workout generate' to generate a schedule, "
-                "or use -f to re-push already-synced workouts."
+                f"No new or modified workouts to sync. "
+                f"Run '{green('workout generate')}' to generate a schedule, "
+                f"or use -f to re-push already-synced workouts."
             )
         return
 
@@ -2197,8 +2216,11 @@ def _resolve_swap_ops(args: argparse.Namespace) -> list | None:
             + [{'id': w['id'], 'new_date': args.date1} for w in on_2]
         )
 
-    print(red("Specify two dates (e.g. 'workout swap 2026-06-09 2026-06-11') "
-              "or --id1 and --id2."))
+    print(
+        red("Specify two dates (e.g. ")
+        + bold(green("'workout swap 2026-06-09 2026-06-11'"))
+        + red(") or --id1 and --id2.")
+    )
     return None
 
 
