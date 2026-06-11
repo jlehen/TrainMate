@@ -539,20 +539,21 @@ Handler functions are named `run_<command>_<subcommand>()` in `trainmate_cli.py`
 | `workout`    | `generate`   | `w g`    | Generate workouts from active strategy (`--goal ID`,                     |
 |              |              |          | `--days N`, `--weeks N`, `--until DATE`,                                 |
 |              |              |          | `--until-goal [ID]`, `--until-mesocycle ID`)                             |
-| `workout`    | `rm`         | `w r`    | Soft-remove workout by ID (`--reason TEXT`); marks      |
-|              |              |          | `removed`, updates Calendar event to be marked deleted; |
-|              |              |          | kept in DB, hidden from list/compare, shown to coach as |
-|              |              |          | a cancellation (with the reason)                        |
+| `workout`    | `rm`         | `w r`    | Soft-remove workout by ID (`--reason TEXT` required);   |
+|              |              |          | marks `removed`, updates Calendar event to be marked    |
+|              |              |          | deleted; kept in DB, hidden from list/compare, shown    |
+|              |              |          | to coach as a cancellation (with the reason)            |
 | `workout`    | `restore`    | `w res`  | Restore soft-removed workout by ID. Clears `removed`    |
 |              |              |          | flags and syncs to Calendar to remove `[Deleted]` mark. |
 | `workout`    | `adapt`      | `w a`    | Run daily adaptation check (`--date YYYY-MM-DD`, `-y` auto-apply)        |
 | `workout`    | `push`       | `w p`    | Sync planned workouts to Google Calendar                                 |
-| `workout`    | `swap`       | `w s`    | Swap workouts between two dates (`<date1> <date2>`) or two IDs           |
-|              |              |          | (`--id1 X --id2 Y`). Runs recovery checks (consecutive hard             |
-|              |              |          | days, weekly load spikes, mesocycle crossings) and prompts on           |
-|              |              |          | warnings unless `-f`/`--force`. Syncs to Calendar unless `--no-sync`.    |
-|              |              |          | `--reason TEXT` is folded into the `modification_reason` and shown to    |
-|              |              |          | the coach.                                                              |
+| `workout`    | `swap`       | `w s`    | Swap workouts between two dates (`<date1> <date2>`)     |
+|              |              |          | or two IDs (`--id1 X --id2 Y`). Requires `--reason`.    |
+|              |              |          | Runs recovery checks (consecutive hard days, weekly     |
+|              |              |          | load spikes, mesocycle crossings) and prompts on        |
+|              |              |          | warnings unless `-f`/`--force`. Syncs to Calendar       |
+|              |              |          | unless `--no-sync`. `--reason` is folded into the       |
+|              |              |          | `modification_reason` and shown to the coach.           |
 | `workout`    | `wipe`       | —        | Delete all workouts                                                      |
 | `data`       | `pull`       | `d pull` | Fetch metrics and activities directly from Garmin (`--days`/`--from`/`--until`/`--metrics-only`/`--activities-only`/`--sleep`) |
 | `data`       | `analyze`    | `d a`    | Analyze completed workouts/metrics to detect cycles                      |

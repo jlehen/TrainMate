@@ -358,7 +358,7 @@ def main() -> None:
     )
     w_rm.add_argument("id", type=int, help="Workout ID to remove")
     w_rm.add_argument(
-        "--reason", default=None,
+        "--reason", required=True,
         help="Why the workout is being removed (shown to the coach as a deliberate "
              "cancellation)"
     )
@@ -418,7 +418,7 @@ def main() -> None:
         help="Apply the swap without prompting, even if warnings are raised"
     )
     w_swap.add_argument(
-        "--reason", default=None,
+        "--reason", required=True,
         help="Why the workouts are being swapped (recorded and shown to the coach)"
     )
 
