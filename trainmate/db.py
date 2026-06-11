@@ -152,7 +152,9 @@ class Database:
                     original_description TEXT,
                     synced INTEGER DEFAULT 0, -- 0 = pending push, 1 = calendar current
                     modification_reason TEXT, -- non-NULL <=> adapted/swapped
-                    google_event_id TEXT
+                    google_event_id TEXT,
+                    removed INTEGER DEFAULT 0, -- 1 <=> soft-deleted via `workout rm`
+                    removed_reason TEXT -- athlete's reason for removal (optional)
                 )
             """)
 
@@ -169,6 +171,17 @@ class Database:
                 pass
             try:
                 cursor.execute("ALTER TABLE workouts ADD COLUMN tss INTEGER DEFAULT NULL")
+            except sqlite3.OperationalError:
+                pass
+            # Soft-delete axis: a workout removed via `workout rm` is marked rather
+            # than deleted, so it can be excluded from reads yet still surfaced to the
+            # coach as a deliberate cancellation (distinct from a miss).
+            try:
+                cursor.execute("ALTER TABLE workouts ADD COLUMN removed INTEGER DEFAULT 0")
+            except sqlite3.OperationalError:
+                pass
+            try:
+                cursor.execute("ALTER TABLE workouts ADD COLUMN removed_reason TEXT")
             except sqlite3.OperationalError:
                 pass
             # Migrate the conflated `status` enum into an orthogonal `synced` flag.
@@ -529,7 +542,8 @@ class Database:
                         synced = ?, modification_reason = ?, google_event_id = ?,
                         duration_minutes = COALESCE(?, duration_minutes),
                         rpe = COALESCE(?, rpe),
-                        tss = COALESCE(?, tss)
+                        tss = COALESCE(?, tss),
+                        removed = 0, removed_reason = NULL
                     WHERE id = ?
                 """, (title, description, original_description, int(synced),
                       modification_reason, ge_id, duration_minutes, rpe, tss,
@@ -564,13 +578,21 @@ class Database:
         self,
         start_date: Optional[str] = None,
         end_date: Optional[str] = None,
-        sport_type: Optional[str] = None
+        sport_type: Optional[str] = None,
+        include_removed: bool = False
     ) -> List[Workout]:
-        """Fetches workouts ordered by date, optionally within a range or by sport type."""
+        """Fetches workouts ordered by date, optionally within a range or by sport type.
+
+        Soft-removed workouts (`removed = 1`, set by `workout rm`) are excluded by
+        default so they never appear in listings, comparisons, adaptation inputs, or
+        the calendar push. Pass include_removed=True to retrieve them (e.g. to tell
+        the coach a session was deliberately cancelled)."""
         with self._get_connection() as conn:
             cursor = conn.cursor()
             query = "SELECT * FROM workouts WHERE 1=1"
             params = []
+            if not include_removed:
+                query += " AND COALESCE(removed, 0) = 0"
             if start_date:
                 query += " AND date >= ?"
                 params.append(start_date)
@@ -619,6 +641,23 @@ class Database:
         """Deletes a workout by ID."""
         with self._get_connection() as conn:
             conn.cursor().execute("DELETE FROM workouts WHERE id = ?", (workout_id,))
+            conn.commit()
+
+    def mark_workout_removed(
+        self, workout_id: int, reason: Optional[str] = None
+    ) -> None:
+        """Soft-deletes a workout: flags it `removed` and detaches it from the calendar.
+
+        The row is kept (excluded from reads by default) so the coach can still be told
+        the session was deliberately cancelled, optionally with the athlete's `reason`.
+        `google_event_id` is cleared because the caller deletes the Calendar event;
+        `synced` is reset for the same reason."""
+        with self._get_connection() as conn:
+            conn.execute(
+                "UPDATE workouts SET removed = 1, removed_reason = ?, "
+                "google_event_id = NULL, synced = 0 WHERE id = ?",
+                (reason, workout_id)
+            )
             conn.commit()
 
     def update_workout_date(

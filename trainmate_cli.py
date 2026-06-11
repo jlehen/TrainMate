@@ -353,6 +353,11 @@ def main() -> None:
         "rm", aliases=["r"], help="Remove a workout by ID"
     )
     w_rm.add_argument("id", type=int, help="Workout ID to remove")
+    w_rm.add_argument(
+        "--reason", default=None,
+        help="Why the workout is being removed (shown to the coach as a deliberate "
+             "cancellation)"
+    )
     
     # workout adapt
     w_adapt = workout_subparsers.add_parser(
@@ -1950,21 +1955,29 @@ def run_workout_push(args: argparse.Namespace) -> None:
 
 
 def run_workout_rm(args: argparse.Namespace) -> None:
-    """Deletes a planned workout by its database ID."""
+    """Soft-removes a planned workout: marks it removed (kept in the DB) and deletes its
+    Calendar event. Removed workouts are excluded from listings, comparisons, and the
+    calendar push, but are still surfaced to the coach as a deliberate cancellation."""
     workout = db.get_workout_by_id(args.id)
     if not workout:
         print(red(f"Workout with ID {args.id} not found."))
         return
-        
+
+    if workout.get('removed'):
+        print(yellow(f"Workout with ID {args.id} ('{workout['title']}') is already removed."))
+        return
+
     if workout.get('google_event_id'):
         print("Workout is synced to Google Calendar. Attempting to delete calendar event...")
         if workout['google_event_id'] is not None:
             calendar_syncer.delete_workout_event(workout['google_event_id'])
-        
-    db.delete_workout_by_id(args.id)
+
+    db.mark_workout_removed(args.id, reason=args.reason)
     print(green(
         f"Workout with ID {args.id} ('{workout['title']}') removed successfully."
     ))
+    if args.reason:
+        print(f"Reason: {args.reason}")
 
 
 def _resolve_swap_ops(args: argparse.Namespace) -> list | None:

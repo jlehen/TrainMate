@@ -241,9 +241,14 @@ from trainmate.coach import coach_service
 `get_lifeevent(id)`, `update_lifeevent(id, **kwargs)`, `delete_lifeevent`,
 `wipe_lifeevents`
 
-**Workouts:** `save_workout` (upsert), `get_workout(date, sport_type)`,
-`get_workouts(start_date, end_date, sport_type)`, `get_workout_by_id(id)`,
-`delete_workout_by_id`, `clear_future_workouts`, `wipe_workouts`
+**Workouts:** `save_workout` (upsert; resets `removed=0`),
+`get_workout(date, sport_type)`,
+`get_workouts(start_date, end_date, sport_type, include_removed=False)` (excludes
+soft-removed rows unless `include_removed=True`), `get_workout_by_id(id)`,
+`delete_workout_by_id` (hard delete), `mark_workout_removed(id, reason=None)` (soft
+delete — sets `removed=1`/`removed_reason`, clears `google_event_id`/`synced`),
+`clear_future_workouts`,
+`wipe_workouts`
 
 **Completed Activities:** `save_completed_activity` (upsert on `activity_id`),
 `get_completed_activities(start_date, end_date)`
@@ -326,14 +331,28 @@ SQLite database at `trainmate.db` (path from `config.db_path`).
 | `duration_minutes`     | INTEGER    |                                                  |
 | `rpe`                  | INTEGER    | Expected RPE 1–10                                |
 | `tss`                  | INTEGER    | Expected Training Stress Score                   |
+| `removed`              | INTEGER    | 0/1 — soft-delete: 1 ⟺ removed via `workout rm`  |
+| `removed_reason`       | TEXT       | Athlete's reason for removal (`--reason`); optional |
 
-**Workout state is three orthogonal facts, not one enum** (a prior single `status`
+**Workout state is four orthogonal facts, not one enum** (a prior single `status`
 string conflated them): *adapted?* = `modification_reason IS NOT NULL`; *on
-calendar?* = `google_event_id IS NOT NULL`; *Calendar current?* = `synced`. The
+calendar?* = `google_event_id IS NOT NULL`; *Calendar current?* = `synced`;
+*removed?* = `removed = 1`. The
 otherwise-unrepresentable "on the calendar but stale, needs re-push" state is
 `synced=0 AND google_event_id IS NOT NULL` — set whenever a pushed workout is later
 adapted (`apply_adaptations`) or swapped (`update_workout_date`). Push eligibility =
 `NOT synced`; calendar cleanup keys on `google_event_id`.
+
+**Removal is a soft delete.** `workout rm` calls `mark_workout_removed`
+(`removed=1`, clears `google_event_id`, `synced=0`) and deletes the Calendar event —
+the row is **kept**. `get_workouts` excludes removed rows by default
+(`include_removed=False`), so they vanish from `workout list`/`compare`, adaptation
+adherence, generation, and the web API; they are **not** counted as misses. The
+adapt flow re-fetches them with `include_removed=True` and surfaces them to the coach
+as deliberate cancellations (symmetric to how a swap records `modification_reason`),
+distinct from a miss — including the athlete's optional `removed_reason`
+(`workout rm --reason`). `save_workout`'s upsert resets `removed=0`/`removed_reason`,
+so re-generating or adapting onto a removed (date, sport_type) slot revives it.
 
 ### completed\_activities
 | Column              | Type    | Notes                                              |
@@ -517,7 +536,9 @@ Handler functions are named `run_<command>_<subcommand>()` in `trainmate_cli.py`
 | `workout`    | `generate`   | `w g`    | Generate workouts from active strategy (`--goal ID`,                     |
 |              |              |          | `--days N`, `--weeks N`, `--until DATE`,                                 |
 |              |              |          | `--until-goal [ID]`, `--until-mesocycle ID`)                             |
-| `workout`    | `rm`         | `w r`    | Remove workout by ID                                                     |
+| `workout`    | `rm`         | `w r`    | Soft-remove workout by ID (`--reason TEXT`); marks `removed`, deletes    |
+|              |              |          | Calendar event; kept in DB, hidden from list/compare, shown to coach as  |
+|              |              |          | a cancellation (with the reason)                                         |
 | `workout`    | `adapt`      | `w a`    | Run daily adaptation check (`--date YYYY-MM-DD`, `-y` auto-apply)        |
 | `workout`    | `push`       | `w p`    | Sync planned workouts to Google Calendar                                 |
 | `workout`    | `swap`       | `w s`    | Swap workouts between two dates (`<date1> <date2>`) or two IDs           |
@@ -634,9 +655,13 @@ Required fields:
 
 ### Daily Adaptation (`workout adapt`)
 1. `CoachService.adapt()` fetches metrics + planned workouts + completed
-   activities in window.
+   activities in window. Workouts in the window are fetched with
+   `include_removed=True` and partitioned into active (planned) vs `removed`;
+   removed ones are passed to `_adapt_logic` and rendered in the prompt as
+   deliberate cancellations (not misses).
 2. `analyze_adherence()` (`adherence.py`) computes discrepancies (misses,
-   duration/load mismatches, rest violations).
+   duration/load mismatches, rest violations) over the **active** workouts only —
+   removed workouts never count as misses.
 3. Finds active mesocycle for the target date → sets `meso_end_date` for
    adaptation range.
 4. Calls `CoachEngine._adapt_logic()` → LLM → `{change_needed, reason,

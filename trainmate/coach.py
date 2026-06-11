@@ -96,6 +96,18 @@ def format_planned_workouts(planned_workouts: List[Workout]) -> str:
     return "\n".join(planned_list)
 
 
+def format_removed_workouts(removed_workouts: List[Workout]) -> str:
+    """Formats workouts the athlete deliberately removed, for the adaptation prompt."""
+    lines = []
+    for w in removed_workouts:
+        line = f"- {w['date']} ({w['sport_type'].upper()}): {w['title']}"
+        reason = w.get('removed_reason')
+        if reason:
+            line += f" — reason: {reason}"
+        lines.append(line)
+    return "\n".join(lines)
+
+
 def format_baseline(baseline: Optional[Dict[str, Any]]) -> str:
     """Formats 28-day baseline reference to a readable block for LLM prompts."""
     if not baseline:
@@ -575,7 +587,8 @@ You MUST respond with a JSON object containing:
         planned_workouts: List[Workout], baseline_str: str,
         meso_end_date_str: str, objectives: List[Objective], lifeevents: List[LifeEvent],
         guidelines: str, profile: Optional[Dict[str, Any]], strategy: str,
-        meso_text: str, learnings: str, discrepancies: List[str]
+        meso_text: str, learnings: str, discrepancies: List[str],
+        removed_workouts: Optional[List[Workout]] = None
     ) -> Dict[str, Any]:
         """Queries LLM to evaluate metrics/activities and adapt workouts if needed."""
         custom_task = f"""
@@ -595,6 +608,11 @@ the active mesocycle block (from {target_date_str} to {meso_end_date_str}).
   volume without spiking the acute load too fast.
 - If they are fully recovered and on track, keep the plan as scheduled or make minor
   optimal adjustments.
+
+Some sessions may be listed as deliberately removed by the athlete. These are
+intentional plan edits, NOT adherence failures — do not treat them as missed workouts.
+You may, however, consider them when judging the athlete's intent and remaining load,
+and note any recurring removal pattern as a learning.
 
 If this window reveals a durable insight about how the athlete responds to training
 (recovery patterns, load tolerance, recurring adherence/injury signals), record it via
@@ -640,6 +658,13 @@ adding a near-duplicate. Do not record one-off, day-specific noise.
         planned_text = format_planned_workouts(planned_workouts)
         completed_text = format_completed_activities(completed_activities)
 
+        removed_section = ""
+        if removed_workouts:
+            removed_section = (
+                "\nWorkouts Removed by Athlete (deliberately cancelled — not misses):\n"
+                + format_removed_workouts(removed_workouts) + "\n"
+            )
+
         user_content = f"""
 Evaluation Date: {target_date_str}
 Adaptation Range: {target_date_str} to {meso_end_date_str}
@@ -652,7 +677,7 @@ Baseline Reference:
 
 Planned Workouts in Window:
 {planned_text}
-
+{removed_section}
 Actual Completed Garmin Activities in Window:
 {completed_text}
 
@@ -1445,9 +1470,11 @@ class CoachService:
         completed_activities = self._db.get_completed_activities(
             start_date=start_date_str, end_date=target_date_str
         )
-        planned_workouts = self._db.get_workouts(
-            start_date=start_date_str, end_date=target_date_str
+        window_workouts = self._db.get_workouts(
+            start_date=start_date_str, end_date=target_date_str, include_removed=True
         )
+        planned_workouts = [w for w in window_workouts if not w.get('removed')]
+        removed_workouts = [w for w in window_workouts if w.get('removed')]
 
         baseline = self._db.get_baseline(target_date_str)
         baseline_str = format_baseline(baseline)
@@ -1507,7 +1534,8 @@ class CoachService:
             strategy=strategy,
             meso_text=meso_text,
             learnings=learnings,
-            discrepancies=discrepancies
+            discrepancies=discrepancies,
+            removed_workouts=removed_workouts
         )
 
         # Record any durable observations the adaptation surfaced. Done at evaluation

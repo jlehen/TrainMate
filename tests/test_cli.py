@@ -603,6 +603,43 @@ class TestTrainMateCLI(unittest.TestCase):
         self.assertIn(f"Workout with ID {w_id} ('Synced Run') removed successfully", stdout)
         mock_calendar.delete_workout_event.assert_called_once_with("mock_event_123")
 
+    @patch("trainmate_cli.calendar_syncer")
+    def test_workout_rm_soft_deletes(self, mock_calendar):
+        """`workout rm` marks the row removed (kept in DB), hides it from reads, and
+        detaches it from the calendar — but it stays retrievable for the coach."""
+        w_id = test_db.save_workout(
+            date="2026-06-02", sport_type="running", title="Interval Session",
+            description="5x800m", synced=True, google_event_id="evt-1",
+        )
+        exit_code, stdout, _ = self.run_cli(
+            ["workout", "rm", str(w_id), "--reason", "Travelling for work"]
+        )
+        self.assertEqual(exit_code, 0)
+        self.assertIn("Reason: Travelling for work", stdout)
+
+        # Row is kept, flagged removed, reason stored, and detached from the calendar.
+        row = test_db.get_workout_by_id(w_id)
+        self.assertIsNotNone(row)
+        self.assertTrue(row["removed"])
+        self.assertEqual(row["removed_reason"], "Travelling for work")
+        self.assertIsNone(row["google_event_id"])
+
+        # Excluded from default reads, retrievable with include_removed=True.
+        self.assertEqual(test_db.get_workouts(start_date="2026-06-02", end_date="2026-06-02"), [])
+        self.assertEqual(
+            len(test_db.get_workouts(
+                start_date="2026-06-02", end_date="2026-06-02", include_removed=True
+            )),
+            1,
+        )
+
+        # Removing an already-removed workout is a no-op that does not re-hit the calendar.
+        mock_calendar.delete_workout_event.reset_mock()
+        exit_code, stdout, _ = self.run_cli(["workout", "rm", str(w_id)])
+        self.assertEqual(exit_code, 0)
+        self.assertIn("already removed", stdout)
+        mock_calendar.delete_workout_event.assert_not_called()
+
     @patch("trainmate_cli.garmin")
     def test_plan_show_never_pulls(self, mock_garmin):
         # `plan show` is a pure read: it must never prompt or trigger a Garmin pull,
