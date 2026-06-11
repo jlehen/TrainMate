@@ -92,7 +92,12 @@ def main() -> None:
         "status",
         aliases=["s"],
         parents=[pull_bypass_parser],
-        help="Show current athlete status, active goals, recent metrics, and memories"
+        help="Show current athlete status, active goals, recent metrics, and memories",
+        description=(
+            "Show current athlete status: the next active goal and its plan, recent "
+            "Garmin metrics, and coach learnings. By default freshens the recent "
+            "metrics window from Garmin first; pass --no-pull to read only the cache."
+        )
     )
     status_parser.add_argument(
         "-v", "--verbose", action="store_true",
@@ -306,7 +311,12 @@ def main() -> None:
     w_list = workout_subparsers.add_parser(
         "list", aliases=["l"],
         parents=[plan_date_parser, sport_type_parser],
-        help="Show all planned workouts"
+        help="Show all planned workouts",
+        description=(
+            "List planned workouts chronologically. With no date filter, shows today "
+            "through the next 7 days; with only --type, shows today onward. Reads the "
+            "local database only (no Garmin pull)."
+        )
     )
     w_list.add_argument(
         "--removed", action="store_true",
@@ -317,14 +327,27 @@ def main() -> None:
     w_cmp = workout_subparsers.add_parser(
         "compare", aliases=["c"],
         parents=[pull_bypass_parser, plan_date_parser, sport_type_parser],
-        help="Compare planned workouts against completed activities"
+        help="Compare planned workouts against completed activities",
+        description=(
+            "Compare planned workouts against completed Garmin activities, flagging "
+            "missed sessions, rest-day violations, and unplanned high-load efforts. "
+            "With no date filter, looks back 14 days; here --days/--weeks look "
+            "backward (not forward) and the end date is always capped at today. "
+            "Freshens Garmin data for the range first unless --no-pull is given."
+        )
     )
 
     # workout generate
     p_w_gen = workout_subparsers.add_parser(
         "generate", aliases=["g"],
         parents=[pull_bypass_parser],
-        help="Generate workouts (microcycles) based on the active strategy"
+        help="Generate workouts (microcycles) based on the active strategy",
+        description=(
+            "Generate workouts (microcycles) from today, driven by the active "
+            "periodization strategy. With no horizon flag, generates "
+            "config.workout_generate_days days ahead (28 by default). Saves to the "
+            "database only; run 'workout push' afterward to sync to Google Calendar."
+        )
     )
     p_w_gen.add_argument(
         "--goal", "--goal-id", type=int, dest="goal_id",
@@ -373,7 +396,13 @@ def main() -> None:
     w_adapt = workout_subparsers.add_parser(
         "adapt", aliases=["a"],
         parents=[pull_bypass_parser],
-        help="Run the daily Garmin check for today (syncs adapted workouts to Calendar)"
+        help="Run the daily Garmin check for today (syncs adapted workouts to Calendar)",
+        description=(
+            "Run the daily adaptation check: read recent recovery metrics and let the "
+            "coach adjust upcoming workouts. Defaults to today (UTC); use --date for "
+            "another day. Proposed changes are confirmed interactively unless -y/--auto "
+            "is given, then synced to Google Calendar."
+        )
     )
     w_adapt.add_argument("--date", help="Date in YYYY-MM-DD format (defaults to UTC today)")
     w_adapt.add_argument(
@@ -385,7 +414,13 @@ def main() -> None:
     w_push = workout_subparsers.add_parser(
         "push", aliases=["p"],
         parents=[plan_date_parser, sport_type_parser],
-        help="Commit local planned workouts to Google Calendar"
+        help="Commit local planned workouts to Google Calendar",
+        description=(
+            "Push planned workouts to Google Calendar. With no date filter, pushes "
+            "from today onward. By default only new or modified (unsynced) workouts "
+            "are sent; use -f/--force to re-push already-synced workouts, overwriting "
+            "their calendar entries."
+        )
     )
     w_push.add_argument(
         "-f", "--force", action="store_true",
@@ -395,7 +430,13 @@ def main() -> None:
     # workout swap
     w_swap = workout_subparsers.add_parser(
         "swap", aliases=["s"],
-        help="Swap workouts between two dates (or two IDs), with recovery checks"
+        help="Swap workouts between two dates (or two IDs), with recovery checks",
+        description=(
+            "Swap two workouts, given either two dates (date1 date2) or two IDs "
+            "(--id1/--id2). Runs recovery checks (consecutive hard days, weekly load "
+            "spikes, mesocycle crossings) and prompts on warnings unless -f/--force. "
+            "The swap is synced to Google Calendar unless --no-sync is given."
+        )
     )
     w_swap.add_argument(
         "date1", nargs="?", help="First date to swap (YYYY-MM-DD)"
@@ -444,7 +485,14 @@ def main() -> None:
     # data pull
     d_pull = data_subparsers.add_parser(
         "pull",
-        help="Fetch latest activities and metrics directly from Garmin Connect"
+        help="Fetch latest activities and metrics directly from Garmin Connect",
+        description=(
+            "Fetch activities and daily metrics directly from Garmin Connect into the "
+            "local cache, advancing the sync watermark. With no range, pulls the last "
+            "2 days ending today (--days N for a different window, or --from/--until "
+            "for an explicit range). Pulls both metrics and activities unless "
+            "--metrics-only/--activities-only is given."
+        )
     )
     d_pull.add_argument(
         "--days", type=int, default=2, metavar="N",
@@ -474,7 +522,15 @@ def main() -> None:
     d_an = data_subparsers.add_parser(
         "analyze", aliases=["a"],
         parents=[pull_bypass_parser, basic_date_parser],
-        help="Analyze recorded workouts and metrics to determine macrocycle/mesocycles"
+        help="Analyze recorded workouts and metrics to determine macrocycle/mesocycles",
+        description=(
+            "Reverse-engineer past training cycles from completed workouts and "
+            "metrics, writing the resulting coach learnings. With no date filter, the "
+            "window is auto-detected from the active goal (since the previous goal, "
+            "else 12 weeks back). Results are cached by evidence fingerprint: an "
+            "unchanged re-run reuses the cache unless --force; --inspect-only renders "
+            "the analysis without writing learnings or the cache."
+        )
     )
     d_an.add_argument(
         "--context", dest="context",
@@ -512,7 +568,13 @@ def main() -> None:
     d_sm = data_subparsers.add_parser(
         "show-metrics", aliases=["sm"],
         parents=[pull_bypass_parser, plan_date_parser],
-        help="Show athlete metrics over a date range"
+        help="Show athlete metrics over a date range",
+        description=(
+            "Show cached daily athlete metrics (RHR, HRV, sleep, stress) over a date "
+            "range. With no date filter, looks back 7 days ending today; -a/--all "
+            "shows every cached row. Freshens recent data from Garmin first unless "
+            "--no-pull or --all is given. Use --csv for machine-readable output."
+        )
     )
     d_sm.add_argument(
         "--csv", action="store_true", dest="csv",
@@ -527,7 +589,13 @@ def main() -> None:
     d_sa = data_subparsers.add_parser(
         "show-activities", aliases=["sa"],
         parents=[pull_bypass_parser, plan_date_parser, sport_type_parser],
-        help="Show completed activities over a date range"
+        help="Show completed activities over a date range",
+        description=(
+            "Show cached completed activities over a date range. With no date filter, "
+            "looks back 7 days ending today; -a/--all shows every cached activity. "
+            "Filter with --type, freshen from Garmin unless --no-pull/--all, and use "
+            "--csv for machine-readable output."
+        )
     )
     d_sa.add_argument(
          "--csv", action="store_true", dest="csv",

@@ -534,7 +534,9 @@ Handler functions are named `run_<command>_<subcommand>()` in `trainmate_cli.py`
 |              |              |          | capped at today.                                         |
 | `workout`    | `generate`   | `w g`    | Generate workouts from active strategy (`--goal ID`,                     |
 |              |              |          | `--days N`, `--weeks N`, `--until DATE`,                                 |
-|              |              |          | `--until-goal [ID]`, `--until-mesocycle ID`)                             |
+|              |              |          | `--until-goal [ID]`, `--until-mesocycle ID`). With no                    |
+|              |              |          | horizon flag, generates `config.workout_generate_days`                   |
+|              |              |          | ahead (28 default). Saves to DB only; run `push` after.                  |
 | `workout`    | `rm`         | `w r`    | Soft-remove workout by ID (`--reason TEXT` required);   |
 |              |              |          | marks `removed`, updates Calendar event to be marked    |
 |              |              |          | deleted; kept in DB, hidden from list/compare, shown    |
@@ -542,7 +544,9 @@ Handler functions are named `run_<command>_<subcommand>()` in `trainmate_cli.py`
 | `workout`    | `restore`    | `w res`  | Restore soft-removed workout by ID. Clears `removed`    |
 |              |              |          | flags and syncs to Calendar to remove `[Deleted]` mark. |
 | `workout`    | `adapt`      | `w a`    | Run daily adaptation check (`--date YYYY-MM-DD`, `-y` auto-apply)        |
-| `workout`    | `push`       | `w p`    | Sync planned workouts to Google Calendar                                 |
+| `workout`    | `push`       | `w p`    | Sync planned workouts to Google Calendar. Defaults to                    |
+|              |              |          | today onward; pushes only unsynced workouts unless                       |
+|              |              |          | `-f`/`--force` re-pushes already-synced ones.                            |
 | `workout`    | `swap`       | `w s`    | Swap workouts between two dates (`<date1> <date2>`)     |
 |              |              |          | or two IDs (`--id1 X --id2 Y`). Requires `--reason`.    |
 |              |              |          | Runs recovery checks (consecutive hard days, weekly     |
@@ -551,15 +555,19 @@ Handler functions are named `run_<command>_<subcommand>()` in `trainmate_cli.py`
 |              |              |          | unless `--no-sync`. `--reason` is folded into the       |
 |              |              |          | `modification_reason` and shown to the coach.           |
 | `workout`    | `wipe`       | —        | Delete all workouts                                                      |
-| `data`       | `pull`       | `d pull` | Fetch metrics and activities directly from Garmin (`--days`/`--from`/`--until`/`--metrics-only`/`--activities-only`/`--sleep`) |
+| `data`       | `pull`       | `d pull` | Fetch metrics and activities directly from Garmin (`--days`/`--from`/`--until`/`--metrics-only`/`--activities-only`/`--sleep`). Defaults to the last 2 days ending today. |
 | `data`       | `analyze`    | `d a`    | Analyze completed workouts/metrics to detect cycles    |
 |              |              |          | (`--from`, `--until`, `--days`, `--weeks`, `--context`,|
-|              |              |          | `--force` to recompute, `--inspect-only` for read-only)|
-| `data`       | `show-metrics` | `d sm` / `sm` | Show athlete metrics over a date range. Supports standard |
-|              |              |          | date range options, `-a`/`--all` (shows all data),      |
+|              |              |          | `--force` to recompute, `--inspect-only` for read-only).|
+|              |              |          | With no date filter, the window is auto-detected from  |
+|              |              |          | the active goal (since previous goal, else 12 weeks).  |
+| `data`       | `show-metrics` | `d sm` | Show athlete metrics over a date range. Defaults to a    |
+|              |              |          | 7-day lookback ending today. Supports standard date     |
+|              |              |          | range options, `-a`/`--all` (shows all data),           |
 |              |              |          | `--no-pull` to bypass Garmin sync, and `--csv`.           |
-| `data`       | `show-activities` | `d sa` / `sa` | Show completed activities over a date range. Supports |
-|              |              |          | date options, `-a`/`--all`, `--type` filter, `--no-pull`,  |
+| `data`       | `show-activities` | `d sa` | Show completed activities over a date range. Defaults  |
+|              |              |          | to a 7-day lookback ending today. Supports date         |
+|              |              |          | options, `-a`/`--all`, `--type` filter, `--no-pull`,      |
 |              |              |          | and `--csv`.                                              |
 | `data`       | `backfill-tss` | —      | Recompute the measured `tss` for all stored activities under the current zone model (no Garmin calls), then refresh derived workload |
 | `data`       | `wipe`       | —        | Delete all metrics, baselines, completed activities                      |
