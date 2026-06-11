@@ -193,6 +193,18 @@ class Database:
                 cursor.execute("UPDATE workouts SET synced = 1 WHERE status = 'synced'")
             except sqlite3.OperationalError:
                 pass
+            # Original date: remembers where a workout was first placed so that
+            # swapping it back clears the modification flag.
+            try:
+                cursor.execute(
+                    "ALTER TABLE workouts ADD COLUMN original_date TEXT"
+                )
+                cursor.execute(
+                    "UPDATE workouts SET original_date = date "
+                    "WHERE original_date IS NULL"
+                )
+            except sqlite3.OperationalError:
+                pass
 
             # Completed activities table
             cursor.execute("""
@@ -522,7 +534,7 @@ class Database:
         original_description: Optional[str] = None, synced: bool = False,
         modification_reason: Optional[str] = None, google_event_id: Optional[str] = None,
         duration_minutes: Optional[int] = None, rpe: Optional[int] = None,
-        tss: Optional[int] = None
+        tss: Optional[int] = None, original_date: Optional[str] = None
     ) -> int:
         """Saves a workout, updating it if it already exists for the date/sport_type."""
         with self._get_connection() as conn:
@@ -539,24 +551,27 @@ class Database:
                     UPDATE workouts
                     SET title = ?, description = ?,
                         original_description = COALESCE(?, original_description),
+                        original_date = COALESCE(?, original_date, date),
                         synced = ?, modification_reason = ?, google_event_id = ?,
                         duration_minutes = COALESCE(?, duration_minutes),
                         rpe = COALESCE(?, rpe),
                         tss = COALESCE(?, tss),
                         removed = 0, removed_reason = NULL
                     WHERE id = ?
-                """, (title, description, original_description, int(synced),
+                """, (title, description, original_description,
+                      original_date, int(synced),
                       modification_reason, ge_id, duration_minutes, rpe, tss,
                       workout_id))
             else:
                 cursor.execute("""
                     INSERT INTO workouts (
                         date, sport_type, title, description, original_description,
-                        synced, modification_reason, google_event_id,
-                        duration_minutes, rpe, tss
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        original_date, synced, modification_reason,
+                        google_event_id, duration_minutes, rpe, tss
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (date, sport_type, title, description,
-                      original_description or description, int(synced),
+                      original_description or description,
+                      original_date or date, int(synced),
                       modification_reason, google_event_id, duration_minutes,
                       rpe, tss))
                 workout_id = cursor.lastrowid
@@ -663,13 +678,20 @@ class Database:
     def update_workout_date(
         self, workout_id: int, new_date: str, modification_reason: str
     ) -> None:
-        """Moves a workout to a new date, flagging it as adapted (modification_reason) and
-        marking it pending re-push (synced = 0)."""
+        """Moves a workout to a new date and marks it pending re-push (synced = 0).
+
+        If the workout lands back on its original_date the modification_reason
+        is cleared — the workout is no longer considered adapted/swapped.
+        """
         with self._get_connection() as conn:
             conn.execute(
                 "UPDATE workouts SET date = ?, synced = 0, "
-                "modification_reason = ? WHERE id = ?",
-                (new_date, modification_reason, workout_id)
+                "modification_reason = CASE "
+                "  WHEN COALESCE(original_date, date) = ? THEN NULL "
+                "  ELSE ? "
+                "END "
+                "WHERE id = ?",
+                (new_date, new_date, modification_reason, workout_id)
             )
             conn.commit()
 

@@ -243,6 +243,87 @@ class TestAdaptation(unittest.TestCase):
         self.assertEqual(test_db.get_workout_by_id(a)["date"], "2026-06-11")
         syncer.sync_workout.assert_not_called()
 
+    def test_apply_swap_back_clears_modified(self):
+        """Swapping two workouts and then swapping them back should clear
+        the modification flag on both — they're back on their original dates."""
+        a = test_db.save_workout(
+            "2026-06-10", "running", "Run A", "a", rpe=4, tss=30
+        )
+        b = test_db.save_workout(
+            "2026-06-12", "road_biking", "Ride B", "b", rpe=4, tss=30
+        )
+        service = trainmate.coach.CoachService(
+            db_instance=test_db, calendar_syncer_instance=Mock()
+        )
+
+        # First swap: A→12, B→10
+        service.apply_swap(
+            [{"id": a, "new_date": "2026-06-12"},
+             {"id": b, "new_date": "2026-06-10"}],
+            no_sync=True,
+        )
+        self.assertIsNotNone(
+            test_db.get_workout_by_id(a)["modification_reason"]
+        )
+        self.assertIsNotNone(
+            test_db.get_workout_by_id(b)["modification_reason"]
+        )
+
+        # Swap back: A→10, B→12 (original dates)
+        service.apply_swap(
+            [{"id": a, "new_date": "2026-06-10"},
+             {"id": b, "new_date": "2026-06-12"}],
+            no_sync=True,
+        )
+        self.assertIsNone(
+            test_db.get_workout_by_id(a)["modification_reason"],
+            "A is back on its original date; modification_reason should "
+            "be cleared",
+        )
+        self.assertIsNone(
+            test_db.get_workout_by_id(b)["modification_reason"],
+            "B is back on its original date; modification_reason should "
+            "be cleared",
+        )
+
+    def test_swap_back_partial_still_modified(self):
+        """When only one of two swapped workouts is moved back, only that
+        one should lose its modification flag."""
+        a = test_db.save_workout(
+            "2026-06-10", "running", "Run A", "a", rpe=4, tss=30
+        )
+        b = test_db.save_workout(
+            "2026-06-12", "road_biking", "Ride B", "b", rpe=4, tss=30
+        )
+        service = trainmate.coach.CoachService(
+            db_instance=test_db, calendar_syncer_instance=Mock()
+        )
+
+        # Swap A↔B
+        service.apply_swap(
+            [{"id": a, "new_date": "2026-06-12"},
+             {"id": b, "new_date": "2026-06-10"}],
+            no_sync=True,
+        )
+
+        # Move only A back to its original date (to a free slot on 2026-06-10
+        # — B was there but we move it elsewhere first).
+        test_db.update_workout_date(
+            b, "2026-06-14", "Swapped from 2026-06-10 to 2026-06-14"
+        )
+        test_db.update_workout_date(
+            a, "2026-06-10", "Swapped from 2026-06-12 to 2026-06-10"
+        )
+
+        self.assertIsNone(
+            test_db.get_workout_by_id(a)["modification_reason"],
+            "A is back home; should be unmodified",
+        )
+        self.assertIsNotNone(
+            test_db.get_workout_by_id(b)["modification_reason"],
+            "B is NOT on its original date; should remain modified",
+        )
+
     def test_analyze_adherence_direct(self):
         planned = [
             {

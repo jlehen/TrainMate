@@ -333,6 +333,8 @@ SQLite database at `trainmate.db` (path from `config.db_path`).
 | `tss`                  | INTEGER    | Expected Training Stress Score                   |
 | `removed`              | INTEGER    | 0/1 — soft-delete: 1 ⟺ removed via `workout rm`  |
 | `removed_reason`       | TEXT       | Athlete's reason for removal (`--reason`); optional |
+| `original_date`        | TEXT       | YYYY-MM-DD — set once on creation, never            |
+|                        |            | overwritten (COALESCE); used to detect swap-back   |
 
 **Workout state is four orthogonal facts, not one enum** (a prior single `status`
 string conflated them): *adapted?* = `modification_reason IS NOT NULL`; *on
@@ -737,7 +739,9 @@ empty rest day). Moved workouts are flagged `status='modified'` with a
 `modification_reason` recording the swap (`Swapped from X to Y`, plus the
 athlete's optional `--reason` appended as `. Reason: …`), exactly like an
 adaptation — so they are re-synced by `workout push` and visibly distinguished
-from untouched `planned` ones. The `modification_reason` is surfaced to the
+from untouched `planned` ones. If a swap returns a workout to its
+`original_date`, the `modification_reason` is cleared to `NULL` — the workout
+is no longer considered modified. The `modification_reason` is surfaced to the
 coach in the adaptation prompt (`format_planned_workouts`), so a swap informs
 the coach symmetrically to how `workout rm`'s `removed_reason` does. Swaps are
 validated first (`CoachService.validate_swap`): the
