@@ -1990,6 +1990,14 @@ def _resolve_swap_ops(args: argparse.Namespace) -> list | None:
         if w1['date'] == w2['date']:
             print(yellow("Both workouts are already on the same date; nothing to swap."))
             return None
+        today = _today_str()
+        for w in (w1, w2):
+            if w['date'] < today:
+                print(red(
+                    f"Cannot swap [{w['id']}] {w['title']} ({w['date']}): "
+                    "it is in the past."
+                ))
+                return None
         print(
             f"Swapping [{w1['id']}] {w1['title']} ({w1['date']}) <-> "
             f"[{w2['id']}] {w2['title']} ({w2['date']})"
@@ -2009,6 +2017,11 @@ def _resolve_swap_ops(args: argparse.Namespace) -> list | None:
         if args.date1 == args.date2:
             print(yellow("The two dates are identical; nothing to swap."))
             return None
+        today = _today_str()
+        for d in (args.date1, args.date2):
+            if d < today:
+                print(red(f"Cannot swap {d}: it is in the past."))
+                return None
         on_1 = db.get_workouts(start_date=args.date1, end_date=args.date1)
         on_2 = db.get_workouts(start_date=args.date2, end_date=args.date2)
         if not on_1 and not on_2:

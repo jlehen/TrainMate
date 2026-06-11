@@ -453,42 +453,48 @@ class TestTrainMateCLI(unittest.TestCase):
 
     @patch("trainmate_cli.coach_service")
     def test_workout_swap_by_date(self, mock_coach):
+        today = datetime.now(timezone.utc).date()
+        d1 = (today + timedelta(days=1)).strftime("%Y-%m-%d")
+        d2 = (today + timedelta(days=3)).strftime("%Y-%m-%d")
         mock_coach.validate_swap.return_value = []
         mock_coach.apply_swap.return_value = [
-            {"id": 1, "title": "Run A", "date": "2026-06-12"},
-            {"id": 2, "title": "Ride B", "date": "2026-06-10"},
+            {"id": 1, "title": "Run A", "date": d2},
+            {"id": 2, "title": "Ride B", "date": d1},
         ]
         a = test_db.save_workout(
-            date="2026-06-10", sport_type="running", title="Run A",
+            date=d1, sport_type="running", title="Run A",
             description="easy", synced=False, rpe=4, tss=30,
         )
         b = test_db.save_workout(
-            date="2026-06-12", sport_type="road_biking", title="Ride B",
+            date=d2, sport_type="road_biking", title="Ride B",
             description="easy", synced=False, rpe=4, tss=30,
         )
         exit_code, stdout, stderr = self.run_cli(
-            ["workout", "swap", "2026-06-10", "2026-06-12"]
+            ["workout", "swap", d1, d2]
         )
         self.assertEqual(exit_code, 0)
         self.assertIn("Swapped 2 workout(s) successfully", stdout)
         # Each date's workout is moved to the other date.
         ops, no_sync = mock_coach.apply_swap.call_args[0]
         self.assertCountEqual(ops, [
-            {"id": a, "new_date": "2026-06-12"},
-            {"id": b, "new_date": "2026-06-10"},
+            {"id": a, "new_date": d2},
+            {"id": b, "new_date": d1},
         ])
         self.assertFalse(no_sync)
 
     @patch("trainmate_cli.coach_service")
     def test_workout_swap_by_id_no_sync(self, mock_coach):
+        today = datetime.now(timezone.utc).date()
+        d1 = (today + timedelta(days=1)).strftime("%Y-%m-%d")
+        d2 = (today + timedelta(days=3)).strftime("%Y-%m-%d")
         mock_coach.validate_swap.return_value = []
         mock_coach.apply_swap.return_value = []
         a = test_db.save_workout(
-            date="2026-06-10", sport_type="running", title="Run A",
+            date=d1, sport_type="running", title="Run A",
             description="easy", synced=False, rpe=4, tss=30,
         )
         b = test_db.save_workout(
-            date="2026-06-12", sport_type="road_biking", title="Ride B",
+            date=d2, sport_type="road_biking", title="Ride B",
             description="easy", synced=False, rpe=4, tss=30,
         )
         exit_code, stdout, stderr = self.run_cli(
@@ -498,29 +504,72 @@ class TestTrainMateCLI(unittest.TestCase):
         self.assertIn("Calendar sync skipped", stdout)
         ops, no_sync = mock_coach.apply_swap.call_args[0]
         self.assertCountEqual(ops, [
-            {"id": a, "new_date": "2026-06-12"},
-            {"id": b, "new_date": "2026-06-10"},
+            {"id": a, "new_date": d2},
+            {"id": b, "new_date": d1},
         ])
         self.assertTrue(no_sync)
 
     @patch("trainmate_cli.coach_service")
     def test_workout_swap_warning_declined(self, mock_coach):
+        today = datetime.now(timezone.utc).date()
+        d1 = (today + timedelta(days=1)).strftime("%Y-%m-%d")
+        d2 = (today + timedelta(days=3)).strftime("%Y-%m-%d")
         mock_coach.validate_swap.return_value = ["Creates 3 consecutive high days"]
         a = test_db.save_workout(
-            date="2026-06-10", sport_type="running", title="Run A",
+            date=d1, sport_type="running", title="Run A",
             description="easy", synced=False, rpe=8, tss=90,
         )
         b = test_db.save_workout(
-            date="2026-06-12", sport_type="road_biking", title="Ride B",
+            date=d2, sport_type="road_biking", title="Ride B",
             description="easy", synced=False, rpe=8, tss=90,
         )
         # Default input is "n": the swap is cancelled and never applied.
         exit_code, stdout, stderr = self.run_cli(
-            ["workout", "swap", "2026-06-10", "2026-06-12"]
+            ["workout", "swap", d1, d2]
         )
         self.assertEqual(exit_code, 0)
         self.assertIn("Swap warnings", stdout)
         self.assertIn("Swap cancelled", stdout)
+        mock_coach.apply_swap.assert_not_called()
+
+    @patch("trainmate_cli.coach_service")
+    def test_workout_swap_past_date_rejected(self, mock_coach):
+        today = datetime.now(timezone.utc).date()
+        past = (today - timedelta(days=2)).strftime("%Y-%m-%d")
+        future = (today + timedelta(days=2)).strftime("%Y-%m-%d")
+        test_db.save_workout(
+            date=past, sport_type="running", title="Run A",
+            description="easy", synced=False, rpe=4, tss=30,
+        )
+        test_db.save_workout(
+            date=future, sport_type="road_biking", title="Ride B",
+            description="easy", synced=False, rpe=4, tss=30,
+        )
+        exit_code, stdout, stderr = self.run_cli(
+            ["workout", "swap", past, future]
+        )
+        self.assertEqual(exit_code, 0)
+        self.assertIn("in the past", stdout)
+        mock_coach.apply_swap.assert_not_called()
+
+    @patch("trainmate_cli.coach_service")
+    def test_workout_swap_past_id_rejected(self, mock_coach):
+        today = datetime.now(timezone.utc).date()
+        past = (today - timedelta(days=2)).strftime("%Y-%m-%d")
+        future = (today + timedelta(days=2)).strftime("%Y-%m-%d")
+        a = test_db.save_workout(
+            date=past, sport_type="running", title="Run A",
+            description="easy", synced=False, rpe=4, tss=30,
+        )
+        b = test_db.save_workout(
+            date=future, sport_type="road_biking", title="Ride B",
+            description="easy", synced=False, rpe=4, tss=30,
+        )
+        exit_code, stdout, stderr = self.run_cli(
+            ["workout", "swap", "--id1", str(a), "--id2", str(b)]
+        )
+        self.assertEqual(exit_code, 0)
+        self.assertIn("in the past", stdout)
         mock_coach.apply_swap.assert_not_called()
 
     def test_workout_swap_missing_args(self):
