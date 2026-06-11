@@ -57,8 +57,9 @@ def format_completed_activities(completed_activities: List[CompletedActivity]) -
         divergence = rpe_divergence(act)
         if divergence is not None:
             line += (
-                f" (RPE {act.get('rpe')} implies ~{divergence:.1f}x the measured "
-                "load: possible hidden fatigue — heat, sleep, muscular damage)"
+                f" (load taken from RPE {act.get('rpe')}: ~{divergence:.1f}x the "
+                f"measured TSS {act.get('tss'):.0f} — meters under-counted, e.g. "
+                "resistance load or hidden fatigue from heat, sleep, muscular damage)"
             )
         extras = []
         if act.get('bike_avg_watts') is not None:

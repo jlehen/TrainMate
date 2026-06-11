@@ -1827,12 +1827,16 @@ def run_workout_compare(args: argparse.Namespace) -> None:
 
     def _fmt_act(act: dict) -> str:
         dur = f"{act['duration_sec'] / 60:.0f}min"
-        parts: list[str] = [dur]
+        parts: list[str] = [dur, f"load {garmin.activity_load(act):.0f}"]
         if act.get('tss'):
             parts.append(f"TSS {act['tss']:.0f}")
         if act.get('rpe'):
             parts.append(f"RPE {act['rpe']}")
-        return f"[{act['activity_type']}] {act['activity_name']} ({', '.join(parts)})"
+        s = f"[{act['activity_type']}] {act['activity_name']} ({', '.join(parts)})"
+        div = garmin.rpe_divergence(act)
+        if div is not None:
+            s += f" [load from RPE: HR under-counted {div:.1f}x]"
+        return s
 
     has_output = False
     for d in range(history_days):
@@ -1883,10 +1887,7 @@ def run_workout_compare(args: argparse.Namespace) -> None:
                 print(f"  ACTUAL:     {red('(none — missed)')}")
 
         for act in unplanned:
-            act_load = (
-                (act.get('tss') or 0.0)
-                + (act.get('rpe') or 0) * (act['duration_sec'] / 3600.0)
-            )
+            act_load = garmin.activity_load(act)
             act_str = _fmt_act(act)
             if act_load >= config.low_load_threshold:
                 print(f"  UNPLANNED:  {yellow(act_str)}")

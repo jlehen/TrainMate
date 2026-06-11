@@ -350,17 +350,44 @@ def _measurement_is_load(act: Dict[str, Any], duration_sec: float) -> bool:
     return _hr_zone_coverage(act, duration_sec) >= HR_ZONE_COVERAGE_MIN
 
 
+def _divergence_ratio(act: Dict[str, Any], duration_sec: float) -> Optional[float]:
+    """Raw sRPE / measured-TSS ratio when the stored `tss` is a trustworthy
+    measurement (power, or adequately-covered HR) and the user entered an RPE;
+    else None. Shared basis for both inflating the load and flagging divergence,
+    so the two always agree on when the meters under-counted real strain."""
+    rpe = act.get("rpe")
+    tss = act.get("tss")
+    if not rpe or not tss or float(tss) <= 0:
+        return None
+    if not _measurement_is_load(act, duration_sec):
+        return None  # measurement isn't the load; RPE already wins, no divergence
+    return _rpe_tss(float(rpe), duration_sec) / float(tss)
+
+
+def _divergence_threshold() -> float:
+    return float(config.data.get("rpe_divergence_ratio", RPE_DIVERGENCE_RATIO_DEFAULT))
+
+
 def activity_load(act: Dict[str, Any]) -> float:
     """Training load for a stored activity row, derived on the fly. Reads the
     objective measurement from the `tss` column (power TSS or hrTSS) and applies
     the fallback: trust it when it came from power or adequately-covered HR;
     otherwise prefer the user's RPE (sRPE), keeping the weak measurement only
-    when no RPE was entered. RPE-only when there is no measurement at all."""
+    when no RPE was entered. RPE-only when there is no measurement at all.
+
+    When the measurement is trustworthy but the user's RPE implies a materially
+    higher load (>= `rpe_divergence_ratio`), the load is taken from RPE instead:
+    the meters under-counted real strain the body paid for (strength/resistance
+    work, HIIT, heat, sleep debt). `rpe_divergence` flags the same activities so
+    the bump can be explained to the user."""
     tss = act.get("tss")
     rpe = act.get("rpe")
     duration_sec = act.get("duration_sec") or 0.0
     if tss is not None:
-        if not _measurement_is_load(act, duration_sec) and rpe:
+        if not _measurement_is_load(act, duration_sec):
+            return _rpe_tss(float(rpe), duration_sec) if rpe else float(tss)
+        ratio = _divergence_ratio(act, duration_sec)
+        if ratio is not None and ratio >= _divergence_threshold():
             return _rpe_tss(float(rpe), duration_sec)
         return float(tss)
     if rpe:
@@ -369,22 +396,17 @@ def activity_load(act: Dict[str, Any]) -> float:
 
 
 def rpe_divergence(act: Dict[str, Any]) -> Optional[float]:
-    """If the load came from the objective measurement (power/HR) but the user's
-    RPE implies a materially higher load, returns the ratio sRPE_load / measured;
-    else None. Flags strain the meters miss (heat, sleep debt, muscular damage),
-    e.g. kettlebell HIIT. The threshold is config `rpe_divergence_ratio`."""
-    rpe = act.get("rpe")
-    tss = act.get("tss")
-    if not rpe or not tss or tss <= 0:
-        return None
+    """If the load came from an objective measurement (power/HR) but the user's
+    RPE implied a materially higher load, returns the ratio sRPE_load / measured;
+    else None. Flags strain the meters miss (resistance work, heat, sleep debt,
+    muscular damage), e.g. kettlebell HIIT. When this fires, `activity_load` has
+    taken the load from RPE; the ratio explains by how much the meters fell short.
+    The threshold is config `rpe_divergence_ratio`."""
     duration_sec = act.get("duration_sec") or 0.0
-    if not _measurement_is_load(act, duration_sec):
-        return None  # load already came from RPE; no divergence to flag
-    ratio = _rpe_tss(float(rpe), duration_sec) / float(tss)
-    threshold = float(
-        config.data.get("rpe_divergence_ratio", RPE_DIVERGENCE_RATIO_DEFAULT)
-    )
-    return round(ratio, 2) if ratio >= threshold else None
+    ratio = _divergence_ratio(act, duration_sec)
+    if ratio is None:
+        return None
+    return round(ratio, 2) if ratio >= _divergence_threshold() else None
 
 
 def _safe_round(value: Any, ndigits: int = 1) -> float:

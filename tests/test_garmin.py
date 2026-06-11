@@ -120,6 +120,17 @@ class TestGarminTransforms(unittest.TestCase):
         act = self._hr_activity(zone1_sec=300, tss=1.7, rpe=8)  # coverage 0.083
         self.assertIsNone(garmin.rpe_divergence(act))
 
+    def test_activity_load_takes_rpe_when_divergent(self):
+        # Trustworthy hrTSS 15 but RPE 4 -> sRPE 40 (ratio 2.67 >= 1.5): the
+        # meters under-counted real strain (e.g. strength work), so load = sRPE.
+        act = self._hr_activity(zone2_sec=3600, tss=15.0, rpe=4)
+        self.assertAlmostEqual(garmin.activity_load(act), 40.0)
+
+    def test_activity_load_keeps_measured_when_rpe_agrees(self):
+        # hrTSS 40 and RPE 4 -> sRPE 40 (ratio 1.0 < 1.5): no divergence, keep it.
+        act = self._hr_activity(zone2_sec=3600, tss=40.0, rpe=4)
+        self.assertAlmostEqual(garmin.activity_load(act), 40.0)
+
 
 class TestZoneParsing(unittest.TestCase):
     def _client(self):
