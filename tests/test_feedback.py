@@ -78,33 +78,6 @@ class TestFeedback(unittest.TestCase):
         meso = test_db.get_mesocycle(meso_id)
         self.assertEqual(meso["feedback"], "Increase duration of long runs.")
 
-    def test_system_prompt_inserts_athlete_feedback(self):
-        obj_id = test_db.add_objective(
-            title="Zurich Marathon",
-            target_date="2026-10-15",
-            sport_type="running",
-            priority=1,
-        )
-        macro_id = test_db.save_macrocycle(
-            objective_id=obj_id,
-            strategy="Keep heart rate low",
-            goals_hash="ghash",
-            lifeevents_hash="lehash",
-            mesocycles=[{
-                "name": "Base Building",
-                "start_date": "2026-06-01",
-                "end_date": "2026-06-28",
-                "focus": "Zone 2 runs",
-            }],
-        )
-        test_db.update_macrocycle_feedback(macro_id, "Strategy was too easy.")
-
-        objs = test_db.get_objectives(status="active")
-        prompt = coach_service._get_coach_system_prompt(objs, [])
-
-        self.assertIn("Keep heart rate low", prompt)
-        self.assertIn("Base Building (2026-06-01 to 2026-06-28): Zone 2 runs", prompt)
-
     @patch("trainmate.coach.openrouter_client")
     def test_replan_injects_feedback_into_prompt(self, mock_client):
         obj_id = test_db.add_objective(

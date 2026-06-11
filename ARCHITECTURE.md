@@ -822,12 +822,20 @@ venv/bin/python -m unittest discover -s tests -p "test_*.py"
 
 | File                           | What it tests                                                   |
 |--------------------------------|-----------------------------------------------------------------|
-| `tests/test_adaptation.py`     | `CoachService.adapt()` end-to-end                               |
+| `tests/test_adaptation.py`     | `CoachService.adapt()` end-to-end, swap validation/apply, and    |
+|                                | `adherence.analyze_adherence()` (misses, tolerances, violations) |
+| `tests/test_analysis.py`       | `analyze_workouts`: date resolution, weekly aggregation, cache   |
+|                                | reuse/force/inspect, learnings injection                         |
 | `tests/test_cli.py`            | CLI command dispatch + output                                   |
+| `tests/test_calendar.py`       | `calendar_syncer.sync_workout` event description formatting      |
+| `tests/test_coach_format.py`   | `format_completed_activities` (HR/power-zone rendering)          |
+| `tests/test_db.py`             | `Database` CRUD, coach-learnings deltas/decay, `analysis_cache`  |
 | `tests/test_feedback.py`       | Feedback saving + use in replanning                             |
-| `tests/test_periodization.py`  | `generate_periodization_plan`, `generate_workouts`, hash logic  |
-| `tests/test_garmin.py`         | Garmin transforms, watermark/auto-ensure policy, recompute      |
-| `tests/test_utils.py`          | `adherence.py` + `util.py` helpers                              |
+| `tests/test_periodization.py`  | `generate_periodization_plan`, `generate_workouts`, hash logic, |
+|                                | system-prompt building                                          |
+| `tests/test_garmin.py`         | Garmin transforms (load model), zone parsing, watermark/         |
+|                                | auto-ensure policy, recompute, `backfill_tss`                    |
+| `tests/test_utils.py`          | `util.py` helpers (text wrapping, ANSI width, ACWR coloring)     |
 
 Tests inject a fresh in-memory SQLite DB by assigning `test_db` to module-level
 `db` variables *before* importing the singletons. `openrouter_client` is mocked

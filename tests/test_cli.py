@@ -552,26 +552,6 @@ class TestTrainMateCLI(unittest.TestCase):
         self.assertIn("in the past", stdout)
         mock_coach.apply_swap.assert_not_called()
 
-    @patch("trainmate_cli.coach_service")
-    def test_workout_swap_past_id_rejected(self, mock_coach):
-        today = datetime.now(timezone.utc).date()
-        past = (today - timedelta(days=2)).strftime("%Y-%m-%d")
-        future = (today + timedelta(days=2)).strftime("%Y-%m-%d")
-        a = test_db.save_workout(
-            date=past, sport_type="running", title="Run A",
-            description="easy", synced=False, rpe=4, tss=30,
-        )
-        b = test_db.save_workout(
-            date=future, sport_type="road_biking", title="Ride B",
-            description="easy", synced=False, rpe=4, tss=30,
-        )
-        exit_code, stdout, stderr = self.run_cli(
-            ["workout", "swap", "--id1", str(a), "--id2", str(b)]
-        )
-        self.assertEqual(exit_code, 0)
-        self.assertIn("in the past", stdout)
-        mock_coach.apply_swap.assert_not_called()
-
     def test_workout_swap_missing_args(self):
         exit_code, stdout, stderr = self.run_cli(["workout", "swap", "2026-06-10"])
         self.assertEqual(exit_code, 0)
@@ -663,92 +643,81 @@ class TestTrainMateCLI(unittest.TestCase):
         self.assertEqual(exit_code, 0)
         mock_garmin.pull.assert_not_called()
 
-    def test_goal_wipe(self):
-        test_db.add_objective(
-            title="Wipe Target", target_date="2026-10-15", sport_type="running"
-        )
-        self.assertEqual(len(test_db.get_objectives()), 1)
+    def test_wipe_commands_confirmation_flow(self):
+        """goal/lifeevent/plan/data wipe share one confirmation flow: `n` cancels,
+        `y` confirms, `-y` skips the prompt. (`workout wipe` is covered separately
+        for its calendar side-effect.)"""
+        def seed_goal():
+            test_db.add_objective(
+                title="Wipe Target", target_date="2026-10-15", sport_type="running"
+            )
+        def count_goal(_):
+            return len(test_db.get_objectives())
 
-        exit_code, stdout, stderr = self.run_cli(["goal", "wipe"], input_value="n")
-        self.assertEqual(exit_code, 0)
-        self.assertIn("Wipe cancelled.", stdout)
-        self.assertEqual(len(test_db.get_objectives()), 1)
+        def seed_lifeevent():
+            test_db.add_lifeevent(
+                title="Wipe Event", start_date="2026-07-01",
+                end_date="2026-07-02", event_type="party",
+            )
+        def count_lifeevent(_):
+            return len(test_db.get_lifeevents())
 
-        exit_code, stdout, stderr = self.run_cli(["goal", "wipe"], input_value="y")
-        self.assertEqual(exit_code, 0)
-        self.assertIn("All training objectives wiped successfully.", stdout)
-        self.assertEqual(len(test_db.get_objectives()), 0)
+        def seed_plan():
+            obj_id = test_db.add_objective(
+                title="Plan Wipe Obj", target_date="2026-10-15", sport_type="running"
+            )
+            test_db.save_macrocycle(
+                objective_id=obj_id, strategy="Base", goals_hash="ghash",
+                lifeevents_hash="lhash",
+                mesocycles=[{
+                    "name": "Meso1", "start_date": "2026-06-01",
+                    "end_date": "2026-06-28", "focus": "Aerobic",
+                }],
+            )
+            return obj_id
+        def count_plan(obj_id):
+            return 1 if test_db.get_macrocycle_for_objective(obj_id) else 0
 
-        test_db.add_objective(
-            title="Wipe Target 2", target_date="2026-10-15", sport_type="running"
-        )
-        exit_code, stdout, stderr = self.run_cli(["goal", "wipe", "-y"])
-        self.assertEqual(exit_code, 0)
-        self.assertEqual(len(test_db.get_objectives()), 0)
+        def seed_data():
+            test_db.save_metric_cache(
+                date="2026-05-31", rhr=48, hrv=82, sleep_score=90, stress=15
+            )
+        def count_data(_):
+            return len(test_db.get_metrics_cache())
 
-    def test_lifeevent_wipe(self):
-        test_db.add_lifeevent(
-            title="Wipe Event", start_date="2026-07-01",
-            end_date="2026-07-02", event_type="party",
-        )
-        self.assertEqual(len(test_db.get_lifeevents()), 1)
+        cases = [
+            (["goal", "wipe"], seed_goal, count_goal,
+             "All training objectives wiped successfully."),
+            (["lifeevent", "wipe"], seed_lifeevent, count_lifeevent,
+             "All life events wiped successfully."),
+            (["plan", "wipe"], seed_plan, count_plan,
+             "All periodization plans wiped successfully."),
+            (["data", "wipe"], seed_data, count_data,
+             "All metrics, baselines, and completed activities wiped successfully."),
+        ]
 
-        exit_code, stdout, stderr = self.run_cli(["lifeevent", "wipe"], input_value="n")
-        self.assertEqual(exit_code, 0)
-        self.assertIn("Wipe cancelled.", stdout)
-        self.assertEqual(len(test_db.get_lifeevents()), 1)
+        for args, seed, count, message in cases:
+            with self.subTest(command=args[0]):
+                # `n` cancels the wipe.
+                token = seed()
+                self.assertEqual(count(token), 1)
+                exit_code, stdout, _ = self.run_cli(args, input_value="n")
+                self.assertEqual(exit_code, 0)
+                self.assertIn("Wipe cancelled.", stdout)
+                self.assertEqual(count(token), 1)
 
-        exit_code, stdout, stderr = self.run_cli(["lifeevent", "wipe"], input_value="y")
-        self.assertEqual(exit_code, 0)
-        self.assertIn("All life events wiped successfully.", stdout)
-        self.assertEqual(len(test_db.get_lifeevents()), 0)
+                # `y` confirms.
+                exit_code, stdout, _ = self.run_cli(args, input_value="y")
+                self.assertEqual(exit_code, 0)
+                self.assertIn(message, stdout)
+                self.assertEqual(count(token), 0)
 
-        test_db.add_lifeevent(
-            title="Wipe Event 2", start_date="2026-07-01",
-            end_date="2026-07-02", event_type="party",
-        )
-        exit_code, stdout, stderr = self.run_cli(["lifeevent", "wipe", "--yes"])
-        self.assertEqual(exit_code, 0)
-        self.assertEqual(len(test_db.get_lifeevents()), 0)
-
-    def test_plan_wipe(self):
-        obj_id = test_db.add_objective(
-            title="Plan Wipe Obj", target_date="2026-10-15", sport_type="running"
-        )
-        test_db.save_macrocycle(
-            objective_id=obj_id,
-            strategy="Base",
-            goals_hash="ghash",
-            lifeevents_hash="lhash",
-            mesocycles=[{
-                "name": "Meso1", "start_date": "2026-06-01",
-                "end_date": "2026-06-28", "focus": "Aerobic",
-            }],
-        )
-        self.assertIsNotNone(test_db.get_macrocycle_for_objective(obj_id))
-
-        exit_code, stdout, stderr = self.run_cli(["plan", "wipe"], input_value="n")
-        self.assertEqual(exit_code, 0)
-        self.assertIsNotNone(test_db.get_macrocycle_for_objective(obj_id))
-
-        exit_code, stdout, stderr = self.run_cli(["plan", "wipe"], input_value="y")
-        self.assertEqual(exit_code, 0)
-        self.assertIn("All periodization plans wiped successfully.", stdout)
-        self.assertIsNone(test_db.get_macrocycle_for_objective(obj_id))
-
-        test_db.save_macrocycle(
-            objective_id=obj_id,
-            strategy="Base",
-            goals_hash="ghash",
-            lifeevents_hash="lhash",
-            mesocycles=[{
-                "name": "Meso1", "start_date": "2026-06-01",
-                "end_date": "2026-06-28", "focus": "Aerobic",
-            }],
-        )
-        exit_code, stdout, stderr = self.run_cli(["plan", "wipe", "-y"])
-        self.assertEqual(exit_code, 0)
-        self.assertIsNone(test_db.get_macrocycle_for_objective(obj_id))
+                # `-y` skips the prompt entirely.
+                token = seed()
+                self.assertEqual(count(token), 1)
+                exit_code, _, _ = self.run_cli(args + ["-y"])
+                self.assertEqual(exit_code, 0)
+                self.assertEqual(count(token), 0)
 
     @patch("trainmate_cli.calendar_syncer")
     def test_workout_wipe(self, mock_calendar):
@@ -783,7 +752,10 @@ class TestTrainMateCLI(unittest.TestCase):
         self.assertEqual(len(test_db.get_workouts()), 0)
         mock_calendar.delete_workout_event.assert_called_once_with("ge_2")
 
-    def test_data_wipe(self):
+    def test_data_wipe_clears_all_evidence_tables(self):
+        # `data wipe` spans three tables — metrics, baselines, and completed
+        # activities — not just the metrics cache. (The confirm/`-y` flow itself is
+        # covered by test_wipe_commands_confirmation_flow.)
         test_db.save_metric_cache(
             date="2026-05-31", rhr=48, hrv=82, sleep_score=90, stress=15
         )
@@ -798,30 +770,11 @@ class TestTrainMateCLI(unittest.TestCase):
             rpe=5, tss=30.0,
         )
 
-        self.assertEqual(len(test_db.get_metrics_cache()), 1)
-        self.assertIsNotNone(test_db.get_baseline("2026-05-31"))
-        self.assertEqual(len(test_db.get_completed_activities()), 1)
-
-        exit_code, stdout, stderr = self.run_cli(["data", "wipe"], input_value="n")
-        self.assertEqual(exit_code, 0)
-        self.assertEqual(len(test_db.get_metrics_cache()), 1)
-        self.assertEqual(len(test_db.get_completed_activities()), 1)
-
-        exit_code, stdout, stderr = self.run_cli(["data", "wipe"], input_value="y")
-        self.assertEqual(exit_code, 0)
-        self.assertIn(
-            "All metrics, baselines, and completed activities wiped successfully.", stdout
-        )
-        self.assertEqual(len(test_db.get_metrics_cache()), 0)
-        self.assertIsNone(test_db.get_baseline("2026-05-31"))
-        self.assertEqual(len(test_db.get_completed_activities()), 0)
-
-        test_db.save_metric_cache(
-            date="2026-05-31", rhr=48, hrv=82, sleep_score=90, stress=15
-        )
         exit_code, stdout, stderr = self.run_cli(["data", "wipe", "-y"])
         self.assertEqual(exit_code, 0)
         self.assertEqual(len(test_db.get_metrics_cache()), 0)
+        self.assertIsNone(test_db.get_baseline("2026-05-31"))
+        self.assertEqual(len(test_db.get_completed_activities()), 0)
 
     def test_workout_list_filters(self):
         today_date = datetime.now(timezone.utc).date()
