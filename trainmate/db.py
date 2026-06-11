@@ -1191,6 +1191,38 @@ class Database:
             """, (end_date, start_date))
             return [(row['start_date'], row['end_date']) for row in cursor.fetchall()]
 
+    def get_periodization_ids_for_date(
+        self, date: str
+    ) -> Optional[Tuple[int, int, int]]:
+        """Resolves the (objective_id, macrocycle_id, mesocycle_id) covering a date.
+
+        Returns the mesocycle whose span contains the given date, along with its
+        parent macrocycle and objective ids. When overlapping blocks exist across
+        objectives, the most recently created macrocycle wins. Returns None if no
+        mesocycle covers the date. Used to stamp calendar events with traceability
+        back to the plan that produced them.
+        """
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT mac.objective_id AS objective_id,
+                       m.macrocycle_id AS macrocycle_id,
+                       m.id AS mesocycle_id
+                FROM mesocycles m
+                JOIN macrocycles mac ON m.macrocycle_id = mac.id
+                WHERE m.start_date <= ? AND m.end_date >= ?
+                ORDER BY mac.id DESC, m.start_date ASC
+                LIMIT 1
+            """, (date, date))
+            row = cursor.fetchone()
+            if not row:
+                return None
+            return (
+                row['objective_id'],
+                row['macrocycle_id'],
+                row['mesocycle_id'],
+            )
+
     def get_mesocycle(self, mesocycle_id: int) -> Optional[Mesocycle]:
         """Fetches a specific mesocycle by its unique ID."""
         with self._get_connection() as conn:

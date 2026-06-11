@@ -87,6 +87,26 @@ class CalendarSyncer:
             else:
                 event_description = prefix
 
+        # Append an identifier footer so each event stays traceable back to the plan
+        # that produced it: goal/macro/meso are resolved from the workout's date, the
+        # workout id comes from the row itself.
+        id_parts = []
+        ids = db.get_periodization_ids_for_date(date_str)
+        if ids:
+            objective_id, macrocycle_id, mesocycle_id = ids
+            id_parts.append(f"Goal: {objective_id}")
+            id_parts.append(f"Macro: {macrocycle_id}")
+            id_parts.append(f"Meso: {mesocycle_id}")
+        workout_id = workout.get('id')
+        if workout_id is not None:
+            id_parts.append(f"Workout: {workout_id}")
+        if id_parts:
+            footer = " | ".join(id_parts)
+            if event_description:
+                event_description = f"{event_description}\n\n{footer}"
+            else:
+                event_description = footer
+
         event_body = {
             'summary': summary,
             'description': event_description,
