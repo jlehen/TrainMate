@@ -216,6 +216,22 @@ class TestAdaptation(unittest.TestCase):
         self.assertEqual(len(updated), 2)
         self.assertEqual(syncer.sync_workout.call_count, 2)
 
+    def test_apply_swap_records_reason(self):
+        a = test_db.save_workout("2026-06-10", "running", "Run A", "a", rpe=4, tss=30)
+        b = test_db.save_workout("2026-06-12", "road_biking", "Ride B", "b", rpe=4, tss=30)
+        ops = [
+            {"id": a, "new_date": "2026-06-12"},
+            {"id": b, "new_date": "2026-06-10"},
+        ]
+        service = trainmate.coach.CoachService(
+            db_instance=test_db, calendar_syncer_instance=Mock()
+        )
+        service.apply_swap(ops, no_sync=True, reason="knee felt sore")
+        for wid in (a, b):
+            mr = test_db.get_workout_by_id(wid)["modification_reason"]
+            self.assertIn("Swapped from", mr)
+            self.assertIn("Reason: knee felt sore", mr)
+
     def test_apply_swap_no_sync(self):
         a = test_db.save_workout("2026-06-10", "running", "Run A", "a", rpe=4, tss=30)
         ops = [{"id": a, "new_date": "2026-06-11"}]

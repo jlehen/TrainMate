@@ -545,6 +545,8 @@ Handler functions are named `run_<command>_<subcommand>()` in `trainmate_cli.py`
 |              |              |          | (`--id1 X --id2 Y`). Runs recovery checks (consecutive hard             |
 |              |              |          | days, weekly load spikes, mesocycle crossings) and prompts on           |
 |              |              |          | warnings unless `-f`/`--force`. Syncs to Calendar unless `--no-sync`.    |
+|              |              |          | `--reason TEXT` is folded into the `modification_reason` and shown to    |
+|              |              |          | the coach.                                                              |
 | `workout`    | `wipe`       | —        | Delete all workouts                                                      |
 | `data`       | `pull`       | `d pull` | Fetch metrics and activities directly from Garmin (`--days`/`--from`/`--until`/`--metrics-only`/`--activities-only`/`--sleep`) |
 | `data`       | `analyze`    | `d a`    | Analyze completed workouts/metrics to detect cycles                      |
@@ -732,9 +734,13 @@ stored instants stay UTC. The web app never calls this — it is a pure reader (
 
 A `workout swap` exchanges the dates of two workouts (or moves one onto an
 empty rest day). Moved workouts are flagged `status='modified'` with a
-`modification_reason` recording the swap, exactly like an adaptation — so they
-are re-synced by `workout push` and visibly distinguished from untouched
-`planned` ones. Swaps are validated first (`CoachService.validate_swap`): the
+`modification_reason` recording the swap (`Swapped from X to Y`, plus the
+athlete's optional `--reason` appended as `. Reason: …`), exactly like an
+adaptation — so they are re-synced by `workout push` and visibly distinguished
+from untouched `planned` ones. The `modification_reason` is surfaced to the
+coach in the adaptation prompt (`format_planned_workouts`), so a swap informs
+the coach symmetrically to how `workout rm`'s `removed_reason` does. Swaps are
+validated first (`CoachService.validate_swap`): the
 new schedule is simulated and the user is warned about newly-created >2-day
 high-intensity streaks, weekly load spikes (an ACWR proxy), and
 mesocycle-boundary crossings.

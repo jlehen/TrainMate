@@ -88,11 +88,15 @@ def format_planned_workouts(planned_workouts: List[Workout]) -> str:
     """Formats planned workouts to a readable block for LLM prompts."""
     planned_list = []
     for w in planned_workouts:
-        planned_list.append(
+        line = (
             f"- {w['date']} ({w['sport_type'].upper()}): {w['title']} | "
             f"Expected duration: {w.get('duration_minutes')}m, "
             f"RPE: {w.get('rpe')}, TSS: {w.get('tss')}"
         )
+        mod_reason = w.get('modification_reason')
+        if mod_reason:
+            line += f" — {mod_reason}"
+        planned_list.append(line)
     return "\n".join(planned_list)
 
 
@@ -1750,20 +1754,25 @@ class CoachService:
         return warnings
 
     def apply_swap(
-        self, swap_ops: List[Dict[str, Any]], no_sync: bool = False
+        self, swap_ops: List[Dict[str, Any]], no_sync: bool = False,
+        reason: Optional[str] = None
     ) -> List[Dict[str, Any]]:
         """Applies the date changes for a swap and syncs the moved workouts.
 
         Reads each workout's original date before moving it (ops reference distinct ids,
-        so reads stay correct across the loop). Returns the updated workout records.
+        so reads stay correct across the loop). The athlete's optional `reason` is folded
+        into each moved workout's `modification_reason` so the coach sees why the swap
+        happened. Returns the updated workout records.
         """
         updated_workouts = []
         for op in swap_ops:
             workout = self._db.get_workout_by_id(op['id'])
             if not workout:
                 continue
-            reason = f"Swapped from {workout['date']} to {op['new_date']}"
-            self._db.update_workout_date(op['id'], op['new_date'], reason)
+            mod_reason = f"Swapped from {workout['date']} to {op['new_date']}"
+            if reason:
+                mod_reason += f". Reason: {reason}"
+            self._db.update_workout_date(op['id'], op['new_date'], mod_reason)
             moved = self._db.get_workout_by_id(op['id'])
             if moved:
                 updated_workouts.append(moved)

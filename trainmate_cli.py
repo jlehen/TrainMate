@@ -407,6 +407,10 @@ def main() -> None:
         "-f", "--force", action="store_true", dest="force",
         help="Apply the swap without prompting, even if warnings are raised"
     )
+    w_swap.add_argument(
+        "--reason", default=None,
+        help="Why the workouts are being swapped (recorded and shown to the coach)"
+    )
 
 
 
@@ -2073,10 +2077,12 @@ def run_workout_swap(args: argparse.Namespace) -> None:
                 print("\nSwap cancelled.")
                 return
 
-    updated = coach_service.apply_swap(ops, args.no_sync)
+    updated = coach_service.apply_swap(ops, args.no_sync, reason=args.reason)
     print(green(f"\nSwapped {len(updated)} workout(s) successfully."))
     for w in updated:
         print(f"  [{w['id']}] {w['title']} -> {w['date']}")
+    if args.reason:
+        print(f"Reason: {args.reason}")
     if args.no_sync:
         print(gray("Calendar sync skipped (--no-sync)."))
 
