@@ -1935,9 +1935,17 @@ def run_workout_push(args: argparse.Namespace) -> None:
         start_date=start_date,
         end_date=end_date,
         sport_type=getattr(args, 'sport_type', None),
+        include_removed=True,
     )
 
-    to_push = all_workouts if force else [w for w in all_workouts if not w['synced']]
+    to_push = []
+    for w in all_workouts:
+        if not w.get('removed'):
+            if force or not w['synced']:
+                to_push.append(w)
+        else:
+            if w.get('google_event_id') and (force or not w['synced']):
+                to_push.append(w)
 
     if not to_push:
         if force:
@@ -1959,9 +1967,10 @@ def run_workout_push(args: argparse.Namespace) -> None:
 
 
 def run_workout_rm(args: argparse.Namespace) -> None:
-    """Soft-removes a planned workout: marks it removed (kept in the DB) and deletes its
-    Calendar event. Removed workouts are excluded from listings, comparisons, and the
-    calendar push, but are still surfaced to the coach as a deliberate cancellation."""
+    """Soft-removes a planned workout: marks it removed (kept in the DB) and updates its
+    Calendar event to be marked as deleted. Removed workouts are excluded from listings,
+    comparisons, and the calendar push, but are still surfaced to the coach as a deliberate
+    cancellation."""
     workout = db.get_workout_by_id(args.id)
     if not workout:
         print(red(f"Workout with ID {args.id} not found."))
@@ -1971,12 +1980,17 @@ def run_workout_rm(args: argparse.Namespace) -> None:
         print(yellow(f"Workout with ID {args.id} ('{workout['title']}') is already removed."))
         return
 
-    if workout.get('google_event_id'):
-        print("Workout is synced to Google Calendar. Attempting to delete calendar event...")
-        if workout['google_event_id'] is not None:
-            calendar_syncer.delete_workout_event(workout['google_event_id'])
-
     db.mark_workout_removed(args.id, reason=args.reason)
+
+    if workout.get('google_event_id'):
+        print("Workout is synced to Google Calendar. Updating calendar event...")
+        updated_workout = db.get_workout_by_id(args.id)
+        if updated_workout is not None:
+            try:
+                calendar_syncer.sync_workout(updated_workout)
+            except Exception as e:
+                print(red(f"Error updating Google Calendar event: {e}"))
+
     print(green(
         f"Workout with ID {args.id} ('{workout['title']}') removed successfully."
     ))

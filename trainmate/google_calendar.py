@@ -50,7 +50,13 @@ class CalendarSyncer:
         # Format Summary and Description
         is_modified = bool(mod_reason)
         content_changed = is_modified and orig_description != description
-        if content_changed:
+        if workout.get('removed'):
+            summary = f"[Deleted] {title}"
+            event_description = description or ""
+            removed_reason = workout.get('removed_reason')
+            if removed_reason:
+                event_description = f"{event_description}\n\nReason:\n{removed_reason}"
+        elif content_changed:
             summary = f"[Adapted] {title}"
             event_description = (
                 f"Adapted:\n{description}\n\n"
@@ -121,7 +127,13 @@ class CalendarSyncer:
                     original_description=orig_description,
                     synced=True,
                     modification_reason=mod_reason,
-                    google_event_id=google_event_id
+                    google_event_id=google_event_id,
+                    duration_minutes=duration,
+                    rpe=workout.get('rpe'),
+                    tss=tss,
+                    original_date=workout.get('original_date'),
+                    removed=workout.get('removed', False),
+                    removed_reason=workout.get('removed_reason')
                 )
                 return google_event_id
             except HttpError as e:
@@ -159,7 +171,13 @@ class CalendarSyncer:
                 original_description=orig_description,
                 synced=True,
                 modification_reason=mod_reason,
-                google_event_id=new_event_id
+                google_event_id=new_event_id,
+                duration_minutes=duration,
+                rpe=workout.get('rpe'),
+                tss=tss,
+                original_date=workout.get('original_date'),
+                removed=workout.get('removed', False),
+                removed_reason=workout.get('removed_reason')
             )
             return str(new_event_id)
         except Exception as e:

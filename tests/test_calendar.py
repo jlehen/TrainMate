@@ -125,5 +125,48 @@ class TestCalendarSync(unittest.TestCase):
         # The description text appears exactly once.
         self.assertEqual(desc.count("40 min tempo at threshold."), 1)
 
+    def test_sync_workout_removed(self):
+        # Setup workout dictionary with removed details
+        workout = {
+            "date": "2026-06-12",
+            "sport_type": "running",
+            "title": "Easy Run",
+            "description": "Short recovery jog.",
+            "original_description": "Short recovery jog.",
+            "duration_minutes": 20,
+            "tss": 15,
+            "google_event_id": "evt-removed-123",
+            "removed": True,
+            "removed_reason": "Injury flare-up",
+            "synced": False
+        }
+
+        # Mock the event update API response
+        mock_service = MagicMock()
+        mock_event_result = {"id": "evt-removed-123", "htmlLink": "http://calendar/event/1"}
+        mock_service.events().update().execute.return_value = mock_event_result
+
+        # Run the sync with patched service
+        with patch.object(calendar_syncer, "service", mock_service):
+            event_id = calendar_syncer.sync_workout(workout)
+
+        # Verify returned event ID
+        self.assertEqual(event_id, "evt-removed-123")
+
+        # Find the call that has the body parameter
+        update_calls = [
+            call for call in mock_service.events().update.call_args_list
+            if call.kwargs.get("body")
+        ]
+        self.assertEqual(len(update_calls), 1)
+        body = update_calls[0].kwargs["body"]
+        self.assertEqual(body.get("summary"), "[Deleted] Easy Run")
+        
+        # Verify description contains Duration, TSS, and Reason
+        desc = body.get("description", "")
+        self.assertIn("Duration: 20m | TSS: 15", desc)
+        self.assertIn("Short recovery jog.", desc)
+        self.assertIn("Reason:\nInjury flare-up", desc)
+
 if __name__ == "__main__":
     unittest.main()

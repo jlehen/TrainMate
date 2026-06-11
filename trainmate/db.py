@@ -534,7 +534,8 @@ class Database:
         original_description: Optional[str] = None, synced: bool = False,
         modification_reason: Optional[str] = None, google_event_id: Optional[str] = None,
         duration_minutes: Optional[int] = None, rpe: Optional[int] = None,
-        tss: Optional[int] = None, original_date: Optional[str] = None
+        tss: Optional[int] = None, original_date: Optional[str] = None,
+        removed: bool = False, removed_reason: Optional[str] = None
     ) -> int:
         """Saves a workout, updating it if it already exists for the date/sport_type."""
         with self._get_connection() as conn:
@@ -556,24 +557,26 @@ class Database:
                         duration_minutes = COALESCE(?, duration_minutes),
                         rpe = COALESCE(?, rpe),
                         tss = COALESCE(?, tss),
-                        removed = 0, removed_reason = NULL
+                        removed = ?, removed_reason = ?
                     WHERE id = ?
                 """, (title, description, original_description,
                       original_date, int(synced),
                       modification_reason, ge_id, duration_minutes, rpe, tss,
+                      int(removed), removed_reason,
                       workout_id))
             else:
                 cursor.execute("""
                     INSERT INTO workouts (
                         date, sport_type, title, description, original_description,
                         original_date, synced, modification_reason,
-                        google_event_id, duration_minutes, rpe, tss
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        google_event_id, duration_minutes, rpe, tss,
+                        removed, removed_reason
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (date, sport_type, title, description,
                       original_description or description,
                       original_date or date, int(synced),
                       modification_reason, google_event_id, duration_minutes,
-                      rpe, tss))
+                      rpe, tss, int(removed), removed_reason))
                 workout_id = cursor.lastrowid
             conn.commit()
             return int(workout_id)
@@ -661,16 +664,16 @@ class Database:
     def mark_workout_removed(
         self, workout_id: int, reason: Optional[str] = None
     ) -> None:
-        """Soft-deletes a workout: flags it `removed` and detaches it from the calendar.
+        """Soft-deletes a workout: flags it `removed` and marks it pending re-push.
 
         The row is kept (excluded from reads by default) so the coach can still be told
         the session was deliberately cancelled, optionally with the athlete's `reason`.
-        `google_event_id` is cleared because the caller deletes the Calendar event;
-        `synced` is reset for the same reason."""
+        `google_event_id` is preserved so the calendar event can be updated to be marked
+        as deleted on sync; `synced` is reset so it triggers an update."""
         with self._get_connection() as conn:
             conn.execute(
                 "UPDATE workouts SET removed = 1, removed_reason = ?, "
-                "google_event_id = NULL, synced = 0 WHERE id = ?",
+                "synced = 0 WHERE id = ?",
                 (reason, workout_id)
             )
             conn.commit()

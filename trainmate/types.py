@@ -33,6 +33,9 @@ class Workout(TypedDict):
     duration_minutes: Optional[int]
     rpe: Optional[int]
     tss: Optional[int]
+    original_date: Optional[str]
+    removed: Optional[bool]
+    removed_reason: Optional[str]
 
 class CompletedActivity(TypedDict):
     """Represents a completed Garmin activity synced from Sheets."""
