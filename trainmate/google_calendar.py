@@ -49,13 +49,19 @@ class CalendarSyncer:
 
         # Format Summary and Description
         is_modified = bool(mod_reason)
-        if is_modified:
+        content_changed = is_modified and orig_description != description
+        if content_changed:
             summary = f"[Adapted] {title}"
             event_description = (
                 f"Adapted:\n{description}\n\n"
                 f"Originally:\n{orig_description}\n\n"
                 f"Reason:\n{mod_reason}"
             )
+        elif is_modified:
+            # Date-only change (e.g. a swap): the content is unchanged, so showing
+            # "Adapted"/"Originally" with identical text is redundant. Show it once.
+            summary = f"[Adapted] {title}"
+            event_description = f"{description or ''}\n\nReason:\n{mod_reason}"
         else:
             summary = title
             event_description = description or ""

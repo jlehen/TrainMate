@@ -86,5 +86,44 @@ class TestCalendarSync(unittest.TestCase):
             "Adapted description should come first"
         )
 
+    def test_sync_workout_swap_does_not_duplicate_description(self):
+        # A swap moves a workout's date without changing its content, so
+        # description == original_description. The calendar should show the
+        # description once rather than identical "Adapted"/"Originally" blocks.
+        workout = {
+            "date": "2026-06-11",
+            "sport_type": "running",
+            "title": "Tempo Run",
+            "description": "40 min tempo at threshold.",
+            "original_description": "40 min tempo at threshold.",
+            "modification_reason": "Swapped from 2026-06-09 to 2026-06-11",
+            "duration_minutes": 40,
+            "tss": 50,
+            "google_event_id": None,
+        }
+
+        mock_service = MagicMock()
+        mock_event_result = {"id": "evt-swap-1", "htmlLink": "http://calendar/event/2"}
+        mock_service.events().insert().execute.return_value = mock_event_result
+
+        with patch.object(calendar_syncer, "service", mock_service):
+            calendar_syncer.sync_workout(workout)
+
+        insert_calls = [
+            call for call in mock_service.events().insert.call_args_list
+            if call.kwargs.get("body")
+        ]
+        self.assertEqual(len(insert_calls), 1)
+        body = insert_calls[0].kwargs["body"]
+        self.assertEqual(body.get("summary"), "[Adapted] Tempo Run")
+
+        desc = body.get("description", "")
+        self.assertNotIn("Adapted:", desc)
+        self.assertNotIn("Originally:", desc)
+        self.assertIn("40 min tempo at threshold.", desc)
+        self.assertIn("Reason:\nSwapped from 2026-06-09 to 2026-06-11", desc)
+        # The description text appears exactly once.
+        self.assertEqual(desc.count("40 min tempo at threshold."), 1)
+
 if __name__ == "__main__":
     unittest.main()
