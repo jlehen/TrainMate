@@ -1122,8 +1122,8 @@ class CoachService:
         self._db.delete_macrocycle_for_objective(objective_id)
 
     def generate_periodization_plan(
-        self, force: bool = False, objective_id: Optional[int] = None
-    ) -> Tuple[str, List[Dict[str, Any]]]:
+        self, force: bool = False, objective_id: Optional[int] = None, auto_apply: bool = True
+    ) -> Tuple[str, List[Dict[str, Any]], bool]:
         """Determines the macrocycle strategy and mesocycle blocks."""
         # Identify the target goal
         if objective_id is not None:
@@ -1303,7 +1303,7 @@ class CoachService:
             mesocycles = macro_data.get("mesocycles", [])
 
             # Save it
-            if next_goal['id'] is not None:
+            if next_goal['id'] is not None and auto_apply:
                 self._db.save_macrocycle(
                     objective_id=next_goal['id'],
                     strategy=strategy,
@@ -1312,6 +1312,7 @@ class CoachService:
                     config_hash=config_hash,
                     mesocycles=mesocycles
                 )
+
             print("\n=== NEW PERIODIZATION STRATEGY (MACROCYCLE) ===")
             print(f"Overall Strategy:\n{strategy}\n")
             print("Mesocycle Blocks:")
@@ -1319,7 +1320,27 @@ class CoachService:
                 print(f"- {m['name']} ({m['start_date']} to {m['end_date']}): {m['focus']}")
             print("==============================================\n")
 
-        return strategy, mesocycles
+        return strategy, mesocycles, reused
+
+    def apply_periodization_plan(
+        self, objective_id: int, strategy: str, mesocycles: List[Dict[str, Any]]
+    ) -> None:
+        """Saves a generated periodization plan to the database."""
+        today_str = _today_str()
+        objectives = self._db.get_objectives(status='active')
+        lifeevents = self._db.get_lifeevents(start_after=today_str)
+        goals_hash = self.engine._get_goals_hash(objectives)
+        lifeevents_hash = self.engine._get_lifeevents_hash(lifeevents)
+        config_hash = self.engine._get_config_hash()
+
+        self._db.save_macrocycle(
+            objective_id=objective_id,
+            strategy=strategy,
+            goals_hash=goals_hash,
+            lifeevents_hash=lifeevents_hash,
+            config_hash=config_hash,
+            mesocycles=mesocycles
+        )
 
     def generate_workouts(
         self, objective_id: Optional[int] = None, end_date: Optional[str] = None

@@ -291,7 +291,7 @@ class TestPeriodization(unittest.TestCase):
         with self.assertRaises(ValueError):
             coach_service.generate_workouts()
 
-        strategy, mesos = coach_service.generate_periodization_plan(force=False)
+        strategy, mesos, _ = coach_service.generate_periodization_plan(force=False)
         self.assertEqual(strategy, "Separate strategy philosophy")
         self.assertEqual(len(mesos), 1)
         mock_client.complete.assert_called_once()
@@ -500,7 +500,7 @@ class TestPeriodization(unittest.TestCase):
             },
         ]
 
-        strategy, mesos = coach_service.generate_periodization_plan(force=True)
+        strategy, mesos, _ = coach_service.generate_periodization_plan(force=True)
         self.assertEqual(mock_client.complete.call_count, 2)
 
         active_objs = sorted(
@@ -544,13 +544,13 @@ class TestPeriodization(unittest.TestCase):
             },
         ]
 
-        strategy_a, mesos_a = coach_service.generate_periodization_plan(
+        strategy_a, mesos_a, _ = coach_service.generate_periodization_plan(
             force=True, objective_id=obj1_id
         )
         self.assertEqual(strategy_a, "Plan A strategy")
         self.assertEqual(mesos_a[0]["start_date"], "2026-06-05")
 
-        strategy_b, mesos_b = coach_service.generate_periodization_plan(
+        strategy_b, mesos_b, _ = coach_service.generate_periodization_plan(
             force=True, objective_id=obj2_id
         )
         self.assertEqual(strategy_b, "Plan B strategy")

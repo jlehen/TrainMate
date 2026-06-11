@@ -161,7 +161,7 @@ def generate_plan() -> Any:
         goal_id = data.get("goal_id")
         if goal_id is not None:
             goal_id = int(goal_id)
-        strategy, mesocycles = coach_service.generate_periodization_plan(
+        strategy, mesocycles, _ = coach_service.generate_periodization_plan(
             objective_id=goal_id
         )
         return jsonify({
