@@ -10,7 +10,7 @@ from trainmate.google_calendar import calendar_syncer
 from trainmate.types import Objective, LifeEvent, Workout, CompletedActivity
 from trainmate.adherence import analyze_adherence
 from trainmate.garmin import activity_load, rpe_divergence
-from trainmate.util import today_str as _today_str, today_date as _today_date
+from trainmate.util import today_str as _today_str, today_date as _today_date, cyan, green, yellow, bold, red
 
 
 # Shared JSON-output instruction for incrementally updating coach learnings. The LLM
@@ -493,7 +493,7 @@ You MUST respond with a JSON object containing:
             f"Please determine the macrocycle and mesocycle blocks starting from {plan_start}."
         )
 
-        print("Querying OpenRouter to generate macrocycle and mesocycles periodization strategy...")
+        print(cyan("Querying OpenRouter to generate macrocycle and mesocycles periodization strategy..."))
         result = openrouter_client.complete(
             system_prompt, user_content, label="periodization_plan"
         )
@@ -579,7 +579,7 @@ You MUST respond with a JSON object containing:
         if history_text_parts:
             user_content += "\n\n" + "\n\n".join(history_text_parts)
 
-        print("Querying OpenRouter to generate training workouts (microcycles)...")
+        print(cyan("Querying OpenRouter to generate training workouts (microcycles)..."))
         plan_data = openrouter_client.complete(
             system_prompt, user_content, label="workout_generation"
         )
@@ -699,8 +699,8 @@ Actual Completed Garmin Activities in Window:
 Adherence Discrepancies & Violations:
 {discrepancy_text}
 {informational_section}"""
-        print(f"Querying OpenRouter to evaluate adaptation for the remainder of the mesocycle "
-              f"({target_date_str} -> {meso_end_date_str})...")
+        print(cyan(f"Querying OpenRouter to evaluate adaptation for the remainder of the mesocycle "
+              f"({target_date_str} -> {meso_end_date_str})..."))
         decision = openrouter_client.complete(
             system_prompt, user_content, label="workout_adaptation"
         )
@@ -759,7 +759,7 @@ Adherence Discrepancies & Violations:
             "  ]\n"
             "}\n"
         )
-        print("Querying OpenRouter to generate intermediate objectives...")
+        print(cyan("Querying OpenRouter to generate intermediate objectives..."))
         result = openrouter_client.complete(
             system_prompt, user_content, label="generate_intermediate_goals"
         )
@@ -849,7 +849,7 @@ Adherence Discrepancies & Violations:
         if context:
             user_content += f"\n\nATHLETE SUBJECTIVE CONTEXT FOR THIS PERIOD:\n{context}\n"
 
-        print("Querying OpenRouter to perform training history analysis...")
+        print(cyan("Querying OpenRouter to perform training history analysis..."))
         result = openrouter_client.complete(
             system_prompt, user_content, label="workout_analysis"
         )
@@ -1187,8 +1187,8 @@ class CoachService:
             )
 
         if duration_weeks > 24:
-            print(f"Goal '{next_goal['title']}' is {duration_weeks:.1f} "
-                  "weeks away (> 24 weeks).")
+            print(cyan(f"Goal '{next_goal['title']}' is {duration_weeks:.1f} "
+                  "weeks away (> 24 weeks)."))
             print("Querying LLM to generate intermediate objectives...")
             goals_data = self.engine._generate_intermediate_goals(
                 next_goal=next_goal,
@@ -1245,8 +1245,8 @@ class CoachService:
                 reused = True
                 strategy = existing_macro['strategy']
                 mesocycles = self._db.get_mesocycles_for_macrocycle(existing_macro['id'])
-                print("Reusing existing periodization strategy (macrocycle and mesocycles) "
-                      "from database.")
+                print(cyan("Reusing existing periodization strategy (macrocycle and mesocycles) "
+                      "from database."))
 
         if not reused:
             # Get the previous strategy for context
@@ -1284,8 +1284,8 @@ class CoachService:
                     feedback_text = "\n".join(fb_parts)
 
             # Generate new macrocycle strategy and mesocycles
-            print("Goals or life events have changed, or force generation requested. "
-                  "Determining new overall periodization strategy...")
+            print(cyan("Goals or life events have changed, or force generation requested. "
+                  "Determining new overall periodization strategy..."))
             guidelines = self._load_science_guidelines()
             profile = config.user_profile
             history_summary = self._get_recent_history_summary(today_str)
@@ -1294,9 +1294,9 @@ class CoachService:
             # replaced, or the preceding goal's plan when there is none.
             prior_training_text = self._build_prior_training_context(prev_macro, today_str)
             if prior_training_text:
-                print("\n=== PRIOR TRAINING REVIEW (planned vs actual) ===")
+                print(cyan(bold("\n=== PRIOR TRAINING REVIEW (planned vs actual) ===")))
                 print(prior_training_text)
-                print("==================================================\n")
+                print(cyan(bold("==================================================\n")))
             macro_data = self.engine._generate_macrocycle_strategy(
                 next_goal=next_goal,
                 objectives=objectives,
@@ -1324,12 +1324,12 @@ class CoachService:
                     mesocycles=mesocycles
                 )
 
-            print("\n=== NEW PERIODIZATION STRATEGY (MACROCYCLE) ===")
-            print(f"Overall Strategy:\n{strategy}\n")
-            print("Mesocycle Blocks:")
+            print(cyan(bold("\n=== NEW PERIODIZATION STRATEGY (MACROCYCLE) ===")))
+            print(f"{bold('Overall Strategy:')}\n{strategy}\n")
+            print(bold("Mesocycle Blocks:"))
             for m in mesocycles:
-                print(f"- {m['name']} ({m['start_date']} to {m['end_date']}): {m['focus']}")
-            print("==============================================\n")
+                print(f"- {bold(m['name'])} ({m['start_date']} to {m['end_date']}): {m['focus']}")
+            print(cyan(bold("==============================================\n")))
 
         return strategy, mesocycles, reused
 
@@ -1440,7 +1440,7 @@ class CoachService:
                 try:
                     self._calendar_syncer.delete_workout_event(ew['google_event_id'])
                 except Exception as e:
-                    print(f"Error deleting Google Calendar event: {e}")
+                    print(red(f"Error deleting Google Calendar event: {e}"))
         self._db.clear_future_workouts(today_str, include_calendar_events=True)
 
         saved_workouts: List[Workout] = []
@@ -1470,7 +1470,7 @@ class CoachService:
                 'tss': w.get('tss')
             })
 
-        print(f"Generated {len(workouts)} workouts.")
+        print(green(f"Generated {len(workouts)} workouts."))
         return plan_data.get("reasoning", "Plan generated."), saved_workouts
 
     def replan(
@@ -1630,13 +1630,13 @@ class CoachService:
             if ew_date in proposed_by_date:
                 proposed_sports = [p['sport_type'] for p in proposed_by_date[ew_date]]
                 if ew['sport_type'] not in proposed_sports:
-                    print(f"Removing overridden workout: {ew['title']} ({ew['sport_type']}) "
-                          f"on {ew_date}")
+                    print(yellow(f"Removing overridden workout: {ew['title']} ({ew['sport_type']}) "
+                          f"on {ew_date}"))
                     if ew.get('google_event_id'):
                         try:
                             self._calendar_syncer.delete_workout_event(ew['google_event_id'])
                         except Exception as e:
-                            print(f"Error deleting Google Calendar event: {e}")
+                            print(red(f"Error deleting Google Calendar event: {e}"))
                     self._db.delete_workout_by_id(ew['id'])
 
         # 3. Save new adapted workouts and sync them
@@ -1668,7 +1668,7 @@ class CoachService:
                 try:
                     self._calendar_syncer.sync_workout(updated)
                 except Exception as e:
-                    print(f"Error syncing {w['title']} to Google Calendar: {e}")
+                    print(red(f"Error syncing {w['title']} to Google Calendar: {e}"))
 
 
     # --- Workout swapping ---
@@ -1880,7 +1880,7 @@ class CoachService:
         from_str = from_date.strftime("%Y-%m-%d")
         until_str = until_date.strftime("%Y-%m-%d")
 
-        print(f"Analyzing activities from {from_str} to {until_str}...")
+        print(cyan(f"Analyzing activities from {from_str} to {until_str}..."))
 
         # Ensure Garmin data covers the analysis window (auto-pull recent/small gaps,
         # surface a command for large backfills) before reading it unless no_pull is True.
@@ -1901,8 +1901,8 @@ class CoachService:
         cached = self._db.get_analysis_cache("long")
         evidence_unchanged = bool(cached and cached.get("fingerprint") == fingerprint)
         if evidence_unchanged and not force and cached.get("reconstruction"):
-            print("Evidence unchanged since last analysis; reusing cached reconstruction "
-                  "(use --force to recompute).")
+            print(cyan("Evidence unchanged since last analysis; reusing cached reconstruction "
+                  "(use --force to recompute)."))
             return cached["reconstruction"]
 
         # Group by ISO week (Monday date string)
