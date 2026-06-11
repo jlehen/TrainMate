@@ -9,7 +9,7 @@ landed: the `analysis_cache` table + CRUD (§5.1); `CoachEngine
 §11); the `apply_learning_deltas(..., suppress_reinforcement=)` integrity
 invariant (§8); `workout generate` made read-only (§11); the `analyze` reuse path
 (fingerprint → cache → reuse-or-recompute, with `suppress_reinforcement` on forced
-unchanged re-runs); the `--inspect`/`--force` CLI flags (§9); `plan feedback
+unchanged re-runs); the `--inspect-only`/`--force` CLI flags (§9); `plan feedback
 --edit` (§7); and the planned-vs-inferred review via **Option A** (§6, §7 — see
 the note below).
 
@@ -166,7 +166,7 @@ analysis_cache
 
 **Retention: one row per `horizon`** (an upsert keyed on `horizon`). A new
 `data pull` shifts the fingerprint and overwrites the slot — we only ever want
-the *current* reconstruction. A fingerprint-keyed *history* (so `--inspect` over
+the *current* reconstruction. A fingerprint-keyed *history* (so `--inspect-only` over
 an old window hits cache) is deferred until missed.
 
 `db.py` methods (fresh-connection-per-call, per ARCHITECTURE §4):
@@ -274,12 +274,12 @@ evidence provenance — is **deferred as YAGNI** until the pain is felt.
 
 ---
 
-## 9. Two Flags: `--inspect` and `--force`
+## 9. Two Flags: `--inspect-only` and `--force`
 
 The two flags answer **independent** questions, so all four combinations are
 valid:
 
-- **`--inspect`** — the *write* axis: "touch memory, or not?" Read-only; shows the
+- **`--inspect-only`** — the *write* axis: "touch memory, or not?" Read-only; shows the
   reconstruction but writes nothing (no learnings, no feedback). For curiosity.
 - **`--force`** — the *recompute* axis: "re-run the LLM, or reuse?" Bypasses the
   cheap-skip/reuse (§5, role 1) — e.g. after improving the prompt or science
@@ -287,8 +287,8 @@ valid:
 
 |                  | write           | read-only          |
 |------------------|-----------------|--------------------|
-| **reuse**        | (default)       | `--inspect`        |
-| **recompute**    | `--force`       | `--force --inspect`|
+| **reuse**        | (default)       | `--inspect-only`   |
+| **recompute**    | `--force`       | `--force --inspect-only`|
 
 **Critical guardrail.** `--force` bypasses the *reuse optimization*, **never the
 integrity invariant** (§8). Forcing a re-run over unchanged data still suppresses
@@ -317,7 +317,7 @@ twice"? No:
 
 `data analyze` earns a separate command because you sometimes look backward
 *without* wanting a new plan — to curate memory on its own cadence, or simply out
-of curiosity (especially early on). That is `--inspect`'s reason to exist.
+of curiosity (especially early on). That is `--inspect-only`'s reason to exist.
 
 ---
 

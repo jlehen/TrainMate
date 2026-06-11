@@ -1790,7 +1790,7 @@ class CoachService:
     def analyze_workouts(
         self, from_date_str: Optional[str] = None, until_date_str: Optional[str] = None,
         days: Optional[int] = None, weeks: Optional[int] = None,
-        context: Optional[str] = None, force: bool = False, inspect: bool = False,
+        context: Optional[str] = None, force: bool = False, inspect_only: bool = False,
         no_pull: bool = False
     ) -> Dict[str, Any]:
         """Analyzes historical workouts and physiological metrics using LLM.
@@ -1802,7 +1802,7 @@ class CoachService:
         - `force` bypasses *reuse* only (recompute even if unchanged); it never bypasses
           the reinforcement integrity invariant — a forced re-run over unchanged evidence
           still suppresses the confidence/recency ratchet.
-        - `inspect` is read-only: it renders the reconstruction but writes neither coach
+        - `inspect_only` is read-only: it renders the reconstruction but writes neither coach
           learnings nor the cache.
         """
         until_date = _today_date()
@@ -2026,7 +2026,7 @@ class CoachService:
             context=context
         )
 
-        if not inspect:
+        if not inspect_only:
             # Apply learning deltas. On a forced re-run over unchanged evidence, honour the
             # integrity invariant (§8): suppress the reinforcement ratchet so re-reading the
             # same data cannot inflate confidence or reset decay.

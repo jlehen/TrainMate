@@ -281,7 +281,9 @@ class TestTrainMateCLI(unittest.TestCase):
             description="5x800m",
             synced=False,
         )
-        exit_code, stdout, stderr = self.run_cli(["workout", "rm", str(w_id)])
+        exit_code, stdout, stderr = self.run_cli(
+            ["workout", "rm", str(w_id), "--reason", "Travelling"]
+        )
         self.assertEqual(exit_code, 0)
         self.assertIn(
             f"Workout with ID {w_id} ('Interval Session') removed successfully", stdout
@@ -470,7 +472,7 @@ class TestTrainMateCLI(unittest.TestCase):
             description="easy", synced=False, rpe=4, tss=30,
         )
         exit_code, stdout, stderr = self.run_cli(
-            ["workout", "swap", d1, d2]
+            ["workout", "swap", d1, d2, "--reason", "Travelling"]
         )
         self.assertEqual(exit_code, 0)
         self.assertIn("Swapped 2 workout(s) successfully", stdout)
@@ -498,7 +500,8 @@ class TestTrainMateCLI(unittest.TestCase):
             description="easy", synced=False, rpe=4, tss=30,
         )
         exit_code, stdout, stderr = self.run_cli(
-            ["workout", "swap", "--id1", str(a), "--id2", str(b), "--no-sync"]
+            ["workout", "swap", "--id1", str(a), "--id2", str(b), "--no-sync",
+             "--reason", "Travelling"]
         )
         self.assertEqual(exit_code, 0)
         self.assertIn("Calendar sync skipped", stdout)
@@ -525,7 +528,7 @@ class TestTrainMateCLI(unittest.TestCase):
         )
         # Default input is "n": the swap is cancelled and never applied.
         exit_code, stdout, stderr = self.run_cli(
-            ["workout", "swap", d1, d2]
+            ["workout", "swap", d1, d2, "--reason", "Travelling"]
         )
         self.assertEqual(exit_code, 0)
         self.assertIn("Swap warnings", stdout)
@@ -546,14 +549,16 @@ class TestTrainMateCLI(unittest.TestCase):
             description="easy", synced=False, rpe=4, tss=30,
         )
         exit_code, stdout, stderr = self.run_cli(
-            ["workout", "swap", past, future]
+            ["workout", "swap", past, future, "--reason", "Travelling"]
         )
         self.assertEqual(exit_code, 0)
         self.assertIn("in the past", stdout)
         mock_coach.apply_swap.assert_not_called()
 
     def test_workout_swap_missing_args(self):
-        exit_code, stdout, stderr = self.run_cli(["workout", "swap", "2026-06-10"])
+        exit_code, stdout, stderr = self.run_cli(
+            ["workout", "swap", "2026-06-10", "--reason", "Travelling"]
+        )
         self.assertEqual(exit_code, 0)
         self.assertIn("Specify two dates", stdout)
 
@@ -574,7 +579,9 @@ class TestTrainMateCLI(unittest.TestCase):
             date="2026-06-02", sport_type="running", title="Synced Run",
             description="30 mins", synced=True, google_event_id="mock_event_123",
         )
-        exit_code, stdout, stderr = self.run_cli(["workout", "rm", str(w_id)])
+        exit_code, stdout, stderr = self.run_cli(
+            ["workout", "rm", str(w_id), "--reason", "Travelling"]
+        )
         self.assertEqual(exit_code, 0)
         self.assertIn(
             "Workout is synced to Google Calendar. Updating calendar event",
@@ -618,7 +625,9 @@ class TestTrainMateCLI(unittest.TestCase):
 
         # Removing an already-removed workout is a no-op that does not re-hit the calendar.
         mock_calendar.sync_workout.reset_mock()
-        exit_code, stdout, _ = self.run_cli(["workout", "rm", str(w_id)])
+        exit_code, stdout, _ = self.run_cli(
+            ["workout", "rm", str(w_id), "--reason", "Travelling"]
+        )
         self.assertEqual(exit_code, 0)
         self.assertIn("already removed", stdout)
         mock_calendar.sync_workout.assert_not_called()
@@ -1006,7 +1015,25 @@ class TestTrainMateCLI(unittest.TestCase):
             weeks=None,
             context="Felt good",
             force=False,
-            inspect=False,
+            inspect_only=False,
+            no_pull=False,
+        )
+
+        mock_coach.analyze_workouts.reset_mock()
+        exit_code, stdout, stderr = self.run_cli([
+            "data", "analyze", "--from", "2026-01-01", "--until", "2026-03-31",
+            "--inspect-only"
+        ])
+        self.assertEqual(exit_code, 0)
+        self.assertIn("Coach Observations (NOT saved — inspect mode):", stdout)
+        mock_coach.analyze_workouts.assert_called_once_with(
+            from_date_str="2026-01-01",
+            until_date_str="2026-03-31",
+            days=None,
+            weeks=None,
+            context=None,
+            force=False,
+            inspect_only=True,
             no_pull=False,
         )
 

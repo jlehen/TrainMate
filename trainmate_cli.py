@@ -485,7 +485,7 @@ def main() -> None:
         help="Recompute even if the evidence is unchanged (bypass the analysis cache)"
     )
     d_an.add_argument(
-        "--inspect", action="store_true",
+        "--inspect-only", action="store_true",
         help="Read-only: show the analysis without writing coach learnings or the cache"
     )
 
@@ -2616,7 +2616,7 @@ def run_data_analyze(args: argparse.Namespace) -> None:
             weeks=args.weeks,
             context=args.context,
             force=args.force,
-            inspect=args.inspect,
+            inspect_only=args.inspect_only,
             no_pull=args.no_pull,
         )
 
@@ -2663,7 +2663,8 @@ def run_data_analyze(args: argparse.Namespace) -> None:
         updates = result.get("learning_updates")
         if updates:
             header = (
-                "Coach Observations (NOT saved — inspect mode):" if args.inspect
+                "Coach Observations (NOT saved — inspect mode):"
+                if args.inspect_only
                 else "Coach Observations (Saved to learnings):"
             )
             print(bold(cyan("\n" + header)))

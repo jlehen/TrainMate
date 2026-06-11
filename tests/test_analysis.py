@@ -186,15 +186,15 @@ class TestWorkoutAnalysis(unittest.TestCase):
         self.assertEqual(test_db.get_learnings()[0]["last_reinforced_at"], sentinel)
 
     @patch("trainmate.coach.openrouter_client")
-    def test_inspect_writes_nothing(self, mock_client):
-        """--inspect renders but writes neither learnings nor the cache (§9)."""
+    def test_inspect_only_writes_nothing(self, mock_client):
+        """--inspect-only renders but writes neither learnings nor the cache (§9)."""
         self._seed_activity()
         mock_client.complete.return_value = {
             "macrocycle_summary": "s",
             "learning_updates": [{"op": "add", "text": "New obs"}],
         }
         coach_service.analyze_workouts(
-            from_date_str="2026-06-01", until_date_str="2026-06-07", inspect=True
+            from_date_str="2026-06-01", until_date_str="2026-06-07", inspect_only=True
         )
         self.assertEqual(len(test_db.get_learnings()), 0)
         self.assertIsNone(test_db.get_analysis_cache("long"))

@@ -188,15 +188,11 @@ called by the UIs.
 |                                                     | `(reason, proposed_workouts)`.                                      |
 | `apply_adaptations(proposed, reason, start, end)`   | Deletes overridden workouts (+ calendar events), saves adapted      |
 |                                                     | workouts, syncs to Calendar.                                        |
-| `analyze_workouts(from, until, days, weeks, context, force, inspect)`| Reverse-engineers past training cycles from completed   |
-|                                                     | activities + metrics. Auto-resolves the date range from             |
-|                                                     | active/preceding goals when omitted. **Reuses** the `analysis_cache`|
-|                                                     | when the evidence fingerprint is unchanged (skips the LLM); `force` |
-|                                                     | recomputes anyway (a forced unchanged re-run still suppresses the   |
-|                                                     | reinforcement ratchet); `inspect` renders without writing learnings |
-|                                                     | or cache. Otherwise calls `CoachEngine._analyze_workouts_logic()`,  |
-|                                                     | applies `learning_updates`, and caches the reconstruction. See      |
-|                                                     | DESIGN_backward_evaluation.md §5, §8, §9.                           |
+| `analyze_workouts(..., inspect_only)` | Reverse-engineers past training cycles from completed   |
+|                                       | activities + metrics. Auto-resolves date range. Reuses  |
+|                                       | `analysis_cache` on unchanged evidence (skips LLM);    |
+|                                       | `force` recomputes; `inspect_only` renders without      |
+|                                       | writing learnings/cache. See DESIGN doc §5, §8, §9.      |
 | `_build_prior_training_context(prior_macro, today)` | Builds the read-only "planned vs actual" review injected into the   |
 |                                                     | `plan generate` strategy prompt (Option A, §6). Anchored on the     |
 |                                                     | prior plan's elapsed mesocycle windows; folds in the cached         |
@@ -556,9 +552,9 @@ Handler functions are named `run_<command>_<subcommand>()` in `trainmate_cli.py`
 |              |              |          | `modification_reason` and shown to the coach.           |
 | `workout`    | `wipe`       | —        | Delete all workouts                                                      |
 | `data`       | `pull`       | `d pull` | Fetch metrics and activities directly from Garmin (`--days`/`--from`/`--until`/`--metrics-only`/`--activities-only`/`--sleep`) |
-| `data`       | `analyze`    | `d a`    | Analyze completed workouts/metrics to detect cycles                      |
-|              |              |          | (`--from`, `--until`, `--days`, `--weeks`, `--context`,                  |
-|              |              |          | `--force` to recompute, `--inspect` for read-only)                      |
+| `data`       | `analyze`    | `d a`    | Analyze completed workouts/metrics to detect cycles    |
+|              |              |          | (`--from`, `--until`, `--days`, `--weeks`, `--context`,|
+|              |              |          | `--force` to recompute, `--inspect-only` for read-only)|
 | `data`       | `show-metrics` | `d sm` / `sm` | Show athlete metrics over a date range. Supports standard |
 |              |              |          | date range options, `-a`/`--all` (shows all data),      |
 |              |              |          | `--no-pull` to bypass Garmin sync, and `--csv`.           |
@@ -725,10 +721,10 @@ stored instants stay UTC. The web app never calls this — it is a pure reader (
 5. Queries `CoachEngine._analyze_workouts_logic()` -> LLM ->
    `{macrocycle_summary, inferred_macrocycle, inferred_mesocycles[],
    physiological_insights[], learning_updates[]}`.
-6. Unless `--inspect`: applies `learning_updates` deltas (with
+6. Unless `--inspect-only`: applies `learning_updates` deltas (with
    `suppress_reinforcement=True` when the evidence was unchanged) and caches
-   the reconstruction in `analysis_cache`. `--inspect` renders but writes
-   nothing.  See DESIGN_backward_evaluation.md §5, §8, §9.
+   the reconstruction in `analysis_cache`. `--inspect-only` renders but writes
+   nothing. See DESIGN_backward_evaluation.md §5, §8, §9.
 
 ---
 
@@ -834,7 +830,7 @@ venv/bin/python -m unittest discover -s tests -p "test_*.py"
 | `tests/test_adaptation.py`     | `CoachService.adapt()` end-to-end, swap validation/apply, and    |
 |                                | `adherence.analyze_adherence()` (misses, tolerances, violations) |
 | `tests/test_analysis.py`       | `analyze_workouts`: date resolution, weekly aggregation, cache   |
-|                                | reuse/force/inspect, learnings injection                         |
+|                                | reuse/force/inspect_only, learnings injection                    |
 | `tests/test_cli.py`            | CLI command dispatch + output                                   |
 | `tests/test_calendar.py`       | `calendar_syncer.sync_workout` event description formatting      |
 | `tests/test_coach_format.py`   | `format_completed_activities` (HR/power-zone rendering)          |
