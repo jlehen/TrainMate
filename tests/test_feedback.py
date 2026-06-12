@@ -13,7 +13,7 @@ import trainmate_cli
 
 test_db = Database(db_path=TEST_DB_PATH)
 trainmate.db.db = test_db
-trainmate.coach.db = test_db
+trainmate.coach.service.db = test_db
 trainmate_cli.db = test_db
 
 from trainmate.coach import coach_service
@@ -27,7 +27,7 @@ class TestFeedback(unittest.TestCase):
         global test_db
         test_db = Database(db_path=TEST_DB_PATH)
         trainmate.db.db = test_db
-        trainmate.coach.db = test_db
+        trainmate.coach.service.db = test_db
         trainmate_cli.db = test_db
 
     @classmethod
@@ -78,7 +78,7 @@ class TestFeedback(unittest.TestCase):
         meso = test_db.get_mesocycle(meso_id)
         self.assertEqual(meso["feedback"], "Increase duration of long runs.")
 
-    @patch("trainmate.coach.openrouter_client")
+    @patch("trainmate.coach.engine.openrouter_client")
     def test_replan_injects_feedback_into_prompt(self, mock_client):
         obj_id = test_db.add_objective(
             title="Zurich Marathon",

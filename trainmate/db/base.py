@@ -1,0 +1,328 @@
+import sqlite3
+from contextlib import contextmanager
+from typing import Generator, Optional
+from trainmate.config import config
+
+
+class BaseDB:
+    """Connection management and schema initialization shared by all DB mixins."""
+
+    def __init__(self, db_path: Optional[str] = None) -> None:
+        """Initializes database path and sets up tables."""
+        self.db_path: str = db_path or config.db_path
+        self._init_db()
+
+    @contextmanager
+    def _get_connection(self) -> Generator[sqlite3.Connection, None, None]:
+        """Creates and returns a connection to SQLite database with constraints enabled."""
+        conn = sqlite3.connect(self.db_path)
+        conn.execute("PRAGMA foreign_keys = ON")
+        conn.row_factory = sqlite3.Row
+        try:
+            with conn:
+                yield conn
+        finally:
+            conn.close()
+
+    def _init_db(self) -> None:
+        """Initializes tables in database if they do not exist."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+
+            # Objectives table
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS objectives (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    title TEXT NOT NULL,
+                    target_date TEXT NOT NULL,
+                    sport_type TEXT NOT NULL,
+                    description TEXT,
+                    priority INTEGER DEFAULT 1,
+                    status TEXT DEFAULT 'active' -- 'active', 'completed', 'archived'
+                )
+            """)
+
+            # Check for existing tables from oldest to newest
+            cursor.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name='lifeevents'"
+            )
+            lifeevents_exists = cursor.fetchone()
+
+            if not lifeevents_exists:
+                cursor.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table' AND name='constraints'"
+                )
+                constraints_exists = cursor.fetchone()
+                if constraints_exists:
+                    cursor.execute("ALTER TABLE constraints RENAME TO lifeevents")
+                else:
+                    cursor.execute(
+                        "SELECT name FROM sqlite_master WHERE type='table' AND name='life_events'"
+                    )
+                    life_events_exists = cursor.fetchone()
+                    if life_events_exists:
+                        cursor.execute("ALTER TABLE life_events RENAME TO lifeevents")
+                    else:
+                        # Create lifeevents table from scratch
+                        cursor.execute("""
+                            CREATE TABLE IF NOT EXISTS lifeevents (
+                                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                                title TEXT NOT NULL,
+                                start_date TEXT NOT NULL,
+                                end_date TEXT NOT NULL,
+                                -- event_type values: 'business_trip', 'vacation', 'party', 'other'
+                                event_type TEXT NOT NULL,
+                                impact_description TEXT
+                            )
+                        """)
+            else:
+                cursor.execute("""
+                    CREATE TABLE IF NOT EXISTS lifeevents (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        title TEXT NOT NULL,
+                        start_date TEXT NOT NULL,
+                        end_date TEXT NOT NULL,
+                        event_type TEXT NOT NULL,
+                        impact_description TEXT
+                    )
+                """)
+
+            # Workouts table
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS workouts (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    date TEXT NOT NULL,
+                    sport_type TEXT NOT NULL,
+                    title TEXT NOT NULL,
+                    description TEXT,
+                    original_description TEXT,
+                    synced INTEGER DEFAULT 0, -- 0 = pending push, 1 = calendar current
+                    modification_reason TEXT, -- non-NULL <=> adapted/swapped
+                    google_event_id TEXT,
+                    removed INTEGER DEFAULT 0, -- 1 <=> soft-deleted via `workout rm`
+                    removed_reason TEXT -- athlete's reason for removal (optional)
+                )
+            """)
+
+            # Add new columns to workouts table if they don't exist
+            try:
+                cursor.execute(
+                    "ALTER TABLE workouts ADD COLUMN duration_minutes INTEGER DEFAULT NULL"
+                )
+            except sqlite3.OperationalError:
+                pass
+            try:
+                cursor.execute("ALTER TABLE workouts ADD COLUMN rpe INTEGER DEFAULT NULL")
+            except sqlite3.OperationalError:
+                pass
+            try:
+                cursor.execute("ALTER TABLE workouts ADD COLUMN tss INTEGER DEFAULT NULL")
+            except sqlite3.OperationalError:
+                pass
+            # Soft-delete axis: a workout removed via `workout rm` is marked rather
+            # than deleted, so it can be excluded from reads yet still surfaced to the
+            # coach as a deliberate cancellation (distinct from a miss).
+            try:
+                cursor.execute("ALTER TABLE workouts ADD COLUMN removed INTEGER DEFAULT 0")
+            except sqlite3.OperationalError:
+                pass
+            try:
+                cursor.execute("ALTER TABLE workouts ADD COLUMN removed_reason TEXT")
+            except sqlite3.OperationalError:
+                pass
+            # Migrate the conflated `status` enum into an orthogonal `synced` flag.
+            # The adaptation axis already lives in modification_reason; only the sync
+            # axis needs its own column. On a fresh DB the ALTER fails (column already
+            # exists from CREATE TABLE) and the backfill is skipped — correct, no rows.
+            try:
+                cursor.execute("ALTER TABLE workouts ADD COLUMN synced INTEGER DEFAULT 0")
+                cursor.execute("UPDATE workouts SET synced = 1 WHERE status = 'synced'")
+            except sqlite3.OperationalError:
+                pass
+            # Original date: remembers where a workout was first placed so that
+            # swapping it back clears the modification flag.
+            try:
+                cursor.execute(
+                    "ALTER TABLE workouts ADD COLUMN original_date TEXT"
+                )
+                cursor.execute(
+                    "UPDATE workouts SET original_date = date "
+                    "WHERE original_date IS NULL"
+                )
+            except sqlite3.OperationalError:
+                pass
+
+            # Completed activities table
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS completed_activities (
+                    activity_id TEXT PRIMARY KEY,
+                    date TEXT NOT NULL,
+                    start_time TEXT,
+                    activity_name TEXT,
+                    activity_type TEXT NOT NULL,
+                    duration_sec REAL,
+                    distance_km REAL,
+                    elevation_gain_m REAL,
+                    avg_hr INTEGER,
+                    max_hr INTEGER,
+                    rpe INTEGER,
+                    tss REAL
+                )
+            """)
+
+            # Add new columns to completed_activities if they don't exist
+            for col in [
+                "bike_avg_watts INTEGER DEFAULT NULL",
+                "zone1_sec INTEGER DEFAULT NULL",
+                "zone2_sec INTEGER DEFAULT NULL",
+                "zone3_sec INTEGER DEFAULT NULL",
+                "zone4_sec INTEGER DEFAULT NULL",
+                "zone5_sec INTEGER DEFAULT NULL",
+                # Power zones use Garmin's 7-zone model (cycling with a power meter).
+                "power_zone1_sec INTEGER DEFAULT NULL",
+                "power_zone2_sec INTEGER DEFAULT NULL",
+                "power_zone3_sec INTEGER DEFAULT NULL",
+                "power_zone4_sec INTEGER DEFAULT NULL",
+                "power_zone5_sec INTEGER DEFAULT NULL",
+                "power_zone6_sec INTEGER DEFAULT NULL",
+                "power_zone7_sec INTEGER DEFAULT NULL",
+            ]:
+                try:
+                    cursor.execute(f"ALTER TABLE completed_activities ADD COLUMN {col}")
+                except sqlite3.OperationalError:
+                    pass
+
+            # Athlete metrics cache table
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS athlete_metrics_cache (
+                    date TEXT PRIMARY KEY,
+                    rhr INTEGER,
+                    hrv INTEGER,
+                    sleep_score INTEGER,
+                    stress INTEGER,
+                    acute_workload REAL,
+                    chronic_workload REAL,
+                    acwr REAL
+                )
+            """)
+
+            # Athlete baselines table
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS athlete_baselines (
+                    date TEXT PRIMARY KEY,
+                    rhr_baseline_mean REAL,
+                    rhr_baseline_std REAL,
+                    hrv_baseline_mean REAL,
+                    hrv_baseline_std REAL,
+                    sleep_baseline_mean REAL,
+                    sleep_baseline_std REAL
+                )
+            """)
+
+            # Coach learnings: discrete, addressable athlete-observation records.
+            # The LLM updates these incrementally via deltas (see apply_learning_deltas)
+            # rather than overwriting a single blob.
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS coach_learnings (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    text TEXT NOT NULL,
+                    sports TEXT NOT NULL DEFAULT 'general',
+                    confidence TEXT NOT NULL DEFAULT 'tentative',
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    last_reinforced_at TEXT
+                )
+            """)
+
+            # Phase 2 enrichment: add sport-scope, confidence, and recency columns to
+            # coach_learnings created before they existed.
+            for col in [
+                "sports TEXT NOT NULL DEFAULT 'general'",
+                "confidence TEXT NOT NULL DEFAULT 'tentative'",
+                "last_reinforced_at TEXT",
+            ]:
+                try:
+                    cursor.execute(f"ALTER TABLE coach_learnings ADD COLUMN {col}")
+                except sqlite3.OperationalError:
+                    pass  # Column already exists.
+            # Backfill recency for migrated rows: treat creation as the last reinforcement.
+            cursor.execute(
+                "UPDATE coach_learnings SET last_reinforced_at = created_at "
+                "WHERE last_reinforced_at IS NULL"
+            )
+
+
+            # Macrocycles table
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS macrocycles (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    objective_id INTEGER NOT NULL,
+                    strategy TEXT NOT NULL,
+                    goals_hash TEXT NOT NULL,
+                    lifeevents_hash TEXT NOT NULL,
+                    config_hash TEXT,
+                    created_at TEXT NOT NULL,
+                    feedback TEXT DEFAULT NULL,
+                    FOREIGN KEY (objective_id) REFERENCES objectives(id) ON DELETE CASCADE
+                )
+            """)
+
+            # Migrate column constraints_hash to lifeevents_hash if constraints_hash exists
+            cursor.execute("PRAGMA table_info(macrocycles)")
+            columns = [row['name'] for row in cursor.fetchall()]
+            if 'constraints_hash' in columns and 'lifeevents_hash' not in columns:
+                cursor.execute(
+                    "ALTER TABLE macrocycles RENAME COLUMN constraints_hash TO lifeevents_hash"
+                )
+            if 'config_hash' not in columns:
+                cursor.execute(
+                    "ALTER TABLE macrocycles ADD COLUMN config_hash TEXT"
+                )
+
+            # Mesocycles table
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS mesocycles (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    macrocycle_id INTEGER NOT NULL,
+                    name TEXT NOT NULL,
+                    start_date TEXT NOT NULL,
+                    end_date TEXT NOT NULL,
+                    focus TEXT NOT NULL,
+                    feedback TEXT DEFAULT NULL,
+                    FOREIGN KEY (macrocycle_id) REFERENCES macrocycles(id) ON DELETE CASCADE
+                )
+            """)
+
+            # Backward-evaluation reconstruction cache (see DESIGN_backward_evaluation.md
+            # §5.1). Each row is a cached reconstruction (inferred cycles + physiological
+            # insights) of a past training window, keyed by an *evidence fingerprint* so
+            # that a re-run over unchanged data can reuse it instead of paying for another
+            # LLM pass. Retention is one row per `horizon` (UNIQUE): a new data pull shifts
+            # the fingerprint and overwrites the slot, because we only ever want the current
+            # reconstruction. The whole reconstruction is stored as one JSON blob — nothing
+            # queries inside it; it is fetched whole, fed to a prompt, or rendered.
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS analysis_cache (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    horizon TEXT NOT NULL UNIQUE, -- 'long' | 'short' — the cache slot
+                    fingerprint TEXT NOT NULL,    -- hash of activity-id set + metrics + window
+                    window_start TEXT,
+                    window_end TEXT,
+                    reconstruction TEXT NOT NULL, -- JSON: inferred cycles + insights
+                    created_at TEXT NOT NULL
+                )
+            """)
+
+            # Sync watermark: how far Garmin data has been pulled, and when.
+            # through_date is the FORWARD high-water mark (local YYYY-MM-DD); a
+            # backward backfill never regresses it. last_pull_utc is an INSTANT
+            # (UTC ISO) compared against now for the freshness interval.
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS sync_state (
+                    key            TEXT PRIMARY KEY,
+                    through_date   TEXT,
+                    last_pull_utc  TEXT
+                )
+            """)
+
+            conn.commit()

@@ -14,7 +14,7 @@ import trainmate.coach
 
 test_db = Database(db_path=TEST_DB_PATH)
 trainmate.db.db = test_db
-trainmate.coach.db = test_db
+trainmate.coach.service.db = test_db
 
 from trainmate.coach import coach_service
 
@@ -27,7 +27,7 @@ class TestAdaptation(unittest.TestCase):
         global test_db
         test_db = Database(db_path=TEST_DB_PATH)
         trainmate.db.db = test_db
-        trainmate.coach.db = test_db
+        trainmate.coach.service.db = test_db
 
     @classmethod
     def tearDownClass(cls):
@@ -40,7 +40,7 @@ class TestAdaptation(unittest.TestCase):
     def setUp(self):
         clear_all_tables(test_db)
 
-    @patch("trainmate.coach.openrouter_client")
+    @patch("trainmate.coach.engine.openrouter_client")
     def test_adaptation_matching_and_discrepancies(self, mock_client):
         test_profile = {"lthr": 165, "max_hr": 185}
 
@@ -107,7 +107,7 @@ class TestAdaptation(unittest.TestCase):
             )
             self.assertIn("duration mismatch", prompt_user_content)
 
-    @patch("trainmate.coach.openrouter_client")
+    @patch("trainmate.coach.engine.openrouter_client")
     def test_adapt_records_learning_updates(self, mock_client):
         test_profile = {"lthr": 165, "max_hr": 185}
         with patch.dict(trainmate.coach.config.data, {

@@ -11,7 +11,7 @@ import trainmate.coach
 TEST_DB_PATH = os.path.join(os.path.dirname(__file__), "test_trainmate_analysis.db")
 test_db = Database(db_path=TEST_DB_PATH)
 trainmate.db.db = test_db
-trainmate.coach.db = test_db
+trainmate.coach.service.db = test_db
 
 from trainmate.coach import coach_service
 
@@ -24,7 +24,7 @@ class TestWorkoutAnalysis(unittest.TestCase):
         global test_db
         test_db = Database(db_path=TEST_DB_PATH)
         trainmate.db.db = test_db
-        trainmate.coach.db = test_db
+        trainmate.coach.service.db = test_db
 
     @classmethod
     def tearDownClass(cls):
@@ -37,7 +37,7 @@ class TestWorkoutAnalysis(unittest.TestCase):
     def setUp(self):
         clear_all_tables(test_db)
 
-    @patch("trainmate.coach.openrouter_client")
+    @patch("trainmate.coach.engine.openrouter_client")
     def test_date_resolution_with_preceding_goal(self, mock_client):
         # Earliest objective: 2026-07-01
         test_db.add_objective(
@@ -66,7 +66,7 @@ class TestWorkoutAnalysis(unittest.TestCase):
         summaries = mock_client.complete.call_args[0][1]
         self.assertIn("2026-06-01", summaries) # Monday of that week is 2026-06-01 (Tuesday 2026-06-02 is in it)
 
-    @patch("trainmate.coach.openrouter_client")
+    @patch("trainmate.coach.engine.openrouter_client")
     def test_date_resolution_relative_days_and_weeks(self, mock_client):
         mock_client.complete.return_value = {
             "macrocycle_summary": "Analysis summary"
@@ -84,7 +84,7 @@ class TestWorkoutAnalysis(unittest.TestCase):
         summaries = mock_client.complete.call_args[0][1]
         self.assertIn("2026-05-18", summaries)
 
-    @patch("trainmate.coach.openrouter_client")
+    @patch("trainmate.coach.engine.openrouter_client")
     def test_weekly_aggregation_logic(self, mock_client):
         # Setup completed activities in different weeks
         # Week commencing 2026-06-01
@@ -140,7 +140,7 @@ class TestWorkoutAnalysis(unittest.TestCase):
             avg_hr=130, max_hr=150, rpe=5, tss=60.0,
         )
 
-    @patch("trainmate.coach.openrouter_client")
+    @patch("trainmate.coach.engine.openrouter_client")
     def test_reuse_skips_llm_when_evidence_unchanged(self, mock_client):
         """A second analyze over unchanged evidence reuses the cached reconstruction
         instead of calling the LLM again (DESIGN_backward_evaluation.md §5)."""
@@ -159,7 +159,7 @@ class TestWorkoutAnalysis(unittest.TestCase):
         self.assertEqual(mock_client.complete.call_count, 1)
         self.assertEqual(reused["macrocycle_summary"], "summary")
 
-    @patch("trainmate.coach.openrouter_client")
+    @patch("trainmate.coach.engine.openrouter_client")
     def test_force_recomputes_and_suppresses_reinforcement(self, mock_client):
         """--force recomputes over unchanged evidence but must NOT re-ratchet recency
         (the integrity invariant survives force; §8, §9)."""
@@ -185,7 +185,7 @@ class TestWorkoutAnalysis(unittest.TestCase):
         self.assertEqual(mock_client.complete.call_count, 2)  # force recomputed
         self.assertEqual(test_db.get_learnings()[0]["last_reinforced_at"], sentinel)
 
-    @patch("trainmate.coach.openrouter_client")
+    @patch("trainmate.coach.engine.openrouter_client")
     def test_inspect_only_writes_nothing(self, mock_client):
         """--inspect-only renders but writes neither learnings nor the cache (§9)."""
         self._seed_activity()
@@ -199,7 +199,7 @@ class TestWorkoutAnalysis(unittest.TestCase):
         self.assertEqual(len(test_db.get_learnings()), 0)
         self.assertIsNone(test_db.get_analysis_cache("long"))
 
-    @patch("trainmate.coach.openrouter_client")
+    @patch("trainmate.coach.engine.openrouter_client")
     def test_existing_learnings_injected_into_prompt(self, mock_client):
         # Existing observations must appear in the analyze prompt (with ids) so the
         # model can revise/reinforce them instead of only re-adding duplicates.

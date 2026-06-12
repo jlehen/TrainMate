@@ -17,22 +17,24 @@ Calendar.
 ```
   +--------------------------------------------------+
   |               User Interface Layer               |
-  |  trainmate_cli.py   trainmate_web.py (Flask)     |
+  |  trainmate_cli.py (shim) + trainmate/cli/        |
+  |  trainmate_web.py (Flask)                        |
   +---------------------------+----------------------+
                               |
   +---------------------------v----------------------+
   |               Coaching Logic Layer               |
-  |  trainmate/coach.py  ─  CoachService             |
+  |  trainmate/coach/service.py ─ CoachService       |
   |    │ orchestrates DB + calendar + LLM calls       |
-  |  trainmate/coach.py  ─  CoachEngine              |
+  |  trainmate/coach/engine.py  ─ CoachEngine        |
   |    │ pure logic: prompt building, hash, LLM calls │
+  |  trainmate/coach/formatting.py (pure helpers)    |
   |  trainmate/openrouter.py  (OpenRouter LLM client) |
   |  trainmate/adherence.py   (plan vs actual diff)   |
   +---------------------------+----------------------+
                               |
   +---------------------------v----------------------+
   |              Data & Integration Layer            |
-  |  trainmate/db.py            (SQLite CRUD)        |
+  |  trainmate/db/              (SQLite CRUD)        |
   |  trainmate/garmin.py        (Garmin direct pull) |
   |  trainmate/google_calendar.py (Calendar sync)    |
   +--------------------------------------------------+
@@ -50,8 +52,11 @@ classes themselves.
 
 | File                 | Purpose                                                              |
 |----------------------|----------------------------------------------------------------------|
-| `trainmate_cli.py`   | argparse CLI; dispatches to handler functions `run_*()`. No          |
-|                      | business logic.                                                      |
+| `trainmate_cli.py`   | Thin shim: argparse dispatcher (`main()`), the patchable             |
+|                      | singletons/helpers the handlers reference via `import trainmate_cli  |
+|                      | as cli`, and a `__main__` alias. No business logic.                  |
+| `trainmate/cli/`     | Per-command-family handler modules (`run_*()`): `status`, `goals`,   |
+|                      | `lifeevents`, `plans`, `workouts`, `data`, plus shared `common`.     |
 | `trainmate_web.py`   | Flask REST API; thin handler functions calling `db`,                 |
 |                      | `coach_service`, `calendar_syncer` (pure reader — never pulls).      |
 
@@ -64,9 +69,11 @@ classes themselves.
 |                      |                      | `zone1_sec`–`zone5_sec`), `AthleteMetric`,       |
 |                      |                      | `AthleteBaseline`, `Macrocycle`, `Mesocycle`     |
 | `config.py`          | `config`             | Reads `config.yaml`; exposes typed properties.   |
-| `db.py`              | `db`                 | SQLite wrapper; full CRUD for all tables.        |
-| `coach.py`           | `coach_service`      | `CoachService` orchestrator + `CoachEngine`      |
-|                      |                      | pure logic.                                      |
+| `db/`                | `db`                 | SQLite wrapper; `Database` composed from         |
+|                      |                      | per-domain mixins. Full CRUD for all tables.     |
+| `coach/`             | `coach_service`      | `service.py` `CoachService` orchestrator +       |
+|                      |                      | `engine.py` `CoachEngine` pure logic +           |
+|                      |                      | `formatting.py` prompt helpers.                  |
 | `openrouter.py`      | `openrouter_client`  | HTTP client for OpenRouter; always expects       |
 |                      |                      | `json_object` response.                          |
 | `garmin.py`          | module functions     | Logs into Garmin Connect; pulls metrics +        |
@@ -84,13 +91,26 @@ classes themselves.
 
 ---
 
-## 3. coach.py Architecture
+## 3. coach Package Architecture
 
-`coach.py` contains two classes and one module-level function:
+The `trainmate/coach/` package re-exports its public API from `__init__.py` (so
+`from trainmate.coach import coach_service` keeps working) and is split into
+three submodules:
+
+- `formatting.py` — pure prompt-formatting helpers (no I/O, no LLM):
+  `format_metrics_history`, `format_completed_activities`,
+  `format_planned_workouts`, `format_removed_workouts`, `format_baseline`,
+  `_load_science_guidelines`.
+- `engine.py` — `CoachEngine` (prompt construction, hashing, LLM calls). Owns
+  the `openrouter_client` binding — **patch target for tests:**
+  `trainmate.coach.engine.openrouter_client`.
+- `service.py` — `CoachService` + the `coach_service` singleton (data I/O,
+  caching, orchestration). Owns the `db` / `calendar_syncer` / `config`
+  bindings — **patch targets:** `trainmate.coach.service.db`, etc.
 
 ### `_load_science_guidelines(app_science_dir, science_dir) → str`
-Module-level function. Concatenates all `*.txt` files from `trainmate/science/`
-(built-in) and `science/` (user-provided). Called by
+Module-level function in `formatting.py`. Concatenates all `*.txt` files from
+`trainmate/science/` (built-in) and `science/` (user-provided). Called by
 `CoachService._load_science_guidelines()`.
 
 ### `CoachEngine`
@@ -204,7 +224,7 @@ called by the UIs.
 | `_get_coach_system_prompt(objectives, lifeevents, ...)`| Builds system prompt without making an LLM call (used by         |
 |                                                     | tests).                                                             |
 
-**Singleton:** `coach_service = CoachService()` at the bottom of `coach.py`. Import as:
+**Singleton:** `coach_service = CoachService()` at the bottom of `coach/service.py`. Import as:
 ```python
 from trainmate.coach import coach_service
 ```
@@ -213,7 +233,13 @@ from trainmate.coach import coach_service
 
 ## 4. Database — Key Patterns
 
-**File:** `trainmate/db.py` · **Singleton:** `db = Database()`
+**Package:** `trainmate/db/` · **Singleton:** `db = Database()` (in `__init__.py`)
+
+`Database` is composed from per-domain mixins — `base.py` (`BaseDB`:
+connection + schema setup), `objectives.py`, `lifeevents.py`, `workouts.py`,
+`activities.py`, `learnings.py`, `analysis.py`, `periodization.py`, `wipes.py` —
+all re-exported from `__init__.py` so `from trainmate.db import ...` is
+unchanged.
 
 - Every method opens a fresh `sqlite3` connection (context manager), commits,
   and closes.
@@ -486,15 +512,21 @@ and `GarminAuthRequired`.
 
 For tests, the DB singleton can be overridden by patching the module-level `db`
 variable in affected modules (see `tests/test_adaptation.py` for the pattern:
-assign `test_db` to `trainmate.coach.db`, `trainmate.garmin.db`, etc.  before
-importing the singletons).
+assign `test_db` to `trainmate.coach.service.db`, `trainmate.garmin.db`, etc.
+before importing the singletons). Because the logic now lives in submodules,
+patch the name where it is *used* — e.g. `trainmate.coach.engine.openrouter_client`,
+`trainmate.coach.service.db`.
 
 ---
 
 ## 7. CLI Commands Reference
 
 Invoked as `python trainmate_cli.py <command> [subcommand] [args]`.
-Handler functions are named `run_<command>_<subcommand>()` in `trainmate_cli.py`.
+`trainmate_cli.py` holds only `main()` (the argparse dispatcher) and the
+patchable singletons; the handler functions, named
+`run_<command>_<subcommand>()`, live in the `trainmate/cli/` package
+(one module per command family: `status`, `goals`, `lifeevents`, `plans`,
+`workouts`, `data`).
 
 | Command      | Subcommand   | Alias    | Description                                                              |
 |--------------|--------------|----------|--------------------------------------------------------------------------|
@@ -704,7 +736,7 @@ gone. Full design: `DESIGN_garmin_direct_pull.md`.
 3. The `sync_state` watermark advances (`through_date` forward only,
    `last_pull_utc` = now).
 4. `bike_avg_watts` and `zone1_sec`–`zone5_sec` come from Garmin (NULL when
-   absent) and feed `format_completed_activities` in `coach.py` verbatim.
+   absent) and feed `format_completed_activities` in `coach/formatting.py` verbatim.
 
 **Auto-ensure.** Read-side commands call `garmin.ensure_data(start, end)` at
 entry (idempotent per process via an in-memory memo). It pulls the

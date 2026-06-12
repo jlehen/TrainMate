@@ -15,7 +15,7 @@ import trainmate.coach
 
 test_db = Database(db_path=TEST_DB_PATH)
 trainmate.db.db = test_db
-trainmate.coach.db = test_db
+trainmate.coach.service.db = test_db
 
 from trainmate.coach import coach_service
 
@@ -28,7 +28,7 @@ class TestPeriodization(unittest.TestCase):
         global test_db
         test_db = Database(db_path=TEST_DB_PATH)
         trainmate.db.db = test_db
-        trainmate.coach.db = test_db
+        trainmate.coach.service.db = test_db
 
     @classmethod
     def tearDownClass(cls):
@@ -67,7 +67,7 @@ class TestPeriodization(unittest.TestCase):
         }
         self.assertNotEqual(hash2, coach_service._get_lifeevents_hash([c]))
 
-    @patch("trainmate.coach.openrouter_client")
+    @patch("trainmate.coach.engine.openrouter_client")
     def test_replan_logic_and_caching(self, mock_client):
         obj_id = test_db.add_objective(
             title="Berlin Marathon", target_date="2026-09-27",
@@ -154,7 +154,7 @@ class TestPeriodization(unittest.TestCase):
         self.assertIn("START OF SPORTS SCIENCE GUIDELINES", prompt)
         self.assertIn("END OF SPORTS SCIENCE GUIDELINES", prompt)
 
-    @patch("trainmate.coach.openrouter_client")
+    @patch("trainmate.coach.engine.openrouter_client")
     def test_replan_provides_previous_strategy_context_to_llm(self, mock_client):
         obj_id = test_db.add_objective(
             title="Zurich Marathon", target_date="2026-10-15",
@@ -203,7 +203,7 @@ class TestPeriodization(unittest.TestCase):
             system_prompt,
         )
 
-    @patch("trainmate.coach.openrouter_client")
+    @patch("trainmate.coach.engine.openrouter_client")
     def test_plan_generate_injects_planned_vs_actual(self, mock_client):
         # Option A (DESIGN_backward_evaluation.md §6): the prior plan's elapsed blocks are
         # compared against what was actually completed, and fed into the strategy prompt.
@@ -273,7 +273,7 @@ class TestPeriodization(unittest.TestCase):
             )
             self.assertIn("Wednesday: 0.0 hours", prompt)
 
-    @patch("trainmate.coach.openrouter_client")
+    @patch("trainmate.coach.engine.openrouter_client")
     def test_generate_plan_and_workouts_separately(self, mock_client):
         obj_id = test_db.add_objective(
             title="Zurich Marathon", target_date="2026-10-15",
@@ -310,8 +310,8 @@ class TestPeriodization(unittest.TestCase):
         self.assertEqual(workouts[0]["title"], "Base Run")
         mock_client.complete.assert_called_once()
 
-    @patch("trainmate.coach.calendar_syncer")
-    @patch("trainmate.coach.openrouter_client")
+    @patch("trainmate.coach.service.calendar_syncer")
+    @patch("trainmate.coach.engine.openrouter_client")
     def test_generate_workouts_clears_stale_synced_workouts(
         self, mock_client, mock_calendar
     ):
@@ -355,8 +355,8 @@ class TestPeriodization(unittest.TestCase):
         # Its Google Calendar event was deleted.
         mock_calendar.delete_workout_event.assert_called_once_with("evt-old-123")
 
-    @patch("trainmate.coach.calendar_syncer")
-    @patch("trainmate.coach.openrouter_client")
+    @patch("trainmate.coach.service.calendar_syncer")
+    @patch("trainmate.coach.engine.openrouter_client")
     def test_generate_workouts_clears_stale_unsynced_calendar_workouts(
         self, mock_client, mock_calendar
     ):
@@ -398,7 +398,7 @@ class TestPeriodization(unittest.TestCase):
         self.assertEqual([w["title"] for w in remaining], ["New Run"])
         mock_calendar.delete_workout_event.assert_called_once_with("evt-stale-456")
 
-    @patch("trainmate.coach.config")
+    @patch("trainmate.coach.service.config")
     def test_load_science_guidelines(self, mock_config):
         temp_app_dir = tempfile.mkdtemp()
         temp_user_dir = tempfile.mkdtemp()
@@ -468,7 +468,7 @@ class TestPeriodization(unittest.TestCase):
             coach_service.generate_periodization_plan()
         self.assertIn("too close", str(ctx.exception))
 
-    @patch("trainmate.coach.openrouter_client")
+    @patch("trainmate.coach.engine.openrouter_client")
     def test_splitting_over_24_weeks(self, mock_client):
         today = datetime.now(timezone.utc).date()
         target_date_str = (today + timedelta(weeks=30)).strftime("%Y-%m-%d")
@@ -516,7 +516,7 @@ class TestPeriodization(unittest.TestCase):
         self.assertIsNotNone(macro)
         self.assertEqual(macro["strategy"], "Simulated base building strategy")
 
-    @patch("trainmate.coach.openrouter_client")
+    @patch("trainmate.coach.engine.openrouter_client")
     def test_multi_goal_planning_and_deletion(self, mock_client):
         obj1_id = test_db.add_objective(
             title="Goal A", target_date="2026-08-01",
@@ -580,7 +580,7 @@ class TestPeriodization(unittest.TestCase):
                 _ = trainmate.coach.config.user_profile
             self.assertIn("must contain at least 'lthr' or 'ftp'", str(ctx.exception))
 
-    @patch("trainmate.coach.openrouter_client")
+    @patch("trainmate.coach.engine.openrouter_client")
     def test_recent_history_summary_periodization_plan(self, mock_client):
         obj_id = test_db.add_objective(
             title="Zurich Marathon", target_date="2026-10-15",
@@ -613,7 +613,7 @@ class TestPeriodization(unittest.TestCase):
         self.assertIn("running: 1 sessions", system_prompt)
         self.assertIn("Resting Heart Rate: 55.0 bpm", system_prompt)
 
-    @patch("trainmate.coach.openrouter_client")
+    @patch("trainmate.coach.engine.openrouter_client")
     def test_recent_history_workout_generation(self, mock_client):
         obj_id = test_db.add_objective(
             title="Zurich Marathon", target_date="2026-10-15",
