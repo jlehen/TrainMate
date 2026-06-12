@@ -621,6 +621,11 @@ def main() -> None:
             "--inspect-only", action="store_true",
             help="Read-only: show the analysis without writing coach learnings or the cache"
         )
+        d_an.add_argument(
+            "--auto", action="store_true",
+            help="Unattended: skip interactive demotion prompts. Staleness demotions apply "
+                 "directly; contradiction demotions stay queued for the next interactive review."
+        )
 
     # data backfill-tss
     d_btss = data_subparsers.add_parser(

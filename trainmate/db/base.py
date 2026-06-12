@@ -221,13 +221,17 @@ class BaseDB:
 
             # Coach learnings: discrete, addressable athlete-observation records.
             # The LLM updates these incrementally via deltas (see apply_learning_deltas)
-            # rather than overwriting a single blob.
+            # rather than overwriting a single blob. `confidence` is now APP-COMPUTED from
+            # the per-learning evidence basis (learning_evidence below), not LLM-asserted
+            # (DESIGN_evidence_based_confidence.md). `proposed_confidence` holds a pending,
+            # human-confirmable DOWNGRADE (NULL when none pending).
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS coach_learnings (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     text TEXT NOT NULL,
                     sports TEXT NOT NULL DEFAULT 'general',
                     confidence TEXT NOT NULL DEFAULT 'tentative',
+                    proposed_confidence TEXT,
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL,
                     last_reinforced_at TEXT
@@ -235,10 +239,12 @@ class BaseDB:
             """)
 
             # Phase 2 enrichment: add sport-scope, confidence, and recency columns to
-            # coach_learnings created before they existed.
+            # coach_learnings created before they existed; plus the evidence-confidence
+            # proposed_confidence column.
             for col in [
                 "sports TEXT NOT NULL DEFAULT 'general'",
                 "confidence TEXT NOT NULL DEFAULT 'tentative'",
+                "proposed_confidence TEXT",
                 "last_reinforced_at TEXT",
             ]:
                 try:
@@ -250,6 +256,24 @@ class BaseDB:
                 "UPDATE coach_learnings SET last_reinforced_at = created_at "
                 "WHERE last_reinforced_at IS NULL"
             )
+
+            # Evidence basis (DESIGN_evidence_based_confidence.md §5). The distinct training
+            # WEEKS that back each learning, tagged +1 supporting / -1 contradicting. Confidence
+            # is a pure function of this basis. UNIQUE(learning_id, week_commencing, polarity)
+            # is the dedup guarantee: re-citing a counted (week, polarity) is an INSERT-OR-IGNORE
+            # no-op, so re-running / --force / overlapping windows cannot inflate confidence.
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS learning_evidence (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    learning_id INTEGER NOT NULL,
+                    week_commencing TEXT NOT NULL, -- YYYY-MM-DD (Monday)
+                    polarity INTEGER NOT NULL,     -- +1 supporting | -1 contradicting
+                    source TEXT,                   -- 'reflect'|'bootstrap'|'plan'|'manual'|'migration'
+                    created_at TEXT NOT NULL,
+                    UNIQUE(learning_id, week_commencing, polarity),
+                    FOREIGN KEY (learning_id) REFERENCES coach_learnings(id) ON DELETE CASCADE
+                )
+            """)
 
 
             # Macrocycles table
@@ -326,3 +350,9 @@ class BaseDB:
             """)
 
             conn.commit()
+
+        # Grandfather pre-evidence learnings with a synthetic basis that sustains their
+        # stored confidence, so the first app-computed recompute does not silently demote
+        # everything (DESIGN_evidence_based_confidence.md §9). Runs after the schema is
+        # committed; idempotent (only acts on learnings with an empty basis).
+        self._grandfather_learning_evidence()

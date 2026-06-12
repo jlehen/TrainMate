@@ -162,8 +162,19 @@ def run_status(verbose: bool = False, no_pull: bool = False) -> None:
                 print(format_labeled_block(gray(tag), gray(f"{l['text']} (dormant)")))
             else:
                 print(format_labeled_block(tag, l['text']))
+            # Pending, human-confirmable confidence downgrade (resolved interactively by
+            # the next 'data reflect'/'data bootstrap' run).
+            proposed = l.get("proposed_confidence")
+            if proposed:
+                target = "retire" if proposed == "retire" else proposed
+                print(yellow(f"     ⚠ proposed demotion → {target} "
+                             "(confirm on the next 'data reflect')"))
     else:
         print(format_labeled_block("- Learnings:", "None yet"))
+        print(
+            yellow("  Run ") + green("'data bootstrap'")
+            + yellow(" to reconstruct your training history and seed observations.")
+        )
 
     if verbose:
         goals = cli.db.get_objectives()

@@ -135,7 +135,9 @@ Module-level function in `formatting.py`. Concatenates all `*.txt` files from
 |                                      | `num_days` (default 28) driving the horizon. Label: |
 |                                      | `workout_generation`.                               |
 | `_adapt_logic(...)`                  | LLM call → `{change_needed, reason,                 |
-|                                      | learning_updates[], adapted_workouts[]}`. Label:    |
+|                                      | adapted_workouts[]}`. **Read-only** w.r.t. learnings |
+|                                      | — emits no `learning_updates`                       |
+|                                      | (DESIGN_evidence_based_confidence.md §2). Label:    |
 |                                      | `workout_adaptation`.                               |
 | `_analyze_workouts_logic(...)`       | LLM call → `{macrocycle_summary,                    |
 |                                      | inferred_macrocycle, inferred_mesocycles[],         |
@@ -145,48 +147,65 @@ Module-level function in `formatting.py`. Concatenates all `*.txt` files from
 | `_generate_intermediate_goals(...)`  | LLM call → `{goals[]}` when timeline > 24 weeks.    |
 |                                      | Label: `generate_intermediate_goals`.               |
 
-**Coach learnings via deltas:** `_analyze_workouts_logic` and `_adapt_logic` emit
-a `learning_updates` array (shared prompt field `LEARNING_UPDATES_FIELD`) of
-incremental ops rather than a full learnings blob. (`_generate_workouts_logic`
-is **read-only** — it consumes learnings but emits none; see
-DESIGN_backward_evaluation.md §11.) The app owns the merge via
-`CoachService._apply_learning_updates()` → `db.apply_learning_deltas()`, so a
-model that omits an existing learning cannot lose it. Each learning carries a
-**sport scope** (`sports`: comma-list or `general`) and a **confidence** level
-(`tentative` | `moderate` | `established`). The four ops:
-- `{"op": "add", text, sports?, confidence?}` — new record (defaults
-  `general`/`tentative`).
-- `{"op": "revise", id, text?, sports?, confidence?}` — change supplied fields;
-  refreshes recency.
-- `{"op": "reinforce", id, confidence?}` — reaffirm without rewording;
-  refreshes recency.
-- `{"op": "retire", id}` — hard delete.
+**Coach learnings via evidence-cited deltas:** only `_analyze_workouts_logic`
+(the `data bootstrap`/`data reflect` flow) emits a `learning_updates` array
+(shared prompt field `LEARNING_UPDATES_FIELD`). `_generate_workouts_logic` **and**
+`_adapt_logic` are **read-only** — they consume the rendered learnings but author
+none (DESIGN_backward_evaluation.md §11; DESIGN_evidence_based_confidence.md §2).
+The app owns the merge via `CoachService._apply_learning_updates()` →
+`db.apply_learning_deltas(deltas, available_weeks, source)`, so a model that omits
+an existing learning cannot lose it. Each learning carries a **sport scope**
+(`sports`) and an **app-computed confidence** (`tentative`/`moderate`/`established`).
+The LLM **no longer sets confidence** — it only attributes each observation to the
+training **week(s)** it was shown (`week_commencing` Mondays). The five ops:
+- `{"op": "add", text, sports?, evidence:[weeks]}` — new record; seeds its
+  supporting basis from `evidence`; confidence derived.
+- `{"op": "revise", id, text?, sports?, evidence?:[weeks]}` — edit fields; if
+  `evidence` given, also adds supporting weeks.
+- `{"op": "reinforce", id, evidence:[weeks]}` — add supporting weeks (no
+  reword). **No `evidence` ⇒ no-op.**
+- `{"op": "contradict", id, evidence:[weeks]}` — add contradicting weeks; may
+  trigger a *proposed* demotion.
+- `{"op": "retire", id}` — hard delete (basis cascades).
 
-**Decay (soft):** a learning is *dormant* once it goes unreinforced past a
-confidence-based budget (`db.LEARNING_STALENESS_DAYS`: tentative 21d / moderate
-60d / established 180d), computed by `db.learning_is_dormant()`.
-`get_learnings()` annotates each record with a `dormant` flag; dormant records
-stay in the DB and show in `status` (marked) but are **excluded from prompts**
-until a `revise`/`reinforce` refreshes them.
-`CoachService._get_learnings_text()` renders only active learnings as
-`[id|sports|confidence] text`. Every flow that *uses* learnings (generate,
-analyze, adapt) injects this rendered block into its prompt — generate/adapt
-via `_build_system_prompt`, analyze under its own `COACH LEARNINGS` heading —
-so the two delta-emitting flows (analyze, adapt) can
-`revise`/`reinforce`/`retire` by `[id]` instead of blindly re-adding
-near-duplicates on repeated runs. `CoachService.adapt()` applies the deltas at
-evaluation time (regardless of whether the proposed workout changes are later
-applied).
+Cited weeks are validated against `available_weeks` (the analysed window's
+Mondays); weeks outside it are dropped (skip-malformed philosophy).
 
-**Reinforcement integrity (`suppress_reinforcement`):**
-`db.apply_learning_deltas(deltas, suppress_reinforcement=False)` accepts a flag
-that, when True, drops the purely-ratcheting effects so re-reading *unchanged*
-evidence cannot inflate confidence or reset decay — `reinforce` is skipped and
-`revise` keeps content edits but not the recency refresh, while `add`/`retire`
-still apply. The evidence fingerprint that decides "unchanged" is
-`CoachEngine._get_evidence_fingerprint(activities, metrics, window)`; the
-cached reconstruction it gates lives in the `analysis_cache` table. Full model
-in DESIGN_backward_evaluation.md §5, §8.
+**Confidence = f(evidence basis)** (DESIGN_evidence_based_confidence.md §3).
+`net = distinct supporting weeks − distinct contradicting weeks`; thresholds
+(`config.learning_confidence_thresholds`, default moderate 3 / established 5) map
+`net` to a level. **Upgrades auto-apply; downgrades are proposed, not applied** —
+`db._recompute_confidence()` writes the lower level to `proposed_confidence` and
+leaves the live `confidence` intact. Re-citing counted weeks is a structural
+no-op (the `UNIQUE(learning_id, week, polarity)` constraint), so re-running /
+`--force` / overlapping windows cannot inflate confidence — this **replaces** the
+old `suppress_reinforcement` flag, now removed. `last_reinforced_at` refreshes only
+when a *new* supporting week lands (or on a staleness demotion).
+
+**Decay (soft) + staleness demotion:** a learning is *dormant* once unreinforced
+past its confidence budget (`db.LEARNING_STALENESS_DAYS`: tentative 21d / moderate
+60d / established 180d, via `db.learning_is_dormant()`). Dormant records stay in
+the DB, show in `status` (marked), and are **excluded from prompts**. Crossing the
+budget also **proposes a one-level staleness demotion** (`derive_staleness_proposals`);
+accepting it re-arms the clock at the lower (shorter) budget, so an untouched
+learning walks established → moderate → tentative → retire over real time.
+
+**Propose / confirm flow (no extra CLI verbs):** pending downgrades
+(contradiction- or staleness-driven) are resolved **interactively** at the end of
+`data bootstrap`/`data reflect` — accept (`db.demote_learning`), keep
+(`db.keep_learning` — dismiss + affirm: drop the −1 rows for a contradiction, or
+refresh recency for staleness), or skip. `--auto` skips the prompts: staleness
+demotions apply directly; contradiction demotions stay queued for the next
+interactive review. `CoachService._get_learnings_text()` renders only active
+learnings as `[id|sports|confidence] text` into every using flow's prompt.
+
+**Cold-start nudge:** when there are no active learnings, `plan generate` and
+`status` suggest running `data bootstrap` (the only flow that authors learnings).
+
+**Migration:** learnings predating the evidence model are grandfathered with a
+synthetic supporting basis sized to sustain their stored level
+(`db._grandfather_learning_evidence()`, source `migration`), so the first
+recompute does not silently demote them (§9).
 
 ### `CoachService`
 **Orchestrator — owns all DB and calendar access.** Exposes the public API
@@ -284,18 +303,24 @@ delete — sets `removed=1`/`removed_reason`, and sets `synced=0`),
 clears `analysis_cache`, which is evidence-derived)
 
 **Coach Learnings:** `get_learnings()` (each record annotated with a computed
-`dormant` flag), `add_learning(text, sports='general',
-confidence='tentative')`, `update_learning(id, text)`, `delete_learning(id)`,
-`apply_learning_deltas(deltas, suppress_reinforcement=False)`. Discrete,
-addressable athlete-observation records (table `coach_learnings`) enriched with
-sport scope, confidence, and recency; updated incrementally via LLM deltas
-(`add`/`revise`/`reinforce`/`retire`). `apply_learning_deltas` runs all ops in
-one transaction and silently skips malformed deltas (and invalid confidence
-values); `suppress_reinforcement` drops the ratcheting effects on unchanged
-evidence (see section 3). Module-level helpers: `normalize_sports()`,
-`valid_confidence()`, `learning_is_dormant()`, constants `CONFIDENCE_LEVELS` /
-`LEARNING_STALENESS_DAYS` (see section 3 for the delta/decay model).
-Periodization strategy lives in the `macrocycles` table, not here.
+`dormant` flag and its `proposed_confidence`), `get_learning_evidence(id)`,
+`add_learning(text, sports='general', confidence='tentative')` (seeds a synthetic
+basis sustaining the level), `update_learning(id, text)`, `delete_learning(id)`,
+`apply_learning_deltas(deltas, available_weeks=None, source='reflect')`,
+`recompute_all_confidence()`, `derive_staleness_proposals(auto=False)`,
+`demote_learning(id)`, `keep_learning(id)`. Discrete, addressable
+athlete-observation records (table `coach_learnings`) whose confidence is
+**app-computed** from a per-learning evidence basis (`learning_evidence`);
+updated incrementally via LLM deltas
+(`add`/`revise`/`reinforce`/`contradict`/`retire`). `apply_learning_deltas` runs
+all ops in one transaction, validates cited weeks against `available_weeks`,
+dedupes evidence, silently skips malformed deltas, then re-derives each touched
+learning's confidence (upgrade auto-applies, downgrade is proposed). Module-level
+helpers: `normalize_sports()`, `valid_confidence()`, `confidence_rank()`,
+`step_down()`, `derive_confidence()`, `learning_is_dormant()`; constants
+`CONFIDENCE_LEVELS` / `LEARNING_STALENESS_DAYS` / `RETIRE_PROPOSAL` (see section 3
+for the evidence/confidence/decay model). Periodization strategy lives in the
+`macrocycles` table, not here.
 
 **Analysis Cache:** `save_analysis_cache(horizon, fingerprint, window_start,
 window_end, reconstruction)` (upsert, one row per `horizon`),
@@ -441,18 +466,40 @@ Pull) and `DESIGN_garmin_direct_pull.md`.
 
 ### coach_\learnings
 Discrete, addressable athlete-observation records, updated incrementally via LLM
-deltas (`add`/`revise`/`reinforce`/`retire`). Enriched with sport scope,
-confidence, and recency (see section 3 for the decay model).
+deltas (`add`/`revise`/`reinforce`/`contradict`/`retire`). Enriched with sport
+scope, recency, and a confidence the **app computes** from the per-learning
+evidence basis (`learning_evidence` below) — the LLM no longer asserts it (see
+section 3 and DESIGN_evidence_based_confidence.md).
 
-| Column               | Type       | Notes                                                  |
-|----------------------|------------|--------------------------------------------------------|
-| `id`                 | INTEGER PK | Referenced by `revise`/`reinforce`/`retire` deltas     |
-| `text`               | TEXT       | LLM-generated observation                              |
-| `sports`             | TEXT       | Comma-separated sport scope, or `general` (default)    |
-| `confidence`         | TEXT       | `tentative` (default) / `moderate` / `established`     |
-| `created_at`         | TEXT       | ISO timestamp                                          |
-| `updated_at`         | TEXT       | ISO timestamp; last content/metadata change            |
-| `last_reinforced_at` | TEXT       | ISO timestamp; drives decay → `dormant` (see §3)       |
+| Column                | Type       | Notes                                                  |
+|-----------------------|------------|--------------------------------------------------------|
+| `id`                  | INTEGER PK | Referenced by `revise`/`reinforce`/`contradict`/`retire` deltas |
+| `text`                | TEXT       | LLM-generated observation                              |
+| `sports`              | TEXT       | Comma-separated sport scope, or `general` (default)    |
+| `confidence`          | TEXT       | App-computed: `tentative` / `moderate` / `established` |
+| `proposed_confidence` | TEXT       | Pending, human-confirmable **downgrade** (`retire` = propose retirement); NULL when none |
+| `created_at`          | TEXT       | ISO timestamp                                          |
+| `updated_at`          | TEXT       | ISO timestamp; last content/metadata change            |
+| `last_reinforced_at`  | TEXT       | ISO timestamp; drives decay → `dormant` (see §3); refreshed only by a *new* supporting week or a staleness demotion |
+
+### learning\_evidence
+The per-learning **evidence basis** (DESIGN_evidence_based_confidence.md §5): the
+distinct training **weeks** backing each learning, tagged supporting or
+contradicting. `confidence` is a pure function of this basis. The UNIQUE
+constraint is the dedup guarantee — re-citing a counted `(week, polarity)` is an
+`INSERT OR IGNORE` no-op, so re-running / `--force` / overlapping windows cannot
+inflate confidence.
+
+| Column            | Type       | Notes                                              |
+|-------------------|------------|----------------------------------------------------|
+| `id`              | INTEGER PK |                                                    |
+| `learning_id`     | INTEGER    | FK → coach_learnings.id (ON DELETE CASCADE)        |
+| `week_commencing` | TEXT       | YYYY-MM-DD (Monday) — the evidence anchor          |
+| `polarity`        | INTEGER    | +1 supporting · −1 contradicting                   |
+| `source`          | TEXT       | `reflect` \| `bootstrap` \| `plan` \| `manual` \| `migration` |
+| `created_at`      | TEXT       | ISO timestamp                                      |
+
+`UNIQUE(learning_id, week_commencing, polarity)`
 
 ### macrocycles
 | Column            | Type                  | Notes                                            |
@@ -591,11 +638,16 @@ patchable singletons; the handler functions, named
 |              |              |          | `modification_reason` and shown to the coach.           |
 | `workout`    | `wipe`       | —        | Delete all workouts                                                      |
 | `data`       | `pull`       | `d pull` | Fetch metrics and activities directly from Garmin (`--days`/`--from`/`--until`/`--metrics-only`/`--activities-only`/`--sleep`). Defaults to the last 2 days ending today. |
-| `data`       | `analyze`    | `d a`    | Analyze completed workouts/metrics to detect cycles    |
-|              |              |          | (`--from`, `--until`, `--days`, `--weeks`, `--context`,|
-|              |              |          | `--force` to recompute, `--inspect-only` for read-only).|
-|              |              |          | With no date filter, the window is auto-detected from  |
-|              |              |          | the active goal (since previous goal, else 12 weeks).  |
+| `data`       | `bootstrap`  | `d b`    | Cold-start reconstruction over the full backlog; seeds  |
+|              |              |          | evidence-based learnings, sets the reflect watermark    |
+|              |              |          | (`--from`, `--until`, `--days`, `--weeks`, `--context`, |
+|              |              |          | `--force`, `--inspect-only`, `--auto`). No date filter →|
+|              |              |          | window auto-detected (since previous goal, else 12 wk). |
+| `data`       | `reflect`    | `d r`    | Incremental analysis since the reflect watermark;       |
+|              |              |          | updates learnings + resolves pending confidence         |
+|              |              |          | demotions (same flags as `bootstrap`). `--auto`:        |
+|              |              |          | unattended — staleness demotions auto-apply,            |
+|              |              |          | contradiction ones stay queued.                         |
 | `data`       | `show-metrics` | `d sm` | Show athlete metrics over a date range. Defaults to a    |
 |              |              |          | 7-day lookback ending today. Supports standard date     |
 |              |              |          | range options, `-a`/`--all` (shows all data),           |
@@ -660,6 +712,9 @@ Required fields:
 | `rpe_divergence_ratio`  | float| sRPE-load ÷ measured-load above which a session is flagged   |
 |                         |      | to the coach as "felt harder than measured" (default: 1.5;   |
 |                         |      | set very high to disable)                                    |
+| `learning_confidence_thresholds` | dict | Distinct net supporting weeks to reach each confidence |
+|                         |      | level: `{moderate: 3, established: 5}` (defaults). Tentative ≥1 |
+|                         |      | and proposed-retirement ≤0 are fixed. Re-levels on recompute. |
 | `user_profile`          | dict | Must contain `lthr` or `ftp` (see below)                     |
 
 `user_profile` keys: `name`, `birth_year`, `max_hr`, `lthr`, `ftp`,
@@ -713,12 +768,12 @@ Required fields:
 3. Finds active mesocycle for the target date → sets `meso_end_date` for
    adaptation range.
 4. Calls `CoachEngine._adapt_logic()` → LLM → `{change_needed, reason,
-   learning_updates[], adapted_workouts[]}`.
-5. Applies `learning_updates` deltas to `coach_learnings`
-   (`_apply_learning_updates`) — at evaluation time, independent of whether the
-   workout changes are applied.
-6. Returns `(reason, proposed_workouts)` — caller decides whether to apply.
-7. If applied: `apply_adaptations()` deletes overridden calendar events + DB
+   adapted_workouts[]}`. **Read-only w.r.t. coach learnings** — it consumes the
+   rendered learnings as context but authors none (durable, evidence-backed
+   observations are written only by `data bootstrap`/`data reflect`, which can
+   attribute them to specific training weeks; DESIGN_evidence_based_confidence.md §2).
+5. Returns `(reason, proposed_workouts)` — caller decides whether to apply.
+6. If applied: `apply_adaptations()` deletes overridden calendar events + DB
    rows, saves adapted workouts with `status='modified'`, syncs to Calendar.
 
 ### Data Pull (`data pull`) and auto-ensure Data is pulled **directly from
@@ -774,10 +829,17 @@ The shared core then:
 4. Queries `CoachEngine._analyze_workouts_logic()` -> LLM ->
    `{macrocycle_summary, inferred_macrocycle, inferred_mesocycles[],
    physiological_insights[], learning_updates[]}`.
-5. Unless `--inspect-only`: applies `learning_updates` deltas (with
-   `suppress_reinforcement=True` when the evidence was unchanged) and caches
-   the reconstruction in `analysis_cache`. `--inspect-only` renders but writes
-   nothing. See DESIGN_backward_evaluation.md §5, §8, §9.
+5. Unless `--inspect-only`: applies `learning_updates` deltas — the LLM attributes
+   each observation to the `week_commencing` weeks it was shown; the app validates
+   them against the window, dedupes into each learning's evidence basis, and
+   re-derives confidence (upgrade auto / downgrade proposed). It then caches the
+   reconstruction in `analysis_cache`. Re-citing counted weeks is a no-op, so no
+   `suppress_reinforcement` is needed (the per-learning basis owns integrity;
+   DESIGN_evidence_based_confidence.md §6, §8).
+6. Unless `--inspect-only`: `_review_learning_proposals(auto)` sweeps staleness
+   demotions and resolves pending downgrades — interactively (accept / keep / skip)
+   or, under `--auto`, applying staleness directly while leaving contradiction
+   proposals queued. See DESIGN_evidence_based_confidence.md §7.
 
 ---
 
@@ -888,7 +950,9 @@ venv/bin/python -m unittest discover -s tests -p "test_*.py"
 | `tests/test_cli.py`            | CLI command dispatch + output                                   |
 | `tests/test_calendar.py`       | `calendar_syncer.sync_workout` event description formatting      |
 | `tests/test_coach_format.py`   | `format_completed_activities` (HR/power-zone rendering)          |
-| `tests/test_db.py`             | `Database` CRUD, coach-learnings deltas/decay, `analysis_cache`  |
+| `tests/test_db.py`             | `Database` CRUD, evidence-based confidence (derivation, dedup,   |
+|                                | week validation, contradiction/demote/keep, staleness,          |
+|                                | grandfather migration), decay, `analysis_cache`                 |
 | `tests/test_feedback.py`       | Feedback saving + use in replanning                             |
 | `tests/test_periodization.py`  | `generate_periodization_plan`, `generate_workouts`, hash logic, |
 |                                | system-prompt building                                          |

@@ -103,6 +103,21 @@ class Config:
         return int(raw)
 
     @property
+    def learning_confidence_thresholds(self) -> dict[str, int]:
+        """Distinct net supporting weeks required to reach each confidence level
+        (evidence-based confidence; see DESIGN_evidence_based_confidence.md §3).
+
+        Only `moderate` and `established` are tunable; `tentative` is always >=1 and
+        proposed-retirement always <=0. Tuning the map re-levels learnings on the next
+        recompute, with no migration.
+        """
+        raw = self.get("learning_confidence_thresholds") or {}
+        return {
+            "moderate": int(raw.get("moderate", 3)),
+            "established": int(raw.get("established", 5)),
+        }
+
+    @property
     def low_load_threshold(self) -> float:
         """Gets the workload score below which an activity is considered minor (default 25).
 
