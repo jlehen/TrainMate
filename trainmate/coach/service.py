@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any, List, Optional, Tuple, Dict
 from trainmate.config import config
 from trainmate.db import db
@@ -9,6 +9,9 @@ from trainmate.garmin import activity_load
 from trainmate.util import today_str as _today_str, today_date as _today_date, cyan, green, yellow, bold, red
 from trainmate.coach.engine import CoachEngine
 from trainmate.coach.formatting import format_baseline, _load_science_guidelines
+
+# Fallback look-back for `reflect` when no watermark exists yet (bootstrap not run).
+DEFAULT_REFLECT_WEEKS = 4
 
 
 class CoachService:
@@ -107,7 +110,7 @@ class CoachService:
         focus is shown beside what the athlete actually did in that window (sessions,
         volume, TSS, zone split) so the model can judge whether the block's intent
         materialized. If a cached backward-evaluation reconstruction exists (from `data
-        analyze`), its summary + physiological insights are appended — reused without
+        bootstrap`), its summary + physiological insights are appended — reused without
         another LLM call (§10). Returns None if there is nothing to report.
 
         This does NOT write to any `feedback` field: under Option A the assessment is
@@ -978,27 +981,48 @@ class CoachService:
 
         return updated_workouts
 
-    def analyze_workouts(
+    def _resolve_until(self, until_date_str: Optional[str]):
+        until_date = _today_date()
+        if until_date_str:
+            until_date = datetime.strptime(until_date_str, "%Y-%m-%d").date()
+        return until_date
+
+    def _set_reflect_watermark(self, through_date: str) -> None:
+        """Records how far `reflect` has consumed evidence. Reuses the generic
+        `sync_state` table under the 'reflect' key (through_date = reflected-through
+        day, last_pull_utc = run timestamp)."""
+        self._db.set_sync_state(
+            through_date=through_date,
+            last_pull_utc=datetime.now(timezone.utc).isoformat(),
+            key="reflect",
+        )
+
+    def _advance_reflect_watermark(self, through_date: str) -> None:
+        """Advances the reflect watermark forward only, so a back-dated --from/--until
+        run cannot rewind it and cause future reflects to re-ingest old evidence."""
+        existing = self._db.get_sync_state("reflect")
+        if existing and existing.get("through_date") and existing["through_date"] >= through_date:
+            return
+        self._set_reflect_watermark(through_date)
+
+    def bootstrap_workouts(
         self, from_date_str: Optional[str] = None, until_date_str: Optional[str] = None,
         days: Optional[int] = None, weeks: Optional[int] = None,
         context: Optional[str] = None, force: bool = False, inspect_only: bool = False,
         no_pull: bool = False
     ) -> Dict[str, Any]:
-        """Analyzes historical workouts and physiological metrics using LLM.
+        """Cold-start backward reconstruction over the full training backlog.
 
-        Backward-evaluation reuse (DESIGN_backward_evaluation.md §5, §8, §9):
-        - The reconstruction is cached under the 'long' horizon, keyed by an evidence
-          fingerprint. If the evidence is unchanged since the last run and `force` is
-          False, the cached reconstruction is returned without an LLM call.
-        - `force` bypasses *reuse* only (recompute even if unchanged); it never bypasses
-          the reinforcement integrity invariant — a forced re-run over unchanged evidence
-          still suppresses the confidence/recency ratchet.
-        - `inspect_only` is read-only: it renders the reconstruction but writes neither coach
-          learnings nor the cache.
+        Reverse-engineers the macro/mesocycle structure and seeds initial coach
+        learnings from history. Run once when onboarding (or after a long gap); `reflect`
+        then handles the incremental stream. With no date filter, the window is
+        auto-detected from the active goal (since the previous goal, else 12 weeks back).
+
+        Establishes the reflect watermark at the window end, so subsequent `reflect` runs
+        only ingest evidence newer than this — preventing the same backlog from being
+        re-counted (and confidence ratcheted to 'established') on every run.
         """
-        until_date = _today_date()
-        if until_date_str:
-            until_date = datetime.strptime(until_date_str, "%Y-%m-%d").date()
+        until_date = self._resolve_until(until_date_str)
 
         from_date = None
         if from_date_str:
@@ -1029,6 +1053,92 @@ class CoachService:
         if from_date > until_date:
             raise ValueError(f"Start date {from_date} is after end date {until_date}.")
 
+        decision = self._run_workout_analysis(
+            from_date, until_date, context=context, force=force,
+            inspect_only=inspect_only, no_pull=no_pull, horizon="long",
+        )
+        # Establish the reflect baseline (read-only inspect mode writes nothing).
+        if not inspect_only:
+            self._set_reflect_watermark(until_date.strftime("%Y-%m-%d"))
+        return decision
+
+    def reflect_workouts(
+        self, from_date_str: Optional[str] = None, until_date_str: Optional[str] = None,
+        days: Optional[int] = None, weeks: Optional[int] = None,
+        context: Optional[str] = None, force: bool = False, inspect_only: bool = False,
+        no_pull: bool = False
+    ) -> Dict[str, Any]:
+        """Incremental reflection over evidence accrued since the last reflect.
+
+        Unlike `bootstrap`, the window starts at the reflect watermark (the day after the
+        last reflected-through date) unless an explicit date filter is given, so
+        overlapping history is never re-counted — the root cause of confidence converging
+        to 'established' when the command was run day after day over a sliding window.
+        Advances the watermark on success.
+
+        Reuse / integrity invariants are inherited from `_run_workout_analysis`.
+        """
+        until_date = self._resolve_until(until_date_str)
+
+        explicit = bool(from_date_str or days or weeks)
+        watermark = self._db.get_sync_state("reflect")
+        if from_date_str:
+            from_date = datetime.strptime(from_date_str, "%Y-%m-%d").date()
+        elif days:
+            from_date = until_date - timedelta(days=days - 1)
+        elif weeks:
+            from_date = until_date - timedelta(weeks=weeks) + timedelta(days=1)
+        elif watermark and watermark.get("through_date"):
+            from_date = (
+                datetime.strptime(watermark["through_date"], "%Y-%m-%d").date()
+                + timedelta(days=1)
+            )
+        else:
+            # No watermark yet (bootstrap not run). Reflect over a recent default window
+            # rather than dead-ending, but nudge the user toward bootstrap.
+            from_date = (
+                until_date - timedelta(weeks=DEFAULT_REFLECT_WEEKS) + timedelta(days=1)
+            )
+            print(yellow(
+                f"No reflect baseline found; reflecting over the last {DEFAULT_REFLECT_WEEKS} "
+                f"weeks. Run '{green('data bootstrap')}' to reconstruct your full training "
+                "history first."
+            ))
+
+        if from_date > until_date:
+            if explicit:
+                raise ValueError(f"Start date {from_date} is after end date {until_date}.")
+            since = watermark["through_date"] if watermark else "?"
+            print(cyan(f"Nothing new to reflect on since {since}."))
+            return {}
+
+        decision = self._run_workout_analysis(
+            from_date, until_date, context=context, force=force,
+            inspect_only=inspect_only, no_pull=no_pull, horizon="short",
+        )
+        if not inspect_only:
+            self._advance_reflect_watermark(until_date.strftime("%Y-%m-%d"))
+        return decision
+
+    def _run_workout_analysis(
+        self, from_date, until_date,
+        context: Optional[str] = None, force: bool = False, inspect_only: bool = False,
+        no_pull: bool = False, horizon: str = "long"
+    ) -> Dict[str, Any]:
+        """Shared core for bootstrap/reflect: builds weekly summaries over
+        [from_date, until_date], runs the LLM reconstruction, applies learning deltas,
+        and caches the reconstruction under `horizon`.
+
+        Backward-evaluation reuse (DESIGN_backward_evaluation.md §5, §8, §9):
+        - The reconstruction is cached per `horizon`, keyed by an evidence fingerprint. If
+          the evidence is unchanged since the last run and `force` is False, the cached
+          reconstruction is returned without an LLM call.
+        - `force` bypasses *reuse* only (recompute even if unchanged); it never bypasses
+          the reinforcement integrity invariant — a forced re-run over unchanged evidence
+          still suppresses the confidence/recency ratchet.
+        - `inspect_only` is read-only: it renders the reconstruction but writes neither coach
+          learnings nor the cache.
+        """
         from_str = from_date.strftime("%Y-%m-%d")
         until_str = until_date.strftime("%Y-%m-%d")
 
@@ -1050,7 +1160,7 @@ class CoachService:
         fingerprint = self.engine._get_evidence_fingerprint(
             completed_activities, metrics, from_str, until_str
         )
-        cached = self._db.get_analysis_cache("long")
+        cached = self._db.get_analysis_cache(horizon)
         evidence_unchanged = bool(cached and cached.get("fingerprint") == fingerprint)
         if evidence_unchanged and not force and cached.get("reconstruction"):
             print(cyan("Evidence unchanged since last analysis; reusing cached reconstruction "
@@ -1230,7 +1340,7 @@ class CoachService:
                 k: v for k, v in decision.items() if k != "learning_updates"
             }
             self._db.save_analysis_cache(
-                "long", fingerprint, from_str, until_str, reconstruction
+                horizon, fingerprint, from_str, until_str, reconstruction
             )
 
         return decision

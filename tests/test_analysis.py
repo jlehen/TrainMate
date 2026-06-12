@@ -59,7 +59,7 @@ class TestWorkoutAnalysis(unittest.TestCase):
         }
 
         # Analyze workouts without explicit range -> should start on 2026-06-02 (day after Goal Preceding)
-        result = coach_service.analyze_workouts(until_date_str="2026-07-01")
+        result = coach_service.bootstrap_workouts(until_date_str="2026-07-01")
         self.assertIsNotNone(result)
 
         # Inspect the start date passed to complete call
@@ -73,13 +73,13 @@ class TestWorkoutAnalysis(unittest.TestCase):
         }
 
         # Last 10 days relative to 2026-06-15
-        coach_service.analyze_workouts(until_date_str="2026-06-15", days=10)
+        coach_service.bootstrap_workouts(until_date_str="2026-06-15", days=10)
         # Start date should be 2026-06-06. The Monday of that week is 2026-06-01.
         summaries = mock_client.complete.call_args[0][1]
         self.assertIn("2026-06-01", summaries)
 
         # Last 4 weeks relative to 2026-06-15
-        coach_service.analyze_workouts(until_date_str="2026-06-15", weeks=4)
+        coach_service.bootstrap_workouts(until_date_str="2026-06-15", weeks=4)
         # Start date should be 2026-05-19. The Monday of that week is 2026-05-18.
         summaries = mock_client.complete.call_args[0][1]
         self.assertIn("2026-05-18", summaries)
@@ -115,7 +115,7 @@ class TestWorkoutAnalysis(unittest.TestCase):
         }
 
         # Analyze the week
-        result = coach_service.analyze_workouts(
+        result = coach_service.bootstrap_workouts(
             from_date_str="2026-06-01", until_date_str="2026-06-07"
         )
         self.assertEqual(result["macrocycle_summary"], "Simulated aggregation summary")
@@ -142,7 +142,7 @@ class TestWorkoutAnalysis(unittest.TestCase):
 
     @patch("trainmate.coach.engine.openrouter_client")
     def test_reuse_skips_llm_when_evidence_unchanged(self, mock_client):
-        """A second analyze over unchanged evidence reuses the cached reconstruction
+        """A second bootstrap over unchanged evidence reuses the cached reconstruction
         instead of calling the LLM again (DESIGN_backward_evaluation.md §5)."""
         self._seed_activity()
         mock_client.complete.return_value = {
@@ -150,10 +150,10 @@ class TestWorkoutAnalysis(unittest.TestCase):
             "inferred_macrocycle": {"overall_focus": "base"},
             "learning_updates": [],
         }
-        coach_service.analyze_workouts(
+        coach_service.bootstrap_workouts(
             from_date_str="2026-06-01", until_date_str="2026-06-07"
         )
-        reused = coach_service.analyze_workouts(
+        reused = coach_service.bootstrap_workouts(
             from_date_str="2026-06-01", until_date_str="2026-06-07"
         )
         self.assertEqual(mock_client.complete.call_count, 1)
@@ -169,7 +169,7 @@ class TestWorkoutAnalysis(unittest.TestCase):
             "macrocycle_summary": "s",
             "learning_updates": [{"op": "reinforce", "id": lid}],
         }
-        coach_service.analyze_workouts(
+        coach_service.bootstrap_workouts(
             from_date_str="2026-06-01", until_date_str="2026-06-07"
         )
         # Backdate recency; a forced re-run over unchanged evidence must leave it as-is.
@@ -179,7 +179,7 @@ class TestWorkoutAnalysis(unittest.TestCase):
                 "UPDATE coach_learnings SET last_reinforced_at=? WHERE id=?",
                 (sentinel, lid),
             )
-        coach_service.analyze_workouts(
+        coach_service.bootstrap_workouts(
             from_date_str="2026-06-01", until_date_str="2026-06-07", force=True
         )
         self.assertEqual(mock_client.complete.call_count, 2)  # force recomputed
@@ -193,7 +193,7 @@ class TestWorkoutAnalysis(unittest.TestCase):
             "macrocycle_summary": "s",
             "learning_updates": [{"op": "add", "text": "New obs"}],
         }
-        coach_service.analyze_workouts(
+        coach_service.bootstrap_workouts(
             from_date_str="2026-06-01", until_date_str="2026-06-07", inspect_only=True
         )
         self.assertEqual(len(test_db.get_learnings()), 0)
@@ -201,7 +201,7 @@ class TestWorkoutAnalysis(unittest.TestCase):
 
     @patch("trainmate.coach.engine.openrouter_client")
     def test_existing_learnings_injected_into_prompt(self, mock_client):
-        # Existing observations must appear in the analyze prompt (with ids) so the
+        # Existing observations must appear in the analysis prompt (with ids) so the
         # model can revise/reinforce them instead of only re-adding duplicates.
         lid = test_db.add_learning(
             "Recovers slowly after back-to-back hard days",
@@ -211,7 +211,7 @@ class TestWorkoutAnalysis(unittest.TestCase):
             "macrocycle_summary": "x", "learning_updates": []
         }
 
-        coach_service.analyze_workouts(
+        coach_service.bootstrap_workouts(
             from_date_str="2026-06-01", until_date_str="2026-06-07"
         )
 
@@ -219,6 +219,75 @@ class TestWorkoutAnalysis(unittest.TestCase):
         self.assertIn("COACH LEARNINGS", system_prompt)
         self.assertIn(f"[{lid}|running|moderate]", system_prompt)
         self.assertIn("Recovers slowly after back-to-back hard days", system_prompt)
+
+
+class TestReflectWatermark(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        if os.path.exists(TEST_DB_PATH):
+            os.remove(TEST_DB_PATH)
+        global test_db
+        test_db = Database(db_path=TEST_DB_PATH)
+        trainmate.db.db = test_db
+        trainmate.coach.service.db = test_db
+
+    @classmethod
+    def tearDownClass(cls):
+        if os.path.exists(TEST_DB_PATH):
+            try:
+                os.remove(TEST_DB_PATH)
+            except OSError:
+                pass
+
+    def setUp(self):
+        clear_all_tables(test_db)
+
+    @patch("trainmate.coach.engine.openrouter_client")
+    def test_bootstrap_establishes_watermark(self, mock_client):
+        mock_client.complete.return_value = {"macrocycle_summary": "s", "learning_updates": []}
+        coach_service.bootstrap_workouts(
+            from_date_str="2026-06-01", until_date_str="2026-06-07", no_pull=True
+        )
+        wm = test_db.get_sync_state("reflect")
+        self.assertEqual(wm["through_date"], "2026-06-07")
+
+    @patch("trainmate.coach.engine.openrouter_client")
+    def test_reflect_starts_after_watermark(self, mock_client):
+        """Reflect ingests only evidence newer than the watermark, so overlapping history
+        is never re-counted (the source of confidence converging to 'established')."""
+        test_db.set_sync_state(
+            through_date="2026-06-07", last_pull_utc="2026-06-07T00:00:00+00:00", key="reflect"
+        )
+        mock_client.complete.return_value = {"macrocycle_summary": "s", "learning_updates": []}
+        coach_service.reflect_workouts(until_date_str="2026-06-21", no_pull=True)
+        # Window starts the day after the watermark: Monday of 2026-06-08's week is 2026-06-08.
+        summaries = mock_client.complete.call_args[0][1]
+        self.assertIn("2026-06-08", summaries)
+        self.assertNotIn("2026-06-01", summaries)
+        # Watermark advanced to the new through-date.
+        self.assertEqual(test_db.get_sync_state("reflect")["through_date"], "2026-06-21")
+
+    @patch("trainmate.coach.engine.openrouter_client")
+    def test_reflect_no_new_evidence_skips_llm(self, mock_client):
+        """With nothing new since the watermark, reflect makes no LLM call."""
+        test_db.set_sync_state(
+            through_date="2026-06-21", last_pull_utc="2026-06-21T00:00:00+00:00", key="reflect"
+        )
+        result = coach_service.reflect_workouts(until_date_str="2026-06-21", no_pull=True)
+        self.assertEqual(result, {})
+        mock_client.complete.assert_not_called()
+
+    @patch("trainmate.coach.engine.openrouter_client")
+    def test_reflect_watermark_never_rewinds(self, mock_client):
+        """A back-dated explicit window must not rewind the watermark."""
+        test_db.set_sync_state(
+            through_date="2026-06-21", last_pull_utc="2026-06-21T00:00:00+00:00", key="reflect"
+        )
+        mock_client.complete.return_value = {"macrocycle_summary": "s", "learning_updates": []}
+        coach_service.reflect_workouts(
+            from_date_str="2026-06-01", until_date_str="2026-06-07", no_pull=True
+        )
+        self.assertEqual(test_db.get_sync_state("reflect")["through_date"], "2026-06-21")
 
 
 if __name__ == "__main__":

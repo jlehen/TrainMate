@@ -208,11 +208,14 @@ called by the UIs.
 |                                                     | `(reason, proposed_workouts)`.                                      |
 | `apply_adaptations(proposed, reason, start, end)`   | Deletes overridden workouts (+ calendar events), saves adapted      |
 |                                                     | workouts, syncs to Calendar.                                        |
-| `analyze_workouts(..., inspect_only)` | Reverse-engineers past training cycles from completed   |
-|                                       | activities + metrics. Auto-resolves date range. Reuses  |
-|                                       | `analysis_cache` on unchanged evidence (skips LLM);    |
-|                                       | `force` recomputes; `inspect_only` renders without      |
-|                                       | writing learnings/cache. See DESIGN doc §5, §8, §9.      |
+| `bootstrap_workouts(...)` / `reflect_workouts(...)` | Reverse-engineer past training cycles from completed    |
+|                                       | activities + metrics via the shared `_run_workout_       |
+|                                       | analysis` core. `bootstrap` = cold-start over the full  |
+|                                       | backlog (horizon `long`), sets the reflect watermark;   |
+|                                       | `reflect` = incremental since the watermark (horizon     |
+|                                       | `short`), advances it. Both reuse `analysis_cache` on    |
+|                                       | unchanged evidence; `force` recomputes; `inspect_only`   |
+|                                       | renders without writing. See DESIGN doc §5, §8, §9.      |
 | `_build_prior_training_context(prior_macro, today)` | Builds the read-only "planned vs actual" review injected into the   |
 |                                                     | `plan generate` strategy prompt (Option A, §6). Anchored on the     |
 |                                                     | prior plan's elapsed mesocycle windows; folds in the cached         |
@@ -747,21 +750,31 @@ the `--no-pull` option to bypass the sync check and read purely from the local S
 cache. Calendar dates use the machine-local timezone (`util.today_str`/`today_date`);
 stored instants stay UTC. The web app never calls this — it is a pure reader (see §1).
 
-### Data Analysis (`data analyze`)
-1. `CoachService.analyze_workouts()` determines target start/end dates
-   automatically based on active and preceding goals if date range parameters
-   are omitted.
-2. Queries the database for completed activities and physiological metrics for
-   that date range.
-3. Computes the evidence fingerprint and checks `analysis_cache['long']`. If
-   the fingerprint matches and `--force` is absent → returns the cached
-   reconstruction (no LLM call). `--force` recomputes regardless.
-4. Groups metrics and activities week-by-week using Monday-commencing ISO
-   weeks.
-5. Queries `CoachEngine._analyze_workouts_logic()` -> LLM ->
+### Data Analysis (`data bootstrap` / `data reflect`)
+Both commands share the `CoachService._run_workout_analysis()` core; they differ
+only in how the window is resolved and whether they set vs. advance the reflect
+watermark (stored in `sync_state` under the `reflect` key).
+- **`data bootstrap`** (cold-start, run once): resolves a wide window
+  automatically from active/preceding goals (else 12 weeks back) when no date
+  filter is given, runs under horizon `long`, and **sets** the reflect watermark
+  to the window end. This is the reconstruction `plan generate` reuses.
+- **`data reflect`** (incremental): starts the window at the day *after* the
+  reflect watermark (or an explicit date filter), runs under horizon `short`, and
+  **advances** the watermark forward only. Because overlapping history is never
+  re-ingested, repeated runs no longer ratchet confidence to `established`. With
+  no watermark yet it falls back to a recent window and nudges toward
+  `data bootstrap`; with no new evidence it returns early without an LLM call.
+
+The shared core then:
+1. Queries completed activities and physiological metrics for the window.
+2. Computes the evidence fingerprint and checks `analysis_cache[horizon]`. If the
+   fingerprint matches and `--force` is absent → returns the cached reconstruction
+   (no LLM call). `--force` recomputes regardless.
+3. Groups metrics and activities week-by-week using Monday-commencing ISO weeks.
+4. Queries `CoachEngine._analyze_workouts_logic()` -> LLM ->
    `{macrocycle_summary, inferred_macrocycle, inferred_mesocycles[],
    physiological_insights[], learning_updates[]}`.
-6. Unless `--inspect-only`: applies `learning_updates` deltas (with
+5. Unless `--inspect-only`: applies `learning_updates` deltas (with
    `suppress_reinforcement=True` when the evidence was unchanged) and caches
    the reconstruction in `analysis_cache`. `--inspect-only` renders but writes
    nothing. See DESIGN_backward_evaluation.md §5, §8, §9.
@@ -869,8 +882,9 @@ venv/bin/python -m unittest discover -s tests -p "test_*.py"
 |--------------------------------|-----------------------------------------------------------------|
 | `tests/test_adaptation.py`     | `CoachService.adapt()` end-to-end, swap validation/apply, and    |
 |                                | `adherence.analyze_adherence()` (misses, tolerances, violations) |
-| `tests/test_analysis.py`       | `analyze_workouts`: date resolution, weekly aggregation, cache   |
-|                                | reuse/force/inspect_only, learnings injection                    |
+| `tests/test_analysis.py`       | `bootstrap_workouts`/`reflect_workouts`: date resolution, weekly |
+|                                | aggregation, cache reuse/force/inspect_only, learnings           |
+|                                | injection, reflect watermark advance/skip                        |
 | `tests/test_cli.py`            | CLI command dispatch + output                                   |
 | `tests/test_calendar.py`       | `calendar_syncer.sync_workout` event description formatting      |
 | `tests/test_coach_format.py`   | `format_completed_activities` (HR/power-zone rendering)          |

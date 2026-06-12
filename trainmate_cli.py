@@ -78,7 +78,7 @@ from trainmate.cli.workouts import (
     run_workout_wipe,
 )
 from trainmate.cli.data import (
-    run_data_pull, run_data_analyze, run_data_backfill_tss,
+    run_data_pull, run_data_bootstrap, run_data_reflect, run_data_backfill_tss,
     run_data_show_metrics, run_data_show_activities, run_data_wipe,
 )
 
@@ -579,32 +579,48 @@ def main() -> None:
         "--activities-only", action="store_true", help="Pull activities only"
     )
 
-    # data analyze
-    d_an = data_subparsers.add_parser(
-        "analyze", aliases=["a"],
+    # data bootstrap — cold-start backward reconstruction over the full backlog
+    d_boot = data_subparsers.add_parser(
+        "bootstrap", aliases=["b"],
         parents=[pull_bypass_parser, basic_date_parser],
-        help="Analyze recorded workouts and metrics to determine macrocycle/mesocycles",
+        help="Reconstruct macro/mesocycles from your full training backlog (run once)",
         description=(
-            "Reverse-engineer past training cycles from completed workouts and "
-            "metrics, writing the resulting coach learnings. With no date filter, the "
-            "window is auto-detected from the active goal (since the previous goal, "
-            "else 12 weeks back). Results are cached by evidence fingerprint: an "
-            "unchanged re-run reuses the cache unless --force; --inspect-only renders "
-            "the analysis without writing learnings or the cache."
+            "Cold-start: reverse-engineer past training cycles from completed workouts "
+            "and metrics, seeding initial coach learnings. With no date filter, the "
+            "window is auto-detected from the active goal (since the previous goal, else "
+            "12 weeks back). Establishes the reflect watermark so later 'data reflect' "
+            "runs only ingest newer evidence. Cached by evidence fingerprint: an "
+            "unchanged re-run reuses the cache unless --force; --inspect-only renders the "
+            "analysis without writing learnings or the cache."
         )
     )
-    d_an.add_argument(
-        "--context", dest="context",
-        help="Optional text context detailing subjective athlete notes (travel, illness, etc.)"
+    # data reflect — incremental reflection over evidence since the last reflect
+    d_reflect = data_subparsers.add_parser(
+        "reflect", aliases=["r"],
+        parents=[pull_bypass_parser, basic_date_parser],
+        help="Reflect on how the athlete responded to training since the last reflect",
+        description=(
+            "Incremental: analyze only evidence accrued since the last reflect watermark "
+            "(the day after the last reflected-through date), updating coach learnings. A "
+            "date filter overrides the watermark. Because overlapping history is never "
+            "re-counted, repeated runs no longer ratchet confidence to 'established'. Run "
+            "'data bootstrap' first to establish a baseline. --inspect-only renders "
+            "without writing; --force bypasses the per-window cache."
+        )
     )
-    d_an.add_argument(
-        "-f", "--force", action="store_true",
-        help="Recompute even if the evidence is unchanged (bypass the analysis cache)"
-    )
-    d_an.add_argument(
-        "--inspect-only", action="store_true",
-        help="Read-only: show the analysis without writing coach learnings or the cache"
-    )
+    for d_an in (d_boot, d_reflect):
+        d_an.add_argument(
+            "--context", dest="context",
+            help="Optional text context detailing subjective athlete notes (travel, illness, etc.)"
+        )
+        d_an.add_argument(
+            "-f", "--force", action="store_true",
+            help="Recompute even if the evidence is unchanged (bypass the analysis cache)"
+        )
+        d_an.add_argument(
+            "--inspect-only", action="store_true",
+            help="Read-only: show the analysis without writing coach learnings or the cache"
+        )
 
     # data backfill-tss
     d_btss = data_subparsers.add_parser(
@@ -746,8 +762,10 @@ def main() -> None:
         sub = args.subcommand.lower()
         if sub == "pull":
             run_data_pull(args)
-        elif sub in ("analyze", "a"):
-            run_data_analyze(args)
+        elif sub in ("bootstrap", "b"):
+            run_data_bootstrap(args)
+        elif sub in ("reflect", "r"):
+            run_data_reflect(args)
         elif sub == "backfill-tss":
             run_data_backfill_tss(args)
         elif sub in ("show-metrics", "sm"):

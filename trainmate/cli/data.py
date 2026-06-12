@@ -444,10 +444,11 @@ def _show_activities_csv(activities: list) -> None:
         ])
 
 
-def run_data_analyze(args: argparse.Namespace) -> None:
-    """Runs data analyze to reverse-engineer training cycles."""
+def run_data_bootstrap(args: argparse.Namespace) -> None:
+    """Cold-start reconstruction over the full training backlog (seeds learnings,
+    establishes the reflect watermark)."""
     try:
-        result = cli.coach_service.analyze_workouts(
+        result = cli.coach_service.bootstrap_workouts(
             from_date_str=args.from_date,
             until_date_str=args.until_date,
             days=args.days,
@@ -457,7 +458,34 @@ def run_data_analyze(args: argparse.Namespace) -> None:
             inspect_only=args.inspect_only,
             no_pull=args.no_pull,
         )
+        _render_analysis_report(result, args.inspect_only)
+    except Exception as e:
+        print(red(f"Error running training history bootstrap: {e}"))
 
+
+def run_data_reflect(args: argparse.Namespace) -> None:
+    """Incremental reflection over evidence accrued since the last reflect watermark."""
+    try:
+        result = cli.coach_service.reflect_workouts(
+            from_date_str=args.from_date,
+            until_date_str=args.until_date,
+            days=args.days,
+            weeks=args.weeks,
+            context=args.context,
+            force=args.force,
+            inspect_only=args.inspect_only,
+            no_pull=args.no_pull,
+        )
+        if not result:
+            return  # Nothing new to reflect on; service already printed why.
+        _render_analysis_report(result, args.inspect_only)
+    except Exception as e:
+        print(red(f"Error running training reflection: {e}"))
+
+
+def _render_analysis_report(result: dict, inspect_only: bool) -> None:
+    """Renders a bootstrap/reflect reconstruction + applied coach learning deltas."""
+    try:
         print(bold(cyan("\n=== HISTORICAL WORKOUT ANALYSIS REPORT ===")))
         
         # Macrocycle Overview
@@ -502,7 +530,7 @@ def run_data_analyze(args: argparse.Namespace) -> None:
         if updates:
             header = (
                 "Coach Observations (NOT saved — inspect mode):"
-                if args.inspect_only
+                if inspect_only
                 else "Coach Observations (Saved to learnings):"
             )
             print(bold(cyan("\n" + header)))
@@ -539,4 +567,4 @@ def run_data_analyze(args: argparse.Namespace) -> None:
         print(bold(cyan("\n==========================================")))
 
     except Exception as e:
-        print(red(f"Error running workout analysis: {e}"))
+        print(red(f"Error rendering workout analysis: {e}"))

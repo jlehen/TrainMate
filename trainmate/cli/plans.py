@@ -23,6 +23,20 @@ def run_plan_generate(args: argparse.Namespace) -> None:
         print(yellow("Warning: Metrics cache is empty. Proceeding without Garmin metrics."))
         
     try:
+        # First-run nudge: no reflect watermark means `data bootstrap` has never run, so
+        # there are no history-derived coach learnings to inform the plan. Offer to seed
+        # them before generating (skipped in non-interactive --auto mode).
+        if cli.db.get_sync_state("reflect") is None and not getattr(args, 'auto', False):
+            try:
+                confirm = input(
+                    "\nNo training-history analysis found. Run 'data bootstrap' first to "
+                    "reconstruct past cycles and seed coach learnings? [y/N]: "
+                ).strip().lower()
+            except EOFError:
+                confirm = 'n'
+            if confirm in ('y', 'yes'):
+                cli.coach_service.bootstrap_workouts(no_pull=args.no_pull)
+
         objectives = cli.db.get_objectives(status='active')
         if objectives:
             if args.goal_id is not None:

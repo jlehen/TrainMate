@@ -962,10 +962,10 @@ class TestTrainMateCLI(unittest.TestCase):
         self.assertIn("No planned workouts or completed activities found", stdout)
 
     @patch("trainmate_cli.coach_service")
-    def test_data_analyze_command(self, mock_coach):
+    def test_data_bootstrap_command(self, mock_coach):
         learning_id = test_db.add_learning("Athlete responds well to high sleep score")
 
-        mock_coach.analyze_workouts.return_value = {
+        mock_coach.bootstrap_workouts.return_value = {
             "macrocycle_summary": "Simulated base building results",
             "inferred_macrocycle": {
                 "overall_focus": "aerobic base building",
@@ -996,7 +996,7 @@ class TestTrainMateCLI(unittest.TestCase):
         }
 
         exit_code, stdout, stderr = self.run_cli([
-            "data", "analyze", "--from", "2026-01-01", "--until", "2026-03-31",
+            "data", "bootstrap", "--from", "2026-01-01", "--until", "2026-03-31",
             "--context", "Felt good"
         ])
         self.assertEqual(exit_code, 0)
@@ -1008,7 +1008,7 @@ class TestTrainMateCLI(unittest.TestCase):
         self.assertIn("Responds well to volume", stdout)
         self.assertIn("reinforced", stdout)
         self.assertIn("Athlete responds well to high sleep score", stdout)
-        mock_coach.analyze_workouts.assert_called_once_with(
+        mock_coach.bootstrap_workouts.assert_called_once_with(
             from_date_str="2026-01-01",
             until_date_str="2026-03-31",
             days=None,
@@ -1019,14 +1019,14 @@ class TestTrainMateCLI(unittest.TestCase):
             no_pull=False,
         )
 
-        mock_coach.analyze_workouts.reset_mock()
+        mock_coach.bootstrap_workouts.reset_mock()
         exit_code, stdout, stderr = self.run_cli([
-            "data", "analyze", "--from", "2026-01-01", "--until", "2026-03-31",
+            "data", "bootstrap", "--from", "2026-01-01", "--until", "2026-03-31",
             "--inspect-only"
         ])
         self.assertEqual(exit_code, 0)
         self.assertIn("Coach Observations (NOT saved — inspect mode):", stdout)
-        mock_coach.analyze_workouts.assert_called_once_with(
+        mock_coach.bootstrap_workouts.assert_called_once_with(
             from_date_str="2026-01-01",
             until_date_str="2026-03-31",
             days=None,
@@ -1143,14 +1143,14 @@ class TestTrainMateCLI(unittest.TestCase):
         self.assertEqual(exit_code, 0)
         mock_garmin.ensure_data.assert_not_called()
 
-        # 5. data analyze with --no-pull
+        # 5. data bootstrap with --no-pull
         mock_garmin.ensure_data.reset_mock()
         exit_code, stdout, stderr = self.run_cli(
-            ["data", "analyze", "--from", "2026-06-01", "--no-pull"]
+            ["data", "bootstrap", "--from", "2026-06-01", "--no-pull"]
         )
         self.assertEqual(exit_code, 0)
-        mock_coach.analyze_workouts.assert_called_once()
-        self.assertTrue(mock_coach.analyze_workouts.call_args[1].get("no_pull"))
+        mock_coach.bootstrap_workouts.assert_called_once()
+        self.assertTrue(mock_coach.bootstrap_workouts.call_args[1].get("no_pull"))
 
 
 if __name__ == "__main__":
