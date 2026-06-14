@@ -229,7 +229,8 @@ UPCOMING LIFE EVENTS:
     def _get_evidence_fingerprint(
         self, completed_activities: List[CompletedActivity],
         metrics: List[Dict[str, Any]], window_start: str, window_end: str,
-        lifeevents: Optional[List[LifeEvent]] = None
+        lifeevents: Optional[List[LifeEvent]] = None,
+        daily_context: Optional[List[Dict[str, Any]]] = None
     ) -> str:
         """Fingerprints the *evidence* a backward evaluation reconstructs from — the
         completed activities + daily metrics (+ overlapping life events) within a window —
@@ -270,9 +271,16 @@ UPCOMING LIFE EVENTS:
              c.get('event_type'), c.get('impact_description'))
             for c in (lifeevents or [])
         )
+        # Daily context feeds the analysis input, so an added/edited/deleted signal must
+        # shift the fingerprint (DESIGN_calendar_context_ingest.md §7).
+        ctx_digest = sorted(
+            (c.get('date'), c.get('metric'), c.get('value'), c.get('text'))
+            for c in (daily_context or [])
+        )
         serialized = json.dumps(
             {'window': [window_start, window_end],
-             'activities': act_digest, 'metrics': met_digest, 'lifeevents': evt_digest},
+             'activities': act_digest, 'metrics': met_digest, 'lifeevents': evt_digest,
+             'daily_context': ctx_digest},
             sort_keys=True
         )
         return hashlib.sha256(serialized.encode('utf-8')).hexdigest()
@@ -686,6 +694,12 @@ Adherence Discrepancies & Violations:
             "  performance, or recovery anomalies before attributing those to training\n"
             "  adaptation; avoid authoring a training learning from a week whose anomaly a\n"
             "  life event already explains.\n"
+            "- 'daily_context': externally-logged daily signals (e.g. alcohol, poor sleep,\n"
+            "  high stress), each with a 'metric', an optional numeric 'value', and free\n"
+            "  'text'. Present only on days one was logged. Treat these the same way as\n"
+            "  life events: a signal the day before (recovery lags) is a likely\n"
+            "  non-training explanation for a depressed next-morning metric, so weigh it\n"
+            "  before attributing the dip to training load.\n"
             "- 'vs_baseline_z': how the week's morning metrics sat versus the athlete's\n"
             "  rolling baseline, in standard deviations. Sign convention: +rhr = elevated\n"
             "  (worse), +hrv = higher (better), +sleep = better. Use these (with\n"

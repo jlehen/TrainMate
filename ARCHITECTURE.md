@@ -83,7 +83,9 @@ classes themselves.
 |                      |                      | load model: `measured_tss`, `activity_load`,     |
 |                      |                      | `rpe_divergence` (see §12).                       |
 | `google_calendar.py` | `calendar_syncer`    | Creates/updates/deletes all-day Google Calendar  |
-|                      |                      | events for workouts.                             |
+|                      |                      | events for workouts (outbound), and ingests       |
+|                      |                      | tagged daily-context events into `daily_context` |
+|                      |                      | (inbound — `sync_calendar_context`, see §13).    |
 | `adherence.py`       | —                    | `analyze_adherence()` pure function; compares    |
 |                      |                      | planned vs completed.                            |
 | `util.py`            | —                    | ANSI color helpers (`bold`, `green`, `red`, …),  |
@@ -258,10 +260,10 @@ from trainmate.coach import coach_service
 **Package:** `trainmate/db/` · **Singleton:** `db = Database()` (in `__init__.py`)
 
 `Database` is composed from per-domain mixins — `base.py` (`BaseDB`:
-connection + schema setup), `objectives.py`, `lifeevents.py`, `workouts.py`,
-`activities.py`, `learnings.py`, `analysis.py`, `periodization.py`, `wipes.py` —
-all re-exported from `__init__.py` so `from trainmate.db import ...` is
-unchanged.
+connection + schema setup), `objectives.py`, `lifeevents.py`, `dailycontext.py`,
+`workouts.py`, `activities.py`, `learnings.py`, `analysis.py`, `periodization.py`,
+`wipes.py` — all re-exported from `__init__.py` so `from trainmate.db import ...`
+is unchanged.
 
 - Every method opens a fresh `sqlite3` connection (context manager), commits,
   and closes.
@@ -284,6 +286,11 @@ unchanged.
 **Life Events:** `add_lifeevent`, `get_lifeevents(start_after=)`,
 `get_lifeevent(id)`, `update_lifeevent(id, **kwargs)`, `delete_lifeevent`,
 `wipe_lifeevents`
+
+**Daily Context:** `upsert_daily_context_by_event(google_event_id, …)`,
+`get_daily_context(start_date=, end_date=)`,
+`delete_daily_context_by_event(google_event_id)` — external signals reconciled
+by Calendar event id (cleared by `wipe_metrics`; see §13).
 
 **Workouts:** `save_workout` (upsert),
 `get_workout(date, sport_type)`,
@@ -453,16 +460,37 @@ sweep run after every pull).
 | `sleep_baseline_std`        | REAL    |
 
 ### sync_\state
-Garmin pull watermark (one row, `key='garmin'`). `through_date` is the forward
-high-water mark (local YYYY-MM-DD) and only ever advances; `last_pull_utc` is an
-instant compared against now for the freshness interval. See section 8 (Data
-Pull) and `DESIGN_garmin_direct_pull.md`.
+Per-source sync progress, one row per `key`. The `garmin` row holds the pull
+watermark: `through_date` is the forward high-water mark (local YYYY-MM-DD) and
+only ever advances; `last_pull_utc` is an instant compared against now for the
+freshness interval. The `calendar_context` row instead holds `sync_token` (the
+opaque Calendar `nextSyncToken`) with `through_date` NULL. Each source populates
+only the columns it uses. See §8 (Data Pull), §13 (Daily Context),
+`DESIGN_garmin_direct_pull.md`, and `DESIGN_calendar_context_ingest.md`.
 
-| Column          | Type    | Notes                                       |
-|-----------------|---------|---------------------------------------------|
-| `key`           | TEXT PK | Source key, e.g. `garmin`                   |
-| `through_date`  | TEXT    | Forward high-water mark (local YYYY-MM-DD)  |
-| `last_pull_utc` | TEXT    | ISO instant of last successful Garmin pull  |
+| Column          | Type    | Notes                                            |
+|-----------------|---------|--------------------------------------------------|
+| `key`           | TEXT PK | Source key: `garmin` or `calendar_context`       |
+| `through_date`  | TEXT    | Garmin forward high-water mark (local YYYY-MM-DD)|
+| `last_pull_utc` | TEXT    | ISO instant of last successful sync              |
+| `sync_token`    | TEXT    | Calendar `nextSyncToken` (calendar_context row)  |
+
+### daily_\context
+External daily context signals (alcohol, sleep, stress, …) ingested from tagged
+Google Calendar events. TrainMate is domain-agnostic: `metric` is an opaque
+category and `value` an optional numeric magnitude. Reconciled by
+`google_event_id` (upsert on edit, delete on cancellation). See §13 and
+`DESIGN_calendar_context_ingest.md`.
+
+| Column            | Type        | Notes                                          |
+|-------------------|-------------|------------------------------------------------|
+| `id`              | INTEGER PK  | Autoincrement                                  |
+| `date`            | TEXT        | YYYY-MM-DD the signal applies to               |
+| `metric`          | TEXT        | Opaque category, e.g. `alcohol`                |
+| `value`           | REAL        | Optional numeric magnitude (NULL if untagged)  |
+| `text`            | TEXT        | Human blurb (summary/description) for the coach|
+| `google_event_id` | TEXT UNIQUE | Calendar event id — reconciliation key         |
+| `updated`         | TEXT        | Event `updated` RFC3339 (debug)                |
 
 ### coach_\learnings
 Discrete, addressable athlete-observation records, updated incrementally via LLM
@@ -943,7 +971,48 @@ average weekly load).
 
 ---
 
-## 13. Testing
+## 13. Daily Context (Calendar Ingest)
+
+External daily signals the coach should factor in — alcohol, sleep quality,
+stress, big meals — reach TrainMate through the **single existing Google
+Calendar**, not through app-specific features. A separate syncer (out of scope,
+mirroring `GarminScraper`) writes one all-day event per signal-day, tagged in
+`extendedProperties.private`: `source=trainmate-context` (the positive marker),
+`metric` (opaque category), and an optional numeric `value`. Full spec:
+`DESIGN_calendar_context_ingest.md`.
+
+**Inbound flow:**
+
+```
+Calendar (tagged events) ──► google_calendar.sync_calendar_context
+   ──► calendar_syncer.sync_context (syncToken, server-side filtered)
+   ──► db.upsert/delete_daily_context_by_event ──► daily_context table
+   ──► coach analysis weekly summaries (per-week `daily_context`)
+```
+
+- **Distinguishing events:** TrainMate writes workouts tagged `source=TrainMate`
+  and reads only events tagged `source=trainmate-context`; untagged events (real
+  appointments) are never fetched (server-side `privateExtendedProperty` filter).
+- **Sync, not append:** incremental via Calendar `syncToken` — edits upsert by
+  `google_event_id`, cancellations delete. First run / expired token (HTTP 410)
+  falls back to a full pull of all tagged events (no date horizon needed; the
+  list is bulk and sparse). Token persisted in `sync_state[calendar_context]`.
+- **Cadence:** rides along `data pull` (force) and the auto-ensure-before-read
+  path (`garmin.ensure_data` → bridge `_sync_calendar_context`, throttled to the
+  Garmin refresh window and memoized once per process). Best-effort: a missing
+  calendar config or any Calendar error is swallowed with a warning. The gating
+  and error handling live in `google_calendar.sync_calendar_context`; `garmin.py`
+  only bridges to it via a guarded lazy import.
+- **Coach use:** qualitative today — each week's summary carries a `daily_context`
+  list (all rows, no collapsing) the LLM reads beside the metrics, the same way
+  `life_events` contextualize anomalies. Hashed into the analysis evidence
+  fingerprint so an added/edited/deleted signal invalidates the cached
+  reconstruction. The optional numeric `value` keeps a future category-agnostic
+  quantitative path open with no migration.
+
+---
+
+## 14. Testing
 
 Tests use `unittest`. Run with:
 ```

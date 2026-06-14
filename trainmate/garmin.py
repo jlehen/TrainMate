@@ -540,6 +540,9 @@ def pull(
             through_date=new_through,
             last_pull_utc=datetime.now(timezone.utc).isoformat(),
         )
+
+    # An explicit pull also refreshes external calendar context (best-effort).
+    _sync_calendar_context(force=True)
     print("Garmin sync completed.")
 
 
@@ -672,6 +675,17 @@ def backfill_tss(
 _ensured: Optional[Tuple[str, str]] = None
 
 
+def _sync_calendar_context(force: bool) -> None:
+    """Bridge to the calendar module's context sync, lazily imported so a missing
+    service-account file (calendar unconfigured) can never break a Garmin read. The
+    gating, throttling, and error handling all live in google_calendar."""
+    try:
+        from trainmate import google_calendar
+    except Exception:
+        return  # Calendar not importable/configured — nothing to sync.
+    google_calendar.sync_calendar_context(force=force)
+
+
 def _pull_command(start: str, end: str) -> str:
     return f"python trainmate_cli.py data pull --from {start} --until {end}"
 
@@ -694,6 +708,11 @@ def ensure_data(start_date: str, end_date: str) -> None:
     blocks. Call once at command entry with the window the command will read.
     """
     global _ensured
+    # Refresh external calendar context alongside the data read (independent of Garmin
+    # auth; throttled + memoized inside, best-effort). Done first so it still runs even
+    # when Garmin credentials are absent.
+    _sync_calendar_context(force=False)
+
     # No credentials → we can't pull anyway. Stay silent rather than warn on every
     # read; manual `data pull` reports the missing-credentials error explicitly.
     if not (config.garmin_email and config.garmin_password):

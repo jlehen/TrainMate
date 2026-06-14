@@ -1325,11 +1325,15 @@ class CoachService:
             c for c in self._db.get_lifeevents(start_after=from_str)
             if c.get('start_date') and c['start_date'] <= until_str
         ]
+        # External daily context signals (alcohol, sleep, stress, …) ingested from the
+        # calendar; they explain recovery anomalies the same way life events explain load
+        # ones (DESIGN_calendar_context_ingest.md §7).
+        daily_context = self._db.get_daily_context(start_date=from_str, end_date=until_str)
 
         # Reuse path: if the evidence is unchanged since the last analysis, return the
         # cached reconstruction instead of paying for another LLM pass (unless --force).
         fingerprint = self.engine._get_evidence_fingerprint(
-            completed_activities, metrics, from_str, until_str, lifeevents
+            completed_activities, metrics, from_str, until_str, lifeevents, daily_context
         )
         cached = self._db.get_analysis_cache(horizon)
         evidence_unchanged = bool(cached and cached.get("fingerprint") == fingerprint)
@@ -1349,7 +1353,8 @@ class CoachService:
                 weeks_data[monday_str] = {
                     "days": [],
                     "metrics": [],
-                    "activities": []
+                    "activities": [],
+                    "daily_context": []
                 }
             weeks_data[monday_str]["days"].append(current_day)
             current_day += timedelta(days=1)
@@ -1361,6 +1366,13 @@ class CoachService:
             monday_str = monday.strftime("%Y-%m-%d")
             if monday_str in weeks_data:
                 weeks_data[monday_str]["metrics"].append(m)
+
+        for ctx in daily_context:
+            c_date = datetime.strptime(ctx['date'], "%Y-%m-%d").date()
+            monday = c_date - timedelta(days=c_date.weekday())
+            monday_str = monday.strftime("%Y-%m-%d")
+            if monday_str in weeks_data:
+                weeks_data[monday_str]["daily_context"].append(ctx)
 
         for act in completed_activities:
             act_date = datetime.strptime(act['date'], "%Y-%m-%d").date()
@@ -1441,6 +1453,16 @@ class CoachService:
             baseline = self._db.get_baseline(week_end.strftime("%Y-%m-%d"))
             response = self._week_response_features(w_metrics, baseline)
             week_events = self._week_life_events(lifeevents, week_start, week_end)
+            # All context signals for the week, handed to the LLM verbatim (no collapsing
+            # of multiple metrics/day — DESIGN_calendar_context_ingest.md §7).
+            week_context = sorted(
+                (
+                    {"date": c["date"], "metric": c["metric"],
+                     "value": c["value"], "text": c.get("text")}
+                    for c in w_info["daily_context"]
+                ),
+                key=lambda r: (r["date"], r["metric"]),
+            )
 
             highlights = []
             for act in w_activities:
@@ -1493,6 +1515,9 @@ class CoachService:
             # any component (so its absence reads as "no data", not "on baseline").
             if "vs_baseline_z" in response:
                 summary["vs_baseline_z"] = response["vs_baseline_z"]
+            # Emitted only when present so its absence reads as "no signals logged".
+            if week_context:
+                summary["daily_context"] = week_context
             weekly_summaries.append(summary)
 
         # Fetch relevant objectives (occurring on or after from_date)

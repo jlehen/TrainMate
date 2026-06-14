@@ -340,14 +340,42 @@ class BaseDB:
             # Sync watermark: how far Garmin data has been pulled, and when.
             # through_date is the FORWARD high-water mark (local YYYY-MM-DD); a
             # backward backfill never regresses it. last_pull_utc is an INSTANT
-            # (UTC ISO) compared against now for the freshness interval.
+            # (UTC ISO) compared against now for the freshness interval. sync_token
+            # is the opaque Calendar nextSyncToken — populated only by the
+            # 'calendar_context' row (DESIGN_calendar_context_ingest.md §6.1).
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS sync_state (
                     key            TEXT PRIMARY KEY,
                     through_date   TEXT,
-                    last_pull_utc  TEXT
+                    last_pull_utc  TEXT,
+                    sync_token     TEXT
                 )
             """)
+            # Migration: pre-existing DBs created sync_state without sync_token.
+            cursor.execute("PRAGMA table_info(sync_state)")
+            sync_state_cols = {row[1] for row in cursor.fetchall()}
+            if "sync_token" not in sync_state_cols:
+                cursor.execute("ALTER TABLE sync_state ADD COLUMN sync_token TEXT")
+
+            # External daily context signals (alcohol, sleep, stress, …) ingested from
+            # tagged Google Calendar events. TrainMate stays domain-agnostic: metric is
+            # an opaque category, value an optional numeric magnitude, text the human
+            # blurb for the LLM. google_event_id is the reconciliation key so ingestion
+            # is an upsert with edit/delete detection (DESIGN_calendar_context_ingest.md §5).
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS daily_context (
+                    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                    date            TEXT NOT NULL,
+                    metric          TEXT NOT NULL,
+                    value           REAL,
+                    text            TEXT,
+                    google_event_id TEXT NOT NULL UNIQUE,
+                    updated         TEXT
+                )
+            """)
+            cursor.execute(
+                "CREATE INDEX IF NOT EXISTS idx_daily_context_date ON daily_context(date)"
+            )
 
             conn.commit()
 

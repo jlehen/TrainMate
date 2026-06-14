@@ -31,7 +31,9 @@ class WipesMixin:
         """Deletes all metrics, baselines, and completed activities from the database.
 
         Also clears the analysis cache: its reconstructions are derived from exactly this
-        evidence, so they are meaningless once the evidence is gone.
+        evidence, so they are meaningless once the evidence is gone. Daily context signals
+        and the sync watermarks (incl. the Calendar sync token) go too — the next sync
+        re-pulls them in full from the calendar (DESIGN_calendar_context_ingest.md §6).
         """
         with self._get_connection() as conn:
             cursor = conn.cursor()
@@ -39,5 +41,6 @@ class WipesMixin:
             cursor.execute("DELETE FROM athlete_metrics_cache")
             cursor.execute("DELETE FROM athlete_baselines")
             cursor.execute("DELETE FROM analysis_cache")
+            cursor.execute("DELETE FROM daily_context")
             cursor.execute("DELETE FROM sync_state")
             conn.commit()

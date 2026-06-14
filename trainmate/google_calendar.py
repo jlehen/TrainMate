@@ -1,5 +1,5 @@
 import json
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any, List, Optional
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
@@ -7,6 +7,10 @@ from googleapiclient.errors import HttpError
 from trainmate.config import config
 from trainmate.db import db
 from trainmate.types import Workout
+from trainmate.util import yellow
+
+CONTEXT_SOURCE = "trainmate-context"
+
 
 class CalendarSyncer:
     """Synchronizes planned and adapted workouts to Google Calendar as all-day events."""
@@ -219,6 +223,116 @@ class CalendarSyncer:
             synced_ids.append(eid)
         return synced_ids
 
+    # ------------------------------------------------------------------
+    # Inbound: external daily-context signals (alcohol, sleep, stress, …)
+    # ------------------------------------------------------------------
+    def sync_context(self) -> int:
+        """Pulls tagged daily-context events from the calendar into `daily_context`.
+
+        Incremental via `syncToken` (edit and delete detection come for free); falls
+        back to a full pull of *all* tagged events on first run or when the token has
+        expired (HTTP 410). The server-side `privateExtendedProperty` filter means only
+        context events ever enter the stream — workouts and private appointments don't.
+        Returns the number of rows upserted or deleted
+        (DESIGN_calendar_context_ingest.md §6).
+        """
+        if not self.calendar_id:
+            return 0
+
+        state = db.get_sync_state(key="calendar_context")
+        use_token: Optional[str] = state.get("sync_token") if state else None
+
+        changed = 0
+        page_token: Optional[str] = None
+        next_sync_token: Optional[str] = None
+        while True:
+            params: dict = {
+                'calendarId': self.calendar_id,
+                'privateExtendedProperty': f"source={CONTEXT_SOURCE}",
+                'showDeleted': True,
+                'singleEvents': True,
+                'maxResults': 250,
+            }
+            # syncToken and the initial-sync params are mutually exclusive beyond
+            # pageToken; reuse the *same* base params so the token stays valid.
+            if use_token:
+                params['syncToken'] = use_token
+            if page_token:
+                params['pageToken'] = page_token
+            try:
+                resp = self.service.events().list(**params).execute()
+            except HttpError as e:
+                if e.resp.status == 410 and use_token:
+                    # Expired token: discard it and restart with a full pull.
+                    use_token = None
+                    page_token = None
+                    changed = 0
+                    continue
+                raise
+            for event in resp.get('items', []):
+                changed += self._ingest_context_event(event)
+            page_token = resp.get('nextPageToken')
+            if not page_token:
+                next_sync_token = resp.get('nextSyncToken')
+                break
+
+        db.set_sync_state(
+            through_date=None,
+            last_pull_utc=datetime.now(timezone.utc).isoformat(),
+            key="calendar_context",
+            sync_token=next_sync_token,
+        )
+        return changed
+
+    def _ingest_context_event(self, event: dict) -> int:
+        """Reconciles a single context event into `daily_context`. A cancelled event
+        deletes its row; otherwise the row is upserted by event id. Returns 1 if the DB
+        changed, else 0."""
+        event_id = event.get('id')
+        if not event_id:
+            return 0
+        if event.get('status') == 'cancelled':
+            db.delete_daily_context_by_event(event_id)
+            return 1
+
+        private = (event.get('extendedProperties', {}) or {}).get('private', {}) or {}
+        # The server-side filter should guarantee this, but a shared calendar or a
+        # token stream can still surprise us — skip anything not actually ours.
+        if private.get('source') != CONTEXT_SOURCE:
+            return 0
+
+        start = event.get('start', {}) or {}
+        date = start.get('date') or (start.get('dateTime') or "")[:10]
+        if not date:
+            return 0
+
+        db.upsert_daily_context_by_event(
+            google_event_id=event_id,
+            date=date,
+            metric=private.get('metric') or 'context',
+            value=self._parse_float(private.get('value')),
+            text=self._context_text(event),
+            updated=event.get('updated'),
+        )
+        return 1
+
+    @staticmethod
+    def _parse_float(raw: Any) -> Optional[float]:
+        """Best-effort parse of the optional numeric `value` tag; None when absent/bad."""
+        if raw is None:
+            return None
+        try:
+            return float(raw)
+        except (TypeError, ValueError):
+            return None
+
+    @staticmethod
+    def _context_text(event: dict) -> Optional[str]:
+        """The human blurb handed to the coach: summary then description, trimmed."""
+        parts = [event.get('summary'), event.get('description')]
+        text = "\n".join(p.strip() for p in parts if p and p.strip())
+        return text or None
+
     def delete_workout_event(self, google_event_id: str) -> None:
         """Deletes a workout event from Google Calendar.
 
@@ -236,3 +350,42 @@ class CalendarSyncer:
 
 # Singleton instance
 calendar_syncer = CalendarSyncer()
+
+
+# Per-process memo: a single CLI command syncs context at most once.
+_context_synced: bool = False
+
+
+def sync_calendar_context(force: bool = False) -> None:
+    """Refreshes daily context from the calendar, gating/throttling the actual sync.
+
+    Rides along with `data pull` (force=True) and the auto-ensure-before-read path
+    (force=False, where it runs at most once per process and skips entirely while the
+    last sync is still fresh). Best-effort: no calendar configured is a silent no-op,
+    and any Calendar error is swallowed with a warning so a data read never blocks
+    (DESIGN_calendar_context_ingest.md §6).
+    """
+    global _context_synced
+    if not config.google_calendar_id:
+        return
+    if not force:
+        if _context_synced:
+            return
+        # Skip if a recent sync already covers the freshness window (shared with the
+        # Garmin metric-refresh cadence — "how fresh is fresh enough").
+        state = db.get_sync_state(key="calendar_context")
+        if state and state.get("last_pull_utc"):
+            try:
+                age = datetime.now(timezone.utc) - datetime.fromisoformat(
+                    state["last_pull_utc"]
+                )
+                if age <= timedelta(minutes=config.garmin_refresh_minutes):
+                    _context_synced = True
+                    return
+            except (ValueError, TypeError):
+                pass
+    try:
+        calendar_syncer.sync_context()
+        _context_synced = True
+    except Exception as e:
+        print(yellow(f"Warning: calendar context sync skipped: {e}"))

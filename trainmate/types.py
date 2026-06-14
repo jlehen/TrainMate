@@ -19,6 +19,21 @@ class LifeEvent(TypedDict):
     event_type: str  # 'business_trip', 'vacation', 'party', 'other'
     impact_description: Optional[str]
 
+class DailyContext(TypedDict):
+    """An external daily context signal ingested from a tagged Calendar event.
+
+    TrainMate is domain-agnostic about these: `metric` is an opaque category
+    (e.g. 'alcohol'), `value` an optional numeric magnitude, `text` the human
+    blurb shown to the coach. `google_event_id` reconciles edits/deletes.
+    """
+    id: Optional[int]
+    date: str
+    metric: str
+    value: Optional[float]
+    text: Optional[str]
+    google_event_id: str
+    updated: Optional[str]
+
 class Workout(TypedDict):
     """Represents a single planned or synced workout."""
     id: Optional[int]

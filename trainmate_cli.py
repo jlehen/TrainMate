@@ -552,7 +552,8 @@ def main() -> None:
             "local cache, advancing the sync watermark. With no range, pulls the last "
             "2 days ending today (--days N for a different window, or --from/--until "
             "for an explicit range). Pulls both metrics and activities unless "
-            "--metrics-only/--activities-only is given."
+            "--metrics-only/--activities-only is given. Also syncs tagged daily-context "
+            "events (alcohol, sleep, stress, …) from Google Calendar into the local cache."
         )
     )
     d_pull.add_argument(

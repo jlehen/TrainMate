@@ -380,6 +380,68 @@ class TestDatabase(unittest.TestCase):
         self.assertIsNone(test_db.get_analysis_cache("long"))
         self.assertIsNone(test_db.get_analysis_cache("short"))
 
+    def test_daily_context_upsert_get_delete(self):
+        """Context signals upsert by event id (edits replace in place), query by date
+        window, and delete on cancellation (DESIGN_calendar_context_ingest.md §5)."""
+        test_db.upsert_daily_context_by_event(
+            google_event_id="evt-a", date="2026-06-13", metric="alcohol",
+            value=2.0, text="2 drinks", updated="2026-06-13T20:00:00Z",
+        )
+        test_db.upsert_daily_context_by_event(
+            google_event_id="evt-b", date="2026-06-14", metric="stress",
+            value=None, text="rough day", updated=None,
+        )
+        rows = test_db.get_daily_context(start_date="2026-06-13", end_date="2026-06-14")
+        self.assertEqual([(r["metric"], r["value"]) for r in rows],
+                         [("alcohol", 2.0), ("stress", None)])
+
+        # Re-ingesting the same event id corrects in place (no duplicate row).
+        test_db.upsert_daily_context_by_event(
+            google_event_id="evt-a", date="2026-06-13", metric="alcohol",
+            value=3.0, text="3 drinks", updated="2026-06-13T21:00:00Z",
+        )
+        rows = test_db.get_daily_context()
+        self.assertEqual(len(rows), 2)
+        alcohol = next(r for r in rows if r["google_event_id"] == "evt-a")
+        self.assertEqual((alcohol["value"], alcohol["text"]), (3.0, "3 drinks"))
+
+        # Window excludes out-of-range dates.
+        self.assertEqual(test_db.get_daily_context(start_date="2026-06-14"),
+                         [r for r in rows if r["date"] == "2026-06-14"])
+
+        # Cancellation deletes the row.
+        test_db.delete_daily_context_by_event("evt-a")
+        remaining = test_db.get_daily_context()
+        self.assertEqual([r["google_event_id"] for r in remaining], ["evt-b"])
+
+        # wipe_metrics clears context alongside the evidence it contextualizes.
+        test_db.wipe_metrics()
+        self.assertEqual(test_db.get_daily_context(), [])
+
+    def test_sync_state_token_is_per_key(self):
+        """The calendar_context row carries a sync_token; the garmin row keeps its
+        date watermark. Distinct keys never clobber each other's columns."""
+        test_db.set_sync_state(through_date="2026-06-14", last_pull_utc="t1", key="garmin")
+        test_db.set_sync_state(
+            through_date=None, last_pull_utc="t2", key="calendar_context",
+            sync_token="tok-123",
+        )
+        garmin = test_db.get_sync_state(key="garmin")
+        ctx = test_db.get_sync_state(key="calendar_context")
+        self.assertEqual(garmin["through_date"], "2026-06-14")
+        self.assertIsNone(garmin["sync_token"])
+        self.assertEqual(ctx["sync_token"], "tok-123")
+        self.assertIsNone(ctx["through_date"])
+
+        # Updating the token preserves the per-key isolation.
+        test_db.set_sync_state(
+            through_date=None, last_pull_utc="t3", key="calendar_context",
+            sync_token="tok-456",
+        )
+        self.assertEqual(test_db.get_sync_state(key="calendar_context")["sync_token"],
+                         "tok-456")
+        self.assertEqual(test_db.get_sync_state(key="garmin")["through_date"], "2026-06-14")
+
     def test_learning_helpers(self):
         self.assertEqual(normalize_sports(None), "general")
         self.assertEqual(normalize_sports(""), "general")

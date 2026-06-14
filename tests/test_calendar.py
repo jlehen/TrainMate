@@ -168,5 +168,102 @@ class TestCalendarSync(unittest.TestCase):
         self.assertIn("Short recovery jog.", desc)
         self.assertIn("Reason:\nInjury flare-up", desc)
 
+    def test_sync_context_ingests_tagged_events(self):
+        """sync_context upserts tagged events, deletes cancelled ones, skips untagged
+        events, and persists the nextSyncToken (DESIGN_calendar_context_ingest.md §6)."""
+        # Pre-seed a row that an incoming cancelled event will delete.
+        test_db.upsert_daily_context_by_event(
+            google_event_id="evt-old", date="2026-06-10", metric="alcohol",
+            value=1.0, text="1 drink", updated=None,
+        )
+
+        items = [
+            {
+                "id": "evt-1",
+                "status": "confirmed",
+                "summary": "Alcohol: 2 drinks",
+                "description": "wine",
+                "updated": "2026-06-13T20:00:00Z",
+                "start": {"date": "2026-06-13"},
+                "extendedProperties": {"private": {
+                    "source": "trainmate-context", "metric": "alcohol", "value": "2",
+                }},
+            },
+            {"id": "evt-old", "status": "cancelled"},  # deletes the pre-seeded row
+            {  # not ours: defensive skip (server-side filter normally excludes it)
+                "id": "evt-foreign",
+                "status": "confirmed",
+                "summary": "Dentist",
+                "start": {"date": "2026-06-13"},
+                "extendedProperties": {"private": {"source": "something-else"}},
+            },
+        ]
+        mock_service = MagicMock()
+        mock_service.events().list.return_value.execute.return_value = {
+            "items": items, "nextSyncToken": "tok-next",
+        }
+
+        with patch.object(calendar_syncer, "service", mock_service), \
+                patch.object(calendar_syncer, "calendar_id", "cal-test"):
+            changed = calendar_syncer.sync_context()
+
+        # evt-1 upserted + evt-old deleted; evt-foreign skipped.
+        self.assertEqual(changed, 2)
+        rows = test_db.get_daily_context()
+        self.assertEqual([r["google_event_id"] for r in rows], ["evt-1"])
+        self.assertEqual(rows[0]["metric"], "alcohol")
+        self.assertEqual(rows[0]["value"], 2.0)
+        self.assertIn("2 drinks", rows[0]["text"])
+
+        # Token persisted for the next incremental sync.
+        self.assertEqual(
+            test_db.get_sync_state(key="calendar_context")["sync_token"], "tok-next"
+        )
+        # The list query used the server-side context filter.
+        _, kwargs = mock_service.events().list.call_args
+        self.assertEqual(kwargs.get("privateExtendedProperty"), "source=trainmate-context")
+
+    def test_sync_context_expired_token_falls_back_to_full_pull(self):
+        """A 410 on the stored syncToken discards it and restarts with a full pull."""
+        from googleapiclient.errors import HttpError
+
+        test_db.set_sync_state(
+            through_date=None, last_pull_utc="t0", key="calendar_context",
+            sync_token="stale-tok",
+        )
+
+        resp_410 = MagicMock()
+        resp_410.status = 410
+        full_pull_result = {
+            "items": [{
+                "id": "evt-2",
+                "status": "confirmed",
+                "summary": "Poor sleep",
+                "start": {"date": "2026-06-14"},
+                "extendedProperties": {"private": {
+                    "source": "trainmate-context", "metric": "sleep_quality",
+                }},
+            }],
+            "nextSyncToken": "fresh-tok",
+        }
+
+        mock_service = MagicMock()
+        mock_service.events().list.return_value.execute.side_effect = [
+            HttpError(resp_410, b"gone"),  # incremental with stale token -> 410
+            full_pull_result,              # restarted full pull
+        ]
+
+        with patch.object(calendar_syncer, "service", mock_service), \
+                patch.object(calendar_syncer, "calendar_id", "cal-test"):
+            changed = calendar_syncer.sync_context()
+
+        self.assertEqual(changed, 1)
+        rows = test_db.get_daily_context()
+        self.assertEqual([r["metric"] for r in rows], ["sleep_quality"])
+        self.assertIsNone(rows[0]["value"])  # no value tag -> NULL
+        self.assertEqual(
+            test_db.get_sync_state(key="calendar_context")["sync_token"], "fresh-tok"
+        )
+
 if __name__ == "__main__":
     unittest.main()

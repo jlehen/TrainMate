@@ -13,6 +13,7 @@ _ALL_TABLES = [
     "coach_learnings",
     "analysis_cache",
     "sync_state",
+    "daily_context",
     "lifeevents",
     "objectives",
 ]

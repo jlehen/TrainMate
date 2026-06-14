@@ -189,32 +189,40 @@ class ActivitiesMixin:
 
     # --- Sync watermark ---
     def get_sync_state(self, key: str = "garmin") -> Optional[Dict[str, Any]]:
-        """Returns the {through_date, last_pull_utc} watermark for a source, or None."""
+        """Returns the {through_date, last_pull_utc, sync_token} state for a source,
+        or None. sync_token is the opaque Calendar nextSyncToken (calendar_context row);
+        through_date is the Garmin forward high-water mark."""
         with self._get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute(
-                "SELECT key, through_date, last_pull_utc FROM sync_state WHERE key = ?",
+                "SELECT key, through_date, last_pull_utc, sync_token "
+                "FROM sync_state WHERE key = ?",
                 (key,),
             )
             row = cursor.fetchone()
             return dict(row) if row else None  # type: ignore
 
     def set_sync_state(
-        self, through_date: Optional[str], last_pull_utc: str, key: str = "garmin"
+        self, through_date: Optional[str], last_pull_utc: str, key: str = "garmin",
+        sync_token: Optional[str] = None
     ) -> None:
         """Upserts the watermark. through_date only ever advances (forward high-water
-        mark); a backward backfill passes the existing value through unchanged."""
+        mark); a backward backfill passes the existing value through unchanged.
+        sync_token carries the Calendar nextSyncToken for the calendar_context row;
+        rows that don't use it pass None. Each source owns a distinct key, so the
+        unused columns simply stay NULL per row."""
         with self._get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute(
                 """
-                INSERT INTO sync_state (key, through_date, last_pull_utc)
-                VALUES (?, ?, ?)
+                INSERT INTO sync_state (key, through_date, last_pull_utc, sync_token)
+                VALUES (?, ?, ?, ?)
                 ON CONFLICT(key) DO UPDATE SET
                     through_date=excluded.through_date,
-                    last_pull_utc=excluded.last_pull_utc
+                    last_pull_utc=excluded.last_pull_utc,
+                    sync_token=excluded.sync_token
                 """,
-                (key, through_date, last_pull_utc),
+                (key, through_date, last_pull_utc, sync_token),
             )
             conn.commit()
 
