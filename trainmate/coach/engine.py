@@ -598,7 +598,11 @@ Athlete's Metrics History (Past {history_days} Days):
 Baseline Reference:
 {baseline_str}
 
-Planned Workouts in Window:
+Planned Workouts (recent window for adherence + already-scheduled sessions through
+the adaptation range). When adapting, modify these EXISTING sessions in place —
+preserve each one's date and sport_type unless deliberately swapping the sport, and
+do NOT drop scheduled sessions you are not changing. Only invent a brand-new session
+for a date that currently has none:
 {planned_text}
 {removed_section}
 Actual Completed Garmin Activities in Window:

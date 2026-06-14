@@ -717,8 +717,20 @@ class CoachService:
         completed_activities = self._db.get_completed_activities(
             start_date=start_date_str, end_date=target_date_str
         )
+
+        # Determine mesocycle end date for the adaptation range. The plan we adapt runs
+        # FORWARD from the target date to here, so workouts must be fetched across the
+        # whole span (lookback start -> mesocycle end), not just the backward window —
+        # otherwise the LLM never sees already-scheduled future sessions and reinvents
+        # them from scratch (losing their sport/title and overwriting the athlete's plan).
+        active_meso = self._db.get_active_mesocycle(target_date_str)
+        if active_meso:
+            meso_end_date_str = active_meso['end_date']
+        else:
+            meso_end_date_str = (target_date_obj + timedelta(days=6)).strftime("%Y-%m-%d")
+
         window_workouts = self._db.get_workouts(
-            start_date=start_date_str, end_date=target_date_str, include_removed=True
+            start_date=start_date_str, end_date=meso_end_date_str, include_removed=True
         )
         planned_workouts = [w for w in window_workouts if not w.get('removed')]
         removed_workouts = [w for w in window_workouts if w.get('removed')]
@@ -731,7 +743,9 @@ class CoachService:
         # reported as informational rather than as "unplanned" deviations.
         covered_ranges = self._db.get_mesocycle_ranges(start_date_str, target_date_str)
 
-        # Match planned workouts vs completed activities and compute discrepancies
+        # Match planned workouts vs completed activities and compute discrepancies.
+        # analyze_adherence only inspects the `history_days` backward window, so the
+        # future-dated workouts now in `planned_workouts` are ignored here (no false misses).
         discrepancies, matching_results, informational = analyze_adherence(
             planned_workouts=planned_workouts,
             completed_activities=completed_activities,
@@ -740,13 +754,6 @@ class CoachService:
             minor_activity_load_threshold=config.minor_activity_load_threshold,
             covered_ranges=covered_ranges,
         )
-
-        # Determine mesocycle end date for adaptation range
-        active_meso = self._db.get_active_mesocycle(target_date_str)
-        if active_meso:
-            meso_end_date_str = active_meso['end_date']
-        else:
-            meso_end_date_str = (target_date_obj + timedelta(days=6)).strftime("%Y-%m-%d")
 
         objectives = self._db.get_objectives(status='active')
 
