@@ -1225,6 +1225,64 @@ class CoachService:
             self._review_learning_proposals(auto=auto)
         return decision
 
+    @staticmethod
+    def _week_life_events(
+        events: List[LifeEvent], week_start, week_end
+    ) -> List[Dict[str, Any]]:
+        """Life events overlapping [week_start, week_end] (date objects), each tagged
+        'full' (spans the whole in-window week) or 'partial'. Dates are ISO strings so
+        lexicographic comparison is chronological (DESIGN_richer_analysis_evidence.md §2)."""
+        ws, we = week_start.strftime("%Y-%m-%d"), week_end.strftime("%Y-%m-%d")
+        out: List[Dict[str, Any]] = []
+        for c in events:
+            start, end = c.get('start_date'), c.get('end_date')
+            if not start or not end or start > we or end < ws:
+                continue  # missing dates or no overlap with this week
+            out.append({
+                "title": c.get('title'),
+                "type": c.get('event_type'),
+                "impact": c.get('impact_description') or "",
+                "coverage": "full" if (start <= ws and end >= we) else "partial",
+            })
+        return out
+
+    @staticmethod
+    def _week_response_features(
+        w_metrics: List[Dict[str, Any]], baseline: Optional[Dict[str, Any]]
+    ) -> Dict[str, Any]:
+        """Deterministic body-response features for one week: mean sleep/stress, and
+        baseline-relative z-scores `(value - mean) / std` for rhr/hrv/sleep averaged over
+        the week's days. A component is None when its baseline mean/std is missing or std
+        is zero (undefined), or no metric day carries the value; `vs_baseline_z` is only
+        included when at least one component is computable (§3)."""
+        def _avg(key: str) -> Optional[float]:
+            vals = [m[key] for m in w_metrics if m.get(key) is not None]
+            return round(sum(vals) / len(vals), 1) if vals else None
+
+        def _z(metric_key: str, mean_key: str, std_key: str) -> Optional[float]:
+            if not baseline:
+                return None
+            mean, std = baseline.get(mean_key), baseline.get(std_key)
+            if mean is None or not std:  # missing baseline or zero std -> undefined
+                return None
+            vals = [m[metric_key] for m in w_metrics if m.get(metric_key) is not None]
+            if not vals:
+                return None
+            return round(sum((v - mean) / std for v in vals) / len(vals), 2)
+
+        vs_baseline_z = {
+            "rhr": _z("rhr", "rhr_baseline_mean", "rhr_baseline_std"),
+            "hrv": _z("hrv", "hrv_baseline_mean", "hrv_baseline_std"),
+            "sleep": _z("sleep_score", "sleep_baseline_mean", "sleep_baseline_std"),
+        }
+        features: Dict[str, Any] = {
+            "avg_sleep_score": _avg("sleep_score"),
+            "avg_stress": _avg("stress"),
+        }
+        if any(v is not None for v in vs_baseline_z.values()):
+            features["vs_baseline_z"] = vs_baseline_z
+        return features
+
     def _run_workout_analysis(
         self, from_date, until_date,
         context: Optional[str] = None, force: bool = False, inspect_only: bool = False,
@@ -1259,11 +1317,19 @@ class CoachService:
         completed_activities = self._db.get_completed_activities(
             start_date=from_str, end_date=until_str
         )
+        # Life events overlapping the window contextualize anomalies (illness/travel/work)
+        # so the model doesn't misattribute them to training. get_lifeevents(start_after)
+        # already drops events ending before the window; filter the tail end here
+        # (DESIGN_richer_analysis_evidence.md §2).
+        lifeevents = [
+            c for c in self._db.get_lifeevents(start_after=from_str)
+            if c.get('start_date') and c['start_date'] <= until_str
+        ]
 
         # Reuse path: if the evidence is unchanged since the last analysis, return the
         # cached reconstruction instead of paying for another LLM pass (unless --force).
         fingerprint = self.engine._get_evidence_fingerprint(
-            completed_activities, metrics, from_str, until_str
+            completed_activities, metrics, from_str, until_str, lifeevents
         )
         cached = self._db.get_analysis_cache(horizon)
         evidence_unchanged = bool(cached and cached.get("fingerprint") == fingerprint)
@@ -1368,6 +1434,14 @@ class CoachService:
             active_dates = {act['date'] for act in w_activities}
             rest_days = len(days_in_week) - len(active_dates)
 
+            # Deterministic body-response features + overlapping life events for this week
+            # (DESIGN_richer_analysis_evidence.md §2–§3). The baseline moves slowly, so one
+            # lookup per week (at the week's last in-window day) is enough.
+            week_start, week_end = days_in_week[0], days_in_week[-1]
+            baseline = self._db.get_baseline(week_end.strftime("%Y-%m-%d"))
+            response = self._week_response_features(w_metrics, baseline)
+            week_events = self._week_life_events(lifeevents, week_start, week_end)
+
             highlights = []
             for act in w_activities:
                 is_hi = (
@@ -1388,7 +1462,7 @@ class CoachService:
                         "rpe": act.get('rpe')
                     })
 
-            weekly_summaries.append({
+            summary = {
                 "week_commencing": monday_str,
                 "total_duration_hours": round(total_duration_hours, 1),
                 "total_tss": round(total_tss, 1),
@@ -1408,10 +1482,18 @@ class CoachService:
                 } if (pz1_pz2_sec + pz3_pz4_sec + pz5_pz7_sec) > 0 else None,
                 "avg_rhr": round(avg_rhr, 1) if avg_rhr is not None else None,
                 "avg_hrv": round(avg_hrv, 1) if avg_hrv is not None else None,
+                "avg_sleep_score": response["avg_sleep_score"],
+                "avg_stress": response["avg_stress"],
                 "max_acwr": round(max_acwr, 2) if max_acwr is not None else None,
                 "rest_days": rest_days,
-                "highlights": highlights
-            })
+                "highlights": highlights,
+                "life_events": week_events,
+            }
+            # Baseline-relative deviations, omitted whole when no metric/baseline supports
+            # any component (so its absence reads as "no data", not "on baseline").
+            if "vs_baseline_z" in response:
+                summary["vs_baseline_z"] = response["vs_baseline_z"]
+            weekly_summaries.append(summary)
 
         # Fetch relevant objectives (occurring on or after from_date)
         all_objectives = self._db.get_objectives()

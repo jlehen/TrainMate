@@ -228,21 +228,26 @@ UPCOMING LIFE EVENTS:
 
     def _get_evidence_fingerprint(
         self, completed_activities: List[CompletedActivity],
-        metrics: List[Dict[str, Any]], window_start: str, window_end: str
+        metrics: List[Dict[str, Any]], window_start: str, window_end: str,
+        lifeevents: Optional[List[LifeEvent]] = None
     ) -> str:
         """Fingerprints the *evidence* a backward evaluation reconstructs from — the
-        completed activities + daily metrics within a window — so a re-run over unchanged
-        data can be detected (see DESIGN_backward_evaluation.md §5, §8).
+        completed activities + daily metrics (+ overlapping life events) within a window —
+        so a re-run over unchanged data can be detected (see DESIGN_backward_evaluation.md
+        §5, §8).
 
         We hash the load-bearing fields (not just activity ids) so that a re-pull which
         *corrects* a value also shifts the fingerprint. Hashing the concrete activity-id
         set rather than only the date range narrows the overlapping/shrinking-window edge
-        (§7).
+        (§7). Life events and `stress` are hashed because they now feed the analysis input
+        (DESIGN_richer_analysis_evidence.md §5).
 
-        DELIBERATE OMISSION (§11): the prompt text and science/*.txt files are NOT hashed.
-        Editing a prompt or guideline will therefore reuse a stale reconstruction until the
-        underlying data changes; `--force` is the manual escape hatch. This is a chosen
-        trade-off, not an oversight — revisit if prompt iteration becomes common.
+        DELIBERATE OMISSIONS (§11 / richer-evidence §5): the prompt text and science/*.txt
+        files are NOT hashed; neither is *baseline recomputation* that shifts a deviation
+        without any in-window metric changing (baselines track the metrics, so they move
+        together in practice). Editing a prompt/guideline or a bare baseline recompute will
+        therefore reuse a stale reconstruction until the underlying data changes; `--force`
+        is the manual escape hatch. Chosen trade-offs, not oversights.
         """
         act_digest = sorted(
             {
@@ -257,12 +262,17 @@ UPCOMING LIFE EVENTS:
         )
         met_digest = sorted(
             (m.get('date'), m.get('rhr'), m.get('hrv'), m.get('sleep_score'),
-             m.get('acwr'))
+             m.get('stress'), m.get('acwr'))
             for m in metrics
+        )
+        evt_digest = sorted(
+            (c.get('id'), c.get('start_date'), c.get('end_date'),
+             c.get('event_type'), c.get('impact_description'))
+            for c in (lifeevents or [])
         )
         serialized = json.dumps(
             {'window': [window_start, window_end],
-             'activities': act_digest, 'metrics': met_digest},
+             'activities': act_digest, 'metrics': met_digest, 'lifeevents': evt_digest},
             sort_keys=True
         )
         return hashlib.sha256(serialized.encode('utf-8')).hexdigest()
@@ -669,6 +679,20 @@ Adherence Discrepancies & Violations:
             "Analyze the athlete's completed training load, zone distributions, and\n"
             "physiological metrics week-by-week. Reverse-engineer this data to identify\n"
             "the underlying training phases (macrocycle & mesocycles) that occurred.\n"
+            "\n"
+            "READING THE PER-WEEK CONTEXT FIELDS:\n"
+            "- 'life_events': non-training events overlapping the week (illness, travel,\n"
+            "  work crunch, etc.). Consider them as a possible explanation for load,\n"
+            "  performance, or recovery anomalies before attributing those to training\n"
+            "  adaptation; avoid authoring a training learning from a week whose anomaly a\n"
+            "  life event already explains.\n"
+            "- 'vs_baseline_z': how the week's morning metrics sat versus the athlete's\n"
+            "  rolling baseline, in standard deviations. Sign convention: +rhr = elevated\n"
+            "  (worse), +hrv = higher (better), +sleep = better. Use these (with\n"
+            "  'avg_sleep_score'/'avg_stress') as the evidence for 'physiological_insights'\n"
+            "  and any recovery/overreaching observation. Recovery response LAGS load by\n"
+            "  roughly a week, so read a high-load week together with the NEXT week's\n"
+            "  'vs_baseline_z'. A null component means 'no data' — never treat it as zero.\n"
             "\n"
             "You MUST respond with a JSON object containing:\n"
             "{\n"

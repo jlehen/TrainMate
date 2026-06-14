@@ -534,7 +534,7 @@ DESIGN_backward_evaluation.md §5.1.
 |------------------|------------|----------------------------------------------------|
 | `id`             | INTEGER PK |                                                    |
 | `horizon`        | TEXT       | `long` \| `short` — UNIQUE; the cache slot         |
-| `fingerprint`    | TEXT       | Hash of activity-id set + metrics + window         |
+| `fingerprint`    | TEXT       | Hash of activity-id set + metrics + overlapping life events + window |
 | `window_start`   | TEXT       | YYYY-MM-DD                                         |
 | `window_end`     | TEXT       | YYYY-MM-DD                                         |
 | `reconstruction` | TEXT       | JSON: inferred cycles + physiological insights     |
@@ -812,7 +812,10 @@ watermark (stored in `sync_state` under the `reflect` key).
 - **`data bootstrap`** (cold-start, run once): resolves a wide window
   automatically from active/preceding goals (else 12 weeks back) when no date
   filter is given, runs under horizon `long`, and **sets** the reflect watermark
-  to the window end. This is the reconstruction `plan generate` reuses.
+  to the window end. This is the reconstruction `plan generate` reuses. Completion
+  is recorded under the `bootstrap` `sync_state` key; a repeat run is detected and
+  confirmed before re-running (`--force` proceeds, `--auto` skips, `--inspect-only`
+  is never gated), since re-running re-pays for the LLM pass and resets the baseline.
 - **`data reflect`** (incremental): starts the window at the day *after* the
   reflect watermark (or an explicit date filter), runs under horizon `short`, and
   **advances** the watermark forward only. Because overlapping history is never
@@ -821,11 +824,18 @@ watermark (stored in `sync_state` under the `reflect` key).
   `data bootstrap`; with no new evidence it returns early without an LLM call.
 
 The shared core then:
-1. Queries completed activities and physiological metrics for the window.
-2. Computes the evidence fingerprint and checks `analysis_cache[horizon]`. If the
-   fingerprint matches and `--force` is absent → returns the cached reconstruction
-   (no LLM call). `--force` recomputes regardless.
-3. Groups metrics and activities week-by-week using Monday-commencing ISO weeks.
+1. Queries completed activities, physiological metrics, and life events
+   overlapping the window.
+2. Computes the evidence fingerprint (activities + metrics + overlapping life
+   events) and checks `analysis_cache[horizon]`. If the fingerprint matches and
+   `--force` is absent → returns the cached reconstruction (no LLM call). `--force`
+   recomputes regardless.
+3. Groups metrics and activities week-by-week using Monday-commencing ISO weeks,
+   enriching each weekly summary (DESIGN_richer_analysis_evidence.md) with the
+   life events overlapping that week (tagged `full`/`partial`), `avg_sleep_score`/
+   `avg_stress`, and `vs_baseline_z` (deterministic rhr/hrv/sleep z-scores vs the
+   rolling baseline, omitted when unsupported). All deterministic — no extra LLM
+   call.
 4. Queries `CoachEngine._analyze_workouts_logic()` -> LLM ->
    `{macrocycle_summary, inferred_macrocycle, inferred_mesocycles[],
    physiological_insights[], learning_updates[]}`.
@@ -946,7 +956,8 @@ venv/bin/python -m unittest discover -s tests -p "test_*.py"
 |                                | `adherence.analyze_adherence()` (misses, tolerances, violations) |
 | `tests/test_analysis.py`       | `bootstrap_workouts`/`reflect_workouts`: date resolution, weekly |
 |                                | aggregation, cache reuse/force/inspect_only, learnings           |
-|                                | injection, reflect watermark advance/skip                        |
+|                                | injection, reflect watermark advance/skip, bootstrap re-run      |
+|                                | guard, per-week life events + body-response z-scores             |
 | `tests/test_cli.py`            | CLI command dispatch + output                                   |
 | `tests/test_calendar.py`       | `calendar_syncer.sync_workout` event description formatting      |
 | `tests/test_coach_format.py`   | `format_completed_activities` (HR/power-zone rendering)          |
