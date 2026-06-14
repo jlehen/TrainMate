@@ -232,7 +232,7 @@ class TestPeriodization(unittest.TestCase):
                 "end_date": "2026-10-15", "focus": "Threshold",
             }],
         }
-        coach_service.generate_periodization_plan(force=True, objective_id=obj_id)
+        coach_service.plan_generate(force=True, objective_id=obj_id)
         system_prompt = mock_client.complete.call_args[0][0]
         self.assertIn("PRIOR TRAINING REVIEW:", system_prompt)
         self.assertIn("PLANNED vs ACTUAL", system_prompt)
@@ -289,9 +289,9 @@ class TestPeriodization(unittest.TestCase):
         }
 
         with self.assertRaises(ValueError):
-            coach_service.generate_workouts()
+            coach_service.workout_generate()
 
-        strategy, mesos, _ = coach_service.generate_periodization_plan(force=False)
+        strategy, mesos, _ = coach_service.plan_generate(force=False)
         self.assertEqual(strategy, "Separate strategy philosophy")
         self.assertEqual(len(mesos), 1)
         mock_client.complete.assert_called_once()
@@ -304,7 +304,7 @@ class TestPeriodization(unittest.TestCase):
                 "title": "Base Run", "description": "30 mins",
             }],
         }
-        reason, workouts = coach_service.generate_workouts()
+        reason, workouts = coach_service.workout_generate()
         self.assertEqual(reason, "Separate workout reasoning")
         self.assertEqual(len(workouts), 1)
         self.assertEqual(workouts[0]["title"], "Base Run")
@@ -328,7 +328,7 @@ class TestPeriodization(unittest.TestCase):
                 "end_date": "2026-06-28", "focus": "Base",
             }],
         }
-        coach_service.generate_periodization_plan(force=False)
+        coach_service.plan_generate(force=False)
 
         # Simulate a stale workout from the old plan that was synced to Calendar.
         today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
@@ -345,7 +345,7 @@ class TestPeriodization(unittest.TestCase):
                 "title": "New Run", "description": "fresh",
             }],
         }
-        coach_service.generate_workouts()
+        coach_service.workout_generate()
 
         # The stale synced workout is gone, and only the new workout remains.
         remaining = test_db.get_workouts(start_date=today)
@@ -374,7 +374,7 @@ class TestPeriodization(unittest.TestCase):
                 "end_date": "2026-06-28", "focus": "Base",
             }],
         }
-        coach_service.generate_periodization_plan(force=False)
+        coach_service.plan_generate(force=False)
 
         today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
         future = (datetime.now(timezone.utc) + timedelta(days=5)).strftime("%Y-%m-%d")
@@ -392,7 +392,7 @@ class TestPeriodization(unittest.TestCase):
                 "title": "New Run", "description": "fresh",
             }],
         }
-        coach_service.generate_workouts()
+        coach_service.workout_generate()
 
         remaining = test_db.get_workouts(start_date=today)
         self.assertEqual([w["title"] for w in remaining], ["New Run"])
@@ -465,7 +465,7 @@ class TestPeriodization(unittest.TestCase):
         )
 
         with self.assertRaises(ValueError) as ctx:
-            coach_service.generate_periodization_plan()
+            coach_service.plan_generate()
         self.assertIn("too close", str(ctx.exception))
 
     @patch("trainmate.coach.engine.openrouter_client")
@@ -500,7 +500,7 @@ class TestPeriodization(unittest.TestCase):
             },
         ]
 
-        strategy, mesos, _ = coach_service.generate_periodization_plan(force=True)
+        strategy, mesos, _ = coach_service.plan_generate(force=True)
         self.assertEqual(mock_client.complete.call_count, 2)
 
         active_objs = sorted(
@@ -544,13 +544,13 @@ class TestPeriodization(unittest.TestCase):
             },
         ]
 
-        strategy_a, mesos_a, _ = coach_service.generate_periodization_plan(
+        strategy_a, mesos_a, _ = coach_service.plan_generate(
             force=True, objective_id=obj1_id
         )
         self.assertEqual(strategy_a, "Plan A strategy")
         self.assertEqual(mesos_a[0]["start_date"], "2026-06-05")
 
-        strategy_b, mesos_b, _ = coach_service.generate_periodization_plan(
+        strategy_b, mesos_b, _ = coach_service.plan_generate(
             force=True, objective_id=obj2_id
         )
         self.assertEqual(strategy_b, "Plan B strategy")
@@ -559,7 +559,7 @@ class TestPeriodization(unittest.TestCase):
         self.assertIsNotNone(test_db.get_macrocycle_for_objective(obj1_id))
         self.assertIsNotNone(test_db.get_macrocycle_for_objective(obj2_id))
 
-        coach_service.delete_plan(obj1_id)
+        coach_service.plan_rm(obj1_id)
         self.assertIsNone(test_db.get_macrocycle_for_objective(obj1_id))
         self.assertIsNotNone(test_db.get_macrocycle_for_objective(obj2_id))
 
@@ -605,7 +605,7 @@ class TestPeriodization(unittest.TestCase):
             }],
         }
 
-        coach_service.generate_periodization_plan(force=True)
+        coach_service.plan_generate(force=True)
 
         system_prompt = mock_client.complete.call_args[0][0]
         self.assertIn("ATHLETE RECENT TRAINING SUMMARY (PAST 15 DAYS):", system_prompt)
@@ -642,7 +642,7 @@ class TestPeriodization(unittest.TestCase):
             }],
         }
 
-        coach_service.generate_workouts()
+        coach_service.workout_generate()
 
         user_content = mock_client.complete.call_args[0][1]
         self.assertIn("Athlete's Metrics History (Past 15 Days):", user_content)

@@ -161,7 +161,7 @@ def generate_plan() -> Any:
         goal_id = data.get("goal_id")
         if goal_id is not None:
             goal_id = int(goal_id)
-        strategy, mesocycles, _ = coach_service.generate_periodization_plan(
+        strategy, mesocycles, _ = coach_service.plan_generate(
             objective_id=goal_id
         )
         return jsonify({
@@ -173,10 +173,10 @@ def generate_plan() -> Any:
         return jsonify({"error": str(e)}), 500
 
 @app.route("/api/plan/<int:goal_id>", methods=["DELETE"])
-def delete_plan(goal_id: int) -> Any:
+def plan_rm(goal_id: int) -> Any:
     """API endpoint to delete the periodization plan for a specific goal."""
     try:
-        coach_service.delete_plan(goal_id)
+        coach_service.plan_rm(goal_id)
         msg = f"Periodization plan for goal {goal_id} deleted successfully."
         return jsonify({"message": msg})
     except Exception as e:
@@ -205,14 +205,14 @@ def save_mesocycle_feedback(meso_id: int) -> Any:
         return jsonify({"error": str(e)}), 500
 
 @app.route("/api/workouts/generate", methods=["POST"])
-def generate_workouts() -> Any:
+def workout_generate() -> Any:
     """API endpoint to generate workouts (microcycles) based on active strategy."""
     try:
         data = request.json or {}
         goal_id = data.get("goal_id")
         if goal_id is not None:
             goal_id = int(goal_id)
-        reasoning, workouts = coach_service.generate_workouts(objective_id=goal_id)
+        reasoning, workouts = coach_service.workout_generate(objective_id=goal_id)
         return jsonify({
             "message": "Workouts generated and saved.",
             "reasoning": reasoning,
@@ -222,12 +222,12 @@ def generate_workouts() -> Any:
         return jsonify({"error": str(e)}), 500
 
 @app.route("/api/adapt", methods=["POST"])
-def adapt() -> Any:
+def workout_adapt() -> Any:
     """API endpoint to run daily Garmin fatigue checks and adapt workouts."""
     data = request.json or {}
     date_str = data.get("date") or datetime.now(timezone.utc).strftime("%Y-%m-%d")
     try:
-        reason, adapted_workout = coach_service.adapt(date_str)
+        reason, adapted_workout = coach_service.workout_adapt(date_str)
         return jsonify({
             "message": "Daily adaptation check finished.",
             "reason": reason,

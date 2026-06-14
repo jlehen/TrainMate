@@ -35,7 +35,7 @@ def run_plan_generate(args: argparse.Namespace) -> None:
             except EOFError:
                 confirm = 'n'
             if confirm in ('y', 'yes'):
-                cli.coach_service.bootstrap_workouts(no_pull=args.no_pull)
+                cli.coach_service.data_bootstrap(no_pull=args.no_pull)
 
         objectives = cli.db.get_objectives(status='active')
         if objectives:
@@ -69,7 +69,7 @@ def run_plan_generate(args: argparse.Namespace) -> None:
         plan_kwargs = {'auto_apply': False}
         if args.goal_id is not None:
             plan_kwargs['objective_id'] = args.goal_id
-        strategy, mesocycles, reused = cli.coach_service.generate_periodization_plan(
+        strategy, mesocycles, reused = cli.coach_service.plan_generate(
             force=bool(args.force), **plan_kwargs
         )
         
@@ -83,7 +83,7 @@ def run_plan_generate(args: argparse.Namespace) -> None:
             confirm = input("\nApply this new periodization strategy? [y/N]: ").strip().lower()
 
         if confirm in ('y', 'yes'):
-            cli.coach_service.apply_periodization_plan(next_goal['id'], strategy, mesocycles)
+            cli.coach_service.plan_apply(next_goal['id'], strategy, mesocycles)
             print(green(f"\nGenerated {len(mesocycles)} mesocycles. Save complete."))
             print(f"Run '{green('workout generate')}' to schedule workouts based on this plan.")
         else:
@@ -212,7 +212,7 @@ def run_plan_rm(args: argparse.Namespace) -> None:
         return
 
     # Delete the plan
-    cli.coach_service.delete_plan(args.id)
+    cli.coach_service.plan_rm(args.id)
     print(green(f"Periodization plan for goal '{goal['title']}' removed successfully."))
 
     # Warn about subsequent plans

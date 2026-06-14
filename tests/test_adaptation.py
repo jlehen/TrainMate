@@ -92,7 +92,7 @@ class TestAdaptation(unittest.TestCase):
                 "cycling", 1800.0, 12.0, 100.0, 132, 150, 4, 20.0,
             )
 
-            reason, proposed = coach_service.adapt("2026-06-03")
+            reason, proposed = coach_service.workout_adapt("2026-06-03")
 
             self.assertTrue(mock_client.complete.called)
             self.assertEqual(reason, "Fatigue detected, RHR is elevated and HRV is suppressed.")
@@ -136,7 +136,7 @@ class TestAdaptation(unittest.TestCase):
             test_db.save_metric_cache("2026-06-03", 56, 42, 60, 35, 14.0, 8.0, 1.75)
             test_db.save_baseline("2026-06-03", 50.0, 2.0, 60.0, 5.0, 80.0, 5.0)
 
-            reason, proposed = coach_service.adapt("2026-06-03")
+            reason, proposed = coach_service.workout_adapt("2026-06-03")
             self.assertEqual(reason, "On track.")
             self.assertEqual(proposed, [])
 
@@ -167,7 +167,7 @@ class TestAdaptation(unittest.TestCase):
 
         # Swapping the easy Wed with the hard Thu makes Mon-Tue-Wed three hard days.
         ops = self._swap_ops_for_dates("2026-06-10", "2026-06-11")
-        warnings = coach_service.validate_swap(ops)
+        warnings = coach_service.workout_swap_validate(ops)
         self.assertTrue(
             any("consecutive high-intensity" in w for w in warnings),
             f"expected a consecutive-hard-days warning, got {warnings}",
@@ -178,7 +178,7 @@ class TestAdaptation(unittest.TestCase):
         test_db.save_workout("2026-06-10", "yoga", "Mobility", "easy", rpe=2, tss=10)
         test_db.save_workout("2026-06-12", "running", "Recovery", "easy", rpe=3, tss=15)
         ops = self._swap_ops_for_dates("2026-06-10", "2026-06-12")
-        self.assertEqual(coach_service.validate_swap(ops), [])
+        self.assertEqual(coach_service.workout_swap_validate(ops), [])
 
     def test_swap_validation_weekly_load_spike(self):
         # Cross-week swap that shifts a big TSS session into a light week.
@@ -187,7 +187,7 @@ class TestAdaptation(unittest.TestCase):
         test_db.save_workout("2026-06-15", "yoga", "Mobility", "easy", rpe=2, tss=40)
 
         ops = self._swap_ops_for_dates("2026-06-09", "2026-06-15")
-        warnings = coach_service.validate_swap(ops)
+        warnings = coach_service.workout_swap_validate(ops)
         self.assertTrue(
             any("spike your ACWR" in w for w in warnings),
             f"expected a weekly load-spike warning, got {warnings}",
@@ -204,7 +204,7 @@ class TestAdaptation(unittest.TestCase):
         service = trainmate.coach.CoachService(
             db_instance=test_db, calendar_syncer_instance=syncer
         )
-        updated = service.apply_swap(ops, no_sync=False)
+        updated = service.workout_swap_apply(ops, no_sync=False)
 
         self.assertEqual(test_db.get_workout_by_id(a)["date"], "2026-06-12")
         self.assertEqual(test_db.get_workout_by_id(b)["date"], "2026-06-10")
@@ -222,7 +222,7 @@ class TestAdaptation(unittest.TestCase):
         service = trainmate.coach.CoachService(
             db_instance=test_db, calendar_syncer_instance=Mock()
         )
-        service.apply_swap(ops, no_sync=True, reason="knee felt sore")
+        service.workout_swap_apply(ops, no_sync=True, reason="knee felt sore")
         for wid in (a, b):
             mr = test_db.get_workout_by_id(wid)["modification_reason"]
             self.assertIn("Swapped from", mr)
@@ -235,7 +235,7 @@ class TestAdaptation(unittest.TestCase):
         service = trainmate.coach.CoachService(
             db_instance=test_db, calendar_syncer_instance=syncer
         )
-        service.apply_swap(ops, no_sync=True)
+        service.workout_swap_apply(ops, no_sync=True)
         self.assertEqual(test_db.get_workout_by_id(a)["date"], "2026-06-11")
         syncer.sync_workout.assert_not_called()
 
@@ -253,7 +253,7 @@ class TestAdaptation(unittest.TestCase):
         )
 
         # First swap: A→12, B→10
-        service.apply_swap(
+        service.workout_swap_apply(
             [{"id": a, "new_date": "2026-06-12"},
              {"id": b, "new_date": "2026-06-10"}],
             no_sync=True,
@@ -266,7 +266,7 @@ class TestAdaptation(unittest.TestCase):
         )
 
         # Swap back: A→10, B→12 (original dates)
-        service.apply_swap(
+        service.workout_swap_apply(
             [{"id": a, "new_date": "2026-06-10"},
              {"id": b, "new_date": "2026-06-12"}],
             no_sync=True,
@@ -296,7 +296,7 @@ class TestAdaptation(unittest.TestCase):
         )
 
         # Swap A↔B
-        service.apply_swap(
+        service.workout_swap_apply(
             [{"id": a, "new_date": "2026-06-12"},
              {"id": b, "new_date": "2026-06-10"}],
             no_sync=True,

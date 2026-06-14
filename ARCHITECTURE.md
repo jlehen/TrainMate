@@ -129,19 +129,19 @@ Module-level function in `formatting.py`. Concatenates all `*.txt` files from
 | `_get_goals_hash(objectives)`        | SHA-256 of sorted objectives list.                  |
 | `_get_lifeevents_hash(lifeevents)`   | SHA-256 of sorted life events list.                 |
 | `_get_config_hash()`                 | SHA-256 of `user_profile` + `metrics_lookback_days`. |
-| `_generate_macrocycle_strategy(...)` | LLM call → `{strategy, mesocycles}`. Label:         |
+| `_plan_generate_strategy(...)` | LLM call → `{strategy, mesocycles}`. Label:         |
 |                                      | `periodization_plan`.                               |
-| `_generate_workouts_logic(...)`      | LLM call → `{reasoning, workouts[]}`. **Read-only** |
+| `_workout_generate_logic(...)`      | LLM call → `{reasoning, workouts[]}`. **Read-only** |
 |                                      | w.r.t. learnings — emits no `learning_updates`      |
 |                                      | (DESIGN_backward_evaluation.md §11). Accepts        |
 |                                      | `num_days` (default 28) driving the horizon. Label: |
 |                                      | `workout_generation`.                               |
-| `_adapt_logic(...)`                  | LLM call → `{change_needed, reason,                 |
+| `_workout_adapt_logic(...)`                  | LLM call → `{change_needed, reason,                 |
 |                                      | adapted_workouts[]}`. **Read-only** w.r.t. learnings |
 |                                      | — emits no `learning_updates`                       |
 |                                      | (DESIGN_evidence_based_confidence.md §2). Label:    |
 |                                      | `workout_adaptation`.                               |
-| `_analyze_workouts_logic(...)`       | LLM call → `{macrocycle_summary,                    |
+| `_data_analyze_logic(...)`       | LLM call → `{macrocycle_summary,                    |
 |                                      | inferred_macrocycle, inferred_mesocycles[],         |
 |                                      | physiological_insights[], learning_updates[]}`.     |
 |                                      | Reverse-engineers cycles from weekly summaries.     |
@@ -149,10 +149,10 @@ Module-level function in `formatting.py`. Concatenates all `*.txt` files from
 | `_generate_intermediate_goals(...)`  | LLM call → `{goals[]}` when timeline > 24 weeks.    |
 |                                      | Label: `generate_intermediate_goals`.               |
 
-**Coach learnings via evidence-cited deltas:** only `_analyze_workouts_logic`
+**Coach learnings via evidence-cited deltas:** only `_data_analyze_logic`
 (the `data bootstrap`/`data reflect` flow) emits a `learning_updates` array
-(shared prompt field `LEARNING_UPDATES_FIELD`). `_generate_workouts_logic` **and**
-`_adapt_logic` are **read-only** — they consume the rendered learnings but author
+(shared prompt field `LEARNING_UPDATES_FIELD`). `_workout_generate_logic` **and**
+`_workout_adapt_logic` are **read-only** — they consume the rendered learnings but author
 none (DESIGN_backward_evaluation.md §11; DESIGN_evidence_based_confidence.md §2).
 The app owns the merge via `CoachService._apply_learning_updates()` →
 `db.apply_learning_deltas(deltas, available_weeks, source)`, so a model that omits
@@ -215,21 +215,21 @@ called by the UIs.
 
 | Method                                              | What it does                                                        |
 |-----------------------------------------------------|---------------------------------------------------------------------|
-| `generate_periodization_plan(force, objective_id)`  | Fetches objectives/lifeevents, checks hashes, calls                 |
-|                                                     | `CoachEngine._generate_macrocycle_strategy()`, saves to DB.         |
+| `plan_generate(force, objective_id)`  | Fetches objectives/lifeevents, checks hashes, calls                 |
+|                                                     | `CoachEngine._plan_generate_strategy()`, saves to DB.         |
 |                                                     | Auto-splits timelines > 24 weeks.                                   |
-| `generate_workouts(objective_id, end_date)`         | Requires an existing macrocycle. Computes `num_days` from           |
+| `workout_generate(objective_id, end_date)`         | Requires an existing macrocycle. Computes `num_days` from           |
 |                                                     | `end_date` (or `config.workout_generate_days` if omitted).          |
-|                                                     | Fetches history, calls `CoachEngine._generate_workouts_logic()`,    |
+|                                                     | Fetches history, calls `CoachEngine._workout_generate_logic()`,    |
 |                                                     | saves workouts to DB.                                               |
-| `replan(force, objective_id)`                       | Convenience: calls `generate_periodization_plan` then               |
-|                                                     | `generate_workouts`.                                                |
-| `adapt(target_date_str)`                            | Fetches metrics + workouts in rolling window, calls                 |
-|                                                     | `CoachEngine._adapt_logic()`. Returns                               |
+| `replan(force, objective_id)`                       | Convenience: calls `plan_generate` then               |
+|                                                     | `workout_generate`.                                                |
+| `workout_adapt(target_date_str)`                    | Fetches metrics + workouts in rolling window, calls                 |
+|                                                     | `CoachEngine._workout_adapt_logic()`. Returns                               |
 |                                                     | `(reason, proposed_workouts)`.                                      |
-| `apply_adaptations(proposed, reason, start, end)`   | Deletes overridden workouts (+ calendar events), saves adapted      |
+| `workout_adapt_apply(proposed, reason, start, end)`   | Deletes overridden workouts (+ calendar events), saves adapted      |
 |                                                     | workouts, syncs to Calendar.                                        |
-| `bootstrap_workouts(...)` / `reflect_workouts(...)` | Reverse-engineer past training cycles from completed    |
+| `data_bootstrap(...)` / `data_reflect(...)` | Reverse-engineer past training cycles from completed    |
 |                                       | activities + metrics via the shared `_run_workout_       |
 |                                       | analysis` core. `bootstrap` = cold-start over the full  |
 |                                       | backlog (horizon `long`), sets the reflect watermark;   |
@@ -241,7 +241,7 @@ called by the UIs.
 |                                                     | `plan generate` strategy prompt (Option A, §6). Anchored on the     |
 |                                                     | prior plan's elapsed mesocycle windows; folds in the cached         |
 |                                                     | reconstruction's insights. Writes no `feedback` field.             |
-| `delete_plan(objective_id)`                         | Deletes macrocycle + mesocycles for that objective (cascades in     |
+| `plan_rm(objective_id)`                         | Deletes macrocycle + mesocycles for that objective (cascades in     |
 |                                                     | DB).                                                                |
 | `_get_config_hash()`                                | Delegates to `CoachEngine._get_config_hash()`. Used by CLI/web to   |
 |                                                     | detect stale plans.                                                 |
@@ -399,7 +399,7 @@ calendar?* = `google_event_id IS NOT NULL`; *Calendar current?* = `synced`;
 *removed?* = `removed = 1`. The
 otherwise-unrepresentable "on the calendar but stale, needs re-push" state is
 `synced=0 AND google_event_id IS NOT NULL` — set whenever a pushed workout is later
-adapted (`apply_adaptations`) or swapped (`update_workout_date`). Push eligibility =
+adapted (`workout_adapt_apply`) or swapped (`update_workout_date`). Push eligibility =
 `NOT synced`; calendar cleanup keys on `google_event_id`.
 
 **Removal is a soft delete.** `workout rm` calls `mark_workout_removed`
@@ -755,7 +755,7 @@ Required fields:
 ## 10. Key Data Flows
 
 ### Plan Generation (`plan generate`)
-1. `CoachService.generate_periodization_plan()` fetches active objectives +
+1. `CoachService.plan_generate()` fetches active objectives +
    life events.
 2. Computes `goals_hash`, `lifeevents_hash`, `config_hash`.
 3. If existing macrocycle has matching hashes and `force=False` → reuse.
@@ -763,7 +763,7 @@ Required fields:
    via `_build_prior_training_context()` (Option A — anchored on the prior
    plan's elapsed mesocycle windows, plus the cached reconstruction's insights;
    written to no `feedback` field), prints it, and passes it as
-   `prior_training_text` into `CoachEngine._generate_macrocycle_strategy()` →
+   `prior_training_text` into `CoachEngine._plan_generate_strategy()` →
    LLM → `{strategy, mesocycles}`.  See DESIGN_backward_evaluation.md §6.
 5. If timeline > 24 weeks: calls `CoachEngine._generate_intermediate_goals()`
    first, saves intermediate objectives, then re-runs with the first goal.
@@ -774,10 +774,10 @@ Required fields:
 1. CLI resolves the generation horizon (end date) from flags in priority order:
    `--days` / `--weeks` → `--until DATE` → `--until-goal [ID]` →
    `--until-mesocycle ID` → `config.workout_generate_days` (default 28).
-2. `CoachService.generate_workouts(end_date=...)` verifies a macrocycle exists,
+2. `CoachService.workout_generate(end_date=...)` verifies a macrocycle exists,
    computes `num_days` from `(end_date − today)`.
 3. Fetches metrics history (last `metrics_lookback_days` days) + baseline.
-4. Calls `CoachEngine._generate_workouts_logic(num_days=...)` → LLM →
+4. Calls `CoachEngine._workout_generate_logic(num_days=...)` → LLM →
    `{reasoning, workouts[]}`. **Read-only** w.r.t. coach learnings — it
    consumes the rendered learnings in its prompt but emits/applies no
    `learning_updates` (DESIGN_backward_evaluation.md §11).
@@ -788,20 +788,20 @@ Required fields:
 1. `CoachService.adapt()` fetches metrics + planned workouts + completed
    activities in window. Workouts in the window are fetched with
    `include_removed=True` and partitioned into active (planned) vs `removed`;
-   removed ones are passed to `_adapt_logic` and rendered in the prompt as
+   removed ones are passed to `_workout_adapt_logic` and rendered in the prompt as
    deliberate cancellations (not misses).
 2. `analyze_adherence()` (`adherence.py`) computes discrepancies (misses,
    duration/load mismatches, rest violations) over the **active** workouts only —
    removed workouts never count as misses.
 3. Finds active mesocycle for the target date → sets `meso_end_date` for
    adaptation range.
-4. Calls `CoachEngine._adapt_logic()` → LLM → `{change_needed, reason,
+4. Calls `CoachEngine._workout_adapt_logic()` → LLM → `{change_needed, reason,
    adapted_workouts[]}`. **Read-only w.r.t. coach learnings** — it consumes the
    rendered learnings as context but authors none (durable, evidence-backed
    observations are written only by `data bootstrap`/`data reflect`, which can
    attribute them to specific training weeks; DESIGN_evidence_based_confidence.md §2).
 5. Returns `(reason, proposed_workouts)` — caller decides whether to apply.
-6. If applied: `apply_adaptations()` deletes overridden calendar events + DB
+6. If applied: `workout_adapt_apply()` deletes overridden calendar events + DB
    rows, saves adapted workouts with `status='modified'`, syncs to Calendar.
 
 ### Data Pull (`data pull`) and auto-ensure Data is pulled **directly from
@@ -864,7 +864,7 @@ The shared core then:
    `avg_stress`, and `vs_baseline_z` (deterministic rhr/hrv/sleep z-scores vs the
    rolling baseline, omitted when unsupported). All deterministic — no extra LLM
    call.
-4. Queries `CoachEngine._analyze_workouts_logic()` -> LLM ->
+4. Queries `CoachEngine._data_analyze_logic()` -> LLM ->
    `{macrocycle_summary, inferred_macrocycle, inferred_mesocycles[],
    physiological_insights[], learning_updates[]}`.
 5. Unless `--inspect-only`: applies `learning_updates` deltas — the LLM attributes
@@ -898,7 +898,7 @@ from untouched `planned` ones. If a swap returns a workout to its
 is no longer considered modified. The `modification_reason` is surfaced to the
 coach in the adaptation prompt (`format_planned_workouts`), so a swap informs
 the coach symmetrically to how `workout rm`'s `removed_reason` does. Swaps are
-validated first (`CoachService.validate_swap`): the
+validated first (`CoachService.workout_swap_validate`): the
 new schedule is simulated and the user is warned about newly-created >2-day
 high-intensity streaks, weekly load spikes (an ACWR proxy), and
 mesocycle-boundary crossings.
@@ -906,7 +906,7 @@ mesocycle-boundary crossings.
 Plan must be generated before workouts. Workouts cover a rolling window from
 today whose length is controlled by the horizon flags on `workout generate`
 (default: `workout_generate_days` in `config.yaml`, falling back to 28 days).
-`replan()` calls `generate_periodization_plan` then `generate_workouts` in one
+`replan()` calls `plan_generate` then `workout_generate` in one
 step (always uses the config default).
 
 ---
@@ -1023,7 +1023,7 @@ venv/bin/python -m unittest discover -s tests -p "test_*.py"
 |--------------------------------|-----------------------------------------------------------------|
 | `tests/test_adaptation.py`     | `CoachService.adapt()` end-to-end, swap validation/apply, and    |
 |                                | `adherence.analyze_adherence()` (misses, tolerances, violations) |
-| `tests/test_analysis.py`       | `bootstrap_workouts`/`reflect_workouts`: date resolution, weekly |
+| `tests/test_analysis.py`       | `data_bootstrap`/`data_reflect`: date resolution, weekly |
 |                                | aggregation, cache reuse/force/inspect_only, learnings           |
 |                                | injection, reflect watermark advance/skip, bootstrap re-run      |
 |                                | guard, per-week life events + body-response z-scores             |
@@ -1034,7 +1034,7 @@ venv/bin/python -m unittest discover -s tests -p "test_*.py"
 |                                | week validation, contradiction/demote/keep, staleness,          |
 |                                | grandfather migration), decay, `analysis_cache`                 |
 | `tests/test_feedback.py`       | Feedback saving + use in replanning                             |
-| `tests/test_periodization.py`  | `generate_periodization_plan`, `generate_workouts`, hash logic, |
+| `tests/test_periodization.py`  | `plan_generate`, `workout_generate`, hash logic, |
 |                                | system-prompt building                                          |
 | `tests/test_garmin.py`         | Garmin transforms (load model), zone parsing, watermark/         |
 |                                | auto-ensure policy, recompute, `backfill_tss`                    |

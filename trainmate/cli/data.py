@@ -448,7 +448,7 @@ def run_data_bootstrap(args: argparse.Namespace) -> None:
     """Cold-start reconstruction over the full training backlog (seeds learnings,
     establishes the reflect watermark)."""
     try:
-        result = cli.coach_service.bootstrap_workouts(
+        result = cli.coach_service.data_bootstrap(
             from_date_str=args.from_date,
             until_date_str=args.until_date,
             days=args.days,
@@ -467,7 +467,7 @@ def run_data_bootstrap(args: argparse.Namespace) -> None:
 def run_data_reflect(args: argparse.Namespace) -> None:
     """Incremental reflection over evidence accrued since the last reflect watermark."""
     try:
-        result = cli.coach_service.reflect_workouts(
+        result = cli.coach_service.data_reflect(
             from_date_str=args.from_date,
             until_date_str=args.until_date,
             days=args.days,

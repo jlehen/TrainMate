@@ -285,7 +285,7 @@ UPCOMING LIFE EVENTS:
         )
         return hashlib.sha256(serialized.encode('utf-8')).hexdigest()
 
-    def _generate_macrocycle_strategy(
+    def _plan_generate_strategy(
         self, next_goal: Objective, objectives: List[Objective],
         lifeevents: List[LifeEvent], today_str: str, guidelines: str,
         profile: Optional[Dict[str, Any]], previous_strategy_text: Optional[str] = None,
@@ -410,7 +410,7 @@ You MUST respond with a JSON object containing:
         )
         return result
 
-    def _generate_workouts_logic(
+    def _workout_generate_logic(
         self, objectives: List[Objective], lifeevents: List[LifeEvent],
         today_str: str, guidelines: str, profile: Optional[Dict[str, Any]],
         strategy: str, meso_text: str, learnings: str,
@@ -496,7 +496,7 @@ You MUST respond with a JSON object containing:
         )
         return plan_data
 
-    def _adapt_logic(
+    def _workout_adapt_logic(
         self, target_date_str: str, history_days: int, start_date_str: str,
         metrics: List[Dict[str, Any]], completed_activities: List[CompletedActivity],
         planned_workouts: List[Workout], baseline_str: str,
@@ -673,7 +673,7 @@ Adherence Discrepancies & Violations:
         )
         return result
 
-    def _analyze_workouts_logic(
+    def _data_analyze_logic(
         self, objectives: List[Objective], guidelines: str,
         profile: Optional[Dict[str, Any]],
         weekly_summaries: List[Dict[str, Any]],

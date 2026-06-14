@@ -59,7 +59,7 @@ class TestWorkoutAnalysis(unittest.TestCase):
         }
 
         # Analyze workouts without explicit range -> should start on 2026-06-02 (day after Goal Preceding)
-        result = coach_service.bootstrap_workouts(until_date_str="2026-07-01")
+        result = coach_service.data_bootstrap(until_date_str="2026-07-01")
         self.assertIsNotNone(result)
 
         # Inspect the start date passed to complete call
@@ -74,13 +74,13 @@ class TestWorkoutAnalysis(unittest.TestCase):
         }
 
         # Last 10 days relative to 2026-06-15
-        coach_service.bootstrap_workouts(until_date_str="2026-06-15", days=10)
+        coach_service.data_bootstrap(until_date_str="2026-06-15", days=10)
         # Start date should be 2026-06-06. The Monday of that week is 2026-06-01.
         summaries = mock_client.complete.call_args[0][1]
         self.assertIn("2026-06-01", summaries)
 
         # Last 4 weeks relative to 2026-06-15
-        coach_service.bootstrap_workouts(until_date_str="2026-06-15", weeks=4)
+        coach_service.data_bootstrap(until_date_str="2026-06-15", weeks=4)
         # Start date should be 2026-05-19. The Monday of that week is 2026-05-18.
         summaries = mock_client.complete.call_args[0][1]
         self.assertIn("2026-05-18", summaries)
@@ -116,7 +116,7 @@ class TestWorkoutAnalysis(unittest.TestCase):
         }
 
         # Analyze the week
-        result = coach_service.bootstrap_workouts(
+        result = coach_service.data_bootstrap(
             from_date_str="2026-06-01", until_date_str="2026-06-07"
         )
         self.assertEqual(result["macrocycle_summary"], "Simulated aggregation summary")
@@ -147,7 +147,7 @@ class TestWorkoutAnalysis(unittest.TestCase):
                  "evidence": in_window + ["2026-09-07"]},  # last week is outside the window
             ],
         }
-        coach_service.bootstrap_workouts(
+        coach_service.data_bootstrap(
             from_date_str="2026-05-04", until_date_str="2026-06-07"
         )
         learning = test_db.get_learnings()[0]
@@ -177,10 +177,10 @@ class TestWorkoutAnalysis(unittest.TestCase):
             "inferred_macrocycle": {"overall_focus": "base"},
             "learning_updates": [],
         }
-        coach_service.bootstrap_workouts(
+        coach_service.data_bootstrap(
             from_date_str="2026-06-01", until_date_str="2026-06-07"
         )
-        reused = coach_service.bootstrap_workouts(
+        reused = coach_service.data_bootstrap(
             from_date_str="2026-06-01", until_date_str="2026-06-07"
         )
         self.assertEqual(mock_client.complete.call_count, 1)
@@ -195,11 +195,11 @@ class TestWorkoutAnalysis(unittest.TestCase):
         mock_client.complete.return_value = {
             "macrocycle_summary": "summary", "learning_updates": [],
         }
-        coach_service.bootstrap_workouts(
+        coach_service.data_bootstrap(
             from_date_str="2026-06-01", until_date_str="2026-06-07"
         )
         reflect_wm = test_db.get_sync_state("reflect")
-        result = coach_service.bootstrap_workouts(
+        result = coach_service.data_bootstrap(
             from_date_str="2026-05-01", until_date_str="2026-05-07"
         )
         self.assertEqual(result, {})
@@ -216,10 +216,10 @@ class TestWorkoutAnalysis(unittest.TestCase):
         mock_client.complete.return_value = {
             "macrocycle_summary": "summary", "learning_updates": [],
         }
-        coach_service.bootstrap_workouts(
+        coach_service.data_bootstrap(
             from_date_str="2026-06-01", until_date_str="2026-06-07", auto=True
         )
-        result = coach_service.bootstrap_workouts(
+        result = coach_service.data_bootstrap(
             from_date_str="2026-06-01", until_date_str="2026-06-07", auto=True
         )
         self.assertEqual(result, {})
@@ -227,7 +227,8 @@ class TestWorkoutAnalysis(unittest.TestCase):
         mock_input.assert_not_called()
 
     @patch("trainmate.coach.engine.openrouter_client")
-    def test_force_recompute_cannot_inflate_via_evidence_dedup(self, mock_client):
+    @patch("builtins.input", return_value="s")
+    def test_force_recompute_cannot_inflate_via_evidence_dedup(self, mock_input, mock_client):
         """--force recomputes over unchanged evidence, but re-citing an already-counted week
         is a structural no-op: confidence is not ratcheted and recency is not refreshed. The
         per-learning basis owns this (the old suppress_reinforcement flag is gone; §6, §8)."""
@@ -238,7 +239,7 @@ class TestWorkoutAnalysis(unittest.TestCase):
                 {"op": "add", "text": "Observation", "evidence": ["2026-06-01"]}
             ],
         }
-        coach_service.bootstrap_workouts(
+        coach_service.data_bootstrap(
             from_date_str="2026-06-01", until_date_str="2026-06-07"
         )
         lid = test_db.get_learnings()[0]["id"]
@@ -255,7 +256,7 @@ class TestWorkoutAnalysis(unittest.TestCase):
                 {"op": "reinforce", "id": lid, "evidence": ["2026-06-01"]}
             ],
         }
-        coach_service.bootstrap_workouts(
+        coach_service.data_bootstrap(
             from_date_str="2026-06-01", until_date_str="2026-06-07", force=True
         )
         self.assertEqual(mock_client.complete.call_count, 2)  # force recomputed
@@ -271,7 +272,7 @@ class TestWorkoutAnalysis(unittest.TestCase):
             "macrocycle_summary": "s",
             "learning_updates": [{"op": "add", "text": "New obs"}],
         }
-        coach_service.bootstrap_workouts(
+        coach_service.data_bootstrap(
             from_date_str="2026-06-01", until_date_str="2026-06-07", inspect_only=True
         )
         self.assertEqual(len(test_db.get_learnings()), 0)
@@ -289,7 +290,7 @@ class TestWorkoutAnalysis(unittest.TestCase):
             "macrocycle_summary": "x", "learning_updates": []
         }
 
-        coach_service.bootstrap_workouts(
+        coach_service.data_bootstrap(
             from_date_str="2026-06-01", until_date_str="2026-06-07"
         )
 
@@ -323,7 +324,7 @@ class TestReflectWatermark(unittest.TestCase):
     @patch("trainmate.coach.engine.openrouter_client")
     def test_bootstrap_establishes_watermark(self, mock_client):
         mock_client.complete.return_value = {"macrocycle_summary": "s", "learning_updates": []}
-        coach_service.bootstrap_workouts(
+        coach_service.data_bootstrap(
             from_date_str="2026-06-01", until_date_str="2026-06-07", no_pull=True
         )
         wm = test_db.get_sync_state("reflect")
@@ -337,7 +338,7 @@ class TestReflectWatermark(unittest.TestCase):
             through_date="2026-06-07", last_pull_utc="2026-06-07T00:00:00+00:00", key="reflect"
         )
         mock_client.complete.return_value = {"macrocycle_summary": "s", "learning_updates": []}
-        coach_service.reflect_workouts(until_date_str="2026-06-21", no_pull=True)
+        coach_service.data_reflect(until_date_str="2026-06-21", no_pull=True)
         # Window starts the day after the watermark: Monday of 2026-06-08's week is 2026-06-08.
         summaries = mock_client.complete.call_args[0][1]
         self.assertIn("2026-06-08", summaries)
@@ -351,7 +352,7 @@ class TestReflectWatermark(unittest.TestCase):
         test_db.set_sync_state(
             through_date="2026-06-21", last_pull_utc="2026-06-21T00:00:00+00:00", key="reflect"
         )
-        result = coach_service.reflect_workouts(until_date_str="2026-06-21", no_pull=True)
+        result = coach_service.data_reflect(until_date_str="2026-06-21", no_pull=True)
         self.assertEqual(result, {})
         mock_client.complete.assert_not_called()
 
@@ -362,7 +363,7 @@ class TestReflectWatermark(unittest.TestCase):
             through_date="2026-06-21", last_pull_utc="2026-06-21T00:00:00+00:00", key="reflect"
         )
         mock_client.complete.return_value = {"macrocycle_summary": "s", "learning_updates": []}
-        coach_service.reflect_workouts(
+        coach_service.data_reflect(
             from_date_str="2026-06-01", until_date_str="2026-06-07", no_pull=True
         )
         self.assertEqual(test_db.get_sync_state("reflect")["through_date"], "2026-06-21")
@@ -486,7 +487,7 @@ class TestRicherEvidenceIntegration(unittest.TestCase):
     def test_features_and_events_reach_the_prompt(self, mock_client):
         self._seed_week()
         mock_client.complete.return_value = {"macrocycle_summary": "s", "learning_updates": []}
-        coach_service.bootstrap_workouts(
+        coach_service.data_bootstrap(
             from_date_str="2026-06-01", until_date_str="2026-06-07", no_pull=True
         )
         user_content = mock_client.complete.call_args[0][1]
@@ -501,14 +502,14 @@ class TestRicherEvidenceIntegration(unittest.TestCase):
         rather than reusing the cached reconstruction."""
         self._seed_week()
         mock_client.complete.return_value = {"macrocycle_summary": "s", "learning_updates": []}
-        coach_service.bootstrap_workouts(
+        coach_service.data_bootstrap(
             from_date_str="2026-06-01", until_date_str="2026-06-07", no_pull=True
         )
         eid = test_db.get_lifeevents()[0]["id"]
         test_db.update_lifeevent(eid, impact_description="changed")
         # Confirm + recompute (bootstrap already ran).
         with patch("builtins.input", return_value="y"):
-            coach_service.bootstrap_workouts(
+            coach_service.data_bootstrap(
                 from_date_str="2026-06-01", until_date_str="2026-06-07", no_pull=True
             )
         self.assertEqual(mock_client.complete.call_count, 2)  # not reused

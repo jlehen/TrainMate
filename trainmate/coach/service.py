@@ -338,11 +338,11 @@ class CoachService:
             custom_task=custom_task
         )
 
-    def delete_plan(self, objective_id: int) -> None:
+    def plan_rm(self, objective_id: int) -> None:
         """Deletes the periodization plan for a specific objective."""
         self._db.delete_macrocycle_for_objective(objective_id)
 
-    def generate_periodization_plan(
+    def plan_generate(
         self, force: bool = False, objective_id: Optional[int] = None, auto_apply: bool = True
     ) -> Tuple[str, List[Dict[str, Any]], bool]:
         """Determines the macrocycle strategy and mesocycle blocks."""
@@ -507,7 +507,7 @@ class CoachService:
                 print(cyan(bold("\n=== PRIOR TRAINING REVIEW (planned vs actual) ===")))
                 print(prior_training_text)
                 print(cyan(bold("==================================================\n")))
-            macro_data = self.engine._generate_macrocycle_strategy(
+            macro_data = self.engine._plan_generate_strategy(
                 next_goal=next_goal,
                 objectives=objectives,
                 lifeevents=lifeevents,
@@ -544,7 +544,7 @@ class CoachService:
         self._maybe_nudge_bootstrap()
         return strategy, mesocycles, reused
 
-    def apply_periodization_plan(
+    def plan_apply(
         self, objective_id: int, strategy: str, mesocycles: List[Dict[str, Any]]
     ) -> None:
         """Saves a generated periodization plan to the database."""
@@ -564,7 +564,7 @@ class CoachService:
             mesocycles=mesocycles
         )
 
-    def generate_workouts(
+    def workout_generate(
         self, objective_id: Optional[int] = None, end_date: Optional[str] = None
     ) -> Tuple[str, List[Workout]]:
         """Generates workouts (microcycles) based on the active strategy."""
@@ -621,7 +621,7 @@ class CoachService:
         )
         baseline = self._db.get_baseline(today_str)
 
-        plan_data = self.engine._generate_workouts_logic(
+        plan_data = self.engine._workout_generate_logic(
             objectives=objectives,
             lifeevents=lifeevents,
             today_str=today_str,
@@ -696,10 +696,10 @@ class CoachService:
                 []
             )
 
-        self.generate_periodization_plan(force=force, objective_id=objective_id)
-        return self.generate_workouts(objective_id=objective_id)
+        self.plan_generate(force=force, objective_id=objective_id)
+        return self.workout_generate(objective_id=objective_id)
 
-    def adapt(self, target_date_str: Optional[str] = None) -> Tuple[str, List[Workout]]:
+    def workout_adapt(self, target_date_str: Optional[str] = None) -> Tuple[str, List[Workout]]:
         """Evaluates metrics/activities over a rolling window and adapts mesocycle if needed."""
         if not target_date_str:
             target_date_str = _today_str()
@@ -771,7 +771,7 @@ class CoachService:
         learnings = self._get_learnings_text()
         lifeevents = self._db.get_lifeevents(start_after=target_date_str)
 
-        decision = self.engine._adapt_logic(
+        decision = self.engine._workout_adapt_logic(
             target_date_str=target_date_str,
             history_days=history_days,
             start_date_str=start_date_str,
@@ -821,7 +821,7 @@ class CoachService:
             } for w in adapted
         ]
 
-    def apply_adaptations(
+    def workout_adapt_apply(
         self, proposed_workouts: List[Dict[str, Any]], reason: str,
         start_date: str, end_date: str
     ) -> None:
@@ -914,7 +914,7 @@ class CoachService:
         d = datetime.strptime(date_str, "%Y-%m-%d").date()
         return (d - timedelta(days=d.weekday())).strftime("%Y-%m-%d")
 
-    def validate_swap(self, swap_ops: List[Dict[str, Any]]) -> List[str]:
+    def workout_swap_validate(self, swap_ops: List[Dict[str, Any]]) -> List[str]:
         """Simulates a proposed swap and returns sports-science warnings.
 
         Each op is ``{'id': <workout id>, 'new_date': 'YYYY-MM-DD'}``. Checks for
@@ -1004,7 +1004,7 @@ class CoachService:
 
         return warnings
 
-    def apply_swap(
+    def workout_swap_apply(
         self, swap_ops: List[Dict[str, Any]], no_sync: bool = False,
         reason: Optional[str] = None
     ) -> List[Dict[str, Any]]:
@@ -1073,7 +1073,7 @@ class CoachService:
             key="bootstrap",
         )
 
-    def bootstrap_workouts(
+    def data_bootstrap(
         self, from_date_str: Optional[str] = None, until_date_str: Optional[str] = None,
         days: Optional[int] = None, weeks: Optional[int] = None,
         context: Optional[str] = None, force: bool = False, inspect_only: bool = False,
@@ -1162,7 +1162,7 @@ class CoachService:
             self._review_learning_proposals(auto=auto)
         return decision
 
-    def reflect_workouts(
+    def data_reflect(
         self, from_date_str: Optional[str] = None, until_date_str: Optional[str] = None,
         days: Optional[int] = None, weeks: Optional[int] = None,
         context: Optional[str] = None, force: bool = False, inspect_only: bool = False,
@@ -1530,7 +1530,7 @@ class CoachService:
         guidelines = self._load_science_guidelines()
         profile = config.user_profile
 
-        decision = self.engine._analyze_workouts_logic(
+        decision = self.engine._data_analyze_logic(
             objectives=objectives,
             guidelines=guidelines,
             profile=profile,

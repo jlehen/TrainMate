@@ -112,7 +112,7 @@ class TestFeedback(unittest.TestCase):
             }],
         }
 
-        coach_service.generate_periodization_plan(force=True)
+        coach_service.plan_generate(force=True)
 
         system_prompt = mock_client.complete.call_args[0][0]
         self.assertIn("ATHLETE FEEDBACK ON THE PREVIOUS PLAN:", system_prompt)
