@@ -1467,8 +1467,8 @@ class CoachService:
             highlights = []
             for act in w_activities:
                 is_hi = (
-                    (act.get('tss') and act['tss'] >= 120) or
-                    (act.get('rpe') and act['rpe'] >= 8) or
+                    (act.get('tss') and act['tss'] >= config.high_intensity_tss_threshold) or
+                    (act.get('rpe') and act['rpe'] >= config.high_intensity_rpe_threshold) or
                     any(
                         kw in (act.get('activity_name') or "").lower()
                         for kw in ["race", "test", "ftp", "marathon"]

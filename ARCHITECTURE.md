@@ -977,9 +977,9 @@ External daily signals the coach should factor in — alcohol, sleep quality,
 stress, big meals — reach TrainMate through the **single existing Google
 Calendar**, not through app-specific features. A separate syncer (out of scope,
 mirroring `GarminScraper`) writes one all-day event per signal-day, tagged in
-`extendedProperties.private`: `source=trainmate-context` (the positive marker),
-`metric` (opaque category), and an optional numeric `value`. Full spec:
-`DESIGN_calendar_context_ingest.md`.
+`extendedProperties.private`: `source=trainmate-context` (the positive marker,
+configurable via `calendar_context_source`), `metric` (opaque category), and an optional
+numeric `value`. Full spec: `DESIGN_calendar_context_ingest.md`.
 
 **Inbound flow:**
 
@@ -991,7 +991,7 @@ Calendar (tagged events) ──► google_calendar.sync_calendar_context
 ```
 
 - **Distinguishing events:** TrainMate writes workouts tagged `source=TrainMate`
-  and reads only events tagged `source=trainmate-context`; untagged events (real
+  and reads only events tagged `source=trainmate-context` (or custom config); untagged events (real
   appointments) are never fetched (server-side `privateExtendedProperty` filter).
 - **Sync, not append:** incremental via Calendar `syncToken` — edits upsert by
   `google_event_id`, cancellations delete. First run / expired token (HTTP 410)

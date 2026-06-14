@@ -172,5 +172,20 @@ class Config:
         """Default sleep between Garmin API calls; --sleep overrides on `data pull` (default 0.2)."""
         return float(self.get("garmin_throttle_seconds", 0.2))
 
+    @property
+    def calendar_context_source(self) -> str:
+        """Gets the source tag for calendar events."""
+        return self.get("calendar_context_source", "trainmate-context")
+
+    @property
+    def high_intensity_rpe_threshold(self) -> int:
+        """Gets the RPE threshold above which an activity is considered high intensity."""
+        return int(self.get("high_intensity_rpe_threshold", 8))
+
+    @property
+    def high_intensity_tss_threshold(self) -> float:
+        """Gets the TSS threshold above which an activity is considered high intensity."""
+        return float(self.get("high_intensity_tss_threshold", 120.0))
+
 # Singleton instance
 config = Config()

@@ -1,6 +1,14 @@
 openrouter_api_key: "YOUR_OPENROUTER_API_KEY"
 # Google Calendar that planned workouts are written to / read from.
 google_calendar_id: "a05efe90aef057e16bf8f423500dda43244ae61b3bd1a9990f55cade1f4e8549@group.calendar.google.com"
+
+# Source tag for calendar events containing daily context.
+#calendar_context_source: "trainmate-context"
+
+# Thresholds to compute high intensity workouts.
+#high_intensity_rpe_threshold: 8
+#high_intensity_tss_threshold: 120.0
+
 openrouter_model: "google/gemini-3.5-flash"
 # Service-account JSON file used to authenticate to the Google APIs.
 service_account_file: "service_account.json"

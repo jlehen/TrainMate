@@ -9,8 +9,6 @@ from trainmate.db import db
 from trainmate.types import Workout
 from trainmate.util import yellow
 
-CONTEXT_SOURCE = "trainmate-context"
-
 
 class CalendarSyncer:
     """Synchronizes planned and adapted workouts to Google Calendar as all-day events."""
@@ -248,7 +246,7 @@ class CalendarSyncer:
         while True:
             params: dict = {
                 'calendarId': self.calendar_id,
-                'privateExtendedProperty': f"source={CONTEXT_SOURCE}",
+                'privateExtendedProperty': f"source={config.calendar_context_source}",
                 'showDeleted': True,
                 'singleEvents': True,
                 'maxResults': 250,
@@ -298,7 +296,7 @@ class CalendarSyncer:
         private = (event.get('extendedProperties', {}) or {}).get('private', {}) or {}
         # The server-side filter should guarantee this, but a shared calendar or a
         # token stream can still surprise us — skip anything not actually ours.
-        if private.get('source') != CONTEXT_SOURCE:
+        if private.get('source') != config.calendar_context_source:
             return 0
 
         start = event.get('start', {}) or {}
