@@ -1112,6 +1112,7 @@ class CoachService:
         decision = self._run_workout_analysis(
             from_date, until_date, context=context, force=force,
             inspect_only=inspect_only, no_pull=no_pull, horizon="long",
+            label="data_bootstrap",
         )
         # Establish the reflect baseline (read-only inspect mode writes nothing).
         if not inspect_only:
@@ -1175,6 +1176,7 @@ class CoachService:
         decision = self._run_workout_analysis(
             from_date, until_date, context=context, force=force,
             inspect_only=inspect_only, no_pull=no_pull, horizon="short",
+            label="data_reflect",
         )
         if not inspect_only:
             self._advance_reflect_watermark(until_date.strftime("%Y-%m-%d"))
@@ -1184,7 +1186,7 @@ class CoachService:
     def _run_workout_analysis(
         self, from_date, until_date,
         context: Optional[str] = None, force: bool = False, inspect_only: bool = False,
-        no_pull: bool = False, horizon: str = "long"
+        no_pull: bool = False, horizon: str = "long", label: str = "workout_analysis"
     ) -> Dict[str, Any]:
         """Shared core for bootstrap/reflect: builds weekly summaries over
         [from_date, until_date], runs the LLM reconstruction, applies learning deltas,
@@ -1385,7 +1387,8 @@ class CoachService:
             profile=profile,
             weekly_summaries=weekly_summaries,
             learnings=self._get_learnings_text(),
-            context=context
+            context=context,
+            label=label
         )
 
         if not inspect_only:

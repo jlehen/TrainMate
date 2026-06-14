@@ -388,7 +388,7 @@ You MUST respond with a JSON object containing:
 
         print(cyan("Querying OpenRouter to generate macrocycle and mesocycles periodization strategy..."))
         result = openrouter_client.complete(
-            system_prompt, user_content, label="periodization_plan"
+            system_prompt, user_content, label="plan_generate"
         )
         return result
 
@@ -474,7 +474,7 @@ You MUST respond with a JSON object containing:
 
         print(cyan("Querying OpenRouter to generate training workouts (microcycles)..."))
         plan_data = openrouter_client.complete(
-            system_prompt, user_content, label="workout_generation"
+            system_prompt, user_content, label="workout_generate"
         )
         return plan_data
 
@@ -592,7 +592,7 @@ Adherence Discrepancies & Violations:
         print(cyan(f"Querying OpenRouter to evaluate adaptation for the remainder of the mesocycle "
               f"({target_date_str} -> {meso_end_date_str})..."))
         decision = openrouter_client.complete(
-            system_prompt, user_content, label="workout_adaptation"
+            system_prompt, user_content, label="workout_adapt"
         )
         return decision
 
@@ -651,7 +651,7 @@ Adherence Discrepancies & Violations:
         )
         print(cyan("Querying OpenRouter to generate intermediate objectives..."))
         result = openrouter_client.complete(
-            system_prompt, user_content, label="generate_intermediate_goals"
+            system_prompt, user_content, label="plan_generate"
         )
         return result
 
@@ -660,7 +660,8 @@ Adherence Discrepancies & Violations:
         profile: Optional[Dict[str, Any]],
         weekly_summaries: List[Dict[str, Any]],
         learnings: str,
-        context: Optional[str] = None
+        context: Optional[str] = None,
+        label: str = "workout_analysis"
     ) -> Dict[str, Any]:
         """Queries LLM to reverse-engineer training cycles from weekly summaries."""
         custom_task = (
@@ -741,6 +742,6 @@ Adherence Discrepancies & Violations:
 
         print(cyan("Querying OpenRouter to perform training history analysis..."))
         result = openrouter_client.complete(
-            system_prompt, user_content, label="workout_analysis"
+            system_prompt, user_content, label=label
         )
         return result
