@@ -188,5 +188,21 @@ class Config:
         """Gets the TSS threshold above which an activity is considered high intensity."""
         return float(self.get("coach", {}).get("high_intensity_tss_threshold", 120.0))
 
+    @property
+    def context_days_lookahead(self) -> int:
+        """The look-ahead `k` for quantitative context-impact alignment: how many mornings
+        bracket each signal episode (before and after) and the drink-free gap below which
+        two signal runs merge into one episode (DESIGN_quantitative_context_impact.md §3,
+        §3.0). Default 3."""
+        return int(self.get("coach", {}).get("context_days_lookahead", 3))
+
+    @property
+    def context_days_min_signal_days(self) -> int:
+        """Minimum total signal-days a context category must have before its aligned rows
+        are shown to the coach at all — a floor against prompting on one stray night
+        (DESIGN_quantitative_context_impact.md §5). Counts signal-days, not episodes.
+        Default 1 (show whatever exists; the LLM judges from the visible count)."""
+        return int(self.get("coach", {}).get("context_days_min_signal_days", 1))
+
 # Singleton instance
 config = Config()

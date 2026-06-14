@@ -409,6 +409,135 @@ class TestWeekResponseFeatures(unittest.TestCase):
         self.assertNotIn("vs_baseline_z", f)  # no values -> all None -> omitted
 
 
+class TestContextDays(unittest.TestCase):
+    """Pure unit tests for the quantitative context-impact alignment (no DB, no LLM):
+    episode grouping, the bracketing morning strip, load attribution, channel exclusion,
+    and the inclusion floor (DESIGN_quantitative_context_impact.md §3–§5)."""
+
+    BASELINE = {
+        "rhr_baseline_mean": 50.0, "rhr_baseline_std": 4.0,
+        "hrv_baseline_mean": 80.0, "hrv_baseline_std": 10.0,
+        "sleep_baseline_mean": 70.0, "sleep_baseline_std": 8.0,
+    }
+
+    def _baseline_for(self, _date):  # baseline is flat across the test window
+        return self.BASELINE
+
+    @staticmethod
+    def _act(date, tss):
+        # rpe=None makes activity_load return the raw tss (no fallback path), so load is
+        # deterministic regardless of HR-coverage heuristics.
+        return {"date": date, "activity_type": "Run", "tss": tss, "rpe": None,
+                "duration_sec": 3600}
+
+    def test_day_response_z_sign_convention(self):
+        z = coach_service._day_response_z(
+            {"rhr": 54, "hrv": 70, "sleep_score": 66}, self.BASELINE
+        )
+        self.assertEqual(z["rhr"], 1.0)    # (54-50)/4 elevated -> +z (worse)
+        self.assertEqual(z["hrv"], -1.0)   # (70-80)/10 suppressed -> -z (worse)
+        self.assertEqual(z["sleep"], -0.5)
+        # Missing value / zero std / no baseline -> None.
+        self.assertIsNone(coach_service._day_response_z({"hrv": 70}, self.BASELINE)["rhr"])
+        flat = dict(self.BASELINE, hrv_baseline_std=0.0)
+        self.assertIsNone(coach_service._day_response_z({"hrv": 70}, flat)["hrv"])
+        self.assertIsNone(coach_service._day_response_z({"hrv": 70}, None)["hrv"])
+
+    def test_single_signal_day_episode_shape(self):
+        ctx = [{"date": "2026-05-10", "metric": "alcohol", "value": 4.0}]
+        metrics = [{"date": "2026-05-11", "rhr": 58, "hrv": 70, "sleep_score": 62}]
+        acts = [self._act("2026-05-10", 85)]
+        out = coach_service._context_days(
+            ctx, metrics, acts, self._baseline_for, k=3, min_signal_days=1
+        )
+        eps = out["alcohol"]
+        self.assertEqual(len(eps), 1)
+        self.assertEqual(eps[0]["days"], [
+            {"date": "2026-05-10", "value": 4, "load_tss": 85}  # 4.0 normalized to int 4
+        ])
+        # Strip spans (first-k+1)..(last+k) = 05-08 .. 05-13 -> 6 mornings.
+        mornings = eps[0]["surrounding_mornings"]
+        self.assertEqual([m["morning"] for m in mornings],
+                         ["2026-05-08", "2026-05-09", "2026-05-10",
+                          "2026-05-11", "2026-05-12", "2026-05-13"])
+        # The morning AFTER the drink carries the drink-day's load as prev_day_load_tss.
+        m11 = next(m for m in mornings if m["morning"] == "2026-05-11")
+        self.assertEqual(m11["prev_day_load_tss"], 85)
+        self.assertEqual(m11["vs_normal"], {"rhr": 2.0, "hrv": -1.0, "sleep": -1.0})
+        # A morning with no metric row shows load context but an empty vs_normal (no data).
+        m08 = next(m for m in mornings if m["morning"] == "2026-05-08")
+        self.assertEqual(m08["vs_normal"], {})
+
+    def test_consecutive_and_near_days_merge_one_episode(self):
+        # 05-10, 05-11 (adjacent) and 05-14 (gap_free=2 < k=3) all merge into one episode;
+        # the interior dry day 05-12/13 is NOT in days but its mornings still appear.
+        ctx = [
+            {"date": "2026-05-10", "metric": "alcohol", "value": 2},
+            {"date": "2026-05-11", "metric": "alcohol", "value": 3},
+            {"date": "2026-05-14", "metric": "alcohol", "value": 1},
+        ]
+        out = coach_service._context_days(
+            ctx, [], [], self._baseline_for, k=3, min_signal_days=1
+        )
+        eps = out["alcohol"]
+        self.assertEqual(len(eps), 1)
+        self.assertEqual([d["date"] for d in eps[0]["days"]],
+                         ["2026-05-10", "2026-05-11", "2026-05-14"])
+        # Strip spans 05-08 .. 05-17, and 05-13 (a dry gap morning) is present.
+        days_in_strip = {m["morning"] for m in eps[0]["surrounding_mornings"]}
+        self.assertIn("2026-05-13", days_in_strip)
+        self.assertNotIn("2026-05-13", {d["date"] for d in eps[0]["days"]})
+
+    def test_large_gap_splits_into_two_episodes(self):
+        # 4 days apart -> gap_free=3, not < k=3 -> separate episodes.
+        ctx = [
+            {"date": "2026-05-10", "metric": "alcohol", "value": 2},
+            {"date": "2026-05-14", "metric": "alcohol", "value": 2},
+        ]
+        out = coach_service._context_days(
+            ctx, [], [], self._baseline_for, k=3, min_signal_days=1
+        )
+        self.assertEqual(len(out["alcohol"]), 2)
+
+    def test_min_signal_days_floor_omits_category(self):
+        ctx = [{"date": "2026-05-10", "metric": "alcohol", "value": 2}]
+        out = coach_service._context_days(
+            ctx, [], [], self._baseline_for, k=3, min_signal_days=2
+        )
+        self.assertNotIn("alcohol", out)
+
+    def test_sleep_construct_excludes_sleep_channel(self):
+        ctx = [{"date": "2026-05-10", "metric": "poor_sleep", "value": 1}]
+        metrics = [{"date": "2026-05-11", "rhr": 58, "hrv": 70, "sleep_score": 62}]
+        out = coach_service._context_days(
+            ctx, metrics, [], self._baseline_for, k=3, min_signal_days=1
+        )
+        m11 = next(
+            m for m in out["poor_sleep"][0]["surrounding_mornings"]
+            if m["morning"] == "2026-05-11"
+        )
+        self.assertNotIn("sleep", m11["vs_normal"])  # would be an echo, not an impact
+        self.assertIn("hrv", m11["vs_normal"])
+        self.assertIn("rhr", m11["vs_normal"])
+
+    def test_presence_only_value_stays_none(self):
+        ctx = [{"date": "2026-05-10", "metric": "big_meal", "value": None}]
+        out = coach_service._context_days(
+            ctx, [], [], self._baseline_for, k=3, min_signal_days=1
+        )
+        self.assertIsNone(out["big_meal"][0]["days"][0]["value"])
+
+    def test_same_day_values_combine(self):
+        ctx = [
+            {"date": "2026-05-10", "metric": "alcohol", "value": 2},
+            {"date": "2026-05-10", "metric": "alcohol", "value": 3},
+        ]
+        out = coach_service._context_days(
+            ctx, [], [], self._baseline_for, k=3, min_signal_days=1
+        )
+        self.assertEqual(out["alcohol"][0]["days"][0]["value"], 5)
+
+
 class TestWeekLifeEvents(unittest.TestCase):
     """Pure unit tests for per-week life-event bucketing (no DB)."""
 
@@ -495,6 +624,23 @@ class TestRicherEvidenceIntegration(unittest.TestCase):
         self.assertIn("Work crunch", user_content)
         self.assertIn("vs_baseline_z", user_content)
         self.assertIn("avg_stress", user_content)
+
+    @patch("trainmate.coach.engine.openrouter_client")
+    def test_context_days_reaches_the_prompt(self, mock_client):
+        """A logged external signal (alcohol) surfaces as an episode-aligned context_days
+        block in the analysis user content (DESIGN_quantitative_context_impact.md §4)."""
+        self._seed_week()
+        test_db.upsert_daily_context_by_event(
+            "evt1", "2026-06-02", "alcohol", value=4.0, text="Alcohol: 4 drinks"
+        )
+        mock_client.complete.return_value = {"macrocycle_summary": "s", "learning_updates": []}
+        coach_service.data_bootstrap(
+            from_date_str="2026-06-01", until_date_str="2026-06-07", no_pull=True
+        )
+        user_content = mock_client.complete.call_args[0][1]
+        self.assertIn("QUANTITATIVE CONTEXT IMPACT", user_content)
+        self.assertIn("surrounding_mornings", user_content)
+        self.assertIn("alcohol", user_content)
 
     @patch("trainmate.coach.engine.openrouter_client")
     def test_editing_a_life_event_invalidates_the_cache(self, mock_client):

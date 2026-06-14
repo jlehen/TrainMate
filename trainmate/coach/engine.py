@@ -683,6 +683,7 @@ Adherence Discrepancies & Violations:
         weekly_summaries: List[Dict[str, Any]],
         learnings: str,
         context: Optional[str] = None,
+        context_days: Optional[Dict[str, List[Dict[str, Any]]]] = None,
         label: str = "workout_analysis"
     ) -> Dict[str, Any]:
         """Queries LLM to reverse-engineer training cycles from weekly summaries."""
@@ -711,6 +712,28 @@ Adherence Discrepancies & Violations:
             "  and any recovery/overreaching observation. Recovery response LAGS load by\n"
             "  roughly a week, so read a high-load week together with the NEXT week's\n"
             "  'vs_baseline_z'. A null component means 'no data' — never treat it as zero.\n"
+            "\n"
+            "READING 'context_days' (quantitative context impact, full history):\n"
+            "- A separate block, per external signal category (e.g. alcohol), of aligned\n"
+            "  EPISODES. An episode is a run of one or more signal-days; each has a 'days'\n"
+            "  dose sequence ({date, value, load_tss} — the signal magnitude and that day's\n"
+            "  training load) and a 'surrounding_mornings' strip bracketing it: k mornings\n"
+            "  before (drink-free, the local 'normal'), the run during, and k after.\n"
+            "- Each morning carries 'prev_day_load_tss' and 'vs_normal' (baseline-relative\n"
+            "  z per recovery channel, same sign convention as 'vs_baseline_z'). Read a\n"
+            "  morning's PRECEDING-day dose (match the morning's prior date against 'days')\n"
+            "  AND its 'prev_day_load_tss' TOGETHER before blaming a low morning on the\n"
+            "  signal — a hard training day the day before is the competing explanation.\n"
+            "- Read the before -> during -> after arc to judge how LARGE the effect is, how\n"
+            "  many days it PERSISTS, and whether back-to-back signal-days STACK (cumulative\n"
+            "  cost). Compare high- vs low-dose days at similar load (the signal's share)\n"
+            "  and high- vs low-load days at similar dose (training's share).\n"
+            "- Weigh the NUMBER of distinct episodes and the spread of doses: a handful is\n"
+            "  weak evidence; do not over-read. 'value' may be a true count, a subjective\n"
+            "  rank, or absent (presence-only) — calibrate how much to read into it.\n"
+            "- A missing channel or morning is 'no data', never zero. When you author a\n"
+            "  durable conclusion from this, cite the in-window week(s) the signal-days\n"
+            "  fall in via the learning evidence protocol, like any other observation.\n"
             "\n"
             "You MUST respond with a JSON object containing:\n"
             "{\n"
@@ -778,6 +801,15 @@ Adherence Discrepancies & Violations:
 
         user_content = "Please analyze the following weekly training summaries:\n\n"
         user_content += json.dumps(weekly_summaries, indent=2)
+
+        # Quantitative context-impact rows ride beside the weekly summaries, covering the
+        # athlete's full signal-day history (DESIGN_quantitative_context_impact.md §4, §6).
+        # Emitted only when some category has rows, so its absence reads as "nothing logged".
+        if context_days:
+            user_content += (
+                "\n\nQUANTITATIVE CONTEXT IMPACT (full signal-day history, episode-aligned):\n"
+            )
+            user_content += json.dumps(context_days, indent=2)
 
         if context:
             user_content += f"\n\nATHLETE SUBJECTIVE CONTEXT FOR THIS PERIOD:\n{context}\n"

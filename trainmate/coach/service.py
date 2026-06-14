@@ -1253,6 +1253,36 @@ class CoachService:
             })
         return out
 
+    # Channels of the per-day z, mapping the metric column to its baseline mean/std keys.
+    # Sign convention (documented for the LLM): +hrv better, +rhr worse, +sleep better
+    # (DESIGN_quantitative_context_impact.md §3).
+    _RESPONSE_Z_CHANNELS = (
+        ("rhr", "rhr", "rhr_baseline_mean", "rhr_baseline_std"),
+        ("hrv", "hrv", "hrv_baseline_mean", "hrv_baseline_std"),
+        ("sleep", "sleep_score", "sleep_baseline_mean", "sleep_baseline_std"),
+    )
+
+    @staticmethod
+    def _day_response_z(
+        metric_row: Dict[str, Any], baseline: Optional[Dict[str, Any]]
+    ) -> Dict[str, Optional[float]]:
+        """Baseline-relative z-score `(value - mean) / std` for ONE morning's rhr/hrv/sleep
+        — the shared definition of "notches from normal" used by both the weekly feature
+        (averaged over the week) and the context-impact alignment (per morning). A channel
+        is None when its metric value is missing, the baseline mean/std is missing, or std
+        is zero (undefined). Unrounded; callers round as they emit
+        (DESIGN_quantitative_context_impact.md §3)."""
+        out: Dict[str, Optional[float]] = {}
+        for channel, metric_key, mean_key, std_key in CoachService._RESPONSE_Z_CHANNELS:
+            mean = baseline.get(mean_key) if baseline else None
+            std = baseline.get(std_key) if baseline else None
+            value = metric_row.get(metric_key)
+            if mean is None or not std or value is None:
+                out[channel] = None  # missing baseline/value or zero std -> undefined
+            else:
+                out[channel] = (value - mean) / std
+        return out
+
     @staticmethod
     def _week_response_features(
         w_metrics: List[Dict[str, Any]], baseline: Optional[Dict[str, Any]]
@@ -1266,21 +1296,18 @@ class CoachService:
             vals = [m[key] for m in w_metrics if m.get(key) is not None]
             return round(sum(vals) / len(vals), 1) if vals else None
 
-        def _z(metric_key: str, mean_key: str, std_key: str) -> Optional[float]:
-            if not baseline:
-                return None
-            mean, std = baseline.get(mean_key), baseline.get(std_key)
-            if mean is None or not std:  # missing baseline or zero std -> undefined
-                return None
-            vals = [m[metric_key] for m in w_metrics if m.get(metric_key) is not None]
-            if not vals:
-                return None
-            return round(sum((v - mean) / std for v in vals) / len(vals), 2)
+        def _z(channel: str) -> Optional[float]:
+            vals = [
+                z for z in (
+                    CoachService._day_response_z(m, baseline)[channel] for m in w_metrics
+                ) if z is not None
+            ]
+            return round(sum(vals) / len(vals), 2) if vals else None
 
         vs_baseline_z = {
-            "rhr": _z("rhr", "rhr_baseline_mean", "rhr_baseline_std"),
-            "hrv": _z("hrv", "hrv_baseline_mean", "hrv_baseline_std"),
-            "sleep": _z("sleep_score", "sleep_baseline_mean", "sleep_baseline_std"),
+            "rhr": _z("rhr"),
+            "hrv": _z("hrv"),
+            "sleep": _z("sleep"),
         }
         features: Dict[str, Any] = {
             "avg_sleep_score": _avg("sleep_score"),
@@ -1289,6 +1316,142 @@ class CoachService:
         if any(v is not None for v in vs_baseline_z.values()):
             features["vs_baseline_z"] = vs_baseline_z
         return features
+
+    # Response channels to omit for a context signal whose own construct overlaps them,
+    # so the LLM cannot "discover" that bad sleep predicts bad sleep — an echo, not an
+    # impact (DESIGN_quantitative_context_impact.md §3.2). Keyed by a substring of the
+    # opaque, free-form metric name; the common signals (alcohol, meals) match nothing
+    # and exclude nothing.
+    _CONTEXT_CHANNEL_EXCLUSIONS = (
+        ("sleep", {"sleep"}),
+    )
+
+    @staticmethod
+    def _norm_signal_value(value: Optional[float]):
+        """Pass a logged signal magnitude through for display: drop float noise on whole
+        numbers (4.0 -> 4) so doses read cleanly, keep fractional values rounded; None
+        (presence-only / unparseable) stays None (§3.1). TrainMate never interprets the
+        scale — it only tidies the number."""
+        if value is None:
+            return None
+        f = float(value)
+        return int(f) if f.is_integer() else round(f, 2)
+
+    @staticmethod
+    def _context_days(
+        daily_context: List[Dict[str, Any]],
+        metrics: List[Dict[str, Any]],
+        activities: List[Dict[str, Any]],
+        baseline_for,
+        k: int,
+        min_signal_days: int = 1,
+    ) -> Dict[str, List[Dict[str, Any]]]:
+        """Deterministic per-episode alignment of external context signals against the
+        mornings that bracket them (DESIGN_quantitative_context_impact.md §3–§4). NO
+        statistics: pure clustering + join + the existing per-day z.
+
+        For each signal category it (1) clusters the logged signal-days into *episodes* —
+        maximal runs separated by fewer than `k` drink-free days (§3.0); (2) emits, per
+        episode, the `days` dose sequence (each signal-day's magnitude + that day's
+        training load) and the `surrounding_mornings` strip spanning
+        `(first − k + 1) … (last + k)`, each morning carrying its preceding day's load and
+        the baseline-relative z of the recovery channels; (3) drops any response channel
+        that duplicates the signal's own construct (§3.2). Categories below
+        `min_signal_days` total signal-days are omitted (§5).
+
+        `baseline_for(date_str)` returns the baseline valid on/just before that morning
+        (or None). `k` is the look-ahead, `min_signal_days` the inclusion floor."""
+        # Day-of training load: sum of derived load over the day's activities (0 on a rest
+        # day), NOT the rolling acute EWMA — the stimulus for a morning is the day before it
+        # (§3 "Day-of load").
+        load_by_date: Dict[str, float] = {}
+        for act in activities:
+            load_by_date[act['date']] = load_by_date.get(act['date'], 0.0) + activity_load(act)
+
+        def day_load(date_str: str) -> int:
+            return int(round(load_by_date.get(date_str, 0.0)))
+
+        metric_by_date = {m['date']: m for m in metrics}
+
+        # Aggregate signal magnitude per (category, date): a day may carry more than one
+        # row of the same category (combined dose); None when no row supplies a value.
+        per_cat: Dict[str, Dict[str, Optional[float]]] = {}
+        for c in daily_context:
+            cat = c.get('metric')
+            if not cat:
+                continue
+            day_map = per_cat.setdefault(cat, {})
+            v = c.get('value')
+            if v is not None:
+                day_map[c['date']] = (day_map.get(c['date']) or 0.0) + float(v)
+            else:
+                day_map.setdefault(c['date'], None)
+
+        out: Dict[str, List[Dict[str, Any]]] = {}
+        for cat in sorted(per_cat.keys()):
+            day_map = per_cat[cat]
+            signal_dates = sorted(day_map.keys())
+            if len(signal_dates) < min_signal_days:
+                continue  # too few signal-days to be worth prompting on (§5)
+
+            excluded: set = set()
+            cat_l = cat.lower()
+            for sub, chans in CoachService._CONTEXT_CHANNEL_EXCLUSIONS:
+                if sub in cat_l:
+                    excluded |= chans
+
+            # Cluster signal-days into episodes: two consecutive signal-days join the same
+            # episode when fewer than k drink-free days separate them (§3.0).
+            episodes: List[List[str]] = []
+            run = [signal_dates[0]]
+            for prev, cur in zip(signal_dates, signal_dates[1:]):
+                gap_free = (
+                    datetime.strptime(cur, "%Y-%m-%d").date()
+                    - datetime.strptime(prev, "%Y-%m-%d").date()
+                ).days - 1
+                if gap_free < k:
+                    run.append(cur)
+                else:
+                    episodes.append(run)
+                    run = [cur]
+            episodes.append(run)
+
+            rows: List[Dict[str, Any]] = []
+            for ep in episodes:
+                first = datetime.strptime(ep[0], "%Y-%m-%d").date()
+                last = datetime.strptime(ep[-1], "%Y-%m-%d").date()
+                days = [
+                    {
+                        "date": d,
+                        "value": CoachService._norm_signal_value(day_map[d]),
+                        "load_tss": day_load(d),
+                    }
+                    for d in ep
+                ]
+                mornings = []
+                cur = first - timedelta(days=k - 1)
+                end = last + timedelta(days=k)
+                while cur <= end:
+                    m_str = cur.strftime("%Y-%m-%d")
+                    prev_str = (cur - timedelta(days=1)).strftime("%Y-%m-%d")
+                    zs = CoachService._day_response_z(
+                        metric_by_date.get(m_str, {}), baseline_for(m_str)
+                    )
+                    vs_normal = {
+                        ch: round(z, 2)
+                        for ch, z in zs.items()
+                        if z is not None and ch not in excluded
+                    }
+                    mornings.append({
+                        "morning": m_str,
+                        "prev_day_load_tss": day_load(prev_str),
+                        "vs_normal": vs_normal,
+                    })
+                    cur += timedelta(days=1)
+                rows.append({"days": days, "surrounding_mornings": mornings})
+
+            out[cat] = rows
+        return out
 
     def _run_workout_analysis(
         self, from_date, until_date,
@@ -1537,11 +1700,27 @@ class CoachService:
         guidelines = self._load_science_guidelines()
         profile = config.user_profile
 
+        # Quantitative context-impact rows (alcohol, big meal, …): episode-aligned dose
+        # sequences + bracketing morning strips. These cover the athlete's FULL history of
+        # signal-days, not just [from,until] — the point is to let the LLM see the whole
+        # pattern, and an incremental reflect window contains almost no drinking history
+        # (DESIGN_quantitative_context_impact.md §6). So they are fetched independently of
+        # the analysis window.
+        context_days = self._context_days(
+            daily_context=self._db.get_daily_context(),
+            metrics=self._db.get_metrics_cache(),
+            activities=self._db.get_completed_activities(),
+            baseline_for=self._db.get_baseline,
+            k=config.context_days_lookahead,
+            min_signal_days=config.context_days_min_signal_days,
+        )
+
         decision = self.engine._data_analyze_logic(
             objectives=objectives,
             guidelines=guidelines,
             profile=profile,
             weekly_summaries=weekly_summaries,
+            context_days=context_days,
             learnings=self._get_learnings_text(),
             context=context,
             label=label

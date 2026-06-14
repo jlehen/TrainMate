@@ -863,8 +863,24 @@ The shared core then:
    life events overlapping that week (tagged `full`/`partial`), `avg_sleep_score`/
    `avg_stress`, and `vs_baseline_z` (deterministic rhr/hrv/sleep z-scores vs the
    rolling baseline, omitted when unsupported). All deterministic — no extra LLM
-   call.
-4. Queries `CoachEngine._data_analyze_logic()` -> LLM ->
+   call. The per-day z is computed by the shared `_day_response_z(metric_row,
+   baseline)` static; `_week_response_features` averages it over the week.
+3a. Builds `context_days` — episode-aligned external-signal impact rows
+   (`_context_days`, DESIGN_quantitative_context_impact.md). Per signal category it
+   clusters logged signal-days into *episodes* (runs separated by fewer than `k`
+   drink-free days, `k = context_days_lookahead`, default 3) and emits, per episode,
+   a `days` dose sequence ({date, value, day-of `load_tss`}) plus a
+   `surrounding_mornings` strip spanning `(first − k + 1) … (last + k)` — each
+   morning tagged with its preceding day's load and the `_day_response_z` recovery
+   deltas, dropping any channel that duplicates the signal's own construct. Pure
+   clustering + join + the existing z — **no statistics**. Unlike the weekly
+   summaries this is fetched over the athlete's **full signal-day history** (not the
+   analysis window), so the LLM sees the whole pattern even on an incremental
+   reflect; categories below `context_days_min_signal_days` are dropped. The rows are
+   recomputed each run (never stored as a learning); only the LLM's conclusion
+   becomes a `coach_learnings` row, citing the in-window weeks the signal-days fall
+   in (DESIGN_evidence_based_confidence.md §6).
+4. Queries `CoachEngine._data_analyze_logic()` (now also handed `context_days`) -> LLM ->
    `{macrocycle_summary, inferred_macrocycle, inferred_mesocycles[],
    physiological_insights[], learning_updates[]}`.
 5. Unless `--inspect-only`: applies `learning_updates` deltas — the LLM attributes
@@ -1003,12 +1019,15 @@ Calendar (tagged events) ──► google_calendar.sync_calendar_context
   calendar config or any Calendar error is swallowed with a warning. The gating
   and error handling live in `google_calendar.sync_calendar_context`; `garmin.py`
   only bridges to it via a guarded lazy import.
-- **Coach use:** qualitative today — each week's summary carries a `daily_context`
-  list (all rows, no collapsing) the LLM reads beside the metrics, the same way
-  `life_events` contextualize anomalies. Hashed into the analysis evidence
-  fingerprint so an added/edited/deleted signal invalidates the cached
-  reconstruction. The optional numeric `value` keeps a future category-agnostic
-  quantitative path open with no migration.
+- **Coach use:** two complementary paths. (1) *Qualitative* — each week's summary
+  carries a `daily_context` list (all rows, no collapsing) the LLM reads beside the
+  metrics, the same way `life_events` contextualize anomalies. (2) *Quantitative*
+  (`context_days`, step 3a above; DESIGN_quantitative_context_impact.md) — the
+  optional numeric `value` is aligned per-episode against the bracketing mornings'
+  recovery and day-of load, full-history, so the LLM can read dose-response,
+  persistence, and the drink-and-hard-day confound. Both are hashed into the analysis
+  evidence fingerprint so an added/edited/deleted signal invalidates the cached
+  reconstruction.
 
 ---
 
