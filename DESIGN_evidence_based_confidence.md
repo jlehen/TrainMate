@@ -1,6 +1,25 @@
 # Design: Evidence-Based Learning Confidence
 
-**Status:** Draft · **Date:** 2026-06-12 · **Branch:** `evidence-based-confidence` (proposed)
+**Status:** Implemented (2026-06-12) · **Branch:** `evident-based-confidence-claude`
+
+**Implementation notes — decisions taken where the design met the codebase:**
+- **`plan generate` stays a non-writer.** The design (§6) assumes it authors
+  learnings, but in this codebase it never did (only the analysis flow and `adapt`
+  wrote). Rather than build a new learnings-writing path into it, the evidence model
+  lives in the analysis flow (`data bootstrap`/`data reflect`), the only flow that
+  shows the LLM weekly summaries. Instead, when there are no learnings yet,
+  `plan generate` **and** `status` nudge the user to run `data bootstrap`.
+- **`adapt` is read-only.** It has no weekly evidence to cite, so it no longer
+  authors learnings at all (it consumes them as context) — matching this doc's
+  "adapt does not write durable learnings" premise (§2/§11). The old
+  `_apply_learning_updates(decision)` call and the learning-writing instructions in
+  `_adapt_logic`'s prompt are removed.
+- **No new CLI verbs.** The propose/confirm flow (§7) is resolved via **interactive
+  prompts** at the end of `data bootstrap`/`data reflect` (the `data wipe` /
+  `workout swap` `input()` idiom) rather than `data learning demote|keep`. `status`
+  still displays pending proposals; `--auto` skips the prompts.
+
+Original draft preamble follows.
 
 This picks up the item both DESIGN_backward_evaluation.md §8 ("Edges") and §12
 ("Out of Scope") explicitly deferred as YAGNI: **per-learning evidence
@@ -198,6 +217,14 @@ cites weeks from the reconstruction window it already analyzes; weeks are valida
 against that window the same way (§ Validation). Keeping one protocol across all
 writers avoids a second, un-anchored confidence path.
 
+> **AS BUILT (supersedes the `plan generate` half above).** In the implemented
+> codebase `plan generate` was **never** a learnings writer (only the analysis flow
+> and `adapt` were), so it was left a non-writer rather than growing a new
+> learnings-writing path. The shared evidence-cited protocol is emitted **only** by
+> `data bootstrap`/`data reflect` (the flow that shows the LLM weekly summaries).
+> `adapt` was made fully read-only. To cover the cold start, `plan generate` and
+> `status` instead **nudge** the user to run `data bootstrap`.
+
 **Recency now follows evidence.** `last_reinforced_at` (the dormancy clock) is
 refreshed to the run time only when a *new* supporting week actually lands in the
 basis — not merely because a delta was emitted. This is what makes "looking at it
@@ -235,18 +262,23 @@ walks down to retirement over time rather than vanishing in one jump.
 
 ```
 [4|cycling|moderate] Responds well to back-to-back hard days.
-   ⚠ proposed demotion → tentative  (2 contradicting weeks since 2026-05-04)
-   confirm with:  trainmate data learning demote 4   |   keep with:  ... keep 4
+   ⚠ proposed demotion → tentative  (confirm on the next 'data reflect')
 ```
 
-Two human actions, one new CLI verb group `data learning`:
-- **`data learning demote <id>`** — accept: write `confidence = proposed_confidence`
-  (or retire on the retirement sentinel), clear `proposed_confidence`.
-- **`data learning keep <id>`** — dismiss + **affirm**: clear `proposed_confidence`
-  **and** durably settle the trigger so it is not re-raised every run — for a
-  *contradiction* proposal, neutralize the −1 rows; for a *staleness* proposal,
-  refresh `last_reinforced_at` (the human affirming counts as reinforcement). Either
-  way the human has overruled the data for now.
+The two human actions and their effects are unchanged, but **AS BUILT** they are
+**not** a `data learning demote|keep` CLI verb group. Instead they are offered as an
+**interactive prompt at the end of `data bootstrap`/`data reflect`** (the
+`data wipe` / `workout swap` `input()` idiom), one line per pending proposal:
+
+- **accept (`y`)** → `db.demote_learning(id)`: write `confidence = proposed_confidence`
+  (or retire on the retirement sentinel), clear `proposed_confidence`, re-arm the clock.
+- **keep (`N`)** → `db.keep_learning(id)`: dismiss + **affirm** — for a *contradiction*
+  proposal, neutralize the −1 rows; for a *staleness* proposal, refresh
+  `last_reinforced_at`. Either way clear `proposed_confidence`.
+- **skip (`s`)** → leave it pending; re-raised on the next run.
+
+`status` only *displays* pending proposals; `--auto` skips the prompt entirely
+(staleness applied directly, contradiction left queued).
 
 **`--auto` (unattended runs).** `plan generate` already carries an `--auto` flag
 for non-interactive use (plans.py — skips prompts, see [reflect/bootstrap split]
@@ -335,8 +367,14 @@ Schema is additive (new table + nullable column), consistent with the in-place
   retirement ≤0 are fixed. Re-levels on recompute, no migration.
 - **`keep` drops the −1 (contradicting) rows** (§7) — chosen over pinning an
   affirm-date. Simpler; we forgo the (speculative) "user overruled N times" signal.
-- **`plan generate` cites evidence weeks too** (§6) — one shared, anchored protocol
-  across all learnings writers; no separate un-anchored confidence path.
+- ~~**`plan generate` cites evidence weeks too** (§6)~~ — **superseded at
+  implementation:** `plan generate` was never a learnings writer in this codebase, so
+  it stayed a non-writer; the evidence-cited protocol is emitted only by
+  `data bootstrap`/`data reflect`, with a cold-start nudge from `plan generate`/`status`
+  (see §6 *AS BUILT*).
+- **Propose/confirm via interactive prompts, not new CLI verbs** (§7 *AS BUILT*) —
+  resolved in `data bootstrap`/`data reflect`; `--auto` skips. No `data learning`
+  verb group was added.
 
 **Open**
 

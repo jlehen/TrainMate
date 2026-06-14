@@ -16,9 +16,13 @@ from trainmate.db.learnings import (
     LearningsMixin,
     normalize_sports,
     valid_confidence,
+    confidence_rank,
+    step_down,
+    derive_confidence,
     learning_is_dormant,
     CONFIDENCE_LEVELS,
     LEARNING_STALENESS_DAYS,
+    RETIRE_PROPOSAL,
 )
 from trainmate.db.analysis import AnalysisCacheMixin
 from trainmate.db.periodization import PeriodizationMixin
@@ -47,7 +51,11 @@ __all__ = [
     "db",
     "normalize_sports",
     "valid_confidence",
+    "confidence_rank",
+    "step_down",
+    "derive_confidence",
     "learning_is_dormant",
     "CONFIDENCE_LEVELS",
     "LEARNING_STALENESS_DAYS",
+    "RETIRE_PROPOSAL",
 ]

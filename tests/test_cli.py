@@ -1017,6 +1017,7 @@ class TestTrainMateCLI(unittest.TestCase):
             force=False,
             inspect_only=False,
             no_pull=False,
+            auto=False,
         )
 
         mock_coach.bootstrap_workouts.reset_mock()
@@ -1035,6 +1036,7 @@ class TestTrainMateCLI(unittest.TestCase):
             force=False,
             inspect_only=True,
             no_pull=False,
+            auto=False,
         )
 
     @patch("trainmate_cli.garmin")

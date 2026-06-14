@@ -6,7 +6,7 @@ from trainmate.google_calendar import calendar_syncer
 from trainmate.types import Objective, LifeEvent, Workout
 from trainmate.adherence import analyze_adherence
 from trainmate.garmin import activity_load
-from trainmate.util import today_str as _today_str, today_date as _today_date, cyan, green, yellow, bold, red
+from trainmate.util import today_str as _today_str, today_date as _today_date, cyan, green, yellow, bold, red, gray
 from trainmate.coach.engine import CoachEngine
 from trainmate.coach.formatting import format_baseline, _load_science_guidelines
 
@@ -251,17 +251,71 @@ class CoachService:
         )
 
     def _apply_learning_updates(
-        self, data: Dict[str, Any], suppress_reinforcement: bool = False
+        self, data: Dict[str, Any], available_weeks: List[str], source: str
     ) -> None:
-        """Applies incremental learning deltas returned by the LLM, if any.
+        """Applies evidence-cited learning deltas returned by the LLM, if any.
 
-        `suppress_reinforcement` is forwarded to the merge layer: pass True when the deltas
-        were derived from unchanged evidence so re-reading cannot ratchet confidence/recency
-        (see db.apply_learning_deltas and DESIGN_backward_evaluation.md §8)."""
+        `available_weeks` is the set of week_commencing (Monday) dates under analysis; cited
+        weeks outside it are dropped. `source` tags the evidence rows ('bootstrap'/'reflect').
+        Confidence is derived by the app from the accumulated basis — re-citing counted weeks
+        cannot inflate it (see db.apply_learning_deltas and
+        DESIGN_evidence_based_confidence.md §6)."""
         self._db.apply_learning_deltas(
             data.get("learning_updates") or [],
-            suppress_reinforcement=suppress_reinforcement,
+            available_weeks=available_weeks,
+            source=source,
         )
+
+    def _review_learning_proposals(self, auto: bool = False) -> None:
+        """Resolves pending learning-confidence downgrades (§7).
+
+        First sweeps for staleness demotions (dormant learnings): under `auto` these apply
+        directly, otherwise they are queued as proposals. Then, when interactive, prompts the
+        human about each pending proposal (contradiction- or staleness-driven) — accept
+        (demote), keep (dismiss + affirm), or skip (leave pending). Under `auto` contradiction
+        proposals stay queued for the next interactive review; no prompts are shown."""
+        self._db.derive_staleness_proposals(auto=auto)
+        if auto:
+            return
+        pending = [l for l in self._db.get_learnings() if l.get("proposed_confidence")]
+        if not pending:
+            return
+        print(yellow(bold("\nPending coach-learning demotion proposals:")))
+        for l in pending:
+            target = l["proposed_confidence"]
+            target_disp = "retire" if target == "retire" else target
+            print(
+                f"  [{l['id']}|{l.get('sports') or 'general'}|{l['confidence']}] {l['text']}"
+            )
+            print(yellow(f"    proposed demotion → {target_disp}"))
+            try:
+                ans = input(
+                    "    Apply? [y=demote / N=keep / s=skip]: "
+                ).strip().lower()
+            except EOFError:
+                ans = "s"
+            if ans in ("y", "yes"):
+                result = self._db.demote_learning(l["id"])
+                if result == "retired":
+                    print(red(f"    Retired learning [{l['id']}]."))
+                else:
+                    print(green(f"    Demoted [{l['id']}] → {result}."))
+            elif ans in ("s", "skip"):
+                print(gray(f"    Left [{l['id']}] pending."))
+            else:
+                self._db.keep_learning(l["id"])
+                print(cyan(f"    Kept [{l['id']}] at {l['confidence']}."))
+
+    def _maybe_nudge_bootstrap(self) -> None:
+        """Prints a cold-start hint to run `data bootstrap` when there are no active coach
+        learnings yet — durable observations are authored only by the history analysis."""
+        if any(not l.get("dormant") for l in self._db.get_learnings()):
+            return
+        print(yellow(
+            "No coach learnings yet. Run "
+        ) + green("'data bootstrap'") + yellow(
+            " to reconstruct your training history and seed evidence-based observations."
+        ))
 
     def _get_coach_system_prompt(
         self, objectives: List[Objective], lifeevents: List[LifeEvent],
@@ -487,6 +541,7 @@ class CoachService:
                 print(f"- {bold(m['name'])} ({m['start_date']} to {m['end_date']}): {m['focus']}")
             print(cyan(bold("==============================================\n")))
 
+        self._maybe_nudge_bootstrap()
         return strategy, mesocycles, reused
 
     def apply_periodization_plan(
@@ -737,10 +792,11 @@ class CoachService:
             removed_workouts=removed_workouts
         )
 
-        # Record any durable observations the adaptation surfaced. Done at evaluation
-        # time (not apply time) since the insight stands regardless of whether the
-        # proposed workout changes are ultimately applied.
-        self._apply_learning_updates(decision)
+        # NOTE: daily adaptation is read-only w.r.t. coach learnings
+        # (DESIGN_evidence_based_confidence.md §2/§11). It consumes the rendered learnings as
+        # context but authors none — durable, evidence-backed observations are written only by
+        # the weekly history analysis (`data bootstrap` / `data reflect`), which can attribute
+        # them to specific training weeks.
 
         reason = decision.get("reason", "No adaptation needed.")
         adapted = []
@@ -1009,7 +1065,7 @@ class CoachService:
         self, from_date_str: Optional[str] = None, until_date_str: Optional[str] = None,
         days: Optional[int] = None, weeks: Optional[int] = None,
         context: Optional[str] = None, force: bool = False, inspect_only: bool = False,
-        no_pull: bool = False
+        no_pull: bool = False, auto: bool = False
     ) -> Dict[str, Any]:
         """Cold-start backward reconstruction over the full training backlog.
 
@@ -1060,13 +1116,14 @@ class CoachService:
         # Establish the reflect baseline (read-only inspect mode writes nothing).
         if not inspect_only:
             self._set_reflect_watermark(until_date.strftime("%Y-%m-%d"))
+            self._review_learning_proposals(auto=auto)
         return decision
 
     def reflect_workouts(
         self, from_date_str: Optional[str] = None, until_date_str: Optional[str] = None,
         days: Optional[int] = None, weeks: Optional[int] = None,
         context: Optional[str] = None, force: bool = False, inspect_only: bool = False,
-        no_pull: bool = False
+        no_pull: bool = False, auto: bool = False
     ) -> Dict[str, Any]:
         """Incremental reflection over evidence accrued since the last reflect.
 
@@ -1110,6 +1167,9 @@ class CoachService:
                 raise ValueError(f"Start date {from_date} is after end date {until_date}.")
             since = watermark["through_date"] if watermark else "?"
             print(cyan(f"Nothing new to reflect on since {since}."))
+            # Even with no new evidence, surface any staleness demotions that have come due.
+            if not inspect_only:
+                self._review_learning_proposals(auto=auto)
             return {}
 
         decision = self._run_workout_analysis(
@@ -1118,6 +1178,7 @@ class CoachService:
         )
         if not inspect_only:
             self._advance_reflect_watermark(until_date.strftime("%Y-%m-%d"))
+            self._review_learning_proposals(auto=auto)
         return decision
 
     def _run_workout_analysis(
@@ -1328,12 +1389,14 @@ class CoachService:
         )
 
         if not inspect_only:
-            # Apply learning deltas. On a forced re-run over unchanged evidence, honour the
-            # integrity invariant (§8): suppress the reinforcement ratchet so re-reading the
-            # same data cannot inflate confidence or reset decay.
-            self._apply_learning_updates(
-                decision, suppress_reinforcement=evidence_unchanged
-            )
+            # Apply evidence-cited learning deltas. The LLM attributes observations to the
+            # week_commencing weeks it was shown; the app derives confidence from the
+            # accumulated distinct weeks, so re-citing counted weeks (forced re-runs,
+            # overlapping windows) is a structural no-op — no reinforcement-suppression flag
+            # needed (DESIGN_evidence_based_confidence.md §6, §8).
+            available_weeks = sorted(weeks_data.keys())
+            source = "bootstrap" if horizon == "long" else "reflect"
+            self._apply_learning_updates(decision, available_weeks, source)
             # Cache the reconstruction (everything but the point-in-time deltas) so future
             # runs — and `plan generate` — can reuse it without another LLM call.
             reconstruction = {

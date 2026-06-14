@@ -457,6 +457,7 @@ def run_data_bootstrap(args: argparse.Namespace) -> None:
             force=args.force,
             inspect_only=args.inspect_only,
             no_pull=args.no_pull,
+            auto=getattr(args, "auto", False),
         )
         _render_analysis_report(result, args.inspect_only)
     except Exception as e:
@@ -475,6 +476,7 @@ def run_data_reflect(args: argparse.Namespace) -> None:
             force=args.force,
             inspect_only=args.inspect_only,
             no_pull=args.no_pull,
+            auto=getattr(args, "auto", False),
         )
         if not result:
             return  # Nothing new to reflect on; service already printed why.
@@ -543,24 +545,28 @@ def _render_analysis_report(result: dict, inspect_only: bool) -> None:
                 meta = []
                 if u.get("sports"):
                     meta.append(u["sports"])
-                if u.get("confidence"):
-                    meta.append(u["confidence"])
-                suffix = f" ({', '.join(meta)})" if meta else ""
+                ev = u.get("evidence")
+                if isinstance(ev, (list, tuple)) and ev:
+                    meta.append(f"weeks: {', '.join(str(w) for w in ev)}")
+                suffix = f" ({'; '.join(meta)})" if meta else ""
+
+                def _existing_text(uid):
+                    if uid is not None and uid in learnings_map:
+                        return learnings_map[uid]['text']
+                    return ""
+
                 if op == "add":
                     print(f"  + {u.get('text', '')}{suffix}")
                 elif op == "revise":
                     print(f"  ~ [{u.get('id')}] {u.get('text', '')}{suffix}")
                 elif op == "reinforce":
-                    learning_id = u.get("id")
-                    learning_text = ""
-                    if learning_id is not None and learning_id in learnings_map:
-                        learning_text = learnings_map[learning_id]['text']
-                    
-                    tag = f"  ↑ reinforced [{learning_id}]{suffix}"
-                    if learning_text:
-                        print(format_labeled_block(tag, learning_text))
-                    else:
-                        print(tag)
+                    tag = f"  ↑ reinforced [{u.get('id')}]{suffix}"
+                    text = _existing_text(u.get("id"))
+                    print(format_labeled_block(tag, text) if text else tag)
+                elif op == "contradict":
+                    tag = f"  ↓ contradicted [{u.get('id')}]{suffix}"
+                    text = _existing_text(u.get("id"))
+                    print(format_labeled_block(tag, text) if text else tag)
                 elif op == "retire":
                     print(f"  - retired [{u.get('id')}]")
 

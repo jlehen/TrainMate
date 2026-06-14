@@ -7,7 +7,8 @@ from tests.helpers import clear_all_tables
 TEST_DB_PATH = os.path.join(os.path.dirname(__file__), "test_trainmate_db.db")
 
 from trainmate.db import (
-    Database, normalize_sports, valid_confidence, learning_is_dormant
+    Database, normalize_sports, valid_confidence, learning_is_dormant,
+    derive_confidence, confidence_rank, step_down, RETIRE_PROPOSAL,
 )
 import trainmate.db
 
@@ -159,43 +160,134 @@ class TestDatabase(unittest.TestCase):
         self.assertEqual(generic["sports"], "general")
         self.assertEqual(generic["confidence"], "tentative")
 
-    def test_learning_deltas_enriched(self):
+    # Five distinct calendar weeks (each normalizes to its own Monday).
+    WEEKS = ["2026-05-04", "2026-05-12", "2026-05-20", "2026-05-28", "2026-06-05"]
+
+    def test_derive_confidence_pure_function(self):
+        # Defaults: moderate at 3 net weeks, established at 5.
+        self.assertEqual(derive_confidence(0, 0), "tentative")   # no basis -> floor
+        self.assertEqual(derive_confidence(2, 0), "tentative")
+        self.assertEqual(derive_confidence(3, 0), "moderate")
+        self.assertEqual(derive_confidence(5, 0), "established")
+        self.assertEqual(derive_confidence(6, 1), "established")  # net 5
+        # Contradiction nets down; only contradiction (not an empty basis) proposes retire.
+        self.assertEqual(derive_confidence(2, 2), RETIRE_PROPOSAL)  # net 0, contradicted
+        self.assertEqual(derive_confidence(5, 3), "tentative")      # net 2
+        self.assertEqual(confidence_rank("tentative"), 1)
+        self.assertEqual(step_down("established"), "moderate")
+        self.assertEqual(step_down("tentative"), RETIRE_PROPOSAL)
+
+    def test_add_derives_confidence_from_distinct_weeks(self):
+        # Citing 3 distinct weeks -> moderate; the LLM sets no confidence.
         test_db.apply_learning_deltas([
             {"op": "add", "text": "Recovers fast",
-             "sports": "Running, Road_Biking", "confidence": "moderate"},
+             "sports": "Running, Road_Biking", "evidence": self.WEEKS[:3]},
         ])
         learning = test_db.get_learnings()[0]
         lid = learning["id"]
-        # Sport scope is normalized (lowercased, trimmed).
         self.assertEqual(learning["sports"], "running,road_biking")
         self.assertEqual(learning["confidence"], "moderate")
+        self.assertIsNone(learning["proposed_confidence"])
 
-        # Revise with only confidence keeps the text but bumps recency.
-        before = test_db.get_learnings()[0]["last_reinforced_at"]
+        # Reinforcing with two more distinct weeks reaches established (net 5).
         test_db.apply_learning_deltas([
-            {"op": "revise", "id": lid, "confidence": "established"}
+            {"op": "reinforce", "id": lid, "evidence": self.WEEKS[3:5]},
         ])
-        revised = test_db.get_learnings()[0]
-        self.assertEqual(revised["confidence"], "established")
-        self.assertEqual(revised["text"], "Recovers fast")
-        self.assertGreaterEqual(revised["last_reinforced_at"], before)
+        self.assertEqual(test_db.get_learnings()[0]["confidence"], "established")
 
-        # Invalid confidence is ignored, but a valid text change still lands.
-        test_db.apply_learning_deltas([
-            {"op": "revise", "id": lid, "confidence": "bogus",
-             "text": "Recovers very fast"}
-        ])
-        learning = test_db.get_learnings()[0]
-        self.assertEqual(learning["confidence"], "established")
-        self.assertEqual(learning["text"], "Recovers very fast")
-
-        # Retire deletes the record.
+        # Retire deletes the record (basis cascades).
         test_db.apply_learning_deltas([{"op": "retire", "id": lid}])
         self.assertEqual(len(test_db.get_learnings()), 0)
 
-    def test_learning_decay_and_reinforce_revival(self):
-        lid = test_db.add_learning("Tentative observation")  # tentative: 21-day budget
-        # Backdate its last reinforcement beyond the budget -> dormant.
+    def test_evidence_dedup_blocks_inflation(self):
+        """Re-citing counted weeks is a structural no-op: confidence cannot ratchet and
+        recency is not refreshed (DESIGN_evidence_based_confidence.md §6)."""
+        test_db.apply_learning_deltas([
+            {"op": "add", "text": "Tolerates volume", "evidence": self.WEEKS[:3]},
+        ])
+        lid = test_db.get_learnings()[0]["id"]
+        before = test_db.get_learnings()[0]["last_reinforced_at"]
+
+        # Re-citing the SAME three weeks: no new basis, no recency refresh, no upgrade.
+        test_db.apply_learning_deltas([
+            {"op": "reinforce", "id": lid, "evidence": self.WEEKS[:3]},
+        ])
+        again = test_db.get_learnings()[0]
+        self.assertEqual(again["confidence"], "moderate")
+        self.assertEqual(again["last_reinforced_at"], before)
+        # Basis still holds exactly three supporting weeks.
+        self.assertEqual(len(test_db.get_learning_evidence(lid)), 3)
+
+    def test_deltas_with_hallucinated_id_are_skipped(self):
+        """An op referencing a non-existent learning is skipped, not allowed to abort the
+        whole transaction on the evidence FK. A valid add in the same batch still lands."""
+        test_db.apply_learning_deltas([
+            {"op": "reinforce", "id": 999, "evidence": ["2026-06-01"]},
+            {"op": "contradict", "id": 999, "evidence": ["2026-06-08"]},
+            {"op": "revise", "id": 999, "text": "ghost"},
+            {"op": "add", "text": "Real one", "evidence": ["2026-06-01"]},
+        ])
+        learnings = test_db.get_learnings()
+        self.assertEqual(len(learnings), 1)
+        self.assertEqual(learnings[0]["text"], "Real one")
+
+    def test_week_validation_drops_out_of_window(self):
+        # Only WEEKS[0] is in the analysed window; the other cited week is dropped.
+        test_db.apply_learning_deltas(
+            [{"op": "add", "text": "Windowed", "evidence": [self.WEEKS[0], self.WEEKS[4]]}],
+            available_weeks=[self.WEEKS[0]],
+        )
+        lid = test_db.get_learnings()[0]["id"]
+        basis = test_db.get_learning_evidence(lid)
+        self.assertEqual(len(basis), 1)
+        self.assertEqual(basis[0]["week_commencing"], "2026-05-04")  # Monday of WEEKS[0]
+
+    def test_contradiction_proposes_demotion_then_demote_keep(self):
+        # Reach established (5 supporting weeks).
+        test_db.apply_learning_deltas([
+            {"op": "add", "text": "Back-to-back hard days fine", "sports": "cycling",
+             "evidence": self.WEEKS},
+        ])
+        lid = test_db.get_learnings()[0]["id"]
+        self.assertEqual(test_db.get_learnings()[0]["confidence"], "established")
+
+        # Contradict in 3 distinct weeks -> net 2 -> derived tentative < established.
+        test_db.apply_learning_deltas([
+            {"op": "contradict", "id": lid,
+             "evidence": ["2026-06-15", "2026-06-22", "2026-06-29"]},
+        ])
+        learning = test_db.get_learnings()[0]
+        # Live confidence is NOT lowered; a downgrade is only proposed.
+        self.assertEqual(learning["confidence"], "established")
+        self.assertEqual(learning["proposed_confidence"], "tentative")
+
+        # keep() dismisses + neutralizes the -1 rows, restoring derived == stored.
+        test_db.keep_learning(lid)
+        learning = test_db.get_learnings()[0]
+        self.assertIsNone(learning["proposed_confidence"])
+        self.assertEqual(learning["confidence"], "established")
+        self.assertFalse(any(
+            e["polarity"] < 0 for e in test_db.get_learning_evidence(lid)
+        ))
+
+    def test_demote_applies_proposed_level(self):
+        test_db.apply_learning_deltas([
+            {"op": "add", "text": "X", "evidence": self.WEEKS},
+        ])
+        lid = test_db.get_learnings()[0]["id"]
+        test_db.apply_learning_deltas([
+            {"op": "contradict", "id": lid,
+             "evidence": ["2026-06-15", "2026-06-22", "2026-06-29"]},
+        ])
+        self.assertEqual(test_db.get_learnings()[0]["proposed_confidence"], "tentative")
+        result = test_db.demote_learning(lid)
+        self.assertEqual(result, "tentative")
+        learning = test_db.get_learnings()[0]
+        self.assertEqual(learning["confidence"], "tentative")
+        self.assertIsNone(learning["proposed_confidence"])
+
+    def test_reinforce_with_new_week_revives_dormant(self):
+        lid = test_db.add_learning("Tentative observation")  # 21-day budget
         old = (datetime.now(timezone.utc) - timedelta(days=30)).isoformat()
         with test_db._get_connection() as conn:
             conn.execute(
@@ -203,51 +295,59 @@ class TestDatabase(unittest.TestCase):
             )
         self.assertTrue(test_db.get_learnings()[0]["dormant"])
 
-        # Reinforcing refreshes recency and revives it.
-        test_db.apply_learning_deltas([{"op": "reinforce", "id": lid}])
-        revived = test_db.get_learnings()[0]
-        self.assertFalse(revived["dormant"])
+        # A genuinely new supporting week refreshes recency and revives it.
+        test_db.apply_learning_deltas([
+            {"op": "reinforce", "id": lid, "evidence": ["2026-06-01"]},
+        ])
+        self.assertFalse(test_db.get_learnings()[0]["dormant"])
 
-    def test_reinforcement_suppressed_on_unchanged_evidence(self):
-        """The integrity invariant (DESIGN_backward_evaluation.md §8): on unchanged
-        evidence, `reinforce` is a no-op and `revise` keeps content but not recency, while
-        `add`/`retire` still apply."""
-        lid = test_db.add_learning("Tentative observation")  # 21-day budget
-        # Make it dormant so a (suppressed) reinforce would visibly revive it if applied.
-        old = (datetime.now(timezone.utc) - timedelta(days=30)).isoformat()
+    def test_staleness_proposes_and_auto_applies(self):
+        lid = test_db.add_learning("Aging note", confidence="moderate")  # 60-day budget
+        old = (datetime.now(timezone.utc) - timedelta(days=90)).isoformat()
         with test_db._get_connection() as conn:
             conn.execute(
                 "UPDATE coach_learnings SET last_reinforced_at=? WHERE id=?", (old, lid)
             )
-
-        # reinforce is dropped -> still dormant, recency unchanged.
-        test_db.apply_learning_deltas(
-            [{"op": "reinforce", "id": lid}], suppress_reinforcement=True
-        )
+        # Interactive sweep: proposes one level down, leaves live level intact.
+        test_db.derive_staleness_proposals(auto=False)
         learning = test_db.get_learnings()[0]
-        self.assertTrue(learning["dormant"])
-        self.assertEqual(learning["last_reinforced_at"], old)
+        self.assertEqual(learning["confidence"], "moderate")
+        self.assertEqual(learning["proposed_confidence"], "tentative")
 
-        # revise applies the text edit but does NOT refresh recency (still dormant).
-        test_db.apply_learning_deltas(
-            [{"op": "revise", "id": lid, "text": "Reworded observation"}],
-            suppress_reinforcement=True,
-        )
-        learning = test_db.get_learnings()[0]
-        self.assertEqual(learning["text"], "Reworded observation")
-        self.assertEqual(learning["last_reinforced_at"], old)
-        self.assertTrue(learning["dormant"])
+        # Auto sweep would have applied it directly; verify on a fresh aged learning.
+        lid2 = test_db.add_learning("Another aging note", confidence="moderate")
+        with test_db._get_connection() as conn:
+            conn.execute(
+                "UPDATE coach_learnings SET last_reinforced_at=? WHERE id=?", (old, lid2)
+            )
+        test_db.derive_staleness_proposals(auto=True)
+        l2 = next(l for l in test_db.get_learnings() if l["id"] == lid2)
+        self.assertEqual(l2["confidence"], "tentative")
+        self.assertIsNone(l2["proposed_confidence"])
 
-        # add and retire are unaffected by suppression.
-        test_db.apply_learning_deltas(
-            [{"op": "add", "text": "Newly surfaced"}], suppress_reinforcement=True
-        )
-        texts = {l["text"] for l in test_db.get_learnings()}
-        self.assertIn("Newly surfaced", texts)
-        test_db.apply_learning_deltas(
-            [{"op": "retire", "id": lid}], suppress_reinforcement=True
-        )
-        self.assertNotIn(lid, {l["id"] for l in test_db.get_learnings()})
+    def test_grandfather_seeds_basis_to_sustain_level(self):
+        """A learning predating the evidence model keeps its level after recompute, because
+        the migration seeds a synthetic supporting basis sized to sustain it (§9)."""
+        # Simulate a pre-evidence row: insert directly with no basis, then run the migration.
+        now = datetime.now(timezone.utc).isoformat()
+        with test_db._get_connection() as conn:
+            conn.execute(
+                "INSERT INTO coach_learnings (text, sports, confidence, created_at, "
+                "updated_at, last_reinforced_at) VALUES "
+                "('Legacy established', 'general', 'established', ?, ?, ?)",
+                (now, now, now)
+            )
+            lid = conn.execute(
+                "SELECT id FROM coach_learnings WHERE text='Legacy established'"
+            ).fetchone()[0]
+        test_db._grandfather_learning_evidence()
+        # 5 distinct synthetic supporting weeks -> recompute keeps 'established'.
+        basis = test_db.get_learning_evidence(lid)
+        self.assertEqual(len({e["week_commencing"] for e in basis}), 5)
+        test_db.recompute_all_confidence()
+        learning = next(l for l in test_db.get_learnings() if l["id"] == lid)
+        self.assertEqual(learning["confidence"], "established")
+        self.assertIsNone(learning["proposed_confidence"])
 
     def test_analysis_cache_upsert_and_retention(self):
         """One row per horizon; saving again overwrites the slot. `reconstruction`

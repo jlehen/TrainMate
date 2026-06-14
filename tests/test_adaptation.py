@@ -108,26 +108,28 @@ class TestAdaptation(unittest.TestCase):
             self.assertIn("duration mismatch", prompt_user_content)
 
     @patch("trainmate.coach.engine.openrouter_client")
-    def test_adapt_records_learning_updates(self, mock_client):
+    def test_adapt_is_read_only_for_learnings(self, mock_client):
+        """Daily adaptation consumes coach learnings as context but authors none — durable,
+        evidence-backed observations are written only by the weekly history analysis
+        (DESIGN_evidence_based_confidence.md §2/§11)."""
         test_profile = {"lthr": 165, "max_hr": 185}
         with patch.dict(trainmate.coach.config.data, {
             "user_profile": test_profile,
             "metrics_lookback_days": 3,
             "low_load_threshold": 10.0,
         }):
-            # Pre-existing observation the model can reinforce by [id].
+            # Pre-existing observation shown to the model as context.
             lid = test_db.add_learning(
                 "Elevated RHR after consecutive hard days", sports="running"
             )
 
+            # Even if the model returns learning_updates, adapt must ignore them.
             mock_client.complete.return_value = {
                 "change_needed": False,
                 "reason": "On track.",
                 "adapted_workouts": [],
                 "learning_updates": [
-                    {"op": "reinforce", "id": lid, "confidence": "moderate"},
-                    {"op": "add", "text": "Sleep score dips precede HRV suppression",
-                     "sports": "general", "confidence": "tentative"},
+                    {"op": "add", "text": "Should NOT be saved by adapt"},
                 ],
             }
 
@@ -138,20 +140,14 @@ class TestAdaptation(unittest.TestCase):
             self.assertEqual(reason, "On track.")
             self.assertEqual(proposed, [])
 
-            # The adapt prompt offers the learning_updates schema and shows the
-            # existing observation by id (so it can reinforce instead of duplicating).
+            # The adapt prompt still surfaces the existing observation by id as context.
             system_prompt = mock_client.complete.call_args[0][0]
-            self.assertIn("learning_updates", system_prompt)
             self.assertIn(f"[{lid}|running|", system_prompt)
 
-            # Deltas were applied: existing reinforced to 'moderate', new one added.
+            # No learnings were written: only the pre-existing one remains.
             learnings = {l["id"]: l for l in test_db.get_learnings()}
-            self.assertEqual(len(learnings), 2)
-            self.assertEqual(learnings[lid]["confidence"], "moderate")
-            self.assertTrue(any(
-                l["text"] == "Sleep score dips precede HRV suppression"
-                for l in learnings.values()
-            ))
+            self.assertEqual(len(learnings), 1)
+            self.assertIn(lid, learnings)
 
     def _swap_ops_for_dates(self, date1, date2):
         """Builds swap ops the way the CLI does: exchange all workouts on two dates."""

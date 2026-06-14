@@ -132,6 +132,30 @@ class TestWorkoutAnalysis(unittest.TestCase):
         self.assertIn("FTP Race Test", user_payload)
         self.assertIn("avg_hrv\": 75.0", user_payload)
 
+    @patch("trainmate.coach.engine.openrouter_client")
+    def test_bootstrap_derives_confidence_and_validates_weeks(self, mock_client):
+        """The analysis flow passes the window's weeks to the merge layer: an observation
+        cited across enough distinct in-window weeks is derived 'established', while a cited
+        week outside the analysed window is dropped (DESIGN_evidence_based_confidence.md §6)."""
+        # Window spans five Mondays: 2026-05-04 .. 2026-06-01 inclusive.
+        in_window = ["2026-05-04", "2026-05-11", "2026-05-18", "2026-05-25", "2026-06-01"]
+        mock_client.complete.return_value = {
+            "macrocycle_summary": "s",
+            "learning_updates": [
+                {"op": "add", "text": "Strong aerobic base",
+                 "evidence": in_window + ["2026-09-07"]},  # last week is outside the window
+            ],
+        }
+        coach_service.bootstrap_workouts(
+            from_date_str="2026-05-04", until_date_str="2026-06-07"
+        )
+        learning = test_db.get_learnings()[0]
+        # Five in-window weeks -> established; the out-of-window week was dropped.
+        self.assertEqual(learning["confidence"], "established")
+        basis = test_db.get_learning_evidence(learning["id"])
+        self.assertEqual(len(basis), 5)
+        self.assertNotIn("2026-09-07", {e["week_commencing"] for e in basis})
+
     def _seed_activity(self):
         test_db.save_completed_activity(
             activity_id="a1", date="2026-06-03", start_time="08:00:00",
@@ -160,30 +184,41 @@ class TestWorkoutAnalysis(unittest.TestCase):
         self.assertEqual(reused["macrocycle_summary"], "summary")
 
     @patch("trainmate.coach.engine.openrouter_client")
-    def test_force_recomputes_and_suppresses_reinforcement(self, mock_client):
-        """--force recomputes over unchanged evidence but must NOT re-ratchet recency
-        (the integrity invariant survives force; §8, §9)."""
-        lid = test_db.add_learning("Observation")
-        self._seed_activity()
+    def test_force_recompute_cannot_inflate_via_evidence_dedup(self, mock_client):
+        """--force recomputes over unchanged evidence, but re-citing an already-counted week
+        is a structural no-op: confidence is not ratcheted and recency is not refreshed. The
+        per-learning basis owns this (the old suppress_reinforcement flag is gone; §6, §8)."""
+        self._seed_activity()  # activity in week commencing 2026-06-01
         mock_client.complete.return_value = {
             "macrocycle_summary": "s",
-            "learning_updates": [{"op": "reinforce", "id": lid}],
+            "learning_updates": [
+                {"op": "add", "text": "Observation", "evidence": ["2026-06-01"]}
+            ],
         }
         coach_service.bootstrap_workouts(
             from_date_str="2026-06-01", until_date_str="2026-06-07"
         )
-        # Backdate recency; a forced re-run over unchanged evidence must leave it as-is.
+        lid = test_db.get_learnings()[0]["id"]
+        # Backdate recency; a forced re-run re-citing the SAME week must leave it untouched.
         sentinel = "2000-01-01T00:00:00+00:00"
         with test_db._get_connection() as conn:
             conn.execute(
                 "UPDATE coach_learnings SET last_reinforced_at=? WHERE id=?",
                 (sentinel, lid),
             )
+        mock_client.complete.return_value = {
+            "macrocycle_summary": "s",
+            "learning_updates": [
+                {"op": "reinforce", "id": lid, "evidence": ["2026-06-01"]}
+            ],
+        }
         coach_service.bootstrap_workouts(
             from_date_str="2026-06-01", until_date_str="2026-06-07", force=True
         )
         self.assertEqual(mock_client.complete.call_count, 2)  # force recomputed
-        self.assertEqual(test_db.get_learnings()[0]["last_reinforced_at"], sentinel)
+        learning = test_db.get_learnings()[0]
+        self.assertEqual(learning["last_reinforced_at"], sentinel)  # no new week -> no refresh
+        self.assertEqual(learning["confidence"], "tentative")        # still one week
 
     @patch("trainmate.coach.engine.openrouter_client")
     def test_inspect_only_writes_nothing(self, mock_client):
