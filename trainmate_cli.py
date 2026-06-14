@@ -99,6 +99,13 @@ def main() -> None:
         help="Skip pull check from Garmin, reading purely from SQLite cache"
     )
 
+    # Common parser for debugging LLM prompts
+    llm_debug_parser = argparse.ArgumentParser(add_help=False)
+    llm_debug_parser.add_argument(
+        "--show-llm-prompt-only", action="store_true", dest="show_llm_prompt_only",
+        help="Print the prompt that would be sent to the LLM and exit without sending"
+    )
+
     # Basic date parser containing base date-filtering options
     basic_date_parser = argparse.ArgumentParser(add_help=False)
     basic_date_parser.add_argument(
@@ -284,7 +291,7 @@ def main() -> None:
     # plan generate
     p_gen = plan_subparsers.add_parser(
         "generate", aliases=["g"],
-        parents=[pull_bypass_parser],
+        parents=[pull_bypass_parser, llm_debug_parser],
         help=(
             "Generate or adapt the periodized training plan strategy "
             "(macrocycles & mesocycles)"
@@ -401,7 +408,7 @@ def main() -> None:
     # workout generate
     p_w_gen = workout_subparsers.add_parser(
         "generate", aliases=["g"],
-        parents=[pull_bypass_parser],
+        parents=[pull_bypass_parser, llm_debug_parser],
         help="Generate workouts (microcycles) based on the active strategy",
         description=(
             "Generate workouts (microcycles) from today, driven by the active "
@@ -456,7 +463,7 @@ def main() -> None:
     # workout adapt
     w_adapt = workout_subparsers.add_parser(
         "adapt", aliases=["a"],
-        parents=[pull_bypass_parser],
+        parents=[pull_bypass_parser, llm_debug_parser],
         help="Run the daily Garmin check for today (syncs adapted workouts to Calendar)",
         description=(
             "Run the daily adaptation check: read recent recovery metrics and let the "
@@ -491,6 +498,7 @@ def main() -> None:
     # workout swap
     w_swap = workout_subparsers.add_parser(
         "swap", aliases=["s"],
+        parents=[llm_debug_parser],
         help="Swap workouts between two dates (or two IDs), with recovery checks",
         description=(
             "Swap two workouts, given either two dates (date1 date2) or two IDs "
@@ -584,7 +592,7 @@ def main() -> None:
     # data bootstrap — cold-start backward reconstruction over the full backlog
     d_boot = data_subparsers.add_parser(
         "bootstrap", aliases=["b"],
-        parents=[pull_bypass_parser, basic_date_parser],
+        parents=[pull_bypass_parser, basic_date_parser, llm_debug_parser],
         help="Reconstruct macro/mesocycles from your full training backlog (run once)",
         description=(
             "Cold-start: reverse-engineer past training cycles from completed workouts "
@@ -599,7 +607,7 @@ def main() -> None:
     # data reflect — incremental reflection over evidence since the last reflect
     d_reflect = data_subparsers.add_parser(
         "reflect", aliases=["r"],
-        parents=[pull_bypass_parser, basic_date_parser],
+        parents=[pull_bypass_parser, basic_date_parser, llm_debug_parser],
         help="Reflect on how the athlete responded to training since the last reflect",
         description=(
             "Incremental: analyze only evidence accrued since the last reflect watermark "
@@ -699,6 +707,10 @@ def main() -> None:
     # Parse the arguments
     args = parser.parse_args()
     
+    if getattr(args, "show_llm_prompt_only", False):
+        from trainmate.openrouter import openrouter_client
+        openrouter_client.show_prompt_only = True
+
     if not args.command:
         parser.print_help()
         sys.exit(1)

@@ -132,6 +132,14 @@ class OpenRouterClient:
             {"role": "user", "content": user_content}
         ]
 
+        if getattr(self, "show_prompt_only", False):
+            import sys
+            print("=== SYSTEM PROMPT ===")
+            print(system_content)
+            print("\n=== USER PROMPT ===")
+            print(user_content)
+            sys.exit(0)
+
         payload = {
             "model": self.model,
             "messages": messages,
