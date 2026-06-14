@@ -66,8 +66,9 @@ class TestWorkoutAnalysis(unittest.TestCase):
         summaries = mock_client.complete.call_args[0][1]
         self.assertIn("2026-06-01", summaries) # Monday of that week is 2026-06-01 (Tuesday 2026-06-02 is in it)
 
+    @patch("builtins.input", return_value="y")
     @patch("trainmate.coach.engine.openrouter_client")
-    def test_date_resolution_relative_days_and_weeks(self, mock_client):
+    def test_date_resolution_relative_days_and_weeks(self, mock_client, _mock_input):
         mock_client.complete.return_value = {
             "macrocycle_summary": "Analysis summary"
         }
@@ -164,10 +165,12 @@ class TestWorkoutAnalysis(unittest.TestCase):
             avg_hr=130, max_hr=150, rpe=5, tss=60.0,
         )
 
+    @patch("builtins.input", return_value="y")
     @patch("trainmate.coach.engine.openrouter_client")
-    def test_reuse_skips_llm_when_evidence_unchanged(self, mock_client):
+    def test_reuse_skips_llm_when_evidence_unchanged(self, mock_client, _mock_input):
         """A second bootstrap over unchanged evidence reuses the cached reconstruction
-        instead of calling the LLM again (DESIGN_backward_evaluation.md §5)."""
+        instead of calling the LLM again (DESIGN_backward_evaluation.md §5). The repeat
+        prompts (bootstrap already ran); confirming proceeds into the reuse path."""
         self._seed_activity()
         mock_client.complete.return_value = {
             "macrocycle_summary": "summary",
@@ -182,6 +185,46 @@ class TestWorkoutAnalysis(unittest.TestCase):
         )
         self.assertEqual(mock_client.complete.call_count, 1)
         self.assertEqual(reused["macrocycle_summary"], "summary")
+
+    @patch("builtins.input", return_value="n")
+    @patch("trainmate.coach.engine.openrouter_client")
+    def test_repeat_bootstrap_declined_is_a_noop(self, mock_client, _mock_input):
+        """A second bootstrap detects the prior run and prompts; declining skips entirely —
+        no extra LLM pass, no reflect-watermark reset."""
+        self._seed_activity()
+        mock_client.complete.return_value = {
+            "macrocycle_summary": "summary", "learning_updates": [],
+        }
+        coach_service.bootstrap_workouts(
+            from_date_str="2026-06-01", until_date_str="2026-06-07"
+        )
+        reflect_wm = test_db.get_sync_state("reflect")
+        result = coach_service.bootstrap_workouts(
+            from_date_str="2026-05-01", until_date_str="2026-05-07"
+        )
+        self.assertEqual(result, {})
+        self.assertEqual(mock_client.complete.call_count, 1)  # second run never reached the LLM
+        # The back-dated re-run did not rewind the reflect baseline.
+        self.assertEqual(test_db.get_sync_state("reflect"), reflect_wm)
+
+    @patch("builtins.input")
+    @patch("trainmate.coach.engine.openrouter_client")
+    def test_repeat_bootstrap_under_auto_skips_without_prompting(self, mock_client, mock_input):
+        """Under --auto (non-interactive) a repeat bootstrap skips silently rather than
+        blocking on a prompt that can never be answered."""
+        self._seed_activity()
+        mock_client.complete.return_value = {
+            "macrocycle_summary": "summary", "learning_updates": [],
+        }
+        coach_service.bootstrap_workouts(
+            from_date_str="2026-06-01", until_date_str="2026-06-07", auto=True
+        )
+        result = coach_service.bootstrap_workouts(
+            from_date_str="2026-06-01", until_date_str="2026-06-07", auto=True
+        )
+        self.assertEqual(result, {})
+        self.assertEqual(mock_client.complete.call_count, 1)
+        mock_input.assert_not_called()
 
     @patch("trainmate.coach.engine.openrouter_client")
     def test_force_recompute_cannot_inflate_via_evidence_dedup(self, mock_client):

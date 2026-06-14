@@ -1061,6 +1061,18 @@ class CoachService:
             return
         self._set_reflect_watermark(through_date)
 
+    def _record_bootstrap_run(self, through_date: str) -> None:
+        """Marks that a cold-start reconstruction has completed, under the 'bootstrap'
+        `sync_state` key. Distinct from the 'reflect' watermark (which `reflect` also
+        advances): this records specifically that `bootstrap` itself has run, so a repeat
+        invocation can detect it and avoid re-paying for the full reconstruction (and
+        rewinding the reflect baseline) by accident."""
+        self._db.set_sync_state(
+            through_date=through_date,
+            last_pull_utc=datetime.now(timezone.utc).isoformat(),
+            key="bootstrap",
+        )
+
     def bootstrap_workouts(
         self, from_date_str: Optional[str] = None, until_date_str: Optional[str] = None,
         days: Optional[int] = None, weeks: Optional[int] = None,
@@ -1077,6 +1089,10 @@ class CoachService:
         Establishes the reflect watermark at the window end, so subsequent `reflect` runs
         only ingest evidence newer than this — preventing the same backlog from being
         re-counted (and confidence ratcheted to 'established') on every run.
+
+        Because this is a once-per-onboarding operation, a repeat invocation is detected
+        (via the 'bootstrap' `sync_state` key) and confirmed before re-running: `--force`
+        proceeds, `--auto` skips, and `--inspect-only` is read-only so it's never gated.
         """
         until_date = self._resolve_until(until_date_str)
 
@@ -1109,14 +1125,40 @@ class CoachService:
         if from_date > until_date:
             raise ValueError(f"Start date {from_date} is after end date {until_date}.")
 
+        # Bootstrap is a once-per-onboarding reconstruction. If it has already run, a
+        # repeat is almost always unintended: it re-pays for the full LLM pass and resets
+        # the reflect baseline (potentially rewinding it). Confirm before re-running —
+        # `--force` is the explicit "yes, redo it" signal; `--inspect-only` is read-only
+        # and harmless so it's never gated.
+        prior = self._db.get_sync_state("bootstrap")
+        if prior and not force and not inspect_only:
+            ran_on = (prior.get("last_pull_utc") or "")[:10] or "?"
+            print(
+                yellow(f"Bootstrap already ran on {ran_on} (through {prior.get('through_date')}). "
+                       "For incremental updates use ")
+                + green("'data reflect'") + yellow(" instead.")
+            )
+            if auto:
+                print(cyan("Skipping bootstrap (pass --force to re-run)."))
+                return {}
+            try:
+                ans = input("Re-run the full bootstrap anyway? [y/N]: ").strip().lower()
+            except EOFError:
+                ans = "n"
+            if ans not in ("y", "yes"):
+                print(cyan("Bootstrap skipped."))
+                return {}
+
         decision = self._run_workout_analysis(
             from_date, until_date, context=context, force=force,
             inspect_only=inspect_only, no_pull=no_pull, horizon="long",
             label="data_bootstrap",
         )
-        # Establish the reflect baseline (read-only inspect mode writes nothing).
+        # Establish the reflect baseline and record the bootstrap run (read-only inspect
+        # mode writes nothing).
         if not inspect_only:
             self._set_reflect_watermark(until_date.strftime("%Y-%m-%d"))
+            self._record_bootstrap_run(until_date.strftime("%Y-%m-%d"))
             self._review_learning_proposals(auto=auto)
         return decision
 
