@@ -665,7 +665,7 @@ patchable singletons; the handler functions, named
 |              |              |          | unless `--no-sync`. `--reason` is folded into the       |
 |              |              |          | `modification_reason` and shown to the coach.           |
 | `workout`    | `wipe`       | —        | Delete all workouts                                                      |
-| `data`       | `pull`       | `d pull` | Fetch metrics and activities directly from Garmin (`--days`/`--from`/`--until`/`--metrics-only`/`--activities-only`/`--sleep`). Defaults to the last 2 days ending today. |
+| `data`       | `pull`       | `d p`    | Fetch metrics and activities directly from Garmin (`--days`/`--from`/`--until`/`--metrics-only`/`--activities-only`/`--sleep`). Defaults to the last 2 days ending today. |
 | `data`       | `bootstrap`  | `d b`    | Cold-start reconstruction over the full backlog; seeds  |
 |              |              |          | evidence-based learnings, sets the reflect watermark    |
 |              |              |          | (`--from`, `--until`, `--days`, `--weeks`, `--context`, |

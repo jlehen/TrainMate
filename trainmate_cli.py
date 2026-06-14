@@ -546,6 +546,7 @@ def main() -> None:
     # data pull
     d_pull = data_subparsers.add_parser(
         "pull",
+        aliases=["p"],
         help="Fetch latest activities and metrics directly from Garmin Connect",
         description=(
             "Fetch activities and daily metrics directly from Garmin Connect into the "
@@ -766,7 +767,7 @@ def main() -> None:
             data_parser.print_help()
             sys.exit(1)
         sub = args.subcommand.lower()
-        if sub == "pull":
+        if sub in ("pull", "p"):
             run_data_pull(args)
         elif sub in ("bootstrap", "b"):
             run_data_bootstrap(args)
