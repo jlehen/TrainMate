@@ -219,7 +219,7 @@ called by the UIs.
 |                                                     | `CoachEngine._plan_generate_strategy()`, saves to DB.         |
 |                                                     | Auto-splits timelines > 24 weeks.                                   |
 | `workout_generate(objective_id, end_date)`         | Requires an existing macrocycle. Computes `num_days` from           |
-|                                                     | `end_date` (or `config.workout_generate_days` if omitted).          |
+|                                                     | `end_date` (or `config.workout_generation_span_days` if omitted).          |
 |                                                     | Fetches history, calls `CoachEngine._workout_generate_logic()`,    |
 |                                                     | saves workouts to DB.                                               |
 | `replan(force, objective_id)`                       | Convenience: calls `plan_generate` then               |
@@ -645,7 +645,7 @@ patchable singletons; the handler functions, named
 | `workout`    | `generate`   | `w g`    | Generate workouts from active strategy (`--goal ID`,                     |
 |              |              |          | `--days N`, `--weeks N`, `--until DATE`,                                 |
 |              |              |          | `--until-goal [ID]`, `--until-mesocycle ID`). With no                    |
-|              |              |          | horizon flag, generates `config.workout_generate_days`                   |
+|              |              |          | horizon flag, generates `config.workout_generation_span_days`                   |
 |              |              |          | ahead (28 default). Saves to DB only; run `push` after.                  |
 | `workout`    | `rm`         | `w r`    | Soft-remove workout by ID (`--reason TEXT` required);   |
 |              |              |          | marks `removed`, updates Calendar event to be marked    |
@@ -731,8 +731,8 @@ Required fields:
 | `service_account_file` | str  | Path to service account JSON (default:                        |
 |                        |      | `service_account.json`)                                       |
 | `metrics_lookback_days`  | int  | Rolling window for adaptation (default: 15)                  |
-| `workout_generate_days` | int  | Default horizon for `workout generate` (default: 28)         |
-| `low_load_threshold`    | float| Workload score below which an activity is "minor"            |
+| `workout_generation_span_days` | int  | Default horizon for `workout generate` (default: 28)         |
+| `minor_activity_load_threshold`    | float| Workload score below which an activity is "minor"            |
 |                         |      | (default: 25). Controls rest-day violations and unplanned    |
 |                         |      | activity visibility (shown as gray/minor if below threshold,  |
 |                         |      | yellow/unplanned if above). Mismatch tolerance for planned   |
@@ -773,7 +773,7 @@ Required fields:
 ### Workout Generation (`workout generate`)
 1. CLI resolves the generation horizon (end date) from flags in priority order:
    `--days` / `--weeks` → `--until DATE` → `--until-goal [ID]` →
-   `--until-mesocycle ID` → `config.workout_generate_days` (default 28).
+   `--until-mesocycle ID` → `config.workout_generation_span_days` (default 28).
 2. `CoachService.workout_generate(end_date=...)` verifies a macrocycle exists,
    computes `num_days` from `(end_date − today)`.
 3. Fetches metrics history (last `metrics_lookback_days` days) + baseline.
@@ -905,7 +905,7 @@ mesocycle-boundary crossings.
 
 Plan must be generated before workouts. Workouts cover a rolling window from
 today whose length is controlled by the horizon flags on `workout generate`
-(default: `workout_generate_days` in `config.yaml`, falling back to 28 days).
+(default: `workout_generation_span_days` in `config.yaml`, falling back to 28 days).
 `replan()` calls `plan_generate` then `workout_generate` in one
 step (always uses the config default).
 
@@ -978,7 +978,7 @@ stress, big meals — reach TrainMate through the **single existing Google
 Calendar**, not through app-specific features. A separate syncer (out of scope,
 mirroring `GarminScraper`) writes one all-day event per signal-day, tagged in
 `extendedProperties.private`: `source=trainmate-context` (the positive marker,
-configurable via `calendar_context_source`), `metric` (opaque category), and an optional
+configurable via `calendar_context_tag`), `metric` (opaque category), and an optional
 numeric `value`. Full spec: `DESIGN_calendar_context_ingest.md`.
 
 **Inbound flow:**

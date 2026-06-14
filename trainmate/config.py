@@ -22,35 +22,36 @@ class Config:
 
         Args:
             key: The configuration option name.
-            default: Fallback value if key is not found.
+            default: Fallback value if key is not found or is None.
 
         Returns:
             The configuration value.
         """
-        return self.data.get(key, default)
+        val = self.data.get(key)
+        return val if val is not None else default
 
     @property
     def openrouter_api_key(self) -> Optional[str]:
         """Gets OpenRouter API Key. Prefers env variable over config.json."""
         key = os.environ.get("OPENROUTER_API_KEY")
         if not key or key == "YOUR_OPENROUTER_API_KEY":
-            key = self.get("openrouter_api_key")
+            key = self.get("llm", {}).get("api_key")
         return key
 
     @property
     def google_calendar_id(self) -> Optional[str]:
         """Gets the target Google Calendar ID for training events."""
-        return self.get("google_calendar_id")
+        return self.get("google", {}).get("calendar_id")
 
     @property
     def openrouter_model(self) -> str:
         """Gets the OpenRouter model identifier, defaulting to gemini-3.5-flash."""
-        return self.get("openrouter_model", "google/gemini-3.5-flash")
+        return self.get("llm", {}).get("model", "google/gemini-3.5-flash")
 
     @property
     def service_account_file(self) -> str:
         """Gets the service account file path. Resolves relative path to absolute."""
-        path = self.get("service_account_file", "service_account.json")
+        path = self.get("google", {}).get("service_account_file", "service_account.json")
         if not os.path.isabs(path):
             path = os.path.join(os.path.dirname(os.path.dirname(__file__)), path)
         return path
@@ -89,17 +90,17 @@ class Config:
     @property
     def metrics_lookback_days(self) -> int:
         """Gets the number of days of metrics history to look at, defaulting to 15."""
-        return self.get("metrics_lookback_days", 15)
+        return self.get("coach", {}).get("metrics_lookback_days", 15)
 
     @property
     def goals_lookback_days(self) -> int:
         """Gets the number of days into the past to look for preceding goals, defaulting to 90."""
-        return self.get("goals_lookback_days", 90)
+        return self.get("coach", {}).get("goals_lookback_days", 90)
 
     @property
-    def workout_generate_days(self) -> int:
+    def workout_generation_span_days(self) -> int:
         """Gets the default number of days to generate workouts for, defaulting to 28."""
-        raw = self.get("workout_generate_days", 28)
+        raw = self.get("coach", {}).get("workout_generation_span_days", 28)
         return int(raw)
 
     @property
@@ -118,30 +119,30 @@ class Config:
         }
 
     @property
-    def low_load_threshold(self) -> float:
+    def minor_activity_load_threshold(self) -> float:
         """Gets the workload score below which an activity is considered minor (default 25).
 
         Used to: (1) widen mismatch tolerance to 50% for matched activities, and
         (2) display unplanned activities as '(minor)' rather than 'UNPLANNED'.
         """
-        return float(self.get("low_load_threshold", 25.0))
+        return float(self.get("coach", {}).get("minor_activity_load_threshold", 25.0))
 
     # --- Garmin direct-pull knobs (see DESIGN_garmin_direct_pull.md §13) ---
     @property
     def garmin_email(self) -> Optional[str]:
         """Garmin Connect login email. Read from config.yaml only — credentials are
         kept out of the environment (config.yaml is gitignored)."""
-        return self.get("garmin_email")
+        return self.get("garmin", {}).get("email")
 
     @property
     def garmin_password(self) -> Optional[str]:
         """Garmin Connect password. Read from config.yaml only (see garmin_email)."""
-        return self.get("garmin_password")
+        return self.get("garmin", {}).get("password")
 
     @property
-    def garmin_token_store(self) -> str:
+    def garmin_token_dir(self) -> str:
         """Directory where garminconnect persists OAuth tokens (default ~/.garminconnect)."""
-        path = self.get("garmin_token_store")
+        path = self.get("garmin", {}).get("token_dir")
         if not path:
             path = os.path.join(os.path.expanduser("~"), ".garminconnect")
         return os.path.expanduser(path)
@@ -149,43 +150,43 @@ class Config:
     @property
     def garmin_refresh_minutes(self) -> int:
         """Minimum minutes between automatic Garmin hits before a refresh re-pulls (default 120)."""
-        return int(self.get("garmin_refresh_minutes", 120))
+        return int(self.get("garmin", {}).get("refresh_minutes", 120))
 
     @property
     def garmin_mutable_days(self) -> int:
         """Trailing days a forward-refresh re-fetches for late-finalizing data (default 3)."""
-        return int(self.get("garmin_mutable_days", 3))
+        return int(self.get("garmin", {}).get("mutable_days", 3))
 
     @property
     def garmin_backfill_prompt_days(self) -> int:
         """Backward-gap size above which a backfill is surfaced as a command rather than
         run automatically; also gates interior gaps (default 30)."""
-        return int(self.get("garmin_backfill_prompt_days", 30))
+        return int(self.get("garmin", {}).get("backfill_prompt_days", 30))
 
     @property
     def garmin_initial_backfill_days(self) -> int:
         """Range used to build the cold-start backfill command (default 90)."""
-        return int(self.get("garmin_initial_backfill_days", 90))
+        return int(self.get("garmin", {}).get("initial_backfill_days", 90))
 
     @property
     def garmin_throttle_seconds(self) -> float:
         """Default sleep between Garmin API calls; --sleep overrides on `data pull` (default 0.2)."""
-        return float(self.get("garmin_throttle_seconds", 0.2))
+        return float(self.get("garmin", {}).get("throttle_seconds", 0.2))
 
     @property
-    def calendar_context_source(self) -> str:
+    def calendar_context_tag(self) -> str:
         """Gets the source tag for calendar events."""
-        return self.get("calendar_context_source", "trainmate-context")
+        return self.get("google", {}).get("calendar_context_tag", "trainmate-context")
 
     @property
     def high_intensity_rpe_threshold(self) -> int:
         """Gets the RPE threshold above which an activity is considered high intensity."""
-        return int(self.get("high_intensity_rpe_threshold", 8))
+        return int(self.get("coach", {}).get("high_intensity_rpe_threshold", 8))
 
     @property
     def high_intensity_tss_threshold(self) -> float:
         """Gets the TSS threshold above which an activity is considered high intensity."""
-        return float(self.get("high_intensity_tss_threshold", 120.0))
+        return float(self.get("coach", {}).get("high_intensity_tss_threshold", 120.0))
 
 # Singleton instance
 config = Config()

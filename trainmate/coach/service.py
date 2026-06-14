@@ -595,7 +595,7 @@ class CoachService:
             end_date_obj = datetime.strptime(end_date, "%Y-%m-%d").date()
             num_days = max(1, (end_date_obj - today_date_obj).days)
         else:
-            num_days = config.workout_generate_days
+            num_days = config.workout_generation_span_days
 
         lifeevents = self._db.get_lifeevents(start_after=today_str)
         guidelines = self._load_science_guidelines()
@@ -737,7 +737,7 @@ class CoachService:
             completed_activities=completed_activities,
             start_date_obj=start_date_obj,
             history_days=history_days,
-            low_load_threshold=config.low_load_threshold,
+            minor_activity_load_threshold=config.minor_activity_load_threshold,
             covered_ranges=covered_ranges,
         )
 

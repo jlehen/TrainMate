@@ -46,8 +46,10 @@ class TestAdaptation(unittest.TestCase):
 
         with patch.dict(trainmate.coach.config.data, {
             "user_profile": test_profile,
-            "metrics_lookback_days": 3,
-            "low_load_threshold": 10.0,
+            "coach": {
+                "metrics_lookback_days": 3,
+                "minor_activity_load_threshold": 10.0,
+            }
         }):
             mock_client.complete.return_value = {
                 "change_needed": True,
@@ -115,8 +117,10 @@ class TestAdaptation(unittest.TestCase):
         test_profile = {"lthr": 165, "max_hr": 185}
         with patch.dict(trainmate.coach.config.data, {
             "user_profile": test_profile,
-            "metrics_lookback_days": 3,
-            "low_load_threshold": 10.0,
+            "coach": {
+                "metrics_lookback_days": 3,
+                "minor_activity_load_threshold": 10.0,
+            }
         }):
             # Pre-existing observation shown to the model as context.
             lid = test_db.add_learning(
@@ -386,7 +390,7 @@ class TestAdaptation(unittest.TestCase):
             completed_activities=completed,
             start_date_obj=date(2026, 6, 1),
             history_days=4,
-            low_load_threshold=10.0,
+            minor_activity_load_threshold=10.0,
         )
 
         self.assertEqual(len(discrepancies), 4)
@@ -421,7 +425,7 @@ class TestAdaptation(unittest.TestCase):
             completed_activities=completed,
             start_date_obj=date(2026, 6, 1),
             history_days=7,
-            low_load_threshold=10.0,
+            minor_activity_load_threshold=10.0,
             covered_ranges=[("2026-06-01", "2026-06-30")],
         )
         self.assertTrue(any("Unplanned Activity! Performed 'Extra Run'" in d for d in disc))
@@ -433,7 +437,7 @@ class TestAdaptation(unittest.TestCase):
             completed_activities=completed,
             start_date_obj=date(2026, 6, 1),
             history_days=7,
-            low_load_threshold=10.0,
+            minor_activity_load_threshold=10.0,
             covered_ranges=[("2026-06-10", "2026-06-30")],
         )
         self.assertEqual(disc, [])
@@ -447,7 +451,7 @@ class TestAdaptation(unittest.TestCase):
             completed_activities=completed,
             start_date_obj=date(2026, 6, 1),
             history_days=7,
-            low_load_threshold=10.0,
+            minor_activity_load_threshold=10.0,
             covered_ranges=[],
         )
         self.assertEqual(disc, [])

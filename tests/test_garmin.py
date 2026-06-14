@@ -260,7 +260,7 @@ class TestEnsureData(unittest.TestCase):
         garmin.reset_memo()
         # Credentials come from config.yaml only; inject test creds into config.data.
         self.creds = patch.dict(
-            garmin.config.data, {"garmin_email": "a@b.c", "garmin_password": "pw"}
+            garmin.config.data, {"garmin": {"email": "a@b.c", "password": "pw"}}
         )
         self.creds.start()
 

@@ -47,7 +47,7 @@ def analyze_adherence(
     completed_activities: List[Dict[str, Any]],
     start_date_obj: Any,
     history_days: int,
-    low_load_threshold: float = 25.0,
+    minor_activity_load_threshold: float = 25.0,
     covered_ranges: Optional[List[Tuple[str, str]]] = None,
 ) -> Tuple[List[str], List[Dict[str, Any]], List[str]]:
     """Evaluates planned workouts vs completed Garmin activities over a rolling window.
@@ -106,7 +106,7 @@ def analyze_adherence(
                     if act["activity_id"] in used_act_ids:
                         continue
                     act_load = activity_load(act)
-                    if act_load < low_load_threshold:
+                    if act_load < minor_activity_load_threshold:
                         continue
                     matched_act = act
                     used_act_ids.add(act["activity_id"])
@@ -185,7 +185,7 @@ def analyze_adherence(
             if act["activity_id"] in used_act_ids:
                 continue
             act_load = activity_load(act)
-            if act_load < low_load_threshold:
+            if act_load < minor_activity_load_threshold:
                 continue
             if date_covered(date_curr, covered_ranges):
                 discrepancies.append(

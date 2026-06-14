@@ -464,7 +464,7 @@ def run_workout_compare(args: argparse.Namespace) -> None:
         completed_activities=activities,
         start_date_obj=start_date_obj,
         history_days=history_days,
-        low_load_threshold=config.low_load_threshold,
+        minor_activity_load_threshold=config.minor_activity_load_threshold,
         covered_ranges=covered_ranges,
     )
 
@@ -553,7 +553,7 @@ def run_workout_compare(args: argparse.Namespace) -> None:
         for act in unplanned:
             act_load = cli.garmin.activity_load(act)
             act_str = _fmt_act(act)
-            if act_load < config.low_load_threshold:
+            if act_load < config.minor_activity_load_threshold:
                 print(gray(f"  (minor):    {act_str}"))
             elif date_covered(date_curr, covered_ranges):
                 print(f"  UNPLANNED:  {yellow(act_str)}")

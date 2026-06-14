@@ -365,7 +365,7 @@ def _divergence_ratio(act: Dict[str, Any], duration_sec: float) -> Optional[floa
 
 
 def _divergence_threshold() -> float:
-    return float(config.data.get("rpe_divergence_ratio", RPE_DIVERGENCE_RATIO_DEFAULT))
+    return float(config.get("coach", {}).get("rpe_divergence_ratio", RPE_DIVERGENCE_RATIO_DEFAULT))
 
 
 def activity_load(act: Dict[str, Any]) -> float:
@@ -520,8 +520,8 @@ def pull(
     if throttle is None:
         throttle = config.garmin_throttle_seconds
 
-    client = GarminClient(config.garmin_email, config.garmin_password, config.garmin_token_store)
-    print(f"Logging into Garmin Connect (tokens: {config.garmin_token_store})...")
+    client = GarminClient(config.garmin_email, config.garmin_password, config.garmin_token_dir)
+    print(f"Logging into Garmin Connect (tokens: {config.garmin_token_dir})...")
     client.login()
 
     if activities:

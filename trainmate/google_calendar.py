@@ -246,7 +246,6 @@ class CalendarSyncer:
         while True:
             params: dict = {
                 'calendarId': self.calendar_id,
-                'privateExtendedProperty': f"source={config.calendar_context_source}",
                 'showDeleted': True,
                 'singleEvents': True,
                 'maxResults': 250,
@@ -255,6 +254,9 @@ class CalendarSyncer:
             # pageToken; reuse the *same* base params so the token stays valid.
             if use_token:
                 params['syncToken'] = use_token
+            else:
+                params['privateExtendedProperty'] = f"source={config.calendar_context_tag}"
+
             if page_token:
                 params['pageToken'] = page_token
             try:
@@ -296,7 +298,7 @@ class CalendarSyncer:
         private = (event.get('extendedProperties', {}) or {}).get('private', {}) or {}
         # The server-side filter should guarantee this, but a shared calendar or a
         # token stream can still surprise us — skip anything not actually ours.
-        if private.get('source') != config.calendar_context_source:
+        if private.get('source') != config.calendar_context_tag:
             return 0
 
         start = event.get('start', {}) or {}

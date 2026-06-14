@@ -112,6 +112,14 @@ class OpenRouterClient:
             ValueError: If the OpenRouter API Key is missing or response is empty.
             requests.exceptions.HTTPError: If HTTP error occurs during requests.
         """
+        if getattr(self, "show_prompt_only", False):
+            import sys
+            print("=== SYSTEM PROMPT ===")
+            print(system_content)
+            print("\n=== USER PROMPT ===")
+            print(user_content)
+            sys.exit(0)
+
         api_key = config.openrouter_api_key
         if not api_key:
             raise ValueError(
@@ -131,14 +139,6 @@ class OpenRouterClient:
             {"role": "system", "content": system_content},
             {"role": "user", "content": user_content}
         ]
-
-        if getattr(self, "show_prompt_only", False):
-            import sys
-            print("=== SYSTEM PROMPT ===")
-            print(system_content)
-            print("\n=== USER PROMPT ===")
-            print(user_content)
-            sys.exit(0)
 
         payload = {
             "model": self.model,

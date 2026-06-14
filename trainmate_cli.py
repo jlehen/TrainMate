@@ -413,7 +413,7 @@ def main() -> None:
         description=(
             "Generate workouts (microcycles) from today, driven by the active "
             "periodization strategy. With no horizon flag, generates "
-            "config.workout_generate_days days ahead (28 by default). Saves to the "
+            "config.workout_generation_span_days days ahead (28 by default). Saves to the "
             f"database only; run '{green('workout push')}' afterward to sync to Google Calendar."
         )
     )
