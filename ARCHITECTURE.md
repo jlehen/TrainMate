@@ -56,7 +56,8 @@ classes themselves.
 |                      | singletons/helpers the handlers reference via `import trainmate_cli  |
 |                      | as cli`, and a `__main__` alias. No business logic.                  |
 | `trainmate/cli/`     | Per-command-family handler modules (`run_*()`): `status`, `goals`,   |
-|                      | `lifeevents`, `plans`, `workouts`, `data`, plus shared `common`.     |
+|                      | `lifeevents`, `learnings`, `plans`, `workouts`, `data`, plus shared  |
+|                      | `common`.                                                            |
 | `trainmate_web.py`   | Flask REST API; thin handler functions calling `db`,                 |
 |                      | `coach_service`, `calendar_syncer` (pure reader — never pulls).      |
 
@@ -187,19 +188,26 @@ when a *new* supporting week lands (or on a staleness demotion).
 **Decay (soft) + staleness demotion:** a learning is *dormant* once unreinforced
 past its confidence budget (`db.LEARNING_STALENESS_DAYS`: tentative 21d / moderate
 60d / established 180d, via `db.learning_is_dormant()`). Dormant records stay in
-the DB, show in `status` (marked), and are **excluded from prompts**. Crossing the
+the DB, are listed by `learnings list` (marked), and are **excluded from prompts**. Crossing the
 budget also **proposes a one-level staleness demotion** (`derive_staleness_proposals`);
 accepting it re-arms the clock at the lower (shorter) budget, so an untouched
 learning walks established → moderate → tentative → retire over real time.
 
-**Propose / confirm flow (no extra CLI verbs):** pending downgrades
-(contradiction- or staleness-driven) are resolved **interactively** at the end of
-`data bootstrap`/`data reflect` — accept (`db.demote_learning`), keep
+**Propose / confirm flow:** pending downgrades (contradiction- or
+staleness-driven) are resolved **interactively** at the end of `data
+bootstrap`/`data reflect` — accept (`db.demote_learning`), keep
 (`db.keep_learning` — dismiss + affirm: drop the −1 rows for a contradiction, or
-refresh recency for staleness), or skip. `--auto` skips the prompts: staleness
-demotions apply directly; contradiction demotions stay queued for the next
-interactive review. `CoachService._get_learnings_text()` renders only active
-learnings as `[id|sports|confidence] text` into every using flow's prompt.
+refresh recency for staleness), or skip — or out of band via `learnings demote
+<id>` / `learnings keep <id>`. `--auto` skips the prompts: staleness demotions
+apply directly; contradiction demotions stay queued for the next interactive
+review. `CoachService._get_learnings_text()` renders only active learnings as
+`[id|sports|confidence] text` into every using flow's prompt.
+
+**Inspection / curation:** the `learnings` command family is the home for viewing
+and hand-curating records — `list` (filters: `--sport`/`--confidence`/`--dormant`),
+`show <id>` (full text + per-week evidence basis), `edit`, `rm`, `demote`, `keep`,
+`wipe`. `status` carries only a one-line summary (`N active, M dormant, K pending
+demotion`) pointing at `learnings list`.
 
 **Cold-start nudge:** when there are no active learnings, `plan generate` and
 `status` suggest running `data bootstrap` (the only flow that authors learnings).
@@ -315,7 +323,7 @@ clears `analysis_cache`, which is evidence-derived)
 basis sustaining the level), `update_learning(id, text)`, `delete_learning(id)`,
 `apply_learning_deltas(deltas, available_weeks=None, source='reflect')`,
 `recompute_all_confidence()`, `derive_staleness_proposals(auto=False)`,
-`demote_learning(id)`, `keep_learning(id)`. Discrete, addressable
+`demote_learning(id)`, `keep_learning(id)`, `wipe_learnings()`. Discrete, addressable
 athlete-observation records (table `coach_learnings`) whose confidence is
 **app-computed** from a per-learning evidence basis (`learning_evidence`);
 updated incrementally via LLM deltas

@@ -150,41 +150,24 @@ def run_status(verbose: bool = False, no_pull: bool = False) -> None:
             + yellow(" first.")
         )
 
-    # Coach Learnings
+    # Coach Learnings — one-line summary; the full list lives under 'learnings list'.
     learnings = cli.db.get_learnings()
     print(bold("\nCoach Learnings:"))
     if learnings:
-        print("- Learnings:")
-        for l in learnings:
-            sports_str = l.get('sports') or 'general'
-            conf_str = l.get('confidence') or 'tentative'
-            
-            if l.get("dormant"):
-                # Decayed: kept on record but no longer fed to the coach until reaffirmed.
-                tag = f"  [{l['id']}|{sports_str}|{conf_str}]"
-                print(format_labeled_block(gray(tag), gray(f"{l['text']} (dormant)")))
-            else:
-                if conf_str == 'established':
-                    conf_disp = green(conf_str)
-                elif conf_str == 'moderate':
-                    conf_disp = yellow(conf_str)
-                else:
-                    conf_disp = gray(conf_str)
-                tag = f"  [{cyan(str(l['id']))}|{magenta(sports_str)}|{conf_disp}]"
-                print(format_labeled_block(tag, l['text']))
-                
-            # Pending, human-confirmable confidence downgrade (resolved interactively by
-            # the next 'data reflect'/'data bootstrap' run).
-            proposed = l.get("proposed_confidence")
-            if proposed:
-                target = "retire" if proposed == "retire" else proposed
-                print(yellow(f"     ⚠ proposed demotion → {target} "
-                             "(confirm on the next 'data reflect')"))
+        active = [l for l in learnings if not l.get("dormant")]
+        dormant = len(learnings) - len(active)
+        proposed = sum(1 for l in learnings if l.get("proposed_confidence"))
+        summary = f"  {len(active)} active"
+        if dormant:
+            summary += gray(f", {dormant} dormant")
+        if proposed:
+            summary += yellow(f", {proposed} pending demotion")
+        summary += green(" — see 'learnings list'")
+        print(summary)
     else:
-        print(format_labeled_block("- Learnings:", "None yet"))
         print(
-            yellow("  Run ") + green("'data bootstrap'")
-            + yellow(" to reconstruct your training history and seed observations.")
+            gray("  None yet. Run ") + green("'data bootstrap'")
+            + gray(" to reconstruct your training history and seed observations.")
         )
 
     if verbose:

@@ -69,6 +69,10 @@ from trainmate.cli.lifeevents import (
     run_lifeevent_add, run_lifeevent_edit, run_lifeevent_list,
     run_lifeevent_show, run_lifeevent_rm, run_lifeevent_wipe,
 )
+from trainmate.cli.learnings import (
+    run_learning_list, run_learning_show, run_learning_edit, run_learning_rm,
+    run_learning_demote, run_learning_keep, run_learning_wipe,
+)
 from trainmate.cli.plans import (
     run_plan_generate, run_plan_show, run_plan_rm, run_plan_feedback, run_plan_wipe,
 )
@@ -277,7 +281,63 @@ def main() -> None:
     # lifeevent wipe
     le_wipe = lifeevent_subparsers.add_parser("wipe", help="Wipe all life events")
     le_wipe.add_argument("-y", "--yes", action="store_true", help="Skip confirmation prompt")
-    
+
+    # learnings command & subparsers
+    learnings_parser = subparsers.add_parser(
+        "learnings",
+        aliases=["l", "learn"],
+        help="View and curate coach learnings (LLM observations from your history)"
+    )
+    learnings_subparsers = learnings_parser.add_subparsers(
+        dest="subcommand", help="Learnings sub-commands"
+    )
+
+    # learnings list
+    ln_list = learnings_subparsers.add_parser(
+        "list", aliases=["l"], help="Show coach learnings"
+    )
+    ln_list.add_argument(
+        "--dormant", action="store_true", help="Show only dormant (decayed) learnings"
+    )
+    ln_list.add_argument("--sport", help="Filter by sport (substring match)")
+    ln_list.add_argument(
+        "--confidence", choices=["tentative", "moderate", "established"],
+        help="Filter by confidence level"
+    )
+
+    # learnings show
+    ln_show = learnings_subparsers.add_parser(
+        "show", aliases=["s"], help="Show a learning and its evidence basis by ID"
+    )
+    ln_show.add_argument("id", type=int, help="Learning ID to display")
+
+    # learnings edit
+    ln_edit = learnings_subparsers.add_parser(
+        "edit", aliases=["e"], help="Revise the text of a learning"
+    )
+    ln_edit.add_argument("id", type=int, help="Learning ID to edit")
+    ln_edit.add_argument("--text", required=True, help="New learning text")
+
+    # learnings rm
+    ln_rm = learnings_subparsers.add_parser("rm", aliases=["r"], help="Remove a learning by ID")
+    ln_rm.add_argument("id", type=int, help="Learning ID to remove")
+
+    # learnings demote
+    ln_demote = learnings_subparsers.add_parser(
+        "demote", aliases=["d"], help="Accept a pending confidence demotion"
+    )
+    ln_demote.add_argument("id", type=int, help="Learning ID to demote")
+
+    # learnings keep
+    ln_keep = learnings_subparsers.add_parser(
+        "keep", aliases=["k"], help="Dismiss a pending demotion (affirms the learning)"
+    )
+    ln_keep.add_argument("id", type=int, help="Learning ID to keep")
+
+    # learnings wipe
+    ln_wipe = learnings_subparsers.add_parser("wipe", help="Wipe all coach learnings")
+    ln_wipe.add_argument("-y", "--yes", action="store_true", help="Skip confirmation prompt")
+
     # plan command & subparsers
     plan_parser = subparsers.add_parser(
         "plan",
@@ -751,6 +811,25 @@ def main() -> None:
             run_lifeevent_show(args)
         elif sub == "wipe":
             run_lifeevent_wipe(args)
+    elif cmd in ("learnings", "learn", "l"):
+        if not args.subcommand:
+            learnings_parser.print_help()
+            sys.exit(1)
+        sub = args.subcommand.lower()
+        if sub in ("list", "l"):
+            run_learning_list(args)
+        elif sub in ("show", "s"):
+            run_learning_show(args)
+        elif sub in ("edit", "e"):
+            run_learning_edit(args)
+        elif sub in ("rm", "r"):
+            run_learning_rm(args)
+        elif sub in ("demote", "d"):
+            run_learning_demote(args)
+        elif sub in ("keep", "k"):
+            run_learning_keep(args)
+        elif sub == "wipe":
+            run_learning_wipe(args)
     elif cmd in ("workout", "w"):
         if not args.subcommand:
             workout_parser.print_help()

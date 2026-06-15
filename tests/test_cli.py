@@ -401,7 +401,17 @@ class TestTrainMateCLI(unittest.TestCase):
         self.assertIn("Overnight HRV: 82 ms", stdout)
         self.assertIn("ACWR       : 1.14", stdout)
         self.assertIn("Baselines (28-day)", stdout)
-        self.assertIn(f"[{learning_id}|general|tentative]\n    Rest well on Fridays", stdout)
+        # Status shows only a one-line learnings summary; the full text lives under 'learnings'.
+        self.assertIn("Coach Learnings:", stdout)
+        self.assertIn("1 active", stdout)
+        self.assertIn("see 'learnings list'", stdout)
+        self.assertNotIn("Rest well on Fridays", stdout)
+
+        # The full text is reachable via the dedicated 'learnings' command.
+        exit_code, ln_stdout, _ = self.run_cli(["learnings", "list"])
+        self.assertEqual(exit_code, 0)
+        self.assertIn(f"[{learning_id}|general|tentative]", ln_stdout)
+        self.assertIn("Rest well on Fridays", ln_stdout)
 
         test_db.add_lifeevent(
             title="Ibiza Trip", start_date="2026-07-01", end_date="2026-07-08",
