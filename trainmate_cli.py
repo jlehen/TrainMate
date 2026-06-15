@@ -653,29 +653,36 @@ def main() -> None:
     d_boot = data_subparsers.add_parser(
         "bootstrap", aliases=["b"],
         parents=[pull_bypass_parser, basic_date_parser, llm_debug_parser],
-        help="Reconstruct macro/mesocycles from your full training backlog (run once)",
+        help="Reconstruct macro/mesocycles from your full backlog (run once): "
+             "seeds coach learnings + a cached reconstruction fed to 'plan generate'",
         description=(
             "Cold-start: reverse-engineer past training cycles from completed workouts "
-            "and metrics, seeding initial coach learnings. With no date filter, the "
-            "window is auto-detected from the active goal (since the previous goal, else "
-            "12 weeks back). Establishes the reflect watermark so later 'data reflect' "
-            "runs only ingest newer evidence. Cached by evidence fingerprint: an "
-            "unchanged re-run reuses the cache unless --force; --inspect-only renders the "
-            "analysis without writing learnings or the cache."
+            "and metrics. With no date filter, the window is auto-detected from the active "
+            "goal (since the previous goal, else 12 weeks back). Two outputs: (1) coach "
+            "learnings, delta-updated from the evidence; and (2) a cached reconstruction — "
+            "the inferred macro focus, mesocycle blocks, and physiological insights — which "
+            "'plan generate' replays read-only into its strategy prompt so the next plan "
+            "builds on your demonstrated training arc. Also establishes the reflect "
+            "watermark so later 'data reflect' runs only ingest newer evidence. Cached by "
+            "evidence fingerprint: an unchanged re-run reuses the cache unless --force; "
+            "--inspect-only renders the analysis without writing learnings or the cache."
         )
     )
     # data reflect — incremental reflection over evidence since the last reflect
     d_reflect = data_subparsers.add_parser(
         "reflect", aliases=["r"],
         parents=[pull_bypass_parser, basic_date_parser, llm_debug_parser],
-        help="Reflect on how the athlete responded to training since the last reflect",
+        help="Update coach learnings from how the athlete responded to training "
+             "since the last reflect (incremental; no reconstruction)",
         description=(
             "Incremental: analyze only evidence accrued since the last reflect watermark "
-            "(the day after the last reflected-through date), updating coach learnings. A "
-            "date filter overrides the watermark. Because overlapping history is never "
-            "re-counted, repeated runs no longer ratchet confidence to 'established'. Run "
-            "'data bootstrap' first to establish a baseline. --inspect-only renders "
-            "without writing; --force bypasses the per-window cache."
+            "(the day after the last reflected-through date). Its output is coach learnings "
+            "— delta-updated from the new evidence; unlike 'data bootstrap' it does not "
+            "feed a reconstruction to 'plan generate'. A date filter overrides the "
+            "watermark. Because overlapping history is never re-counted, repeated runs no "
+            "longer ratchet confidence to 'established'. Run 'data bootstrap' first to "
+            "establish a baseline. --inspect-only renders without writing; --force bypasses "
+            "the per-window cache."
         )
     )
     for d_an in (d_boot, d_reflect):

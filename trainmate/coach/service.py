@@ -110,8 +110,9 @@ class CoachService:
         focus is shown beside what the athlete actually did in that window (sessions,
         volume, TSS, zone split) so the model can judge whether the block's intent
         materialized. If a cached backward-evaluation reconstruction exists (from `data
-        bootstrap`), its summary + physiological insights are appended — reused without
-        another LLM call (§10). Returns None if there is nothing to report.
+        bootstrap`), its summary, reverse-engineered macro/mesocycle structure, and
+        physiological insights are appended — reused without another LLM call (§10).
+        Returns None if there is nothing to report.
 
         This does NOT write to any `feedback` field: under Option A the assessment is
         prompt context only, sidestepping the feedback-lifecycle collision (§11).
@@ -181,6 +182,30 @@ class CoachService:
             recon_lines = []
             if recon.get("macrocycle_summary"):
                 recon_lines.append(f"Summary: {recon['macrocycle_summary']}")
+            # Reverse-engineered periodization structure: the overall focus and the
+            # mesocycle blocks the athlete actually moved through. Fed so the new plan can
+            # build on the real prior arc (where base/build/recovery fell, how consistent
+            # each block was) rather than re-deriving it (DESIGN_backward_evaluation.md §10).
+            im = recon.get("inferred_macrocycle") or {}
+            if im.get("overall_focus"):
+                span = ""
+                if im.get("start_date") and im.get("end_date"):
+                    span = f" ({im['start_date']}..{im['end_date']})"
+                recon_lines.append(f"Reconstructed macrocycle focus{span}: {im['overall_focus']}")
+            for meso in (recon.get("inferred_mesocycles") or []):
+                name = meso.get("name", "Phase")
+                m_span = ""
+                if meso.get("start_date") and meso.get("end_date"):
+                    m_span = f" ({meso['start_date']}..{meso['end_date']})"
+                detail = []
+                if meso.get("focus_detected"):
+                    detail.append(f"focus \"{meso['focus_detected']}\"")
+                if meso.get("average_weekly_tss") is not None:
+                    detail.append(f"~{float(meso['average_weekly_tss']):.0f} TSS/wk")
+                if meso.get("estimated_consistency"):
+                    detail.append(f"{meso['estimated_consistency']} consistency")
+                detail_txt = f": {', '.join(detail)}" if detail else ""
+                recon_lines.append(f"- {name}{m_span}{detail_txt}")
             for ins in (recon.get("physiological_insights") or []):
                 recon_lines.append(f"- {ins}")
             if recon_lines:

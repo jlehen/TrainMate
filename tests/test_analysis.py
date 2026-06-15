@@ -661,5 +661,67 @@ class TestRicherEvidenceIntegration(unittest.TestCase):
         self.assertEqual(mock_client.complete.call_count, 2)  # not reused
 
 
+class TestPriorTrainingContext(unittest.TestCase):
+    """The cached reconstruction is fed read-only into the plan-generate strategy prompt
+    (DESIGN_backward_evaluation.md §6)."""
+
+    @classmethod
+    def setUpClass(cls):
+        if os.path.exists(TEST_DB_PATH):
+            os.remove(TEST_DB_PATH)
+        global test_db
+        test_db = Database(db_path=TEST_DB_PATH)
+        trainmate.db.db = test_db
+        trainmate.coach.service.db = test_db
+
+    @classmethod
+    def tearDownClass(cls):
+        if os.path.exists(TEST_DB_PATH):
+            try:
+                os.remove(TEST_DB_PATH)
+            except OSError:
+                pass
+
+    def setUp(self):
+        clear_all_tables(test_db)
+
+    def test_inferred_blocks_reach_the_context(self):
+        """The reverse-engineered macro focus and mesocycle blocks from a bootstrap
+        reconstruction are rendered into the prior-training context, not just the summary."""
+        test_db.save_analysis_cache(
+            "long", "fp", "2026-03-01", "2026-05-31",
+            {
+                "macrocycle_summary": "Built a solid aerobic base.",
+                "inferred_macrocycle": {
+                    "overall_focus": "Marathon base prep",
+                    "start_date": "2026-03-01",
+                    "end_date": "2026-05-31",
+                },
+                "inferred_mesocycles": [
+                    {
+                        "name": "Base Building",
+                        "start_date": "2026-03-01",
+                        "end_date": "2026-04-15",
+                        "focus_detected": "Aerobic volume",
+                        "average_weekly_tss": 380.0,
+                        "estimated_consistency": "High",
+                    },
+                ],
+                "physiological_insights": ["RHR trended down as volume rose."],
+            },
+        )
+
+        text = coach_service._build_prior_training_context(None, "2026-06-15")
+
+        self.assertIsNotNone(text)
+        self.assertIn("Reconstructed macrocycle focus", text)
+        self.assertIn("Marathon base prep", text)
+        self.assertIn("Base Building", text)
+        self.assertIn("Aerobic volume", text)
+        self.assertIn("380 TSS/wk", text)
+        self.assertIn("High consistency", text)
+        self.assertIn("RHR trended down", text)
+
+
 if __name__ == "__main__":
     unittest.main()

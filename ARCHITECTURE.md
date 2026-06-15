@@ -248,7 +248,8 @@ called by the UIs.
 | `_build_prior_training_context(prior_macro, today)` | Builds the read-only "planned vs actual" review injected into the   |
 |                                                     | `plan generate` strategy prompt (Option A, §6). Anchored on the     |
 |                                                     | prior plan's elapsed mesocycle windows; folds in the cached         |
-|                                                     | reconstruction's insights. Writes no `feedback` field.             |
+|                                                     | reconstruction's summary, inferred macro/mesocycle blocks, and      |
+|                                                     | physiological insights. Writes no `feedback` field.                |
 | `plan_rm(objective_id)`                         | Deletes macrocycle + mesocycles for that objective (cascades in     |
 |                                                     | DB).                                                                |
 | `_get_config_hash()`                                | Delegates to `CoachEngine._get_config_hash()`. Used by CLI/web to   |
@@ -769,7 +770,8 @@ Required fields:
 3. If existing macrocycle has matching hashes and `force=False` → reuse.
 4. Otherwise: builds a read-only **planned-vs-actual review** of the prior plan
    via `_build_prior_training_context()` (Option A — anchored on the prior
-   plan's elapsed mesocycle windows, plus the cached reconstruction's insights;
+   plan's elapsed mesocycle windows, plus the cached reconstruction's summary,
+   reverse-engineered macro/mesocycle blocks, and physiological insights;
    written to no `feedback` field), prints it, and passes it as
    `prior_training_text` into `CoachEngine._plan_generate_strategy()` →
    LLM → `{strategy, mesocycles}`.  See DESIGN_backward_evaluation.md §6.

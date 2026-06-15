@@ -41,9 +41,11 @@ generation). It supersedes the relevant TODO items:
 
 `data analyze` already reverse-engineers past training into a rich result —
 `{macrocycle_summary, inferred_macrocycle, inferred_mesocycles[],
-physiological_insights[], learning_updates[]}` (see ARCHITECTURE §3, §10). Today
-only `learning_updates` survives; the reconstruction and insights are printed
-and discarded.
+physiological_insights[], learning_updates[]}` (see ARCHITECTURE §3, §10).
+`learning_updates` survives as coach-learnings deltas, and the reconstruction —
+its summary, reverse-engineered macro/mesocycle structure, and physiological
+insights — is cached and replayed read-only into `plan generate`'s strategy
+prompt (Option A, see §5/§6); none of it is discarded.
 
 The reconstruction is exactly the context that would ground a *new* plan in the
 athlete's demonstrated reality rather than an idealized template, and would tell
