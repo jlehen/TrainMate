@@ -194,9 +194,17 @@ Add a row `key="calendar_context"` rather than a new table, and add a **nullable
 column fits an opaque token — `through_date` is a forward *date* high-water
 mark). The column is populated only by the context row; `through_date` stays
 `NULL` for it; `last_pull_utc` records when context last synced. Chosen over a
-separate `settings` kv so there's a single "sync progress" concept; `wipes.py`
-already clears `sync_state` in one place. `get_sync_state`/`set_sync_state` gain
-a `sync_token` field.
+separate `settings` kv so there's a single "sync progress" concept;
+`get_sync_state`/`set_sync_state` gain a `sync_token` field.
+
+**Re-ingesting / wiping context.** `data wipe --calendar` (db `wipe_calendar_context`)
+deletes the `daily_context` rows and **resets the Calendar sync token**. The token
+reset is mandatory: because the sync is incremental (only events changed since the
+token are replayed), deleting rows without it would leave them gone until each event
+happened to change again — so the next pull would not restore them. Clearing the
+token forces a full re-pull of all tagged events. This is how you recover from a
+syncer that wrote malformed events (e.g. missing `metric`/`value` tags) after the
+syncer is fixed: wipe, then pull.
 
 ---
 

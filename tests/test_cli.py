@@ -729,7 +729,8 @@ class TestTrainMateCLI(unittest.TestCase):
             (["plan", "wipe"], seed_plan, count_plan,
              "All periodization plans wiped successfully."),
             (["data", "wipe"], seed_data, count_data,
-             "All metrics, baselines, and completed activities wiped successfully."),
+             "Wiped Garmin metrics, baselines, and activities and "
+             "ingested daily-context signals."),
         ]
 
         for args, seed, count, message in cases:

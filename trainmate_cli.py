@@ -767,7 +767,35 @@ def main() -> None:
 
     # data wipe
     d_wipe = data_subparsers.add_parser(
-        "wipe", help="Wipe all metrics and completed activities from the database"
+        "wipe",
+        help="Wipe locally cached Garmin data and/or daily context from the database",
+        description=(
+            "Delete locally cached data. With no scope flag, wipes everything (Garmin "
+            "metrics, baselines, activities, and ingested daily-context signals) and "
+            "resets the sync watermarks. --garmin or --calendar narrow the scope; "
+            "--from/--until/--days restrict it to a date window (the next 'data pull' "
+            "re-fetches what was removed)."
+        ),
+    )
+    d_wipe.add_argument(
+        "--garmin", action="store_true",
+        help="Wipe only Garmin evidence (metrics, baselines, activities, analysis cache)"
+    )
+    d_wipe.add_argument(
+        "--calendar", "--context", action="store_true", dest="calendar",
+        help="Wipe only ingested daily-context signals and reset the Calendar sync token"
+    )
+    d_wipe.add_argument(
+        "--days", type=int, metavar="N",
+        help="Restrict to the trailing N days (ending --until, default today)"
+    )
+    d_wipe.add_argument(
+        "--from", "--from-date", dest="from_date", metavar="YYYY-MM-DD",
+        help="Restrict to rows on or after this date"
+    )
+    d_wipe.add_argument(
+        "--until", "--until-date", dest="until_date", metavar="YYYY-MM-DD",
+        help="Restrict to rows on or before this date"
     )
     d_wipe.add_argument("-y", "--yes", action="store_true", help="Skip confirmation prompt")
     

@@ -55,23 +55,68 @@ def run_data_backfill_tss(args: argparse.Namespace) -> None:
     print(green(f"Backfill complete. {changed} activities updated."))
 
 
+def _resolve_wipe_range(args: argparse.Namespace) -> tuple[Optional[str], Optional[str]]:
+    """Resolves the optional [start, end] window for `data wipe` from --from/--until/
+    --days. No date flag at all -> (None, None), meaning wipe the whole scope.
+
+    Mirrors `data pull`: --days N anchors a trailing N-day window on --until (default
+    today); --from / --until each bound their side, either open-ended on its own.
+    """
+    if not (args.from_date or args.until_date or args.days):
+        return None, None
+    start = args.from_date
+    end = args.until_date
+    if args.days and start is None:
+        base = end or _today_str()
+        start = (
+            datetime.strptime(base, "%Y-%m-%d").date() - timedelta(days=args.days - 1)
+        ).strftime("%Y-%m-%d")
+        end = end or base
+    return start, end
+
+
 def run_data_wipe(args: argparse.Namespace) -> None:
-    """Wipes all metrics, baselines, and activities after confirmation."""
+    """Wipes locally cached data after confirmation. --garmin / --calendar scope the
+    wipe to Garmin evidence or ingested daily context respectively (neither flag = both);
+    --from/--until/--days restrict it to a date window."""
+    garmin = getattr(args, "garmin", False)
+    calendar = getattr(args, "calendar", False)
+    # No scope flag means "everything" — keep the historical full-wipe behaviour.
+    if not garmin and not calendar:
+        garmin = calendar = True
+
+    start, end = _resolve_wipe_range(args)
+
+    scope_parts = []
+    if garmin:
+        scope_parts.append("Garmin metrics, baselines, and activities")
+    if calendar:
+        scope_parts.append("ingested daily-context signals")
+    scope = " and ".join(scope_parts)
+
+    if start and end:
+        window = f" dated {start} to {end}"
+    elif start:
+        window = f" dated {start} onward"
+    elif end:
+        window = f" dated up to {end}"
+    else:
+        window = ""
+
     if not args.yes:
         try:
-            msg = (
-                "Are you sure you want to wipe all metrics, baselines, "
-                "and completed activities? [y/N]: "
-            )
-            confirm = input(msg).strip().lower()
+            confirm = input(f"Are you sure you want to wipe {scope}{window}? [y/N]: ").strip().lower()
         except EOFError:
             confirm = 'n'
         if confirm not in ('y', 'yes'):
             print("Wipe cancelled.")
             return
 
-    cli.db.wipe_metrics()
-    print(green("All metrics, baselines, and completed activities wiped successfully."))
+    if garmin:
+        cli.db.wipe_garmin_data(start, end)
+    if calendar:
+        cli.db.wipe_calendar_context(start, end)
+    print(green(f"Wiped {scope}{window}."))
 
 
 def _resolve_historical_date_range(

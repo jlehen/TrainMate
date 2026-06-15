@@ -315,8 +315,13 @@ delete — sets `removed=1`/`removed_reason`, and sets `synced=0`),
 
 **Metrics & Baselines:** `save_metric_cache` (upsert),
 `get_metrics_cache(start_date, end_date)`, `save_baseline`,
-`get_baseline(date)` (returns closest prior baseline), `wipe_metrics` (also
-clears `analysis_cache`, which is evidence-derived)
+`get_baseline(date)` (returns closest prior baseline). Scoped wipes:
+`wipe_garmin_data(start, end)` (metrics/baselines/activities + the evidence-derived
+`analysis_cache`; resets the garmin/reflect/bootstrap watermarks on a full wipe,
+leaves them on a dated wipe since re-pull detects gaps by row presence),
+`wipe_calendar_context(start, end)` (daily context + always resets the Calendar
+sync token, since the incremental sync can't otherwise backfill deleted rows), and
+`wipe_metrics()` = both (full reset)
 
 **Coach Learnings:** `get_learnings()` (each record annotated with a computed
 `dormant` flag and its `proposed_confidence`), `get_learning_evidence(id)`,
@@ -694,7 +699,7 @@ patchable singletons; the handler functions, named
 |              |              |          | options, `-a`/`--all`, `--type` filter, `--no-pull`,      |
 |              |              |          | and `--csv`.                                              |
 | `data`       | `backfill-tss` | —      | Recompute the measured `tss` for all stored activities under the current zone model (no Garmin calls), then refresh derived workload |
-| `data`       | `wipe`       | —        | Delete all metrics, baselines, completed activities                      |
+| `data`       | `wipe`       | `--garmin`, `--calendar`, `--from/--until/--days`, `-y` | Delete cached data. No scope flag = everything (Garmin evidence + daily context) and reset watermarks; `--garmin`/`--calendar` narrow the scope; date flags restrict to a window |
 
 ---
 
