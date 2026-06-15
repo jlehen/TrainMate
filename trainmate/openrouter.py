@@ -26,7 +26,7 @@ class OpenRouterClient:
             logs_dir = config.llm_logs_dir
             os.makedirs(logs_dir, exist_ok=True)
             
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
             filename = f"{timestamp}_{label}.md"
             filepath = os.path.join(logs_dir, filename)
             
@@ -93,6 +93,25 @@ class OpenRouterClient:
         except Exception as e:
             print(f"Warning: Failed to log LLM exchange: {e}")
 
+    @staticmethod
+    def _parse_json_content(content: str) -> dict[str, Any]:
+        """Parses the model's JSON response, tolerating common chatty output.
+
+        Strips an optional ```json ... ``` markdown fence and ignores any
+        trailing data after the first complete JSON value, so responses that
+        append prose or a stray fence don't abort the whole exchange.
+        """
+        text = content.strip()
+        if text.startswith("```"):
+            # Drop the opening fence (e.g. ```json) and trailing fence.
+            text = text.split("\n", 1)[-1] if "\n" in text else text
+            if text.endswith("```"):
+                text = text[: -len("```")]
+            text = text.strip()
+        # raw_decode parses the first JSON value and ignores trailing data.
+        obj, _ = json.JSONDecoder().raw_decode(text)
+        return obj
+
     def complete(
         self, system_content: str, user_content: str, label: str = "exchange"
     ) -> dict[str, Any]:
@@ -146,6 +165,8 @@ class OpenRouterClient:
             "response_format": {"type": "json_object"}
         }
 
+        response = None
+        resp_data = None
         try:
             response = requests.post(self.api_url, headers=headers, json=payload, timeout=45)
             response.raise_for_status()
@@ -167,8 +188,8 @@ class OpenRouterClient:
                 raise ValueError("Empty completion returned from OpenRouter.")
                 
             content = choices[0].get("message", {}).get("content", "")
-            return json.loads(content)
-            
+            return self._parse_json_content(content)
+
         except requests.exceptions.HTTPError as he:
             print(f"HTTP Error calling OpenRouter: {he}")
             resp_text = response.text if response is not None else ""
@@ -179,7 +200,10 @@ class OpenRouterClient:
             raise he
         except Exception as e:
             print(f"Error calling OpenRouter completions: {e}")
-            self._log_exchange(label, system_content, user_content, error_msg=str(e))
+            self._log_exchange(
+                label, system_content, user_content,
+                response_data=resp_data, error_msg=str(e)
+            )
             raise e
 
 # Singleton instance
