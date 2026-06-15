@@ -7,7 +7,7 @@ from trainmate.types import Objective, LifeEvent, Workout, CompletedActivity
 from trainmate.util import today_date as _today_date, cyan
 from trainmate.coach.formatting import (
     format_metrics_history, format_completed_activities, format_baseline,
-    format_planned_workouts, format_removed_workouts,
+    format_planned_workouts, format_removed_workouts, format_daily_context,
 )
 
 
@@ -504,7 +504,8 @@ You MUST respond with a JSON object containing:
         guidelines: str, profile: Optional[Dict[str, Any]], strategy: str,
         meso_text: str, learnings: str, discrepancies: List[str],
         informational: Optional[List[CompletedActivity]] = None,
-        removed_workouts: Optional[List[Workout]] = None
+        removed_workouts: Optional[List[Workout]] = None,
+        daily_context: Optional[List[Dict[str, Any]]] = None
     ) -> Dict[str, Any]:
         """Queries LLM to evaluate metrics/activities and adapt workouts if needed."""
         custom_task = f"""
@@ -527,6 +528,24 @@ the active mesocycle block (from {target_date_str} to {meso_end_date_str}).
   volume without spiking the acute load too fast.
 - If they are fully recovered and on track, keep the plan as scheduled or make minor
   optimal adjustments.
+
+ATTRIBUTING A DEPRESSED MORNING — TRAINING FATIGUE vs LIFESTYLE NOISE:
+When recovery looks bad, separate WHY it is depressed from WHAT to do today — they are
+different decisions. If an externally-logged daily-context signal (e.g. alcohol, a bad
+night, high stress — recovery lags, so look at the signal the DAY BEFORE the depressed
+morning) explains the dip, treat that suppression as transient lifestyle noise, NOT
+accumulated training fatigue.
+- Today's readiness still counts: a suppressed body trains a hard session poorly and
+  with more risk regardless of cause, so easing today, or better RESCHEDULING the hard
+  session a day or two later (preserving the planned work rather than deleting it), is
+  a reasonable call. Use your judgement on acute readiness.
+- But do NOT read a lifestyle-suppressed morning as evidence the BLOCK is too hard:
+  don't permanently cut the mesocycle's planned volume/intensity on its account, and
+  don't treat it as accumulated training fatigue. Reserve genuine load REDUCTIONS for
+  fatigue the TRAINING actually caused (a depressed morning following genuinely hard
+  days, with no lifestyle signal to explain it).
+When a hard day AND a lifestyle signal coincide, both may contribute — weigh them
+rather than blaming training alone.
 
 Some sessions may be listed as deliberately removed by the athlete. These are
 intentional plan edits, NOT adherence failures — do not treat them as missed workouts.
@@ -567,6 +586,10 @@ evidence-backed observations are authored only by the weekly history analysis
         )
 
         metrics_text = format_metrics_history(metrics)
+        context_text = (
+            format_daily_context(daily_context) if daily_context
+            else "No external daily-context signals logged in this window."
+        )
         discrepancy_text = (
             "\n".join(discrepancies) if discrepancies
             else "No discrepancies detected (athlete fully on track)."
@@ -594,6 +617,10 @@ Adaptation Range: {target_date_str} to {meso_end_date_str}
 
 Athlete's Metrics History (Past {history_days} Days):
 {metrics_text}
+
+Externally-Logged Daily Context (alcohol, poor sleep, stress, etc. — a signal the day
+before a depressed morning is a likely non-training explanation; recovery lags):
+{context_text}
 
 Baseline Reference:
 {baseline_str}

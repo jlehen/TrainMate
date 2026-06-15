@@ -328,8 +328,23 @@ has exactly two entry points; those are the only flows this change touches:
 | `data bootstrap` | builds `context_days` over full history; feeds it to the analysis prompt |
 | `data reflect`   | **same** — rebuilds over full history (§6), not just the new weeks |
 
-Everything else is unaffected: `plan generate`, `status`, and `workout adapt` read
-durable *learnings*, not the facts, so they inherit the conclusions for free.
+`plan generate` and `status` are unaffected: they read durable *learnings*, not the
+facts, so they inherit the conclusions for free.
+
+**`workout adapt` is the one place the conclusion alone is not enough.** The durable
+learning ("alcohol suppresses next-day HRV") is general; to act on it at the daily
+load decision the adaptation must also see the *per-day* fact that a signal was logged
+yesterday — which the episode-aligned `context_days` block (an analysis-pass input)
+does not give it. So `workout adapt` reads the raw windowed `daily_context` rows
+directly (alongside metrics) and is instructed to attribute a depressed morning to
+lifestyle noise vs training fatigue, separating *why* recovery is low from *what* to do
+today. A signal the day before a bad morning is transient suppression, **not**
+accumulated training fatigue: the LLM may still ease or **reschedule** today's hard
+session for acute readiness, but must not read it as evidence the *block* is too hard
+(no permanent cut to planned volume/intensity, not counted as training fatigue).
+Without this, the whole quantitative path produces a true-but-inert learning — the
+attribution never reaches the decision that moves load. (Plumbing only: no learning is
+authored here; daily adaptation stays read-only w.r.t. learnings.)
 
 There is **no dedicated "analyse my drinking" command**, and the athlete triggers
 nothing manually. Because the block is rebuilt full-history every run, the picture

@@ -15,6 +15,20 @@ def format_metrics_history(metrics: List[Dict[str, Any]]) -> str:
     return "\n".join(metrics_lines)
 
 
+def format_daily_context(daily_context: List[Dict[str, Any]]) -> str:
+    """Formats externally-logged daily context signals (alcohol, poor sleep, etc.)
+    to a readable block for LLM prompts. One line per logged signal-day."""
+    lines = []
+    for c in daily_context:
+        line = f"- {c['date']}: {c['metric']}"
+        if c.get('value') is not None:
+            line += f"={c['value']:g}"
+        if c.get('text'):
+            line += f' — "{c["text"]}"'
+        lines.append(line)
+    return "\n".join(lines)
+
+
 def format_completed_activities(completed_activities: List[CompletedActivity]) -> str:
     """Formats Garmin completed activities to a readable block for LLM prompts."""
     completed_list = []

@@ -789,7 +789,15 @@ Required fields:
    activities in window. Workouts in the window are fetched with
    `include_removed=True` and partitioned into active (planned) vs `removed`;
    removed ones are passed to `_workout_adapt_logic` and rendered in the prompt as
-   deliberate cancellations (not misses).
+   deliberate cancellations (not misses). It also fetches the window's
+   `daily_context` rows (reaching one day before the metrics window, since recovery
+   lags the signal) so the LLM can attribute a depressed morning to lifestyle noise
+   (alcohol/poor sleep the day before) vs genuine training fatigue. It may still ease or
+   **reschedule** today's hard session for acute readiness, but must not read a
+   lifestyle-suppressed morning as evidence the *block* is too hard (no permanent cut to
+   planned volume, not counted as training fatigue). This is what makes the
+   quantitative-context learning actually move a decision rather than stay inert at the
+   daily load call (DESIGN_quantitative_context_impact.md §6.1).
 2. `analyze_adherence()` (`adherence.py`) computes discrepancies (misses,
    duration/load mismatches, rest violations) over the **active** workouts only —
    removed workouts never count as misses.
@@ -977,7 +985,10 @@ average weekly load).
 - RHR rises > 1 std above baseline mean (min +3 bpm) → flag potential
   overtraining
 - `workout adapt` acts on these signals over the rolling
-  `metrics_lookback_days` window.
+  `metrics_lookback_days` window, but first discounts a depressed morning that a
+  logged `daily_context` signal the day before explains (lifestyle noise, not training
+  fatigue): today's session may still be eased or rescheduled for acute readiness, but
+  the block's planned load is not cut on a non-training artifact.
 
 ### Science Guidelines Files
 - `trainmate/science/` — built-in: `acwr.txt`, `periodization.txt`,

@@ -718,6 +718,16 @@ class CoachService:
             start_date=start_date_str, end_date=target_date_str
         )
 
+        # External daily-context signals over the window, so the adaptation can tell a
+        # lifestyle-suppressed morning (alcohol/poor sleep the day before) from genuine
+        # training fatigue and avoid cutting load on a non-training artifact. Recovery
+        # lags the signal by a day, so reach one day before the metrics window to cover
+        # the first morning's preceding-day signal.
+        context_start_str = (start_date_obj - timedelta(days=1)).strftime("%Y-%m-%d")
+        daily_context = self._db.get_daily_context(
+            start_date=context_start_str, end_date=target_date_str
+        )
+
         # Determine mesocycle end date for the adaptation range. The plan we adapt runs
         # FORWARD from the target date to here, so workouts must be fetched across the
         # whole span (lookback start -> mesocycle end), not just the backward window —
@@ -796,7 +806,8 @@ class CoachService:
             learnings=learnings,
             discrepancies=discrepancies,
             informational=informational,
-            removed_workouts=removed_workouts
+            removed_workouts=removed_workouts,
+            daily_context=daily_context
         )
 
         # NOTE: daily adaptation is read-only w.r.t. coach learnings
