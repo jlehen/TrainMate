@@ -503,7 +503,7 @@ You MUST respond with a JSON object containing:
         meso_end_date_str: str, objectives: List[Objective], lifeevents: List[LifeEvent],
         guidelines: str, profile: Optional[Dict[str, Any]], strategy: str,
         meso_text: str, learnings: str, discrepancies: List[str],
-        informational: Optional[List[str]] = None,
+        informational: Optional[List[CompletedActivity]] = None,
         removed_workouts: Optional[List[Workout]] = None
     ) -> Dict[str, Any]:
         """Queries LLM to evaluate metrics/activities and adapt workouts if needed."""
@@ -585,7 +585,7 @@ evidence-backed observations are authored only by the weekly history analysis
         if informational:
             informational_section = (
                 "\nActivities Outside Any Plan (informational — load counts, "
-                "but not adherence failures):\n" + "\n".join(informational) + "\n"
+                "but not adherence failures):\n" + format_completed_activities(informational) + "\n"
             )
 
         user_content = f"""

@@ -69,7 +69,7 @@ def analyze_adherence(
         A tuple containing:
             - List of text discrepancy messages (deviations from the plan).
             - List of mapping results with date, planned workout, and completed activity.
-            - List of informational notes (activities on dates no plan governed).
+            - List of completed activities that fall outside any planned block (informational).
     """
     matching_results = []
     discrepancies = []
@@ -197,10 +197,6 @@ def analyze_adherence(
                 # No plan governs this date (e.g. before tool adoption, or an
                 # unplanned off-season stretch). The load still feeds fatigue/ACWR
                 # via completed_activities — surface it as informational, not a deviation.
-                informational.append(
-                    f"- {date_curr}: Performed '{act['activity_name']}' "
-                    f"({act['activity_type']}) with workload {act_load:.1f} on a day "
-                    f"with no planned block."
-                )
+                informational.append(act)
 
     return discrepancies, matching_results, informational

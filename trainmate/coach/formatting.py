@@ -75,7 +75,11 @@ def format_removed_workouts(removed_workouts: List[Workout]) -> str:
     """Formats workouts the athlete deliberately removed, for the adaptation prompt."""
     lines = []
     for w in removed_workouts:
-        line = f"- {w['date']} ({w['sport_type'].upper()}): {w['title']}"
+        line = (
+            f"- {w['date']} ({w['sport_type'].upper()}): {w['title']} | "
+            f"Expected duration: {w.get('duration_minutes')}m, "
+            f"RPE: {w.get('rpe')}, TSS: {w.get('tss')}"
+        )
         reason = w.get('removed_reason')
         if reason:
             line += f" — reason: {reason}"

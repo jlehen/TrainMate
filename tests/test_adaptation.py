@@ -442,8 +442,7 @@ class TestAdaptation(unittest.TestCase):
         )
         self.assertEqual(disc, [])
         self.assertEqual(len(info), 1)
-        self.assertIn("Extra Run", info[0])
-        self.assertIn("no planned block", info[0])
+        self.assertEqual(info[0]["activity_name"], "Extra Run")
 
         # No coverage at all (cold start) -> informational.
         disc, _, info = analyze_adherence(
