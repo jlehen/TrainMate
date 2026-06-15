@@ -156,12 +156,23 @@ def run_status(verbose: bool = False, no_pull: bool = False) -> None:
     if learnings:
         print("- Learnings:")
         for l in learnings:
-            tag = f"  [{l['id']}|{l.get('sports') or 'general'}|{l.get('confidence') or 'tentative'}]"
+            sports_str = l.get('sports') or 'general'
+            conf_str = l.get('confidence') or 'tentative'
+            
             if l.get("dormant"):
                 # Decayed: kept on record but no longer fed to the coach until reaffirmed.
+                tag = f"  [{l['id']}|{sports_str}|{conf_str}]"
                 print(format_labeled_block(gray(tag), gray(f"{l['text']} (dormant)")))
             else:
+                if conf_str == 'established':
+                    conf_disp = green(conf_str)
+                elif conf_str == 'moderate':
+                    conf_disp = yellow(conf_str)
+                else:
+                    conf_disp = gray(conf_str)
+                tag = f"  [{cyan(str(l['id']))}|{magenta(sports_str)}|{conf_disp}]"
                 print(format_labeled_block(tag, l['text']))
+                
             # Pending, human-confirmable confidence downgrade (resolved interactively by
             # the next 'data reflect'/'data bootstrap' run).
             proposed = l.get("proposed_confidence")
