@@ -794,6 +794,51 @@ def run_workout_swap(args: argparse.Namespace) -> None:
         print(gray("Calendar sync skipped (--no-sync)."))
 
 
+def run_workout_add(args: argparse.Namespace) -> None:
+    """Manually schedules a workout on a date, replacing any same-sport session."""
+    try:
+        datetime.strptime(args.date, "%Y-%m-%d")
+    except ValueError:
+        print(red(f"Invalid date format: '{args.date}'. Use YYYY-MM-DD."))
+        sys.exit(1)
+
+    existing = cli.db.get_workout(args.date, args.sport_type)
+    if existing:
+        print(yellow(
+            f"Replacing existing {args.sport_type} workout on {args.date}: "
+            f"{existing['title']}"
+        ))
+
+    saved, replaced = cli.coach_service.workout_add(
+        date=args.date,
+        sport_type=args.sport_type,
+        title=args.title,
+        description=args.description or "",
+        duration_minutes=args.duration,
+        rpe=args.rpe,
+        tss=args.tss,
+        reason=args.reason,
+    )
+
+    if not saved:
+        print(red("Failed to save workout."))
+        sys.exit(1)
+
+    stat_parts = []
+    if saved.get('duration_minutes') is not None:
+        stat_parts.append(f"{saved['duration_minutes']}m")
+    if saved.get('tss') is not None:
+        stat_parts.append(f"TSS {saved['tss']}")
+    if saved.get('rpe') is not None:
+        stat_parts.append(f"RPE {saved['rpe']}")
+    stats = f" ({', '.join(stat_parts)})" if stat_parts else ""
+    verb = "Replaced with" if replaced else "Added"
+    print(green(
+        f"{verb} [{saved['id']}] {saved['title']}{stats} on {saved['date']} "
+        f"({saved['sport_type']}) and synced to Calendar."
+    ))
+
+
 def run_workout_wipe(args: argparse.Namespace) -> None:
     """Wipes all workouts from the database and Google Calendar after confirmation."""
     if not args.yes:

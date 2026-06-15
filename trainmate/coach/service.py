@@ -1080,6 +1080,72 @@ class CoachService:
 
         return updated_workouts
 
+    def workout_add(
+        self, date: str, sport_type: str, title: str, description: str,
+        duration_minutes: Optional[int] = None, rpe: Optional[int] = None,
+        tss: Optional[int] = None, reason: Optional[str] = None,
+    ) -> Tuple[Optional[Workout], Optional[Workout]]:
+        """Manually schedules a workout on `date`, replacing any existing workout of
+        the same sport that day.
+
+        When a session is replaced, what was overwritten is recorded on the new
+        workout — and therefore on its calendar event — mirroring how `adapt`
+        annotates a changed session: the replaced description lands in
+        `original_description` (rendered as "Originally:") and its title plus
+        duration/TSS/RPE are folded into `modification_reason` (rendered as
+        "Reason:"). The old row is deleted before the insert so omitted stats
+        don't inherit the replaced session's values, but its `google_event_id` is
+        carried onto the new row so the existing calendar event is updated in place
+        rather than orphaned.
+
+        Returns (saved_workout, replaced_workout_or_None).
+        """
+        existing = self._db.get_workout(date, sport_type)
+
+        orig_desc = description
+        ge_id = None
+        mod_reason = None
+        if existing:
+            orig_desc = existing['description']
+            ge_id = existing.get('google_event_id')
+            stat_parts: List[str] = []
+            if existing.get('duration_minutes') is not None:
+                stat_parts.append(f"{existing['duration_minutes']}m")
+            if existing.get('tss') is not None:
+                stat_parts.append(f"TSS {existing['tss']}")
+            if existing.get('rpe') is not None:
+                stat_parts.append(f"RPE {existing['rpe']}")
+            header = existing['title']
+            if stat_parts:
+                header += f" ({', '.join(stat_parts)})"
+            mod_reason = f"Manually replaced previous session: {header}"
+            if reason:
+                mod_reason += f". Reason: {reason}"
+            self._db.delete_workout_by_id(existing['id'])
+
+        self._db.save_workout(
+            date=date,
+            sport_type=sport_type,
+            title=title,
+            description=description,
+            original_description=orig_desc,
+            synced=False,
+            modification_reason=mod_reason,
+            google_event_id=ge_id,
+            duration_minutes=duration_minutes,
+            rpe=rpe,
+            tss=tss,
+        )
+
+        saved = self._db.get_workout(date, sport_type)
+        if saved:
+            try:
+                self._calendar_syncer.sync_workout(saved)
+                saved = self._db.get_workout(date, sport_type)
+            except Exception as e:
+                print(red(f"Error syncing {title} to Google Calendar: {e}"))
+        return saved, existing
+
     def _resolve_until(self, until_date_str: Optional[str]):
         until_date = _today_date()
         if until_date_str:

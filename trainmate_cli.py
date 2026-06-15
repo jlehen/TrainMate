@@ -79,7 +79,7 @@ from trainmate.cli.plans import (
 from trainmate.cli.workouts import (
     run_workout_list, run_workout_compare, run_workout_generate, run_workout_rm,
     run_workout_restore, run_workout_adapt, run_workout_push, run_workout_swap,
-    run_workout_wipe,
+    run_workout_add, run_workout_wipe,
 )
 from trainmate.cli.data import (
     run_data_pull, run_data_bootstrap, run_data_reflect, run_data_backfill_tss,
@@ -503,6 +503,36 @@ def main() -> None:
         help="Generate workouts until the end date of a mesocycle"
     )
     
+    # workout add
+    w_add = workout_subparsers.add_parser(
+        "add",
+        help="Manually schedule a workout on a date (replaces any same-sport session)",
+        description=(
+            "Manually add a workout on a specific date — driven by you rather than the "
+            "coach. If a workout of the same sport already exists that day it is "
+            "replaced, and the replaced session's description, duration, TSS and RPE are "
+            "recorded on the new workout (and its Calendar event) so the change stays "
+            "traceable. Saved and synced to Google Calendar immediately. To have the "
+            f"coach re-balance surrounding load afterward, run '{green('workout adapt')}'."
+        )
+    )
+    w_add.add_argument("date", help="Workout date (YYYY-MM-DD)")
+    w_add.add_argument("sport_type", help="Sport type (e.g. running, road_biking)")
+    w_add.add_argument("--title", required=True, help="Workout title")
+    w_add.add_argument(
+        "--description", "--desc", dest="description", help="Workout description / details"
+    )
+    w_add.add_argument(
+        "--duration", type=int, dest="duration", metavar="MIN",
+        help="Planned duration in minutes"
+    )
+    w_add.add_argument("--rpe", type=int, help="Target RPE (1-10)")
+    w_add.add_argument("--tss", type=int, help="Target training stress score")
+    w_add.add_argument(
+        "--reason",
+        help="Why you're adding/replacing this session (recorded and shown to the coach)"
+    )
+
     # workout rm
     w_rm = workout_subparsers.add_parser(
         "rm", aliases=["r"], help="Remove a workout by ID"
@@ -886,6 +916,8 @@ def main() -> None:
             run_workout_push(args)
         elif sub in ("swap", "s"):
             run_workout_swap(args)
+        elif sub == "add":
+            run_workout_add(args)
         elif sub == "wipe":
             run_workout_wipe(args)
     elif cmd in ("data", "d"):

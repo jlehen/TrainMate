@@ -324,6 +324,60 @@ class TestAdaptation(unittest.TestCase):
             "B is NOT on its original date; should remain modified",
         )
 
+    def test_workout_add_new_inserts_and_syncs(self):
+        syncer = Mock()
+        service = trainmate.coach.CoachService(
+            db_instance=test_db, calendar_syncer_instance=syncer
+        )
+        saved, replaced = service.workout_add(
+            "2026-06-20", "running", "Long Run", "90min Z2",
+            duration_minutes=90, tss=70,
+        )
+        self.assertIsNone(replaced)
+        self.assertEqual(saved["title"], "Long Run")
+        self.assertEqual(saved["tss"], 70)
+        # A brand-new session that replaced nothing is not flagged as modified.
+        self.assertIsNone(saved["modification_reason"])
+        syncer.sync_workout.assert_called_once()
+
+    def test_workout_add_replaces_and_records_overwritten_session(self):
+        syncer = Mock()
+        service = trainmate.coach.CoachService(
+            db_instance=test_db, calendar_syncer_instance=syncer
+        )
+        test_db.save_workout(
+            "2026-06-20", "running", "Tempo Intervals", "6x3min Z4",
+            duration_minutes=60, rpe=8, tss=85, google_event_id="evt-123",
+        )
+
+        saved, replaced = service.workout_add(
+            "2026-06-20", "running", "Easy Recovery", "40min Z2",
+            duration_minutes=40, tss=30, reason="legs feel cooked",
+        )
+
+        self.assertIsNotNone(replaced)
+        self.assertEqual(saved["title"], "Easy Recovery")
+        # New session's own stats win — the replaced session's RPE is not inherited.
+        self.assertEqual(saved["tss"], 30)
+        self.assertEqual(saved["duration_minutes"], 40)
+        self.assertIsNone(saved["rpe"])
+        # The replaced description becomes "Originally:" content on the event.
+        self.assertEqual(saved["original_description"], "6x3min Z4")
+        # The replaced session's title + stats and the athlete's reason are captured.
+        reason = saved["modification_reason"]
+        self.assertIn("Tempo Intervals", reason)
+        self.assertIn("60m", reason)
+        self.assertIn("TSS 85", reason)
+        self.assertIn("RPE 8", reason)
+        self.assertIn("legs feel cooked", reason)
+        # The existing calendar event is carried over (updated in place, not orphaned).
+        self.assertEqual(saved["google_event_id"], "evt-123")
+        syncer.sync_workout.assert_called_once()
+        # Only one row remains for that date/sport (replace, not double).
+        self.assertEqual(
+            len(test_db.get_workouts(start_date="2026-06-20", end_date="2026-06-20")), 1
+        )
+
     def test_analyze_adherence_direct(self):
         planned = [
             {
