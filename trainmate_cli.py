@@ -510,10 +510,11 @@ def main() -> None:
         description=(
             "Manually add a workout on a specific date — driven by you rather than the "
             "coach. If a workout of the same sport already exists that day it is "
-            "replaced, and the replaced session's description, duration, TSS and RPE are "
-            "recorded on the new workout (and its Calendar event) so the change stays "
-            "traceable. Saved and synced to Google Calendar immediately. To have the "
-            f"coach re-balance surrounding load afterward, run '{green('workout adapt')}'."
+            "replaced (use --replace-day to instead replace every session that day "
+            "regardless of sport), and each replaced session's description, duration, "
+            "TSS and RPE are recorded on the new workout (and its Calendar event) so the "
+            "change stays traceable. Saved and synced to Google Calendar immediately. To "
+            f"have the coach re-balance surrounding load afterward, run '{green('workout adapt')}'."
         )
     )
     w_add.add_argument("date", help="Workout date (YYYY-MM-DD)")
@@ -531,6 +532,10 @@ def main() -> None:
     w_add.add_argument(
         "--reason",
         help="Why you're adding/replacing this session (recorded and shown to the coach)"
+    )
+    w_add.add_argument(
+        "--replace-day", dest="replace_day", action="store_true",
+        help="Replace every session that day, not just the same sport"
     )
 
     # workout rm

@@ -1090,44 +1090,75 @@ class CoachService:
         self, date: str, sport_type: str, title: str, description: str,
         duration_minutes: Optional[int] = None, rpe: Optional[int] = None,
         tss: Optional[int] = None, reason: Optional[str] = None,
-    ) -> Tuple[Optional[Workout], Optional[Workout]]:
-        """Manually schedules a workout on `date`, replacing any existing workout of
-        the same sport that day.
+        replace_day: bool = False,
+    ) -> Tuple[Optional[Workout], List[Workout]]:
+        """Manually schedules a workout on `date`, replacing existing sessions that day.
 
-        When a session is replaced, what was overwritten is recorded on the new
+        By default only an existing workout of the *same sport* is replaced, so other
+        sports scheduled that day are left untouched. Pass `replace_day=True` to instead
+        replace every session that day regardless of sport.
+
+        When sessions are replaced, what was overwritten is recorded on the new
         workout — and therefore on its calendar event — mirroring how `adapt`
         annotates a changed session: the replaced description lands in
-        `original_description` (rendered as "Originally:") and its title plus
-        duration/TSS/RPE are folded into `modification_reason` (rendered as
-        "Reason:"). The old row is deleted before the insert so omitted stats
-        don't inherit the replaced session's values, but its `google_event_id` is
-        carried onto the new row so the existing calendar event is updated in place
-        rather than orphaned.
+        `original_description` (rendered as "Originally:") and each replaced session's
+        title plus duration/TSS/RPE are folded into `modification_reason` (rendered as
+        "Reason:"). The old rows are deleted before the insert so omitted stats don't
+        inherit a replaced session's values. The same-sport session's `google_event_id`
+        (if any) is carried onto the new row so its existing calendar event is updated
+        in place rather than orphaned; any other replaced sessions' calendar events are
+        deleted.
 
-        Returns (saved_workout, replaced_workout_or_None).
+        Returns (saved_workout, list_of_replaced_workouts).
         """
-        existing = self._db.get_workout(date, sport_type)
+        if replace_day:
+            existing_all = self._db.get_workouts(start_date=date, end_date=date)
+        else:
+            same = self._db.get_workout(date, sport_type)
+            existing_all = [same] if same else []
+
+        # The same-sport session (if any) lends its calendar event to the new workout.
+        primary = next(
+            (w for w in existing_all
+             if w['sport_type'].lower() == sport_type.lower()),
+            None,
+        )
 
         orig_desc = description
         ge_id = None
-        mod_reason = None
-        if existing:
-            orig_desc = existing['description']
-            ge_id = existing.get('google_event_id')
+        if primary:
+            orig_desc = primary['description']
+            ge_id = primary.get('google_event_id')
+
+        headers: List[str] = []
+        for w in existing_all:
             stat_parts: List[str] = []
-            if existing.get('duration_minutes') is not None:
-                stat_parts.append(f"{existing['duration_minutes']}m")
-            if existing.get('tss') is not None:
-                stat_parts.append(f"TSS {existing['tss']}")
-            if existing.get('rpe') is not None:
-                stat_parts.append(f"RPE {existing['rpe']}")
-            header = existing['title']
+            if w.get('duration_minutes') is not None:
+                stat_parts.append(f"{w['duration_minutes']}m")
+            if w.get('tss') is not None:
+                stat_parts.append(f"TSS {w['tss']}")
+            if w.get('rpe') is not None:
+                stat_parts.append(f"RPE {w['rpe']}")
+            header = w['title']
+            if w is not primary:
+                header = f"{w['sport_type']} {header}"
             if stat_parts:
                 header += f" ({', '.join(stat_parts)})"
-            mod_reason = f"Manually replaced previous session: {header}"
+            headers.append(header)
+            # Other-sport events can't be reused by the new (single) workout; drop them.
+            if w is not primary and w.get('google_event_id'):
+                try:
+                    self._calendar_syncer.delete_workout_event(w['google_event_id'])
+                except Exception as e:
+                    print(red(f"Error deleting replaced calendar event: {e}"))
+            self._db.delete_workout_by_id(w['id'])
+
+        mod_reason = None
+        if headers:
+            label = "sessions" if len(headers) > 1 else "session"
+            mod_reason = f"Manually replaced previous {label}: " + "; ".join(headers)
             if reason:
                 mod_reason += f". Reason: {reason}"
-            self._db.delete_workout_by_id(existing['id'])
 
         self._db.save_workout(
             date=date,
@@ -1151,7 +1182,7 @@ class CoachService:
                 saved = self._db.get_workout(date, sport_type)
             except Exception as e:
                 print(red(f"Error syncing {title} to Google Calendar: {e}"))
-        return saved, existing
+        return saved, existing_all
 
     def _resolve_until(self, until_date_str: Optional[str]):
         until_date = _today_date()

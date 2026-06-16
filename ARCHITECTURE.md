@@ -239,8 +239,8 @@ called by the UIs.
 |                                                     | `(reason, proposed_workouts)`.                                      |
 | `workout_adapt_apply(proposed, reason, start, end)`   | Deletes overridden workouts (+ calendar events), saves adapted      |
 |                                                     | workouts, syncs to Calendar.                                        |
-| `workout_add(date, sport_type, title, description, …)` | Manually schedules a workout, **replacing** any same-sport         |
-|                                                     | session that day (deterministic — no LLM). Captures the overwritten |
+| `workout_add(date, sport_type, title, description, …, replace_day=False)` | Manually schedules a workout, **replacing** any same-sport |
+|                                                     | session that day — or every session that day with `replace_day` (deterministic — no LLM). Captures the overwritten |
 |                                                     | session so the calendar event records it (replaced description →    |
 |                                                     | `original_description`/"Originally:"; replaced title+duration/TSS/  |
 |                                                     | RPE + athlete reason → `modification_reason`/"Reason:"), carries the |
@@ -970,14 +970,16 @@ The shared core then:
 
 A `workout add` manually schedules a single session on a date (athlete-driven,
 not coach-driven, and LLM-free). It **replaces** any existing same-sport workout
-that day — recording the overwritten session on the new row the way an
+that day — or, with `--replace-day`, **every** session that day regardless of
+sport — recording the overwritten session(s) on the new row the way an
 adaptation does (`CoachService.workout_add`, §3): the replaced description
-becomes `original_description` (rendered "Originally:" on the event) and the
+becomes `original_description` (rendered "Originally:" on the event) and each
 replaced title + duration/TSS/RPE plus the athlete's `--reason` become the
-`modification_reason` (rendered "Reason:"). The old row's `google_event_id` is
-carried over so the existing Calendar event is updated in place. Load
-re-balancing of surrounding days is intentionally **not** done here — run
-`workout adapt` for that.
+`modification_reason` (rendered "Reason:"); other-sport entries are prefixed
+with their sport. The same-sport row's `google_event_id` is carried over so its
+existing Calendar event is updated in place; any other replaced sessions'
+Calendar events are deleted. Load re-balancing of surrounding days is
+intentionally **not** done here — run `workout adapt` for that.
 
 A `workout swap` exchanges the dates of two workouts (or moves one onto an
 empty rest day). Moved workouts are flagged `status='modified'` with a

@@ -805,11 +805,15 @@ def run_workout_add(args: argparse.Namespace) -> None:
         print(red(f"Invalid date format: '{args.date}'. Use YYYY-MM-DD."))
         sys.exit(1)
 
-    existing = cli.db.get_workout(args.date, args.sport_type)
-    if existing:
+    if args.replace_day:
+        to_replace = cli.db.get_workouts(start_date=args.date, end_date=args.date)
+    else:
+        same = cli.db.get_workout(args.date, args.sport_type)
+        to_replace = [same] if same else []
+    for w in to_replace:
         print(yellow(
-            f"Replacing existing {args.sport_type} workout on {args.date}: "
-            f"{existing['title']}"
+            f"Replacing existing {w['sport_type']} workout on {args.date}: "
+            f"{w['title']}"
         ))
 
     saved, replaced = cli.coach_service.workout_add(
@@ -821,6 +825,7 @@ def run_workout_add(args: argparse.Namespace) -> None:
         rpe=args.rpe,
         tss=args.tss,
         reason=args.reason,
+        replace_day=args.replace_day,
     )
 
     if not saved:
