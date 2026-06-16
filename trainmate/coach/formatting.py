@@ -85,6 +85,33 @@ def format_planned_workouts(planned_workouts: List[Workout]) -> str:
     return "\n".join(planned_list)
 
 
+def format_planned_workouts_detailed(planned_workouts: List[Workout]) -> str:
+    """Like format_planned_workouts but includes each session's full description.
+
+    Used by the adaptation prompt so the model can preserve interval structure,
+    heart-rate zones, and rest/recovery durations it is not deliberately changing.
+    The one-line summary alone omits these details, so adaptations otherwise lose
+    them (the model reconstructs the session from title + duration + RPE + TSS).
+    """
+    blocks = []
+    for w in planned_workouts:
+        header = (
+            f"- {w['date']} ({w['sport_type'].upper()}): {w['title']} | "
+            f"Expected duration: {w.get('duration_minutes')}m, "
+            f"RPE: {w.get('rpe')}, TSS: {w.get('tss')}"
+        )
+        mod_reason = w.get('modification_reason')
+        if mod_reason:
+            header += f" — {mod_reason}"
+        desc = (w.get('description') or '').strip()
+        if desc:
+            indented = "\n".join("    " + ln for ln in desc.splitlines())
+            blocks.append(f"{header}\n  Full description:\n{indented}")
+        else:
+            blocks.append(header)
+    return "\n\n".join(blocks)
+
+
 def format_removed_workouts(removed_workouts: List[Workout]) -> str:
     """Formats workouts the athlete deliberately removed, for the adaptation prompt."""
     lines = []

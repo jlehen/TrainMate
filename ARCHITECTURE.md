@@ -102,8 +102,10 @@ three submodules:
 
 - `formatting.py` — pure prompt-formatting helpers (no I/O, no LLM):
   `format_metrics_history`, `format_completed_activities`,
-  `format_planned_workouts`, `format_removed_workouts`, `format_baseline`,
-  `_load_science_guidelines`.
+  `format_planned_workouts`, `format_planned_workouts_detailed` (adapt-only
+  variant that includes each session's full description so the model preserves
+  interval/rest detail it isn't deliberately changing), `format_removed_workouts`,
+  `format_baseline`, `_load_science_guidelines`.
 - `engine.py` — `CoachEngine` (prompt construction, hashing, LLM calls). Owns
   the `openrouter_client` binding — **patch target for tests:**
   `trainmate.coach.engine.openrouter_client`.
@@ -981,7 +983,7 @@ adaptation — so they are re-synced by `workout push` and visibly distinguished
 from untouched `planned` ones. If a swap returns a workout to its
 `original_date`, the `modification_reason` is cleared to `NULL` — the workout
 is no longer considered modified. The `modification_reason` is surfaced to the
-coach in the adaptation prompt (`format_planned_workouts`), so a swap informs
+coach in the adaptation prompt (`format_planned_workouts_detailed`), so a swap informs
 the coach symmetrically to how `workout rm`'s `removed_reason` does. Swaps are
 validated first (`CoachService.workout_swap_validate`): the
 new schedule is simulated and the user is warned about newly-created >2-day

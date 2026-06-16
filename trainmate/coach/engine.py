@@ -7,7 +7,8 @@ from trainmate.types import Objective, LifeEvent, Workout, CompletedActivity
 from trainmate.util import today_date as _today_date, cyan
 from trainmate.coach.formatting import (
     format_metrics_history, format_completed_activities, format_baseline,
-    format_planned_workouts, format_removed_workouts, format_daily_context,
+    format_planned_workouts, format_planned_workouts_detailed,
+    format_removed_workouts, format_daily_context,
 )
 
 
@@ -597,7 +598,7 @@ evidence-backed observations are authored only by the weekly history analysis
             "\n".join(discrepancies) if discrepancies
             else "No discrepancies detected (athlete fully on track)."
         )
-        planned_text = format_planned_workouts(planned_workouts)
+        planned_text = format_planned_workouts_detailed(planned_workouts)
         completed_text = format_completed_activities(completed_activities)
 
         removed_section = ""
@@ -632,7 +633,11 @@ Planned Workouts (recent window for adherence + already-scheduled sessions throu
 the adaptation range). When adapting, modify these EXISTING sessions in place —
 preserve each one's date and sport_type unless deliberately swapping the sport, and
 do NOT drop scheduled sessions you are not changing. Only invent a brand-new session
-for a date that currently has none:
+for a date that currently has none.
+Each session below includes its full description so you can reuse its specifics —
+interval structure, heart-rate zones, rest/recovery durations — when you carry a session
+over largely as-is. Adapt as boldly as the athlete's state warrants; the descriptions are
+here only so detail you are keeping isn't lost for lack of being restated:
 {planned_text}
 {removed_section}
 Actual Completed Garmin Activities in Window:
