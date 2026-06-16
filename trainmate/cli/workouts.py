@@ -397,13 +397,16 @@ def run_workout_list(args: argparse.Namespace) -> None:
         rem_marker = ""
         if w.get('removed'):
             rem_marker = bold(red(" [REMOVED]"))
+        src_marker = ""
+        if w.get('source') == 'manual':
+            src_marker = bold(magenta(" [MANUAL]"))
         duration = w.get('duration_minutes')
         tss = w.get('tss')
         duration_str = f" | {duration}min" if duration else ""
         tss_str = f" | TSS {tss}" if tss is not None else ""
         print(
             f"ID: {w['id']} | {cyan(fmt_date(w['date']))} | {magenta(w['sport_type'].upper())} | "
-            f"{bold(w['title'])}{mod_marker}{sync_marker}{rem_marker}{duration_str}{tss_str}"
+            f"{bold(w['title'])}{mod_marker}{sync_marker}{rem_marker}{src_marker}{duration_str}{tss_str}"
         )
         print(format_labeled_block("  Description:", w['description']))
         if w.get('modification_reason'):

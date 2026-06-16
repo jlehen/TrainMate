@@ -92,6 +92,9 @@ def format_planned_workouts_detailed(planned_workouts: List[Workout]) -> str:
     heart-rate zones, and rest/recovery durations it is not deliberately changing.
     The one-line summary alone omits these details, so adaptations otherwise lose
     them (the model reconstructs the session from title + duration + RPE + TSS).
+
+    Sessions the athlete scheduled themselves (source == 'manual') are tagged
+    "[athlete-added]" so the adaptation can treat them as deliberate intent.
     """
     blocks = []
     for w in planned_workouts:
@@ -100,6 +103,8 @@ def format_planned_workouts_detailed(planned_workouts: List[Workout]) -> str:
             f"Expected duration: {w.get('duration_minutes')}m, "
             f"RPE: {w.get('rpe')}, TSS: {w.get('tss')}"
         )
+        if w.get('source') == 'manual':
+            header += " [athlete-added]"
         mod_reason = w.get('modification_reason')
         if mod_reason:
             header += f" — {mod_reason}"

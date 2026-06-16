@@ -415,6 +415,10 @@ SQLite database at `trainmate.db` (path from `config.db_path`).
 | `removed_reason`       | TEXT       | Athlete's reason for removal (`--reason`); optional |
 | `original_date`        | TEXT       | YYYY-MM-DD — set once on creation, never            |
 |                        |            | overwritten (COALESCE); used to detect swap-back   |
+| `source`               | TEXT       | Origin axis, fixed at creation: `generated`        |
+|                        |            | (plan/generate, or a session adapt newly adds) or  |
+|                        |            | `manual` (`workout add`). NULL on legacy rows.     |
+|                        |            | Orthogonal to adaptation — adapting keeps origin.  |
 
 **Workout state is four orthogonal facts, not one enum** (a prior single `status`
 string conflated them): *adapted?* = `modification_reason IS NOT NULL`; *on

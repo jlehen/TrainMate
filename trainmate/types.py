@@ -51,6 +51,7 @@ class Workout(TypedDict):
     original_date: Optional[str]
     removed: Optional[bool]
     removed_reason: Optional[str]
+    source: Optional[str]  # origin, fixed at creation: 'generated'|'manual' (None = legacy)
 
 class CompletedActivity(TypedDict):
     """Represents a completed Garmin activity synced from Sheets."""

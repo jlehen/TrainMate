@@ -539,6 +539,9 @@ async function fetchWorkouts() {
             // calendar-current = synced.
             const isAdapted = !!w.modification_reason;
             const isSynced = !!w.synced;
+            // Origin axis (ARCHITECTURE.md §5): orthogonal to adapted/synced —
+            // 'manual' = athlete-scheduled via `workout add`.
+            const isManual = w.source === "manual";
 
             let cardClass = "workout-card";
             if (isAdapted) cardClass += " adapted";
@@ -572,6 +575,8 @@ async function fetchWorkouts() {
             const item = document.createElement("div");
             item.className = cardClass;
             
+            const manualBadge = isManual ? ` <span class="workout-tag-manual">MANUAL</span>` : "";
+
             let reasonHtml = "";
             if (isAdapted && w.modification_reason) {
                 reasonHtml = `<div class="workout-reason"><i class="fa-solid fa-triangle-exclamation"></i> Adapted Reason: ${w.modification_reason}</div>`;
@@ -589,7 +594,7 @@ async function fetchWorkouts() {
                     <span class="workout-weekday">${weekdayStr}</span>
                 </div>
                 <div class="workout-body">
-                    <span class="workout-title">${escapeHtml(w.title)}</span>
+                    <span class="workout-title">${escapeHtml(w.title)}${manualBadge}</span>
                     <span class="workout-desc">${escapeHtml(w.description)}</span>
                     ${reasonHtml}
                     ${origHtml}

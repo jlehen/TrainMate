@@ -689,7 +689,8 @@ class CoachService:
                 synced=False,
                 duration_minutes=w.get('duration_minutes'),
                 rpe=w.get('rpe'),
-                tss=w.get('tss')
+                tss=w.get('tss'),
+                source='generated'
             )
             saved_workouts.append({
                 'id': wid,
@@ -902,6 +903,10 @@ class CoachService:
             if existing:
                 orig_desc = existing['original_description'] or existing['description']
                 ge_id = existing['google_event_id']
+            # Origin is fixed at creation: preserve it when adapting an existing
+            # session (None + COALESCE keeps 'manual'/'generated'); only a session
+            # adapt newly introduces is coach-authored ('generated').
+            source = None if existing else 'generated'
 
             self._db.save_workout(
                 date=w['date'],
@@ -914,7 +919,8 @@ class CoachService:
                 google_event_id=ge_id,
                 duration_minutes=w.get('duration_minutes'),
                 rpe=w.get('rpe'),
-                tss=w.get('tss')
+                tss=w.get('tss'),
+                source=source
             )
 
             # Sync to Google Calendar
@@ -1135,6 +1141,7 @@ class CoachService:
             duration_minutes=duration_minutes,
             rpe=rpe,
             tss=tss,
+            source='manual',
         )
 
         saved = self._db.get_workout(date, sport_type)

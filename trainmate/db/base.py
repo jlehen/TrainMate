@@ -100,7 +100,8 @@ class BaseDB:
                     modification_reason TEXT, -- non-NULL <=> adapted/swapped
                     google_event_id TEXT,
                     removed INTEGER DEFAULT 0, -- 1 <=> soft-deleted via `workout rm`
-                    removed_reason TEXT -- athlete's reason for removal (optional)
+                    removed_reason TEXT, -- athlete's reason for removal (optional)
+                    source TEXT -- origin, fixed at creation: 'generated'|'manual' (NULL = legacy)
                 )
             """)
 
@@ -128,6 +129,17 @@ class BaseDB:
                 pass
             try:
                 cursor.execute("ALTER TABLE workouts ADD COLUMN removed_reason TEXT")
+            except sqlite3.OperationalError:
+                pass
+            # Origin axis: who authored the session, fixed at creation and never
+            # overwritten — 'generated' (plan/workout generate, or a session adapt
+            # newly introduces) or 'manual' (workout add). NULL on legacy rows
+            # predating this column. Lets the coach and analysis treat
+            # athlete-scheduled sessions distinctly from AI-authored ones; orthogonal
+            # to the synced/adaptation/removed axes (adapting a session keeps its
+            # origin — the change lands on modification_reason instead).
+            try:
+                cursor.execute("ALTER TABLE workouts ADD COLUMN source TEXT")
             except sqlite3.OperationalError:
                 pass
             # Migrate the conflated `status` enum into an orthogonal `synced` flag.

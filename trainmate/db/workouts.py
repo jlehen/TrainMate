@@ -11,7 +11,8 @@ class WorkoutsMixin:
         modification_reason: Optional[str] = None, google_event_id: Optional[str] = None,
         duration_minutes: Optional[int] = None, rpe: Optional[int] = None,
         tss: Optional[int] = None, original_date: Optional[str] = None,
-        removed: bool = False, removed_reason: Optional[str] = None
+        removed: bool = False, removed_reason: Optional[str] = None,
+        source: Optional[str] = None
     ) -> int:
         """Saves a workout, updating it if it already exists for the date/sport_type."""
         with self._get_connection() as conn:
@@ -33,12 +34,13 @@ class WorkoutsMixin:
                         duration_minutes = COALESCE(?, duration_minutes),
                         rpe = COALESCE(?, rpe),
                         tss = COALESCE(?, tss),
-                        removed = ?, removed_reason = ?
+                        removed = ?, removed_reason = ?,
+                        source = COALESCE(?, source)
                     WHERE id = ?
                 """, (title, description, original_description,
                       original_date, int(synced),
                       modification_reason, ge_id, duration_minutes, rpe, tss,
-                      int(removed), removed_reason,
+                      int(removed), removed_reason, source,
                       workout_id))
             else:
                 cursor.execute("""
@@ -46,13 +48,13 @@ class WorkoutsMixin:
                         date, sport_type, title, description, original_description,
                         original_date, synced, modification_reason,
                         google_event_id, duration_minutes, rpe, tss,
-                        removed, removed_reason
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        removed, removed_reason, source
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (date, sport_type, title, description,
                       original_description or description,
                       original_date or date, int(synced),
                       modification_reason, google_event_id, duration_minutes,
-                      rpe, tss, int(removed), removed_reason))
+                      rpe, tss, int(removed), removed_reason, source))
                 workout_id = cursor.lastrowid
             conn.commit()
             return int(workout_id)
