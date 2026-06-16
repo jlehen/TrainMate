@@ -446,8 +446,9 @@ You MUST respond with a JSON object containing:
             '      "sport_type": "running" | "road_biking" | "hiking" | "strength_training" | "yoga" |\n'
             '        "ski_touring" | "rest",\n'
             '      "title": "Workout Title (e.g., Tempo Run, Long Ride, Rest Day)",\n'
-            '      "description": "Detailed description of intensity, duration, heart rate zones, and\n'
-            '        goals.",\n'
+            '      "description": "Start with the title on its own line in brackets followed by a\n'
+            '        newline, e.g. \"[Tempo Run]\\n\", then a detailed description of intensity,\n'
+            '        duration, heart rate zones, and goals.",\n'
             "      \"duration_minutes\": 60, (Estimated workout duration in minutes, integer. Use 0 for rest days)\n"
             "      \"rpe\": 6, (Expected Rate of Perceived Exertion, integer 1-10. Use 0 for rest days)\n"
             "      \"tss\": 45.0 (Expected Training Stress Score, float/integer. Use 0 for rest days)\n"
@@ -566,7 +567,9 @@ evidence-backed observations are authored only by the weekly history analysis
             '      "sport_type": "running" | "road_biking" | "hiking" | "strength_training" |\n'
             '        "yoga" | "ski_touring" | "rest",\n'
             '      "title": "Adapted Workout Title",\n'
-            '      "description": "Adapted description of intensity, duration, heart rate zones, and goals.",\n'
+            '      "description": "Start with the title on its own line in brackets followed by a\n'
+            '        newline, e.g. \"[Tempo Run]\\n\", then an adapted description of intensity,\n'
+            '        duration, heart rate zones, and goals.",\n'
             '      "duration_minutes": 45,\n'
             '      "rpe": 5,\n'
             '      "tss": 30.0\n'
