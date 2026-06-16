@@ -715,25 +715,53 @@ patchable singletons; the handler functions, named
 Flask server at `trainmate_web.py`, runs on port 5000. Static files served from
 `static/`.
 
+The API tracks the CLI feature set (mirrors `data`/`workout`/`learnings` flows);
+all mutating handlers stay thin wrappers over `coach_service`/`db`/`calendar_syncer`.
+It remains a **pure reader** w.r.t. Garmin (never calls `ensure_data`/`pull`); the
+calendar *writes* it does perform (workout sync, swap/remove/restore/adapt-apply)
+use the non-interactive service account.
+
 | Method      | Path                            | Description                                  |
 |-------------|---------------------------------|----------------------------------------------|
 | GET         | `/api/status`                   | Active goal, latest metrics, coach learnings |
-|             |                                 | (under `coach_learnings.learnings`),         |
-|             |                                 | macrocycle+mesocycles                        |
+|             |                                 | (under `coach_learnings.learnings` +         |
+|             |                                 | `.summary`), macrocycle+mesocycles,          |
+|             |                                 | `sync_state` (data freshness)                |
 | GET/POST    | `/api/objectives`               | List all / create objective                  |
 | DELETE/PUT  | `/api/objectives/<id>`          | Delete or update objective                   |
 | GET/POST    | `/api/life-events`              | List upcoming / create life event            |
 | DELETE/PUT  | `/api/life-events/<id>`         | Delete or update life event                  |
-| GET         | `/api/workouts`                 | List workouts (`?start_date=&end_date=`)     |
+| GET/POST    | `/api/workouts`                 | List workouts (`?start_date=&end_date=`,     |
+|             |                                 | `?include_removed=`) / manually add a session|
+|             |                                 | (`workout add`: `{date, sport_type, title,   |
+|             |                                 | description, duration_minutes?, rpe?, tss?,  |
+|             |                                 | reason?}`)                                    |
+| POST        | `/api/workouts/<id>/remove`     | Soft-remove a workout (`{reason?}`)          |
+| POST        | `/api/workouts/<id>/restore`    | Restore a soft-removed workout               |
+| POST        | `/api/workouts/swap`            | Swap two workouts (`{ops:[{id,new_date}],    |
+|             |                                 | reason, force?, no_sync?}`); returns          |
+|             |                                 | `{warnings}` unapplied unless `force`         |
 | POST        | `/api/plan`                     | Generate periodization plan (`{goal_id?}`)   |
 | DELETE      | `/api/plan/<goal_id>`           | Delete plan for goal                         |
 | POST        | `/api/macrocycles/<id>/feedback`| Save macrocycle feedback (`{feedback}`)      |
 | POST        | `/api/mesocycles/<id>/feedback` | Save mesocycle feedback (`{feedback}`)       |
 | POST        | `/api/workouts/generate`        | Generate workouts (`{goal_id?}`)             |
-| POST        | `/api/adapt`                    | Run daily adaptation (`{date?}`)             |
+| POST        | `/api/adapt`                    | Run daily adaptation check (read-only;       |
+|             |                                 | `{date?}` → `{reason, change_needed,         |
+|             |                                 | workouts}`)                                   |
+| POST        | `/api/adapt/apply`              | Apply proposed adaptations + sync            |
+|             |                                 | (`{workouts, reason}`)                        |
 | POST        | `/api/workouts/push`            | Sync workouts to Google Calendar             |
+| GET         | `/api/learnings`                | List coach learnings (`?sport=&confidence=&  |
+|             |                                 | dormant=`) + `summary`                        |
+| GET         | `/api/learnings/<id>/evidence`  | Per-week evidence basis (supporting/contra)  |
+| PUT/DELETE  | `/api/learnings/<id>`           | Edit text / delete a learning                |
+| POST        | `/api/learnings/<id>/demote`    | Accept a pending confidence downgrade        |
+| POST        | `/api/learnings/<id>/keep`      | Dismiss + affirm a pending downgrade         |
+| GET         | `/api/activities`               | Completed activities (`?start_date=&end_date=`)|
+| GET         | `/api/daily-context`            | Daily-context signals (`?start_date=&end_date=`)|
 | POST        | `/api/metrics/pull`             | Returns 409 — Garmin pulls are CLI-only      |
-| GET         | `/api/metrics`                  | Last 30 days of cached metrics               |
+| GET         | `/api/metrics`                  | Cached metrics (range, else last 30 days)    |
 
 
 ---

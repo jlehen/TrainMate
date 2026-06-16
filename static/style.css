@@ -139,9 +139,19 @@ header {
 /* --- MAIN DASHBOARD GRID --- */
 .dashboard-grid {
     display: grid;
-    grid-template-columns: 430px 1fr;
+    /* minmax(0, 1fr) — without the 0 floor the track defaults to min-content,
+       letting long strategy text / nowrap timeline blocks push the column wider
+       than the viewport and clip every right-column card at the edge. */
+    grid-template-columns: 430px minmax(0, 1fr);
     gap: 1.5rem;
     align-items: start;
+}
+
+/* Grid children must be allowed to shrink below their content's intrinsic width
+   so long text wraps instead of overflowing the page. */
+.left-column,
+.right-column {
+    min-width: 0;
 }
 
 @media (max-width: 1024px) {
@@ -342,9 +352,12 @@ header {
 }
 
 .status-badge {
-    position: absolute;
-    top: 1rem;
-    right: 1rem;
+    /* Flow as a compact chip at the bottom of the metric box instead of being
+       absolutely positioned over the header — at that position wide badges like
+       "Sweet Spot" overprinted long titles ("ACWR (7:28d)") and the metric icon. */
+    align-self: flex-start;
+    margin-top: auto;
+    white-space: nowrap;
     display: none; /* Controlled by badges classes */
 }
 
@@ -405,8 +418,9 @@ header {
     font-size: 0.85rem;
     line-height: 1.45;
     color: var(--text-primary);
-    max-height: 120px;
+    max-height: 320px;
     overflow-y: auto;
+    overflow-wrap: break-word;
     transition: var(--transition-smooth);
 }
 .memory-text:hover {
@@ -597,7 +611,7 @@ header {
     border-radius: 16px;
     padding: 1rem;
     display: grid;
-    grid-template-columns: 100px 1fr auto;
+    grid-template-columns: 100px minmax(0, 1fr) auto;
     gap: 1.25rem;
     align-items: center;
     transition: var(--transition-smooth);
@@ -652,6 +666,7 @@ header {
     display: flex;
     flex-direction: column;
     gap: 0.25rem;
+    min-width: 0; /* allow long titles/descriptions to wrap, not overflow */
 }
 
 .workout-title {
@@ -659,12 +674,14 @@ header {
     font-weight: 600;
     font-size: 1.05rem;
     color: var(--text-primary);
+    overflow-wrap: break-word;
 }
 
 .workout-desc {
     font-size: 0.85rem;
     color: var(--text-secondary);
     line-height: 1.4;
+    overflow-wrap: break-word;
 }
 
 .workout-reason {
@@ -956,3 +973,57 @@ header {
     box-shadow: 0 0 10px rgba(99, 102, 241, 0.4);
 }
 
+
+/* --- Evidence-based coach learnings (ARCHITECTURE.md §3) --- */
+.learning-summary {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    margin-bottom: 0.5rem;
+    letter-spacing: 0.02em;
+}
+.learning-item {
+    position: relative;
+    padding: 0.5rem 1.5rem 0.5rem 0;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+    font-size: 0.85rem;
+    line-height: 1.4;
+}
+.learning-item:last-child { border-bottom: none; }
+.learning-item.dormant { opacity: 0.5; }
+.learning-tag {
+    font-family: monospace;
+    font-size: 0.72rem;
+    color: var(--accent-cyan, #22d3ee);
+    margin-right: 0.35rem;
+}
+.learning-dormant { color: var(--text-muted); font-style: italic; }
+.learning-proposed {
+    margin-top: 0.25rem;
+    font-size: 0.75rem;
+    color: var(--accent-gold, #fbbf24);
+}
+.btn-link {
+    background: none;
+    border: none;
+    color: var(--accent-cyan, #22d3ee);
+    cursor: pointer;
+    font-size: 0.72rem;
+    padding: 0 0.25rem;
+    text-decoration: underline;
+}
+.learning-item > .btn-link {
+    position: absolute;
+    top: 0.4rem;
+    right: 0;
+    color: var(--text-muted);
+    text-decoration: none;
+}
+.workout-card { position: relative; }
+.workout-rm-btn {
+    position: absolute;
+    top: 0.4rem;
+    right: 0.4rem;
+    opacity: 0.4;
+    font-size: 0.8rem;
+}
+.workout-rm-btn:hover { opacity: 1; }

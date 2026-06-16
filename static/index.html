@@ -49,8 +49,8 @@
                 <div class="card control-card">
                     <h2><i class="fa-solid fa-sliders"></i> Coaching Engine Actions</h2>
                     <div class="action-grid">
-                        <button id="btn-pull-metrics" class="btn btn-secondary">
-                            <i class="fa-solid fa-cloud-arrow-down"></i> Pull Garmin Metrics
+                        <button id="btn-pull-metrics" class="btn btn-secondary" title="Garmin pulls run from the CLI (interactive MFA)">
+                            <i class="fa-solid fa-cloud-arrow-down"></i> Garmin Data (CLI sync)
                         </button>
                         <button id="btn-adapt" class="btn btn-warning">
                             <i class="fa-solid fa-shield-heart"></i> Run Daily Adapt Check
@@ -70,6 +70,7 @@
                 <!-- ATHLETE METRICS CARD -->
                 <div class="card metrics-card">
                     <h2><i class="fa-solid fa-heart-pulse"></i> Recovery & Training Load</h2>
+                    <div id="sync-freshness" style="font-size: 0.75rem; color: var(--text-muted); margin: 0 0 0.75rem 0;"></div>
                     <div class="metrics-grid">
                         <div class="metric-box" id="metric-hrv">
                             <div class="metric-header">

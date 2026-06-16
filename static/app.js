@@ -73,14 +73,16 @@ async function fetchStatus() {
         // Update Garmin Metrics and Baselines
         updateMetrics(data.last_metrics, data.last_baseline);
         
-        // Update Coach Memory
-        const learningsEl = document.getElementById("memory-learnings");
-        const learnings = data.coach_memory.learnings;
-        if (learnings && learnings.length > 0) {
-            learningsEl.innerText = learnings.map(l => `[${l.id}] ${l.text}`).join("\n");
-        } else {
-            learningsEl.innerText = "No observations cached yet.";
-        }
+        // Update Coach Memory (evidence-based learnings: sports + app-computed
+        // confidence + dormancy/pending-demotion markers — see ARCHITECTURE.md §3).
+        renderLearnings(
+            (data.coach_learnings && data.coach_learnings.learnings) || [],
+            (data.coach_learnings && data.coach_learnings.summary) || null
+        );
+
+        // Surface how fresh the cached Garmin data is. The web app is a pure
+        // reader; pulling is CLI-only (DESIGN_garmin_direct_pull.md §11).
+        renderSyncFreshness(data.sync_state);
         
         // Update Strategy Card
         const strategyCard = document.getElementById("strategy-card");
@@ -114,6 +116,94 @@ async function fetchStatus() {
     } catch (e) {
         logConsole(`Error fetching status: ${e.message}`, "error");
     }
+}
+
+function renderLearnings(learnings, summary) {
+    const el = document.getElementById("memory-learnings");
+    if (!el) return;
+    el.innerHTML = "";
+
+    if (!learnings || learnings.length === 0) {
+        el.innerText = "No observations cached yet. Run 'data bootstrap' (CLI) to "
+            + "reconstruct your training history and seed observations.";
+        return;
+    }
+
+    if (summary) {
+        const sum = document.createElement("div");
+        sum.className = "learning-summary";
+        let txt = `${summary.active} active`;
+        if (summary.dormant) txt += ` · ${summary.dormant} dormant`;
+        if (summary.pending_demotion) txt += ` · ${summary.pending_demotion} pending demotion`;
+        sum.innerText = txt;
+        el.appendChild(sum);
+    }
+
+    learnings.forEach(l => {
+        const sports = l.sports || "general";
+        const conf = l.confidence || "tentative";
+        const row = document.createElement("div");
+        row.className = "learning-item" + (l.dormant ? " dormant" : "");
+
+        const tag = `<span class="learning-tag">[${l.id} · ${sports} · ${conf}]</span>`;
+        const dormant = l.dormant ? ` <span class="learning-dormant">(dormant)</span>` : "";
+        let proposed = "";
+        if (l.proposed_confidence) {
+            const target = l.proposed_confidence === "retire" ? "retire" : l.proposed_confidence;
+            proposed = `<div class="learning-proposed">⚠ proposed demotion → ${target}
+                <button class="btn-link" onclick="learningAction(${l.id}, 'demote')">accept</button>
+                <button class="btn-link" onclick="learningAction(${l.id}, 'keep')">keep</button>
+            </div>`;
+        }
+        row.innerHTML = `${tag} ${escapeHtml(l.text)}${dormant}
+            <button class="btn-link" onclick="learningAction(${l.id}, 'delete')" title="Remove learning">✕</button>
+            ${proposed}`;
+        el.appendChild(row);
+    });
+}
+
+function escapeHtml(s) {
+    const div = document.createElement("div");
+    div.innerText = s == null ? "" : s;
+    return div.innerHTML;
+}
+
+window.learningAction = async function(id, action) {
+    if (action === "delete" && !confirm("Remove this learning permanently?")) return;
+    let url, method;
+    if (action === "delete") { url = `/api/learnings/${id}`; method = "DELETE"; }
+    else { url = `/api/learnings/${id}/${action}`; method = "POST"; }
+    try {
+        const res = await fetch(`${API_BASE}${url}`, { method });
+        const data = await res.json();
+        if (res.ok) {
+            logConsole(data.message || `Learning ${id} ${action} done.`);
+            fetchStatus();
+        } else {
+            logConsole(`Learning ${action} failed: ${data.error}`, "error");
+        }
+    } catch (e) {
+        logConsole(`Learning ${action} error: ${e.message}`, "error");
+    }
+};
+
+function renderSyncFreshness(syncState) {
+    const el = document.getElementById("sync-freshness");
+    if (!el) return;
+    if (!syncState || (!syncState.through_date && !syncState.last_pull_utc)) {
+        el.innerText = "Garmin data: never pulled — run 'data pull' (CLI).";
+        return;
+    }
+    const through = syncState.through_date || "?";
+    let ago = "";
+    if (syncState.last_pull_utc) {
+        const last = new Date(syncState.last_pull_utc);
+        const hours = Math.floor((Date.now() - last) / 3600000);
+        ago = hours < 1 ? " (just now)"
+            : hours < 24 ? ` (${hours}h ago)`
+            : ` (${Math.floor(hours / 24)}d ago)`;
+    }
+    el.innerText = `Garmin data through ${through}${ago} — pulling is CLI-only.`;
 }
 
 function parseLocalDate(dateStr) {
@@ -444,9 +534,12 @@ async function fetchWorkouts() {
             const monthStr = dateObj.toLocaleDateString("en-US", { month: "short", timeZone: "UTC" });
             const weekdayStr = dateObj.toLocaleDateString("en-US", { weekday: "short", timeZone: "UTC" });
             
-            const isAdapted = w.status === 'modified' || w.modification_reason;
-            const isSynced = w.status === 'synced';
-            
+            // Workout state is four orthogonal facts, not one enum (ARCHITECTURE.md
+            // §5): adapted = modification_reason set; on-calendar = google_event_id;
+            // calendar-current = synced.
+            const isAdapted = !!w.modification_reason;
+            const isSynced = !!w.synced;
+
             let cardClass = "workout-card";
             if (isAdapted) cardClass += " adapted";
             else if (isSynced) cardClass += " synced";
@@ -496,14 +589,18 @@ async function fetchWorkouts() {
                     <span class="workout-weekday">${weekdayStr}</span>
                 </div>
                 <div class="workout-body">
-                    <span class="workout-title">${w.title}</span>
-                    <span class="workout-desc">${w.description}</span>
+                    <span class="workout-title">${escapeHtml(w.title)}</span>
+                    <span class="workout-desc">${escapeHtml(w.description)}</span>
                     ${reasonHtml}
                     ${origHtml}
                 </div>
                 <div class="${iconClass}">
                     <i class="fa-solid ${iconGlyph}"></i>
                 </div>
+                <button class="btn-icon-only workout-rm-btn" title="Remove this session"
+                    onclick="removeWorkout(${w.id})">
+                    <i class="fa-solid fa-xmark"></i>
+                </button>
             `;
             container.appendChild(item);
         });
@@ -513,19 +610,40 @@ async function fetchWorkouts() {
     }
 }
 
+window.removeWorkout = async function(id) {
+    const reason = prompt("Remove this session? Optionally note why (cancellation reason):");
+    if (reason === null) return;  // user cancelled the prompt
+    try {
+        const res = await fetch(`${API_BASE}/api/workouts/${id}/remove`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ reason })
+        });
+        const data = await res.json();
+        if (res.ok) {
+            logConsole(data.message || "Workout removed.");
+            if (data.warning) logConsole(`Calendar warning: ${data.warning}`, "warning");
+            fetchWorkouts();
+        } else {
+            logConsole(`Remove failed: ${data.error}`, "error");
+        }
+    } catch (e) {
+        logConsole(`Remove error: ${e.message}`, "error");
+    }
+};
+
 // --- BUTTON TRIGGER FUNCTIONS ---
 
 document.getElementById("btn-pull-metrics").addEventListener("click", async () => {
-    logConsole("Pulling Garmin metrics from Google Sheets...", "system");
+    // Garmin pulls are CLI-only — login can require an interactive MFA prompt, so it
+    // cannot run from the web app (DESIGN_garmin_direct_pull.md §11). Surface the
+    // command and refresh the (read-only) view of cached data.
     try {
         const res = await fetch(`${API_BASE}/api/metrics/pull`, { method: "POST" });
         const data = await res.json();
-        if (res.ok) {
-            logConsole("Garmin metrics pull complete!");
-            fetchStatus();
-        } else {
-            logConsole(`Pull metrics failed: ${data.error}`, "error");
-        }
+        logConsole(data.error || "Garmin sync is CLI-only.", "warning");
+        if (data.command) logConsole(`Run: ${data.command}`, "system");
+        fetchStatus();
     } catch (e) {
         logConsole(`Pull metrics error: ${e.message}`, "error");
     }
@@ -574,17 +692,35 @@ document.getElementById("btn-adapt").addEventListener("click", async () => {
     try {
         const res = await fetch(`${API_BASE}/api/adapt`, { method: "POST" });
         const data = await res.json();
-        if (res.ok) {
-            logConsole(`Daily Check Complete: ${data.reason}`, "system");
-            if (data.adapted) {
-                logConsole(`Workout was adapted: ${data.workout.title}`, "warning");
-            } else {
-                logConsole(`Workout remains as scheduled.`, "system");
-            }
+        if (!res.ok) {
+            logConsole(`Adaptation check failed: ${data.error}`, "error");
+            return;
+        }
+        logConsole(`Daily Check Complete: ${data.reason}`, "system");
+        if (!data.change_needed || !data.workouts || data.workouts.length === 0) {
+            logConsole("Workouts remain as scheduled.", "system");
+            return;
+        }
+        // The check is read-only; applying saves the proposals + syncs Calendar.
+        data.workouts.forEach(w => {
+            logConsole(`Proposed: ${w.date} ${w.sport_type} — ${w.title}`, "warning");
+        });
+        if (!confirm(`Apply ${data.workouts.length} proposed adaptation(s) and sync to Calendar?`)) {
+            logConsole("Adaptations discarded.", "system");
+            return;
+        }
+        const ap = await fetch(`${API_BASE}/api/adapt/apply`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ workouts: data.workouts, reason: data.reason })
+        });
+        const apData = await ap.json();
+        if (ap.ok) {
+            logConsole(apData.message || "Adaptations applied.");
             fetchStatus();
             fetchWorkouts();
         } else {
-            logConsole(`Adaptation check failed: ${data.error}`, "error");
+            logConsole(`Apply failed: ${apData.error}`, "error");
         }
     } catch (e) {
         logConsole(`Adaptation check error: ${e.message}`, "error");
