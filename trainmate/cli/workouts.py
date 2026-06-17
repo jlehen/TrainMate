@@ -5,6 +5,7 @@ from typing import Optional
 import trainmate_cli as cli
 from trainmate.config import config
 from trainmate.adherence import analyze_adherence, date_covered
+from trainmate.sports import canonical_sport
 from trainmate.util import (
     bold, dim, green, red, yellow, cyan, blue, magenta, gray,
     color_acwr, visible_len, pad_visible, wrap_text, format_labeled_text,
@@ -806,6 +807,10 @@ def run_workout_add(args: argparse.Namespace) -> None:
     except ValueError:
         print(red(f"Invalid date format: '{args.date}'. Use YYYY-MM-DD."))
         sys.exit(1)
+
+    # Normalize to the coach's canonical sport vocabulary so the stored session and the
+    # "Replacing existing ..." preview both match what generate/adapt will look up.
+    args.sport_type = canonical_sport(args.sport_type)
 
     if args.replace_day:
         to_replace = cli.db.get_workouts(start_date=args.date, end_date=args.date)

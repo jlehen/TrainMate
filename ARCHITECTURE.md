@@ -89,6 +89,9 @@ classes themselves.
 |                      |                      | (inbound — `sync_calendar_context`, see §13).    |
 | `adherence.py`       | —                    | `analyze_adherence()` pure function; compares    |
 |                      |                      | planned vs completed.                            |
+| `sports.py`          | —                    | Canonical sport vocabulary (`SPORT_MAPPING`,     |
+|                      |                      | `canonical_sport`, `sport_aliases`); dependency- |
+|                      |                      | free so DB + adherence share it without a cycle. |
 | `util.py`            | —                    | ANSI color helpers (`bold`, `green`, `red`, …),  |
 |                      |                      | `wrap_text`, `format_labeled_text`.              |
 
@@ -290,6 +293,16 @@ is unchanged.
 - `save_workout(date, sport_type, ...)` is an **upsert**: it looks up by
   `(date, sport_type)` and updates if found, inserts otherwise. The
   `google_event_id` is preserved unless explicitly passed.
+- **Sport-type matching is alias-aware** (`trainmate/sports.py`, `SPORT_MAPPING`):
+  the coach's prompts/generated/adapted workouts speak canonical names
+  (`strength_training`), while manual (`workout add`) or legacy rows may use an alias
+  (`strength`). `workout add` normalizes input via `canonical_sport()`; `get_workout`
+  and `save_workout`'s upsert match any alias of the same canonical sport
+  (case-insensitively) so a canonical lookup/save resolves an aliased row instead of
+  reporting it missing or inserting a duplicate. Adaptation's override check
+  (`workout_adapt_apply`) compares canonically too. `adherence.py` re-exports
+  `SPORT_MAPPING` from `trainmate/sports.py` (kept dependency-free to avoid the
+  `adherence → garmin → trainmate.db` import cycle).
 - `clear_future_workouts(from_date)` deletes future workouts, **sparing any with a
   `google_event_id`** (the true "on calendar" signal) so their events aren't
   orphaned; `include_calendar_events=True` removes those too (caller deletes the

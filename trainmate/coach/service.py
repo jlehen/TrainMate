@@ -5,6 +5,7 @@ from trainmate.db import db
 from trainmate.google_calendar import calendar_syncer
 from trainmate.types import Objective, LifeEvent, Workout
 from trainmate.adherence import analyze_adherence
+from trainmate.sports import canonical_sport
 from trainmate.garmin import activity_load
 from trainmate.util import today_str as _today_str, today_date as _today_date, cyan, green, yellow, bold, red, gray
 from trainmate.coach.engine import CoachEngine
@@ -884,8 +885,12 @@ class CoachService:
         for ew in existing_workouts:
             ew_date = ew['date']
             if ew_date in proposed_by_date:
-                proposed_sports = [p['sport_type'] for p in proposed_by_date[ew_date]]
-                if ew['sport_type'] not in proposed_sports:
+                # Compare canonically so a proposal for 'strength_training' is recognized
+                # as adapting an existing 'strength' session (not overriding/deleting it).
+                proposed_sports = {
+                    canonical_sport(p['sport_type']) for p in proposed_by_date[ew_date]
+                }
+                if canonical_sport(ew['sport_type']) not in proposed_sports:
                     print(yellow(f"Removing overridden workout: {ew['title']} ({ew['sport_type']}) "
                           f"on {ew_date}"))
                     if ew.get('google_event_id'):
@@ -1111,6 +1116,9 @@ class CoachService:
 
         Returns (saved_workout, list_of_replaced_workouts).
         """
+        # Store the coach's canonical sport name (e.g. 'strength' -> 'strength_training')
+        # so manual sessions match the vocabulary that generate/adapt speak.
+        sport_type = canonical_sport(sport_type)
         if replace_day:
             existing_all = self._db.get_workouts(start_date=date, end_date=date)
         else:
@@ -1120,7 +1128,7 @@ class CoachService:
         # The same-sport session (if any) lends its calendar event to the new workout.
         primary = next(
             (w for w in existing_all
-             if w['sport_type'].lower() == sport_type.lower()),
+             if canonical_sport(w['sport_type']) == sport_type),
             None,
         )
 

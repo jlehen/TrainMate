@@ -1,5 +1,6 @@
 from typing import List, Optional
 from trainmate.types import Workout
+from trainmate.sports import sport_aliases
 
 
 class WorkoutsMixin:
@@ -14,12 +15,18 @@ class WorkoutsMixin:
         removed: bool = False, removed_reason: Optional[str] = None,
         source: Optional[str] = None
     ) -> int:
-        """Saves a workout, updating it if it already exists for the date/sport_type."""
+        """Saves a workout, updating it if one already exists that day for the same
+        sport. Existence is alias-aware (see trainmate.sports), so adapting/regenerating
+        a canonical ``strength_training`` updates an existing ``strength`` row in place
+        instead of inserting a duplicate; the stored row keeps its original spelling."""
+        aliases = sport_aliases(sport_type)
+        placeholders = ",".join("?" * len(aliases))
         with self._get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute(
-                "SELECT id, google_event_id FROM workouts WHERE date = ? AND sport_type = ?",
-                (date, sport_type)
+                "SELECT id, google_event_id FROM workouts WHERE date = ? "
+                f"AND LOWER(sport_type) IN ({placeholders})",
+                (date, *aliases)
             )
             row = cursor.fetchone()
             if row:
@@ -60,12 +67,20 @@ class WorkoutsMixin:
             return int(workout_id)
 
     def get_workout(self, date: str, sport_type: str) -> Optional[Workout]:
-        """Fetches a workout by date and sport type."""
+        """Fetches a workout by date and sport type.
+
+        Matching is alias-aware (see trainmate.sports): a lookup for the canonical
+        ``strength_training`` finds a row stored under an alias like ``strength`` (and
+        vice-versa), case-insensitively, so the coach's canonical vocabulary lines up
+        with manually-added or legacy spellings."""
+        aliases = sport_aliases(sport_type)
+        placeholders = ",".join("?" * len(aliases))
         with self._get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute(
-                "SELECT * FROM workouts WHERE date = ? AND sport_type = ?",
-                (date, sport_type)
+                "SELECT * FROM workouts WHERE date = ? "
+                f"AND LOWER(sport_type) IN ({placeholders})",
+                (date, *aliases)
             )
             row = cursor.fetchone()
             return dict(row) if row else None  # type: ignore

@@ -2,6 +2,7 @@ from datetime import timedelta
 from typing import List, Dict, Any, Tuple, Optional
 
 from trainmate.garmin import activity_load, _rpe_tss
+from trainmate.sports import SPORT_MAPPING
 
 
 def date_covered(
@@ -15,19 +16,6 @@ def date_covered(
     if covered_ranges is None:
         return True
     return any(start <= date_str <= end for start, end in covered_ranges)
-
-
-# Maps planned workout types to corresponding Garmin activity types
-SPORT_MAPPING = {
-    "running": ["running", "indoor_running", "trail_running", "treadmill_running"],
-    "road_biking": [
-        "road_biking", "indoor_cycling", "cycling", "virtual_cycling", "biking"
-    ],
-    "hiking": ["hiking", "walking"],
-    "strength_training": ["strength_training", "strength", "indoor_cardio", "fitness"],
-    "yoga": ["yoga", "stretching", "pilates"],
-    "ski_touring": ["ski_touring", "backcountry_skiing", "nordic_skiing", "skiing"]
-}
 
 
 def _planned_load(w: Dict[str, Any]) -> float:
