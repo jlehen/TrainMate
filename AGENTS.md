@@ -1,6 +1,8 @@
 # Code
 - Read ARCHITECTURE.md to ramp up on the code structure.
 - When changing code, always update ARCHITECTURE.md if appropriate.
+- When adding a new feature, always reflect if this needs to be integrated
+  in each command and data flow.
 
 # VCS policy
 - Never commits without being explicitly asked by the user.
