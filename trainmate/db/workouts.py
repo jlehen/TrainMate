@@ -13,7 +13,7 @@ class WorkoutsMixin:
         duration_minutes: Optional[int] = None, rpe: Optional[int] = None,
         tss: Optional[int] = None, original_date: Optional[str] = None,
         removed: bool = False, removed_reason: Optional[str] = None,
-        source: Optional[str] = None
+        source: Optional[str] = None, adaptation_summary: Optional[str] = None
     ) -> int:
         """Saves a workout, updating it if one already exists that day for the same
         sport. Existence is alias-aware (see trainmate.sports), so adapting/regenerating
@@ -37,7 +37,9 @@ class WorkoutsMixin:
                     SET title = ?, description = ?,
                         original_description = COALESCE(?, original_description),
                         original_date = COALESCE(?, original_date, date),
-                        synced = ?, modification_reason = ?, google_event_id = ?,
+                        synced = ?, modification_reason = ?,
+                        adaptation_summary = COALESCE(?, adaptation_summary),
+                        google_event_id = ?,
                         duration_minutes = COALESCE(?, duration_minutes),
                         rpe = COALESCE(?, rpe),
                         tss = COALESCE(?, tss),
@@ -46,21 +48,23 @@ class WorkoutsMixin:
                     WHERE id = ?
                 """, (title, description, original_description,
                       original_date, int(synced),
-                      modification_reason, ge_id, duration_minutes, rpe, tss,
+                      modification_reason, adaptation_summary, ge_id,
+                      duration_minutes, rpe, tss,
                       int(removed), removed_reason, source,
                       workout_id))
             else:
                 cursor.execute("""
                     INSERT INTO workouts (
                         date, sport_type, title, description, original_description,
-                        original_date, synced, modification_reason,
+                        original_date, synced, modification_reason, adaptation_summary,
                         google_event_id, duration_minutes, rpe, tss,
                         removed, removed_reason, source
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (date, sport_type, title, description,
                       original_description or description,
                       original_date or date, int(synced),
-                      modification_reason, google_event_id, duration_minutes,
+                      modification_reason, adaptation_summary,
+                      google_event_id, duration_minutes,
                       rpe, tss, int(removed), removed_reason, source))
                 workout_id = cursor.lastrowid
             conn.commit()

@@ -97,7 +97,8 @@ class BaseDB:
                     description TEXT,
                     original_description TEXT,
                     synced INTEGER DEFAULT 0, -- 0 = pending push, 1 = calendar current
-                    modification_reason TEXT, -- non-NULL <=> adapted/swapped
+                    modification_reason TEXT, -- non-NULL <=> adapted/swapped; short per-workout note
+                    adaptation_summary TEXT, -- batch-level adapt rationale, shared across the batch
                     google_event_id TEXT,
                     removed INTEGER DEFAULT 0, -- 1 <=> soft-deleted via `workout rm`
                     removed_reason TEXT, -- athlete's reason for removal (optional)
@@ -129,6 +130,14 @@ class BaseDB:
                 pass
             try:
                 cursor.execute("ALTER TABLE workouts ADD COLUMN removed_reason TEXT")
+            except sqlite3.OperationalError:
+                pass
+            # Split the adaptation rationale into two axes: modification_reason holds a
+            # short per-workout note, while adaptation_summary holds the long batch-level
+            # reason shared across every session in one `workout adapt` run (deduplicated
+            # at display). NULL on swaps/manual edits and on legacy adapted rows.
+            try:
+                cursor.execute("ALTER TABLE workouts ADD COLUMN adaptation_summary TEXT")
             except sqlite3.OperationalError:
                 pass
             # Origin axis: who authored the session, fixed at creation and never

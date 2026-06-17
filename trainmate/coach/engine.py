@@ -566,13 +566,19 @@ evidence-backed observations are authored only by the weekly history analysis
             "You MUST respond with a JSON object containing:\n"
             "{\n"
             '  "change_needed": true | false,\n'
-            '  "reason": "Swapping tempo run to rest.",\n'
+            '  "reason": "Overall rationale for the whole adaptation: the readiness/load\n'
+            '    picture and the strategy applied across the block. This is the batch-level\n'
+            '    summary, shared by every adapted workout below — do NOT repeat it per\n'
+            '    workout; keep per-workout notes in "change_reason".",\n'
             '  "adapted_workouts": [\n'
             "    {\n"
             '      "date": "YYYY-MM-DD",\n'
             '      "sport_type": "running" | "road_biking" | "hiking" | "strength_training" |\n'
             '        "yoga" | "ski_touring" | "rest",\n'
             '      "title": "Adapted Workout Title",\n'
+            '      "change_reason": "One short sentence on why THIS specific session changed,\n'
+            '        e.g. \"Cut to easy Z2 to shed intensity.\" Keep it to a single sentence;\n'
+            '        do not restate the overall reason.",\n'
             '      "description": "Start with the title on its own line in brackets followed by a\n'
             '        newline, e.g. \"[Tempo Run]\\n\", then an adapted description of intensity,\n'
             '        duration, heart rate zones, and goals.",\n'

@@ -858,7 +858,13 @@ class CoachService:
                 'description': w['description'],
                 'original_description': w['description'],
                 'synced': False,
-                'modification_reason': reason,
+                # Per-workout note; the long batch rationale travels separately as the
+                # returned `reason` and is stamped onto adaptation_summary at apply time.
+                # Fall back to the batch reason so an adapted session is never left with a
+                # NULL modification_reason (the load-bearing "modified?" flag) if the model
+                # omits a per-workout change_reason.
+                'modification_reason': w.get('change_reason') or reason,
+                'adaptation_summary': reason,
                 'google_event_id': None,
                 'duration_minutes': w.get('duration_minutes'),
                 'rpe': w.get('rpe'),
@@ -920,7 +926,8 @@ class CoachService:
                 description=w['description'],
                 original_description=orig_desc or w['description'],
                 synced=False,
-                modification_reason=reason,
+                modification_reason=w.get('modification_reason'),
+                adaptation_summary=reason,
                 google_event_id=ge_id,
                 duration_minutes=w.get('duration_minutes'),
                 rpe=w.get('rpe'),

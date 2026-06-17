@@ -43,7 +43,8 @@ class Workout(TypedDict):
     description: Optional[str]
     original_description: Optional[str]
     synced: bool  # True = Google Calendar event current; orthogonal to adaptation
-    modification_reason: Optional[str]  # non-None <=> adapted/swapped
+    modification_reason: Optional[str]  # non-None <=> adapted/swapped; short per-workout note
+    adaptation_summary: Optional[str]  # set <=> from `workout adapt`; long batch rationale
     google_event_id: Optional[str]  # set <=> a Calendar event exists (may be stale)
     duration_minutes: Optional[int]
     rpe: Optional[int]

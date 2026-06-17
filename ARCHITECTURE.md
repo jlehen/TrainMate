@@ -241,7 +241,9 @@ called by the UIs.
 |                                                     | `CoachEngine._workout_adapt_logic()`. Returns                               |
 |                                                     | `(reason, proposed_workouts)`.                                      |
 | `workout_adapt_apply(proposed, reason, start, end)`   | Deletes overridden workouts (+ calendar events), saves adapted      |
-|                                                     | workouts, syncs to Calendar.                                        |
+|                                                     | workouts, syncs to Calendar. Each session keeps its short            |
+|                                                     | per-workout `change_reason` in `modification_reason`; the long       |
+|                                                     | batch `reason` is stamped on every session's `adaptation_summary`.   |
 | `workout_add(date, sport_type, title, description, …, replace_day=False)` | Manually schedules a workout, **replacing** any same-sport |
 |                                                     | session that day — or every session that day with `replace_day` (deterministic — no LLM). Captures the overwritten |
 |                                                     | session so the calendar event records it (replaced description →    |
@@ -419,7 +421,12 @@ SQLite database at `trainmate.db` (path from `config.db_path`).
 |                        |            | (COALESCE)                                       |
 | `synced`               | INTEGER    | 0/1 — sync axis: 1 = Calendar event current.     |
 |                        |            | Orthogonal to adaptation (see below)             |
-| `modification_reason`  | TEXT       | Adaptation axis: non-NULL ⟺ adapted/swapped      |
+| `modification_reason`  | TEXT       | Adaptation axis: non-NULL ⟺ adapted/swapped.     |
+|                        |            | A short per-workout note (one sentence).         |
+| `adaptation_summary`   | TEXT       | Long batch-level adapt rationale, stamped on      |
+|                        |            | every session of one `workout adapt` run and      |
+|                        |            | deduplicated when listed. NULL on swaps/manual/    |
+|                        |            | legacy rows.                                      |
 | `google_event_id`      | TEXT       | Non-NULL ⟺ a Calendar event exists (may be stale)|
 | `duration_minutes`     | INTEGER    |                                                  |
 | `rpe`                  | INTEGER    | Expected RPE 1–10                                |
@@ -434,9 +441,14 @@ SQLite database at `trainmate.db` (path from `config.db_path`).
 |                        |            | Orthogonal to adaptation — adapting keeps origin.  |
 
 **Workout state is four orthogonal facts, not one enum** (a prior single `status`
-string conflated them): *adapted?* = `modification_reason IS NOT NULL`; *on
+string conflated them): *modified?* = `modification_reason IS NOT NULL`; *on
 calendar?* = `google_event_id IS NOT NULL`; *Calendar current?* = `synced`;
-*removed?* = `removed = 1`. The
+*removed?* = `removed = 1`. *Modified* spans both daily adapts and swaps/manual
+replaces; the two are now distinguishable — `adaptation_summary IS NOT NULL` ⟺ the
+change came from `workout adapt` (a swap/manual replace sets only
+`modification_reason`). `modification_reason` is set directly (so a swap-back can clear
+it to NULL), whereas `adaptation_summary` is COALESCE-preserved on re-save — only ever
+written by an adapt, never cleared. The
 otherwise-unrepresentable "on the calendar but stale, needs re-push" state is
 `synced=0 AND google_event_id IS NOT NULL` — set whenever a pushed workout is later
 adapted (`workout_adapt_apply`) or swapped (`update_workout_date`). Push eligibility =

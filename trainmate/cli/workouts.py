@@ -387,7 +387,10 @@ def run_workout_list(args: argparse.Namespace) -> None:
         if args.sport_type:
             filter_parts.append(f"Type: {args.sport_type}")
         print(gray(f"Filters: {', '.join(filter_parts)}"))
-        
+
+    # The long batch rationale is stamped on every workout of an adapt run; show each
+    # distinct summary only once across the listing so it doesn't dominate the output.
+    seen_summaries: set = set()
     for w in workouts:
         mod_marker = ""
         if w['modification_reason']:
@@ -412,8 +415,15 @@ def run_workout_list(args: argparse.Namespace) -> None:
             f"{bold(w['title'])}{mod_marker}{sync_marker}{rem_marker}{src_marker}{duration_str}{tss_str}{rpe_str}"
         )
         print(format_labeled_block("  Description:", w['description']))
-        if w.get('modification_reason'):
+        summary = w.get('adaptation_summary')
+        # Show the per-workout note inline, unless it's just the batch reason echoed
+        # (the fallback when the model gave no per-workout change_reason) — that would
+        # duplicate the Adapt summary printed below.
+        if w.get('modification_reason') and w['modification_reason'] != summary:
             print(format_labeled_block("  Reason:", w['modification_reason'], color_fn=yellow))
+        if summary and summary not in seen_summaries:
+            seen_summaries.add(summary)
+            print(format_labeled_block("  Adapt summary:", summary, color_fn=gray))
         print(gray("-" * 40))
 
 
