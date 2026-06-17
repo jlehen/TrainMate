@@ -230,7 +230,7 @@ class TestAdaptation(unittest.TestCase):
         for wid in (a, b):
             mr = test_db.get_workout_by_id(wid)["modification_reason"]
             self.assertIn("Swapped from", mr)
-            self.assertIn("Reason: knee felt sore", mr)
+            self.assertIn("Reason given: knee felt sore", mr)
 
     def test_apply_swap_no_sync(self):
         a = test_db.save_workout("2026-06-10", "running", "Run A", "a", rpe=4, tss=30)

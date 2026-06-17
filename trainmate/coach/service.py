@@ -1076,7 +1076,7 @@ class CoachService:
                 continue
             mod_reason = f"Swapped from {workout['date']} to {op['new_date']}"
             if reason:
-                mod_reason += f". Reason: {reason}"
+                mod_reason += f". Reason given: {reason}"
             self._db.update_workout_date(op['id'], op['new_date'], mod_reason)
             moved = self._db.get_workout_by_id(op['id'])
             if moved:
@@ -1166,7 +1166,7 @@ class CoachService:
             label = "sessions" if len(headers) > 1 else "session"
             mod_reason = f"Manually replaced previous {label}: " + "; ".join(headers)
             if reason:
-                mod_reason += f". Reason: {reason}"
+                mod_reason += f". Reason given: {reason}"
 
         self._db.save_workout(
             date=date,

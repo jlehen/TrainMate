@@ -1000,7 +1000,7 @@ surrounding days is intentionally **not** done here — run `workout adapt` for 
 A `workout swap` exchanges the dates of two workouts (or moves one onto an
 empty rest day). Moved workouts are flagged `status='modified'` with a
 `modification_reason` recording the swap (`Swapped from X to Y`, plus the
-athlete's optional `--reason` appended as `. Reason: …`), exactly like an
+athlete's optional `--reason` appended as `. Reason given: …`), exactly like an
 adaptation — so they are re-synced by `workout push` and visibly distinguished
 from untouched `planned` ones. If a swap returns a workout to its
 `original_date`, the `modification_reason` is cleared to `NULL` — the workout
