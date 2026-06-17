@@ -125,6 +125,67 @@ class TestCalendarSync(unittest.TestCase):
         # The description text appears exactly once.
         self.assertEqual(desc.count("40 min tempo at threshold."), 1)
 
+    def test_sync_workout_manual_marks_summary(self):
+        # A manually-added session (no replacement) should be flagged "[Manual]"
+        # in the calendar summary so it's distinguishable from generated ones.
+        workout = {
+            "date": "2026-06-13",
+            "sport_type": "running",
+            "title": "Easy Run",
+            "description": "Casual 30 min jog.",
+            "original_description": "Casual 30 min jog.",
+            "duration_minutes": 30,
+            "tss": 25,
+            "google_event_id": None,
+            "source": "manual",
+        }
+
+        mock_service = MagicMock()
+        mock_event_result = {"id": "evt-manual-1", "htmlLink": "http://calendar/event/3"}
+        mock_service.events().insert().execute.return_value = mock_event_result
+
+        with patch.object(calendar_syncer, "service", mock_service):
+            calendar_syncer.sync_workout(workout)
+
+        insert_calls = [
+            call for call in mock_service.events().insert.call_args_list
+            if call.kwargs.get("body")
+        ]
+        self.assertEqual(len(insert_calls), 1)
+        body = insert_calls[0].kwargs["body"]
+        self.assertEqual(body.get("summary"), "[Manual] Easy Run")
+
+    def test_sync_workout_manual_replacement_composes_markers(self):
+        # A manual add that overwrote an existing session is both manual and
+        # adapted; the summary carries both markers.
+        workout = {
+            "date": "2026-06-14",
+            "sport_type": "running",
+            "title": "Tempo Run",
+            "description": "New 45 min tempo.",
+            "original_description": "Old 60 min intervals.",
+            "modification_reason": "Manually replaced previous session: Intervals.",
+            "duration_minutes": 45,
+            "tss": 55,
+            "google_event_id": None,
+            "source": "manual",
+        }
+
+        mock_service = MagicMock()
+        mock_event_result = {"id": "evt-manual-2", "htmlLink": "http://calendar/event/4"}
+        mock_service.events().insert().execute.return_value = mock_event_result
+
+        with patch.object(calendar_syncer, "service", mock_service):
+            calendar_syncer.sync_workout(workout)
+
+        insert_calls = [
+            call for call in mock_service.events().insert.call_args_list
+            if call.kwargs.get("body")
+        ]
+        self.assertEqual(len(insert_calls), 1)
+        body = insert_calls[0].kwargs["body"]
+        self.assertEqual(body.get("summary"), "[Manual] [Adapted] Tempo Run")
+
     def test_sync_workout_removed(self):
         # Setup workout dictionary with removed details
         workout = {

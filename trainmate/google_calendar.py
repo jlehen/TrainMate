@@ -52,6 +52,7 @@ class CalendarSyncer:
         # Format Summary and Description
         is_modified = bool(mod_reason)
         content_changed = is_modified and orig_description != description
+        is_manual = workout.get('source') == 'manual'
         if workout.get('removed'):
             summary = f"[Deleted] {title}"
             event_description = description or ""
@@ -73,6 +74,13 @@ class CalendarSyncer:
         else:
             summary = title
             event_description = description or ""
+
+        # Flag manually-added sessions so they're distinguishable at a glance from
+        # coach-generated ones. The marker composes with any "[Adapted]" tag above
+        # (a manual add can replace an existing session); a deleted event keeps the
+        # "[Deleted]" framing alone since its removal is the salient state.
+        if is_manual and not workout.get('removed'):
+            summary = f"[Manual] {summary}"
 
         # Prepend duration and tss to description if available
         duration = workout.get('duration_minutes')

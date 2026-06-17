@@ -991,8 +991,11 @@ replaced title + duration/TSS/RPE plus the athlete's `--reason` become the
 `modification_reason` (rendered "Reason:"); other-sport entries are prefixed
 with their sport. The same-sport row's `google_event_id` is carried over so its
 existing Calendar event is updated in place; any other replaced sessions'
-Calendar events are deleted. Load re-balancing of surrounding days is
-intentionally **not** done here — run `workout adapt` for that.
+Calendar events are deleted. The row's `source='manual'` surfaces on the
+Calendar event as a `[Manual]` summary prefix (composing with `[Adapted]` when
+the manual add also replaced a session), so athlete-added sessions are
+distinguishable at a glance from coach-generated ones. Load re-balancing of
+surrounding days is intentionally **not** done here — run `workout adapt` for that.
 
 A `workout swap` exchanges the dates of two workouts (or moves one onto an
 empty rest day). Moved workouts are flagged `status='modified'` with a
