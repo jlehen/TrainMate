@@ -453,14 +453,23 @@ COALESCE-preserved on re-save — only ever written by an adapt, never cleared.
 **The modification *kind* is derived, not stored** (`trainmate.modification_state`).
 *Modified* spans daily adapts, swaps, and manual replaces; `modification_status(workout)`
 names which without a stored flag (a stored kind would be the same hand-maintained
-denormalization the calendar rework removed). It returns **unmodified**
+denormalization the calendar rework removed). Checked in order, it returns **unmodified**
 (`modification_reason IS NULL`), **adapted** (`adaptation_summary IS NOT NULL` ⟺ from
-`workout adapt`), **swapped** (`date != original_date` — a `workout swap` move),
-**replaced** (`source == 'manual'` — an in-place manual replace), else **adapted** again
-(a legacy adapt: a generated row whose pre-split rationale lives in `modification_reason`
-with no summary — the catch-all is `adapted`, not `replaced`, because a manual replace
-always stamps `source='manual'`). `adapted` takes precedence over `swapped`: a session
-adapted then swapped keeps its summary and still reads `adapted`. `workout list`
+`workout adapt`), **swapped** (reason starts `"Swapped from "`, *or* `date !=
+original_date`), **replaced** (reason starts `"Manually replaced previous "`, *or*
+`source == 'manual'`), else **adapted** again (a legacy adapt: a generated row whose
+pre-split rationale lives in `modification_reason` with no summary — the catch-all is
+`adapted`, not `replaced`, because a manual replace always stamps `source='manual'`).
+
+The `"Swapped from "` / `"Manually replaced previous "` prefixes are shared constants
+(`SWAP_REASON_PREFIX`, `MANUAL_REPLACE_REASON_PREFIX`) that `coach/service.py`'s swap and
+manual-add writers use, so reader and writer can't drift (a test asserts the swap writer's
+output still starts with the prefix). They exist because the column-only signals have
+blind spots: the `original_date` backfill set `original_date = date` on legacy rows,
+hiding any pre-column swap's move — the prefix recovers it (`workout adapt` writes a
+free-form rationale, never these prefixes, so it is never misread as a swap/replace).
+`adapted` takes precedence over `swapped`: a session adapted then swapped keeps its
+summary and still reads `adapted`. `workout list`
 markers (`[ADAPTED]`/`[SWAPPED]`/`[REPLACED]`) come from this accessor. *(The Calendar
 event summary's `[Adapted]`/before-after framing in `google_calendar.sync_workout` is a
 separate concern — it keys on whether the **description** actually changed, not on the

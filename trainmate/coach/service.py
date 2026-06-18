@@ -6,6 +6,7 @@ from trainmate.google_calendar import calendar_syncer
 from trainmate.types import Objective, LifeEvent, Workout
 from trainmate.adherence import analyze_adherence
 from trainmate.sports import canonical_sport
+from trainmate.modification_state import SWAP_REASON_PREFIX, MANUAL_REPLACE_REASON_PREFIX
 from trainmate.garmin import activity_load
 from trainmate.util import today_str as _today_str, today_date as _today_date, cyan, green, yellow, bold, red, gray
 from trainmate.coach.engine import CoachEngine
@@ -1077,7 +1078,7 @@ class CoachService:
             workout = self._db.get_workout_by_id(op['id'])
             if not workout:
                 continue
-            mod_reason = f"Swapped from {workout['date']} to {op['new_date']}"
+            mod_reason = f"{SWAP_REASON_PREFIX}{workout['date']} to {op['new_date']}"
             if reason:
                 mod_reason += f". Reason given: {reason}"
             self._db.update_workout_date(op['id'], op['new_date'], mod_reason)
@@ -1167,7 +1168,7 @@ class CoachService:
         mod_reason = None
         if headers:
             label = "sessions" if len(headers) > 1 else "session"
-            mod_reason = f"Manually replaced previous {label}: " + "; ".join(headers)
+            mod_reason = f"{MANUAL_REPLACE_REASON_PREFIX}{label}: " + "; ".join(headers)
             if reason:
                 mod_reason += f". Reason given: {reason}"
 
