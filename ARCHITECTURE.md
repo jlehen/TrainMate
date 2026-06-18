@@ -4,6 +4,28 @@ This document is the primary reference for coding agents. Read it before
 reading source files — in most cases it will be sufficient. Read a source file
 only when you need to change it or when a specific detail is not covered here.
 
+Each section is **current-state reference**. The *why* behind non-obvious design
+choices (and what they replaced) lives in [§15 Design Rationale & History](#15-design-rationale--history)
+and the `DESIGN_*.md` files, so the reference sections stay lookup-friendly.
+
+## Contents
+
+1. [System Overview](#1-system-overview)
+2. [Module Map](#2-module-map)
+3. [coach Package Architecture](#3-coach-package-architecture) — **canonical** coach-learnings / confidence model
+4. [Database — Key Patterns](#4-database--key-patterns)
+5. [Database Schema](#5-database-schema)
+6. [Singletons](#6-singletons)
+7. [CLI Commands Reference](#7-cli-commands-reference)
+8. [Web API Endpoints](#8-web-api-endpoints)
+9. [Configuration (`config.yaml`)](#9-configuration-configyaml)
+10. [Key Data Flows](#10-key-data-flows)
+11. [Terminology: Plans vs. Workouts](#11-terminology-plans-vs-workouts)
+12. [Sports Science & Coaching Mathematics](#12-sports-science--coaching-mathematics)
+13. [Daily Context (Calendar Ingest)](#13-daily-context-calendar-ingest)
+14. [Testing](#14-testing)
+15. [Design Rationale & History](#15-design-rationale--history)
+
 ---
 
 ## 1. System Overview
@@ -44,22 +66,20 @@ Calendar.
 
 ## 2. Module Map
 
-Every module exposes one **singleton** at module level (see section 6 for the
-list). UIs and tests import the singleton directly — never instantiate the
+Every module exposes one **singleton** at module level (see [§6](#6-singletons) for
+the list). UIs and tests import the singleton directly — never instantiate the
 classes themselves.
 
 ### Entry Points
 
-| File                 | Purpose                                                              |
-|----------------------|----------------------------------------------------------------------|
-| `trainmate_cli.py`   | Thin shim: argparse dispatcher (`main()`), the patchable             |
-|                      | singletons/helpers the handlers reference via `import trainmate_cli  |
-|                      | as cli`, and a `__main__` alias. No business logic.                  |
-| `trainmate/cli/`     | Per-command-family handler modules (`run_*()`): `status`, `goals`,   |
-|                      | `lifeevents`, `learnings`, `plans`, `workouts`, `data`, plus shared  |
-|                      | `common`.                                                            |
-| `trainmate_web.py`   | Flask REST API; thin handler functions calling `db`,                 |
-|                      | `coach_service`, `calendar_syncer` (pure reader — never pulls).      |
+- **`trainmate_cli.py`** — thin shim: argparse dispatcher (`main()`), the patchable
+  singletons/helpers handlers reference via `import trainmate_cli as cli`, and a
+  `__main__` alias. No business logic.
+- **`trainmate/cli/`** — per-command-family handler modules (`run_*()`): `status`,
+  `goals`, `lifeevents`, `learnings`, `plans`, `workouts`, `data`, plus shared
+  `common`.
+- **`trainmate_web.py`** — Flask REST API; thin handler functions calling `db`,
+  `coach_service`, `calendar_syncer` (pure reader — never pulls).
 
 ### Package `trainmate/`
 
@@ -125,35 +145,27 @@ Module-level function in `formatting.py`. Concatenates all `*.txt` files from
 **Pure business logic — no DB or I/O.** All methods are prefixed `_` (called by
 `CoachService` or directly by tests).
 
-| Method                               | What it does                                        |
-|--------------------------------------|-----------------------------------------------------|
-| `_build_system_prompt(...)`          | Assembles the main LLM system prompt with           |
-|                                      | guidelines, strategy, goals, life events, athlete   |
-|                                      | profile.                                            |
-| `_format_athlete_profile(profile)`   | Formats `config.user_profile` dict into a readable  |
-|                                      | prompt segment.                                     |
-| `_get_goals_hash(objectives)`        | SHA-256 of sorted objectives list.                  |
-| `_get_lifeevents_hash(lifeevents)`   | SHA-256 of sorted life events list.                 |
-| `_get_config_hash()`                 | SHA-256 of `user_profile` + `metrics_lookback_days`. |
-| `_plan_generate_strategy(...)` | LLM call → `{strategy, mesocycles}`. Label:         |
-|                                      | `periodization_plan`.                               |
-| `_workout_generate_logic(...)`      | LLM call → `{reasoning, workouts[]}`. **Read-only** |
-|                                      | w.r.t. learnings — emits no `learning_updates`      |
-|                                      | (DESIGN_backward_evaluation.md §11). Accepts        |
-|                                      | `num_days` (default 28) driving the horizon. Label: |
-|                                      | `workout_generation`.                               |
-| `_workout_adapt_logic(...)`                  | LLM call → `{change_needed, reason,                 |
-|                                      | adapted_workouts[]}`. **Read-only** w.r.t. learnings |
-|                                      | — emits no `learning_updates`                       |
-|                                      | (DESIGN_evidence_based_confidence.md §2). Label:    |
-|                                      | `workout_adaptation`.                               |
-| `_data_analyze_logic(...)`       | LLM call → `{macrocycle_summary,                    |
-|                                      | inferred_macrocycle, inferred_mesocycles[],         |
-|                                      | physiological_insights[], learning_updates[]}`.     |
-|                                      | Reverse-engineers cycles from weekly summaries.     |
-|                                      | Label: `workout_analysis`.                          |
-| `_generate_intermediate_goals(...)`  | LLM call → `{goals[]}` when timeline > 24 weeks.    |
-|                                      | Label: `generate_intermediate_goals`.               |
+- **`_build_system_prompt(...)`** — assembles the main LLM system prompt
+  (guidelines, strategy, goals, life events, athlete profile).
+- **`_format_athlete_profile(profile)`** — formats `config.user_profile` into a
+  readable prompt segment.
+- **`_get_goals_hash(objectives)`** — SHA-256 of the sorted objectives list.
+- **`_get_lifeevents_hash(lifeevents)`** — SHA-256 of the sorted life events list.
+- **`_get_config_hash()`** — SHA-256 of `user_profile` + `metrics_lookback_days`.
+- **`_plan_generate_strategy(...)`** — LLM call → `{strategy, mesocycles}`. Label
+  `periodization_plan`.
+- **`_workout_generate_logic(...)`** — LLM call → `{reasoning, workouts[]}`. Accepts
+  `num_days` (default 28) driving the horizon. **Read-only** w.r.t. learnings. Label
+  `workout_generation`.
+- **`_workout_adapt_logic(...)`** — LLM call →
+  `{change_needed, reason, adapted_workouts[]}`. **Read-only** w.r.t. learnings.
+  Label `workout_adaptation`.
+- **`_data_analyze_logic(...)`** — LLM call → `{macrocycle_summary,
+  inferred_macrocycle, inferred_mesocycles[], physiological_insights[],
+  learning_updates[]}`. Reverse-engineers cycles from weekly summaries. Label
+  `workout_analysis`.
+- **`_generate_intermediate_goals(...)`** — LLM call → `{goals[]}` when timeline >
+  24 weeks. Label `generate_intermediate_goals`.
 
 **Coach learnings via evidence-cited deltas:** only `_data_analyze_logic`
 (the `data bootstrap`/`data reflect` flow) emits a `learning_updates` array
@@ -186,9 +198,8 @@ Mondays); weeks outside it are dropped (skip-malformed philosophy).
 `db._recompute_confidence()` writes the lower level to `proposed_confidence` and
 leaves the live `confidence` intact. Re-citing counted weeks is a structural
 no-op (the `UNIQUE(learning_id, week, polarity)` constraint), so re-running /
-`--force` / overlapping windows cannot inflate confidence — this **replaces** the
-old `suppress_reinforcement` flag, now removed. `last_reinforced_at` refreshes only
-when a *new* supporting week lands (or on a staleness demotion).
+`--force` / overlapping windows cannot inflate confidence. `last_reinforced_at`
+refreshes only when a *new* supporting week lands (or on a staleness demotion).
 
 **Decay (soft) + staleness demotion:** a learning is *dormant* once unreinforced
 past its confidence budget (`db.LEARNING_STALENESS_DAYS`: tentative 21d / moderate
@@ -220,56 +231,52 @@ demotion`) pointing at `learnings list`.
 **Migration:** learnings predating the evidence model are grandfathered with a
 synthetic supporting basis sized to sustain their stored level
 (`db._grandfather_learning_evidence()`, source `migration`), so the first
-recompute does not silently demote them (§9).
+recompute does not silently demote them (see [§15](#15-design-rationale--history)).
 
 ### `CoachService`
 **Orchestrator — owns all DB and calendar access.** Exposes the public API
 called by the UIs.
 
-| Method                                              | What it does                                                        |
-|-----------------------------------------------------|---------------------------------------------------------------------|
-| `plan_generate(force, objective_id)`  | Fetches objectives/lifeevents, checks hashes, calls                 |
-|                                                     | `CoachEngine._plan_generate_strategy()`, saves to DB.         |
-|                                                     | Auto-splits timelines > 24 weeks.                                   |
-| `workout_generate(objective_id, end_date)`         | Requires an existing macrocycle. Computes `num_days` from           |
-|                                                     | `end_date` (or `config.workout_generation_span_days` if omitted).          |
-|                                                     | Fetches history, calls `CoachEngine._workout_generate_logic()`,    |
-|                                                     | saves workouts to DB.                                               |
-| `replan(force, objective_id)`                       | Convenience: calls `plan_generate` then               |
-|                                                     | `workout_generate`.                                                |
-| `workout_adapt(target_date_str)`                    | Fetches metrics + workouts in rolling window, calls                 |
-|                                                     | `CoachEngine._workout_adapt_logic()`. Returns                               |
-|                                                     | `(reason, proposed_workouts)`.                                      |
-| `workout_adapt_apply(proposed, reason, start, end)`   | Deletes overridden workouts (+ calendar events), saves adapted      |
-|                                                     | workouts, syncs to Calendar. Each session keeps its short            |
-|                                                     | per-workout `change_reason` in `modification_reason`; the long       |
-|                                                     | batch `reason` is stamped on every session's `adaptation_summary`.   |
-| `workout_add(date, sport_type, title, description, …, replace_day=False)` | Manually schedules a workout, **replacing** any same-sport |
-|                                                     | session that day — or every session that day with `replace_day` (deterministic — no LLM). Captures the overwritten |
-|                                                     | session so the calendar event records it (replaced description →    |
-|                                                     | `original_description`/"Originally:"; replaced title+duration/TSS/  |
-|                                                     | RPE + athlete reason → `modification_reason`/"Reason:"), carries the |
-|                                                     | old `google_event_id` over, then syncs. Load re-balancing is left   |
-|                                                     | to `workout_adapt`.                                                 |
-| `data_bootstrap(...)` / `data_reflect(...)` | Reverse-engineer past training cycles from completed    |
-|                                       | activities + metrics via the shared `_run_workout_       |
-|                                       | analysis` core. `bootstrap` = cold-start over the full  |
-|                                       | backlog (horizon `long`), sets the reflect watermark;   |
-|                                       | `reflect` = incremental since the watermark (horizon     |
-|                                       | `short`), advances it. Both reuse `analysis_cache` on    |
-|                                       | unchanged evidence; `force` recomputes; `inspect_only`   |
-|                                       | renders without writing. See DESIGN doc §5, §8, §9.      |
-| `_build_prior_training_context(prior_macro, today)` | Builds the read-only "planned vs actual" review injected into the   |
-|                                                     | `plan generate` strategy prompt (Option A, §6). Anchored on the     |
-|                                                     | prior plan's elapsed mesocycle windows; folds in the cached         |
-|                                                     | reconstruction's summary, inferred macro/mesocycle blocks, and      |
-|                                                     | physiological insights. Writes no `feedback` field.                |
-| `plan_rm(objective_id)`                         | Deletes macrocycle + mesocycles for that objective (cascades in     |
-|                                                     | DB).                                                                |
-| `_get_config_hash()`                                | Delegates to `CoachEngine._get_config_hash()`. Used by CLI/web to   |
-|                                                     | detect stale plans.                                                 |
-| `_get_coach_system_prompt(objectives, lifeevents, ...)`| Builds system prompt without making an LLM call (used by         |
-|                                                     | tests).                                                             |
+- **`plan_generate(force, objective_id)`** — fetches objectives/lifeevents, checks
+  hashes, calls `CoachEngine._plan_generate_strategy()`, saves to DB. Auto-splits
+  timelines > 24 weeks.
+- **`workout_generate(objective_id, end_date)`** — requires an existing macrocycle.
+  Computes `num_days` from `end_date` (or `config.workout_generation_span_days` if
+  omitted), fetches history, calls `CoachEngine._workout_generate_logic()`, saves
+  workouts to DB.
+- **`replan(force, objective_id)`** — convenience: `plan_generate` then
+  `workout_generate`.
+- **`workout_adapt(target_date_str)`** — fetches metrics + workouts in the rolling
+  window, calls `CoachEngine._workout_adapt_logic()`. Returns
+  `(reason, proposed_workouts)`.
+- **`workout_adapt_apply(proposed, reason, start, end)`** — deletes overridden
+  workouts (+ calendar events), saves adapted workouts, syncs to Calendar. Each
+  session keeps its short per-workout `change_reason` in `modification_reason`; the
+  long batch `reason` is stamped on every session's `adaptation_summary`.
+- **`workout_add(date, sport_type, title, description, …, replace_day=False)`** —
+  manually schedules a workout (deterministic, no LLM), **replacing** any same-sport
+  session that day — or every session that day with `replace_day`. Captures the
+  overwritten session onto the new row (replaced description → `original_description`
+  / "Originally:"; replaced title+duration/TSS/RPE + athlete reason →
+  `modification_reason` / "Reason:"), carries the old `google_event_id` over, then
+  syncs. Load re-balancing is left to `workout_adapt`. (See [§11](#11-terminology-plans-vs-workouts).)
+- **`data_bootstrap(...)` / `data_reflect(...)`** — reverse-engineer past training
+  cycles from completed activities + metrics via the shared `_run_workout_analysis`
+  core. `bootstrap` = cold-start over the full backlog (horizon `long`), sets the
+  reflect watermark; `reflect` = incremental since the watermark (horizon `short`),
+  advances it. Both reuse `analysis_cache` on unchanged evidence; `force` recomputes;
+  `inspect_only` renders without writing. See DESIGN_backward_evaluation.md §5, §8, §9.
+- **`_build_prior_training_context(prior_macro, today)`** — builds the read-only
+  "planned vs actual" review injected into the `plan generate` strategy prompt
+  (Option A). Anchored on the prior plan's elapsed mesocycle windows; folds in the
+  cached reconstruction's summary, inferred macro/mesocycle blocks, and physiological
+  insights. Writes no `feedback` field.
+- **`plan_rm(objective_id)`** — deletes macrocycle + mesocycles for that objective
+  (cascades in DB).
+- **`_get_config_hash()`** — delegates to `CoachEngine._get_config_hash()`. Used by
+  CLI/web to detect stale plans.
+- **`_get_coach_system_prompt(objectives, lifeevents, ...)`** — builds the system
+  prompt without making an LLM call (used by tests).
 
 **Singleton:** `coach_service = CoachService()` at the bottom of `coach/service.py`. Import as:
 ```python
@@ -354,19 +361,13 @@ sync token, since the incremental sync can't otherwise backfill deleted rows), a
 basis sustaining the level), `update_learning(id, text)`, `delete_learning(id)`,
 `apply_learning_deltas(deltas, available_weeks=None, source='reflect')`,
 `recompute_all_confidence()`, `derive_staleness_proposals(auto=False)`,
-`demote_learning(id)`, `keep_learning(id)`, `wipe_learnings()`. Discrete, addressable
-athlete-observation records (table `coach_learnings`) whose confidence is
-**app-computed** from a per-learning evidence basis (`learning_evidence`);
-updated incrementally via LLM deltas
-(`add`/`revise`/`reinforce`/`contradict`/`retire`). `apply_learning_deltas` runs
-all ops in one transaction, validates cited weeks against `available_weeks`,
-dedupes evidence, silently skips malformed deltas, then re-derives each touched
-learning's confidence (upgrade auto-applies, downgrade is proposed). Module-level
+`demote_learning(id)`, `keep_learning(id)`, `wipe_learnings()`. Module-level
 helpers: `normalize_sports()`, `valid_confidence()`, `confidence_rank()`,
 `step_down()`, `derive_confidence()`, `learning_is_dormant()`; constants
-`CONFIDENCE_LEVELS` / `LEARNING_STALENESS_DAYS` / `RETIRE_PROPOSAL` (see section 3
-for the evidence/confidence/decay model). Periodization strategy lives in the
-`macrocycles` table, not here.
+`CONFIDENCE_LEVELS` / `LEARNING_STALENESS_DAYS` / `RETIRE_PROPOSAL`. The
+evidence/confidence/decay model these implement is the **canonical** description in
+[§3](#3-coach-package-architecture); tables `coach_learnings` + `learning_evidence`
+in [§5](#5-database-schema). Periodization strategy lives in `macrocycles`, not here.
 
 **Analysis Cache:** `save_analysis_cache(horizon, fingerprint, window_start,
 window_end, reconstruction)` (upsert, one row per `horizon`),
@@ -444,60 +445,61 @@ SQLite database at `trainmate.db` (path from `config.db_path`).
 |                        |            | `manual` (`workout add`). NULL on legacy rows.     |
 |                        |            | Orthogonal to adaptation — adapting keeps origin.  |
 
-**Workout state is three orthogonal facts, not one enum** (a prior single `status`
-string conflated them): *modified?* = `modification_reason IS NOT NULL`; *calendar
-state* (a derived 3-way, below); *removed?* = `removed = 1`. `modification_reason` is set
-directly (so a swap-back can clear it to NULL), whereas `adaptation_summary` is
-COALESCE-preserved on re-save — only ever written by an adapt, never cleared.
+#### Workout state = three orthogonal axes (not one enum)
 
-**The modification *kind* is derived, not stored** (`trainmate.modification_state`).
-*Modified* spans daily adapts, swaps, and manual replaces; `modification_status(workout)`
-names which without a stored flag (a stored kind would be the same hand-maintained
-denormalization the calendar rework removed). Checked in order, it returns **unmodified**
-(`modification_reason IS NULL`), **adapted** (`adaptation_summary IS NOT NULL` ⟺ from
-`workout adapt`), **swapped** (reason starts `"Swapped from "`, *or* `date !=
-original_date`), **replaced** (reason starts `"Manually replaced previous "`, *or*
-`source == 'manual'`), else **adapted** again (a legacy adapt: a generated row whose
-pre-split rationale lives in `modification_reason` with no summary — the catch-all is
-`adapted`, not `replaced`, because a manual replace always stamps `source='manual'`).
+Three independent facts, none stored as a status string. See [§15](#15-design-rationale--history)
+for why these are derived rather than stored.
 
-The `"Swapped from "` / `"Manually replaced previous "` prefixes are shared constants
-(`SWAP_REASON_PREFIX`, `MANUAL_REPLACE_REASON_PREFIX`) that `coach/service.py`'s swap and
-manual-add writers use, so reader and writer can't drift (a test asserts the swap writer's
-output still starts with the prefix). They exist because the column-only signals have
-blind spots: the `original_date` backfill set `original_date = date` on legacy rows,
-hiding any pre-column swap's move — the prefix recovers it (`workout adapt` writes a
-free-form rationale, never these prefixes, so it is never misread as a swap/replace).
-`adapted` takes precedence over `swapped`: a session adapted then swapped keeps its
-summary and still reads `adapted`. `workout list`
-markers (`[ADAPTED]`/`[SWAPPED]`/`[REPLACED]`) come from this accessor. *(The Calendar
-event summary's `[Adapted]`/before-after framing in `google_calendar.sync_workout` is a
-separate concern — it keys on whether the **description** actually changed, not on the
-modification kind, so it is intentionally left as-is.)*
+**1. Modified?** = `modification_reason IS NOT NULL`. The *kind* is derived by
+`trainmate.modification_state.modification_status(workout)` — there is no stored
+kind flag. Checked **in order**:
 
-**The calendar axis is derived, not stored** (`trainmate.calendar_state`). A successful
-push records `pushed_signature` = hash of the calendar-relevant fields; the current
-state then *falls out* of comparing it to the live content — `calendar_status(workout)`
-returns **unpushed** (`google_event_id IS NULL`), **synced** (`pushed_signature ==`
-current hash), or **stale** (`!=`). This replaced a hand-maintained `synced` boolean
-that every write path had to remember to reset; now any edit through any path leaves
-`pushed_signature` untouched and the row reads `stale` automatically — no flag to
-forget. (The signature excludes `rpe`, which never reaches Calendar, so editing it no
-longer spuriously marks a workout for re-push.) Push eligibility = `calendar_status !=
-'synced'`; `mark_workout_pushed` is the **only** writer of `pushed_signature`; calendar
-cleanup still keys on `google_event_id`.
+| Result | Condition |
+|--------|-----------|
+| `unmodified` | `modification_reason IS NULL` |
+| `adapted` | `adaptation_summary IS NOT NULL` (⟺ from `workout adapt`) |
+| `swapped` | reason starts `SWAP_REASON_PREFIX` (`"Swapped from "`) **or** `date != original_date` |
+| `replaced` | reason starts `MANUAL_REPLACE_REASON_PREFIX` (`"Manually replaced previous "`) **or** `source == 'manual'` |
+| `adapted` | catch-all (a legacy adapt: rationale in `modification_reason`, no summary) |
 
-**Removal is a soft delete.** `workout rm` calls `mark_workout_removed`
-(`removed=1`, preserves `google_event_id`; the content change reads as `stale`) and updates the Calendar event
-to be marked as deleted — the row is **kept**. `get_workouts` excludes removed rows
-by default
-(`include_removed=False`), so they vanish from `workout list`/`compare`, adaptation
-adherence, generation, and the web API; they are **not** counted as misses. The
-adapt flow re-fetches them with `include_removed=True` and surfaces them to the coach
-as deliberate cancellations (symmetric to how a swap records `modification_reason`),
-distinct from a miss — including the athlete's optional `removed_reason`
-(`workout rm --reason`). `save_workout`'s upsert resets `removed=0`/`removed_reason`,
-so re-generating or adapting onto a removed (date, sport_type) slot revives it.
+  - `adapted` takes precedence over `swapped` — a session adapted *then* swapped
+    keeps its summary and still reads `adapted`.
+  - `modification_reason` is set directly, so a swap-back to `original_date` can
+    clear it to NULL. `adaptation_summary` is COALESCE-preserved on re-save (only
+    an adapt writes it, never cleared).
+  - The two prefix constants are shared by `coach/service.py`'s swap and manual-add
+    writers so reader and writer can't drift (a test guards this).
+  - `workout list` markers `[ADAPTED]`/`[SWAPPED]`/`[REPLACED]` come from this
+    accessor. *(The Calendar event summary's `[Adapted]`/before-after framing in
+    `google_calendar.sync_workout` is separate — it keys on whether the
+    **description** changed, not on the modification kind.)*
+
+**2. Calendar state** = derived by `trainmate.calendar_state.calendar_status(workout)`:
+
+| Result | Condition |
+|--------|-----------|
+| `unpushed` | `google_event_id IS NULL` |
+| `synced` | `pushed_signature == ` current calendar-field hash |
+| `stale` | `pushed_signature != ` current hash |
+
+  - `pushed_signature` is the hash of calendar-relevant fields captured at the last
+    successful push; `mark_workout_pushed` is its **only** writer. Any edit through
+    any path leaves it untouched, so the row reads `stale` automatically.
+  - The signature excludes `rpe` (never reaches Calendar), so editing RPE does not
+    mark a workout for re-push.
+  - Push eligibility = `calendar_status != 'synced'`; calendar cleanup keys on
+    `google_event_id`.
+
+**3. Removed?** = `removed = 1` — a **soft delete**. `workout rm` calls
+`mark_workout_removed` (`removed=1`, preserves `google_event_id`; content change reads
+as `stale`) and marks the Calendar event deleted — the row is **kept**. `get_workouts`
+excludes removed rows by default (`include_removed=False`), so they vanish from
+`workout list`/`compare`, adherence, generation, and the web API, and are **not**
+counted as misses. The adapt flow re-fetches them (`include_removed=True`) and surfaces
+them to the coach as deliberate cancellations (with the optional `removed_reason` from
+`workout rm --reason`), distinct from a miss. `save_workout`'s upsert resets
+`removed=0`/`removed_reason`, so re-generating or adapting onto a removed
+`(date, sport_type)` slot revives it.
 
 ### completed\_activities
 | Column              | Type    | Notes                                              |
@@ -578,11 +580,9 @@ category and `value` an optional numeric magnitude. Reconciled by
 | `updated`         | TEXT        | Event `updated` RFC3339 (debug)                |
 
 ### coach_\learnings
-Discrete, addressable athlete-observation records, updated incrementally via LLM
-deltas (`add`/`revise`/`reinforce`/`contradict`/`retire`). Enriched with sport
-scope, recency, and a confidence the **app computes** from the per-learning
-evidence basis (`learning_evidence` below) — the LLM no longer asserts it (see
-section 3 and DESIGN_evidence_based_confidence.md).
+Discrete, addressable athlete-observation records. Confidence is **app-computed**
+from the `learning_evidence` basis (below), not asserted by the LLM. Full model:
+[§3](#3-coach-package-architecture).
 
 | Column                | Type       | Notes                                                  |
 |-----------------------|------------|--------------------------------------------------------|
@@ -596,12 +596,11 @@ section 3 and DESIGN_evidence_based_confidence.md).
 | `last_reinforced_at`  | TEXT       | ISO timestamp; drives decay → `dormant` (see §3); refreshed only by a *new* supporting week or a staleness demotion |
 
 ### learning\_evidence
-The per-learning **evidence basis** (DESIGN_evidence_based_confidence.md §5): the
-distinct training **weeks** backing each learning, tagged supporting or
-contradicting. `confidence` is a pure function of this basis. The UNIQUE
-constraint is the dedup guarantee — re-citing a counted `(week, polarity)` is an
-`INSERT OR IGNORE` no-op, so re-running / `--force` / overlapping windows cannot
-inflate confidence.
+The per-learning **evidence basis**: the distinct training **weeks** backing each
+learning, tagged supporting/contradicting; `confidence` is a pure function of it.
+The `UNIQUE(learning_id, week_commencing, polarity)` constraint is the dedup
+guarantee (re-citing a counted week is an `INSERT OR IGNORE` no-op). Full model:
+[§3](#3-coach-package-architecture); DESIGN_evidence_based_confidence.md §5.
 
 | Column            | Type       | Notes                                              |
 |-------------------|------------|----------------------------------------------------|
@@ -892,9 +891,8 @@ Required fields:
    computes `num_days` from `(end_date − today)`.
 3. Fetches metrics history (last `metrics_lookback_days` days) + baseline.
 4. Calls `CoachEngine._workout_generate_logic(num_days=...)` → LLM →
-   `{reasoning, workouts[]}`. **Read-only** w.r.t. coach learnings — it
-   consumes the rendered learnings in its prompt but emits/applies no
-   `learning_updates` (DESIGN_backward_evaluation.md §11).
+   `{reasoning, workouts[]}`. **Read-only** w.r.t. coach learnings (see
+   [§3](#3-coach-package-architecture)).
 5. Clears future unsynced workouts (`clear_future_workouts`), then saves new
    workouts.
 
@@ -918,17 +916,18 @@ Required fields:
 3. Finds active mesocycle for the target date → sets `meso_end_date` for
    adaptation range.
 4. Calls `CoachEngine._workout_adapt_logic()` → LLM → `{change_needed, reason,
-   adapted_workouts[]}`. **Read-only w.r.t. coach learnings** — it consumes the
-   rendered learnings as context but authors none (durable, evidence-backed
-   observations are written only by `data bootstrap`/`data reflect`, which can
-   attribute them to specific training weeks; DESIGN_evidence_based_confidence.md §2).
+   adapted_workouts[]}`. **Read-only w.r.t. coach learnings** (see
+   [§3](#3-coach-package-architecture)).
 5. Returns `(reason, proposed_workouts)` — caller decides whether to apply.
 6. If applied: `workout_adapt_apply()` deletes overridden calendar events + DB
-   rows, saves adapted workouts with `status='modified'`, syncs to Calendar.
+   rows, saves adapted workouts (each carrying its `modification_reason` +
+   `adaptation_summary`, so they read as `adapted`; see [§5](#5-database-schema)),
+   syncs to Calendar.
 
-### Data Pull (`data pull`) and auto-ensure Data is pulled **directly from
-Garmin Connect** (`trainmate/garmin.py`); the former Google Sheets path is
-gone. Full design: `DESIGN_garmin_direct_pull.md`.
+### Data Pull (`data pull`) and auto-ensure
+
+Data is pulled **directly from Garmin Connect** (`trainmate/garmin.py`). Full
+design: `DESIGN_garmin_direct_pull.md`.
 
 1. `garmin.pull(start, end)` logs into Garmin (token persistence; TTY-gated
    MFA), fetches activities (storing the **measured** TSS — power TSS or hrTSS —
@@ -1008,10 +1007,9 @@ The shared core then:
 5. Unless `--inspect-only`: applies `learning_updates` deltas — the LLM attributes
    each observation to the `week_commencing` weeks it was shown; the app validates
    them against the window, dedupes into each learning's evidence basis, and
-   re-derives confidence (upgrade auto / downgrade proposed). It then caches the
-   reconstruction in `analysis_cache`. Re-citing counted weeks is a no-op, so no
-   `suppress_reinforcement` is needed (the per-learning basis owns integrity;
-   DESIGN_evidence_based_confidence.md §6, §8).
+   re-derives confidence (upgrade auto / downgrade proposed; see
+   [§3](#3-coach-package-architecture)). It then caches the reconstruction in
+   `analysis_cache`.
 6. Unless `--inspect-only`: `_review_learning_proposals(auto)` sweeps staleness
    demotions and resolves pending downgrades — interactively (accept / keep / skip)
    or, under `--auto`, applying staleness directly while leaving contradiction
@@ -1043,11 +1041,11 @@ distinguishable at a glance from coach-generated ones. Load re-balancing of
 surrounding days is intentionally **not** done here — run `workout adapt` for that.
 
 A `workout swap` exchanges the dates of two workouts (or moves one onto an
-empty rest day). Moved workouts are flagged `status='modified'` with a
-`modification_reason` recording the swap (`Swapped from X to Y`, plus the
-athlete's optional `--reason` appended as `. Reason given: …`), exactly like an
-adaptation — so they are re-synced by `workout push` and visibly distinguished
-from untouched `planned` ones. If a swap returns a workout to its
+empty rest day). Moved workouts get a `modification_reason` recording the swap
+(`Swapped from X to Y`, plus the athlete's optional `--reason` appended as
+`. Reason given: …`), so they read as `swapped` ([§5](#5-database-schema)), are
+re-synced by `workout push`, and are visibly distinguished from untouched ones.
+If a swap returns a workout to its
 `original_date`, the `modification_reason` is cleared to `NULL` — the workout
 is no longer considered modified. The `modification_reason` is surfaced to the
 coach in the adaptation prompt (`format_planned_workouts_detailed`), so a swap informs
@@ -1096,16 +1094,16 @@ default 1.5) × the measured load — i.e. it felt harder than it measured (heat
 sleep debt, muscular damage). It never inflates the stored load.
 
 ### Workload per activity
-`Workload = activity_load(act)` — the single fallback value above (the former
-`TSS + RPE × hours` additive blend was removed).
+`Workload = activity_load(act)` — the single fallback value above.
 
-### Acute Workload (7 days) Sum of daily workloads over the past 7 days
-(current day included).
+### Acute Workload (7 days)
+Sum of daily workloads over the past 7 days (current day included).
 
-### Chronic Workload (28 days) Sum of workloads over past 28 days ÷ 4 (≈
-average weekly load).
+### Chronic Workload (28 days)
+Sum of workloads over past 28 days ÷ 4 (≈ average weekly load).
 
-### ACWR ``` ACWR = Acute / Chronic ```
+### ACWR
+`ACWR = Acute / Chronic`
 - < 0.8: under-training
 - 0.8–1.3: "sweet spot"
 - > 1.5: elevated injury risk
@@ -1206,3 +1204,53 @@ via `@patch`.
 
 Integration / manual test scripts (not part of the test suite):
 - `tests/run_integration.py`, `tests/run_calendar.py`
+
+---
+
+## 15. Design Rationale & History
+
+*Why* the current design looks the way it does, and what it replaced. The
+reference sections above describe only the current state; this section explains
+the non-obvious choices. The `DESIGN_*.md` files hold the full deep-dives.
+
+### Workout state: three derived axes, not a stored `status` enum
+A single `status` string once conflated *modified*, *calendar*, and *removed*.
+Each write path had to remember to set it correctly, and the three facts are
+genuinely independent, so they're now **derived** (see [§5](#5-database-schema)):
+
+- **Calendar axis** replaced a hand-maintained `synced` boolean that every write
+  path had to remember to reset. Now `pushed_signature` is written only on a
+  successful push; any later edit through any path leaves it untouched and the row
+  reads `stale` automatically — no flag to forget. The signature deliberately
+  excludes `rpe` (never reaches Calendar) so editing RPE no longer marks a workout
+  for re-push.
+- **Modification kind** is derived rather than stored for the same reason: a stored
+  kind would reintroduce the hand-maintained denormalization the calendar rework
+  removed.
+- The `SWAP_REASON_PREFIX` / `MANUAL_REPLACE_REASON_PREFIX` prefixes exist because
+  the column-only signals have blind spots: the `original_date` backfill set
+  `original_date = date` on legacy rows, hiding any pre-column swap's move — the
+  prefix recovers it. (`workout adapt` writes a free-form rationale, never these
+  prefixes, so it is never misread as a swap/replace.)
+- `adapted` takes precedence over `swapped`: a session adapted *then* swapped keeps
+  its summary and still reads `adapted`.
+
+### Coach learnings: confidence dropped `suppress_reinforcement`
+Confidence is now a pure function of the per-learning evidence basis. Because
+re-citing a counted `(week, polarity)` is a `UNIQUE`-constrained `INSERT OR IGNORE`
+no-op, re-running / `--force` / overlapping windows cannot inflate confidence — so
+the old `suppress_reinforcement` flag became unnecessary and was removed. Learnings
+predating this model are grandfathered with a synthetic basis sized to sustain their
+stored level (`db._grandfather_learning_evidence()`, source `migration`) so the first
+recompute doesn't silently demote them. Full model:
+[§3](#3-coach-package-architecture); DESIGN_evidence_based_confidence.md.
+
+### Load model: single fallback, no additive blend
+`Workload = activity_load(act)` picks one best-available method (power TSS → hrTSS →
+sRPE); the former `TSS + RPE × hours` additive blend was removed because it
+double-counted internal and external load. RPE is user-entered only and never
+synthesised from power/HR. See [§12](#12-sports-science--coaching-mathematics).
+
+### Data pull: direct from Garmin
+Data is pulled directly from Garmin Connect; the former Google Sheets ingestion
+path is gone. See DESIGN_garmin_direct_pull.md.
