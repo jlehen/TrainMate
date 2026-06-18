@@ -684,7 +684,7 @@ patch the name where it is *used* — e.g. `trainmate.coach.engine.openrouter_cl
 
 ## 7. CLI Commands Reference
 
-Invoked as `python trainmate_cli.py <command> [subcommand] [args]`.
+Invoked as `python trainmate_cli.py [--llm-model MODEL] <command> [subcommand] [args]`.
 `trainmate_cli.py` holds only `main()` (the argparse dispatcher) and the
 patchable singletons; the handler functions, named
 `run_<command>_<subcommand>()`, live in the `trainmate/cli/` package

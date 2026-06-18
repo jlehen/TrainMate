@@ -93,6 +93,10 @@ def main() -> None:
         description="TrainMate - Local Training Coach CLI",
         formatter_class=argparse.RawDescriptionHelpFormatter
     )
+    parser.add_argument(
+        "--llm-model", dest="llm_model",
+        help="Override the OpenRouter model identifier"
+    )
     
     subparsers = parser.add_subparsers(dest="command", help="Available commands")
     
@@ -837,6 +841,10 @@ def main() -> None:
     # Parse the arguments
     args = parser.parse_args()
     
+    if getattr(args, "llm_model", None):
+        from trainmate.openrouter import openrouter_client
+        openrouter_client.model = args.llm_model
+
     if getattr(args, "show_llm_prompt_only", False):
         from trainmate.openrouter import openrouter_client
         openrouter_client.show_prompt_only = True

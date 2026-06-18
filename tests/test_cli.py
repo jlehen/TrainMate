@@ -1165,6 +1165,19 @@ class TestTrainMateCLI(unittest.TestCase):
         mock_coach.data_bootstrap.assert_called_once()
         self.assertTrue(mock_coach.data_bootstrap.call_args[1].get("no_pull"))
 
+    def test_llm_model_override(self):
+        from trainmate.openrouter import openrouter_client
+        original_model = openrouter_client.model
+        try:
+            exit_code, _, _ = self.run_cli([
+                "--llm-model", "google/gemini-2.5-pro",
+                "goal", "list"
+            ])
+            self.assertEqual(exit_code, 0)
+            self.assertEqual(openrouter_client.model, "google/gemini-2.5-pro")
+        finally:
+            openrouter_client.model = original_model
+
 
 if __name__ == "__main__":
     unittest.main()
