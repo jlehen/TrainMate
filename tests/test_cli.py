@@ -279,7 +279,7 @@ class TestTrainMateCLI(unittest.TestCase):
             sport_type="running",
             title="Interval Session",
             description="5x800m",
-            synced=False,
+            
         )
         exit_code, stdout, stderr = self.run_cli(
             ["workout", "rm", str(w_id), "--reason", "Travelling"]
@@ -455,7 +455,7 @@ class TestTrainMateCLI(unittest.TestCase):
         today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
         test_db.save_workout(
             date=today_str, sport_type="running", title="Tempo Run",
-            description="30 mins fast", synced=False,
+            description="30 mins fast", 
         )
 
         exit_code, stdout, stderr = self.run_cli(["workout", "push"])
@@ -475,11 +475,11 @@ class TestTrainMateCLI(unittest.TestCase):
         ]
         a = test_db.save_workout(
             date=d1, sport_type="running", title="Run A",
-            description="easy", synced=False, rpe=4, tss=30,
+            description="easy", rpe=4, tss=30,
         )
         b = test_db.save_workout(
             date=d2, sport_type="road_biking", title="Ride B",
-            description="easy", synced=False, rpe=4, tss=30,
+            description="easy", rpe=4, tss=30,
         )
         exit_code, stdout, stderr = self.run_cli(
             ["workout", "swap", d1, d2, "--reason", "Travelling"]
@@ -503,11 +503,11 @@ class TestTrainMateCLI(unittest.TestCase):
         mock_coach.workout_swap_apply.return_value = []
         a = test_db.save_workout(
             date=d1, sport_type="running", title="Run A",
-            description="easy", synced=False, rpe=4, tss=30,
+            description="easy", rpe=4, tss=30,
         )
         b = test_db.save_workout(
             date=d2, sport_type="road_biking", title="Ride B",
-            description="easy", synced=False, rpe=4, tss=30,
+            description="easy", rpe=4, tss=30,
         )
         exit_code, stdout, stderr = self.run_cli(
             ["workout", "swap", "--id1", str(a), "--id2", str(b), "--no-sync",
@@ -530,11 +530,11 @@ class TestTrainMateCLI(unittest.TestCase):
         mock_coach.workout_swap_validate.return_value = ["Creates 3 consecutive high days"]
         a = test_db.save_workout(
             date=d1, sport_type="running", title="Run A",
-            description="easy", synced=False, rpe=8, tss=90,
+            description="easy", rpe=8, tss=90,
         )
         b = test_db.save_workout(
             date=d2, sport_type="road_biking", title="Ride B",
-            description="easy", synced=False, rpe=8, tss=90,
+            description="easy", rpe=8, tss=90,
         )
         # Default input is "n": the swap is cancelled and never applied.
         exit_code, stdout, stderr = self.run_cli(
@@ -552,11 +552,11 @@ class TestTrainMateCLI(unittest.TestCase):
         future = (today + timedelta(days=2)).strftime("%Y-%m-%d")
         test_db.save_workout(
             date=past, sport_type="running", title="Run A",
-            description="easy", synced=False, rpe=4, tss=30,
+            description="easy", rpe=4, tss=30,
         )
         test_db.save_workout(
             date=future, sport_type="road_biking", title="Ride B",
-            description="easy", synced=False, rpe=4, tss=30,
+            description="easy", rpe=4, tss=30,
         )
         exit_code, stdout, stderr = self.run_cli(
             ["workout", "swap", past, future, "--reason", "Travelling"]
@@ -587,7 +587,7 @@ class TestTrainMateCLI(unittest.TestCase):
     def test_workout_rm_synced(self, mock_calendar):
         w_id = test_db.save_workout(
             date="2026-06-02", sport_type="running", title="Synced Run",
-            description="30 mins", synced=True, google_event_id="mock_event_123",
+            description="30 mins", google_event_id="mock_event_123",
         )
         exit_code, stdout, stderr = self.run_cli(
             ["workout", "rm", str(w_id), "--reason", "Travelling"]
@@ -609,7 +609,7 @@ class TestTrainMateCLI(unittest.TestCase):
         updates its calendar event — but it stays retrievable for the coach."""
         w_id = test_db.save_workout(
             date="2026-06-02", sport_type="running", title="Interval Session",
-            description="5x800m", synced=True, google_event_id="evt-1",
+            description="5x800m", google_event_id="evt-1",
         )
         exit_code, stdout, _ = self.run_cli(
             ["workout", "rm", str(w_id), "--reason", "Travelling for work"]
@@ -760,11 +760,11 @@ class TestTrainMateCLI(unittest.TestCase):
     def test_workout_wipe(self, mock_calendar):
         test_db.save_workout(
             date="2026-06-02", sport_type="running", title="Run 1",
-            description="30 mins", synced=True, google_event_id="ge_1",
+            description="30 mins", google_event_id="ge_1",
         )
         test_db.save_workout(
             date="2026-06-03", sport_type="running", title="Run 2",
-            description="30 mins", synced=False,
+            description="30 mins", 
         )
         self.assertEqual(len(test_db.get_workouts()), 2)
 
@@ -782,7 +782,7 @@ class TestTrainMateCLI(unittest.TestCase):
         mock_calendar.reset_mock()
         test_db.save_workout(
             date="2026-06-02", sport_type="running", title="Run 1",
-            description="30 mins", synced=True, google_event_id="ge_2",
+            description="30 mins", google_event_id="ge_2",
         )
         exit_code, stdout, stderr = self.run_cli(["workout", "wipe", "-y"])
         self.assertEqual(exit_code, 0)
@@ -822,19 +822,19 @@ class TestTrainMateCLI(unittest.TestCase):
 
         test_db.save_workout(
             date=today_str, sport_type="running", title="Today Run",
-            description="30 mins", synced=False,
+            description="30 mins", 
         )
         test_db.save_workout(
             date=tomorrow_str, sport_type="road_biking", title="Tomorrow Ride",
-            description="60 mins", synced=False,
+            description="60 mins", 
         )
         test_db.save_workout(
             date=past_str, sport_type="yoga", title="Past Yoga",
-            description="15 mins", synced=False,
+            description="15 mins", 
         )
         test_db.save_workout(
             date=future_str, sport_type="strength_training", title="Future Lift",
-            description="45 mins", synced=False,
+            description="45 mins", 
         )
 
         goal_id = test_db.add_objective(

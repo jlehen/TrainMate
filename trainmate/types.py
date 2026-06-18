@@ -42,8 +42,8 @@ class Workout(TypedDict):
     title: str
     description: Optional[str]
     original_description: Optional[str]
-    synced: bool  # True = Google Calendar event current; orthogonal to adaptation
-    modification_reason: Optional[str]  # non-None <=> adapted/swapped; short per-workout note
+    pushed_signature: Optional[str]  # hash of calendar fields at last push; freshness derived (trainmate.calendar_state)
+    modification_reason: Optional[str]  # non-None <=> modified; short per-workout note. Kind derived via trainmate.modification_state
     adaptation_summary: Optional[str]  # set <=> from `workout adapt`; long batch rationale
     google_event_id: Optional[str]  # set <=> a Calendar event exists (may be stale)
     duration_minutes: Optional[int]

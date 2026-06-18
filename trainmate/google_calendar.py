@@ -7,6 +7,7 @@ from googleapiclient.errors import HttpError
 from trainmate.config import config
 from trainmate.db import db
 from trainmate.types import Workout
+from trainmate.calendar_state import calendar_signature
 from trainmate.util import yellow
 
 
@@ -148,23 +149,12 @@ class CalendarSyncer:
                     f"{updated_event.get('htmlLink')}"
                 )
                 
-                # Mark as synced in DB
-                db.save_workout(
-                    date=date_str,
-                    sport_type=sport_type,
-                    title=title,
-                    description=description or "",
-                    original_description=orig_description,
-                    synced=True,
-                    modification_reason=mod_reason,
-                    google_event_id=google_event_id,
-                    duration_minutes=duration,
-                    rpe=workout.get('rpe'),
-                    tss=tss,
-                    original_date=workout.get('original_date'),
-                    removed=workout.get('removed', False),
-                    removed_reason=workout.get('removed_reason')
-                )
+                # Record the push: store the event handle + the signature of what we
+                # just pushed, so the row derives as `synced` until edited again.
+                if workout.get('id') is not None:
+                    db.mark_workout_pushed(
+                        workout['id'], google_event_id, calendar_signature(workout)
+                    )
                 return google_event_id
             except HttpError as e:
                 if e.resp.status in (404, 410):
@@ -192,23 +182,12 @@ class CalendarSyncer:
                 f"{created_event.get('htmlLink')}"
             )
             
-            # Save the new event ID and mark as synced in DB
-            db.save_workout(
-                date=date_str,
-                sport_type=sport_type,
-                title=title,
-                description=description or "",
-                original_description=orig_description,
-                synced=True,
-                modification_reason=mod_reason,
-                google_event_id=new_event_id,
-                duration_minutes=duration,
-                rpe=workout.get('rpe'),
-                tss=tss,
-                original_date=workout.get('original_date'),
-                removed=workout.get('removed', False),
-                removed_reason=workout.get('removed_reason')
-            )
+            # Record the push: store the new event handle + the signature of what we
+            # just pushed, so the row derives as `synced` until edited again.
+            if workout.get('id') is not None:
+                db.mark_workout_pushed(
+                    workout['id'], new_event_id, calendar_signature(workout)
+                )
             return str(new_event_id)
         except Exception as e:
             print(f"Error inserting event to Google Calendar: {e}")

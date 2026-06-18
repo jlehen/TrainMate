@@ -5,6 +5,8 @@ from typing import Optional
 import trainmate_cli as cli
 from trainmate.config import config
 from trainmate.adherence import analyze_adherence, date_covered
+from trainmate.calendar_state import calendar_status
+from trainmate.modification_state import modification_status
 from trainmate.sports import canonical_sport
 from trainmate.util import (
     bold, dim, green, red, yellow, cyan, blue, magenta, gray,
@@ -393,11 +395,19 @@ def run_workout_list(args: argparse.Namespace) -> None:
     seen_summaries: set = set()
     for w in workouts:
         mod_marker = ""
-        if w['modification_reason']:
+        mod_status = modification_status(w)
+        if mod_status == 'adapted':
             mod_marker = bold(yellow(" [ADAPTED]"))
+        elif mod_status == 'swapped':
+            mod_marker = bold(yellow(" [SWAPPED]"))
+        elif mod_status == 'replaced':
+            mod_marker = bold(yellow(" [REPLACED]"))
         sync_marker = ""
-        if w['synced']:
+        status = calendar_status(w)
+        if status == 'synced':
             sync_marker = bold(green(" [SYNCED]"))
+        elif status == 'stale':
+            sync_marker = bold(yellow(" [STALE]"))
         rem_marker = ""
         if w.get('removed'):
             rem_marker = bold(red(" [REMOVED]"))
@@ -619,11 +629,13 @@ def run_workout_push(args: argparse.Namespace) -> None:
 
     to_push = []
     for w in all_workouts:
+        is_fresh = calendar_status(w) == 'synced'
         if not w.get('removed'):
-            if force or not w['synced']:
+            if force or not is_fresh:
                 to_push.append(w)
         else:
-            if w.get('google_event_id') and (force or not w['synced']):
+            # A removed workout only needs pushing if it has an event to update.
+            if w.get('google_event_id') and (force or not is_fresh):
                 to_push.append(w)
 
     if not to_push:

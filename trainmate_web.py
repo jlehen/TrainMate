@@ -2,6 +2,7 @@ import os
 from flask import Flask, jsonify, request, send_from_directory
 from typing import Any, Dict, List
 from trainmate.db import db
+from trainmate.calendar_state import calendar_status
 from trainmate.google_calendar import calendar_syncer
 from trainmate.coach import coach_service
 from trainmate.config import config
@@ -423,8 +424,8 @@ def workout_adapt_apply() -> Any:
 def sync_calendar() -> Any:
     """API endpoint to synchronize planned and adapted workouts with Google Calendar."""
     planned_workouts = db.get_workouts(start_date=today_str())
-    # Push eligibility = NOT synced (ARCHITECTURE.md §5).
-    unsynced = [w for w in planned_workouts if not w['synced']]
+    # Push eligibility = anything not currently in sync with Calendar (ARCHITECTURE.md §5).
+    unsynced = [w for w in planned_workouts if calendar_status(w) != 'synced']
 
     if not unsynced:
         return jsonify({

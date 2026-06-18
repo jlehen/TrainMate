@@ -42,7 +42,6 @@ def main() -> None:
         sport_type="running",
         title="Aerobic Base Run",
         description="45 minutes in HR Zone 2 (130-145 bpm). Steady flat pace.",
-        synced=False
     )
     
     # Workout 2: Modified session
@@ -52,7 +51,6 @@ def main() -> None:
         title="Active Recovery Spin",
         description="30 minutes of light cycling. Keep heart rate below 110 bpm.",
         original_description="90 minutes endurance road cycling with hill climbs.",
-        synced=False,
         modification_reason="HRV average dropped 1.2 SD below chronic baseline."
     )
     

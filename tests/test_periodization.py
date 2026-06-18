@@ -335,7 +335,7 @@ class TestPeriodization(unittest.TestCase):
         future = (datetime.now(timezone.utc) + timedelta(days=5)).strftime("%Y-%m-%d")
         test_db.save_workout(
             date=future, sport_type="running", title="Old Plan Run",
-            description="stale", synced=True, google_event_id="evt-old-123",
+            description="stale", google_event_id="evt-old-123",
         )
 
         mock_client.complete.reset_mock()
@@ -360,9 +360,9 @@ class TestPeriodization(unittest.TestCase):
     def test_generate_workouts_clears_stale_unsynced_calendar_workouts(
         self, mock_client, mock_calendar
     ):
-        """A workout that was pushed then adapted/swapped (synced=0 but with a
+        """A workout that was pushed then adapted/swapped (stale but with a
         google_event_id) must still have its Calendar event deleted on regenerate —
-        i.e. cleanup keys on google_event_id, not the sync flag (orphan guard)."""
+        i.e. cleanup keys on google_event_id, not the freshness state (orphan guard)."""
         test_db.add_objective(
             title="Zurich Marathon", target_date="2026-10-15",
             sport_type="running", priority=1,
@@ -381,7 +381,7 @@ class TestPeriodization(unittest.TestCase):
         # On the calendar (google_event_id) but pending re-push after an adaptation.
         test_db.save_workout(
             date=future, sport_type="running", title="Adapted Run",
-            description="adapted", synced=False, google_event_id="evt-stale-456",
+            description="adapted", google_event_id="evt-stale-456",
             modification_reason="swapped",
         )
 

@@ -24,6 +24,12 @@ class BaseDB:
         finally:
             conn.close()
 
+    @staticmethod
+    def _table_has_column(cursor: sqlite3.Cursor, table: str, column: str) -> bool:
+        """Returns True if `table` currently has `column` (via PRAGMA table_info)."""
+        cursor.execute(f"PRAGMA table_info({table})")
+        return any(row[1] == column for row in cursor.fetchall())
+
     def _init_db(self) -> None:
         """Initializes tables in database if they do not exist."""
         with self._get_connection() as conn:
@@ -96,7 +102,7 @@ class BaseDB:
                     title TEXT NOT NULL,
                     description TEXT,
                     original_description TEXT,
-                    synced INTEGER DEFAULT 0, -- 0 = pending push, 1 = calendar current
+                    pushed_signature TEXT, -- hash of calendar fields at last push; NULL = never pushed. Freshness derived (see trainmate.calendar_state)
                     modification_reason TEXT, -- non-NULL <=> adapted/swapped; short per-workout note
                     adaptation_summary TEXT, -- batch-level adapt rationale, shared across the batch
                     google_event_id TEXT,
@@ -151,15 +157,34 @@ class BaseDB:
                 cursor.execute("ALTER TABLE workouts ADD COLUMN source TEXT")
             except sqlite3.OperationalError:
                 pass
-            # Migrate the conflated `status` enum into an orthogonal `synced` flag.
-            # The adaptation axis already lives in modification_reason; only the sync
-            # axis needs its own column. On a fresh DB the ALTER fails (column already
-            # exists from CREATE TABLE) and the backfill is skipped — correct, no rows.
-            try:
-                cursor.execute("ALTER TABLE workouts ADD COLUMN synced INTEGER DEFAULT 0")
+            # Migrate the very old conflated `status` enum into an orthogonal `synced`
+            # flag. Only relevant for DBs predating the `synced` column; guarded on the
+            # `status` column so it doesn't re-add `synced` after we drop it below.
+            if self._table_has_column(cursor, "workouts", "status"):
+                try:
+                    cursor.execute("ALTER TABLE workouts ADD COLUMN synced INTEGER DEFAULT 0")
+                except sqlite3.OperationalError:
+                    pass
                 cursor.execute("UPDATE workouts SET synced = 1 WHERE status = 'synced'")
+            # Replace the hand-maintained `synced` flag with a derived freshness signal:
+            # store `pushed_signature` (hash of calendar-relevant fields) on each push and
+            # compare against the live hash to tell unpushed/synced/stale apart (see
+            # trainmate.calendar_state). Backfill: a row that was `synced=1` matched the
+            # calendar at push time, so its current content is its signature; everything
+            # else stays NULL (reads as unpushed/stale). Then drop the now-dead column.
+            try:
+                cursor.execute("ALTER TABLE workouts ADD COLUMN pushed_signature TEXT")
             except sqlite3.OperationalError:
                 pass
+            if self._table_has_column(cursor, "workouts", "synced"):
+                from trainmate.calendar_state import calendar_signature
+                cursor.execute("SELECT * FROM workouts WHERE synced = 1")
+                for row in cursor.fetchall():
+                    cursor.execute(
+                        "UPDATE workouts SET pushed_signature = ? WHERE id = ?",
+                        (calendar_signature(dict(row)), row["id"]),
+                    )
+                cursor.execute("ALTER TABLE workouts DROP COLUMN synced")
             # Original date: remembers where a workout was first placed so that
             # swapping it back clears the modification flag.
             try:

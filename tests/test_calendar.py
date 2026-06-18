@@ -199,7 +199,6 @@ class TestCalendarSync(unittest.TestCase):
             "google_event_id": "evt-removed-123",
             "removed": True,
             "removed_reason": "Injury flare-up",
-            "synced": False
         }
 
         # Mock the event update API response

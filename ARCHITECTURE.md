@@ -330,8 +330,9 @@ by Calendar event id (cleared by `wipe_metrics`; see §13).
 `get_workouts(start_date, end_date, sport_type, include_removed=False)` (excludes
 soft-removed rows unless `include_removed=True`), `get_workout_by_id(id)`,
 `delete_workout_by_id` (hard delete), `mark_workout_removed(id, reason=None)` (soft
-delete — sets `removed=1`/`removed_reason`, and sets `synced=0`),
-`clear_future_workouts`,
+delete — sets `removed=1`/`removed_reason`; the content change reads as `stale`),
+`mark_workout_pushed(id, google_event_id, signature)` (records a successful push — the
+only writer of `pushed_signature`), `clear_future_workouts`,
 `wipe_workouts`
 
 **Completed Activities:** `save_completed_activity` (upsert on `activity_id`),
@@ -419,10 +420,13 @@ SQLite database at `trainmate.db` (path from `config.db_path`).
 | `description`          | TEXT       | Current description (may be adapted)             |
 | `original_description` | TEXT       | Set once on creation, never overwritten          |
 |                        |            | (COALESCE)                                       |
-| `synced`               | INTEGER    | 0/1 — sync axis: 1 = Calendar event current.     |
-|                        |            | Orthogonal to adaptation (see below)             |
-| `modification_reason`  | TEXT       | Adaptation axis: non-NULL ⟺ adapted/swapped.     |
-|                        |            | A short per-workout note (one sentence).         |
+| `pushed_signature`     | TEXT       | Hash of calendar-relevant fields captured at the |
+|                        |            | last successful push. Freshness is *derived* by  |
+|                        |            | comparing it to the live hash — not stored. NULL  |
+|                        |            | ⟺ never pushed (see `trainmate.calendar_state`).  |
+| `modification_reason`  | TEXT       | Modification axis: non-NULL ⟺ modified. A short   |
+|                        |            | per-workout note. Kind (adapted/swapped/replaced) |
+|                        |            | derived via `trainmate.modification_state`.       |
 | `adaptation_summary`   | TEXT       | Long batch-level adapt rationale, stamped on      |
 |                        |            | every session of one `workout adapt` run and      |
 |                        |            | deduplicated when listed. NULL on swaps/manual/    |
@@ -440,22 +444,42 @@ SQLite database at `trainmate.db` (path from `config.db_path`).
 |                        |            | `manual` (`workout add`). NULL on legacy rows.     |
 |                        |            | Orthogonal to adaptation — adapting keeps origin.  |
 
-**Workout state is four orthogonal facts, not one enum** (a prior single `status`
-string conflated them): *modified?* = `modification_reason IS NOT NULL`; *on
-calendar?* = `google_event_id IS NOT NULL`; *Calendar current?* = `synced`;
-*removed?* = `removed = 1`. *Modified* spans both daily adapts and swaps/manual
-replaces; the two are now distinguishable — `adaptation_summary IS NOT NULL` ⟺ the
-change came from `workout adapt` (a swap/manual replace sets only
-`modification_reason`). `modification_reason` is set directly (so a swap-back can clear
-it to NULL), whereas `adaptation_summary` is COALESCE-preserved on re-save — only ever
-written by an adapt, never cleared. The
-otherwise-unrepresentable "on the calendar but stale, needs re-push" state is
-`synced=0 AND google_event_id IS NOT NULL` — set whenever a pushed workout is later
-adapted (`workout_adapt_apply`) or swapped (`update_workout_date`). Push eligibility =
-`NOT synced`; calendar cleanup keys on `google_event_id`.
+**Workout state is three orthogonal facts, not one enum** (a prior single `status`
+string conflated them): *modified?* = `modification_reason IS NOT NULL`; *calendar
+state* (a derived 3-way, below); *removed?* = `removed = 1`. `modification_reason` is set
+directly (so a swap-back can clear it to NULL), whereas `adaptation_summary` is
+COALESCE-preserved on re-save — only ever written by an adapt, never cleared.
+
+**The modification *kind* is derived, not stored** (`trainmate.modification_state`).
+*Modified* spans daily adapts, swaps, and manual replaces; `modification_status(workout)`
+names which without a stored flag (a stored kind would be the same hand-maintained
+denormalization the calendar rework removed). It returns **unmodified**
+(`modification_reason IS NULL`), **adapted** (`adaptation_summary IS NOT NULL` ⟺ from
+`workout adapt`), **swapped** (`date != original_date` — a `workout swap` move),
+**replaced** (`source == 'manual'` — an in-place manual replace), else **adapted** again
+(a legacy adapt: a generated row whose pre-split rationale lives in `modification_reason`
+with no summary — the catch-all is `adapted`, not `replaced`, because a manual replace
+always stamps `source='manual'`). `adapted` takes precedence over `swapped`: a session
+adapted then swapped keeps its summary and still reads `adapted`. `workout list`
+markers (`[ADAPTED]`/`[SWAPPED]`/`[REPLACED]`) come from this accessor. *(The Calendar
+event summary's `[Adapted]`/before-after framing in `google_calendar.sync_workout` is a
+separate concern — it keys on whether the **description** actually changed, not on the
+modification kind, so it is intentionally left as-is.)*
+
+**The calendar axis is derived, not stored** (`trainmate.calendar_state`). A successful
+push records `pushed_signature` = hash of the calendar-relevant fields; the current
+state then *falls out* of comparing it to the live content — `calendar_status(workout)`
+returns **unpushed** (`google_event_id IS NULL`), **synced** (`pushed_signature ==`
+current hash), or **stale** (`!=`). This replaced a hand-maintained `synced` boolean
+that every write path had to remember to reset; now any edit through any path leaves
+`pushed_signature` untouched and the row reads `stale` automatically — no flag to
+forget. (The signature excludes `rpe`, which never reaches Calendar, so editing it no
+longer spuriously marks a workout for re-push.) Push eligibility = `calendar_status !=
+'synced'`; `mark_workout_pushed` is the **only** writer of `pushed_signature`; calendar
+cleanup still keys on `google_event_id`.
 
 **Removal is a soft delete.** `workout rm` calls `mark_workout_removed`
-(`removed=1`, `synced=0`, preserves `google_event_id`) and updates the Calendar event
+(`removed=1`, preserves `google_event_id`; the content change reads as `stale`) and updates the Calendar event
 to be marked as deleted — the row is **kept**. `get_workouts` excludes removed rows
 by default
 (`include_removed=False`), so they vanish from `workout list`/`compare`, adaptation

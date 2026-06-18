@@ -687,7 +687,6 @@ class CoachService:
                 sport_type=w['sport_type'],
                 title=w['title'],
                 description=w['description'],
-                synced=False,
                 duration_minutes=w.get('duration_minutes'),
                 rpe=w.get('rpe'),
                 tss=w.get('tss'),
@@ -700,7 +699,6 @@ class CoachService:
                 'title': w['title'],
                 'description': w['description'],
                 'original_description': w['description'],
-                'synced': False,
                 'modification_reason': None,
                 'google_event_id': None,
                 'duration_minutes': w.get('duration_minutes'),
@@ -857,7 +855,6 @@ class CoachService:
                 'title': w['title'],
                 'description': w['description'],
                 'original_description': w['description'],
-                'synced': False,
                 # Per-workout note; the long batch rationale travels separately as the
                 # returned `reason` and is stamped onto adaptation_summary at apply time.
                 # Fall back to the batch reason so an adapted session is never left with a
@@ -925,7 +922,6 @@ class CoachService:
                 title=w['title'],
                 description=w['description'],
                 original_description=orig_desc or w['description'],
-                synced=False,
                 modification_reason=w.get('modification_reason'),
                 adaptation_summary=reason,
                 google_event_id=ge_id,
@@ -1181,7 +1177,6 @@ class CoachService:
             title=title,
             description=description,
             original_description=orig_desc,
-            synced=False,
             modification_reason=mod_reason,
             google_event_id=ge_id,
             duration_minutes=duration_minutes,

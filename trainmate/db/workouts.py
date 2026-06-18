@@ -8,7 +8,7 @@ class WorkoutsMixin:
 
     def save_workout(
         self, date: str, sport_type: str, title: str, description: str,
-        original_description: Optional[str] = None, synced: bool = False,
+        original_description: Optional[str] = None,
         modification_reason: Optional[str] = None, google_event_id: Optional[str] = None,
         duration_minutes: Optional[int] = None, rpe: Optional[int] = None,
         tss: Optional[int] = None, original_date: Optional[str] = None,
@@ -18,7 +18,12 @@ class WorkoutsMixin:
         """Saves a workout, updating it if one already exists that day for the same
         sport. Existence is alias-aware (see trainmate.sports), so adapting/regenerating
         a canonical ``strength_training`` updates an existing ``strength`` row in place
-        instead of inserting a duplicate; the stored row keeps its original spelling."""
+        instead of inserting a duplicate; the stored row keeps its original spelling.
+
+        Calendar freshness is *not* touched here: `pushed_signature` is left as-is, so any
+        content change made through this method automatically reads as `stale` (see
+        trainmate.calendar_state). Only a successful push, via `mark_workout_pushed`,
+        records a new signature."""
         aliases = sport_aliases(sport_type)
         placeholders = ",".join("?" * len(aliases))
         with self._get_connection() as conn:
@@ -37,7 +42,7 @@ class WorkoutsMixin:
                     SET title = ?, description = ?,
                         original_description = COALESCE(?, original_description),
                         original_date = COALESCE(?, original_date, date),
-                        synced = ?, modification_reason = ?,
+                        modification_reason = ?,
                         adaptation_summary = COALESCE(?, adaptation_summary),
                         google_event_id = ?,
                         duration_minutes = COALESCE(?, duration_minutes),
@@ -47,7 +52,7 @@ class WorkoutsMixin:
                         source = COALESCE(?, source)
                     WHERE id = ?
                 """, (title, description, original_description,
-                      original_date, int(synced),
+                      original_date,
                       modification_reason, adaptation_summary, ge_id,
                       duration_minutes, rpe, tss,
                       int(removed), removed_reason, source,
@@ -56,13 +61,13 @@ class WorkoutsMixin:
                 cursor.execute("""
                     INSERT INTO workouts (
                         date, sport_type, title, description, original_description,
-                        original_date, synced, modification_reason, adaptation_summary,
+                        original_date, modification_reason, adaptation_summary,
                         google_event_id, duration_minutes, rpe, tss,
                         removed, removed_reason, source
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (date, sport_type, title, description,
                       original_description or description,
-                      original_date or date, int(synced),
+                      original_date or date,
                       modification_reason, adaptation_summary,
                       google_event_id, duration_minutes,
                       rpe, tss, int(removed), removed_reason, source))
@@ -158,19 +163,33 @@ class WorkoutsMixin:
             conn.cursor().execute("DELETE FROM workouts WHERE id = ?", (workout_id,))
             conn.commit()
 
+    def mark_workout_pushed(
+        self, workout_id: int, google_event_id: str, signature: str
+    ) -> None:
+        """Records a successful Google Calendar push: stores the event handle and the
+        signature of the content that was pushed. Freshness is derived from comparing
+        this signature against the live content (see trainmate.calendar_state), so this
+        is the *only* method that marks a workout `synced`."""
+        with self._get_connection() as conn:
+            conn.execute(
+                "UPDATE workouts SET google_event_id = ?, pushed_signature = ? WHERE id = ?",
+                (google_event_id, signature, workout_id)
+            )
+            conn.commit()
+
     def mark_workout_removed(
         self, workout_id: int, reason: Optional[str] = None
     ) -> None:
-        """Soft-deletes a workout: flags it `removed` and marks it pending re-push.
+        """Soft-deletes a workout: flags it `removed`.
 
         The row is kept (excluded from reads by default) so the coach can still be told
         the session was deliberately cancelled, optionally with the athlete's `reason`.
         `google_event_id` is preserved so the calendar event can be updated to be marked
-        as deleted on sync; `synced` is reset so it triggers an update."""
+        as deleted on sync; changing `removed` shifts the content hash, so the workout
+        reads as `stale` and the next push updates the event (see trainmate.calendar_state)."""
         with self._get_connection() as conn:
             conn.execute(
-                "UPDATE workouts SET removed = 1, removed_reason = ?, "
-                "synced = 0 WHERE id = ?",
+                "UPDATE workouts SET removed = 1, removed_reason = ? WHERE id = ?",
                 (reason, workout_id)
             )
             conn.commit()
@@ -178,12 +197,11 @@ class WorkoutsMixin:
     def restore_workout(self, workout_id: int) -> None:
         """Restores a soft-deleted workout.
 
-        Clears the `removed` and `removed_reason` flags and marks it pending re-push
-        (`synced = 0`) so the Google Calendar event can be un-deleted."""
+        Clears the `removed` and `removed_reason` flags; the resulting content change
+        reads as `stale` so the next push un-deletes the Google Calendar event."""
         with self._get_connection() as conn:
             conn.execute(
-                "UPDATE workouts SET removed = 0, removed_reason = NULL, "
-                "synced = 0 WHERE id = ?",
+                "UPDATE workouts SET removed = 0, removed_reason = NULL WHERE id = ?",
                 (workout_id,)
             )
             conn.commit()
@@ -191,14 +209,15 @@ class WorkoutsMixin:
     def update_workout_date(
         self, workout_id: int, new_date: str, modification_reason: str
     ) -> None:
-        """Moves a workout to a new date and marks it pending re-push (synced = 0).
+        """Moves a workout to a new date; the date change reads as `stale` so the next
+        push updates the Calendar event (see trainmate.calendar_state).
 
         If the workout lands back on its original_date the modification_reason
         is cleared — the workout is no longer considered adapted/swapped.
         """
         with self._get_connection() as conn:
             conn.execute(
-                "UPDATE workouts SET date = ?, synced = 0, "
+                "UPDATE workouts SET date = ?, "
                 "modification_reason = CASE "
                 "  WHEN COALESCE(original_date, date) = ? THEN NULL "
                 "  ELSE ? "
