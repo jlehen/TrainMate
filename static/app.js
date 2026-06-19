@@ -182,10 +182,29 @@ async function fetchStatus() {
             activeMacrocycleId = data.macrocycle.id;
             strategyCard.style.display = "block";
             if (noStrategyCard) noStrategyCard.style.display = "none";
-            document.getElementById("strategy-philosophy").innerText = data.macrocycle.strategy;
-            document.getElementById("macro-feedback-input").value = data.macrocycle.feedback || "";
+            document.getElementById("strategy-philosophy").innerText =
+                data.macrocycle.strategy;
+            document.getElementById("macro-feedback-input").value =
+                data.macrocycle.feedback || "";
             document.getElementById("macro-feedback-notice").style.display = "none";
             renderTimeline(data.mesocycles);
+
+            if (data.macrocycle.created_at) {
+                const created = new Date(data.macrocycle.created_at);
+                const formattedDate = created.toLocaleDateString("en-US", {
+                    month: "short",
+                    day: "numeric",
+                    year: "numeric"
+                });
+                const formattedTime = created.toLocaleTimeString("en-US", {
+                    hour: "numeric",
+                    minute: "2-digit"
+                });
+                const generatedText = `Generated ${formattedDate} at ${formattedTime}`;
+                document.getElementById("strategy-generated-at").innerText = generatedText;
+            } else {
+                document.getElementById("strategy-generated-at").innerText = "";
+            }
         } else {
             activeMacrocycleId = null;
             strategyCard.style.display = "none";
