@@ -129,7 +129,8 @@ three submodules:
   variant that includes each session's full description so the model preserves
   interval/rest detail it isn't deliberately changing, and tags already-completed
   sessions `[COMPLETED — locked history, not adaptable]` from the adherence
-  `completed_keys`), `format_removed_workouts`,
+  `completed_keys`), `format_removed_workouts`, `format_daily_context`
+  (renders the window's `daily_context` rows into the adapt prompt),
   `format_baseline`, `_load_science_guidelines`.
 - `engine.py` — `CoachEngine` (prompt construction, hashing, LLM calls). Owns
   the `openrouter_client` binding — **patch target for tests:**
@@ -249,6 +250,9 @@ called by the UIs.
   Computes `num_days` from `end_date` (or `config.workout_generation_span_days` if
   omitted), fetches history, calls `CoachEngine._workout_generate_logic()`, saves
   workouts to DB.
+- **`plan_apply(objective_id, strategy, mesocycles)`** — persists an
+  already-generated strategy + mesocycles to the DB (recomputes the goals/lifeevents/
+  config hashes and snapshots). Used by the intermediate-goals branch of `plan generate`.
 - **`replan(force, objective_id)`** — convenience: `plan_generate` then
   `workout_generate`.
 - **`workout_adapt(target_date_str)`** — fetches metrics + workouts in the rolling
@@ -347,8 +351,9 @@ soft-removed rows unless `include_removed=True`), `get_workout_by_id(id)`,
 `delete_workout_by_id` (hard delete), `mark_workout_removed(id, reason=None)` (soft
 delete — sets `removed=1`/`removed_reason`; the content change reads as `stale`),
 `mark_workout_pushed(id, google_event_id, signature)` (records a successful push — the
-only writer of `pushed_signature`), `clear_future_workouts`,
-`wipe_workouts`
+only writer of `pushed_signature`), `restore_workout(id)` (clears the soft-delete
+flags — `workout restore`), `update_workout_date(id, date)` (moves a row — used by
+`workout swap`), `clear_future_workouts`, `wipe_workouts`
 
 **Completed Activities:** `save_completed_activity` (upsert on `activity_id`),
 `get_completed_activities(start_date, end_date)`
@@ -701,7 +706,7 @@ Invoked as `python trainmate_cli.py [--llm-model MODEL] <command> [subcommand] [
 `trainmate_cli.py` holds only `main()` (the argparse dispatcher) and the
 patchable singletons; the handler functions, named
 `run_<command>_<subcommand>()`, live in the `trainmate/cli/` package
-(one module per command family: `status`, `goals`, `lifeevents`, `plans`,
+(one module per command family: `status`, `goals`, `lifeevents`, `learnings`, `plans`,
 `workouts`, `data`).
 
 | Command      | Subcommand   | Alias    | Description                                                              |
@@ -718,6 +723,13 @@ patchable singletons; the handler functions, named
 | `lifeevent`  | `list`       | `le l`   | List life events                                                         |
 | `lifeevent`  | `show`       | `le s`   | Show life event details by ID                                            |
 | `lifeevent`  | `wipe`       | —        | Delete all life events                                                   |
+| `learnings`  | `list`       | `l`      | Show coach learnings (`--sport`, `--confidence`, `--dormant`)            |
+| `learnings`  | `show`       | —        | Show a learning's full text + per-week evidence basis by ID             |
+| `learnings`  | `edit`       | —        | Edit a learning's text by ID                                            |
+| `learnings`  | `rm`         | `r`      | Delete a learning by ID                                                 |
+| `learnings`  | `demote`     | —        | Accept a pending confidence downgrade by ID                            |
+| `learnings`  | `keep`       | —        | Dismiss + affirm a pending downgrade by ID                             |
+| `learnings`  | `wipe`       | —        | Delete all coach learnings                                             |
 | `plan`       | `generate`   | `p g`    | Generate/reuse macrocycle+mesocycles (`-f` to force, `--goal ID`)        |
 | `plan`       | `show`       | `p s`    | Show active periodization plan                                           |
 | `plan`       | `rm`         | `p d`    | Delete plan for a goal ID                                                |
@@ -930,7 +942,7 @@ Required fields:
    workouts.
 
 ### Daily Adaptation (`workout adapt`)
-1. `CoachService.adapt()` fetches metrics + planned workouts + completed
+1. `CoachService.workout_adapt()` fetches metrics + planned workouts + completed
    activities in window. Workouts in the window are fetched with
    `include_removed=True` and partitioned into active (planned) vs `removed`;
    removed ones are passed to `_workout_adapt_logic` and rendered in the prompt as
@@ -1212,7 +1224,7 @@ venv/bin/python -m unittest discover -s tests -p "test_*.py"
 
 | File                           | What it tests                                                   |
 |--------------------------------|-----------------------------------------------------------------|
-| `tests/test_adaptation.py`     | `CoachService.adapt()` end-to-end, swap validation/apply, and    |
+| `tests/test_adaptation.py`     | `CoachService.workout_adapt()` end-to-end, swap validation/apply, |
 |                                | `adherence.analyze_adherence()` (misses, tolerances, violations) |
 | `tests/test_analysis.py`       | `data_bootstrap`/`data_reflect`: date resolution, weekly |
 |                                | aggregation, cache reuse/force/inspect_only, learnings           |
