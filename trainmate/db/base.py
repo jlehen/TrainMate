@@ -331,6 +331,8 @@ class BaseDB:
                     goals_hash TEXT NOT NULL,
                     lifeevents_hash TEXT NOT NULL,
                     config_hash TEXT,
+                    goals_snapshot TEXT,
+                    lifeevents_snapshot TEXT,
                     created_at TEXT NOT NULL,
                     feedback TEXT DEFAULT NULL,
                     FOREIGN KEY (objective_id) REFERENCES objectives(id) ON DELETE CASCADE
@@ -347,6 +349,18 @@ class BaseDB:
             if 'config_hash' not in columns:
                 cursor.execute(
                     "ALTER TABLE macrocycles ADD COLUMN config_hash TEXT"
+                )
+            # Snapshots of the goals and life events the plan was generated from, so they
+            # can be shown after the fact even once the live records have changed. Stored
+            # as the same cleaned JSON the goals_hash/lifeevents_hash fingerprint. NULL on
+            # macrocycles created before this column existed.
+            if 'goals_snapshot' not in columns:
+                cursor.execute(
+                    "ALTER TABLE macrocycles ADD COLUMN goals_snapshot TEXT"
+                )
+            if 'lifeevents_snapshot' not in columns:
+                cursor.execute(
+                    "ALTER TABLE macrocycles ADD COLUMN lifeevents_snapshot TEXT"
                 )
 
             # Mesocycles table

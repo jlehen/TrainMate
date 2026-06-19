@@ -274,6 +274,48 @@ class TestPeriodization(unittest.TestCase):
             self.assertIn("Wednesday: 0.0 hours", prompt)
 
     @patch("trainmate.coach.engine.openrouter_client")
+    def test_plan_snapshots_goals_and_lifeevents(self, mock_client):
+        import json
+        obj_id = test_db.add_objective(
+            title="Berlin Marathon", target_date="2026-10-15",
+            sport_type="running", description="sub-3 attempt", priority=1,
+        )
+        # A future life event that the plan should snapshot. A past one is excluded
+        # because plan generation only considers events from today onward.
+        test_db.add_lifeevent(
+            title="Work trip", start_date="2026-08-01", end_date="2026-08-10",
+            event_type="travel", impact_description="limited training time",
+        )
+
+        mock_client.complete.return_value = {
+            "strategy": "Snapshot strategy",
+            "mesocycles": [{
+                "name": "Base Phase", "start_date": "2026-06-01",
+                "end_date": "2026-06-28", "focus": "Base",
+            }],
+        }
+
+        coach_service.plan_generate(force=True, objective_id=obj_id)
+
+        macro = test_db.get_macrocycle_for_objective(obj_id)
+        self.assertIsNotNone(macro["goals_snapshot"])
+        self.assertIsNotNone(macro["lifeevents_snapshot"])
+
+        goals = json.loads(macro["goals_snapshot"])
+        events = json.loads(macro["lifeevents_snapshot"])
+        self.assertEqual([g["title"] for g in goals], ["Berlin Marathon"])
+        self.assertEqual([e["title"] for e in events], ["Work trip"])
+
+        # The snapshot must serialize exactly the data the hash fingerprints, so the
+        # two never disagree about what the plan was built on.
+        self.assertEqual(
+            coach_service._get_goals_hash(goals), macro["goals_hash"]
+        )
+        self.assertEqual(
+            coach_service._get_lifeevents_hash(events), macro["lifeevents_hash"]
+        )
+
+    @patch("trainmate.coach.engine.openrouter_client")
     def test_generate_plan_and_workouts_separately(self, mock_client):
         obj_id = test_db.add_objective(
             title="Zurich Marathon", target_date="2026-10-15",

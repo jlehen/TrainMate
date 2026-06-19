@@ -184,6 +184,7 @@ async function fetchStatus() {
             if (noStrategyCard) noStrategyCard.style.display = "none";
             document.getElementById("strategy-philosophy").innerText =
                 data.macrocycle.strategy;
+            renderStrategyInputs(data.macrocycle);
             document.getElementById("macro-feedback-input").value =
                 data.macrocycle.feedback || "";
             document.getElementById("macro-feedback-notice").style.display = "none";
@@ -259,6 +260,59 @@ function renderSyncFreshness(syncState) {
             : ` (${Math.floor(hours / 24)}d ago)`;
     }
     el.innerText = `Garmin data through ${through}${ago} — pulling is CLI-only.`;
+}
+
+// Renders the goals and life events the plan was generated from. These are
+// snapshotted on the macrocycle (server-side), so they reflect the inputs the plan
+// was built on rather than the current live records, which may since have changed.
+// Older plans predate the snapshot (null fields) and show a brief note instead.
+function renderStrategyInputs(macrocycle) {
+    const el = document.getElementById("strategy-inputs");
+    if (!el) return;
+
+    const rawGoals = macrocycle.goals_snapshot;
+    const rawEvents = macrocycle.lifeevents_snapshot;
+    if (rawGoals == null && rawEvents == null) {
+        el.innerHTML = `<div class="strategy-inputs-note">`
+            + `Inputs considered: not recorded (plan predates input snapshots).</div>`;
+        return;
+    }
+
+    let goals = [], events = [];
+    try { goals = rawGoals ? JSON.parse(rawGoals) : []; } catch (e) { goals = []; }
+    try { events = rawEvents ? JSON.parse(rawEvents) : []; } catch (e) { events = []; }
+
+    const goalItems = goals.length
+        ? goals.map(g => `<li>`
+            + `<span class="si-title">${escapeHtml(g.title || "")}</span> `
+            + `<span class="si-meta">(${escapeHtml((g.sport_type || "").toUpperCase())}) `
+            + `· ${escapeHtml(g.target_date || "")} · priority ${escapeHtml(String(g.priority ?? ""))}</span>`
+            + (g.description ? `<div class="si-desc">${escapeHtml(g.description)}</div>` : "")
+            + `</li>`).join("")
+        : `<li class="si-empty">None</li>`;
+
+    const eventItems = events.length
+        ? events.map(e => `<li>`
+            + `<span class="si-title">${escapeHtml(e.title || "")}</span> `
+            + `<span class="si-meta">(${escapeHtml(e.event_type || "")}) `
+            + `· ${escapeHtml(e.start_date || "")} → ${escapeHtml(e.end_date || "")}</span>`
+            + (e.impact_description ? `<div class="si-desc">${escapeHtml(e.impact_description)}</div>` : "")
+            + `</li>`).join("")
+        : `<li class="si-empty">None</li>`;
+
+    el.innerHTML = `
+        <details class="strategy-inputs-details">
+            <summary>Inputs considered (${goals.length} goal${goals.length === 1 ? "" : "s"}, `
+                + `${events.length} life event${events.length === 1 ? "" : "s"})</summary>
+            <div class="si-section">
+                <div class="si-heading"><i class="fa-solid fa-flag-checkered"></i> Goals considered</div>
+                <ul class="si-list">${goalItems}</ul>
+            </div>
+            <div class="si-section">
+                <div class="si-heading"><i class="fa-solid fa-calendar-day"></i> Life events considered</div>
+                <ul class="si-list">${eventItems}</ul>
+            </div>
+        </details>`;
 }
 
 function renderTimeline(mesocycles) {

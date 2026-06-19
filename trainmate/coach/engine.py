@@ -185,8 +185,12 @@ UPCOMING LIFE EVENTS:
 """
         return system_prompt
 
-    def _get_goals_hash(self, objectives: List[Objective]) -> str:
-        """Computes a hash representation of objectives list to check for updates."""
+    def _clean_goals(self, objectives: List[Objective]) -> List[Dict[str, Any]]:
+        """The goal fields that matter for planning, normalized and stably ordered.
+
+        Single source of truth for both the goals_hash fingerprint and the snapshot
+        persisted on the macrocycle, so the two can never drift apart.
+        """
         cleaned = []
         for o in objectives:
             cleaned.append({
@@ -199,11 +203,14 @@ UPCOMING LIFE EVENTS:
                 'status': o.get('status')
             })
         cleaned.sort(key=lambda x: (str(x['target_date']), x['id'] or 0))
-        serialized = json.dumps(cleaned, sort_keys=True)
-        return hashlib.sha256(serialized.encode('utf-8')).hexdigest()
+        return cleaned
 
-    def _get_lifeevents_hash(self, lifeevents: List[LifeEvent]) -> str:
-        """Computes a hash representation of life events list to check for updates."""
+    def _clean_lifeevents(self, lifeevents: List[LifeEvent]) -> List[Dict[str, Any]]:
+        """The life-event fields that matter for planning, normalized and stably ordered.
+
+        Single source of truth for both the lifeevents_hash fingerprint and the snapshot
+        persisted on the macrocycle (see _clean_goals).
+        """
         cleaned = []
         for c in lifeevents:
             cleaned.append({
@@ -215,7 +222,16 @@ UPCOMING LIFE EVENTS:
                 'impact_description': c.get('impact_description')
             })
         cleaned.sort(key=lambda x: (str(x['start_date']), x['id'] or 0))
-        serialized = json.dumps(cleaned, sort_keys=True)
+        return cleaned
+
+    def _get_goals_hash(self, objectives: List[Objective]) -> str:
+        """Computes a hash representation of objectives list to check for updates."""
+        serialized = json.dumps(self._clean_goals(objectives), sort_keys=True)
+        return hashlib.sha256(serialized.encode('utf-8')).hexdigest()
+
+    def _get_lifeevents_hash(self, lifeevents: List[LifeEvent]) -> str:
+        """Computes a hash representation of life events list to check for updates."""
+        serialized = json.dumps(self._clean_lifeevents(lifeevents), sort_keys=True)
         return hashlib.sha256(serialized.encode('utf-8')).hexdigest()
 
     def _get_config_hash(self) -> str:

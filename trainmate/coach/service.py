@@ -1,3 +1,4 @@
+import json
 from datetime import datetime, timedelta, timezone
 from typing import Any, List, Optional, Tuple, Dict
 from trainmate.config import config
@@ -464,6 +465,8 @@ class CoachService:
         goals_hash = self.engine._get_goals_hash(objectives)
         lifeevents_hash = self.engine._get_lifeevents_hash(lifeevents)
         config_hash = self.engine._get_config_hash()
+        goals_snapshot = json.dumps(self.engine._clean_goals(objectives))
+        lifeevents_snapshot = json.dumps(self.engine._clean_lifeevents(lifeevents))
 
         # Try to retrieve existing macrocycle
         strategy = ""
@@ -558,6 +561,8 @@ class CoachService:
                     goals_hash=goals_hash,
                     lifeevents_hash=lifeevents_hash,
                     config_hash=config_hash,
+                    goals_snapshot=goals_snapshot,
+                    lifeevents_snapshot=lifeevents_snapshot,
                     mesocycles=mesocycles
                 )
 
@@ -588,6 +593,8 @@ class CoachService:
             goals_hash=goals_hash,
             lifeevents_hash=lifeevents_hash,
             config_hash=config_hash,
+            goals_snapshot=json.dumps(self.engine._clean_goals(objectives)),
+            lifeevents_snapshot=json.dumps(self.engine._clean_lifeevents(lifeevents)),
             mesocycles=mesocycles
         )
 

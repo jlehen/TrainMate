@@ -159,9 +159,15 @@ class PeriodizationMixin:
     def save_macrocycle(
         self, objective_id: int, strategy: str, goals_hash: str,
         lifeevents_hash: str, mesocycles: List[Dict[str, Any]],
-        config_hash: str = ""
+        config_hash: str = "", goals_snapshot: str = "",
+        lifeevents_snapshot: str = ""
     ) -> int:
-        """Saves a macrocycle and its nested mesocycles for the objective."""
+        """Saves a macrocycle and its nested mesocycles for the objective.
+
+        goals_snapshot/lifeevents_snapshot are JSON of the goals and life events the plan
+        was generated from (the same cleaned data the hashes fingerprint), preserved so
+        the inputs can be shown later even after the live records change.
+        """
         with self._get_connection() as conn:
             cursor = conn.cursor()
             # Delete any existing macrocycles for this objective (cascade deletes mesocycles)
@@ -170,9 +176,11 @@ class PeriodizationMixin:
             created_at = datetime.now(timezone.utc).isoformat()
             cursor.execute("""
                 INSERT INTO macrocycles (
-                    objective_id, strategy, goals_hash, lifeevents_hash, config_hash, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?)
-            """, (objective_id, strategy, goals_hash, lifeevents_hash, config_hash, created_at))
+                    objective_id, strategy, goals_hash, lifeevents_hash, config_hash,
+                    goals_snapshot, lifeevents_snapshot, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """, (objective_id, strategy, goals_hash, lifeevents_hash, config_hash,
+                  goals_snapshot or None, lifeevents_snapshot or None, created_at))
             macrocycle_id = cursor.lastrowid
 
             for meso in mesocycles:

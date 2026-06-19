@@ -1,3 +1,4 @@
+import json
 import textwrap
 import argparse
 import sys
@@ -93,6 +94,54 @@ def run_plan_generate(args: argparse.Namespace) -> None:
         print(red(f"Error during plan generation: {e}"))
 
 
+def _print_considered_inputs(macrocycle: dict) -> None:
+    """Prints the goals and life events snapshotted when the plan was generated.
+
+    These are preserved on the macrocycle (see save_macrocycle), so they reflect the
+    inputs the plan was actually built on rather than the current live records, which
+    may have since changed. Older plans predate the snapshot and have nothing to show.
+    """
+    raw_goals = macrocycle.get('goals_snapshot')
+    raw_events = macrocycle.get('lifeevents_snapshot')
+    if raw_goals is None and raw_events is None:
+        print(gray("Inputs considered: not recorded (plan predates input snapshots)."))
+        print()
+        return
+
+    goals = json.loads(raw_goals) if raw_goals else []
+    events = json.loads(raw_events) if raw_events else []
+
+    print(bold("Goals considered:"))
+    if goals:
+        for g in goals:
+            sport = (g.get('sport_type') or '').upper()
+            print(
+                f"  - [ID: {g.get('id')}] {cyan(g.get('title', ''))} "
+                f"({magenta(sport)}) on {cyan(fmt_date(g.get('target_date')))} "
+                f"[priority {g.get('priority')}]"
+            )
+            if g.get('description'):
+                for line in textwrap.wrap(g['description'], width=78):
+                    print(f"      {gray(line)}")
+    else:
+        print(f"  {gray('None')}")
+
+    print(bold("Life events considered:"))
+    if events:
+        for e in events:
+            print(
+                f"  - [ID: {e.get('id')}] {cyan(e.get('title', ''))} "
+                f"({e.get('event_type', '')}) "
+                f"{fmt_date(e.get('start_date'))} -> {fmt_date(e.get('end_date'))}"
+            )
+            if e.get('impact_description'):
+                for line in textwrap.wrap(e['impact_description'], width=78):
+                    print(f"      {gray(line)}")
+    else:
+        print(f"  {gray('None')}")
+    print()
+
+
 def run_plan_show(args: argparse.Namespace) -> None:
     """Displays the active training macrocycle and mesocycles periodization timeline."""
     objectives = cli.db.get_objectives(status='active')
@@ -136,6 +185,7 @@ def run_plan_show(args: argparse.Namespace) -> None:
     if macrocycle.get('feedback'):
         print(format_labeled_block(f"{bold('Macrocycle Feedback')}:", macrocycle['feedback']))
     print()
+    _print_considered_inputs(macrocycle)
     print(bold("Mesocycle Timeline:"))
     
     today = _today_date()

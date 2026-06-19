@@ -151,8 +151,11 @@ Module-level function in `formatting.py`. Concatenates all `*.txt` files from
   (guidelines, strategy, goals, life events, athlete profile).
 - **`_format_athlete_profile(profile)`** — formats `config.user_profile` into a
   readable prompt segment.
-- **`_get_goals_hash(objectives)`** — SHA-256 of the sorted objectives list.
-- **`_get_lifeevents_hash(lifeevents)`** — SHA-256 of the sorted life events list.
+- **`_clean_goals(objectives)` / `_clean_lifeevents(lifeevents)`** — the
+  planning-relevant fields, normalized and stably ordered. Single source of truth
+  shared by the hash functions and the snapshots persisted on the macrocycle.
+- **`_get_goals_hash(objectives)`** — SHA-256 of the `_clean_goals` list.
+- **`_get_lifeevents_hash(lifeevents)`** — SHA-256 of the `_clean_lifeevents` list.
 - **`_get_config_hash()`** — SHA-256 of `user_profile` + `metrics_lookback_days`.
 - **`_plan_generate_strategy(...)`** — LLM call → `{strategy, mesocycles}`. Label
   `periodization_plan`.
@@ -628,6 +631,12 @@ guarantee (re-citing a counted week is an `INSERT OR IGNORE` no-op). Full model:
 | `lifeevents_hash` | TEXT                  | SHA-256 of life events at generation time        |
 | `config_hash`     | TEXT                  | SHA-256 of `user_profile` +                      |
 |                   |                       | `metrics_lookback_days`                          |
+| `goals_snapshot`  | TEXT                  | JSON of the goals the plan was generated from    |
+|                   |                       | (same cleaned data the hash covers); NULL on     |
+|                   |                       | plans predating the column. Shown by `plan show` |
+|                   |                       | and the web strategy card.                       |
+| `lifeevents_snapshot` | TEXT              | JSON of the life events the plan was generated   |
+|                   |                       | from; NULL on pre-snapshot plans                 |
 | `created_at`      | TEXT                  | ISO timestamp                                    |
 | `feedback`        | TEXT                  | Athlete feedback for next replanning             |
 

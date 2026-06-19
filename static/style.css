@@ -829,6 +829,79 @@ header {
     color: var(--text-primary);
 }
 
+.strategy-inputs {
+    margin-top: 0.6rem;
+}
+
+.strategy-inputs-note {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    font-style: italic;
+}
+
+.strategy-inputs-details > summary {
+    cursor: pointer;
+    font-size: 0.78rem;
+    color: var(--text-secondary);
+    list-style-position: inside;
+    padding: 0.25rem 0;
+    user-select: none;
+}
+
+.strategy-inputs-details > summary:hover {
+    color: var(--text-primary);
+}
+
+.strategy-inputs-details .si-section {
+    margin: 0.5rem 0 0.25rem;
+}
+
+.strategy-inputs-details .si-heading {
+    font-size: 0.72rem;
+    font-weight: 600;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 0.3rem;
+}
+
+.strategy-inputs-details .si-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+}
+
+.strategy-inputs-details .si-list > li {
+    font-size: 0.8rem;
+    color: var(--text-primary);
+    padding: 0.2rem 0;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+}
+
+.strategy-inputs-details .si-list > li:last-child {
+    border-bottom: none;
+}
+
+.strategy-inputs-details .si-title {
+    font-weight: 600;
+}
+
+.strategy-inputs-details .si-meta {
+    color: var(--text-muted);
+    font-size: 0.74rem;
+}
+
+.strategy-inputs-details .si-desc {
+    color: var(--text-secondary);
+    font-size: 0.74rem;
+    margin-top: 0.1rem;
+}
+
+.strategy-inputs-details .si-empty {
+    color: var(--text-muted);
+    font-style: italic;
+}
+
 .timeline-container {
     display: flex;
     height: 32px;
