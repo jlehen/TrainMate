@@ -93,29 +93,80 @@ def run_workout_adapt(args: argparse.Namespace) -> None:
             f"{'Adapted Workout':<25} | {'Duration/RPE/TSS':<16}"
         ))
         print(gray("-" * 100))
+
+        # Pair each proposal with the session it adapts. An in-place adapt matches by
+        # (date, sport) — get_workout is alias-aware, so it always finds the original.
+        # A sport SWAP (e.g. a strength session converted to REST) carries a new
+        # sport_type with no same-sport original, so get_workout returns None and the row
+        # would otherwise show "[None]", hiding the replaced session's data. Mirror the
+        # apply-time rule (workout_adapt_apply): on a proposed date, an existing session
+        # whose canonical sport isn't among that date's proposals is the one being
+        # overridden, so pair it with that date's new-sport proposal.
+        proposed_by_date: dict[str, list] = {}
+        for pw in proposed_workouts:
+            proposed_by_date.setdefault(pw['date'], []).append(pw)
+        swap_original: dict[int, dict] = {}
+        leftover_removed: list[dict] = []
+        for date, proposals in proposed_by_date.items():
+            existing_list = cli.db.get_workouts(start_date=date, end_date=date)
+            proposed_canons = {canonical_sport(p['sport_type']) for p in proposals}
+            existing_canons = {canonical_sport(e['sport_type']) for e in existing_list}
+            overridden = [
+                e for e in existing_list
+                if canonical_sport(e['sport_type']) not in proposed_canons
+            ]
+            new_proposals = [
+                p for p in proposals
+                if canonical_sport(p['sport_type']) not in existing_canons
+            ]
+            # Common case: exactly one overridden session and one new-sport proposal (a
+            # clean swap). Pair positionally; any overridden session left without a
+            # new-sport proposal is a plain deletion — surface it as a "[Removed]" row so
+            # the apply step never silently drops a session the preview didn't show.
+            for p, orig in zip(new_proposals, overridden):
+                swap_original[id(p)] = orig
+            leftover_removed.extend(overridden[len(new_proposals):])
+
+        def _stats(w: dict) -> str:
+            return (
+                f"{w.get('duration_minutes') or 0}m/"
+                f"RPE{w.get('rpe') or 0}/"
+                f"TSS{w.get('tss') or 0}"
+            )
+
         for pw in proposed_workouts:
             existing = cli.db.get_workout(pw['date'], pw['sport_type'])
-            orig_title = existing['title'] if existing else "[None]"
-            orig_stats = ""
-            if existing:
-                orig_stats = (
-                    f"{existing.get('duration_minutes') or 0}m/"
-                    f"RPE{existing.get('rpe') or 0}/"
-                    f"TSS{existing.get('tss') or 0}"
-                )
-            new_stats = (
-                f"{pw.get('duration_minutes') or 0}m/"
-                f"RPE{pw.get('rpe') or 0}/"
-                f"TSS{pw.get('tss') or 0}"
+            if existing is None:
+                existing = swap_original.get(id(pw))
+            is_swap = existing is not None and (
+                canonical_sport(existing['sport_type'])
+                != canonical_sport(pw['sport_type'])
             )
-            stats_diff = f"{orig_stats} -> {new_stats}" if orig_stats else new_stats
-            
+
+            orig_title = existing['title'] if existing else "[None]"
+            stats_diff = (
+                f"{_stats(existing)} -> {_stats(pw)}" if existing else _stats(pw)
+            )
+            sport_label = (
+                f"{existing['sport_type'].upper()}->{pw['sport_type'].upper()}"
+                if is_swap else pw['sport_type'].upper()
+            )
+
             date_col = pad_visible(cyan(pw['date']), 12)
-            sport_col = pad_visible(magenta(pw['sport_type'].upper()), 12)
+            sport_col = pad_visible(magenta(sport_label), 12)
             orig_col = pad_visible(gray(orig_title), 25)
             new_col = pad_visible(green(pw['title']), 25)
             stats_col = pad_visible(yellow(stats_diff), 16)
-            
+
+            print(f"{date_col} | {sport_col} | {orig_col} | {new_col} | {stats_col}")
+
+        # Sessions being deleted outright (overridden with no replacement proposal).
+        for ew in sorted(leftover_removed, key=lambda w: w['date']):
+            date_col = pad_visible(cyan(ew['date']), 12)
+            sport_col = pad_visible(magenta(ew['sport_type'].upper()), 12)
+            orig_col = pad_visible(gray(ew['title']), 25)
+            new_col = pad_visible(red("[Removed]"), 25)
+            stats_col = pad_visible(yellow(f"{_stats(ew)} -> removed"), 16)
             print(f"{date_col} | {sport_col} | {orig_col} | {new_col} | {stats_col}")
 
         if args.auto:
