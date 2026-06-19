@@ -791,6 +791,16 @@ class CoachService:
             covered_ranges=covered_ranges,
         )
 
+        # Sessions that already have a matching completed Garmin activity are history and
+        # cannot be adapted: the evaluation date is the first day of the adaptation range,
+        # but the athlete may have already trained today. Without this lock the LLM
+        # "adapts" a finished session (typically restating it to match the actual ride),
+        # which is meaningless and, on apply, rewrites a past calendar event.
+        completed_keys = {
+            (m["date"], canonical_sport(m["planned"]["sport_type"]))
+            for m in matching_results if m["completed"] is not None
+        }
+
         objectives = self._db.get_objectives(status='active')
 
         # Determine the fallback next_goal for passing to the prompt generator
@@ -833,7 +843,8 @@ class CoachService:
             discrepancies=discrepancies,
             informational=informational,
             removed_workouts=removed_workouts,
-            daily_context=daily_context
+            daily_context=daily_context,
+            completed_keys=completed_keys
         )
 
         # NOTE: daily adaptation is read-only w.r.t. coach learnings
@@ -846,6 +857,16 @@ class CoachService:
         adapted = []
         if decision.get("change_needed"):
             adapted = decision.get("adapted_workouts", [])
+
+        # Drop any proposal that targets an already-completed session — those are locked
+        # history (see completed_keys above). This is the load-bearing guard: it holds even
+        # if the model ignores the prompt instruction not to adapt finished sessions.
+        if completed_keys:
+            adapted = [
+                w for w in adapted
+                if (w.get("date"), canonical_sport(w.get("sport_type", "")))
+                not in completed_keys
+            ]
 
         # Filter and structure returned workouts
         return reason, [

@@ -127,7 +127,9 @@ three submodules:
   `format_metrics_history`, `format_completed_activities`,
   `format_planned_workouts`, `format_planned_workouts_detailed` (adapt-only
   variant that includes each session's full description so the model preserves
-  interval/rest detail it isn't deliberately changing), `format_removed_workouts`,
+  interval/rest detail it isn't deliberately changing, and tags already-completed
+  sessions `[COMPLETED — locked history, not adaptable]` from the adherence
+  `completed_keys`), `format_removed_workouts`,
   `format_baseline`, `_load_science_guidelines`.
 - `engine.py` — `CoachEngine` (prompt construction, hashing, LLM calls). Owns
   the `openrouter_client` binding — **patch target for tests:**
@@ -248,7 +250,10 @@ called by the UIs.
   `workout_generate`.
 - **`workout_adapt(target_date_str)`** — fetches metrics + workouts in the rolling
   window, calls `CoachEngine._workout_adapt_logic()`. Returns
-  `(reason, proposed_workouts)`.
+  `(reason, proposed_workouts)`. Sessions that already have a matching completed
+  activity (incl. one performed earlier on the evaluation date) are **locked
+  history**: any proposal targeting such a `(date, sport)` is dropped before
+  returning, so a workout already finished today is never "adapted".
 - **`workout_adapt_apply(proposed, reason, start, end)`** — deletes overridden
   workouts (+ calendar events), saves adapted workouts, syncs to Calendar. Each
   session keeps its short per-workout `change_reason` in `modification_reason`; the

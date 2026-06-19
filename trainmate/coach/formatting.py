@@ -1,7 +1,8 @@
 import os
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Set, Tuple
 from trainmate.types import Workout, CompletedActivity
 from trainmate.garmin import activity_load, rpe_divergence
+from trainmate.sports import canonical_sport
 
 
 def format_metrics_history(metrics: List[Dict[str, Any]]) -> str:
@@ -85,7 +86,10 @@ def format_planned_workouts(planned_workouts: List[Workout]) -> str:
     return "\n".join(planned_list)
 
 
-def format_planned_workouts_detailed(planned_workouts: List[Workout]) -> str:
+def format_planned_workouts_detailed(
+    planned_workouts: List[Workout],
+    completed_keys: Optional[Set[Tuple[str, str]]] = None,
+) -> str:
     """Like format_planned_workouts but includes each session's full description.
 
     Used by the adaptation prompt so the model can preserve interval structure,
@@ -95,7 +99,14 @@ def format_planned_workouts_detailed(planned_workouts: List[Workout]) -> str:
 
     Sessions the athlete scheduled themselves (source == 'manual') are tagged
     "[athlete-added]" so the adaptation can treat them as deliberate intent.
+
+    `completed_keys` is the set of `(date, canonical_sport)` pairs that already have a
+    matching completed activity (computed by adherence analysis). Those sessions are
+    tagged "[COMPLETED — locked history, not adaptable]" so the model has the
+    authoritative done/locked signal instead of re-pairing the plan against the
+    completed-activity list itself.
     """
+    completed_keys = completed_keys or set()
     blocks = []
     for w in planned_workouts:
         header = (
@@ -103,6 +114,8 @@ def format_planned_workouts_detailed(planned_workouts: List[Workout]) -> str:
             f"Expected duration: {w.get('duration_minutes')}m, "
             f"RPE: {w.get('rpe')}, TSS: {w.get('tss')}"
         )
+        if (w['date'], canonical_sport(w['sport_type'])) in completed_keys:
+            header += " [COMPLETED — locked history, not adaptable]"
         if w.get('source') == 'manual':
             header += " [athlete-added]"
         mod_reason = w.get('modification_reason')

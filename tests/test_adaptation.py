@@ -153,6 +153,82 @@ class TestAdaptation(unittest.TestCase):
             self.assertEqual(len(learnings), 1)
             self.assertIn(lid, learnings)
 
+    @patch("trainmate.coach.engine.openrouter_client")
+    def test_adapt_drops_already_completed_session(self, mock_client):
+        """A session already performed (matched by a completed activity) is locked history:
+        the guard drops any proposal targeting it, even if the model returns one — you cannot
+        adapt a workout you have already finished today."""
+        test_profile = {"lthr": 165, "max_hr": 185}
+        with patch.dict(trainmate.coach.config.data, {
+            "user_profile": test_profile,
+            "coach": {
+                "metrics_lookback_days": 3,
+                "minor_activity_load_threshold": 10.0,
+            }
+        }):
+            # The model tries to "adapt" today's already-completed ride (date == eval date),
+            # plus legitimately adapt a future session still ahead of the athlete.
+            mock_client.complete.return_value = {
+                "change_needed": True,
+                "reason": "Mild fatigue; ease the upcoming interval session.",
+                "adapted_workouts": [
+                    {
+                        "date": "2026-06-03",
+                        "sport_type": "road_biking",
+                        "title": "Rewritten Ride (should be dropped)",
+                        "description": "Restating the finished ride to match actual.",
+                        "duration_minutes": 82,
+                        "rpe": 4,
+                        "tss": 52.0,
+                    },
+                    {
+                        "date": "2026-06-04",
+                        "sport_type": "running",
+                        "title": "Eased Intervals",
+                        "description": "Cut intensity for the future session.",
+                        "duration_minutes": 40,
+                        "rpe": 5,
+                        "tss": 35.0,
+                    },
+                ],
+            }
+
+            test_db.save_metric_cache("2026-06-03", 56, 42, 60, 35, 14.0, 8.0, 1.75)
+            test_db.save_baseline("2026-06-03", 50.0, 2.0, 60.0, 5.0, 80.0, 5.0)
+
+            # Today's planned ride and a future running session.
+            test_db.save_workout(
+                "2026-06-03", "road_biking", "Aerobic Base Endurance", "70 mins",
+                duration_minutes=70, rpe=4, tss=45,
+            )
+            test_db.save_workout(
+                "2026-06-04", "running", "Interval Session", "45 mins",
+                duration_minutes=45, rpe=8, tss=60,
+            )
+
+            # The ride was actually completed today — this is what locks it.
+            test_db.save_completed_activity(
+                "act_ride", "2026-06-03", "2026-06-03 08:00:00", "Zwift Ride",
+                "cycling", 4920.0, 30.0, 250.0, 132, 150, 4, 52.0,
+            )
+
+            reason, proposed = coach_service.workout_adapt("2026-06-03")
+
+            dates = {p["date"] for p in proposed}
+            self.assertNotIn("2026-06-03", dates)  # completed session dropped
+            self.assertEqual(len(proposed), 1)
+            self.assertEqual(proposed[0]["date"], "2026-06-04")
+            self.assertEqual(proposed[0]["title"], "Eased Intervals")
+
+            # The completed session is surfaced to the model as locked history (the
+            # authoritative signal), not left for it to re-derive from the activity list.
+            prompt_user_content = mock_client.complete.call_args[0][1]
+            self.assertIn(
+                "Aerobic Base Endurance | Expected duration: 70m, RPE: 4, TSS: 45 "
+                "[COMPLETED — locked history, not adaptable]",
+                prompt_user_content,
+            )
+
     def _swap_ops_for_dates(self, date1, date2):
         """Builds swap ops the way the CLI does: exchange all workouts on two dates."""
         on_1 = test_db.get_workouts(start_date=date1, end_date=date1)
