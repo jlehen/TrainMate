@@ -164,17 +164,40 @@ def run_plan_show(args: argparse.Namespace) -> None:
         objectives.sort(key=lambda x: str(x['target_date']))
         next_goal = objectives[0]
     
-    macrocycle = cli.db.get_macrocycle_for_objective(next_goal['id'])
+    version_id = getattr(args, 'version', None)
+    if version_id is not None:
+        macrocycle = cli.db.get_macrocycle(version_id)
+        if not macrocycle or macrocycle.get('objective_id') != next_goal['id']:
+            print(red(
+                f"Plan version {version_id} does not belong to goal '{next_goal['title']}'."
+            ))
+            print(f"Run '{green('plan versions')}' to list this goal's plan versions.")
+            return
+    else:
+        macrocycle = cli.db.get_macrocycle_for_objective(next_goal['id'])
     if not macrocycle:
         print(yellow(
             f"No active macrocycle strategy found for goal '{next_goal['title']}'."
         ))
         print(f"Run '{green('plan generate')}' to create one.")
         return
-        
+
     mesocycles = cli.db.get_mesocycles_for_macrocycle(macrocycle['id'])
-    
-    print(bold(cyan("\n=== ACTIVE MACROCYCLE STRATEGY ===")))
+
+    is_superseded = macrocycle.get('status') == 'superseded'
+    if is_superseded:
+        superseded_on = str(macrocycle.get('superseded_at', ''))[:10]
+        header = (
+            f"=== SUPERSEDED MACROCYCLE STRATEGY (plan ID {macrocycle['id']}"
+            + (f", superseded {superseded_on}" if superseded_on else "")
+            + ") ==="
+        )
+        print(bold(yellow("\n" + header)))
+        print(yellow(
+            f"This is a past version, kept for rollback. Run "
+        ) + green(f"'plan rollback --version {macrocycle['id']}'") + yellow(" to restore it."))
+    else:
+        print(bold(cyan("\n=== ACTIVE MACROCYCLE STRATEGY ===")))
     sport_str = next_goal['sport_type'].upper()
     print(
         f"{bold('Objective')} [ID: {next_goal['id']}]: "
@@ -249,6 +272,60 @@ def run_plan_show(args: argparse.Namespace) -> None:
         print("  " + gray("-" * 40))
 
 
+def run_plan_versions(args: argparse.Namespace) -> None:
+    """Lists every periodization plan version (active + superseded) for a goal."""
+    if getattr(args, 'goal_id', None) is not None:
+        goal = cli.db.get_objective(args.goal_id)
+        if not goal:
+            print(red(f"Goal with ID {args.goal_id} not found."))
+            return
+    else:
+        objectives = cli.db.get_objectives(status='active')
+        if not objectives:
+            print(yellow("No active goals found. TrainMate needs at least one objective."))
+            return
+        objectives.sort(key=lambda x: str(x['target_date']))
+        goal = objectives[0]
+
+    versions = cli.db.get_macrocycle_versions(goal['id'])
+    if not versions:
+        print(yellow(f"No periodization plan exists for goal '{goal['title']}'."))
+        print(f"Run '{green('plan generate')}' to create one.")
+        return
+
+    sport_str = goal['sport_type'].upper()
+    print(bold(cyan("\n=== PLAN VERSIONS ===")))
+    print(
+        f"{bold('Objective')} [ID: {goal['id']}]: "
+        f"{cyan(goal['title'])} ({magenta(sport_str)}) "
+        f"on {cyan(fmt_date(goal['target_date']))}\n"
+    )
+    for v in versions:
+        active = v.get('status') != 'superseded'
+        created = str(v.get('created_at', ''))[:10]
+        excerpt = " ".join((v.get('strategy') or "").split())
+        if len(excerpt) > 70:
+            excerpt = excerpt[:69] + "…"
+        marker = green("●") if active else " "
+        id_str = (green if active else str)(f"ID {v['id']}")
+        if active:
+            status = green("active")
+        else:
+            superseded = str(v.get('superseded_at', ''))[:10]
+            status = gray("superseded" + (f" {superseded}" if superseded else ""))
+        gen = f"generated {fmt_date(created)}" if created else ""
+        print(
+            f"{marker} {pad_visible(id_str, 8)} {pad_visible(status, 24)} {gray(gen)}"
+        )
+        if excerpt:
+            print(f"    {gray(excerpt)}")
+    print()
+    print(gray(
+        "Restore a version with "
+    ) + green("'plan rollback --version <ID>'") + gray(", or inspect one with ")
+        + green("'plan show --version <ID>'") + gray("."))
+
+
 def run_plan_rm(args: argparse.Namespace) -> None:
     """Deletes the periodization plan for a specific goal."""
     goal = cli.db.get_objective(args.id)
@@ -300,6 +377,79 @@ def run_plan_wipe(args: argparse.Namespace) -> None:
 
     cli.db.wipe_plans()
     print(green("All periodization plans wiped successfully."))
+
+
+def run_plan_rollback(args: argparse.Namespace) -> None:
+    """Restores a superseded periodization plan version (and its workouts)."""
+    # Resolve the target goal the same way generate/show do.
+    if getattr(args, 'goal_id', None) is not None:
+        goal = cli.db.get_objective(args.goal_id)
+        if not goal:
+            print(red(f"Goal with ID {args.goal_id} not found."))
+            return
+    else:
+        objectives = cli.db.get_objectives(status='active')
+        if not objectives:
+            print(yellow("No active goals found."))
+            return
+        objectives.sort(key=lambda x: str(x['target_date']))
+        goal = objectives[0]
+
+    versions = cli.db.get_macrocycle_versions(goal['id'])
+    superseded = [v for v in versions if v.get('status') == 'superseded']
+    if not superseded:
+        print(yellow(
+            f"Goal '{goal['title']}' has no earlier plan version to roll back to."
+        ))
+        return
+
+    # Determine the target version (default: chronologically previous).
+    target_id = getattr(args, 'version', None)
+    if target_id is None:
+        prev = cli.db.get_previous_macrocycle(goal['id'])
+        target_id = prev['id'] if prev else None
+    if target_id is None:
+        print(yellow(f"Goal '{goal['title']}' has no earlier plan version to roll back to."))
+        return
+
+    target = cli.db.get_macrocycle(target_id)
+    if not target or target.get('objective_id') != goal['id']:
+        print(red(f"Plan version {target_id} does not belong to goal '{goal['title']}'."))
+        return
+
+    if not getattr(args, 'yes', False):
+        created = fmt_date(str(target.get('created_at', ''))[:10]) if target.get('created_at') else '?'
+        try:
+            confirm = input(
+                f"\nRoll back the plan for '{goal['title']}' to the version generated "
+                f"{created} (plan ID {target_id})?\nThis archives the current plan's "
+                f"upcoming workouts and restores that version's on Google Calendar. [y/N]: "
+            ).strip().lower()
+        except EOFError:
+            confirm = 'n'
+        if confirm not in ('y', 'yes'):
+            print("Rollback cancelled.")
+            return
+
+    try:
+        result = cli.coach_service.plan_rollback(
+            objective_id=goal['id'], target_macrocycle_id=target_id
+        )
+    except ValueError as e:
+        print(red(str(e)))
+        return
+
+    print(green(
+        f"\nRolled back '{goal['title']}' to plan ID {result['to']['id']} "
+        f"(was {result['from']['id']})."
+    ))
+    print(
+        f"Restored {result['restored_workouts']} workout(s) and archived "
+        f"{result['archived_workouts']} from the superseded plan; Google Calendar updated."
+    )
+    print(f"Run '{green('plan show')}' to review the restored strategy.")
+
+
 def _resolve_feedback_text(args: argparse.Namespace, current: Optional[str]) -> Optional[str]:
     """Returns the feedback text to save: either the editor result (--edit, seeded with the
     current value) or the positional `text`. Returns None to signal 'do not save' (aborted

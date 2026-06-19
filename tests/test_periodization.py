@@ -440,6 +440,109 @@ class TestPeriodization(unittest.TestCase):
         self.assertEqual([w["title"] for w in remaining], ["New Run"])
         mock_calendar.delete_workout_event.assert_called_once_with("evt-stale-456")
 
+    @patch("trainmate.coach.engine.openrouter_client")
+    def test_plan_regenerate_supersedes_prior_version(self, mock_client):
+        """Regenerating a plan keeps the prior macrocycle as a superseded version
+        rather than deleting it (see DESIGN_plan_rollback.md)."""
+        test_db.add_objective(
+            title="Zurich Marathon", target_date="2026-10-15",
+            sport_type="running", priority=1,
+        )
+        meso = [{
+            "name": "Base", "start_date": "2026-06-01",
+            "end_date": "2026-06-28", "focus": "Base",
+        }]
+        mock_client.complete.return_value = {"strategy": "v1", "mesocycles": meso}
+        coach_service.plan_generate(force=False)
+        obj_id = test_db.get_active_objective()["id"]
+        v1 = test_db.get_macrocycle_for_objective(obj_id)
+
+        mock_client.complete.return_value = {"strategy": "v2", "mesocycles": meso}
+        coach_service.plan_generate(force=True)
+
+        versions = test_db.get_macrocycle_versions(obj_id)
+        self.assertEqual(len(versions), 2)
+        active = test_db.get_macrocycle_for_objective(obj_id)
+        self.assertEqual(active["strategy"], "v2")
+        self.assertNotEqual(active["id"], v1["id"])
+        superseded = [v for v in versions if v["status"] == "superseded"]
+        self.assertEqual([v["id"] for v in superseded], [v1["id"]])
+
+    @patch("trainmate.coach.service.calendar_syncer")
+    @patch("trainmate.coach.engine.openrouter_client")
+    def test_plan_rollback_restores_plan_and_workouts(self, mock_client, mock_calendar):
+        """`plan rollback` restores the previous plan version, resurrects its workouts,
+        archives the current plan's, and reconciles Google Calendar symmetrically."""
+        mock_calendar.sync_workout.return_value = "evt-new"
+        test_db.add_objective(
+            title="Zurich Marathon", target_date="2026-10-15",
+            sport_type="running", priority=1,
+        )
+        meso = [{
+            "name": "Base", "start_date": "2026-06-01",
+            "end_date": "2026-06-28", "focus": "Base",
+        }]
+        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        obj_id = None
+
+        # --- Plan v1 + its workouts ---
+        mock_client.complete.return_value = {"strategy": "v1", "mesocycles": meso}
+        coach_service.plan_generate(force=False)
+        obj_id = test_db.get_active_objective()["id"]
+        v1_id = test_db.get_macrocycle_for_objective(obj_id)["id"]
+        mock_client.complete.return_value = {
+            "reasoning": "w1", "workouts": [{
+                "date": today, "sport_type": "running",
+                "title": "V1 Run", "description": "v1 session",
+            }],
+        }
+        coach_service.workout_generate()
+
+        # --- Plan v2 + its workouts (archives v1's) ---
+        mock_client.complete.return_value = {"strategy": "v2", "mesocycles": meso}
+        coach_service.plan_generate(force=True)
+        v2_id = test_db.get_macrocycle_for_objective(obj_id)["id"]
+        mock_client.complete.return_value = {
+            "reasoning": "w2", "workouts": [{
+                "date": today, "sport_type": "running",
+                "title": "V2 Run", "description": "v2 session",
+            }],
+        }
+        coach_service.workout_generate()
+        self.assertEqual(
+            [w["title"] for w in test_db.get_workouts(start_date=today)], ["V2 Run"]
+        )
+
+        # --- Roll back to v1 ---
+        result = coach_service.plan_rollback(objective_id=obj_id)
+
+        self.assertEqual(result["to"]["id"], v1_id)
+        self.assertEqual(result["from"]["id"], v2_id)
+        self.assertEqual(test_db.get_macrocycle_for_objective(obj_id)["strategy"], "v1")
+        # V1's workout is live again; V2's is archived.
+        live = test_db.get_workouts(start_date=today)
+        self.assertEqual([w["title"] for w in live], ["V1 Run"])
+        self.assertEqual(result["restored_workouts"], 1)
+        self.assertEqual(result["archived_workouts"], 1)
+        # The restored workout was re-pushed to Calendar.
+        self.assertTrue(mock_calendar.sync_multiple.called)
+
+    @patch("trainmate.coach.engine.openrouter_client")
+    def test_plan_rollback_without_history_raises(self, mock_client):
+        """Rolling back a plan with no earlier version is rejected."""
+        test_db.add_objective(
+            title="Zurich Marathon", target_date="2026-10-15",
+            sport_type="running", priority=1,
+        )
+        mock_client.complete.return_value = {"strategy": "v1", "mesocycles": [{
+            "name": "Base", "start_date": "2026-06-01",
+            "end_date": "2026-06-28", "focus": "Base",
+        }]}
+        coach_service.plan_generate(force=False)
+        obj_id = test_db.get_active_objective()["id"]
+        with self.assertRaises(ValueError):
+            coach_service.plan_rollback(objective_id=obj_id)
+
     @patch("trainmate.coach.service.config")
     def test_load_science_guidelines(self, mock_config):
         temp_app_dir = tempfile.mkdtemp()
@@ -655,8 +758,9 @@ class TestPeriodization(unittest.TestCase):
         self.assertIn("running: 1 sessions", system_prompt)
         self.assertIn("Resting Heart Rate: 55.0 bpm", system_prompt)
 
+    @patch("trainmate.coach.service.calendar_syncer")
     @patch("trainmate.coach.engine.openrouter_client")
-    def test_recent_history_workout_generation(self, mock_client):
+    def test_recent_history_workout_generation(self, mock_client, mock_calendar):
         obj_id = test_db.add_objective(
             title="Zurich Marathon", target_date="2026-10-15",
             sport_type="running", priority=1,

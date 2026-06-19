@@ -248,8 +248,12 @@ called by the UIs.
   timelines > 24 weeks.
 - **`workout_generate(objective_id, end_date)`** — requires an existing macrocycle.
   Computes `num_days` from `end_date` (or `config.workout_generation_span_days` if
-  omitted), fetches history, calls `CoachEngine._workout_generate_logic()`, saves
-  workouts to DB.
+  omitted), fetches history, calls `CoachEngine._workout_generate_logic()`. **Eager:**
+  archives the previous plan's future workouts (tearing down their Calendar events),
+  saves the new workouts tagged with the active `macrocycle_id`, then pushes them to
+  Calendar straight away — the calendar always mirrors the active plan. The archive
+  (not delete) makes the regeneration undoable via `plan_rollback`
+  (DESIGN_plan_rollback.md).
 - **`plan_apply(objective_id, strategy, mesocycles)`** — persists an
   already-generated strategy + mesocycles to the DB (recomputes the goals/lifeevents/
   config hashes and snapshots). Used by the intermediate-goals branch of `plan generate`.
@@ -284,7 +288,12 @@ called by the UIs.
   cached reconstruction's summary, inferred macro/mesocycle blocks, and physiological
   insights. Writes no `feedback` field.
 - **`plan_rm(objective_id)`** — deletes macrocycle + mesocycles for that objective
-  (cascades in DB).
+  (cascades in DB; removes *all* versions, active and superseded).
+- **`plan_rollback(objective_id, target_macrocycle_id)`** — restores a superseded plan
+  version (the chronologically previous one by default, or a specific id) and its
+  workouts. Archives the current plan's future workouts (deleting their events), flips
+  the active macrocycle, resurrects the target version's archived workouts, and re-pushes
+  them — the symmetric inverse of eager generation (DESIGN_plan_rollback.md).
 - **`_get_config_hash()`** — delegates to `CoachEngine._get_config_hash()`. Used by
   CLI/web to detect stale plans.
 - **`_get_coach_system_prompt(objectives, lifeevents, ...)`** — builds the system
@@ -324,10 +333,12 @@ is unchanged.
   (`workout_adapt_apply`) compares canonically too. `adherence.py` re-exports
   `SPORT_MAPPING` from `trainmate/sports.py` (kept dependency-free to avoid the
   `adherence → garmin → trainmate.db` import cycle).
-- `clear_future_workouts(from_date)` deletes future workouts, **sparing any with a
-  `google_event_id`** (the true "on calendar" signal) so their events aren't
-  orphaned; `include_calendar_events=True` removes those too (caller deletes the
-  events first).
+- `archive_future_workouts(from_date)` **soft-archives** every live future workout
+  (sets `archived_at`, clears the Calendar handle) and returns the pre-archive rows so
+  the caller can delete their events. Used by eager `workout generate` and
+  `plan rollback` to displace a plan's workouts without losing them — the archived rows
+  stay tagged with their `macrocycle_id` so `restore_macrocycle_workouts` can resurrect
+  them (DESIGN_plan_rollback.md).
 
 ### Key methods by domain
 
@@ -346,14 +357,20 @@ by Calendar event id (cleared by `wipe_metrics`; see §13).
 
 **Workouts:** `save_workout` (upsert),
 `get_workout(date, sport_type)`,
-`get_workouts(start_date, end_date, sport_type, include_removed=False)` (excludes
-soft-removed rows unless `include_removed=True`), `get_workout_by_id(id)`,
+`get_workouts(start_date, end_date, sport_type, include_removed=False,
+include_archived=False)` (excludes soft-removed and archived rows unless asked),
+`get_workout_by_id(id)`,
 `delete_workout_by_id` (hard delete), `mark_workout_removed(id, reason=None)` (soft
 delete — sets `removed=1`/`removed_reason`; the content change reads as `stale`),
 `mark_workout_pushed(id, google_event_id, signature)` (records a successful push — the
 only writer of `pushed_signature`), `restore_workout(id)` (clears the soft-delete
 flags — `workout restore`), `update_workout_date(id, date)` (moves a row — used by
-`workout swap`), `clear_future_workouts`, `wipe_workouts`
+`workout swap`), `archive_future_workouts(from_date)` (soft-archives every live future
+row — sets `archived_at`, clears the Calendar handle, returns the pre-archive rows so
+the caller can delete events; used by eager generate + rollback),
+`restore_macrocycle_workouts(macrocycle_id)` (un-archives that plan version's
+most-recently-archived batch), `wipe_workouts`. `get_workouts`/`get_workout` exclude
+archived rows by default (DESIGN_plan_rollback.md).
 
 **Completed Activities:** `save_completed_activity` (upsert on `activity_id`),
 `get_completed_activities(start_date, end_date)`
@@ -390,12 +407,17 @@ reconstruction keyed by an evidence fingerprint so a re-run over unchanged data
 reuses it instead of re-calling the LLM (table `analysis_cache`; see
 DESIGN_backward_evaluation.md §5.1).
 
-**Macrocycles/Mesocycles:** `save_macrocycle` (deletes existing for objective,
-then inserts), `get_macrocycle_for_objective(objective_id)`,
-`get_last_macrocycle()`, `get_mesocycles_for_macrocycle(macrocycle_id)`,
-`get_mesocycle(id)`, `update_macrocycle_feedback(id, feedback)`,
-`update_mesocycle_feedback(id, feedback)`, `update_macrocycle_config_hash(id,
-hash)`, `delete_macrocycle_for_objective`, `wipe_plans`
+**Macrocycles/Mesocycles:** `save_macrocycle` (**supersedes** the existing active
+version for the objective — marks it `superseded`, keeps it — then inserts the new
+active one), `get_macrocycle_for_objective(objective_id)` (the active version only),
+`get_macrocycle(id)` (any version by id), `get_macrocycle_versions(objective_id)`
+(all versions, newest first), `get_previous_macrocycle(objective_id, before_id=None)`
+(walk-back navigation for rollback), `set_active_macrocycle(id)` (promote a version,
+superseding the rest), `get_last_macrocycle()`,
+`get_mesocycles_for_macrocycle(macrocycle_id)`, `get_mesocycle(id)`,
+`update_macrocycle_feedback(id, feedback)`, `update_mesocycle_feedback(id, feedback)`,
+`update_macrocycle_config_hash(id, hash)`, `delete_macrocycle_for_objective` (all
+versions), `wipe_plans`. Plan versioning + rollback: DESIGN_plan_rollback.md.
 
 ---
 
@@ -457,11 +479,19 @@ SQLite database at `trainmate.db` (path from `config.db_path`).
 |                        |            | (plan/generate, or a session adapt newly adds) or  |
 |                        |            | `manual` (`workout add`). NULL on legacy rows.     |
 |                        |            | Orthogonal to adaptation — adapting keeps origin.  |
+| `macrocycle_id`        | INTEGER    | Plan version this row belongs to, fixed at creation|
+|                        |            | (never overwritten). Used by `plan rollback` to    |
+|                        |            | resurrect a version's workouts. NULL on legacy rows.|
+| `archived_at`          | TEXT       | Plan-version axis: non-NULL ⟺ archived (belonged to|
+|                        |            | a superseded plan version). Hidden from reads by   |
+|                        |            | default, event torn down. Distinct from `removed`. |
+|                        |            | See DESIGN_plan_rollback.md.                       |
 
-#### Workout state = three orthogonal axes (not one enum)
+#### Workout state = four orthogonal axes (not one enum)
 
-Three independent facts, none stored as a status string. See [§15](#15-design-rationale--history)
-for why these are derived rather than stored.
+Four independent facts, none stored as a single status string. The first three are
+derived; the fourth (archived) is a stored lifecycle flag. See [§15](#15-design-rationale--history)
+for why the rest are derived rather than stored.
 
 **1. Modified?** = `modification_reason IS NOT NULL`. The *kind* is derived by
 `trainmate.modification_state.modification_status(workout)` — there is no stored
@@ -513,6 +543,16 @@ them to the coach as deliberate cancellations (with the optional `removed_reason
 `workout rm --reason`), distinct from a miss. `save_workout`'s upsert resets
 `removed=0`/`removed_reason`, so re-generating or adapting onto a removed
 `(date, sport_type)` slot revives it.
+
+**4. Archived?** = `archived_at IS NOT NULL` — the **plan-version** axis, orthogonal to
+the three above. Set by `archive_future_workouts` when a regeneration or `plan rollback`
+displaces the current plan's workouts; the row is **kept** (tagged with its
+`macrocycle_id`) so the matching rollback can resurrect it via
+`restore_macrocycle_workouts`, but its Calendar event is torn down and its handle
+cleared. `get_workouts`/`get_workout` exclude archived rows by default
+(`include_archived=False`) and `save_workout`'s upsert ignores them, so archived
+workouts are invisible to listings, adherence, generation, adaptation, and the calendar
+push until restored. See DESIGN_plan_rollback.md.
 
 ### completed\_activities
 | Column              | Type    | Notes                                              |
@@ -644,6 +684,15 @@ guarantee (re-citing a counted week is an `INSERT OR IGNORE` no-op). Full model:
 |                   |                       | from; NULL on pre-snapshot plans                 |
 | `created_at`      | TEXT                  | ISO timestamp                                    |
 | `feedback`        | TEXT                  | Athlete feedback for next replanning             |
+| `status`          | TEXT                  | `active` or `superseded`. Exactly one active     |
+|                   |                       | version per objective; readers filter on active. |
+|                   |                       | Defaults to `active` (legacy rows). See           |
+|                   |                       | DESIGN_plan_rollback.md.                          |
+| `superseded_at`   | TEXT                  | ISO timestamp a version stopped being active;     |
+|                   |                       | NULL while active.                               |
+
+Regenerating a plan **supersedes** the prior version (kept) rather than deleting it, so
+`plan rollback` can restore an earlier version and its workouts (DESIGN_plan_rollback.md).
 
 ### mesocycles
 | Column          | Type                    | Notes                                   |
@@ -850,10 +899,15 @@ markers as `workout list` without re-deriving the rules (§5).
 |             |                                 | reason, force?, no_sync?}`); returns          |
 |             |                                 | `{warnings}` unapplied unless `force`         |
 | POST        | `/api/plan`                     | Generate periodization plan (`{goal_id?}`)   |
-| DELETE      | `/api/plan/<goal_id>`           | Delete plan for goal                         |
+| GET         | `/api/plan/versions`            | List plan versions for a goal                |
+|             |                                 | (`?goal_id=`; active + superseded)           |
+| POST        | `/api/plan/rollback`            | Restore a plan version + its workouts        |
+|             |                                 | (`{goal_id?, version?}`; DESIGN_plan_rollback)|
+| DELETE      | `/api/plan/<goal_id>`           | Delete plan for goal (all versions)          |
 | POST        | `/api/macrocycles/<id>/feedback`| Save macrocycle feedback (`{feedback}`)      |
 | POST        | `/api/mesocycles/<id>/feedback` | Save mesocycle feedback (`{feedback}`)       |
-| POST        | `/api/workouts/generate`        | Generate workouts (`{goal_id?}`)             |
+| POST        | `/api/workouts/generate`        | Generate workouts (`{goal_id?}`); eager —    |
+|             |                                 | archives old + pushes new to Calendar        |
 | POST        | `/api/adapt`                    | Run daily adaptation check (read-only;       |
 |             |                                 | `{date?}` → `{reason, change_needed,         |
 |             |                                 | workouts}`)                                   |
@@ -1064,10 +1118,14 @@ The shared core then:
 
 ## 11. Terminology: Plans vs. Workouts
 
-- **Plan** = periodization strategy: one macrocycle (per objective) + mesocycle
-  blocks.  Commands: `plan generate/show/rm/feedback`.
+- **Plan** = periodization strategy: one *active* macrocycle (per objective, with
+  superseded versions kept) + mesocycle blocks.  Commands:
+  `plan generate/show/versions/rm/rollback/feedback`. `plan versions` lists every kept
+  version; `plan show --version <id>` renders a specific (e.g. superseded) one.
 - **Workouts** = daily microcycle activities implementing the mesocycle focus.
-  Commands: `workout generate/adapt/push/swap/add`.
+  Commands: `workout generate/adapt/push/swap/add`. `workout generate` pushes to
+  Calendar eagerly; `plan rollback` undoes a plan regeneration and its workouts
+  (DESIGN_plan_rollback.md).
 
 A `workout add` manually schedules a single session on a date (athlete-driven,
 not coach-driven, and LLM-free). It **replaces** any existing same-sport workout

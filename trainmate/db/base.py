@@ -157,6 +157,22 @@ class BaseDB:
                 cursor.execute("ALTER TABLE workouts ADD COLUMN source TEXT")
             except sqlite3.OperationalError:
                 pass
+            # Plan-version axis (see DESIGN_plan_rollback.md): macrocycle_id tags the
+            # plan version a workout was created under, and archived_at marks workouts
+            # that belonged to a superseded plan version (set when a regeneration or a
+            # `plan rollback` displaces them). Archived rows are hidden from every read
+            # by default and have their Calendar event torn down, but are kept so that
+            # rolling back to their plan version can resurrect them. Distinct from
+            # `removed` (a deliberate athlete cancellation that still surfaces to the
+            # coach). NULL on legacy rows.
+            try:
+                cursor.execute("ALTER TABLE workouts ADD COLUMN macrocycle_id INTEGER")
+            except sqlite3.OperationalError:
+                pass
+            try:
+                cursor.execute("ALTER TABLE workouts ADD COLUMN archived_at TEXT")
+            except sqlite3.OperationalError:
+                pass
             # Migrate the very old conflated `status` enum into an orthogonal `synced`
             # flag. Only relevant for DBs predating the `synced` column; guarded on the
             # `status` column so it doesn't re-add `synced` after we drop it below.
@@ -361,6 +377,19 @@ class BaseDB:
             if 'lifeevents_snapshot' not in columns:
                 cursor.execute(
                     "ALTER TABLE macrocycles ADD COLUMN lifeevents_snapshot TEXT"
+                )
+            # Plan-version axis (see DESIGN_plan_rollback.md). Regenerating a plan no
+            # longer deletes the prior macrocycle: it is marked 'superseded' (with the
+            # moment recorded in superseded_at) and kept, so `plan rollback` can restore
+            # an earlier version. Exactly one macrocycle per objective is 'active' at a
+            # time; readers filter on status='active'. Legacy rows default to 'active'.
+            if 'status' not in columns:
+                cursor.execute(
+                    "ALTER TABLE macrocycles ADD COLUMN status TEXT DEFAULT 'active'"
+                )
+            if 'superseded_at' not in columns:
+                cursor.execute(
+                    "ALTER TABLE macrocycles ADD COLUMN superseded_at TEXT"
                 )
 
             # Mesocycles table

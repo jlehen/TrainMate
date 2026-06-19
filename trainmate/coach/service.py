@@ -677,16 +677,16 @@ class CoachService:
         # Save workouts to database
         workouts = plan_data.get("workouts", [])
 
-        # Clear future workouts from the previous plan to prevent overlap. This includes
-        # synced workouts: their Google Calendar events are deleted first so the old plan
-        # doesn't linger on the calendar.
-        for ew in self._db.get_workouts(start_date=today_str):
+        # Archive (don't delete) future workouts from the previous plan so they can be
+        # resurrected by `plan rollback`, and tear down their Calendar events first so the
+        # old plan doesn't linger on the calendar (see DESIGN_plan_rollback.md). The
+        # displaced rows keep their macrocycle_id tag for the matching rollback.
+        for ew in self._db.archive_future_workouts(today_str):
             if ew.get('google_event_id'):
                 try:
                     self._calendar_syncer.delete_workout_event(ew['google_event_id'])
                 except Exception as e:
                     print(red(f"Error deleting Google Calendar event: {e}"))
-        self._db.clear_future_workouts(today_str, include_calendar_events=True)
 
         saved_workouts: List[Workout] = []
         for w in workouts:
@@ -698,7 +698,8 @@ class CoachService:
                 duration_minutes=w.get('duration_minutes'),
                 rpe=w.get('rpe'),
                 tss=w.get('tss'),
-                source='generated'
+                source='generated',
+                macrocycle_id=macrocycle['id']
             )
             saved_workouts.append({
                 'id': wid,
@@ -715,7 +716,91 @@ class CoachService:
             })
 
         print(green(f"Generated {len(workouts)} workouts."))
+        # Eager sync: push the new plan to Google Calendar straight away so the calendar
+        # always mirrors the active plan (the old events were just torn down). Rollback is
+        # the symmetric inverse (see DESIGN_plan_rollback.md).
+        if saved_workouts:
+            try:
+                self._calendar_syncer.sync_multiple(saved_workouts)
+                print(green("Synced new workouts to Google Calendar."))
+            except Exception as e:
+                print(red(f"Error syncing to Google Calendar: {e}"))
         return plan_data.get("reasoning", "Plan generated."), saved_workouts
+
+    def plan_rollback(
+        self, objective_id: Optional[int] = None, target_macrocycle_id: Optional[int] = None
+    ) -> Dict[str, Any]:
+        """Restores an earlier periodization plan version and its workouts.
+
+        Swaps the active macrocycle for `objective_id` (defaults to the next active goal)
+        back to a superseded version — the chronologically previous one by default, or
+        `target_macrocycle_id` when given — then reconciles workouts and Calendar
+        symmetrically with eager generation: the current plan's future workouts are
+        archived (their events torn down) and the restored version's archived workouts are
+        resurrected and re-pushed (see DESIGN_plan_rollback.md).
+
+        Returns a summary dict: {from, to, restored_workouts, archived_workouts}.
+        Raises ValueError when there is nothing to roll back to.
+        """
+        if objective_id is not None:
+            objective = self._db.get_objective(objective_id)
+        else:
+            objective = self._db.get_active_objective()
+        if not objective:
+            raise ValueError("No goal found to roll back.")
+
+        current = self._db.get_macrocycle_for_objective(objective['id'])
+        if not current:
+            raise ValueError(
+                f"Goal '{objective['title']}' has no active plan to roll back."
+            )
+
+        if target_macrocycle_id is not None:
+            target = self._db.get_macrocycle(target_macrocycle_id)
+            if not target or target.get('objective_id') != objective['id']:
+                raise ValueError(
+                    f"Plan version {target_macrocycle_id} does not belong to goal "
+                    f"'{objective['title']}'."
+                )
+            if target_macrocycle_id == current['id']:
+                raise ValueError("That plan version is already active.")
+        else:
+            target = self._db.get_previous_macrocycle(objective['id'])
+            if not target:
+                raise ValueError(
+                    f"Goal '{objective['title']}' has no earlier plan version to roll "
+                    "back to."
+                )
+
+        today_str = _today_str()
+
+        # 1. Archive the current plan's future workouts and tear down their events.
+        archived = self._db.archive_future_workouts(today_str)
+        for ew in archived:
+            if ew.get('google_event_id'):
+                try:
+                    self._calendar_syncer.delete_workout_event(ew['google_event_id'])
+                except Exception as e:
+                    print(red(f"Error deleting Google Calendar event: {e}"))
+
+        # 2. Flip the active version so date->plan lookups resolve to the restored plan.
+        self._db.set_active_macrocycle(target['id'])
+
+        # 3. Resurrect the restored version's workouts and re-push them.
+        restored = self._db.restore_macrocycle_workouts(target['id'])
+        if restored:
+            try:
+                self._calendar_syncer.sync_multiple(restored)
+            except Exception as e:
+                print(red(f"Error syncing to Google Calendar: {e}"))
+
+        return {
+            'objective': objective,
+            'from': current,
+            'to': target,
+            'restored_workouts': len(restored),
+            'archived_workouts': len(archived),
+        }
 
     def replan(
         self, force: bool = False, objective_id: Optional[int] = None

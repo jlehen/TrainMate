@@ -7,14 +7,91 @@ class PeriodizationMixin:
     """Macrocycles & mesocycles: persistence, lookups, and feedback."""
 
     def get_macrocycle_for_objective(self, objective_id: int) -> Optional[Macrocycle]:
-        """Fetches the latest macrocycle created for a specific objective."""
+        """Fetches the active macrocycle for a specific objective.
+
+        Superseded plan versions (kept for `plan rollback`, see DESIGN_plan_rollback.md)
+        are excluded — only the one currently-active macrocycle is returned. Legacy rows
+        predating the version axis default to 'active'."""
         with self._get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute(
                 "SELECT * FROM macrocycles WHERE objective_id = ? "
+                "AND COALESCE(status, 'active') = 'active' "
                 "ORDER BY id DESC LIMIT 1",
                 (objective_id,)
             )
+            row = cursor.fetchone()
+            return dict(row) if row else None  # type: ignore
+
+    def get_macrocycle_versions(self, objective_id: int) -> List[Macrocycle]:
+        """Returns every macrocycle version for an objective, newest first.
+
+        Includes the active version and all superseded ones, for rollback target
+        selection and history display (see DESIGN_plan_rollback.md)."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT * FROM macrocycles WHERE objective_id = ? ORDER BY id DESC",
+                (objective_id,)
+            )
+            return [dict(row) for row in cursor.fetchall()]  # type: ignore
+
+    def get_previous_macrocycle(
+        self, objective_id: int, before_id: Optional[int] = None
+    ) -> Optional[Macrocycle]:
+        """Returns the macrocycle version chronologically prior to the active one.
+
+        With `before_id` given, returns the newest version older than that id instead.
+        Used by `plan rollback` to walk backwards through plan history one step at a
+        time (see DESIGN_plan_rollback.md). Returns None when there is no earlier version."""
+        if before_id is None:
+            active = self.get_macrocycle_for_objective(objective_id)
+            if not active:
+                return None
+            before_id = active['id']
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT * FROM macrocycles WHERE objective_id = ? AND id < ? "
+                "ORDER BY id DESC LIMIT 1",
+                (objective_id, before_id)
+            )
+            row = cursor.fetchone()
+            return dict(row) if row else None  # type: ignore
+
+    def set_active_macrocycle(self, macrocycle_id: int) -> None:
+        """Makes `macrocycle_id` the active version for its objective, superseding any
+        other active version (see DESIGN_plan_rollback.md). Idempotent."""
+        now = datetime.now(timezone.utc).isoformat()
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT objective_id FROM macrocycles WHERE id = ?", (macrocycle_id,)
+            )
+            row = cursor.fetchone()
+            if not row:
+                return
+            objective_id = row['objective_id']
+            # Supersede whichever version is currently active for this objective.
+            cursor.execute(
+                "UPDATE macrocycles SET status = 'superseded', superseded_at = ? "
+                "WHERE objective_id = ? AND COALESCE(status, 'active') = 'active' "
+                "AND id != ?",
+                (now, objective_id, macrocycle_id)
+            )
+            # Promote the target.
+            cursor.execute(
+                "UPDATE macrocycles SET status = 'active', superseded_at = NULL "
+                "WHERE id = ?",
+                (macrocycle_id,)
+            )
+            conn.commit()
+
+    def get_macrocycle(self, macrocycle_id: int) -> Optional[Macrocycle]:
+        """Fetches a specific macrocycle by its unique ID, regardless of status."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM macrocycles WHERE id = ?", (macrocycle_id,))
             row = cursor.fetchone()
             return dict(row) if row else None  # type: ignore
 
@@ -43,14 +120,18 @@ class PeriodizationMixin:
         Used to decide whether a date fell inside *any* planned block: an activity on a
         covered date with no matching workout is a genuine deviation, whereas one outside
         all coverage is just history the plan never governed (e.g. before tool adoption,
-        or an unplanned off-season stretch). Status is intentionally not filtered — a
-        since-completed objective still planned its dates."""
+        or an unplanned off-season stretch). Objective status is intentionally not
+        filtered — a since-completed objective still planned its dates — but superseded
+        plan *versions* are excluded so an old version's ranges don't double-count the
+        same dates as the active one (see DESIGN_plan_rollback.md)."""
         with self._get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("""
-                SELECT start_date, end_date FROM mesocycles
-                WHERE start_date <= ? AND end_date >= ?
-                ORDER BY start_date ASC
+                SELECT m.start_date, m.end_date FROM mesocycles m
+                JOIN macrocycles mac ON m.macrocycle_id = mac.id
+                WHERE COALESCE(mac.status, 'active') = 'active'
+                  AND m.start_date <= ? AND m.end_date >= ?
+                ORDER BY m.start_date ASC
             """, (end_date, start_date))
             return [(row['start_date'], row['end_date']) for row in cursor.fetchall()]
 
@@ -73,7 +154,8 @@ class PeriodizationMixin:
                        m.id AS mesocycle_id
                 FROM mesocycles m
                 JOIN macrocycles mac ON m.macrocycle_id = mac.id
-                WHERE m.start_date <= ? AND m.end_date >= ?
+                WHERE COALESCE(mac.status, 'active') = 'active'
+                  AND m.start_date <= ? AND m.end_date >= ?
                 ORDER BY mac.id DESC, m.start_date ASC
                 LIMIT 1
             """, (date, date))
@@ -108,7 +190,7 @@ class PeriodizationMixin:
                 SELECT m.* FROM mesocycles m
                 JOIN macrocycles mac ON m.macrocycle_id = mac.id
                 JOIN objectives o ON mac.objective_id = o.id
-                WHERE o.status = 'active'
+                WHERE o.status = 'active' AND COALESCE(mac.status, 'active') = 'active'
                   AND m.start_date <= ? AND m.end_date >= ?
                 ORDER BY m.start_date ASC LIMIT 1
             """, (target_date, target_date))
@@ -120,7 +202,7 @@ class PeriodizationMixin:
                 SELECT m.* FROM mesocycles m
                 JOIN macrocycles mac ON m.macrocycle_id = mac.id
                 JOIN objectives o ON mac.objective_id = o.id
-                WHERE o.status = 'active'
+                WHERE o.status = 'active' AND COALESCE(mac.status, 'active') = 'active'
                   AND m.end_date >= ?
                 ORDER BY m.start_date ASC LIMIT 1
             """, (target_date,))
@@ -132,7 +214,7 @@ class PeriodizationMixin:
                 SELECT m.* FROM mesocycles m
                 JOIN macrocycles mac ON m.macrocycle_id = mac.id
                 JOIN objectives o ON mac.objective_id = o.id
-                WHERE o.status = 'active'
+                WHERE o.status = 'active' AND COALESCE(mac.status, 'active') = 'active'
                 ORDER BY m.start_date ASC LIMIT 1
             """)
             row = cursor.fetchone()
@@ -167,13 +249,21 @@ class PeriodizationMixin:
         goals_snapshot/lifeevents_snapshot are JSON of the goals and life events the plan
         was generated from (the same cleaned data the hashes fingerprint), preserved so
         the inputs can be shown later even after the live records change.
+
+        The previously-active macrocycle for the objective is *superseded* rather than
+        deleted (see DESIGN_plan_rollback.md): it and its mesocycles are kept so that
+        `plan rollback` can restore them, while the freshly-saved version becomes active.
         """
+        created_at = datetime.now(timezone.utc).isoformat()
         with self._get_connection() as conn:
             cursor = conn.cursor()
-            # Delete any existing macrocycles for this objective (cascade deletes mesocycles)
-            cursor.execute("DELETE FROM macrocycles WHERE objective_id = ?", (objective_id,))
+            # Retire any currently-active version for this objective (kept for rollback).
+            cursor.execute(
+                "UPDATE macrocycles SET status = 'superseded', superseded_at = ? "
+                "WHERE objective_id = ? AND COALESCE(status, 'active') = 'active'",
+                (created_at, objective_id)
+            )
 
-            created_at = datetime.now(timezone.utc).isoformat()
             cursor.execute("""
                 INSERT INTO macrocycles (
                     objective_id, strategy, goals_hash, lifeevents_hash, config_hash,

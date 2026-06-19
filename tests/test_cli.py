@@ -1179,6 +1179,50 @@ class TestTrainMateCLI(unittest.TestCase):
             openrouter_client.model = original_model
 
 
+    def test_plan_versions_and_show_version(self):
+        """`plan versions` lists active + superseded versions; `plan show --version`
+        renders a specific superseded version (see DESIGN_plan_rollback.md)."""
+        oid = test_db.add_objective(
+            title="Versioned Goal", target_date="2026-12-15",
+            sport_type="running", priority=1,
+        )
+        meso = [{
+            "name": "Base", "start_date": "2026-06-01",
+            "end_date": "2026-06-28", "focus": "Base",
+        }]
+        v1 = test_db.save_macrocycle(
+            objective_id=oid, strategy="First strategy alpha",
+            goals_hash="g", lifeevents_hash="l", mesocycles=meso,
+        )
+        v2 = test_db.save_macrocycle(
+            objective_id=oid, strategy="Second strategy beta",
+            goals_hash="g", lifeevents_hash="l", mesocycles=meso,
+        )
+
+        exit_code, stdout, _ = self.run_cli(["plan", "versions"])
+        self.assertEqual(exit_code, 0)
+        self.assertIn(f"ID {v1}", stdout)
+        self.assertIn(f"ID {v2}", stdout)
+        self.assertIn("active", stdout)
+        self.assertIn("superseded", stdout)
+
+        # Showing the superseded version renders its strategy under a superseded header.
+        exit_code, stdout, _ = self.run_cli(["plan", "show", "--version", str(v1)])
+        self.assertEqual(exit_code, 0)
+        self.assertIn("SUPERSEDED", stdout)
+        self.assertIn("First strategy alpha", stdout)
+
+        # A version id from another goal is rejected.
+        other = test_db.add_objective(
+            title="Other Goal", target_date="2027-01-15",
+            sport_type="running", priority=1,
+        )
+        exit_code, stdout, _ = self.run_cli(
+            ["plan", "show", "--goal", str(other), "--version", str(v1)]
+        )
+        self.assertIn("does not belong", stdout)
+
+
 if __name__ == "__main__":
     unittest.main()
 

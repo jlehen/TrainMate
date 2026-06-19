@@ -75,6 +75,7 @@ from trainmate.cli.learnings import (
 )
 from trainmate.cli.plans import (
     run_plan_generate, run_plan_show, run_plan_rm, run_plan_feedback, run_plan_wipe,
+    run_plan_rollback, run_plan_versions,
 )
 from trainmate.cli.workouts import (
     run_workout_list, run_workout_compare, run_workout_generate, run_workout_rm,
@@ -383,6 +384,26 @@ def main() -> None:
         "--goal", "--goal-id", type=int, dest="goal_id",
         help="Target goal ID to show the periodization plan for"
     )
+    p_show.add_argument(
+        "--version", type=int, dest="version", metavar="PLAN_ID",
+        help="Show a specific (e.g. superseded) plan version by ID instead of the active one"
+    )
+
+    # plan versions
+    p_versions = plan_subparsers.add_parser(
+        "versions", aliases=["vers"],
+        help="List all plan versions (active + superseded) for a goal",
+        description=(
+            "List every periodization plan version kept for a goal — the active one and "
+            "any superseded by later regenerations — with their IDs and dates, so you can "
+            "inspect one ('plan show --version <ID>') or restore one "
+            "('plan rollback --version <ID>')."
+        )
+    )
+    p_versions.add_argument(
+        "--goal", "--goal-id", type=int, dest="goal_id",
+        help="Target goal ID whose plan versions to list (defaults to the next active goal)"
+    )
 
     # plan rm
     p_rm = plan_subparsers.add_parser(
@@ -392,6 +413,31 @@ def main() -> None:
     p_rm.add_argument(
         "id", type=int,
         help="Goal ID whose periodization plan should be removed"
+    )
+
+    # plan rollback
+    p_rollback = plan_subparsers.add_parser(
+        "rollback", aliases=["rb"],
+        help="Restore a superseded plan version and its workouts",
+        description=(
+            "Undo a plan regeneration: restore an earlier periodization plan version "
+            "and the workouts that were live under it. Defaults to the chronologically "
+            "previous version of the next active goal's plan; repeat to walk further "
+            "back, or target a specific version with --version. The current plan's "
+            "upcoming workouts are archived and the restored version's are re-pushed to "
+            "Google Calendar (the symmetric inverse of generation)."
+        )
+    )
+    p_rollback.add_argument(
+        "--goal", "--goal-id", type=int, dest="goal_id",
+        help="Target goal ID whose plan to roll back (defaults to the next active goal)"
+    )
+    p_rollback.add_argument(
+        "--version", type=int, dest="version", metavar="PLAN_ID",
+        help="Roll back to a specific plan version (macrocycle) ID instead of the previous one"
+    )
+    p_rollback.add_argument(
+        "-y", "--yes", action="store_true", help="Skip confirmation prompt"
     )
 
     # plan feedback
@@ -477,8 +523,10 @@ def main() -> None:
         description=(
             "Generate workouts (microcycles) from today, driven by the active "
             "periodization strategy. With no horizon flag, generates "
-            "config.workout_generation_span_days days ahead (28 by default). Saves to the "
-            f"database only; run '{green('workout push')}' afterward to sync to Google Calendar."
+            "config.workout_generation_span_days days ahead (28 by default). The new plan "
+            "is pushed to Google Calendar straight away (the previous plan's upcoming "
+            f"workouts are archived first); use '{green('plan rollback')}' to undo a "
+            "regeneration."
         )
     )
     p_w_gen.add_argument(
@@ -961,8 +1009,12 @@ def main() -> None:
             run_plan_generate(args)
         elif sub in ("show", "s"):
             run_plan_show(args)
+        elif sub in ("versions", "vers"):
+            run_plan_versions(args)
         elif sub in ("rm", "d"):
             run_plan_rm(args)
+        elif sub in ("rollback", "rb"):
+            run_plan_rollback(args)
         elif sub in ("feedback", "f"):
             run_plan_feedback(args)
         elif sub == "wipe":

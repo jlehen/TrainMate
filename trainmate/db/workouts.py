@@ -1,3 +1,4 @@
+from datetime import datetime, timezone
 from typing import List, Optional
 from trainmate.types import Workout
 from trainmate.sports import sport_aliases
@@ -13,12 +14,19 @@ class WorkoutsMixin:
         duration_minutes: Optional[int] = None, rpe: Optional[int] = None,
         tss: Optional[int] = None, original_date: Optional[str] = None,
         removed: bool = False, removed_reason: Optional[str] = None,
-        source: Optional[str] = None, adaptation_summary: Optional[str] = None
+        source: Optional[str] = None, adaptation_summary: Optional[str] = None,
+        macrocycle_id: Optional[int] = None
     ) -> int:
         """Saves a workout, updating it if one already exists that day for the same
         sport. Existence is alias-aware (see trainmate.sports), so adapting/regenerating
         a canonical ``strength_training`` updates an existing ``strength`` row in place
         instead of inserting a duplicate; the stored row keeps its original spelling.
+
+        New rows are tagged with the plan version they belong to: `macrocycle_id` if
+        given, else the macrocycle governing the workout's date (see DESIGN_plan_rollback.md).
+        The tag is fixed at creation and never overwritten on update. Archived rows (from a
+        superseded plan version) are ignored by the same-day/same-sport lookup, so a fresh
+        generation inserts new rows rather than reviving archived ones.
 
         Calendar freshness is *not* touched here: `pushed_signature` is left as-is, so any
         content change made through this method automatically reads as `stale` (see
@@ -26,11 +34,15 @@ class WorkoutsMixin:
         records a new signature."""
         aliases = sport_aliases(sport_type)
         placeholders = ",".join("?" * len(aliases))
+        if macrocycle_id is None:
+            ids = self.get_periodization_ids_for_date(date)
+            if ids:
+                macrocycle_id = ids[1]
         with self._get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute(
                 "SELECT id, google_event_id FROM workouts WHERE date = ? "
-                f"AND LOWER(sport_type) IN ({placeholders})",
+                f"AND LOWER(sport_type) IN ({placeholders}) AND archived_at IS NULL",
                 (date, *aliases)
             )
             row = cursor.fetchone()
@@ -63,14 +75,14 @@ class WorkoutsMixin:
                         date, sport_type, title, description, original_description,
                         original_date, modification_reason, adaptation_summary,
                         google_event_id, duration_minutes, rpe, tss,
-                        removed, removed_reason, source
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        removed, removed_reason, source, macrocycle_id
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (date, sport_type, title, description,
                       original_description or description,
                       original_date or date,
                       modification_reason, adaptation_summary,
                       google_event_id, duration_minutes,
-                      rpe, tss, int(removed), removed_reason, source))
+                      rpe, tss, int(removed), removed_reason, source, macrocycle_id))
                 workout_id = cursor.lastrowid
             conn.commit()
             return int(workout_id)
@@ -88,7 +100,7 @@ class WorkoutsMixin:
             cursor = conn.cursor()
             cursor.execute(
                 "SELECT * FROM workouts WHERE date = ? "
-                f"AND LOWER(sport_type) IN ({placeholders})",
+                f"AND LOWER(sport_type) IN ({placeholders}) AND archived_at IS NULL",
                 (date, *aliases)
             )
             row = cursor.fetchone()
@@ -99,20 +111,27 @@ class WorkoutsMixin:
         start_date: Optional[str] = None,
         end_date: Optional[str] = None,
         sport_type: Optional[str] = None,
-        include_removed: bool = False
+        include_removed: bool = False,
+        include_archived: bool = False
     ) -> List[Workout]:
         """Fetches workouts ordered by date, optionally within a range or by sport type.
 
         Soft-removed workouts (`removed = 1`, set by `workout rm`) are excluded by
         default so they never appear in listings, comparisons, adaptation inputs, or
         the calendar push. Pass include_removed=True to retrieve them (e.g. to tell
-        the coach a session was deliberately cancelled)."""
+        the coach a session was deliberately cancelled).
+
+        Archived workouts (`archived_at` set — belonging to a superseded plan version,
+        see DESIGN_plan_rollback.md) are likewise excluded by default; pass
+        include_archived=True only when reconciling plan-version history."""
         with self._get_connection() as conn:
             cursor = conn.cursor()
             query = "SELECT * FROM workouts WHERE 1=1"
             params = []
             if not include_removed:
                 query += " AND COALESCE(removed, 0) = 0"
+            if not include_archived:
+                query += " AND archived_at IS NULL"
             if start_date:
                 query += " AND date >= ?"
                 params.append(start_date)
@@ -126,28 +145,62 @@ class WorkoutsMixin:
             cursor.execute(query, params)
             return [dict(row) for row in cursor.fetchall()]  # type: ignore
 
-    def clear_future_workouts(
-        self, from_date: str, include_calendar_events: bool = False
-    ) -> None:
-        """Deletes future workouts from the database.
+    def archive_future_workouts(self, from_date: str) -> List[Workout]:
+        """Archives (rather than deletes) every live workout on/after `from_date`.
 
-        By default workouts that have a Google Calendar event (google_event_id set) are
-        spared, so their events are not orphaned — this is the true "on calendar" signal,
-        independent of whether the event is currently in sync. Pass
-        include_calendar_events=True to remove them too; callers doing this are responsible
-        for deleting the corresponding Calendar events first.
-        """
+        Returns the affected rows as they were *before* archival (so the caller still
+        sees their `google_event_id` and can tear down the Calendar events), then stamps
+        them `archived_at = now` and clears their Calendar handle/signature so a later
+        restore re-pushes cleanly. Used when a regeneration or `plan rollback` displaces
+        the current plan's workouts; they keep their `macrocycle_id` tag so the matching
+        rollback can resurrect them (see DESIGN_plan_rollback.md)."""
+        now = datetime.now(timezone.utc).isoformat()
         with self._get_connection() as conn:
-            if include_calendar_events:
-                conn.cursor().execute(
-                    "DELETE FROM workouts WHERE date >= ?", (from_date,)
-                )
-            else:
-                conn.cursor().execute(
-                    "DELETE FROM workouts WHERE date >= ? AND google_event_id IS NULL",
-                    (from_date,)
-                )
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT * FROM workouts WHERE date >= ? AND archived_at IS NULL",
+                (from_date,)
+            )
+            rows = [dict(r) for r in cursor.fetchall()]  # type: ignore
+            cursor.execute(
+                "UPDATE workouts SET archived_at = ?, google_event_id = NULL, "
+                "pushed_signature = NULL WHERE date >= ? AND archived_at IS NULL",
+                (now, from_date)
+            )
             conn.commit()
+            return rows
+
+    def restore_macrocycle_workouts(self, macrocycle_id: int) -> List[Workout]:
+        """Un-archives the most recently archived batch of workouts for a plan version.
+
+        A `plan rollback` to `macrocycle_id` resurrects the workouts that were live when
+        that version was last superseded — i.e. the batch sharing the latest `archived_at`
+        among that version's archived rows. Their Calendar handles were cleared at archival,
+        so the caller must re-push them. Returns the restored rows (empty if the version
+        never had workouts). See DESIGN_plan_rollback.md."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT MAX(archived_at) AS m FROM workouts "
+                "WHERE macrocycle_id = ? AND archived_at IS NOT NULL",
+                (macrocycle_id,)
+            )
+            row = cursor.fetchone()
+            batch = row['m'] if row else None
+            if not batch:
+                return []
+            cursor.execute(
+                "SELECT * FROM workouts WHERE macrocycle_id = ? AND archived_at = ?",
+                (macrocycle_id, batch)
+            )
+            restored = [dict(r) for r in cursor.fetchall()]  # type: ignore
+            cursor.execute(
+                "UPDATE workouts SET archived_at = NULL "
+                "WHERE macrocycle_id = ? AND archived_at = ?",
+                (macrocycle_id, batch)
+            )
+            conn.commit()
+            return restored
 
     def get_workout_by_id(self, workout_id: int) -> Optional[Workout]:
         """Fetches a workout by its unique ID."""

@@ -474,6 +474,66 @@ def plan_rm(goal_id: int) -> Any:
         return jsonify({"error": str(e)}), 500
 
 
+def _resolve_goal_id(raw: Any) -> Any:
+    """Resolves a goal id from a request payload/query, defaulting to the next active
+    goal (earliest target date) — mirrors the CLI's plan-command goal resolution."""
+    if raw is not None and raw != "":
+        return int(raw)
+    objectives = db.get_objectives(status='active')
+    if not objectives:
+        return None
+    objectives.sort(key=lambda x: str(x['target_date']))
+    return objectives[0]['id']
+
+
+@app.route("/api/plan/versions", methods=["GET"])
+def plan_versions() -> Any:
+    """Lists every kept periodization plan version (active + superseded) for a goal,
+    for the web equivalent of `plan versions` (see DESIGN_plan_rollback.md)."""
+    goal_id = _resolve_goal_id(request.args.get("goal_id"))
+    if goal_id is None:
+        return jsonify({"goal": None, "versions": []})
+    goal = db.get_objective(goal_id)
+    versions = db.get_macrocycle_versions(goal_id)
+    return jsonify({"goal": goal, "versions": versions})
+
+
+@app.route("/api/plan/rollback", methods=["POST"])
+def plan_rollback() -> Any:
+    """Restores a superseded plan version and its workouts (web equivalent of
+    `plan rollback`). Body: {goal_id?, version?}. Defaults to the previous version of
+    the next active goal. See DESIGN_plan_rollback.md."""
+    data = request.json or {}
+    goal_id = _resolve_goal_id(data.get("goal_id"))
+    if goal_id is None:
+        return jsonify({"error": "No goal to roll back."}), 400
+    version = data.get("version")
+    if version is not None and version != "":
+        version = int(version)
+    else:
+        version = None
+    try:
+        result = coach_service.plan_rollback(
+            objective_id=goal_id, target_macrocycle_id=version
+        )
+        return jsonify({
+            "message": (
+                f"Rolled back to plan ID {result['to']['id']} "
+                f"(was {result['from']['id']}). Restored "
+                f"{result['restored_workouts']} workout(s), archived "
+                f"{result['archived_workouts']}; Google Calendar updated."
+            ),
+            "to_id": result['to']['id'],
+            "from_id": result['from']['id'],
+            "restored_workouts": result['restored_workouts'],
+            "archived_workouts": result['archived_workouts'],
+        })
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
 @app.route("/api/macrocycles/<int:macro_id>/feedback", methods=["POST"])
 def save_macrocycle_feedback(macro_id: int) -> Any:
     """API endpoint to save athlete feedback for a specific macrocycle."""
@@ -508,7 +568,7 @@ def workout_generate() -> Any:
             goal_id = int(goal_id)
         reasoning, workouts = coach_service.workout_generate(objective_id=goal_id)
         return jsonify({
-            "message": "Workouts generated and saved.",
+            "message": "Workouts generated and pushed to Google Calendar.",
             "reasoning": reasoning,
             "workouts_count": len(workouts)
         })

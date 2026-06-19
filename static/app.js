@@ -1061,14 +1061,85 @@ document.getElementById("btn-delete-plan").addEventListener("click", async () =>
     } catch (e) { logConsole(`Delete plan error: ${e.message}`, "error"); }
 });
 
+// --- Plan versions & rollback (see DESIGN_plan_rollback.md) ---
+async function loadPlanVersions() {
+    const listEl = document.getElementById("plan-versions-list");
+    if (!listEl) return;
+    listEl.innerHTML = `<div class="item-meta">Loading versions…</div>`;
+    try {
+        const params = activeGoalId != null ? `?goal_id=${activeGoalId}` : "";
+        const res = await fetch(`${API_BASE}/api/plan/versions${params}`);
+        const data = await res.json();
+        const versions = (data && data.versions) || [];
+        if (versions.length <= 1) {
+            listEl.innerHTML = `<div class="item-meta">No earlier versions yet. `
+                + `Regenerating this plan keeps the previous version here so you can roll back.</div>`;
+            return;
+        }
+        listEl.innerHTML = versions.map(v => {
+            const active = v.status !== "superseded";
+            const created = v.created_at
+                ? new Date(v.created_at).toLocaleDateString("en-US",
+                    { month: "short", day: "numeric", year: "numeric" })
+                : "?";
+            let excerpt = (v.strategy || "").replace(/\s+/g, " ").trim();
+            if (excerpt.length > 90) excerpt = excerpt.slice(0, 89) + "…";
+            const badge = active
+                ? `<span class="badge badge-success">ACTIVE</span>`
+                : `<span class="badge badge-info">superseded</span>`;
+            const action = active
+                ? `<span class="item-meta">current</span>`
+                : `<button class="btn btn-secondary btn-sm" data-version="${v.id}">`
+                  + `<i class="fa-solid fa-rotate-left"></i> Restore</button>`;
+            return `<div class="plan-version-row">`
+                + `<div class="plan-version-head">${badge} `
+                + `<span class="item-meta">ID ${v.id} · generated ${escapeHtml(created)}</span>`
+                + `<span class="plan-version-action">${action}</span></div>`
+                + (excerpt ? `<div class="si-desc">${escapeHtml(excerpt)}</div>` : "")
+                + `</div>`;
+        }).join("");
+        listEl.querySelectorAll("button[data-version]").forEach(btn => {
+            btn.addEventListener("click", () => rollbackToVersion(btn.dataset.version));
+        });
+    } catch (e) {
+        listEl.innerHTML = `<div class="item-meta">Failed to load versions: ${escapeHtml(e.message)}</div>`;
+    }
+}
+
+async function rollbackToVersion(versionId) {
+    if (!confirm("Roll back to this plan version? This archives the current plan's "
+        + "upcoming workouts and restores that version's on Google Calendar.")) return;
+    logConsole(`Rolling back plan to version ${versionId}…`, "system");
+    try {
+        const res = await fetch(`${API_BASE}/api/plan/rollback`, {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ goal_id: activeGoalId, version: Number(versionId) }),
+        });
+        const data = await res.json();
+        if (res.ok) {
+            logConsole(data.message || "Rollback complete.");
+            fetchStatus();
+            fetchWorkouts();
+            loadPlanVersions();
+        } else {
+            logConsole(`Rollback failed: ${data.error}`, "error");
+        }
+    } catch (e) { logConsole(`Rollback error: ${e.message}`, "error"); }
+}
+
+document.getElementById("plan-versions").addEventListener("toggle", (e) => {
+    if (e.target.open) loadPlanVersions();
+});
+
 document.getElementById("btn-generate-workouts").addEventListener("click", async () => {
     logConsole("Requesting Coach to generate workouts (microcycles)...", "system");
     try {
         const res = await fetch(`${API_BASE}/api/workouts/generate`, { method: "POST" });
         const data = await res.json();
         if (res.ok) {
-            logConsole(`Workouts generated! ${data.workouts_count} workouts scheduled.`);
+            logConsole(`Workouts generated! ${data.workouts_count} workouts scheduled and pushed to Google Calendar.`);
             if (data.reasoning) logConsole(`Coach Reasoning:\n${data.reasoning}`, "system");
+            fetchStatus();
             fetchWorkouts();
         } else logConsole(`Workout generation failed: ${data.error}`, "error");
     } catch (e) { logConsole(`AI Workout Generation Error: ${e.message}`, "error"); }

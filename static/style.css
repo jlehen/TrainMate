@@ -902,6 +902,25 @@ header {
     font-style: italic;
 }
 
+.plan-versions-list .plan-version-row {
+    padding: 0.5rem 0;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.plan-versions-list .plan-version-row:last-child {
+    border-bottom: none;
+}
+
+.plan-versions-list .plan-version-head {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.plan-versions-list .plan-version-action {
+    margin-left: auto;
+}
+
 .timeline-container {
     display: flex;
     height: 32px;
