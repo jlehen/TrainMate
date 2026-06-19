@@ -1,8 +1,12 @@
 import os
+from datetime import datetime, timedelta
 from flask import Flask, jsonify, request, send_from_directory
 from typing import Any, Dict, List
+from trainmate import garmin
 from trainmate.db import db
+from trainmate.adherence import analyze_adherence, date_covered
 from trainmate.calendar_state import calendar_status
+from trainmate.modification_state import modification_status
 from trainmate.google_calendar import calendar_syncer
 from trainmate.coach import coach_service
 from trainmate.config import config
@@ -19,6 +23,18 @@ def index() -> Any:
 
 
 # --- Helpers ---
+
+def _annotate_workout(workout: Dict[str, Any]) -> Dict[str, Any]:
+    """Adds the *derived* calendar + modification facts the CLI shows as
+    [SYNCED]/[STALE] and [ADAPTED]/[SWAPPED]/[REPLACED] markers (ARCHITECTURE.md
+    §5). These are computed from the row, never stored — so the frontend renders
+    them without re-deriving the rules (and risking drift from the writers)."""
+    return {
+        **workout,
+        "calendar_status": calendar_status(workout),
+        "modification_status": modification_status(workout),
+    }
+
 
 def _learnings_summary(learnings: List[Dict[str, Any]]) -> Dict[str, int]:
     """Computes the active/dormant/pending counts shown by `status` (status.py)."""
@@ -212,9 +228,12 @@ def manage_workouts() -> Any:
     start_date = request.args.get("start_date")
     end_date = request.args.get("end_date")
     include_removed = request.args.get("include_removed", "").lower() in ("1", "true", "yes")
-    return jsonify(db.get_workouts(
-        start_date=start_date, end_date=end_date, include_removed=include_removed
-    ))
+    sport_type = request.args.get("sport_type") or None
+    workouts = db.get_workouts(
+        start_date=start_date, end_date=end_date,
+        sport_type=sport_type, include_removed=include_removed,
+    )
+    return jsonify([_annotate_workout(w) for w in workouts])
 
 
 @app.route("/api/workouts/<int:workout_id>/remove", methods=["POST"])
@@ -302,6 +321,124 @@ def swap_workouts() -> Any:
         })
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/workouts/compare", methods=["GET"])
+def compare_workouts() -> Any:
+    """Plan-vs-actual adherence over a date range (mirrors `workout compare`,
+    trainmate/cli/workouts.py). Pure reader: unlike the CLI it never calls
+    `garmin.ensure_data` — the web app is a read-only consumer of cached data
+    (ARCHITECTURE.md §8). Reuses `analyze_adherence`; returns a day-by-day
+    structure so the frontend renders without re-deriving any logic.
+
+    Query params: ?start_date=&end_date= (default 14-day lookback ending today,
+    end capped at today), optional ?sport= filter."""
+    today = today_str()
+    start_date = request.args.get("start_date")
+    end_date = request.args.get("end_date")
+    sport_filter = (request.args.get("sport") or "").lower() or None
+
+    if not start_date:
+        start_date = (
+            datetime.strptime(today, "%Y-%m-%d").date() - timedelta(days=13)
+        ).strftime("%Y-%m-%d")
+    # We can only compare past/present activities.
+    if not end_date or end_date > today:
+        end_date = today
+
+    start_obj = datetime.strptime(start_date, "%Y-%m-%d").date()
+    end_obj = datetime.strptime(end_date, "%Y-%m-%d").date()
+    if end_obj < start_obj:
+        return jsonify({"error": "end_date is before start_date."}), 400
+    history_days = (end_obj - start_obj).days + 1
+
+    all_workouts = db.get_workouts(start_date=start_date, end_date=end_date)
+    activities = db.get_completed_activities(start_date=start_date, end_date=end_date)
+    covered_ranges = db.get_mesocycle_ranges(start_date, end_date)
+    threshold = config.minor_activity_load_threshold
+
+    discrepancies, matching_results, informational = analyze_adherence(
+        planned_workouts=all_workouts,
+        completed_activities=activities,
+        start_date_obj=start_obj,
+        history_days=history_days,
+        minor_activity_load_threshold=threshold,
+        covered_ranges=covered_ranges,
+    )
+
+    matched_act_ids = {
+        r["completed"]["activity_id"] for r in matching_results if r["completed"]
+    }
+    acts_by_date: Dict[str, List[Dict[str, Any]]] = {}
+    for act in activities:
+        acts_by_date.setdefault(act["date"], []).append(act)
+    results_by_date: Dict[str, List[Dict[str, Any]]] = {}
+    for r in matching_results:
+        results_by_date.setdefault(r["date"], []).append(r)
+
+    days: List[Dict[str, Any]] = []
+    for d in range(history_days):
+        date_curr = (start_obj + timedelta(days=d)).strftime("%Y-%m-%d")
+        day_results = results_by_date.get(date_curr, [])
+        day_acts = acts_by_date.get(date_curr, [])
+        unplanned = [a for a in day_acts if a["activity_id"] not in matched_act_ids]
+
+        if sport_filter:
+            day_results = [
+                r for r in day_results
+                if r["planned"]["sport_type"].lower() == sport_filter
+            ]
+            unplanned = [
+                a for a in unplanned if sport_filter in a["activity_type"].lower()
+            ]
+
+        if not day_results and not unplanned:
+            continue
+
+        results_out = []
+        for r in day_results:
+            w = r["planned"]
+            act = r["completed"]
+            is_rest = w["sport_type"] == "rest"
+            results_out.append({
+                "planned": w,
+                "completed": act,
+                "is_rest": is_rest,
+                "rest_violation": bool(is_rest and act),
+            })
+
+        unplanned_out = []
+        for act in unplanned:
+            load = garmin.activity_load(act)
+            if load < threshold:
+                kind = "minor"
+            elif date_covered(date_curr, covered_ranges):
+                kind = "unplanned"
+            else:
+                kind = "off_plan"
+            unplanned_out.append({
+                "activity": act,
+                "load": round(load, 1),
+                "rpe_divergence": garmin.rpe_divergence(act),
+                "kind": kind,
+            })
+
+        days.append({
+            "date": date_curr,
+            "results": results_out,
+            "unplanned": unplanned_out,
+        })
+
+    return jsonify({
+        "filters": {
+            "start_date": start_date,
+            "end_date": end_date,
+            "sport": sport_filter,
+        },
+        "days": days,
+        "discrepancies": discrepancies,
+        "informational": informational,
+    })
 
 
 # --- Plan & Workout Generation ---

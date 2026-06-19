@@ -1044,3 +1044,217 @@ header {
     font-size: 0.8rem;
 }
 .workout-rm-btn:hover { opacity: 1; }
+
+/* ============================================================
+   FEATURE-PARITY UI: tabs, views, filters, tables, modal,
+   workout badges, compare, learnings manager
+   ============================================================ */
+
+/* --- MAIN TAB NAVIGATION --- */
+.main-tabs {
+    display: flex;
+    gap: 0.5rem;
+    margin-bottom: 1.5rem;
+    border-bottom: 1px solid var(--card-border);
+    flex-wrap: wrap;
+}
+.main-tab-btn {
+    font-family: var(--font-heading);
+    font-weight: 600;
+    font-size: 0.95rem;
+    background: transparent;
+    border: none;
+    color: var(--text-secondary);
+    padding: 0.75rem 1.25rem;
+    cursor: pointer;
+    border-radius: 12px 12px 0 0;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    transition: var(--transition-smooth);
+    position: relative;
+}
+.main-tab-btn:hover { color: var(--text-primary); background: rgba(255,255,255,0.03); }
+.main-tab-btn.active { color: var(--text-primary); }
+.main-tab-btn.active::after {
+    content: "";
+    position: absolute;
+    bottom: -1px; left: 0; right: 0;
+    height: 3px;
+    background: var(--gradient-primary);
+    border-radius: 3px;
+}
+
+.main-view { display: none; }
+.main-view.active { display: block; }
+.main-view .card { margin-bottom: 1.5rem; }
+
+.subhead {
+    font-family: var(--font-heading);
+    font-size: 1rem;
+    margin-bottom: 1rem;
+    color: var(--text-primary);
+    display: flex; align-items: center; gap: 0.5rem;
+}
+.empty-note { color: var(--text-muted); font-size: 0.9rem; padding: 0.5rem 0; }
+
+/* --- FILTER ROWS --- */
+.filter-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    gap: 0.75rem;
+    margin-bottom: 1rem;
+    padding-bottom: 1rem;
+    border-bottom: 1px solid var(--card-border);
+}
+.filter-field { display: flex; flex-direction: column; gap: 0.25rem; }
+.filter-field label { font-size: 0.7rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; }
+.filter-row input[type="date"], .filter-row input[type="text"], .filter-row select {
+    background: rgba(0,0,0,0.25);
+    border: 1px solid var(--card-border);
+    border-radius: 8px;
+    color: var(--text-primary);
+    padding: 0.45rem 0.6rem;
+    font-family: inherit;
+    font-size: 0.85rem;
+    outline: none;
+}
+.filter-check { display: flex; align-items: center; gap: 0.4rem; font-size: 0.8rem; color: var(--text-secondary); }
+
+/* --- ITEM / LEARNING ACTION GROUPS --- */
+.item-actions, .learning-actions { display: flex; gap: 0.25rem; align-items: center; }
+
+/* --- WORKOUT CARD: 4-col grid + state badges --- */
+.workout-card { grid-template-columns: 90px minmax(0, 1fr) auto auto; }
+.workout-card.removed { opacity: 0.55; border-left: 4px solid var(--accent-red); }
+.workout-actions { display: flex; gap: 0.2rem; }
+.workout-stats { font-size: 0.75rem; color: var(--text-muted); }
+
+.wbadge {
+    display: inline-block;
+    vertical-align: middle;
+    margin-left: 0.3rem;
+    padding: 0.05rem 0.4rem;
+    border-radius: 6px;
+    font-size: 0.6rem;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+}
+.wbadge.adapted, .wbadge.swapped, .wbadge.replaced { color: #fcd34d; background: rgba(245,158,11,0.12); border: 1px solid rgba(245,158,11,0.3); }
+.wbadge.manual { color: #f0abfc; background: rgba(217,70,239,0.12); border: 1px solid rgba(217,70,239,0.3); }
+.wbadge.synced { color: #6ee7b7; background: rgba(16,185,129,0.12); border: 1px solid rgba(16,185,129,0.3); }
+.wbadge.stale { color: #fcd34d; background: rgba(245,158,11,0.1); border: 1px solid rgba(245,158,11,0.25); }
+.wbadge.removed { color: #fca5a5; background: rgba(239,68,68,0.12); border: 1px solid rgba(239,68,68,0.3); }
+
+/* --- DATA TABLES (History) --- */
+.data-table { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
+.data-table th {
+    text-align: left;
+    color: var(--text-muted);
+    font-weight: 600;
+    text-transform: uppercase;
+    font-size: 0.68rem;
+    letter-spacing: 0.5px;
+    padding: 0.5rem 0.6rem;
+    border-bottom: 1px solid var(--card-border);
+}
+.data-table td { padding: 0.5rem 0.6rem; border-bottom: 1px solid rgba(255,255,255,0.04); color: var(--text-secondary); }
+.data-table tr:hover td { background: rgba(255,255,255,0.02); }
+
+.cli-guidance {
+    margin-top: 0.5rem;
+    padding: 0.6rem 0.85rem;
+    border-radius: 10px;
+    background: rgba(99,102,241,0.06);
+    border: 1px solid rgba(99,102,241,0.15);
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+}
+.cli-guidance code {
+    background: rgba(0,0,0,0.35);
+    padding: 0.1rem 0.35rem;
+    border-radius: 5px;
+    color: var(--accent-cyan);
+    font-size: 0.78rem;
+}
+
+/* --- COMPARE / ADHERENCE --- */
+.compare-filters { margin-bottom: 0.75rem; }
+.compare-day {
+    border: 1px solid var(--card-border);
+    border-radius: 12px;
+    padding: 0.75rem 1rem;
+    margin-bottom: 0.6rem;
+    background: rgba(255,255,255,0.01);
+}
+.compare-date { font-family: var(--font-heading); font-weight: 700; color: var(--accent-cyan); margin-bottom: 0.4rem; }
+.compare-line { font-size: 0.85rem; margin: 0.15rem 0; color: var(--text-secondary); }
+.compare-label { display: inline-block; min-width: 78px; font-size: 0.68rem; font-weight: 700; color: var(--text-muted); letter-spacing: 0.5px; }
+.actual-good { color: var(--accent-green); }
+.actual-bad { color: var(--accent-red); }
+.actual-warn { color: var(--accent-gold); }
+.actual-muted { color: var(--text-muted); }
+.compare-summary { margin-top: 1rem; font-size: 0.85rem; }
+.compare-disc-head { font-family: var(--font-heading); font-weight: 700; color: var(--accent-gold); margin-bottom: 0.4rem; }
+
+/* --- LEARNINGS MANAGER --- */
+.learning-main { line-height: 1.5; }
+.learning-evidence {
+    margin-top: 0.5rem;
+    padding: 0.5rem 0.75rem;
+    border-radius: 8px;
+    background: rgba(0,0,0,0.2);
+    font-size: 0.8rem;
+}
+.evidence-line { margin: 0.15rem 0; color: var(--text-secondary); }
+.evidence-pos { color: var(--accent-green); font-weight: 600; }
+.evidence-neg { color: var(--accent-red); font-weight: 600; }
+.btn-link.danger { color: #fca5a5; }
+
+/* --- MODAL --- */
+.modal-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.6);
+    backdrop-filter: blur(4px);
+    z-index: 100;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 1rem;
+}
+.modal-box {
+    background: #11151f;
+    border: 1px solid var(--card-border);
+    border-radius: 16px;
+    width: 100%;
+    max-width: 480px;
+    box-shadow: var(--shadow-premium);
+    max-height: 90vh;
+    overflow-y: auto;
+}
+.modal-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 1rem 1.25rem;
+    border-bottom: 1px solid var(--card-border);
+    font-family: var(--font-heading);
+    font-weight: 700;
+    font-size: 1.05rem;
+}
+.modal-body { padding: 1.25rem; }
+.modal-body .form-field { display: flex; flex-direction: column; gap: 0.3rem; margin-bottom: 0.85rem; }
+.modal-body .form-field label { font-size: 0.75rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; }
+.modal-body input, .modal-body select, .modal-body textarea {
+    background: rgba(0,0,0,0.25);
+    border: 1px solid var(--card-border);
+    border-radius: 8px;
+    color: var(--text-primary);
+    padding: 0.5rem 0.6rem;
+    font-family: inherit;
+    font-size: 0.9rem;
+    outline: none;
+}
+.modal-body textarea { min-height: 80px; resize: vertical; }

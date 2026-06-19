@@ -784,6 +784,19 @@ It remains a **pure reader** w.r.t. Garmin (never calls `ensure_data`/`pull`); t
 calendar *writes* it does perform (workout sync, swap/remove/restore/adapt-apply)
 use the non-interactive service account.
 
+The **front-end** (`static/index.html` + `static/app.js`) is organized into four
+top-level tabs — **Dashboard** (status/actions/metrics/strategy + goal & life-event
+CRUD + plan delete), **Workouts** (date/sport/removed-filtered list with derived
+state markers, manual add, swap, remove/restore, and the compare/adherence view),
+**Learnings** (filterable manager with per-week evidence, edit, demote/keep), and
+**History** (read-only activities/metrics/daily-context tables) — and surfaces every
+endpoint below. The deliberately-CLI-only flows (`data bootstrap`/`reflect` and
+Garmin `data pull`) are not web actions; the UI shows the command to run instead
+(interactive / MFA-bound, DESIGN_garmin_direct_pull.md §11). `GET /api/workouts`
+annotates each row with derived `calendar_status` + `modification_status` (via
+`_annotate_workout`) so the front-end renders the same `[SYNCED]`/`[ADAPTED]`/etc.
+markers as `workout list` without re-deriving the rules (§5).
+
 | Method      | Path                            | Description                                  |
 |-------------|---------------------------------|----------------------------------------------|
 | GET         | `/api/status`                   | Active goal, latest metrics, coach learnings |
@@ -795,10 +808,16 @@ use the non-interactive service account.
 | GET/POST    | `/api/life-events`              | List upcoming / create life event            |
 | DELETE/PUT  | `/api/life-events/<id>`         | Delete or update life event                  |
 | GET/POST    | `/api/workouts`                 | List workouts (`?start_date=&end_date=`,     |
-|             |                                 | `?include_removed=`) / manually add a session|
+|             |                                 | `?sport_type=&include_removed=`) / add a session|
 |             |                                 | (`workout add`: `{date, sport_type, title,   |
 |             |                                 | description, duration_minutes?, rpe?, tss?,  |
-|             |                                 | reason?}`)                                    |
+|             |                                 | reason?}`). Listed rows carry derived         |
+|             |                                 | `calendar_status` + `modification_status`.    |
+| GET         | `/api/workouts/compare`         | Plan-vs-actual adherence (`workout compare`); |
+|             |                                 | pure reader, no `ensure_data`. `?start_date=&|
+|             |                                 | end_date=&sport=` (default 14-day lookback,   |
+|             |                                 | end capped at today) → `{filters, days[],     |
+|             |                                 | discrepancies[], informational[]}`            |
 | POST        | `/api/workouts/<id>/remove`     | Soft-remove a workout (`{reason?}`)          |
 | POST        | `/api/workouts/<id>/restore`    | Restore a soft-removed workout               |
 | POST        | `/api/workouts/swap`            | Swap two workouts (`{ops:[{id,new_date}],    |
