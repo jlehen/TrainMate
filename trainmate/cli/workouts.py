@@ -29,7 +29,7 @@ def run_workout_adapt(args: argparse.Namespace) -> None:
         start_date = (date_obj - timedelta(days=history_days - 1)).strftime("%Y-%m-%d")
         metrics_history = cli.db.get_metrics_cache(start_date=start_date, end_date=date_str)
         
-        print(bold(cyan("\n=== METRICS TRAJECTORY (PAST 5 DAYS) ===")))
+        print(bold(cyan(f"\n=== METRICS TRAJECTORY (PAST {history_days} DAYS) ===")))
         print(bold(
             f"{'Date':<12} | {'HRV (ms)':<8} | {'RHR (bpm)':<9} | {'Sleep':<5} | {'ACWR':<5}"
         ))
