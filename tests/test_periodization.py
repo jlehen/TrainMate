@@ -725,8 +725,10 @@ class TestPeriodization(unittest.TestCase):
                 _ = trainmate.coach.config.user_profile
             self.assertIn("must contain at least 'lthr' or 'ftp'", str(ctx.exception))
 
+    @patch("trainmate.coach.service._today_str")
     @patch("trainmate.coach.engine.openrouter_client")
-    def test_recent_history_summary_periodization_plan(self, mock_client):
+    def test_recent_history_summary_periodization_plan(self, mock_client, mock_today_str):
+        mock_today_str.return_value = "2026-06-18"
         obj_id = test_db.add_objective(
             title="Zurich Marathon", target_date="2026-10-15",
             sport_type="running", priority=1,
@@ -758,9 +760,11 @@ class TestPeriodization(unittest.TestCase):
         self.assertIn("running: 1 sessions", system_prompt)
         self.assertIn("Resting Heart Rate: 55.0 bpm", system_prompt)
 
+    @patch("trainmate.coach.service._today_str")
     @patch("trainmate.coach.service.calendar_syncer")
     @patch("trainmate.coach.engine.openrouter_client")
-    def test_recent_history_workout_generation(self, mock_client, mock_calendar):
+    def test_recent_history_workout_generation(self, mock_client, mock_calendar, mock_today_str):
+        mock_today_str.return_value = "2026-06-18"
         obj_id = test_db.add_objective(
             title="Zurich Marathon", target_date="2026-10-15",
             sport_type="running", priority=1,
