@@ -598,6 +598,33 @@ class CoachService:
             mesocycles=mesocycles
         )
 
+    def _today_workout_completed(
+        self, today_str: str, completed_activities: List[Dict[str, Any]]
+    ) -> bool:
+        """Returns True when today's planned session has a matching completed activity.
+
+        Used by `workout_generate` to decide whether to protect today's workout from a
+        regeneration: a session already in the books should be kept as history rather
+        than overwritten. Completion is decided by `analyze_adherence` over a one-day
+        window so it uses the exact same planned-vs-completed sport matching as the rest
+        of the app. A day counts as completed only when a non-rest planned workout for
+        today is paired with an activity; rest days and empty days have nothing to protect.
+        """
+        planned = [
+            w for w in self._db.get_workouts(start_date=today_str, end_date=today_str)
+            if w['sport_type'] != 'rest'
+        ]
+        if not planned:
+            return False
+        today_date_obj = datetime.strptime(today_str, "%Y-%m-%d").date()
+        _, matching, _ = analyze_adherence(
+            planned_workouts=planned,
+            completed_activities=completed_activities or [],
+            start_date_obj=today_date_obj,
+            history_days=1,
+        )
+        return any(r['completed'] for r in matching)
+
     def workout_generate(
         self, objective_id: Optional[int] = None, end_date: Optional[str] = None
     ) -> Tuple[str, List[Workout]]:
@@ -625,9 +652,35 @@ class CoachService:
         today_str = _today_str()
         today_date_obj = datetime.strptime(today_str, "%Y-%m-%d").date()
 
+        # Retrieve recent history context
+        history_days = config.metrics_lookback_days
+        start_date_obj = today_date_obj - timedelta(days=history_days - 1)
+        start_date_str = start_date_obj.strftime("%Y-%m-%d")
+
+        metrics = self._db.get_metrics_cache(
+            start_date=start_date_str, end_date=today_str
+        )
+        completed_activities = self._db.get_completed_activities(
+            start_date=start_date_str, end_date=today_str
+        )
+        baseline = self._db.get_baseline(today_str)
+
+        # A regeneration normally replaces every workout from today onward, but a session
+        # the athlete has already completed should be preserved as history rather than
+        # overwritten. When today's planned workout is already in the books, start the
+        # regenerated plan tomorrow and leave today's row (and its Calendar event) intact.
+        gen_start_str = today_str
+        if self._today_workout_completed(today_str, completed_activities):
+            gen_start_str = (today_date_obj + timedelta(days=1)).strftime("%Y-%m-%d")
+            print(green(
+                f"Today's workout is already completed — preserving it and regenerating "
+                f"from {gen_start_str}."
+            ))
+        gen_start_obj = datetime.strptime(gen_start_str, "%Y-%m-%d").date()
+
         if end_date is not None:
             end_date_obj = datetime.strptime(end_date, "%Y-%m-%d").date()
-            num_days = max(1, (end_date_obj - today_date_obj).days)
+            num_days = max(1, (end_date_obj - gen_start_obj).days)
         else:
             num_days = config.workout_generation_span_days
 
@@ -642,23 +695,11 @@ class CoachService:
         )
         learnings = self._get_learnings_text()
 
-        # Retrieve recent history context
-        history_days = config.metrics_lookback_days
-        start_date_obj = today_date_obj - timedelta(days=history_days - 1)
-        start_date_str = start_date_obj.strftime("%Y-%m-%d")
-
-        metrics = self._db.get_metrics_cache(
-            start_date=start_date_str, end_date=today_str
-        )
-        completed_activities = self._db.get_completed_activities(
-            start_date=start_date_str, end_date=today_str
-        )
-        baseline = self._db.get_baseline(today_str)
-
         plan_data = self.engine._workout_generate_logic(
             objectives=objectives,
             lifeevents=lifeevents,
             today_str=today_str,
+            start_str=gen_start_str,
             guidelines=guidelines,
             profile=profile,
             strategy=strategy,
@@ -677,11 +718,18 @@ class CoachService:
         # Save workouts to database
         workouts = plan_data.get("workouts", [])
 
+        # Guard the preserved day: when today's completed session is being kept, drop any
+        # workout the model mistakenly dated before the generation start. save_workout
+        # matches on date+sport, so a stray today-dated row would silently overwrite the
+        # completed session we deliberately kept.
+        if gen_start_str != today_str:
+            workouts = [w for w in workouts if w.get('date', '') >= gen_start_str]
+
         # Archive (don't delete) future workouts from the previous plan so they can be
         # resurrected by `plan rollback`, and tear down their Calendar events first so the
         # old plan doesn't linger on the calendar (see DESIGN_plan_rollback.md). The
         # displaced rows keep their macrocycle_id tag for the matching rollback.
-        for ew in self._db.archive_future_workouts(today_str):
+        for ew in self._db.archive_future_workouts(gen_start_str):
             if ew.get('google_event_id'):
                 try:
                     self._calendar_syncer.delete_workout_event(ew['google_event_id'])

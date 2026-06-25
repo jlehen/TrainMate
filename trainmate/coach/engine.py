@@ -432,18 +432,26 @@ You MUST respond with a JSON object containing:
         today_str: str, guidelines: str, profile: Optional[Dict[str, Any]],
         strategy: str, meso_text: str, learnings: str,
         num_days: int = 28,
+        start_str: Optional[str] = None,
         metrics: Optional[List[Dict[str, Any]]] = None,
         completed_activities: Optional[List[CompletedActivity]] = None,
         baseline: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
-        """Queries LLM to generate workouts for a given number of days based on active strategy."""
+        """Queries LLM to generate workouts for a given number of days based on active strategy.
+
+        `start_str` is the first day to schedule (defaults to today). It differs from today
+        only when today's session is already completed and must be preserved — generation
+        then begins tomorrow so the finished workout isn't overwritten.
+        """
+        start_str = start_str or today_str
+        starting_phrase = "today" if start_str == today_str else start_str
         weeks = num_days / 7
         if weeks == int(weeks):
             duration_desc = f"{int(weeks)} week{'s' if weeks != 1 else ''} ({num_days} days)"
         else:
             duration_desc = f"{num_days} day{'s' if num_days != 1 else ''}"
         custom_task = (
-            f"TASK:\nGenerate a training schedule for the next {duration_desc} starting from today.\n"
+            f"TASK:\nGenerate a training schedule for the next {duration_desc} starting from {starting_phrase}.\n"
             "Ensure the weekly schedules/microcycles are designed specifically to match the focus, target\n"
             "volume, and intensity of the active mesocycle block(s) the athlete is in during this period, and\n"
             "incorporate any deload weeks or exceptions for upcoming life events in accordance with the\n"
@@ -485,8 +493,14 @@ You MUST respond with a JSON object containing:
         )
         user_content = (
             f"Today's date is {today_str}. "
-            f"Please generate the microcycles (workouts) for the next {duration_desc} starting today."
+            f"Please generate the microcycles (workouts) for the next {duration_desc} "
+            f"starting from {starting_phrase}."
         )
+        if start_str != today_str:
+            user_content += (
+                f" Today's ({today_str}) session is already completed and must NOT be "
+                f"regenerated — the first workout you schedule must be dated {start_str}."
+            )
 
         history_text_parts = []
         if metrics:

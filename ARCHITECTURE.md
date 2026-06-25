@@ -161,8 +161,9 @@ Module-level function in `formatting.py`. Concatenates all `*.txt` files from
 - **`_plan_generate_strategy(...)`** — LLM call → `{strategy, mesocycles}`. Label
   `periodization_plan`.
 - **`_workout_generate_logic(...)`** — LLM call → `{reasoning, workouts[]}`. Accepts
-  `num_days` (default 28) driving the horizon. **Read-only** w.r.t. learnings. Label
-  `workout_generation`.
+  `num_days` (default 28) driving the horizon and `start_str` (defaults to today) for
+  the first day to schedule — the prompt tells the model to begin there. **Read-only**
+  w.r.t. learnings. Label `workout_generation`.
 - **`_workout_adapt_logic(...)`** — LLM call →
   `{change_needed, reason, adapted_workouts[]}`. **Read-only** w.r.t. learnings.
   Label `workout_adaptation`.
@@ -247,13 +248,18 @@ called by the UIs.
   hashes, calls `CoachEngine._plan_generate_strategy()`, saves to DB. Auto-splits
   timelines > 24 weeks.
 - **`workout_generate(objective_id, end_date)`** — requires an existing macrocycle.
-  Computes `num_days` from `end_date` (or `config.workout_generation_span_days` if
-  omitted), fetches history, calls `CoachEngine._workout_generate_logic()`. **Eager:**
-  archives the previous plan's future workouts (tearing down their Calendar events),
+  Fetches history, then **preserves a completed session**: if today's planned workout
+  already has a matching completed activity (decided by `_today_workout_completed`, a
+  one-day `analyze_adherence` pass), generation starts *tomorrow* so the finished
+  workout isn't overwritten; otherwise it starts today. Computes `num_days` from
+  `end_date` (or `config.workout_generation_span_days` if omitted) relative to that
+  start, calls `CoachEngine._workout_generate_logic()`. **Eager:** archives the previous
+  plan's future workouts from the generation start (tearing down their Calendar events),
   saves the new workouts tagged with the active `macrocycle_id`, then pushes them to
-  Calendar straight away — the calendar always mirrors the active plan. The archive
-  (not delete) makes the regeneration undoable via `plan_rollback`
-  (DESIGN_plan_rollback.md).
+  Calendar straight away — the calendar always mirrors the active plan. A defensive
+  filter drops any model-emitted workout dated before the generation start so it can't
+  overwrite the preserved day. The archive (not delete) makes the regeneration undoable
+  via `plan_rollback` (DESIGN_plan_rollback.md).
 - **`plan_apply(objective_id, strategy, mesocycles)`** — persists an
   already-generated strategy + mesocycles to the DB (recomputes the goals/lifeevents/
   config hashes and snapshots). Used by the intermediate-goals branch of `plan generate`.

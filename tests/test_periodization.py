@@ -354,6 +354,57 @@ class TestPeriodization(unittest.TestCase):
 
     @patch("trainmate.coach.service.calendar_syncer")
     @patch("trainmate.coach.engine.openrouter_client")
+    def test_generate_preserves_completed_today_workout(
+        self, mock_client, mock_calendar
+    ):
+        """When today's planned session has a matching completed activity, regeneration
+        must keep today's workout and start the new plan tomorrow."""
+        test_db.add_objective(
+            title="Zurich Marathon", target_date="2026-10-15",
+            sport_type="running", priority=1,
+        )
+        mock_client.complete.return_value = {
+            "strategy": "Strategy", "mesocycles": [{
+                "name": "Base", "start_date": "2026-06-01",
+                "end_date": "2026-06-28", "focus": "Base",
+            }],
+        }
+        coach_service.plan_generate(force=False)
+
+        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        tomorrow = (datetime.now(timezone.utc) + timedelta(days=1)).strftime("%Y-%m-%d")
+
+        # Today's planned workout, already done (a matching Garmin run today).
+        test_db.save_workout(
+            date=today, sport_type="running", title="Today Done",
+            description="completed session", google_event_id="evt-today",
+        )
+        test_db.save_completed_activity(
+            activity_id="act-today", date=today, start_time=None,
+            activity_name="Morning Run", activity_type="running",
+            duration_sec=3600, distance_km=10.0, elevation_gain_m=50.0,
+            avg_hr=150, max_hr=170, rpe=6, tss=50.0,
+        )
+
+        # The model is asked to start tomorrow; it (correctly) dates its workout tomorrow.
+        mock_client.complete.reset_mock()
+        mock_client.complete.return_value = {
+            "reasoning": "New plan", "workouts": [{
+                "date": tomorrow, "sport_type": "running",
+                "title": "Tomorrow Run", "description": "fresh",
+            }],
+        }
+        coach_service.workout_generate()
+
+        # Today's completed workout survives; the new plan begins tomorrow.
+        titles = [w["title"] for w in test_db.get_workouts(start_date=today)]
+        self.assertEqual(titles, ["Today Done", "Tomorrow Run"])
+        # Today's Calendar event was left untouched (only future days are torn down).
+        for call in mock_calendar.delete_workout_event.call_args_list:
+            self.assertNotEqual(call.args[0], "evt-today")
+
+    @patch("trainmate.coach.service.calendar_syncer")
+    @patch("trainmate.coach.engine.openrouter_client")
     def test_generate_workouts_clears_stale_synced_workouts(
         self, mock_client, mock_calendar
     ):
