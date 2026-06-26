@@ -391,7 +391,7 @@ def main() -> None:
 
     # plan versions
     p_versions = plan_subparsers.add_parser(
-        "versions", aliases=["vers"],
+        "versions", aliases=["v"],
         help="List all plan versions (active + superseded) for a goal",
         description=(
             "List every periodization plan version kept for a goal — the active one and "
@@ -1025,7 +1025,7 @@ def main() -> None:
             run_plan_generate(args)
         elif sub in ("show", "s"):
             run_plan_show(args)
-        elif sub in ("versions", "vers"):
+        elif sub in ("versions", "v"):
             run_plan_versions(args)
         elif sub in ("rm", "d"):
             run_plan_rm(args)

@@ -135,7 +135,7 @@ eager push and point at `plan rollback` to undo.
 Two read-only companions make versions discoverable (so rollback in either direction
 doesn't require guessing ids):
 
-- **`plan versions [--goal ID]`** (alias `vers`) — lists every kept version (active +
+- **`plan versions [--goal ID]`** (alias `v`) — lists every kept version (active +
   superseded) with id, generated-on date, status, and a one-line strategy excerpt.
 - **`plan show --version <PLAN_ID>`** — renders a specific version in full (strategy +
   mesocycle timeline) under a "superseded" header when it isn't the active one.
