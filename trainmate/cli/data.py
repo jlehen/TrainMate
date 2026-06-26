@@ -11,7 +11,7 @@ from trainmate.util import (
     color_acwr, visible_len, pad_visible, wrap_text, format_labeled_text,
     format_labeled_block, today_str as _today_str, today_date as _today_date,
 )
-from trainmate.cli.common import fmt_date, ensure_recent_data
+from trainmate.cli.common import fmt_date, ensure_recent_data, mark_adherence_range
 
 
 def run_data_pull(args: argparse.Namespace) -> None:
@@ -30,6 +30,7 @@ def run_data_pull(args: argparse.Namespace) -> None:
             datetime.strptime(end_date, "%Y-%m-%d").date() - timedelta(days=days - 1)
         ).strftime("%Y-%m-%d")
 
+    pulled = False
     try:
         cli.garmin.pull(
             start_date, end_date,
@@ -37,11 +38,23 @@ def run_data_pull(args: argparse.Namespace) -> None:
             activities=not args.metrics_only,
             throttle=args.sleep,
         )
+        pulled = True
     except cli.garmin.GarminAuthRequired as e:
         print(red(f"Garmin authentication required: {e}"))
         print(yellow("Run this command in an interactive terminal to complete MFA."))
     except Exception as e:
         print(red(f"Error pulling from Garmin: {e}"))
+
+    # Ride-along: with fresh activity data in hand, stamp the adherence verdict
+    # onto past Calendar events over the pulled range (best-effort — a Calendar
+    # failure never breaks the pull; no-op when no calendar is configured).
+    if pulled:
+        try:
+            marked = mark_adherence_range(start_date, end_date)
+            if marked:
+                print(green(f"Marked {marked} past Calendar event(s) with adherence."))
+        except Exception as e:
+            print(yellow(f"Warning: adherence Calendar marking skipped: {e}"))
 
 
 def run_data_backfill_tss(args: argparse.Namespace) -> None:

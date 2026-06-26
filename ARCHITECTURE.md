@@ -547,8 +547,13 @@ kind flag. Checked **in order**:
     effort, discrepancy notes). It reuses `sync_workout(workout, adherence=...)`, so
     the `pushed_signature` re-stamp is unchanged (the workout fields are still fully
     represented, so the row stays `synced`, not `stale`). Today/future events are
-    skipped (a not-yet-done session would falsely read as missed). Explicit-only — it
-    does **not** run automatically on `data pull`.
+    skipped (a not-yet-done session would falsely read as missed). It also **rides
+    along on `data pull`**: once fresh activity data lands, the pulled range is
+    marked automatically (`cli.common.mark_adherence_range`, best-effort — a Calendar
+    failure never breaks the pull, and it is a no-op when no calendar is configured).
+    The shared pipeline (`mark_adherence_range` →
+    `mark_adherence_from_results`) lives in `cli/common.py` so the explicit flag and
+    the ride-along can't drift.
 
 **3. Removed?** = `removed = 1` — a **soft delete**. `workout rm` calls
 `mark_workout_removed` (`removed=1`, preserves `google_event_id`; content change reads

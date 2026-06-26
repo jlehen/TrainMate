@@ -1,8 +1,9 @@
 """Shared helpers used across the CLI command modules."""
 from datetime import datetime, timedelta
-from typing import Optional
+from typing import Any, Dict, List, Optional
 import trainmate_cli as cli
 from trainmate.config import config
+from trainmate.adherence import analyze_adherence, classify_adherence
 from trainmate.util import yellow, today_str as _today_str
 
 
@@ -33,3 +34,69 @@ def ensure_recent_data(end_date: Optional[str] = None, no_pull: bool = False) ->
         )
         if not present:
             print(yellow(f"Note: Garmin metrics for today ({today}) are not available yet."))
+
+
+def _format_actual(act: Dict[str, Any]) -> str:
+    """Compact 'actual effort' line for a Calendar adherence header, e.g.
+    '[running] Morning Run (48min, load 62, TSS 58)'."""
+    parts = [f"{act['duration_sec'] / 60:.0f}min", f"load {cli.garmin.activity_load(act):.0f}"]
+    if act.get('tss'):
+        parts.append(f"TSS {act['tss']:.0f}")
+    if act.get('rpe'):
+        parts.append(f"RPE {act['rpe']}")
+    return f"[{act['activity_type']}] {act['activity_name']} ({', '.join(parts)})"
+
+
+def mark_adherence_from_results(
+    matching_results: List[Dict[str, Any]], today_str: Optional[str] = None
+) -> int:
+    """Stamps the backward adherence verdict onto each *strictly past* planned
+    workout's Calendar event (title tag + 'Adherence' header). Today/future
+    events are skipped (a not-yet-done session would falsely read as missed), as
+    are workouts without an existing event. Best-effort per event: a Calendar
+    failure degrades to a warning. Returns the number of events marked; the
+    caller owns any summary line."""
+    today_str = today_str or _today_str()
+    threshold = config.minor_activity_load_threshold
+    marked = 0
+    for r in matching_results:
+        w = r['planned']
+        if not w.get('google_event_id') or r['date'] >= today_str:
+            continue
+        verdict = classify_adherence(w, r['completed'], threshold)
+        actual = _format_actual(r['completed']) if r['completed'] else None
+        adherence = {
+            "status": verdict["status"],
+            "actual": actual,
+            "reasons": verdict["reasons"],
+        }
+        try:
+            cli.calendar_syncer.sync_workout(w, adherence=adherence)
+            marked += 1
+        except Exception as e:
+            print(yellow(f"Warning: could not mark {w['date']} on Calendar: {e}"))
+    return marked
+
+
+def mark_adherence_range(start_date: str, end_date: str) -> int:
+    """Computes adherence over [start_date, end_date] and marks strictly-past
+    Calendar events with the verdict. No-op (returns 0) when no calendar is
+    configured. Reuses `analyze_adherence`'s pairing; the `data pull` ride-along
+    calls this once fresh activity data has landed."""
+    if not config.google_calendar_id:
+        return 0
+    workouts = cli.db.get_workouts(start_date=start_date, end_date=end_date)
+    activities = cli.db.get_completed_activities(start_date=start_date, end_date=end_date)
+    start_obj = datetime.strptime(start_date, "%Y-%m-%d").date()
+    end_obj = datetime.strptime(end_date, "%Y-%m-%d").date()
+    history_days = (end_obj - start_obj).days + 1
+    covered_ranges = cli.db.get_mesocycle_ranges(start_date, end_date)
+    _, matching_results, _ = analyze_adherence(
+        planned_workouts=workouts,
+        completed_activities=activities,
+        start_date_obj=start_obj,
+        history_days=history_days,
+        minor_activity_load_threshold=config.minor_activity_load_threshold,
+        covered_ranges=covered_ranges,
+    )
+    return mark_adherence_from_results(matching_results, _today_str())

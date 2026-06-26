@@ -259,6 +259,52 @@ class TestCalendarSync(unittest.TestCase):
         self.assertNotIn("Actual:", desc)
         self.assertNotIn("Notes:", desc)
 
+    def test_mark_adherence_from_results_skips_today_and_eventless(self):
+        # Only strictly-past planned workouts that already have a Calendar event
+        # get marked: today/future and event-less rows are skipped.
+        from trainmate.cli.common import mark_adherence_from_results
+
+        today = "2026-06-20"
+        results = [
+            {  # past + has event -> marked
+                "date": "2026-06-18",
+                "planned": {
+                    "date": "2026-06-18", "sport_type": "running", "title": "Run",
+                    "duration_minutes": 30, "tss": 30, "google_event_id": "evt-past",
+                },
+                "completed": {
+                    "activity_id": "a", "activity_name": "Morning Run",
+                    "activity_type": "running", "duration_sec": 1800,
+                    "rpe": 6, "tss": 32.0,
+                },
+            },
+            {  # today -> skipped
+                "date": today,
+                "planned": {
+                    "date": today, "sport_type": "running", "title": "Run",
+                    "google_event_id": "evt-today",
+                },
+                "completed": None,
+            },
+            {  # past but no event -> skipped
+                "date": "2026-06-17",
+                "planned": {
+                    "date": "2026-06-17", "sport_type": "running", "title": "Run",
+                    "google_event_id": None,
+                },
+                "completed": None,
+            },
+        ]
+
+        with patch("trainmate_cli.calendar_syncer") as mock_syncer:
+            marked = mark_adherence_from_results(results, today_str=today)
+
+        self.assertEqual(marked, 1)
+        self.assertEqual(mock_syncer.sync_workout.call_count, 1)
+        call = mock_syncer.sync_workout.call_args
+        self.assertEqual(call.args[0]["google_event_id"], "evt-past")
+        self.assertEqual(call.kwargs["adherence"]["status"], "done")
+
     def test_sync_workout_removed(self):
         # Setup workout dictionary with removed details
         workout = {

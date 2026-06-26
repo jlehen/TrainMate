@@ -578,6 +578,29 @@ class TestTrainMateCLI(unittest.TestCase):
         self.assertEqual(exit_code, 0)
         mock_garmin.pull.assert_called_once()
 
+    @patch("trainmate.cli.data.mark_adherence_range")
+    @patch("trainmate_cli.garmin")
+    def test_data_pull_marks_adherence(self, mock_garmin, mock_mark):
+        # A successful pull rides along into the adherence Calendar marking over
+        # the pulled range, and reports how many past events were marked.
+        mock_mark.return_value = 2
+        exit_code, stdout, stderr = self.run_cli(["data", "pull", "--days", "7"])
+        self.assertEqual(exit_code, 0)
+        mock_garmin.pull.assert_called_once()
+        mock_mark.assert_called_once()
+        self.assertIn("Marked 2 past Calendar event(s)", stdout)
+
+    @patch("trainmate.cli.data.mark_adherence_range")
+    @patch("trainmate_cli.garmin")
+    def test_data_pull_skips_marking_on_failure(self, mock_garmin, mock_mark):
+        # If the Garmin pull fails, the ride-along marking is not attempted.
+        from trainmate.garmin import GarminAuthRequired
+        mock_garmin.GarminAuthRequired = GarminAuthRequired
+        mock_garmin.pull.side_effect = RuntimeError("boom")
+        exit_code, stdout, stderr = self.run_cli(["data", "pull"])
+        self.assertEqual(exit_code, 0)
+        mock_mark.assert_not_called()
+
     def test_invalid_command(self):
         exit_code, stdout, stderr = self.run_cli(["invalidcmd"])
         self.assertEqual(exit_code, 2)
