@@ -107,8 +107,9 @@ classes themselves.
 |                      |                      | events for workouts (outbound), and ingests       |
 |                      |                      | tagged daily-context events into `daily_context` |
 |                      |                      | (inbound — `sync_calendar_context`, see §13).    |
-| `adherence.py`       | —                    | `analyze_adherence()` pure function; compares    |
-|                      |                      | planned vs completed.                            |
+| `adherence.py`       | —                    | `analyze_adherence()` + `classify_adherence()`   |
+|                      |                      | pure functions; compare planned vs completed     |
+|                      |                      | (the latter yields a per-workout verdict).       |
 | `sports.py`          | —                    | Canonical sport vocabulary (`SPORT_MAPPING`,     |
 |                      |                      | `canonical_sport`, `sport_aliases`); dependency- |
 |                      |                      | free so DB + adherence share it without a cycle. |
@@ -538,6 +539,16 @@ kind flag. Checked **in order**:
     mark a workout for re-push.
   - Push eligibility = `calendar_status != 'synced'`; calendar cleanup keys on
     `google_event_id`.
+  - **Backward adherence marking** (`workout compare --mark`) is the past-looking
+    counterpart to the forward push. For each *strictly past* planned workout that
+    already has an event, it re-renders the event with an adherence verdict from
+    `adherence.classify_adherence` — a `[Done]`/`[Missed]`/`[Partial]`/`[Rest OK]`/
+    `[Rest broken]` title tag and an `Adherence:` description header (status, actual
+    effort, discrepancy notes). It reuses `sync_workout(workout, adherence=...)`, so
+    the `pushed_signature` re-stamp is unchanged (the workout fields are still fully
+    represented, so the row stays `synced`, not `stale`). Today/future events are
+    skipped (a not-yet-done session would falsely read as missed). Explicit-only — it
+    does **not** run automatically on `data pull`.
 
 **3. Removed?** = `removed = 1` — a **soft delete**. `workout rm` calls
 `mark_workout_removed` (`removed=1`, preserves `google_event_id`; content change reads

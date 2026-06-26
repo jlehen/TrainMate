@@ -186,6 +186,79 @@ class TestCalendarSync(unittest.TestCase):
         body = insert_calls[0].kwargs["body"]
         self.assertEqual(body.get("summary"), "[Manual] [Adapted] Tempo Run")
 
+    def test_sync_workout_adherence_marks_title_and_header(self):
+        # A past event marked with an adherence verdict gets a [Partial] title tag
+        # and an "Adherence" header (status + actual effort + notes) at the top of
+        # the description, above the planned Duration/TSS prefix.
+        workout = {
+            "date": "2026-06-15",
+            "sport_type": "running",
+            "title": "Tempo Run",
+            "description": "45 min tempo.",
+            "original_description": "45 min tempo.",
+            "duration_minutes": 45,
+            "tss": 55,
+            "google_event_id": "evt-existing-1",
+        }
+        adherence = {
+            "status": "partial",
+            "actual": "[running] Morning Run (52min, load 70, TSS 66)",
+            "reasons": ["duration mismatch +/-15% (planned 45m, actual 52m)"],
+        }
+
+        mock_service = MagicMock()
+        mock_event_result = {"id": "evt-existing-1", "htmlLink": "http://calendar/event/5"}
+        mock_service.events().update().execute.return_value = mock_event_result
+
+        with patch.object(calendar_syncer, "service", mock_service):
+            calendar_syncer.sync_workout(workout, adherence=adherence)
+
+        update_calls = [
+            call for call in mock_service.events().update.call_args_list
+            if call.kwargs.get("body")
+        ]
+        self.assertEqual(len(update_calls), 1)
+        body = update_calls[0].kwargs["body"]
+        self.assertEqual(body.get("summary"), "[Partial] Tempo Run")
+        desc = body.get("description")
+        self.assertTrue(desc.startswith("Adherence: Partial\n"))
+        self.assertIn("Actual: [running] Morning Run (52min, load 70, TSS 66)", desc)
+        self.assertIn("Notes: duration mismatch +/-15% (planned 45m, actual 52m)", desc)
+        # Header sits above the planned prefix and the original body.
+        self.assertLess(desc.index("Adherence:"), desc.index("Duration: 45m"))
+        self.assertLess(desc.index("Duration: 45m"), desc.index("45 min tempo."))
+
+    def test_sync_workout_adherence_rest_ok_omits_actual_and_notes(self):
+        # An adhered rest day: [Rest OK] tag, no Actual/Notes lines.
+        workout = {
+            "date": "2026-06-15",
+            "sport_type": "rest",
+            "title": "Rest",
+            "description": "Recovery day.",
+            "original_description": "Recovery day.",
+            "google_event_id": "evt-rest-1",
+        }
+        adherence = {"status": "rest_ok", "actual": None, "reasons": []}
+
+        mock_service = MagicMock()
+        mock_service.events().update().execute.return_value = {
+            "id": "evt-rest-1", "htmlLink": "http://calendar/event/6"
+        }
+
+        with patch.object(calendar_syncer, "service", mock_service):
+            calendar_syncer.sync_workout(workout, adherence=adherence)
+
+        update_calls = [
+            call for call in mock_service.events().update.call_args_list
+            if call.kwargs.get("body")
+        ]
+        body = update_calls[0].kwargs["body"]
+        self.assertEqual(body.get("summary"), "[Rest OK] Rest")
+        desc = body.get("description")
+        self.assertTrue(desc.startswith("Adherence: Rest OK"))
+        self.assertNotIn("Actual:", desc)
+        self.assertNotIn("Notes:", desc)
+
     def test_sync_workout_removed(self):
         # Setup workout dictionary with removed details
         workout = {

@@ -25,11 +25,27 @@ class CalendarSyncer:
         self.service: Any = build('calendar', 'v3', credentials=self.creds)
         self.calendar_id: Optional[str] = config.google_calendar_id
 
-    def sync_workout(self, workout: Workout) -> Optional[str]:
+    # Past-event adherence verdict -> title tag (see adherence.classify_adherence).
+    _ADHERENCE_TAGS = {
+        "done": "Done",
+        "partial": "Partial",
+        "missed": "Missed",
+        "rest_ok": "Rest OK",
+        "rest_violation": "Rest broken",
+    }
+
+    def sync_workout(
+        self, workout: Workout, adherence: Optional[dict] = None
+    ) -> Optional[str]:
         """Syncs a single workout to Google Calendar (creating or updating).
 
         Args:
             workout: The Workout details to synchronize.
+            adherence: Optional backward-looking verdict for a *past* event,
+                ``{"status": str, "actual": Optional[str], "reasons": [str]}``
+                (built by `workout compare --mark`). When present, a status tag
+                is prepended to the title and an "Adherence" header is prepended
+                to the description.
 
         Returns:
             The Google Calendar event ID if sync was successful, or None.
@@ -83,6 +99,14 @@ class CalendarSyncer:
         if is_manual and not workout.get('removed'):
             summary = f"[Manual] {summary}"
 
+        # Backward-looking adherence tag for a past event (Done/Missed/Partial/…).
+        # Prepended so it reads first — for a finished session the verdict is the
+        # salient state — and composes with any [Adapted]/[Manual] tag above.
+        if adherence:
+            tag = self._ADHERENCE_TAGS.get(adherence.get("status"))
+            if tag:
+                summary = f"[{tag}] {summary}"
+
         # Prepend duration and tss to description if available
         duration = workout.get('duration_minutes')
         tss = workout.get('tss')
@@ -117,6 +141,24 @@ class CalendarSyncer:
                 event_description = f"{event_description}\n\n{footer}"
             else:
                 event_description = footer
+
+        # Prepend the adherence header so the verdict + actual effort sit at the top
+        # of a past event's description, above the planned Duration/TSS and body.
+        if adherence:
+            status = adherence.get("status")
+            tag = self._ADHERENCE_TAGS.get(status, status)
+            header_lines = [f"Adherence: {tag}"]
+            actual = adherence.get("actual")
+            if actual:
+                header_lines.append(f"Actual: {actual}")
+            reasons = adherence.get("reasons") or []
+            if reasons:
+                header_lines.append(f"Notes: {', '.join(reasons)}")
+            header = "\n".join(header_lines)
+            if event_description:
+                event_description = f"{header}\n\n{event_description}"
+            else:
+                event_description = header
 
         event_body = {
             'summary': summary,

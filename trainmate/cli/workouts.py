@@ -4,7 +4,7 @@ from datetime import datetime, timedelta
 from typing import Optional
 import trainmate_cli as cli
 from trainmate.config import config
-from trainmate.adherence import analyze_adherence, date_covered
+from trainmate.adherence import analyze_adherence, classify_adherence, date_covered
 from trainmate.calendar_state import calendar_status
 from trainmate.modification_state import modification_status
 from trainmate.sports import canonical_sport
@@ -660,6 +660,41 @@ def run_workout_compare(args: argparse.Namespace) -> None:
         print(bold(gray("=== OUTSIDE ANY PLAN (informational) ===")))
         for note in informational:
             print(gray(note))
+
+    if getattr(args, 'mark', False):
+        _mark_adherence_on_calendar(matching_results, today_str, _fmt_act)
+
+
+def _mark_adherence_on_calendar(matching_results, today_str, fmt_act) -> None:
+    """Stamps the backward adherence verdict onto each past planned workout's
+    Calendar event (title tag + 'Adherence' header). Only touches strictly past
+    events that already have an event (today/future are left alone — a session
+    not yet done would falsely read as missed). Best-effort: a Calendar failure
+    degrades to a warning rather than aborting the compare."""
+    threshold = config.minor_activity_load_threshold
+    marked = 0
+    for r in matching_results:
+        w = r['planned']
+        if not w.get('google_event_id') or r['date'] >= today_str:
+            continue
+        verdict = classify_adherence(w, r['completed'], threshold)
+        actual = fmt_act(r['completed']) if r['completed'] else None
+        adherence = {
+            "status": verdict["status"],
+            "actual": actual,
+            "reasons": verdict["reasons"],
+        }
+        try:
+            cli.calendar_syncer.sync_workout(w, adherence=adherence)
+            marked += 1
+        except Exception as e:
+            print(yellow(f"Warning: could not mark {w['date']} on Calendar: {e}"))
+
+    print()
+    if marked:
+        print(green(f"Marked {marked} past event(s) on Calendar with adherence."))
+    else:
+        print(gray("No past Calendar events to mark in this range."))
 
 
 def run_workout_push(args: argparse.Namespace) -> None:

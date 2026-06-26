@@ -511,7 +511,17 @@ def main() -> None:
             "missed sessions, rest-day violations, and unplanned high-load efforts. "
             "With no date filter, looks back 14 days; here --days/--weeks look "
             "backward (not forward) and the end date is always capped at today. "
-            "Freshens Garmin data for the range first unless --no-pull is given."
+            "Freshens Garmin data for the range first unless --no-pull is given. "
+            "With --mark, stamps each past event's Calendar entry with the adherence "
+            "verdict (a [Done]/[Missed]/[Partial]/... title tag and an 'Adherence' "
+            "description header)."
+        )
+    )
+    w_cmp.add_argument(
+        "--mark", action="store_true",
+        help=(
+            "Write the adherence verdict back to each past workout's Google Calendar "
+            "event (title tag + description header). Today/future events are left alone."
         )
     )
 

@@ -30,6 +30,78 @@ def _planned_load(w: Dict[str, Any]) -> float:
     return _rpe_tss(float(rpe), duration_min * 60.0)
 
 
+def _adherence_tolerance(exp_load: float) -> float:
+    """Dynamic +/- tolerance for the duration/workload comparison: looser for
+    easy sessions (where small absolute swings are large in %), tighter for hard
+    ones. Linearly interpolated between 50% at load 20 and 15% at load 100."""
+    if exp_load <= 20.0:
+        return 0.50
+    if exp_load >= 100.0:
+        return 0.15
+    fraction = (exp_load - 20.0) / (100.0 - 20.0)
+    return 0.50 - fraction * (0.50 - 0.15)
+
+
+def _discrepancy_reasons(
+    w: Dict[str, Any], matched_act: Dict[str, Any]
+) -> List[str]:
+    """Duration/workload mismatch notes for a planned workout vs the activity it
+    matched. Empty list means the session was performed within tolerance. Single
+    source of truth shared by `analyze_adherence` and `classify_adherence`."""
+    act_duration_min = matched_act["duration_sec"] / 60.0
+    act_load = activity_load(matched_act)
+
+    p_duration = w.get("duration_minutes") or 0
+    exp_load = _planned_load(w)
+
+    tolerance = _adherence_tolerance(exp_load)
+    tol_pct = f"+/-{tolerance*100:.0f}%"
+
+    reasons: List[str] = []
+    if (
+        p_duration > 0
+        and (abs(act_duration_min - p_duration) / p_duration) > tolerance
+    ):
+        reasons.append(
+            f"duration mismatch {tol_pct} (planned {p_duration:.0f}m, "
+            f"actual {act_duration_min:.0f}m)"
+        )
+    if exp_load > 0 and (abs(act_load - exp_load) / exp_load) > tolerance:
+        reasons.append(
+            f"workload mismatch {tol_pct} (planned load {exp_load:.1f}, "
+            f"actual load {act_load:.1f})"
+        )
+    return reasons
+
+
+def classify_adherence(
+    planned: Dict[str, Any],
+    completed: Optional[Dict[str, Any]],
+    minor_activity_load_threshold: float = 25.0,
+) -> Dict[str, Any]:
+    """Per-workout adherence verdict for a planned workout and the activity it
+    matched (or None). `completed` is the *already-matched* activity from
+    `analyze_adherence`'s pairing — for a rest day that is the violating effort,
+    if any. Returns ``{"status": <one of below>, "reasons": [str, ...]}``:
+
+        rest_ok          rest planned, no significant activity
+        rest_violation   rest planned, a significant activity was performed
+        missed           non-rest planned, nothing matched
+        done             non-rest planned, matched within tolerance
+        partial          non-rest planned, matched but duration/load off
+    """
+    if planned["sport_type"] == "rest":
+        if completed and activity_load(completed) >= minor_activity_load_threshold:
+            return {"status": "rest_violation", "reasons": []}
+        return {"status": "rest_ok", "reasons": []}
+
+    if not completed:
+        return {"status": "missed", "reasons": []}
+
+    reasons = _discrepancy_reasons(planned, completed)
+    return {"status": "partial" if reasons else "done", "reasons": reasons}
+
+
 def analyze_adherence(
     planned_workouts: List[Dict[str, Any]],
     completed_activities: List[Dict[str, Any]],
@@ -123,38 +195,7 @@ def analyze_adherence(
                         f"({w['sport_type']})."
                     )
                 else:
-                    act_duration_min = matched_act["duration_sec"] / 60.0
-                    act_load = activity_load(matched_act)
-
-                    p_duration = w.get("duration_minutes") or 0
-                    exp_load = _planned_load(w)
-
-                    # Determine dynamic tolerance based on expected workload (exp_load)
-                    if exp_load <= 20.0:
-                        tolerance = 0.50
-                    elif exp_load >= 100.0:
-                        tolerance = 0.15
-                    else:
-                        # Linear interpolation between 20.0 (50% tol) and 100.0 (15% tol)
-                        fraction = (exp_load - 20.0) / (100.0 - 20.0)
-                        tolerance = 0.50 - fraction * (0.50 - 0.15)
-                    tol_pct = f"+/-{tolerance*100:.0f}%"
-
-                    disc_reasons = []
-                    if (
-                        p_duration > 0
-                        and (abs(act_duration_min - p_duration) / p_duration) > tolerance
-                    ):
-                        disc_reasons.append(
-                            f"duration mismatch {tol_pct} (planned {p_duration:.0f}m, "
-                            f"actual {act_duration_min:.0f}m)"
-                        )
-
-                    if exp_load > 0 and (abs(act_load - exp_load) / exp_load) > tolerance:
-                        disc_reasons.append(
-                            f"workload mismatch {tol_pct} (planned load {exp_load:.1f}, "
-                            f"actual load {act_load:.1f})"
-                        )
+                    disc_reasons = _discrepancy_reasons(w, matched_act)
 
                     if disc_reasons:
                         discrepancies.append(

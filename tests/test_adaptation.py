@@ -590,6 +590,39 @@ class TestAdaptation(unittest.TestCase):
             any("Unplanned Activity! Performed 'Extra Run'" in d for d in discrepancies)
         )
 
+    def test_classify_adherence_statuses(self):
+        from trainmate.adherence import classify_adherence
+
+        run = {"sport_type": "running", "title": "Run",
+               "duration_minutes": 30, "rpe": 5, "tss": 25}
+        rest = {"sport_type": "rest", "title": "Rest",
+                "duration_minutes": 0, "rpe": 0, "tss": 0}
+
+        def act(tss, dur_sec):
+            return {"activity_id": "a", "activity_name": "X", "activity_type": "running",
+                    "duration_sec": dur_sec, "rpe": 6, "tss": tss}
+
+        # Non-rest, nothing matched -> missed.
+        v = classify_adherence(run, None)
+        self.assertEqual(v["status"], "missed")
+
+        # Non-rest, matched within tolerance -> done (no reasons).
+        v = classify_adherence(run, act(25.0, 1800))
+        self.assertEqual(v["status"], "done")
+        self.assertEqual(v["reasons"], [])
+
+        # Non-rest, matched but workload way off -> partial (with reasons).
+        v = classify_adherence(run, act(120.0, 1800))
+        self.assertEqual(v["status"], "partial")
+        self.assertTrue(v["reasons"])
+
+        # Rest planned, no activity -> rest_ok.
+        self.assertEqual(classify_adherence(rest, None)["status"], "rest_ok")
+
+        # Rest planned, significant activity -> rest_violation.
+        v = classify_adherence(rest, act(60.0, 3600), minor_activity_load_threshold=10.0)
+        self.assertEqual(v["status"], "rest_violation")
+
     def test_analyze_adherence_coverage_gates_unplanned(self):
         """An activity with no planned workout is an 'Unplanned Activity!' deviation only
         when its date falls inside a planned block; outside all coverage it is softened
