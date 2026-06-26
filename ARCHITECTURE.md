@@ -539,21 +539,22 @@ kind flag. Checked **in order**:
     mark a workout for re-push.
   - Push eligibility = `calendar_status != 'synced'`; calendar cleanup keys on
     `google_event_id`.
-  - **Backward adherence marking** (`workout compare --mark`) is the past-looking
-    counterpart to the forward push. For each *strictly past* planned workout that
-    already has an event, it re-renders the event with an adherence verdict from
-    `adherence.classify_adherence` — a `[Done]`/`[Missed]`/`[Partial]`/`[Rest OK]`/
-    `[Rest broken]` title tag and an `Adherence:` description header (status, actual
-    effort, discrepancy notes). It reuses `sync_workout(workout, adherence=...)`, so
-    the `pushed_signature` re-stamp is unchanged (the workout fields are still fully
-    represented, so the row stays `synced`, not `stale`). Today/future events are
-    skipped (a not-yet-done session would falsely read as missed). It also **rides
-    along on `data pull`**: once fresh activity data lands, the pulled range is
-    marked automatically (`cli.common.mark_adherence_range`, best-effort — a Calendar
-    failure never breaks the pull, and it is a no-op when no calendar is configured).
-    The shared pipeline (`mark_adherence_range` →
-    `mark_adherence_from_results`) lives in `cli/common.py` so the explicit flag and
-    the ride-along can't drift.
+  - **Backward adherence marking** is the past-looking counterpart to the forward
+    push. For each *strictly past* planned workout that already has an event, it
+    re-renders the event with an adherence verdict from `adherence.classify_adherence`
+    — a `[Done]`/`[Missed]`/`[Partial]`/`[Rest OK]`/`[Rest broken]` title tag and an
+    `Adherence:` description header (status, actual effort, discrepancy notes). It
+    reuses `sync_workout(workout, adherence=...)`, so the `pushed_signature` re-stamp
+    is unchanged (the workout fields are still fully represented, so the row stays
+    `synced`, not `stale`). Today/future events are skipped (a not-yet-done session
+    would falsely read as missed). It runs **by default** on both `data pull` (once
+    fresh activity data lands, over the pulled range) and `workout compare` (over the
+    compared window); pass `--no-mark` to either to skip it. Best-effort — a Calendar
+    failure never breaks the command, and it is a no-op when no calendar is configured.
+    The shared pipeline (`mark_adherence_range` → `mark_adherence_from_results`) lives
+    in `cli/common.py` so the two entry points can't drift. Re-marking re-pushes the
+    (idempotent) event each run; no per-event skip signature is kept (the default
+    windows are small enough that it isn't worth the state).
 
 **3. Removed?** = `removed = 1` — a **soft delete**. `workout rm` calls
 `mark_workout_removed` (`removed=1`, preserves `google_event_id`; content change reads

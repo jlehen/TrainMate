@@ -661,7 +661,7 @@ def run_workout_compare(args: argparse.Namespace) -> None:
         for note in informational:
             print(gray(note))
 
-    if getattr(args, 'mark', False):
+    if not getattr(args, 'no_mark', False) and config.google_calendar_id:
         marked = mark_adherence_from_results(matching_results, today_str)
         print()
         if marked:

@@ -1,10 +1,13 @@
 """Shared helpers used across the CLI command modules."""
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
-import trainmate_cli as cli
 from trainmate.config import config
 from trainmate.adherence import analyze_adherence, classify_adherence
 from trainmate.util import yellow, today_str as _today_str
+
+# `trainmate_cli` (the `db`/`garmin`/`calendar_syncer` facade) is imported lazily
+# inside the functions below: it imports this module, so a module-level import here
+# is a cycle that breaks whenever `common` is imported first (e.g. in isolation).
 
 
 def fmt_date(date_str: str) -> str:
@@ -16,6 +19,7 @@ def ensure_recent_data(end_date: Optional[str] = None, no_pull: bool = False) ->
     """Ensures Garmin data covering the recent metrics window is present and fresh,
     auto-pulling small/recent gaps and surfacing large backfills as a command. Warns
     if today's metrics are still unavailable afterward."""
+    import trainmate_cli as cli
     if no_pull:
         return
     end_date = end_date or _today_str()
@@ -39,6 +43,7 @@ def ensure_recent_data(end_date: Optional[str] = None, no_pull: bool = False) ->
 def _format_actual(act: Dict[str, Any]) -> str:
     """Compact 'actual effort' line for a Calendar adherence header, e.g.
     '[running] Morning Run (48min, load 62, TSS 58)'."""
+    import trainmate_cli as cli
     parts = [f"{act['duration_sec'] / 60:.0f}min", f"load {cli.garmin.activity_load(act):.0f}"]
     if act.get('tss'):
         parts.append(f"TSS {act['tss']:.0f}")
@@ -56,6 +61,7 @@ def mark_adherence_from_results(
     are workouts without an existing event. Best-effort per event: a Calendar
     failure degrades to a warning. Returns the number of events marked; the
     caller owns any summary line."""
+    import trainmate_cli as cli
     today_str = today_str or _today_str()
     threshold = config.minor_activity_load_threshold
     marked = 0
@@ -83,6 +89,7 @@ def mark_adherence_range(start_date: str, end_date: str) -> int:
     Calendar events with the verdict. No-op (returns 0) when no calendar is
     configured. Reuses `analyze_adherence`'s pairing; the `data pull` ride-along
     calls this once fresh activity data has landed."""
+    import trainmate_cli as cli
     if not config.google_calendar_id:
         return 0
     workouts = cli.db.get_workouts(start_date=start_date, end_date=end_date)

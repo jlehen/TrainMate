@@ -48,7 +48,7 @@ def run_data_pull(args: argparse.Namespace) -> None:
     # Ride-along: with fresh activity data in hand, stamp the adherence verdict
     # onto past Calendar events over the pulled range (best-effort — a Calendar
     # failure never breaks the pull; no-op when no calendar is configured).
-    if pulled:
+    if pulled and not getattr(args, 'no_mark', False):
         try:
             marked = mark_adherence_range(start_date, end_date)
             if marked:

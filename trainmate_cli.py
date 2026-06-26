@@ -512,16 +512,16 @@ def main() -> None:
             "With no date filter, looks back 14 days; here --days/--weeks look "
             "backward (not forward) and the end date is always capped at today. "
             "Freshens Garmin data for the range first unless --no-pull is given. "
-            "With --mark, stamps each past event's Calendar entry with the adherence "
-            "verdict (a [Done]/[Missed]/[Partial]/... title tag and an 'Adherence' "
-            "description header)."
+            "Each past event's Calendar entry is stamped with the adherence verdict "
+            "(a [Done]/[Missed]/[Partial]/... title tag and an 'Adherence' description "
+            "header) unless --no-mark is given."
         )
     )
     w_cmp.add_argument(
-        "--mark", action="store_true",
+        "--no-mark", action="store_true", dest="no_mark",
         help=(
-            "Write the adherence verdict back to each past workout's Google Calendar "
-            "event (title tag + description header). Today/future events are left alone."
+            "Skip writing the adherence verdict back to each past workout's Google "
+            "Calendar event (title tag + description header)."
         )
     )
 
@@ -719,12 +719,18 @@ def main() -> None:
             "2 days ending today (--days N for a different window, or --from/--until "
             "for an explicit range). Pulls both metrics and activities unless "
             "--metrics-only/--activities-only is given. Also syncs tagged daily-context "
-            "events (alcohol, sleep, stress, …) from Google Calendar into the local cache."
+            "events (alcohol, sleep, stress, …) from Google Calendar into the local cache. "
+            "Past Calendar events in the pulled range are stamped with the adherence "
+            "verdict unless --no-mark is given."
         )
     )
     d_pull.add_argument(
         "--days", type=int, default=2, metavar="N",
         help="Number of days to pull, ending today (default: 2)"
+    )
+    d_pull.add_argument(
+        "--no-mark", action="store_true", dest="no_mark",
+        help="Skip stamping past Calendar events with the adherence verdict"
     )
     d_pull.add_argument(
         "--from", "--from-date", dest="from_date", metavar="YYYY-MM-DD",

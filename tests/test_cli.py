@@ -592,6 +592,15 @@ class TestTrainMateCLI(unittest.TestCase):
 
     @patch("trainmate.cli.data.mark_adherence_range")
     @patch("trainmate_cli.garmin")
+    def test_data_pull_no_mark_skips_marking(self, mock_garmin, mock_mark):
+        # --no-mark suppresses the ride-along even on a successful pull.
+        exit_code, stdout, stderr = self.run_cli(["data", "pull", "--no-mark"])
+        self.assertEqual(exit_code, 0)
+        mock_garmin.pull.assert_called_once()
+        mock_mark.assert_not_called()
+
+    @patch("trainmate.cli.data.mark_adherence_range")
+    @patch("trainmate_cli.garmin")
     def test_data_pull_skips_marking_on_failure(self, mock_garmin, mock_mark):
         # If the Garmin pull fails, the ride-along marking is not attempted.
         from trainmate.garmin import GarminAuthRequired
