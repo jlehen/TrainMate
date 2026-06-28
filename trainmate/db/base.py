@@ -213,6 +213,33 @@ class BaseDB:
                 )
             except sqlite3.OperationalError:
                 pass
+            # Adaptation recency axis: `adapted_at` is the UTC ISO timestamp of the most
+            # recent `workout adapt` run that touched this row (NULL = never adapted), and
+            # `adaptation_count` counts how many distinct adapt runs have eased it. Unlike
+            # the *kind* of modification (derived in trainmate.modification_state), neither
+            # is derivable from any other column — they are facts of WHEN/HOW-OFTEN — so the
+            # daily adaptation surfaces them to the prompt as a real recency signal and
+            # avoids compounding a fresh cut onto a session it only just eased (recovery
+            # metrics lag, so the morning after an easing still looks depressed).
+            # Creation timestamp: UTC ISO of when this row first entered the plan, set
+            # once on INSERT and never overwritten. Distinct from `date` (the day the
+            # session is scheduled for) and `original_date` (its first scheduled day) —
+            # this is WHEN it was authored, the natural counterpart to `adapted_at` for
+            # showing a session's plan→adapt lifecycle. NULL on legacy rows.
+            try:
+                cursor.execute("ALTER TABLE workouts ADD COLUMN created_at TEXT")
+            except sqlite3.OperationalError:
+                pass
+            try:
+                cursor.execute("ALTER TABLE workouts ADD COLUMN adapted_at TEXT")
+            except sqlite3.OperationalError:
+                pass
+            try:
+                cursor.execute(
+                    "ALTER TABLE workouts ADD COLUMN adaptation_count INTEGER DEFAULT 0"
+                )
+            except sqlite3.OperationalError:
+                pass
 
             # Completed activities table
             cursor.execute("""

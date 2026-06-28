@@ -15,7 +15,7 @@ class WorkoutsMixin:
         tss: Optional[int] = None, original_date: Optional[str] = None,
         removed: bool = False, removed_reason: Optional[str] = None,
         source: Optional[str] = None, adaptation_summary: Optional[str] = None,
-        macrocycle_id: Optional[int] = None
+        macrocycle_id: Optional[int] = None, adapted_at: Optional[str] = None
     ) -> int:
         """Saves a workout, updating it if one already exists that day for the same
         sport. Existence is alias-aware (see trainmate.sports), so adapting/regenerating
@@ -31,7 +31,17 @@ class WorkoutsMixin:
         Calendar freshness is *not* touched here: `pushed_signature` is left as-is, so any
         content change made through this method automatically reads as `stale` (see
         trainmate.calendar_state). Only a successful push, via `mark_workout_pushed`,
-        records a new signature."""
+        records a new signature.
+
+        `created_at` is set to now (UTC) on INSERT only and never overwritten on update,
+        recording when the session first entered the plan (NULL on legacy rows).
+
+        `adapted_at` marks this save as a `workout adapt` easing: when given (a UTC ISO
+        timestamp), it is stored and `adaptation_count` is bumped, giving the daily
+        adaptation a recency/frequency signal so it can avoid compounding cuts. All other
+        callers (plan/generate, swap, add) leave it None, which preserves both columns
+        untouched — a fresh INSERT then starts at count 0 / NULL, so regenerating a plan
+        resets the adaptation history of that slot."""
         aliases = sport_aliases(sport_type)
         placeholders = ",".join("?" * len(aliases))
         if macrocycle_id is None:
@@ -61,13 +71,17 @@ class WorkoutsMixin:
                         rpe = COALESCE(?, rpe),
                         tss = COALESCE(?, tss),
                         removed = ?, removed_reason = ?,
-                        source = COALESCE(?, source)
+                        source = COALESCE(?, source),
+                        adapted_at = COALESCE(?, adapted_at),
+                        adaptation_count = COALESCE(adaptation_count, 0)
+                            + CASE WHEN ? IS NOT NULL THEN 1 ELSE 0 END
                     WHERE id = ?
                 """, (title, description, original_description,
                       original_date,
                       modification_reason, adaptation_summary, ge_id,
                       duration_minutes, rpe, tss,
                       int(removed), removed_reason, source,
+                      adapted_at, adapted_at,
                       workout_id))
             else:
                 cursor.execute("""
@@ -75,14 +89,17 @@ class WorkoutsMixin:
                         date, sport_type, title, description, original_description,
                         original_date, modification_reason, adaptation_summary,
                         google_event_id, duration_minutes, rpe, tss,
-                        removed, removed_reason, source, macrocycle_id
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        removed, removed_reason, source, macrocycle_id,
+                        created_at, adapted_at, adaptation_count
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (date, sport_type, title, description,
                       original_description or description,
                       original_date or date,
                       modification_reason, adaptation_summary,
                       google_event_id, duration_minutes,
-                      rpe, tss, int(removed), removed_reason, source, macrocycle_id))
+                      rpe, tss, int(removed), removed_reason, source, macrocycle_id,
+                      datetime.now(timezone.utc).isoformat(),
+                      adapted_at, 1 if adapted_at else 0))
                 workout_id = cursor.lastrowid
             conn.commit()
             return int(workout_id)

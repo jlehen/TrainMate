@@ -303,6 +303,62 @@ class TestAdaptation(unittest.TestCase):
             self.assertEqual(len(proposed), 1)
             self.assertEqual(proposed[0]["title"], "Eased Tempo")
 
+    def test_adapt_apply_stamps_recency_and_bumps_count(self):
+        """Applying an adaptation stamps `adapted_at` and bumps `adaptation_count`;
+        a second adapt of the same session bumps it again. Non-adapt saves leave both
+        untouched."""
+        test_db.save_workout(
+            "2026-06-20", "running", "Friday Tempo", "45 mins w/ tempo blocks",
+            duration_minutes=45, rpe=7, tss=55,
+        )
+        # A plain save (no adapted_at) must not start the counter.
+        row = test_db.get_workout("2026-06-20", "running")
+        self.assertIsNone(row["adapted_at"])
+        self.assertEqual(row["adaptation_count"], 0)
+
+        service = trainmate.coach.CoachService(
+            db_instance=test_db, calendar_syncer_instance=Mock()
+        )
+        proposed = [{
+            "date": "2026-06-20", "sport_type": "running", "title": "Easy Tempo",
+            "description": "Cut to Z2", "modification_reason": "Eased for fatigue",
+            "duration_minutes": 35, "rpe": 5, "tss": 30,
+        }]
+        service.workout_adapt_apply(proposed, "Block too hard", "2026-06-20", "2026-06-20")
+        row = test_db.get_workout("2026-06-20", "running")
+        self.assertIsNotNone(row["adapted_at"])
+        self.assertEqual(row["adaptation_count"], 1)
+
+        proposed[0]["description"] = "Cut further to easy walk"
+        service.workout_adapt_apply(proposed, "Still fatigued", "2026-06-20", "2026-06-20")
+        row = test_db.get_workout("2026-06-20", "running")
+        self.assertEqual(row["adaptation_count"], 2)
+
+    def test_already_eased_tag_in_planned_prompt(self):
+        """An already-eased session is tagged with its count + recency for the adapt
+        prompt; an unadapted session is not."""
+        from trainmate.coach.formatting import format_planned_workouts_detailed
+
+        eased = {
+            "date": "2026-06-18", "sport_type": "running", "title": "Easy Tempo",
+            "description": "Z2", "duration_minutes": 35, "rpe": 5, "tss": 30,
+            "modification_reason": "Eased", "adaptation_summary": "Block too hard",
+            "adapted_at": "2026-06-17T08:00:00+00:00", "adaptation_count": 2,
+        }
+        untouched = {
+            "date": "2026-06-19", "sport_type": "yoga", "title": "Mobility",
+            "description": "easy", "duration_minutes": 20, "rpe": 2, "tss": 10,
+        }
+        text = format_planned_workouts_detailed(
+            [eased, untouched], eval_date="2026-06-20"
+        )
+        self.assertIn("ALREADY EASED", text)
+        self.assertIn("2x", text)
+        self.assertIn("3 days ago", text)
+        # The unadapted yoga line carries no such tag.
+        yoga_line = [ln for ln in text.splitlines() if "(YOGA)" in ln][0]
+        self.assertNotIn("ALREADY EASED", yoga_line)
+
     def _swap_ops_for_dates(self, date1, date2):
         """Builds swap ops the way the CLI does: exchange all workouts on two dates."""
         on_1 = test_db.get_workouts(start_date=date1, end_date=date1)

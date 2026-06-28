@@ -128,9 +128,11 @@ three submodules:
   `format_metrics_history`, `format_completed_activities`,
   `format_planned_workouts`, `format_planned_workouts_detailed` (adapt-only
   variant that includes each session's full description so the model preserves
-  interval/rest detail it isn't deliberately changing, and tags already-completed
+  interval/rest detail it isn't deliberately changing, tags already-completed
   sessions `[COMPLETED — locked history, not adaptable]` from the adherence
-  `completed_keys`), `format_removed_workouts`, `format_daily_context`
+  `completed_keys`, and tags already-eased sessions `[ALREADY EASED …]` with
+  recency/count from `adapted_at`/`adaptation_count` so a re-run doesn't compound
+  the cut), `format_removed_workouts`, `format_daily_context`
   (renders the window's `daily_context` rows into the adapt prompt),
   `format_baseline`, `_load_science_guidelines`.
 - `engine.py` — `CoachEngine` (prompt construction, hashing, LLM calls). Owns
@@ -282,7 +284,10 @@ called by the UIs.
 - **`workout_adapt_apply(proposed, reason, start, end)`** — deletes overridden
   workouts (+ calendar events), saves adapted workouts, syncs to Calendar. Each
   session keeps its short per-workout `change_reason` in `modification_reason`; the
-  long batch `reason` is stamped on every session's `adaptation_summary`.
+  long batch `reason` is stamped on every session's `adaptation_summary`. One UTC
+  timestamp for the run is stamped on every eased session's `adapted_at` and bumps its
+  `adaptation_count`, giving a later re-run the recency signal it needs to avoid
+  compounding the cut.
 - **`workout_add(date, sport_type, title, description, …, replace_day=False)`** —
   manually schedules a workout (deterministic, no LLM), **replacing** any same-sport
   session that day — or every session that day with `replace_day`. Captures the
@@ -502,6 +507,17 @@ SQLite database at `trainmate.db` (path from `config.db_path`).
 |                        |            | a superseded plan version). Hidden from reads by   |
 |                        |            | default, event torn down. Distinct from `removed`. |
 |                        |            | See DESIGN_plan_rollback.md.                       |
+| `created_at`           | TEXT       | UTC ISO timestamp set once on INSERT, never        |
+|                        |            | overwritten — when the session first entered the   |
+|                        |            | plan. Distinct from `date`/`original_date` (the    |
+|                        |            | scheduled day). NULL on legacy rows.               |
+| `adapted_at`           | TEXT       | UTC ISO timestamp of the most recent `workout      |
+|                        |            | adapt` run that eased this row. NULL ⟺ never        |
+|                        |            | adapted. A *stored fact of WHEN* (not derivable),   |
+|                        |            | so the daily adaptation can avoid compounding cuts. |
+| `adaptation_count`     | INTEGER    | How many distinct adapt runs have eased this row    |
+|                        |            | (default 0). Bumped only when `adapted_at` is set;  |
+|                        |            | a fresh INSERT resets it, so regeneration clears it.|
 
 #### Workout state = four orthogonal axes (not one enum)
 
@@ -529,9 +545,16 @@ kind flag. Checked **in order**:
   - The two prefix constants are shared by `coach/service.py`'s swap and manual-add
     writers so reader and writer can't drift (a test guards this).
   - `workout list` markers `[ADAPTED]`/`[SWAPPED]`/`[REPLACED]` come from this
-    accessor. *(The Calendar event summary's `[Adapted]`/before-after framing in
+    accessor; an `[ADAPTED]` session eased by more than one run reads `[ADAPTED ×N]`
+    from `adaptation_count`. *(The Calendar event summary's `[Adapted]`/before-after framing in
     `google_calendar.sync_workout` is separate — it keys on whether the
     **description** changed, not on the modification kind.)*
+  - **Recency is stored, the kind is not.** `adapted_at` / `adaptation_count` are
+    *stored* on the row because no other column carries *when* or *how often* a
+    session was eased — unlike the modification *kind*, which is fully derivable and
+    so deliberately is **not** stored. The daily adaptation surfaces these to its
+    prompt (`[ALREADY EASED …]` tag) so a re-run holds an already-eased session
+    instead of stacking another cut onto still-lagging recovery metrics.
 
 **2. Calendar state** = derived by `trainmate.calendar_state.calendar_status(workout)`:
 

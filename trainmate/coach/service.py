@@ -1081,6 +1081,11 @@ class CoachService:
             start_date=start_date, end_date=end_date
         )
 
+        # One timestamp for the whole run, stamped on every session it eases. Lets a
+        # re-run see how recently (and how many times) each session was already adapted
+        # and hold back from compounding the cut (see save_workout / the adapt prompt).
+        adapted_at = datetime.now(timezone.utc).isoformat()
+
         # Group proposed workouts by date
         proposed_by_date: Dict[str, List[Dict[str, Any]]] = {}
         for pw in proposed_workouts:
@@ -1130,7 +1135,8 @@ class CoachService:
                 duration_minutes=w.get('duration_minutes'),
                 rpe=w.get('rpe'),
                 tss=w.get('tss'),
-                source=source
+                source=source,
+                adapted_at=adapted_at
             )
 
             # Sync to Google Calendar

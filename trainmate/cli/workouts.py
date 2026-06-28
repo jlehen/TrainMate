@@ -16,6 +16,18 @@ from trainmate.util import (
 from trainmate.cli.common import fmt_date, ensure_recent_data, mark_adherence_from_results
 
 
+def _fmt_ts(iso: Optional[str]) -> str:
+    """Renders a stored UTC ISO timestamp as 'YYYY-MM-DD HH:MM' for the workout list.
+
+    Falls back to the raw string if it isn't parseable (e.g. a date-only legacy value)."""
+    if not iso:
+        return "?"
+    try:
+        return datetime.fromisoformat(iso).strftime("%Y-%m-%d %H:%M")
+    except ValueError:
+        return iso
+
+
 def run_workout_adapt(args: argparse.Namespace) -> None:
     # Executes the daily workout Garmin adaptation checks command.
     date_str = args.date or _today_str()
@@ -453,7 +465,11 @@ def run_workout_list(args: argparse.Namespace) -> None:
         mod_marker = ""
         mod_status = modification_status(w)
         if mod_status == 'adapted':
-            mod_marker = bold(yellow(" [ADAPTED]"))
+            # Surface repeat easings: a session adapted by more than one adapt run
+            # reads [ADAPTED ×N], flagging load that has been walked down multiple times.
+            count = w.get('adaptation_count') or 0
+            label = f" [ADAPTED ×{count}]" if count > 1 else " [ADAPTED]"
+            mod_marker = bold(yellow(label))
         elif mod_status == 'swapped':
             mod_marker = bold(yellow(" [SWAPPED]"))
         elif mod_status == 'replaced':
@@ -480,6 +496,16 @@ def run_workout_list(args: argparse.Namespace) -> None:
             f"ID: {w['id']} | {cyan(fmt_date(w['date']))} | {magenta(w['sport_type'].upper())} | "
             f"{bold(w['title'])}{mod_marker}{sync_marker}{rem_marker}{src_marker}{duration_str}{tss_str}{rpe_str}"
         )
+        # Lifecycle timestamps: when the session first entered the plan and, if ever
+        # eased, when the most recent `workout adapt` run touched it. Both NULL on
+        # rows predating these columns, so the line is omitted when neither is known.
+        lifecycle_parts = []
+        if w.get('created_at'):
+            lifecycle_parts.append(f"Planned: {_fmt_ts(w['created_at'])}")
+        if w.get('adapted_at'):
+            lifecycle_parts.append(f"Last adapted: {_fmt_ts(w['adapted_at'])}")
+        if lifecycle_parts:
+            print(gray("  " + "  ·  ".join(lifecycle_parts)))
         print(format_labeled_block("  Description:", w['description']))
         summary = w.get('adaptation_summary')
         # Show the per-workout note inline, unless it's just the batch reason echoed

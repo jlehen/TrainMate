@@ -1,8 +1,44 @@
 import os
+from datetime import datetime
 from typing import Any, Dict, List, Optional, Set, Tuple
 from trainmate.types import Workout, CompletedActivity
 from trainmate.garmin import activity_load, rpe_divergence
 from trainmate.sports import canonical_sport
+from trainmate.modification_state import modification_status
+
+
+def _adapt_recency_tag(workout: Workout, eval_date: Optional[str]) -> str:
+    """Tags an already-adapted session with how recently/often it was eased.
+
+    Returns "" unless the session reads as `adapted` (see trainmate.modification_state)
+    AND carries an `adapted_at` stamp. The tag feeds the adaptation prompt a recency
+    signal so a re-run holds the already-eased form instead of compounding the cut on
+    still-lagging recovery metrics."""
+    if modification_status(workout) != "adapted":
+        return ""
+    adapted_at = workout.get("adapted_at")
+    if not adapted_at:
+        return ""
+    count = workout.get("adaptation_count") or 1
+    times = "once" if count == 1 else f"{count}x"
+    when = ""
+    if eval_date:
+        try:
+            d0 = datetime.strptime(adapted_at[:10], "%Y-%m-%d").date()
+            d1 = datetime.strptime(eval_date, "%Y-%m-%d").date()
+            days = (d1 - d0).days
+            if days <= 0:
+                when = ", most recently TODAY"
+            elif days == 1:
+                when = ", most recently YESTERDAY"
+            else:
+                when = f", most recently {days} days ago"
+        except (ValueError, TypeError):
+            when = ""
+    return (
+        f" [ALREADY EASED by a prior adaptation ({times}{when}) — current form is the "
+        f"reduced plan, not the original; do not compound]"
+    )
 
 
 def format_metrics_history(metrics: List[Dict[str, Any]]) -> str:
@@ -89,6 +125,7 @@ def format_planned_workouts(planned_workouts: List[Workout]) -> str:
 def format_planned_workouts_detailed(
     planned_workouts: List[Workout],
     completed_keys: Optional[Set[Tuple[str, str]]] = None,
+    eval_date: Optional[str] = None,
 ) -> str:
     """Like format_planned_workouts but includes each session's full description.
 
@@ -105,6 +142,10 @@ def format_planned_workouts_detailed(
     tagged "[COMPLETED — locked history, not adaptable]" so the model has the
     authoritative done/locked signal instead of re-pairing the plan against the
     completed-activity list itself.
+
+    Sessions a prior `workout adapt` already eased are tagged "[ALREADY EASED …]" with
+    how recently and how many times (relative to `eval_date`), so a re-run does not stack
+    a second reduction on a session whose current form is already the reduced plan.
     """
     completed_keys = completed_keys or set()
     blocks = []
@@ -118,6 +159,7 @@ def format_planned_workouts_detailed(
             header += " [COMPLETED — locked history, not adaptable]"
         if w.get('source') == 'manual':
             header += " [athlete-added]"
+        header += _adapt_recency_tag(w, eval_date)
         mod_reason = w.get('modification_reason')
         if mod_reason:
             header += f" — {mod_reason}"

@@ -1051,6 +1051,32 @@ class TestTrainMateCLI(unittest.TestCase):
         self.assertIn("Tomorrow Ride", stdout)
         self.assertIn("Future Lift", stdout)
 
+    def test_workout_list_shows_repeat_adapt_count(self):
+        """A session eased once reads [ADAPTED]; eased again reads [ADAPTED ×2]."""
+        today_str = datetime.now(timezone.utc).date().strftime("%Y-%m-%d")
+        test_db.save_workout(
+            date=today_str, sport_type="running", title="Tempo",
+            description="orig", adaptation_summary="block too hard",
+            modification_reason="eased", adapted_at="2026-06-17T08:00:00+00:00",
+        )
+        exit_code, stdout, _ = self.run_cli(["workout", "list"])
+        self.assertEqual(exit_code, 0)
+        self.assertIn("[ADAPTED]", stdout)
+        self.assertNotIn("[ADAPTED ×", stdout)
+        # Lifecycle line: creation stamp always shown, last-adapted stamp when eased.
+        self.assertIn("Planned:", stdout)
+        self.assertIn("Last adapted: 2026-06-17 08:00", stdout)
+
+        # Second easing of the same slot bumps the count.
+        test_db.save_workout(
+            date=today_str, sport_type="running", title="Tempo",
+            description="easier", adaptation_summary="still fatigued",
+            modification_reason="eased again", adapted_at="2026-06-18T08:00:00+00:00",
+        )
+        exit_code, stdout, _ = self.run_cli(["workout", "list"])
+        self.assertEqual(exit_code, 0)
+        self.assertIn("[ADAPTED ×2]", stdout)
+
     def test_workout_compare(self):
         today = datetime.now(timezone.utc).date()
         yesterday = today - timedelta(days=1)
