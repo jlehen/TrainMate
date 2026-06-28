@@ -86,6 +86,9 @@ from trainmate.cli.data import (
     run_data_pull, run_data_bootstrap, run_data_reflect, run_data_backfill_tss,
     run_data_show_metrics, run_data_show_activities, run_data_wipe,
 )
+from trainmate.cli.context import (
+    run_context_add, run_context_rm, run_context_list, run_context_list_metrics,
+)
 
 
 def main() -> None:
@@ -286,6 +289,100 @@ def main() -> None:
     # lifeevent wipe
     le_wipe = lifeevent_subparsers.add_parser("wipe", help="Wipe all life events")
     le_wipe.add_argument("-y", "--yes", action="store_true", help="Skip confirmation prompt")
+
+    # context command & subparsers — first-party daily-context authoring
+    context_parser = subparsers.add_parser(
+        "context",
+        aliases=["c"],
+        help="Author/list/remove daily-context signals (heat, sleep, stress, …)",
+        description=(
+            "Manage external daily-context signals — the same tagged Google Calendar "
+            "events that 'data pull' ingests into the coach's view. 'add' authors them "
+            "(one all-day event per day), 'rm' removes them (calendar event + local row), "
+            "'list' and 'list-metrics' inspect what's recorded. TrainMate stays "
+            "domain-agnostic: a metric is opaque free text."
+        )
+    )
+    context_subparsers = context_parser.add_subparsers(
+        dest="subcommand", help="Context sub-commands"
+    )
+
+    # context add
+    ctx_add = context_subparsers.add_parser(
+        "add", aliases=["a"],
+        help="Author a context signal over a day or date range",
+        description=(
+            "Write a tagged all-day context event per day in the range and mirror it "
+            "locally. Defaults to today. Metric/label are prompted if omitted; re-adding "
+            "the same (date, metric) updates in place rather than duplicating."
+        )
+    )
+    ctx_add.add_argument(
+        "text", nargs="*", help="Human label/summary (e.g. severe heatwave)"
+    )
+    ctx_add.add_argument(
+        "-l", "--label",
+        help="Human label/summary (alternative to the positional text; takes "
+             "precedence, and avoids word-splitting for multi-word labels)"
+    )
+    ctx_add.add_argument("-m", "--metric", help="Opaque category, e.g. heat, sleep, stress")
+    ctx_add.add_argument(
+        "--value", type=float, metavar="N",
+        help="Optional free numeric magnitude (severity, °C, count — uninterpreted)"
+    )
+    ctx_add.add_argument(
+        "--from", "--from-date", dest="from_date", metavar="YYYY-MM-DD",
+        help="Start date (default: today)"
+    )
+    ctx_add.add_argument(
+        "--until", "--until-date", dest="until_date", metavar="YYYY-MM-DD",
+        help="End date (default: --from)"
+    )
+
+    # context rm
+    ctx_rm = context_subparsers.add_parser(
+        "rm", aliases=["r"],
+        help="Remove signal(s) by ID, or by date range + metric",
+        description=(
+            "Delete context signal(s). Pass row IDs, or narrow with "
+            "--from/--until/--metric. The calendar event is deleted too, so a full "
+            "re-pull cannot resurrect it."
+        )
+    )
+    ctx_rm.add_argument("ids", nargs="*", type=int, help="Context row IDs to remove")
+    ctx_rm.add_argument("-m", "--metric", help="Restrict range removal to this metric")
+    ctx_rm.add_argument(
+        "--from", "--from-date", dest="from_date", metavar="YYYY-MM-DD",
+        help="Start date for range removal"
+    )
+    ctx_rm.add_argument(
+        "--until", "--until-date", dest="until_date", metavar="YYYY-MM-DD",
+        help="End date for range removal"
+    )
+    ctx_rm.add_argument(
+        "-y", "--yes", action="store_true", help="Skip confirmation for multi-row removal"
+    )
+
+    # context list
+    ctx_list = context_subparsers.add_parser(
+        "list", aliases=["l"],
+        help="List context signals (default window: the coach's metrics lookback)"
+    )
+    ctx_list.add_argument("-m", "--metric", help="Filter to a single metric")
+    ctx_list.add_argument(
+        "--from", "--from-date", dest="from_date", metavar="YYYY-MM-DD",
+        help="Start date (default: metrics_lookback_days before --until)"
+    )
+    ctx_list.add_argument(
+        "--until", "--until-date", dest="until_date", metavar="YYYY-MM-DD",
+        help="End date (default: today)"
+    )
+
+    # context list-metrics
+    context_subparsers.add_parser(
+        "list-metrics", aliases=["lm"],
+        help="Show distinct metrics in use with counts and date span"
+    )
 
     # learnings command & subparsers
     learnings_parser = subparsers.add_parser(
@@ -953,6 +1050,19 @@ def main() -> None:
             run_lifeevent_show(args)
         elif sub == "wipe":
             run_lifeevent_wipe(args)
+    elif cmd in ("context", "c"):
+        if not args.subcommand:
+            context_parser.print_help()
+            sys.exit(1)
+        sub = args.subcommand.lower()
+        if sub in ("add", "a"):
+            run_context_add(args)
+        elif sub in ("rm", "r"):
+            run_context_rm(args)
+        elif sub in ("list", "l"):
+            run_context_list(args)
+        elif sub in ("list-metrics", "lm"):
+            run_context_list_metrics(args)
     elif cmd in ("learnings", "learn", "l"):
         if not args.subcommand:
             learnings_parser.print_help()

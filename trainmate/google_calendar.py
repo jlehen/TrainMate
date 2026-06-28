@@ -362,8 +362,47 @@ class CalendarSyncer:
         text = "\n".join(p.strip() for p in parts if p and p.strip())
         return text or None
 
-    def delete_workout_event(self, google_event_id: str) -> None:
-        """Deletes a workout event from Google Calendar.
+    def add_context_event(
+        self, date: str, metric: str, value: Optional[float],
+        text: Optional[str], existing_event_id: Optional[str] = None
+    ) -> Optional[str]:
+        """Authors (or updates) a tagged daily-context event for a single day.
+
+        TrainMate becomes the first-party producer of the same `source=<context_tag>`
+        events the external syncer writes (DESIGN_context_authoring.md). All-day, end
+        exclusive = start + 1 day, matching workouts. When `existing_event_id` is given
+        the event is updated in place (the idempotent upsert-by-(date,metric) path);
+        otherwise a new one is inserted. Returns the event id, or None if no calendar
+        is configured.
+        """
+        if not self.calendar_id:
+            return None
+
+        end_date_str = (
+            datetime.strptime(date, "%Y-%m-%d").date() + timedelta(days=1)
+        ).strftime("%Y-%m-%d")
+        private = {'source': config.calendar_context_tag, 'metric': metric}
+        if value is not None:
+            private['value'] = str(value)
+        event_body = {
+            'summary': text or metric,
+            'start': {'date': date},
+            'end': {'date': end_date_str},
+            'extendedProperties': {'private': private},
+        }
+
+        if existing_event_id:
+            updated = self.service.events().update(
+                calendarId=self.calendar_id, eventId=existing_event_id, body=event_body
+            ).execute()
+            return updated.get('id')
+        created = self.service.events().insert(
+            calendarId=self.calendar_id, body=event_body
+        ).execute()
+        return created.get('id')
+
+    def delete_event(self, google_event_id: str) -> None:
+        """Deletes an event from Google Calendar by id (source-agnostic).
 
         Args:
             google_event_id: The event ID to delete.
@@ -376,6 +415,11 @@ class CalendarSyncer:
             print(f"Deleted Google Calendar event {google_event_id}.")
         except Exception as e:
             print(f"Warning: Failed to delete Google Calendar event {google_event_id}: {e}")
+
+    # Back-compat alias: workout teardown paths call this name.
+    def delete_workout_event(self, google_event_id: str) -> None:
+        """Deletes a workout event from Google Calendar (see `delete_event`)."""
+        self.delete_event(google_event_id)
 
 # Singleton instance
 calendar_syncer = CalendarSyncer()

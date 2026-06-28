@@ -76,8 +76,8 @@ classes themselves.
   singletons/helpers handlers reference via `import trainmate_cli as cli`, and a
   `__main__` alias. No business logic.
 - **`trainmate/cli/`** — per-command-family handler modules (`run_*()`): `status`,
-  `goals`, `lifeevents`, `learnings`, `plans`, `workouts`, `data`, plus shared
-  `common`.
+  `goals`, `lifeevents`, `context`, `learnings`, `plans`, `workouts`, `data`, plus
+  shared `common`.
 - **`trainmate_web.py`** — Flask REST API; thin handler functions calling `db`,
   `coach_service`, `calendar_syncer` (pure reader — never pulls).
 
@@ -358,9 +358,11 @@ is unchanged.
 `wipe_lifeevents`
 
 **Daily Context:** `upsert_daily_context_by_event(google_event_id, …)`,
-`get_daily_context(start_date=, end_date=)`,
+`get_daily_context(start_date=, end_date=, metric=)`,
 `delete_daily_context_by_event(google_event_id)` — external signals reconciled
-by Calendar event id (cleared by `wipe_metrics`; see §13).
+by Calendar event id (cleared by `wipe_metrics`; see §13). For the `context`
+command: `get_daily_context_by_id(id)`, `delete_daily_context(id)`,
+`list_context_metrics()`.
 
 **Workouts:** `save_workout` (upsert),
 `get_workout(date, sport_type)`,
@@ -778,8 +780,8 @@ Invoked as `python trainmate_cli.py [--llm-model MODEL] <command> [subcommand] [
 `trainmate_cli.py` holds only `main()` (the argparse dispatcher) and the
 patchable singletons; the handler functions, named
 `run_<command>_<subcommand>()`, live in the `trainmate/cli/` package
-(one module per command family: `status`, `goals`, `lifeevents`, `learnings`, `plans`,
-`workouts`, `data`).
+(one module per command family: `status`, `goals`, `lifeevents`, `context`,
+`learnings`, `plans`, `workouts`, `data`).
 
 | Command      | Subcommand   | Alias    | Description                                                              |
 |--------------|--------------|----------|--------------------------------------------------------------------------|
@@ -795,6 +797,10 @@ patchable singletons; the handler functions, named
 | `lifeevent`  | `list`       | `le l`   | List life events                                                         |
 | `lifeevent`  | `show`       | `le s`   | Show life event details by ID                                            |
 | `lifeevent`  | `wipe`       | —        | Delete all life events                                                   |
+| `context`    | `add`        | `c a`    | Author daily-context signal(s) (`text` or `-l/--label`, `-m METRIC`, `--value N`, `--from`, `--until`; one tagged all-day event per day, prompts if omitted) |
+| `context`    | `rm`         | `c r`    | Remove signal(s) by ID(s), or by `--from`/`--until`/`-m` (deletes calendar event + local row) |
+| `context`    | `list`       | `c l`    | List signals (`-m METRIC`, `--from`, `--until`; default window `metrics_lookback_days`) |
+| `context`    | `list-metrics` | `c lm` | Show distinct metrics in use with counts and date span                  |
 | `learnings`  | `list`       | `l`      | Show coach learnings (`--sport`, `--confidence`, `--dormant`)            |
 | `learnings`  | `show`       | —        | Show a learning's full text + per-week evidence basis by ID             |
 | `learnings`  | `edit`       | —        | Edit a learning's text by ID                                            |
@@ -1255,12 +1261,16 @@ Sum of workloads over past 28 days ÷ 4 (≈ average weekly load).
 ## 13. Daily Context (Calendar Ingest)
 
 External daily signals the coach should factor in — alcohol, sleep quality,
-stress, big meals — reach TrainMate through the **single existing Google
-Calendar**, not through app-specific features. A separate syncer (out of scope,
-mirroring `GarminScraper`) writes one all-day event per signal-day, tagged in
-`extendedProperties.private`: `source=trainmate-context` (the positive marker,
-configurable via `calendar_context_tag`), `metric` (opaque category), and an optional
-numeric `value`. Full spec: `DESIGN_calendar_context_ingest.md`.
+stress, big meals, a heatwave — reach TrainMate through the **single existing
+Google Calendar**, not through app-specific features. Producers write one all-day
+event per signal-day, tagged in `extendedProperties.private`:
+`source=trainmate-context` (the positive marker, configurable via
+`calendar_context_tag`), `metric` (opaque category), and an optional numeric
+`value`. Two producers exist: a separate syncer (out of scope, mirroring
+`GarminScraper`) for spreadsheet-backed streams, and TrainMate's own `context`
+command (outbound, below) for ad-hoc signals. Full specs:
+`DESIGN_calendar_context_ingest.md` (ingest) and `DESIGN_context_authoring.md`
+(authoring).
 
 **Inbound flow:**
 
@@ -1293,6 +1303,20 @@ Calendar (tagged events) ──► google_calendar.sync_calendar_context
   persistence, and the drink-and-hard-day confound. Both are hashed into the analysis
   evidence fingerprint so an added/edited/deleted signal invalidates the cached
   reconstruction.
+
+**Outbound flow (first-party authoring — `context` command, alias `c`):** for
+ad-hoc signals where standing up a syncer is overkill (a heatwave), the user can
+author the same tagged events directly, since the private-property tag is
+unsettable from the Calendar UI. `context add` writes one tagged all-day event
+per day in a range (`add_context_event`, idempotent upsert-by-(date, metric)) and
+mirrors the rows locally via `upsert_daily_context_by_event` so they appear before
+the next pull. `context rm` deletes the **calendar event** (`delete_event`) before
+the local row, so a full re-pull (`data wipe --calendar`) can't resurrect it.
+`context list` (default window: `metrics_lookback_days`, the coach's context-read
+window) and `context list-metrics` inspect what's recorded. Authored events are
+indistinguishable from synced ones downstream — `sync_context`, the analysis
+prompt, and the evidence fingerprint are untouched. Handlers: `cli/context.py`;
+spec: `DESIGN_context_authoring.md`.
 
 ---
 

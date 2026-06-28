@@ -41,10 +41,12 @@ class DailyContextMixin:
             conn.commit()
 
     def get_daily_context(
-        self, start_date: Optional[str] = None, end_date: Optional[str] = None
+        self, start_date: Optional[str] = None, end_date: Optional[str] = None,
+        metric: Optional[str] = None
     ) -> List[DailyContext]:
         """Returns context signals within [start_date, end_date] (inclusive), ordered
-        by date then metric. Either bound may be omitted for an open-ended range."""
+        by date then metric. Either bound may be omitted for an open-ended range; an
+        optional `metric` restricts to a single category."""
         clauses = []
         params: list = []
         if start_date is not None:
@@ -53,6 +55,9 @@ class DailyContextMixin:
         if end_date is not None:
             clauses.append("date <= ?")
             params.append(end_date)
+        if metric is not None:
+            clauses.append("metric = ?")
+            params.append(metric)
         where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
         with self._get_connection() as conn:
             cursor = conn.cursor()
@@ -61,3 +66,38 @@ class DailyContextMixin:
                 params,
             )
             return [dict(row) for row in cursor.fetchall()]  # type: ignore
+
+    def get_daily_context_by_id(self, context_id: int) -> Optional[DailyContext]:
+        """Returns a single context signal by its local row id, or None."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM daily_context WHERE id = ?", (context_id,))
+            row = cursor.fetchone()
+            return dict(row) if row else None  # type: ignore
+
+    def delete_daily_context(self, context_id: int) -> None:
+        """Removes a context signal by its local row id (the calendar event must be
+        deleted separately so a full re-pull can't resurrect it)."""
+        with self._get_connection() as conn:
+            conn.cursor().execute(
+                "DELETE FROM daily_context WHERE id = ?", (context_id,)
+            )
+            conn.commit()
+
+    def list_context_metrics(self) -> List[dict]:
+        """Returns the distinct metrics in use with a row count and first/last date,
+        ordered by most-recently-seen. Powers `context list-metrics`."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                SELECT metric,
+                       COUNT(*)  AS count,
+                       MIN(date) AS first_date,
+                       MAX(date) AS last_date
+                FROM daily_context
+                GROUP BY metric
+                ORDER BY last_date DESC, metric ASC
+                """
+            )
+            return [dict(row) for row in cursor.fetchall()]

@@ -54,7 +54,9 @@ signal-day; TrainMate ingests them.
 
 **Non-Goals**
 - The external syncer itself is **out of scope** — separate repo. This doc only
-  fixes the *contract* (the calendar tag) it must honor.
+  fixes the *contract* (the calendar tag) it must honor. (TrainMate later became a
+  *first-party* producer of the same tagged events for ad-hoc signals via the
+  `context` command — see `DESIGN_context_authoring.md`.)
 - No per-signal logic in TrainMate (no "alcohol is bad" rule).
 - No correlation / quantitative analysis built now — only the storage that would
   permit it later (§7).
