@@ -538,9 +538,16 @@ You MUST respond with a JSON object containing:
         informational: Optional[List[CompletedActivity]] = None,
         removed_workouts: Optional[List[Workout]] = None,
         daily_context: Optional[List[Dict[str, Any]]] = None,
-        completed_keys: Optional[set] = None
+        completed_keys: Optional[set] = None,
+        athlete_message: Optional[str] = None
     ) -> Dict[str, Any]:
-        """Queries LLM to evaluate metrics/activities and adapt workouts if needed."""
+        """Queries LLM to evaluate metrics/activities and adapt workouts if needed.
+
+        `athlete_message` is an optional free-text note for THIS adaptation only; when
+        present it is surfaced as a clearly-bounded section of the user content and the
+        model is told to weigh it as today's intent without treating it as a durable
+        signal about the block.
+        """
         custom_task = f"""
 TASK:
 Analyze the athlete's actual workout adherence and physiological metrics trajectory
@@ -606,6 +613,17 @@ eased, or a genuinely NEW signal (a hard completed session, a fresh life/context
 warrants it — and the more recently and more times it was already eased (see the tag),
 the higher your bar for touching it again. Restoring load toward the original as the
 athlete recovers is encouraged; deepening an already-fresh cut is not.
+
+ATHLETE'S NOTE FOR TODAY:
+If the user content includes a section titled "ATHLETE'S NOTE FOR THIS ADAPTATION", it is
+a free-text note the athlete attached to THIS run — extra intent or constraints the
+metrics can't show (e.g. a niggle to protect, no access to a sport/venue on a given day,
+or how they feel). Weigh it as today's intent alongside the data: honour stated
+constraints, and let it tip a judgement call. It is advisory, not an override — do NOT
+schedule clearly unsafe load just because the athlete asks (if recovery signals warrant
+easing, ease and say why). Treat it as a one-off for this adaptation only: do NOT read it
+as durable evidence about the block, and do NOT permanently re-shape the mesocycle on its
+account.
 
 This daily adaptation is READ-ONLY with respect to the coach's durable observations:
 use the COACH LEARNINGS as context, but do NOT emit any learning updates here — durable,
@@ -683,9 +701,20 @@ evidence-backed observations are authored only by the weekly history analysis
                 "but not adherence failures):\n" + format_completed_activities(informational) + "\n"
             )
 
+        # Ephemeral, this-run-only note from the athlete (see custom_task guidance). Omitted
+        # entirely when absent so a message-less run is byte-for-byte the prior behaviour.
+        message_section = ""
+        if athlete_message and athlete_message.strip():
+            message_section = (
+                "\nATHLETE'S NOTE FOR THIS ADAPTATION (free-text intent/constraints for "
+                "today only — advisory, not an override; do not treat as durable evidence "
+                f"about the block):\n{athlete_message.strip()}\n"
+            )
+
         user_content = f"""
 Evaluation Date: {target_date_str}
 Adaptation Range: {target_date_str} to {meso_end_date_str}
+{message_section}
 
 Athlete's Metrics History (Past {history_days} Days):
 {metrics_text}

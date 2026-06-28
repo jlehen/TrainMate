@@ -92,7 +92,9 @@ def run_workout_adapt(args: argparse.Namespace) -> None:
 
     print(f"Evaluating daily Garmin metrics adaptation for {date_str}...")
     try:
-        reason, proposed_workouts = cli.coach_service.workout_adapt(date_str)
+        reason, proposed_workouts = cli.coach_service.workout_adapt(
+            date_str, message=getattr(args, 'message', None)
+        )
         print(f"\n{bold('Decision Summary')}:\n{wrap_text(reason, width=80)}")
         
         if not proposed_workouts:

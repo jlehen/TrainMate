@@ -368,6 +368,19 @@ class TestTrainMateCLI(unittest.TestCase):
         self.assertIn("Metrics are green", stdout)
         self.assertIn("Adaptations applied and synced to calendar successfully.", stdout)
         mock_coach.workout_adapt.assert_called_once()
+        # With no -m, the athlete message threads through as None.
+        self.assertIsNone(mock_coach.workout_adapt.call_args.kwargs.get("message"))
+
+        # -m/--message is forwarded verbatim to the service for this run.
+        mock_coach.workout_adapt.reset_mock()
+        exit_code, stdout, stderr = self.run_cli(
+            ["workout", "adapt", "--auto", "-m", "knee is sore, keep impact low"]
+        )
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(
+            mock_coach.workout_adapt.call_args.kwargs.get("message"),
+            "knee is sore, keep impact low",
+        )
 
         w_id = test_db.save_workout(
             date="2026-06-02",

@@ -268,9 +268,13 @@ called by the UIs.
   config hashes and snapshots). Used by the intermediate-goals branch of `plan generate`.
 - **`replan(force, objective_id)`** — convenience: `plan_generate` then
   `workout_generate`.
-- **`workout_adapt(target_date_str)`** — fetches metrics + workouts in the rolling
-  window, calls `CoachEngine._workout_adapt_logic()`. Returns
-  `(reason, proposed_workouts)`. The prompt shows the LLM the whole forward plan
+- **`workout_adapt(target_date_str, message=None)`** — fetches metrics + workouts in
+  the rolling window, calls `CoachEngine._workout_adapt_logic()`. Returns
+  `(reason, proposed_workouts)`. The optional `message` (CLI `-m/--message`) is a
+  free-text athlete note for **this run only** — surfaced as a bounded section of the
+  adapt prompt and weighed as today's intent/constraints, but advisory (it does not
+  override clear fatigue signals) and **ephemeral** (never persisted or turned into a
+  learning; persistent context belongs in `daily_context` via `context add`). The prompt shows the LLM the whole forward plan
   through the mesocycle end for context but instructs it to return **only sessions it
   is actually changing** — omitted sessions are preserved (apply never drops a date
   with no proposal), so the model is not pushed to re-author the entire block.
@@ -871,7 +875,7 @@ patchable singletons; the handler functions, named
 |              |              |          | to coach as a cancellation (with the reason)            |
 | `workout`    | `restore`    | `w res`  | Restore soft-removed workout by ID. Clears `removed`    |
 |              |              |          | flags and syncs to Calendar to remove `[Deleted]` mark. |
-| `workout`    | `adapt`      | `w a`    | Run daily adaptation check (`--date YYYY-MM-DD`, `-y` auto-apply)        |
+| `workout`    | `adapt`      | `w a`    | Run daily adaptation check (`--date YYYY-MM-DD`, `-m` athlete note, `-y` auto-apply) |
 | `workout`    | `push`       | `w p`    | Sync planned workouts to Google Calendar. Defaults to                    |
 |              |              |          | today onward; pushes only unsynced workouts unless                       |
 |              |              |          | `-f`/`--force` re-pushes already-synced ones.                            |
@@ -1068,7 +1072,10 @@ Required fields:
    lifestyle-suppressed morning as evidence the *block* is too hard (no permanent cut to
    planned volume, not counted as training fatigue). This is what makes the
    quantitative-context learning actually move a decision rather than stay inert at the
-   daily load call (DESIGN_quantitative_context_impact.md §6.1).
+   daily load call (DESIGN_quantitative_context_impact.md §6.1). An optional `-m/--message`
+   athlete note for this run is passed through verbatim and rendered as a bounded prompt
+   section (advisory, ephemeral — see `workout_adapt` in
+   [§3](#3-coach-package-architecture)).
 2. `analyze_adherence()` (`adherence.py`) computes discrepancies (misses,
    duration/load mismatches, rest violations) over the **active** workouts only —
    removed workouts never count as misses.

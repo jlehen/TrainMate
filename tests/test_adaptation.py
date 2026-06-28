@@ -154,6 +154,51 @@ class TestAdaptation(unittest.TestCase):
             self.assertIn(lid, learnings)
 
     @patch("trainmate.coach.engine.openrouter_client")
+    def test_adapt_message_surfaced_in_prompt(self, mock_client):
+        """An athlete message for the run is rendered as a bounded section of the adapt
+        prompt (advisory, ephemeral) and omitted entirely when no message is given."""
+        test_profile = {"lthr": 165, "max_hr": 185}
+        with patch.dict(trainmate.coach.config.data, {
+            "user_profile": test_profile,
+            "coach": {
+                "metrics_lookback_days": 3,
+                "minor_activity_load_threshold": 10.0,
+            }
+        }):
+            mock_client.complete.return_value = {
+                "change_needed": False,
+                "reason": "On track.",
+                "adapted_workouts": [],
+            }
+
+            test_db.save_metric_cache("2026-06-03", 56, 42, 60, 35, 14.0, 8.0, 1.75)
+            test_db.save_baseline("2026-06-03", 50.0, 2.0, 60.0, 5.0, 80.0, 5.0)
+
+            coach_service.workout_adapt(
+                "2026-06-03", message="  knee is sore, keep impact low  "
+            )
+            user_content = mock_client.complete.call_args[0][1]
+            system_prompt = mock_client.complete.call_args[0][0]
+            self.assertIn("ATHLETE'S NOTE FOR THIS ADAPTATION", user_content)
+            # Surrounding whitespace is trimmed before rendering.
+            self.assertIn("knee is sore, keep impact low", user_content)
+            self.assertNotIn("  knee is sore", user_content)
+            self.assertIn("ATHLETE'S NOTE FOR TODAY", system_prompt)
+
+            # No message → the section is absent (message-less run is unchanged).
+            mock_client.complete.reset_mock()
+            mock_client.complete.return_value = {
+                "change_needed": False,
+                "reason": "On track.",
+                "adapted_workouts": [],
+            }
+            coach_service.workout_adapt("2026-06-03")
+            self.assertNotIn(
+                "ATHLETE'S NOTE FOR THIS ADAPTATION",
+                mock_client.complete.call_args[0][1],
+            )
+
+    @patch("trainmate.coach.engine.openrouter_client")
     def test_adapt_drops_already_completed_session(self, mock_client):
         """A session already performed (matched by a completed activity) is locked history:
         the guard drops any proposal targeting it, even if the model returns one — you cannot

@@ -739,6 +739,15 @@ def main() -> None:
     )
     w_adapt.add_argument("--date", help="Date in YYYY-MM-DD format (defaults to UTC today)")
     w_adapt.add_argument(
+        "-m", "--message", dest="message",
+        help=(
+            "Free-text note to the coach for THIS adaptation only (e.g. 'knee is sore, "
+            "keep impact low', 'no bike access Thursday'). Advisory and ephemeral: it is "
+            "not stored and won't override clear fatigue signals. For persistent context "
+            "(alcohol, sleep, stress) use 'context add' instead."
+        )
+    )
+    w_adapt.add_argument(
         "-y", "--yes", "--auto", action="store_true", dest="auto",
         help="Apply proposed adaptations automatically without prompting"
     )

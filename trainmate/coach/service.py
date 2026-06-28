@@ -897,8 +897,17 @@ class CoachService:
                 return True
         return False
 
-    def workout_adapt(self, target_date_str: Optional[str] = None) -> Tuple[str, List[Workout]]:
-        """Evaluates metrics/activities over a rolling window and adapts mesocycle if needed."""
+    def workout_adapt(
+        self, target_date_str: Optional[str] = None, message: Optional[str] = None
+    ) -> Tuple[str, List[Workout]]:
+        """Evaluates metrics/activities over a rolling window and adapts mesocycle if needed.
+
+        `message` is an optional free-text note from the athlete for THIS adaptation only
+        (e.g. "knee is sore, keep impact low"). It is advisory context fed to the prompt and
+        is NOT persisted or turned into a durable learning — consistent with daily adapt
+        being read-only w.r.t. coach observations. Persistent context belongs in
+        `daily_context` via `context add`.
+        """
         if not target_date_str:
             target_date_str = _today_str()
 
@@ -1016,7 +1025,8 @@ class CoachService:
             informational=informational,
             removed_workouts=removed_workouts,
             daily_context=daily_context,
-            completed_keys=completed_keys
+            completed_keys=completed_keys,
+            athlete_message=message
         )
 
         # NOTE: daily adaptation is read-only w.r.t. coach learnings
