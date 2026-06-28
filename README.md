@@ -1,23 +1,70 @@
 # TrainMate
 
-TrainMate is a local AI sports-science coaching application.  The user
-configures goals and life events; TrainMate generates periodized training plans
-(macrocycle → mesocycles) and workout schedules (microcycles), then adapts them
-daily based on Garmin metrics. Plans and workouts can be pushed to Google
-Calendar.
+TrainMate is a local, AI-powered sports-science coach. You tell it your goals
+(races, target dates, sports) and the life events that will get in the way; it
+designs a periodized training plan, writes your day-to-day workouts, and then
+**adapts them every day** in response to how your body is actually responding —
+resting heart rate, HRV, sleep, training load, and even lifestyle factors like a
+late night or a few drinks. It pulls your data straight from Garmin Connect and
+pushes the resulting schedule to Google Calendar, so your plan lives where you
+already look.
 
-## Features
+It runs entirely on your machine against a local SQLite database; the only
+external calls are to Garmin, Google Calendar, and an LLM (via OpenRouter) that
+does the coaching reasoning.
 
-- **AI-Powered Periodization**: Generates long-term macrocycles and mesocycles
-  based on user goals, events, and fitness profile.
-- **Daily Adaptation**: Adjusts workouts daily using resting heart rate, HRV,
-  and sleep metrics.
-- **Garmin Integration**: Syncs daily metrics and completed activities directly
-  from Garmin Connect, tracking a watermark so reads auto-refresh recent data.
-- **Calendar Sync**: Automatically schedules and updates planned workouts in
-  Google Calendar.
-- **Coach Learnings**: The system learns from your performance and adaptations
-  over time to provide better personalized schedules.
+## What makes it intelligent
+
+- **Periodized planning.** From your goals, life events, and fitness profile,
+  TrainMate builds a full macrocycle → mesocycle → microcycle structure (long-term
+  strategy down to individual sessions). Timelines longer than ~24 weeks are
+  automatically broken into intermediate goals.
+
+- **Context-aware daily adaptation.** Each day it weighs your recovery signals
+  against the planned session and eases, reschedules, or holds the workout
+  accordingly. Crucially, it distinguishes *training fatigue* from *lifestyle
+  noise* — a poor morning explained by yesterday's alcohol or bad sleep won't be
+  misread as "the block is too hard," so it won't permanently cut your volume on a
+  false signal. It also avoids compounding cuts by remembering when a session was
+  already eased.
+
+- **Real sports-science load model.** Training load is computed per activity using
+  the best available method — power-based TSS (Coggan), heart-rate TSS (Friel), or
+  session-RPE (Foster) — and rolls up into acute/chronic workload and ACWR for
+  injury-risk and readiness assessment. An "RPE divergence" flag surfaces sessions
+  that *felt* far harder than they measured (heat, sleep debt, muscular damage).
+
+- **A coach that learns, with evidence.** TrainMate maintains durable "coach
+  learnings" about you (e.g. how you respond to back-to-back hard days). Each
+  learning's confidence is **computed from cited evidence** — the distinct training
+  weeks that support or contradict it — not asserted by the model. Learnings decay
+  if unreinforced, downgrades are proposed rather than silently applied, and you
+  can inspect or curate every record.
+
+- **Backward evaluation / bootstrap.** TrainMate can reverse-engineer your past
+  training from completed activities and metrics, reconstructing the cycles you
+  *actually* did and seeding coach learnings — so it starts smart instead of cold,
+  and reviews planned-vs-actual when it replans.
+
+- **Lifestyle context ingest.** Tag ordinary Google Calendar events (alcohol,
+  poor sleep, stress, travel) and TrainMate folds them into both daily adaptation
+  and long-term analysis.
+
+- **Plan versioning & rollback.** Regenerating a plan supersedes the old one
+  rather than destroying it, so you can roll back a plan (and its workouts) to a
+  previous version.
+
+## Features at a glance
+
+- **Garmin integration** — pulls daily metrics and completed activities directly
+  from Garmin Connect, with a watermark so reads auto-refresh recent data.
+- **Google Calendar sync** — schedules and updates planned workouts as calendar
+  events, tags them with adherence verdicts after the fact, and ingests tagged
+  context events back in.
+- **Adherence tracking** — compares planned vs. completed and flags misses,
+  load/duration mismatches, and rest-day violations.
+- **Manual overrides** — add, swap, or remove individual workouts by hand;
+  adaptation re-balances around them.
 
 ## System Architecture
 
