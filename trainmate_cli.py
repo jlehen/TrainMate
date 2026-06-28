@@ -712,7 +712,7 @@ def main() -> None:
     d_pull = data_subparsers.add_parser(
         "pull",
         aliases=["p"],
-        help="Fetch latest activities and metrics directly from Garmin Connect",
+        help="Fetch Garmin activities/metrics and Google Calendar context",
         description=(
             "Fetch activities and daily metrics directly from Garmin Connect into the "
             "local cache, advancing the sync watermark. With no range, pulls the last "

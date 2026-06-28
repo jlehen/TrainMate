@@ -67,8 +67,10 @@ class TestPeriodization(unittest.TestCase):
         }
         self.assertNotEqual(hash2, coach_service._get_lifeevents_hash([c]))
 
+    @patch("trainmate.coach.service._today_str")
     @patch("trainmate.coach.engine.openrouter_client")
-    def test_replan_logic_and_caching(self, mock_client):
+    def test_replan_logic_and_caching(self, mock_client, mock_today):
+        mock_today.return_value = "2026-06-01"
         obj_id = test_db.add_objective(
             title="Berlin Marathon", target_date="2026-09-27",
             sport_type="running", priority=1,
@@ -712,8 +714,10 @@ class TestPeriodization(unittest.TestCase):
         self.assertIsNotNone(macro)
         self.assertEqual(macro["strategy"], "Simulated base building strategy")
 
+    @patch("trainmate.coach.service._today_str")
     @patch("trainmate.coach.engine.openrouter_client")
-    def test_multi_goal_planning_and_deletion(self, mock_client):
+    def test_multi_goal_planning_and_deletion(self, mock_client, mock_today):
+        mock_today.return_value = "2026-06-01"
         obj1_id = test_db.add_objective(
             title="Goal A", target_date="2026-08-01",
             sport_type="running", priority=1,
