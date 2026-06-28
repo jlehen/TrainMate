@@ -268,10 +268,17 @@ called by the UIs.
   `workout_generate`.
 - **`workout_adapt(target_date_str)`** — fetches metrics + workouts in the rolling
   window, calls `CoachEngine._workout_adapt_logic()`. Returns
-  `(reason, proposed_workouts)`. Sessions that already have a matching completed
-  activity (incl. one performed earlier on the evaluation date) are **locked
-  history**: any proposal targeting such a `(date, sport)` is dropped before
-  returning, so a workout already finished today is never "adapted".
+  `(reason, proposed_workouts)`. The prompt shows the LLM the whole forward plan
+  through the mesocycle end for context but instructs it to return **only sessions it
+  is actually changing** — omitted sessions are preserved (apply never drops a date
+  with no proposal), so the model is not pushed to re-author the entire block.
+  Sessions that already have a matching completed activity (incl. one performed
+  earlier on the evaluation date) are **locked history**: any proposal targeting such
+  a `(date, sport)` is dropped before returning, so a workout already finished today is
+  never "adapted". A **no-op backstop** (`_adapt_is_change`) then drops any proposal
+  that reproduces an existing same-sport session on every meaningful field (title,
+  description, duration/RPE/TSS — whitespace- and int/float-insensitive), so a session
+  the model re-lists unchanged is never re-stamped as adapted or needlessly re-synced.
 - **`workout_adapt_apply(proposed, reason, start, end)`** — deletes overridden
   workouts (+ calendar events), saves adapted workouts, syncs to Calendar. Each
   session keeps its short per-workout `change_reason` in `modification_reason`; the

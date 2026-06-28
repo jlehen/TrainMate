@@ -865,6 +865,38 @@ class CoachService:
         self.plan_generate(force=force, objective_id=objective_id)
         return self.workout_generate(objective_id=objective_id)
 
+    def _adapt_is_change(self, proposal: Dict[str, Any]) -> bool:
+        """True unless `proposal` exactly reproduces an existing same-sport session.
+
+        Backstops the adaptation prompt's "return only changed sessions" rule: a verbatim
+        (or cosmetic-only) re-list of an unchanged session is treated as a no-op so it is
+        not re-stamped as adapted or re-synced. A sport swap (no same-sport original) or a
+        proposal on a date with no current session is always a real change.
+        """
+        existing = self._db.get_workout(proposal['date'], proposal['sport_type'])
+        if not existing:
+            return True
+        if canonical_sport(existing['sport_type']) != canonical_sport(proposal['sport_type']):
+            return True
+
+        def _norm_text(v: Any) -> str:
+            return " ".join(str(v or "").split())
+
+        def _norm_num(v: Any) -> Optional[float]:
+            try:
+                return float(v) if v is not None else None
+            except (TypeError, ValueError):
+                return None
+
+        if _norm_text(proposal.get('title')) != _norm_text(existing.get('title')):
+            return True
+        if _norm_text(proposal.get('description')) != _norm_text(existing.get('description')):
+            return True
+        for field in ('duration_minutes', 'rpe', 'tss'):
+            if _norm_num(proposal.get(field)) != _norm_num(existing.get(field)):
+                return True
+        return False
+
     def workout_adapt(self, target_date_str: Optional[str] = None) -> Tuple[str, List[Workout]]:
         """Evaluates metrics/activities over a rolling window and adapts mesocycle if needed."""
         if not target_date_str:
@@ -1007,6 +1039,14 @@ class CoachService:
                 if (w.get("date"), canonical_sport(w.get("sport_type", "")))
                 not in completed_keys
             ]
+
+        # No-op backstop: the prompt tells the model to return ONLY changed sessions, but
+        # if it re-lists one verbatim (or with cosmetic-only churn) anyway, drop it here so
+        # an unchanged session is never re-stamped as adapted or needlessly re-synced. A
+        # proposal is a real change unless it matches an EXISTING same-sport session on every
+        # meaningful field; a sport swap (no same-sport original) or a brand-new date always
+        # counts as a change and is kept.
+        adapted = [w for w in adapted if self._adapt_is_change(w)]
 
         # Filter and structure returned workouts
         return reason, [

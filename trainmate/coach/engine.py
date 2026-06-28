@@ -608,6 +608,12 @@ evidence-backed observations are authored only by the weekly history analysis
             '    summary, shared by every adapted workout below — do NOT repeat it per\n'
             '    workout; keep per-workout notes in "change_reason".",\n'
             '  "adapted_workouts": [\n'
+            "    // Include ONLY sessions you are actually changing. Omit any session that\n"
+            "    // stays exactly as planned — it is preserved automatically, so re-listing\n"
+            "    // an unchanged session (even verbatim) is wrong and counts as a spurious\n"
+            "    // adaptation. EXCEPTION: if you change one session on a date that holds\n"
+            "    // ANOTHER session of a different sport you are keeping, include BOTH that\n"
+            "    // day so the kept one is not dropped.\n"
             "    {\n"
             '      "date": "YYYY-MM-DD",\n'
             '      "sport_type": "running" | "road_biking" | "hiking" | "strength_training" |\n'
@@ -678,14 +684,19 @@ Baseline Reference:
 {baseline_str}
 
 Planned Workouts (recent window for adherence + already-scheduled sessions through
-the adaptation range). When adapting, modify these EXISTING sessions in place —
-preserve each one's date and sport_type unless deliberately swapping the sport, and
-do NOT drop scheduled sessions you are not changing. Only invent a brand-new session
-for a date that currently has none.
+the adaptation range). This is the full forward plan for CONTEXT — most of it will
+usually be fine and should be left untouched. Return a session in "adapted_workouts"
+ONLY if you are genuinely changing it; sessions you omit stay exactly as planned (they
+are NOT dropped). Do not re-list a session just to keep it, and do not reword a session
+you don't mean to change — that registers as a spurious adaptation.
+When you DO change a session, modify it in place: preserve its date and sport_type
+unless deliberately swapping the sport. Only invent a brand-new session for a date that
+currently has none.
 Each session below includes its full description so you can reuse its specifics —
-interval structure, heart-rate zones, rest/recovery durations — when you carry a session
-over largely as-is. Adapt as boldly as the athlete's state warrants; the descriptions are
-here only so detail you are keeping isn't lost for lack of being restated:
+interval structure, heart-rate zones, rest/recovery durations — when you carry a changed
+session over largely as-is. Adapt as boldly as the athlete's state warrants, but only
+where their state actually warrants it; the descriptions are here only so detail you are
+keeping isn't lost for lack of being restated:
 {planned_text}
 {removed_section}
 Actual Completed Garmin Activities in Window:

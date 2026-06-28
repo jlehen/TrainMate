@@ -229,6 +229,80 @@ class TestAdaptation(unittest.TestCase):
                 prompt_user_content,
             )
 
+    @patch("trainmate.coach.engine.openrouter_client")
+    def test_adapt_drops_noop_relisted_session(self, mock_client):
+        """No-op backstop: if the model re-lists a session unchanged (here verbatim, plus a
+        cosmetic whitespace-only variant), it is dropped so an untouched session is never
+        re-stamped as adapted. A genuinely changed session on the same run is kept."""
+        test_profile = {"lthr": 165, "max_hr": 185}
+        with patch.dict(trainmate.coach.config.data, {
+            "user_profile": test_profile,
+            "coach": {
+                "metrics_lookback_days": 3,
+                "minor_activity_load_threshold": 10.0,
+            }
+        }):
+            mock_client.complete.return_value = {
+                "change_needed": True,
+                "reason": "Mostly on track; only the Friday tempo needs easing.",
+                "adapted_workouts": [
+                    # Verbatim re-list of the planned session — a no-op, must be dropped.
+                    {
+                        "date": "2026-06-04",
+                        "sport_type": "running",
+                        "title": "Easy Run",
+                        "description": "30 mins easy Z2",
+                        "duration_minutes": 30,
+                        "rpe": 4,
+                        "tss": 20.0,
+                    },
+                    # Same content but cosmetic whitespace churn + int/float tss — still a
+                    # no-op, must be dropped.
+                    {
+                        "date": "2026-06-05",
+                        "sport_type": "road_biking",
+                        "title": "Endurance Ride",
+                        "description": "60 mins  aerobic   base",
+                        "duration_minutes": 60,
+                        "rpe": 5,
+                        "tss": 40,
+                    },
+                    # Genuine change — must survive.
+                    {
+                        "date": "2026-06-06",
+                        "sport_type": "running",
+                        "title": "Eased Tempo",
+                        "description": "Cut to easy Z2 to shed intensity.",
+                        "duration_minutes": 35,
+                        "rpe": 5,
+                        "tss": 30.0,
+                    },
+                ],
+            }
+
+            test_db.save_metric_cache("2026-06-03", 50, 60, 80, 20, 10.0, 8.0, 1.1)
+            test_db.save_baseline("2026-06-03", 50.0, 2.0, 60.0, 5.0, 80.0, 5.0)
+
+            test_db.save_workout(
+                "2026-06-04", "running", "Easy Run", "30 mins easy Z2",
+                duration_minutes=30, rpe=4, tss=20,
+            )
+            test_db.save_workout(
+                "2026-06-05", "road_biking", "Endurance Ride", "60 mins aerobic base",
+                duration_minutes=60, rpe=5, tss=40,
+            )
+            test_db.save_workout(
+                "2026-06-06", "running", "Friday Tempo", "45 mins w/ tempo blocks",
+                duration_minutes=45, rpe=7, tss=55,
+            )
+
+            reason, proposed = coach_service.workout_adapt("2026-06-03")
+
+            dates = {p["date"] for p in proposed}
+            self.assertEqual(dates, {"2026-06-06"})
+            self.assertEqual(len(proposed), 1)
+            self.assertEqual(proposed[0]["title"], "Eased Tempo")
+
     def _swap_ops_for_dates(self, date1, date2):
         """Builds swap ops the way the CLI does: exchange all workouts on two dates."""
         on_1 = test_db.get_workouts(start_date=date1, end_date=date1)
