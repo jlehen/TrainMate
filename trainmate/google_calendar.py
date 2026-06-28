@@ -8,7 +8,7 @@ from trainmate.config import config
 from trainmate.db import db
 from trainmate.types import Workout
 from trainmate.calendar_state import calendar_signature
-from trainmate.util import yellow
+from trainmate.util import yellow, dim
 
 
 class CalendarSyncer:
@@ -452,7 +452,12 @@ def sync_calendar_context(force: bool = False) -> None:
                 age = datetime.now(timezone.utc) - datetime.fromisoformat(
                     state["last_pull_utc"]
                 )
-                if age <= timedelta(minutes=config.garmin_refresh_minutes):
+                if age <= timedelta(minutes=config.data_refresh_minutes):
+                    print(dim(
+                        f"Calendar context is fresh (last sync "
+                        f"{int(age.total_seconds() // 60)}m ago); using cache. "
+                        "Pass --force-pull to refresh now."
+                    ))
                     _context_synced = True
                     return
             except (ValueError, TypeError):

@@ -104,11 +104,19 @@ def main() -> None:
     
     subparsers = parser.add_subparsers(dest="command", help="Available commands")
     
-    # Common parser for commands that support bypassing the Garmin pull
+    # Common parser for commands that support bypassing or forcing the auto-pull.
+    # --no-pull and --force-pull are opposite ends of the same throttle, so they're
+    # mutually exclusive.
     pull_bypass_parser = argparse.ArgumentParser(add_help=False)
-    pull_bypass_parser.add_argument(
+    _pull_group = pull_bypass_parser.add_mutually_exclusive_group()
+    _pull_group.add_argument(
         "--no-pull", action="store_true", dest="no_pull",
-        help="Skip pull check from Garmin, reading purely from SQLite cache"
+        help="Skip the Garmin/Calendar pull check, reading purely from the SQLite cache"
+    )
+    _pull_group.add_argument(
+        "--force-pull", action="store_true", dest="force_pull",
+        help="Force a Garmin/Calendar refresh even within the refresh-minutes window, "
+             "bypassing the cache-reuse throttle"
     )
 
     # Common parser for debugging LLM prompts
@@ -1020,7 +1028,7 @@ def main() -> None:
     cmd = args.command.lower()
 
     if cmd in ("status", "s"):
-        run_status(verbose=args.verbose, no_pull=args.no_pull)
+        run_status(verbose=args.verbose, no_pull=args.no_pull, force_pull=args.force_pull)
     elif cmd in ("goal", "g"):
         if not args.subcommand:
             goal_parser.print_help()

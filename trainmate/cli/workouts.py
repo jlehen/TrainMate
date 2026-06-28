@@ -20,7 +20,9 @@ def run_workout_adapt(args: argparse.Namespace) -> None:
     # Executes the daily workout Garmin adaptation checks command.
     date_str = args.date or _today_str()
 
-    ensure_recent_data(date_str, no_pull=args.no_pull)
+    ensure_recent_data(
+        date_str, no_pull=args.no_pull, force_pull=getattr(args, 'force_pull', False)
+    )
 
     # Display rolling trajectory
     try:
@@ -238,7 +240,9 @@ def _resolve_workout_end_date(
 
 def run_workout_generate(args: argparse.Namespace) -> None:
     """Executes the AI workout generation command based on active strategy."""
-    ensure_recent_data(no_pull=args.no_pull)
+    ensure_recent_data(
+        no_pull=args.no_pull, force_pull=getattr(args, 'force_pull', False)
+    )
 
     try:
         objectives = cli.db.get_objectives(status='active')
@@ -522,7 +526,9 @@ def run_workout_compare(args: argparse.Namespace) -> None:
 
     if not getattr(args, 'no_pull', False):
         try:
-            cli.garmin.ensure_data(start_date, end_date)
+            cli.garmin.ensure_data(
+                start_date, end_date, force=getattr(args, 'force_pull', False)
+            )
         except Exception as e:
             print(yellow(f"Warning: Could not ensure recent data: {e}"))
 

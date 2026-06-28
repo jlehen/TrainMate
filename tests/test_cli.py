@@ -1155,6 +1155,7 @@ class TestTrainMateCLI(unittest.TestCase):
             force=False,
             inspect_only=False,
             no_pull=False,
+            force_pull=False,
             auto=False,
         )
 
@@ -1174,6 +1175,7 @@ class TestTrainMateCLI(unittest.TestCase):
             force=False,
             inspect_only=True,
             no_pull=False,
+            force_pull=False,
             auto=False,
         )
 
@@ -1194,7 +1196,9 @@ class TestTrainMateCLI(unittest.TestCase):
         self.assertEqual(exit_code, 0)
         self.assertIn("=== ATHLETE METRICS", stdout)
         self.assertIn("2026-06-03", stdout)
-        mock_garmin.ensure_data.assert_called_once_with("2026-06-01", "2026-06-05")
+        mock_garmin.ensure_data.assert_called_once_with(
+            "2026-06-01", "2026-06-05", force=False
+        )
 
         mock_garmin.ensure_data.reset_mock()
         exit_code, stdout, stderr = self.run_cli([

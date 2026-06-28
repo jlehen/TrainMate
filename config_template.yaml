@@ -2,6 +2,11 @@ llm:
   api_key: "YOUR_OPENROUTER_API_KEY"
   model: "google/gemini-3.5-flash"
 
+# Minimum minutes before an automatic refresh re-pulls — gates both Garmin hits and
+# Calendar-context syncs; within this window reads reuse the local cache. Bypass a single
+# run with --force-pull.
+#refresh_minutes: 120
+
 google:
   # Service-account JSON file used to authenticate to the Google APIs.
   service_account_file: "service_account.json"
@@ -15,8 +20,6 @@ garmin:
   password: "your-garmin-password"
   # Directory where the garminconnect OAuth tokens are persisted.
   #token_dir: "~/.garminconnect"
-  # Minimum minutes between automatic Garmin hits before a refresh re-pulls.
-  #refresh_minutes: 120
   # Trailing days a forward-refresh re-fetches to catch late-finalizing data.
   #mutable_days: 3
   # Backward-gap size above which a backfill is surfaced as a command rather

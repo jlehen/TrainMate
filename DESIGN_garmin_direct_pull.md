@@ -161,7 +161,7 @@ window `[S, E]` needs Garmin contact when:
 
 - `E > through_date` → **forward extension** (new days), or
 - `E` is within the **mutable recent zone** and `now − last_pull_utc >
-  garmin_refresh_minutes` → **re-refresh**, or
+  data_refresh_minutes` (or `--force-pull`) → **re-refresh**, or
 - the **required raw window** (next section) is not covered below `S` →
   **backfill**.
 
@@ -332,7 +332,7 @@ helper.
 ## 13. Configuration (`config.yaml`)
 
 ```yaml
-garmin_refresh_minutes: 120        # min time between automatic Garmin hits
+refresh_minutes: 120               # top-level: min time between automatic Garmin/Calendar refreshes
 garmin_mutable_days: 3             # trailing days a forward-refresh re-fetches
 garmin_backfill_prompt_days: 30    # small→auto / large→print-command cutoff (also gates interior gaps)
 garmin_initial_backfill_days: 90   # range used to build the cold-start printed command

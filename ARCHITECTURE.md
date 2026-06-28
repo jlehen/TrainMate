@@ -974,7 +974,8 @@ Required fields:
 | `openrouter_model`     | str  | Default: `google/gemini-3.5-flash`                            |
 | `google_calendar_id`   | str  | Target calendar ID                                            |
 | `garmin_email` / `garmin_password` | str | Garmin login; config.yaml only (kept out of the environment) |
-| `garmin_refresh_minutes` / `garmin_mutable_days` / `garmin_backfill_prompt_days` / `garmin_initial_backfill_days` / `garmin_throttle_seconds` | — | Auto-ensure tuning (see §8) |
+| `data_refresh_minutes` | int | Throttle window shared by Garmin pulls **and** Calendar-context syncs; reads inside it reuse the cache. Top-level config key `refresh_minutes` (default 120) |
+| `garmin_mutable_days` / `garmin_backfill_prompt_days` / `garmin_initial_backfill_days` / `garmin_throttle_seconds` | — | Auto-ensure tuning (see §8) |
 | `service_account_file` | str  | Path to service account JSON (default:                        |
 |                        |      | `service_account.json`)                                       |
 | `metrics_lookback_days`  | int  | Rolling window for adaptation (default: 15)                  |
@@ -1084,9 +1085,13 @@ design: `DESIGN_garmin_direct_pull.md`.
 entry (idempotent per process via an in-memory memo). It pulls the
 28-day-padded required window where the gap is small/recent and **prints a
 copy-pastable `data pull` command for large backfills** (cold start, big
-forward/backward gaps), always continuing with cached data. These commands support
-the `--no-pull` option to bypass the sync check and read purely from the local SQLite
-cache. Calendar dates use the machine-local timezone (`util.today_str`/`today_date`);
+forward/backward gaps), always continuing with cached data. The same entry point also
+rides along a best-effort Calendar daily-context sync (`google_calendar.sync_calendar_context`),
+gated by the same `data_refresh_minutes` throttle. When that throttle keeps a read on
+cached data (Garmin or Calendar), a one-line note says so. These commands support
+`--no-pull` to bypass the sync entirely (cache-only) and `--force-pull` to refresh even
+within the throttle window (the two are mutually exclusive). Calendar dates use the
+machine-local timezone (`util.today_str`/`today_date`);
 stored instants stay UTC. The web app never calls this — it is a pure reader (see §1).
 
 ### Data Analysis (`data bootstrap` / `data reflect`)

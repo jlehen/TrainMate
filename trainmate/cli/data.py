@@ -242,7 +242,9 @@ def run_data_show_metrics(args: argparse.Namespace) -> None:
 
     if not getattr(args, 'no_pull', False) and not getattr(args, 'all', False):
         try:
-            cli.garmin.ensure_data(start_date, end_date)
+            cli.garmin.ensure_data(
+                start_date, end_date, force=getattr(args, 'force_pull', False)
+            )
         except Exception as e:
             print(yellow(f"Warning: Could not ensure recent data: {e}"))
 
@@ -365,7 +367,9 @@ def run_data_show_activities(args: argparse.Namespace) -> None:
 
     if not getattr(args, 'no_pull', False) and not getattr(args, 'all', False):
         try:
-            cli.garmin.ensure_data(start_date, end_date)
+            cli.garmin.ensure_data(
+                start_date, end_date, force=getattr(args, 'force_pull', False)
+            )
         except Exception as e:
             print(yellow(f"Warning: Could not ensure recent data: {e}"))
 
@@ -515,6 +519,7 @@ def run_data_bootstrap(args: argparse.Namespace) -> None:
             force=args.force,
             inspect_only=args.inspect_only,
             no_pull=args.no_pull,
+            force_pull=args.force_pull,
             auto=getattr(args, "auto", False),
         )
         _render_analysis_report(result, args.inspect_only)
@@ -534,6 +539,7 @@ def run_data_reflect(args: argparse.Namespace) -> None:
             force=args.force,
             inspect_only=args.inspect_only,
             no_pull=args.no_pull,
+            force_pull=args.force_pull,
             auto=getattr(args, "auto", False),
         )
         if not result:

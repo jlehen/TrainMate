@@ -148,9 +148,11 @@ class Config:
         return os.path.expanduser(path)
 
     @property
-    def garmin_refresh_minutes(self) -> int:
-        """Minimum minutes between automatic Garmin hits before a refresh re-pulls (default 120)."""
-        return int(self.get("garmin", {}).get("refresh_minutes", 120))
+    def data_refresh_minutes(self) -> int:
+        """Minimum minutes before an automatic refresh re-pulls — gating both Garmin hits
+        and Calendar-context syncs; within this window reads reuse the local cache
+        (top-level `refresh_minutes`, default 120)."""
+        return int(self.get("refresh_minutes", 120))
 
     @property
     def garmin_mutable_days(self) -> int:

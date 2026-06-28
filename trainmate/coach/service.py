@@ -1436,7 +1436,7 @@ class CoachService:
         self, from_date_str: Optional[str] = None, until_date_str: Optional[str] = None,
         days: Optional[int] = None, weeks: Optional[int] = None,
         context: Optional[str] = None, force: bool = False, inspect_only: bool = False,
-        no_pull: bool = False, auto: bool = False
+        no_pull: bool = False, force_pull: bool = False, auto: bool = False
     ) -> Dict[str, Any]:
         """Cold-start backward reconstruction over the full training backlog.
 
@@ -1510,8 +1510,8 @@ class CoachService:
 
         decision = self._run_workout_analysis(
             from_date, until_date, context=context, force=force,
-            inspect_only=inspect_only, no_pull=no_pull, horizon="long",
-            label="data_bootstrap",
+            inspect_only=inspect_only, no_pull=no_pull, force_pull=force_pull,
+            horizon="long", label="data_bootstrap",
         )
         # Establish the reflect baseline and record the bootstrap run (read-only inspect
         # mode writes nothing).
@@ -1525,7 +1525,7 @@ class CoachService:
         self, from_date_str: Optional[str] = None, until_date_str: Optional[str] = None,
         days: Optional[int] = None, weeks: Optional[int] = None,
         context: Optional[str] = None, force: bool = False, inspect_only: bool = False,
-        no_pull: bool = False, auto: bool = False
+        no_pull: bool = False, force_pull: bool = False, auto: bool = False
     ) -> Dict[str, Any]:
         """Incremental reflection over evidence accrued since the last reflect.
 
@@ -1576,8 +1576,8 @@ class CoachService:
 
         decision = self._run_workout_analysis(
             from_date, until_date, context=context, force=force,
-            inspect_only=inspect_only, no_pull=no_pull, horizon="short",
-            label="data_reflect",
+            inspect_only=inspect_only, no_pull=no_pull, force_pull=force_pull,
+            horizon="short", label="data_reflect",
         )
         if not inspect_only:
             self._advance_reflect_watermark(until_date.strftime("%Y-%m-%d"))
@@ -1808,7 +1808,8 @@ class CoachService:
     def _run_workout_analysis(
         self, from_date, until_date,
         context: Optional[str] = None, force: bool = False, inspect_only: bool = False,
-        no_pull: bool = False, horizon: str = "long", label: str = "workout_analysis"
+        no_pull: bool = False, force_pull: bool = False,
+        horizon: str = "long", label: str = "workout_analysis"
     ) -> Dict[str, Any]:
         """Shared core for bootstrap/reflect: builds weekly summaries over
         [from_date, until_date], runs the LLM reconstruction, applies learning deltas,
@@ -1833,7 +1834,7 @@ class CoachService:
         # surface a command for large backfills) before reading it unless no_pull is True.
         if not no_pull:
             from trainmate import garmin
-            garmin.ensure_data(from_str, until_str)
+            garmin.ensure_data(from_str, until_str, force=force_pull)
 
         metrics = self._db.get_metrics_cache(start_date=from_str, end_date=until_str)
         completed_activities = self._db.get_completed_activities(

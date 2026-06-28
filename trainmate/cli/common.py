@@ -15,10 +15,13 @@ def fmt_date(date_str: str) -> str:
     return datetime.strptime(date_str, "%Y-%m-%d").strftime("%Y-%m-%d %a")
 
 
-def ensure_recent_data(end_date: Optional[str] = None, no_pull: bool = False) -> None:
+def ensure_recent_data(
+    end_date: Optional[str] = None, no_pull: bool = False, force_pull: bool = False
+) -> None:
     """Ensures Garmin data covering the recent metrics window is present and fresh,
     auto-pulling small/recent gaps and surfacing large backfills as a command. Warns
-    if today's metrics are still unavailable afterward."""
+    if today's metrics are still unavailable afterward. `force_pull` bypasses the
+    refresh-minutes throttle."""
     import trainmate_cli as cli
     if no_pull:
         return
@@ -27,7 +30,7 @@ def ensure_recent_data(end_date: Optional[str] = None, no_pull: bool = False) ->
     start_date = (
         datetime.strptime(end_date, "%Y-%m-%d").date() - timedelta(days=history_days - 1)
     ).strftime("%Y-%m-%d")
-    cli.garmin.ensure_data(start_date, end_date)
+    cli.garmin.ensure_data(start_date, end_date, force=force_pull)
 
     today = _today_str()
     if end_date == today:

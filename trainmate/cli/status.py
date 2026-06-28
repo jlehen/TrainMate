@@ -13,9 +13,11 @@ from trainmate.util import (
 from trainmate.cli.common import fmt_date, ensure_recent_data
 
 
-def run_status(verbose: bool = False, no_pull: bool = False) -> None:
+def run_status(
+    verbose: bool = False, no_pull: bool = False, force_pull: bool = False
+) -> None:
     """Displays current athlete goals, Garmin metrics, baselines, and memories."""
-    ensure_recent_data(no_pull=no_pull)
+    ensure_recent_data(no_pull=no_pull, force_pull=force_pull)
     print(bold(cyan("=== TRAINMATE ATHLETE STATUS ===")))
     
     # Active Goal & Periodization Strategy

@@ -701,17 +701,21 @@ def _contiguous_regions(missing: List[str]) -> List[Tuple[str, str]]:
     return regions
 
 
-def ensure_data(start_date: str, end_date: str) -> None:
+def ensure_data(start_date: str, end_date: str, force: bool = False) -> None:
     """Ensures Garmin data covering [start_date, end_date] is present and fresh,
     pulling automatically where the gap is small and surfacing a copy-pastable
     command where it is large. Always continue-with-warning: never aborts, never
     blocks. Call once at command entry with the window the command will read.
+
+    `force` (from --force-pull) bypasses the refresh-minutes throttle: the recent
+    mutable zone is re-fetched and Calendar context re-synced even if a refresh ran
+    within the freshness window.
     """
     global _ensured
     # Refresh external calendar context alongside the data read (independent of Garmin
     # auth; throttled + memoized inside, best-effort). Done first so it still runs even
     # when Garmin credentials are absent.
-    _sync_calendar_context(force=False)
+    _sync_calendar_context(force=force)
 
     # No credentials → we can't pull anyway. Stay silent rather than warn on every
     # read; manual `data pull` reports the missing-credentials error explicitly.
@@ -724,13 +728,14 @@ def ensure_data(start_date: str, end_date: str) -> None:
     if req_end < pad_start:
         return  # window lies entirely in the future
 
-    # Process memo: skip if already covered by a prior ensure this run.
-    if _ensured and _ensured[0] <= pad_start and req_end <= _ensured[1]:
+    # Process memo: skip if already covered by a prior ensure this run. --force-pull
+    # bypasses the memo so an explicit refresh actually re-fetches.
+    if not force and _ensured and _ensured[0] <= pad_start and req_end <= _ensured[1]:
         return
 
     state = db.get_sync_state()
     present = set(db.get_metric_dates())
-    refresh_minutes = config.garmin_refresh_minutes
+    refresh_minutes = config.data_refresh_minutes
     mutable_days = config.garmin_mutable_days
     prompt_days = config.garmin_backfill_prompt_days
 
@@ -741,14 +746,18 @@ def ensure_data(start_date: str, end_date: str) -> None:
         _remember(pad_start, req_end)
         return
 
-    # Is the recent (mutable) zone stale?
+    # Is the recent (mutable) zone stale? --force-pull treats it as stale unconditionally.
     stale = True
+    last_pull_age_min: Optional[int] = None
     if state and state.get("last_pull_utc"):
         try:
             age = datetime.now(timezone.utc) - datetime.fromisoformat(state["last_pull_utc"])
+            last_pull_age_min = int(age.total_seconds() // 60)
             stale = age > timedelta(minutes=refresh_minutes)
         except (ValueError, TypeError):
             stale = True
+    if force:
+        stale = True
     mutable_start = _shift(today, -(mutable_days - 1))
 
     # A needed day must be fetched if it has no row, or it's in the (stale) mutable
@@ -758,6 +767,17 @@ def ensure_data(start_date: str, end_date: str) -> None:
         if d not in present or (stale and d >= mutable_start)
     ]
     if not to_fetch:
+        # Nothing to do. If the only reason we're not re-fetching the recent mutable zone
+        # is the refresh-minutes throttle, say so — otherwise this silent reuse is opaque.
+        if not stale and req_end >= mutable_start:
+            age_note = (
+                f"last pull {last_pull_age_min}m ago, < {refresh_minutes}m"
+                if last_pull_age_min is not None else "recently pulled"
+            )
+            print(dim(
+                f"Garmin data is fresh ({age_note}); using cache. "
+                "Pass --force-pull to refresh now."
+            ))
         _remember(pad_start, req_end)
         return
 

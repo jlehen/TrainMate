@@ -18,7 +18,7 @@ from trainmate.cli.common import fmt_date, ensure_recent_data
 def run_plan_generate(args: argparse.Namespace) -> None:
     """Executes the AI periodization strategy plan generation command."""
     # Make sure we have latest metrics cached
-    ensure_recent_data(no_pull=args.no_pull)
+    ensure_recent_data(no_pull=args.no_pull, force_pull=getattr(args, 'force_pull', False))
     metrics = cli.db.get_metrics_cache()
     if not metrics:
         print(yellow("Warning: Metrics cache is empty. Proceeding without Garmin metrics."))
@@ -36,7 +36,9 @@ def run_plan_generate(args: argparse.Namespace) -> None:
             except EOFError:
                 confirm = 'n'
             if confirm in ('y', 'yes'):
-                cli.coach_service.data_bootstrap(no_pull=args.no_pull)
+                cli.coach_service.data_bootstrap(
+                    no_pull=args.no_pull, force_pull=getattr(args, 'force_pull', False)
+                )
 
         objectives = cli.db.get_objectives(status='active')
         if objectives:
