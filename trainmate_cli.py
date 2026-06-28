@@ -313,7 +313,7 @@ def main() -> None:
         help="Author a context signal over a day or date range",
         description=(
             "Write a tagged all-day context event per day in the range and mirror it "
-            "locally. Defaults to today. Metric/label are prompted if omitted; re-adding "
+            "locally. Defaults to today; the label is optional. Re-adding "
             "the same (date, metric) updates in place rather than duplicating."
         )
     )
@@ -325,7 +325,10 @@ def main() -> None:
         help="Human label/summary (alternative to the positional text; takes "
              "precedence, and avoids word-splitting for multi-word labels)"
     )
-    ctx_add.add_argument("-m", "--metric", help="Opaque category, e.g. heat, sleep, stress")
+    ctx_add.add_argument(
+        "-m", "--metric", required=True,
+        help="Opaque category, e.g. heat, sleep, stress"
+    )
     ctx_add.add_argument(
         "--value", type=float, metavar="N",
         help="Optional free numeric magnitude (severity, °C, count — uninterpreted)"

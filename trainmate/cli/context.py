@@ -25,16 +25,6 @@ def _date_range(start: str, end: str) -> Iterator[str]:
         d += timedelta(days=1)
 
 
-def _prompt(label: str, default: Optional[str] = None) -> Optional[str]:
-    """Reads a line interactively, returning `default` on empty input or EOF."""
-    suffix = f" [{default}]" if default else ""
-    try:
-        raw = input(f"{label}{suffix}: ").strip()
-    except EOFError:
-        return default
-    return raw or default
-
-
 def _context_summary(metric: str, value: Optional[float], label: str) -> str:
     """Builds the calendar entry / LLM blurb. A provided label gets the value
     appended in parentheses (`severe heatwave (38.0)`); with no label it's
@@ -59,20 +49,9 @@ def run_context_add(args: argparse.Namespace) -> None:
         sys.exit(1)
 
     metric = args.metric
-    if not metric:
-        existing = [m["metric"] for m in cli.db.list_context_metrics()]
-        if existing:
-            print(dim(f"Existing metrics: {', '.join(existing)}"))
-        metric = _prompt("Metric (e.g. heat, sleep, stress)")
-        if not metric:
-            print(red("A metric is required."))
-            sys.exit(1)
-
     value = args.value
 
     label = (args.label or " ".join(args.text or [])).strip()
-    if not label:
-        label = (_prompt("Label (optional)", default="") or "").strip()
     text = _context_summary(metric, value, label)
 
     count = 0
