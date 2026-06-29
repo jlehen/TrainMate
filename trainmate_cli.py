@@ -91,6 +91,115 @@ from trainmate.cli.context import (
 )
 
 
+def _canonical_option(action: argparse.Action) -> str:
+    """The most explicit spelling of an option (argparse accepts any registered one)."""
+    return max(action.option_strings, key=len)
+
+
+def _build_keyword_spec(parser: argparse.ArgumentParser) -> dict:
+    """Map every dashless option spelling -> its action for one parser level.
+
+    ``--from``/``--from-date`` both register (``from``, ``from-date``); ``-y`` registers
+    ``y``. Positionals, the sub-parsers action, and ``-h/--help`` are excluded. Two
+    distinct actions claiming one keyword in the same command is an authoring bug, so we
+    warn rather than silently shadow.
+    """
+    spec: dict = {}
+    for action in parser._actions:
+        if isinstance(action, (argparse._HelpAction, argparse._SubParsersAction)):
+            continue
+        if not action.option_strings:
+            continue  # positional — bound by position, not by keyword
+        for opt in action.option_strings:
+            kw = opt.lstrip("-")
+            if kw in spec and spec[kw] is not action:
+                print(yellow(f"Warning: ambiguous dashless keyword '{kw}'"), file=sys.stderr)
+            spec[kw] = action
+    return spec
+
+
+def _subparser_choices(parser: argparse.ArgumentParser) -> dict:
+    """The sub-command/alias -> sub-parser map for this level (empty for leaf commands)."""
+    for action in parser._actions:
+        if isinstance(action, argparse._SubParsersAction):
+            return action.choices
+    return {}
+
+
+def translate_dashless_argv(parser: argparse.ArgumentParser, tokens: list) -> list:
+    """Rewrite network-appliance-style dashless options back into ``--flag`` form.
+
+    The dashless syntax (``workout adapt message "..." no-pull``) and the classic
+    ``--flag`` syntax funnel through the *same* argparse tree: this preprocessor consults
+    the tree itself (per-command option specs) to expand bare keywords, then hands the
+    result to ``parse_args`` which still does all validation/help/choices. Both syntaxes —
+    even mixed — therefore keep working, and the command handlers are untouched.
+
+    Rules per token, at the current command level:
+      * ``-…`` (already dashed) → passed through verbatim (classic syntax / its values).
+      * a known boolean keyword (``nargs == 0``) → ``--flag``, consumes nothing.
+      * a known multi-value keyword (``nargs`` in ``+``/``*``) → ``--flag`` then the next
+        token split on commas (``sport running,hiking`` → ``--sport running hiking``).
+      * a known optional-value keyword (``nargs == '?'``, e.g. ``mesocycle [ID]``) →
+        ``--flag``, consuming the next token only if it isn't itself a keyword/option.
+      * any other known keyword → ``--flag`` and binds the very next token as its value
+        unconditionally (so a value colliding with a keyword name — a goal literally
+        titled ``date`` — is still taken as the value).
+      * a sub-command/alias → emitted, then the remainder is translated in that
+        sub-parser's context (recursive descent mirroring the parser tree).
+      * anything else → left as-is for argparse to bind positionally.
+    """
+    spec = _build_keyword_spec(parser)
+    sub_choices = _subparser_choices(parser)
+    out: list = []
+    i, n = 0, len(tokens)
+    while i < n:
+        tok = tokens[i]
+        if tok.startswith("-"):
+            out.append(tok)
+            i += 1
+            continue
+        action = spec.get(tok)
+        if action is not None:
+            out.append(_canonical_option(action))
+            nargs = action.nargs
+            nxt = tokens[i + 1] if i + 1 < n else None
+            if nargs == 0:
+                i += 1
+            elif nargs in ("+", "*"):
+                if nxt is not None:
+                    out.extend(nxt.split(","))
+                    i += 2
+                else:
+                    i += 1
+            elif nargs == "?":
+                takes = (
+                    nxt is not None
+                    and not nxt.startswith("-")
+                    and nxt not in spec
+                    and nxt not in sub_choices
+                )
+                if takes:
+                    out.append(nxt)
+                    i += 2
+                else:
+                    i += 1
+            else:
+                if nxt is not None:
+                    out.append(nxt)
+                    i += 2
+                else:
+                    i += 1
+            continue
+        if tok in sub_choices:
+            out.append(tok)
+            out.extend(translate_dashless_argv(sub_choices[tok], tokens[i + 1:]))
+            return out
+        out.append(tok)
+        i += 1
+    return out
+
+
 def main() -> None:
     """Entry point for the TrainMate Command Line Interface."""
     parser = argparse.ArgumentParser(
@@ -1019,8 +1128,10 @@ def main() -> None:
     )
     d_wipe.add_argument("-y", "--yes", action="store_true", help="Skip confirmation prompt")
     
-    # Parse the arguments
-    args = parser.parse_args()
+    # Parse the arguments. Network-appliance-style dashless options
+    # (e.g. `workout adapt message "..." no-pull`) are first rewritten back into
+    # `--flag` form against the parser tree, so both syntaxes share one definition.
+    args = parser.parse_args(translate_dashless_argv(parser, sys.argv[1:]))
     
     if getattr(args, "llm_model", None):
         from trainmate.openrouter import openrouter_client
