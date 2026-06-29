@@ -159,6 +159,9 @@ def translate_dashless_argv(parser: argparse.ArgumentParser, tokens: list) -> li
             out.append(tok)
             i += 1
             continue
+        if tok == "help":
+            out.append("--help")
+            return out
         action = spec.get(tok)
         if action is not None:
             out.append(_canonical_option(action))
