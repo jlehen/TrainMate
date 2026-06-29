@@ -58,19 +58,26 @@ def _format_actual(act: Dict[str, Any]) -> str:
 def mark_adherence_from_results(
     matching_results: List[Dict[str, Any]], today_str: Optional[str] = None
 ) -> int:
-    """Stamps the backward adherence verdict onto each *strictly past* planned
-    workout's Calendar event (title tag + 'Adherence' header). Today/future
-    events are skipped (a not-yet-done session would falsely read as missed), as
-    are workouts without an existing event. Best-effort per event: a Calendar
-    failure degrades to a warning. Returns the number of events marked; the
-    caller owns any summary line."""
+    """Stamps the adherence verdict onto past and same-day planned workout Calendar
+    events (title tag + 'Adherence' header). Future events are always skipped.
+    Today's event is skipped only when no activity was matched — marking an
+    unmatched today's session would falsely read as missed. Workouts without an
+    existing Calendar event are skipped. Best-effort per event: a Calendar failure
+    degrades to a warning. Returns the number of events marked; the caller owns
+    any summary line."""
     import trainmate_cli as cli
     today_str = today_str or _today_str()
     threshold = config.minor_activity_load_threshold
     marked = 0
     for r in matching_results:
         w = r['planned']
-        if not w.get('google_event_id') or r['date'] >= today_str:
+        if not w.get('google_event_id'):
+            continue
+        # Skip future dates always. Skip today only when unmatched — a not-yet-done
+        # session would falsely read as missed.
+        if r['date'] > today_str:
+            continue
+        if r['date'] == today_str and not r['completed']:
             continue
         verdict = classify_adherence(w, r['completed'], threshold)
         actual = _format_actual(r['completed']) if r['completed'] else None
