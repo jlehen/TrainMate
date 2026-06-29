@@ -68,12 +68,14 @@ does the coaching reasoning.
 
 ## System Architecture
 
-TrainMate consists of two primary interfaces built on a unified coaching logic
+TrainMate consists of three interfaces built on a unified coaching logic
 and SQLite database:
 1. **Command Line Interface (`trainmate_cli.py`)**: A rich CLI for managing
    goals, generating plans, syncing data, and viewing status.
 2. **Web API (`trainmate_web.py`)**: A Flask-based REST API serving a web
    frontend for visual management.
+3. **Telegram bot (`trainmate_bot.py`)**: A chat front-end that runs the same
+   CLI commands from your phone (see [Running the Telegram bot](#running-the-telegram-bot)).
 
 For more deep-dive technical details on how the coaching logic and application
 internals work, see the [Architecture Document](ARCHITECTURE.md).
@@ -130,3 +132,37 @@ To start the Flask server locally:
 python trainmate_web.py
 ```
 Then visit `http://127.0.0.1:5000` in your browser.
+
+## Running the Telegram bot
+
+The bot lets you drive TrainMate from your phone using the same commands as the
+CLI — the leading `/` Telegram requires is optional:
+
+```
+/status
+/workout list --weeks 1
+/workout adapt -m "tired today"
+/help workout
+```
+
+Each message is run through `trainmate_cli.py` as a subprocess, so the bot
+always supports exactly what the CLI does. Setup:
+
+1. Create a bot with [@BotFather](https://t.me/BotFather) and copy its token.
+2. Message your bot once, then find your numeric chat id (e.g. via
+   [@userinfobot](https://t.me/userinfobot)).
+3. Add a `telegram:` block to `config.yaml` (see `config_template.yaml`):
+   ```yaml
+   telegram:
+     bot_token: "123456789:ABCdef..."   # or set TELEGRAM_BOT_TOKEN
+     allowed_chat_ids:
+       - 123456789                      # only these chat ids may use the bot
+   ```
+4. Start the long-polling bot (no public URL needed):
+   ```bash
+   ./tm-bot
+   ```
+
+Only allow-listed chat ids are served. Because the bot can't ask for
+confirmation, destructive commands (`wipe`, `rm`) are declined unless you pass
+their `-y`/`--yes` flag.

@@ -41,6 +41,7 @@ Calendar.
   |               User Interface Layer               |
   |  trainmate_cli.py (shim) + trainmate/cli/        |
   |  trainmate_web.py (Flask)                        |
+  |  trainmate_bot.py (Telegram → CLI subprocess)    |
   +---------------------------+----------------------+
                               |
   +---------------------------v----------------------+
@@ -80,6 +81,18 @@ classes themselves.
   shared `common`.
 - **`trainmate_web.py`** — Flask REST API; thin handler functions calling `db`,
   `coach_service`, `calendar_syncer` (pure reader — never pulls).
+- **`trainmate_bot.py`** — Telegram chat front-end. A message is treated as a CLI
+  command line (leading `/` optional) and run through `trainmate_cli.py` *as a
+  subprocess*; stdout+stderr are ANSI-stripped and returned as a `<pre>` reply.
+  Running the real CLI keeps the bot in permanent parity with every command/flag
+  and isolates each call; a stream of `n` declines is fed on stdin so the
+  handlers' `input()` confirmations abort cleanly — destructive ops therefore
+  no-op over chat unless their `-y`/`--yes` flag is passed. Access is gated by a
+  numeric chat-id allowlist (`telegram.allowed_chat_ids`). Token + allowlist live
+  under a `telegram:` block in `config.yaml` (or `TELEGRAM_BOT_TOKEN`). Launch
+  with `./tm-bot`. The pure helpers (`parse_message_to_argv`, `chunk_text`,
+  `format_reply`, `is_authorized`) are import-safe without `python-telegram-bot`
+  (imported lazily in `main`) and unit-tested in `tests/test_bot.py`.
 
 ### Package `trainmate/`
 

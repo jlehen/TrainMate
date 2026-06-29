@@ -9,3 +9,6 @@ google-auth>=2.0
 
 # Garmin Connect (direct daily-metrics & activity sync)
 garminconnect>=0.2.0
+
+# Telegram chat front-end (trainmate_bot.py); optional — only needed to run the bot
+python-telegram-bot>=21.0

@@ -206,5 +206,47 @@ class Config:
         Default 1 (show whatever exists; the LLM judges from the visible count)."""
         return int(self.get("coach", {}).get("context_days_min_signal_days", 1))
 
+    @property
+    def telegram_bot_token(self) -> Optional[str]:
+        """Telegram bot token used by the chat front-end (trainmate_bot.py).
+
+        Prefers the TELEGRAM_BOT_TOKEN env variable over config.yaml so the secret
+        can be injected at runtime; returns None when neither is set."""
+        token = os.environ.get("TELEGRAM_BOT_TOKEN")
+        if not token:
+            token = self.get("telegram", {}).get("bot_token")
+        return token or None
+
+    @property
+    def telegram_allowed_chat_ids(self) -> list[int]:
+        """Telegram chat IDs allowed to drive the bot — the single-user allowlist.
+
+        An empty list means *no one* is authorized (the bot refuses every message);
+        the operator must add their own chat id. Non-integer entries are ignored."""
+        raw = self.get("telegram", {}).get("allowed_chat_ids") or []
+        ids = []
+        for entry in raw:
+            try:
+                ids.append(int(entry))
+            except (TypeError, ValueError):
+                continue
+        return ids
+
+    @property
+    def telegram_command_timeout(self) -> int:
+        """Seconds a single bot-dispatched CLI command may run before it's killed.
+
+        LLM-backed commands (plan/workout generate) are slow, so the default is
+        generous. Default 180."""
+        return int(self.get("telegram", {}).get("command_timeout_seconds", 180))
+
+    @property
+    def telegram_wrap_width(self) -> int:
+        """Column width the CLI wraps prose to when driven by the bot (via the
+        TRAINMATE_WRAP_WIDTH env var). The CLI's terminal default is 80, which a
+        phone-width monospace block then double-wraps; ~48 fits portrait without
+        the client re-wrapping. Default 48."""
+        return int(self.get("telegram", {}).get("wrap_width", 48))
+
 # Singleton instance
 config = Config()

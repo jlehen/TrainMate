@@ -3,9 +3,25 @@ import re
 import sys
 import textwrap
 from datetime import date
+from typing import Optional
 
 # ANSI escape codes for terminal coloring
 ANSI_ESCAPE = re.compile(r'(?:\033|\x1b)\[[0-9;]*m')
+
+
+def default_wrap_width() -> int:
+    """The column width text wrapping targets, default 80.
+
+    Overridable via the TRAINMATE_WRAP_WIDTH env var so a narrow client (e.g. the
+    Telegram bot rendering into a phone-width monospace block) can ask the CLI to
+    wrap tighter and avoid the client double-wrapping 80-col lines. Floored at 20."""
+    raw = os.environ.get("TRAINMATE_WRAP_WIDTH")
+    if not raw:
+        return 80
+    try:
+        return max(20, int(raw))
+    except ValueError:
+        return 80
 
 
 def today_date() -> date:
@@ -100,8 +116,13 @@ def pad_visible(s: str, width: int, align_left: bool = True) -> str:
         return padding + s
 
 
-def wrap_text(text: str, width: int = 80) -> str:
-    """Wraps text at the specified width while preserving layout and indentation."""
+def wrap_text(text: str, width: Optional[int] = None) -> str:
+    """Wraps text at the specified width while preserving layout and indentation.
+
+    When width is None it falls back to default_wrap_width() (80, or the
+    TRAINMATE_WRAP_WIDTH override)."""
+    if width is None:
+        width = default_wrap_width()
     if not text:
         return text
     paragraphs = text.split('\n')
@@ -126,9 +147,11 @@ def wrap_text(text: str, width: int = 80) -> str:
 
 
 def format_labeled_text(
-    label: str, text: str, width: int = 80, color_fn=None
+    label: str, text: str, width: Optional[int] = None, color_fn=None
 ) -> str:
     """Wraps and indents text dynamically under its label, optional coloring."""
+    if width is None:
+        width = default_wrap_width()
     indent_len = visible_len(label)
     wrapped_width = max(20, width - indent_len)
     wrapped_text = wrap_text(text, width=wrapped_width)
@@ -139,9 +162,11 @@ def format_labeled_text(
 
 
 def format_labeled_block(
-    label: str, text: str, width: int = 80, color_fn=None
+    label: str, text: str, width: Optional[int] = None, color_fn=None
 ) -> str:
     """Wraps text on a new line, indented 2 spaces deeper than the label."""
+    if width is None:
+        width = default_wrap_width()
     if not text:
         return f"{label}"
     match = re.match(r'^(\s*)', label)
