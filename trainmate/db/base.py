@@ -240,6 +240,23 @@ class BaseDB:
                 )
             except sqlite3.OperationalError:
                 pass
+            # Original load snapshot: the duration / TSS / RPE the session carried when it
+            # first entered the plan, captured once (set to the live value on INSERT, then
+            # COALESCE-preserved across every later UPDATE — the same once-only treatment as
+            # `original_description` / `original_date`). Lets the plan show how far an adapted
+            # session has been walked down from its planned load without parsing prose. NULL
+            # on legacy rows; their first adaptation backfills them from the pre-adapt value.
+            for col in (
+                "original_duration_minutes",
+                "original_tss",
+                "original_rpe",
+            ):
+                try:
+                    cursor.execute(
+                        f"ALTER TABLE workouts ADD COLUMN {col} INTEGER DEFAULT NULL"
+                    )
+                except sqlite3.OperationalError:
+                    pass
 
             # Completed activities table
             cursor.execute("""

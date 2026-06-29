@@ -86,6 +86,89 @@ class TestCalendarSync(unittest.TestCase):
             "Adapted description should come first"
         )
 
+    def test_sync_workout_provenance_block(self):
+        # An adapted session whose load was walked down from its planned values should
+        # surface the original load snapshot plus its plan->adapt lifecycle in the footer.
+        workout = {
+            "date": "2026-06-12",
+            "sport_type": "running",
+            "title": "Easy Run",
+            "description": "Short 20 min recovery jog.",
+            "original_description": "Long 60 min intervals.",
+            "modification_reason": "Fatigue.",
+            "duration_minutes": 20,
+            "tss": 15,
+            "rpe": 4,
+            "original_duration_minutes": 60,
+            "original_tss": 80,
+            "original_rpe": 7,
+            "created_at": "2026-06-01T14:30:00+00:00",
+            "adapted_at": "2026-06-11T09:00:00+00:00",
+            "adaptation_count": 2,
+            "id": 42,
+            "google_event_id": None,
+        }
+
+        mock_service = MagicMock()
+        mock_service.events().insert().execute.return_value = {"id": "evt-1"}
+        with patch.object(calendar_syncer, "service", mock_service):
+            calendar_syncer.sync_workout(workout)
+
+        body = [
+            c for c in mock_service.events().insert.call_args_list
+            if c.kwargs.get("body")
+        ][0].kwargs["body"]
+        desc = body.get("description", "")
+
+        # Current load line now carries RPE too.
+        self.assertIn("Duration: 20m | TSS: 15 | RPE: 4", desc)
+        # Full original-load snapshot, shown because the load drifted.
+        self.assertIn("Originally: 60m | TSS 80 | RPE 7", desc)
+        # Lifecycle line: planned timestamp, last-adapted timestamp, ease count.
+        self.assertIn("Planned: 2026-06-01 14:30", desc)
+        self.assertIn("Last adapted: 2026-06-11 09:00", desc)
+        self.assertIn("Adapted ×2", desc)
+        # Provenance sits above the technical ID footer.
+        self.assertTrue(desc.index("Originally: 60m") < desc.index("Workout: 42"))
+
+    def test_sync_workout_unadapted_shows_planned_only(self):
+        # A session at its planned load shows the Planned line but no "Originally"
+        # snapshot and no last-adapted/count (it has never been eased).
+        workout = {
+            "date": "2026-06-12",
+            "sport_type": "running",
+            "title": "Easy Run",
+            "description": "30 min jog.",
+            "original_description": "30 min jog.",
+            "duration_minutes": 30,
+            "tss": 25,
+            "rpe": 3,
+            "original_duration_minutes": 30,
+            "original_tss": 25,
+            "original_rpe": 3,
+            "created_at": "2026-06-01T14:30:00+00:00",
+            "adapted_at": None,
+            "adaptation_count": 0,
+            "id": 7,
+            "google_event_id": None,
+        }
+
+        mock_service = MagicMock()
+        mock_service.events().insert().execute.return_value = {"id": "evt-2"}
+        with patch.object(calendar_syncer, "service", mock_service):
+            calendar_syncer.sync_workout(workout)
+
+        body = [
+            c for c in mock_service.events().insert.call_args_list
+            if c.kwargs.get("body")
+        ][0].kwargs["body"]
+        desc = body.get("description", "")
+
+        self.assertIn("Planned: 2026-06-01 14:30", desc)
+        self.assertNotIn("Originally:", desc)
+        self.assertNotIn("Last adapted:", desc)
+        self.assertNotIn("Adapted ×", desc)
+
     def test_sync_workout_swap_does_not_duplicate_description(self):
         # A swap moves a workout's date without changing its content, so
         # description == original_description. The calendar should show the

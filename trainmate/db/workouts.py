@@ -36,6 +36,12 @@ class WorkoutsMixin:
         `created_at` is set to now (UTC) on INSERT only and never overwritten on update,
         recording when the session first entered the plan (NULL on legacy rows).
 
+        `original_duration_minutes` / `original_tss` / `original_rpe` snapshot the load the
+        session was planned with. They take the inserted load on INSERT and are then
+        COALESCE-preserved on every UPDATE (the live duration/rpe/tss reference resolves to
+        the pre-update value, so the first adaptation of a legacy row backfills them), giving
+        the plan a stable "planned vs. current" comparison without parsing the description.
+
         `adapted_at` marks this save as a `workout adapt` easing: when given (a UTC ISO
         timestamp), it is stored and `adaptation_count` is bumped, giving the daily
         adaptation a recency/frequency signal so it can avoid compounding cuts. All other
@@ -70,6 +76,10 @@ class WorkoutsMixin:
                         duration_minutes = COALESCE(?, duration_minutes),
                         rpe = COALESCE(?, rpe),
                         tss = COALESCE(?, tss),
+                        original_duration_minutes =
+                            COALESCE(original_duration_minutes, duration_minutes),
+                        original_tss = COALESCE(original_tss, tss),
+                        original_rpe = COALESCE(original_rpe, rpe),
                         removed = ?, removed_reason = ?,
                         source = COALESCE(?, source),
                         adapted_at = COALESCE(?, adapted_at),
@@ -89,15 +99,18 @@ class WorkoutsMixin:
                         date, sport_type, title, description, original_description,
                         original_date, modification_reason, adaptation_summary,
                         google_event_id, duration_minutes, rpe, tss,
+                        original_duration_minutes, original_rpe, original_tss,
                         removed, removed_reason, source, macrocycle_id,
                         created_at, adapted_at, adaptation_count
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (date, sport_type, title, description,
                       original_description or description,
                       original_date or date,
                       modification_reason, adaptation_summary,
                       google_event_id, duration_minutes,
-                      rpe, tss, int(removed), removed_reason, source, macrocycle_id,
+                      rpe, tss,
+                      duration_minutes, rpe, tss,
+                      int(removed), removed_reason, source, macrocycle_id,
                       datetime.now(timezone.utc).isoformat(),
                       adapted_at, 1 if adapted_at else 0))
                 workout_id = cursor.lastrowid

@@ -100,6 +100,55 @@ class TestDatabase(unittest.TestCase):
         self.assertEqual(workout["duration_minutes"], 45)
         self.assertEqual(workout["rpe"], 7)
         self.assertEqual(workout["tss"], 50)
+        # Original load snapshot is seeded from the inserted values.
+        self.assertEqual(workout["original_duration_minutes"], 45)
+        self.assertEqual(workout["original_rpe"], 7)
+        self.assertEqual(workout["original_tss"], 50)
+
+    def test_original_load_snapshot_preserved_across_adaptation(self):
+        # The planned-load snapshot is captured once and survives later easings, so the
+        # plan can always compare the current load against where the session started.
+        test_db.save_workout(
+            date="2026-06-04",
+            sport_type="running",
+            title="Intervals",
+            description="6x3min",
+            duration_minutes=60,
+            rpe=8,
+            tss=90,
+        )
+        # First adaptation: load is walked down; originals must hold their planned values.
+        test_db.save_workout(
+            date="2026-06-04",
+            sport_type="running",
+            title="Intervals",
+            description="3x3min",
+            duration_minutes=40,
+            rpe=6,
+            tss=55,
+            adapted_at="2026-06-03T09:00:00+00:00",
+        )
+        w = test_db.get_workout("2026-06-04", "running")
+        self.assertEqual(w["duration_minutes"], 40)
+        self.assertEqual(w["original_duration_minutes"], 60)
+        self.assertEqual(w["original_rpe"], 8)
+        self.assertEqual(w["original_tss"], 90)
+
+        # Second adaptation: still pinned to the original plan, not the intermediate cut.
+        test_db.save_workout(
+            date="2026-06-04",
+            sport_type="running",
+            title="Intervals",
+            description="easy 20min",
+            duration_minutes=20,
+            rpe=4,
+            tss=25,
+            adapted_at="2026-06-03T10:00:00+00:00",
+        )
+        w = test_db.get_workout("2026-06-04", "running")
+        self.assertEqual(w["original_duration_minutes"], 60)
+        self.assertEqual(w["original_rpe"], 8)
+        self.assertEqual(w["original_tss"], 90)
 
     def test_macrocycles_cascade_delete(self):
         obj_id = test_db.add_objective(

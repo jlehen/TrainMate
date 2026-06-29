@@ -25,6 +25,18 @@ class CalendarSyncer:
         self.service: Any = build('calendar', 'v3', credentials=self.creds)
         self.calendar_id: Optional[str] = config.google_calendar_id
 
+    @staticmethod
+    def _fmt_ts(iso: Optional[str]) -> str:
+        """Renders a stored UTC ISO timestamp as 'YYYY-MM-DD HH:MM' for the event footer.
+
+        Falls back to the raw string if it isn't parseable (e.g. a date-only legacy value)."""
+        if not iso:
+            return "?"
+        try:
+            return datetime.fromisoformat(iso).strftime("%Y-%m-%d %H:%M")
+        except ValueError:
+            return iso
+
     # Past-event adherence verdict -> title tag (see adherence.classify_adherence).
     _ADHERENCE_TAGS = {
         "done": "Done",
@@ -107,20 +119,62 @@ class CalendarSyncer:
             if tag:
                 summary = f"[{tag}] {summary}"
 
-        # Prepend duration and tss to description if available
+        # Prepend the session's current load to the description if available.
         duration = workout.get('duration_minutes')
         tss = workout.get('tss')
+        rpe = workout.get('rpe')
         prefix_parts = []
         if duration is not None:
             prefix_parts.append(f"Duration: {duration}m")
         if tss is not None:
             prefix_parts.append(f"TSS: {tss}")
+        if rpe is not None:
+            prefix_parts.append(f"RPE: {rpe}")
         prefix = " | ".join(prefix_parts)
         if prefix:
             if event_description:
                 event_description = f"{prefix}\n\n{event_description}"
             else:
                 event_description = prefix
+
+        # Provenance / lifecycle footer, sitting just above the technical ID line so the two
+        # read as one block at the bottom of the event:
+        #   * the load the session was *planned* with — shown only once it has actually
+        #     drifted from the current load (an adaptation), as a full snapshot;
+        #   * when it entered the plan (`created_at`, always), and when/how often it has been
+        #     eased (`adapted_at` / `adaptation_count`, only once adapted).
+        footer_lines: List[str] = []
+        orig_d = workout.get('original_duration_minutes')
+        orig_t = workout.get('original_tss')
+        orig_r = workout.get('original_rpe')
+        load_changed = (
+            (orig_d is not None and orig_d != duration)
+            or (orig_t is not None and orig_t != tss)
+            or (orig_r is not None and orig_r != rpe)
+        )
+        if load_changed:
+            orig_parts = []
+            if orig_d is not None:
+                orig_parts.append(f"{orig_d}m")
+            if orig_t is not None:
+                orig_parts.append(f"TSS {orig_t}")
+            if orig_r is not None:
+                orig_parts.append(f"RPE {orig_r}")
+            if orig_parts:
+                footer_lines.append("Originally: " + " | ".join(orig_parts))
+
+        lifecycle_parts = []
+        created_at = workout.get('created_at')
+        adapted_at = workout.get('adapted_at')
+        adaptation_count = workout.get('adaptation_count') or 0
+        if created_at:
+            lifecycle_parts.append(f"Planned: {self._fmt_ts(created_at)}")
+        if adapted_at:
+            lifecycle_parts.append(f"Last adapted: {self._fmt_ts(adapted_at)}")
+        if adaptation_count:
+            lifecycle_parts.append(f"Adapted ×{adaptation_count}")
+        if lifecycle_parts:
+            footer_lines.append(" · ".join(lifecycle_parts))
 
         # Append an identifier footer so each event stays traceable back to the plan
         # that produced it: goal/macro/meso are resolved from the workout's date, the
@@ -136,7 +190,10 @@ class CalendarSyncer:
         if workout_id is not None:
             id_parts.append(f"Workout: {workout_id}")
         if id_parts:
-            footer = " | ".join(id_parts)
+            footer_lines.append(" | ".join(id_parts))
+
+        if footer_lines:
+            footer = "\n".join(footer_lines)
             if event_description:
                 event_description = f"{event_description}\n\n{footer}"
             else:
