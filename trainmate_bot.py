@@ -17,6 +17,7 @@ token + allowlist under a ``telegram:`` block in config.yaml (see
 config_template.yaml).
 """
 import asyncio
+import datetime
 import html
 import os
 import shlex
@@ -190,19 +191,27 @@ def main() -> None:
             "venv/bin/pip install -r requirements.txt"
         )
 
+    def _log(chat_id: int, direction: str, msg: str) -> None:
+        ts = datetime.datetime.now().strftime("%H:%M:%S")
+        print(f"{ts} [{chat_id}] {direction} {msg}", flush=True)
+
     async def on_message(update: "Update", context) -> None:
         message = update.effective_message
         chat = update.effective_chat
         if message is None or chat is None or not message.text:
             return
+
+        text = message.text.strip()
+        _log(chat.id, ">>", repr(text))
+
         if not is_authorized(chat.id, allowed_ids):
+            _log(chat.id, "--", "unauthorized")
             await message.reply_text(
                 f"Not authorized. Your chat id is {chat.id}; add it to "
                 "telegram.allowed_chat_ids to enable access."
             )
             return
 
-        text = message.text.strip()
         if text in ("/start", "/help") or text.lower() == "start":
             if text != "/help":
                 await message.reply_text(WELCOME)
@@ -217,8 +226,11 @@ def main() -> None:
         if not argv:
             return
 
+        _log(chat.id, "  ", f"run: {shlex.join(argv)}")
         await context.bot.send_chat_action(chat_id=chat.id, action="typing")
         output = await asyncio.to_thread(run_cli, argv, timeout, wrap_width)
+        lines = output.count("\n") + 1
+        _log(chat.id, "<<", f"{lines} line(s)")
         for part in format_reply(output):
             await message.reply_text(part, parse_mode=ParseMode.HTML)
 
