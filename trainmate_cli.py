@@ -28,8 +28,42 @@ from trainmate.config import config
 from trainmate.util import (
     bold, dim, green, red, yellow, cyan, blue, magenta, gray,
     color_acwr, visible_len, pad_visible, wrap_text, format_labeled_text,
-    format_labeled_block, today_str as _today_str, today_date as _today_date,
+    format_labeled_block, default_wrap_width,
+    today_str as _today_str, today_date as _today_date,
 )
+
+
+class WrapAwareHelpFormatter(argparse.RawDescriptionHelpFormatter):
+    """argparse help formatter that respects the prose wrap width.
+
+    argparse keys its layout off an 80-col terminal: option help is indented to a
+    fixed deep column (``max_help_position`` 24), which on a phone-width client
+    wastes most of every line on the gap between an option and its help. When the
+    Telegram bot drives the CLI it sets TRAINMATE_WRAP_WIDTH (~48); we pin the
+    total width to that and, once narrow, collapse the help column so each option's
+    help sits on the next line at a shallow indent instead of far to the right.
+    On a real terminal (default width) we defer entirely to argparse's familiar
+    two-column layout."""
+
+    def __init__(self, prog):
+        width = default_wrap_width()
+        if width >= 70:
+            super().__init__(prog)
+        else:
+            super().__init__(prog, max_help_position=4, width=width)
+
+
+class WrapAwareArgumentParser(argparse.ArgumentParser):
+    """ArgumentParser that defaults to :class:`WrapAwareHelpFormatter`.
+
+    Used for the root parser so every sub-parser created via ``add_subparsers`` /
+    ``add_parser`` inherits the same formatter (argparse propagates the parser
+    class but not ``formatter_class``), making all help — top-level and nested —
+    wrap to the active client width."""
+
+    def __init__(self, *args, **kwargs):
+        kwargs.setdefault("formatter_class", WrapAwareHelpFormatter)
+        super().__init__(*args, **kwargs)
 
 
 def _edit_text_in_editor(initial: str) -> Optional[str]:
@@ -205,9 +239,8 @@ def translate_dashless_argv(parser: argparse.ArgumentParser, tokens: list) -> li
 
 def main() -> None:
     """Entry point for the TrainMate Command Line Interface."""
-    parser = argparse.ArgumentParser(
+    parser = WrapAwareArgumentParser(
         description="TrainMate - Local Training Coach CLI",
-        formatter_class=argparse.RawDescriptionHelpFormatter
     )
     parser.add_argument(
         "--llm-model", dest="llm_model",
