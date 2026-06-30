@@ -1,6 +1,6 @@
 import argparse
 import sys
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 import trainmate_cli as cli
 from trainmate.config import config
@@ -11,6 +11,22 @@ from trainmate.util import (
     format_labeled_block, today_str as _today_str, today_date as _today_date,
 )
 from trainmate.cli.common import fmt_date, ensure_recent_data
+
+
+def _ago(iso_utc: str) -> str:
+    """Return a compact 'Nm/Nh/Nd ago' for a UTC ISO timestamp, or '' if unparseable."""
+    try:
+        delta = datetime.now(timezone.utc) - datetime.fromisoformat(iso_utc)
+    except (ValueError, TypeError):
+        return ""
+    secs = int(delta.total_seconds())
+    if secs < 0:
+        return ""
+    if secs < 3600:
+        return f"{secs // 60}m ago"
+    if secs < 86400:
+        return f"{secs // 3600}h ago"
+    return f"{secs // 86400}d ago"
 
 
 def run_status(
@@ -171,6 +187,25 @@ def run_status(
             gray("  None yet. Run ") + green("'data bootstrap'")
             + gray(" to reconstruct your training history and seed observations.")
         )
+
+    # When the learnings were last updated — reflect/bootstrap run watermarks.
+    reflect_state = cli.db.get_sync_state("reflect")
+    bootstrap_state = cli.db.get_sync_state("bootstrap")
+    if reflect_state and reflect_state.get("last_pull_utc"):
+        line = f"  Last reflect: {fmt_date(reflect_state['last_pull_utc'][:10])}"
+        ago = _ago(reflect_state["last_pull_utc"])
+        if ago:
+            line += gray(f" ({ago})")
+        if reflect_state.get("through_date"):
+            line += gray(f" · through {fmt_date(reflect_state['through_date'])}")
+        print(line)
+    elif learnings:
+        print(gray("  Last reflect: never — run ") + green("'data reflect'"))
+    if bootstrap_state and bootstrap_state.get("last_pull_utc"):
+        line = f"  Bootstrap:    {fmt_date(bootstrap_state['last_pull_utc'][:10])}"
+        if bootstrap_state.get("through_date"):
+            line += gray(f" · through {fmt_date(bootstrap_state['through_date'])}")
+        print(gray(line))
 
     if verbose:
         goals = cli.db.get_objectives()
