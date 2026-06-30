@@ -195,14 +195,15 @@ def translate_dashless_argv(parser: argparse.ArgumentParser, tokens: list) -> li
     i, n = 0, len(tokens)
     while i < n:
         tok = tokens[i]
+        tok_lower = tok.lower()
         if tok.startswith("-"):
             out.append(tok)
             i += 1
             continue
-        if tok == "help":
+        if tok_lower == "help":
             out.append("--help")
             return out
-        action = spec.get(tok)
+        action = spec.get(tok_lower)
         if action is not None:
             out.append(_canonical_option(action))
             nargs = action.nargs
@@ -219,8 +220,8 @@ def translate_dashless_argv(parser: argparse.ArgumentParser, tokens: list) -> li
                 takes = (
                     nxt is not None
                     and not nxt.startswith("-")
-                    and nxt not in spec
-                    and nxt not in sub_choices
+                    and nxt.lower() not in spec
+                    and nxt.lower() not in sub_choices
                 )
                 if takes:
                     out.append(nxt)
@@ -234,9 +235,9 @@ def translate_dashless_argv(parser: argparse.ArgumentParser, tokens: list) -> li
                 else:
                     i += 1
             continue
-        if tok in sub_choices:
-            out.append(tok)
-            out.extend(translate_dashless_argv(sub_choices[tok], tokens[i + 1:]))
+        if tok_lower in sub_choices:
+            out.append(tok_lower)
+            out.extend(translate_dashless_argv(sub_choices[tok_lower], tokens[i + 1:]))
             return out
         out.append(tok)
         i += 1
