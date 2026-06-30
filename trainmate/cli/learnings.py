@@ -43,6 +43,13 @@ def _print_learning(l: dict) -> None:
                      "(confirm with 'learnings demote'/'keep')"))
 
 
+def _print_learning_dates(l: dict) -> None:
+    """Prints the created/updated/reinforced timestamps shared by `list -v` and `show`."""
+    print(f"  created   : {l.get('created_at') or '-'}")
+    print(f"  updated   : {l.get('updated_at') or '-'}")
+    print(f"  reinforced: {l.get('last_reinforced_at') or '-'}")
+
+
 def run_learning_list(args: argparse.Namespace) -> None:
     """Lists coach learnings, optionally filtered by sport, confidence, or dormancy."""
     learnings = cli.db.get_learnings()
@@ -68,8 +75,11 @@ def run_learning_list(args: argparse.Namespace) -> None:
             )
         return
 
+    verbose = getattr(args, "verbose", False)
     for l in learnings:
         _print_learning(l)
+        if verbose:
+            _print_learning_dates(l)
 
 
 def run_learning_show(args: argparse.Namespace) -> None:
@@ -80,9 +90,7 @@ def run_learning_show(args: argparse.Namespace) -> None:
         sys.exit(1)
 
     _print_learning(learning)
-    print(f"  created   : {learning.get('created_at') or '-'}")
-    print(f"  updated   : {learning.get('updated_at') or '-'}")
-    print(f"  reinforced: {learning.get('last_reinforced_at') or '-'}")
+    _print_learning_dates(learning)
 
     evidence = cli.db.get_learning_evidence(args.id)
     sup = [e for e in evidence if e['polarity'] >= 0]

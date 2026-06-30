@@ -617,6 +617,10 @@ def main() -> None:
         "--confidence", choices=["tentative", "moderate", "established"],
         help="Filter by confidence level"
     )
+    ln_list.add_argument(
+        "-v", "--verbose", action="store_true",
+        help="Also show created/updated/reinforced timestamps"
+    )
 
     # learnings show
     ln_show = learnings_subparsers.add_parser(
