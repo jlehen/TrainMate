@@ -430,7 +430,7 @@ def _ingest_activities(client: GarminClient, start: str, end: str, throttle: flo
         print(red(f"Error fetching activities {start}..{end}: {e}"))
         return
     print(f"Found {len(activities)} activities in {start}..{end}.")
-    underestimated = 0  # activities whose load is a weak estimate for lack of RPE
+    underestimated_activities = []  # activities whose load is a weak estimate for lack of RPE
     fetched_ids = []  # everything Garmin still has in this range, for deletion reconcile
     for idx, act in enumerate(activities):
         activity_id = str(act.get("activityId"))
@@ -470,7 +470,8 @@ def _ingest_activities(client: GarminClient, start: str, end: str, throttle: flo
         tss = measured_tss(power_zones, zones)
         _load, _method, warning = compute_load(power_zones, zones, rpe, duration_sec)
         if warning:
-            underestimated += 1
+            act_name = act.get("activityName", "Unknown Activity")
+            underestimated_activities.append(f"{date_str} {act_name}")
 
         db.save_completed_activity(
             activity_id=activity_id, date=date_str, start_time=start_time,
@@ -484,12 +485,15 @@ def _ingest_activities(client: GarminClient, start: str, end: str, throttle: flo
         if throttle:
             time.sleep(throttle)
 
-    if underestimated:
+    if underestimated_activities:
+        count = len(underestimated_activities)
         print(yellow(
-            f"  {underestimated} activit{'y' if underestimated == 1 else 'ies'} "
+            f"  {count} activit{'y' if count == 1 else 'ies'} "
             "had low HR-zone coverage and no RPE; their load is an underestimate. "
-            "Enter an RPE in Garmin for a better load value."
+            "Enter an RPE in Garmin for a better load value:"
         ))
+        for act_str in underestimated_activities:
+            print(yellow(f"    - {act_str}"))
 
     # Reconcile deletions: drop local rows in this range that Garmin no longer
     # returns (e.g. a duplicate Zwift auto-upload the user deleted in Garmin
