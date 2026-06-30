@@ -55,8 +55,27 @@ class WrapAwareHelpFormatter(argparse.RawDescriptionHelpFormatter):
         width = default_wrap_width()
         if width >= 70:
             super().__init__(prog)
+            self._narrow = False
         else:
             super().__init__(prog, max_help_position=4, width=width)
+            self._narrow = True
+
+    def _format_action(self, action):
+        # In narrow mode argparse collapses help onto the next line at a single
+        # global column (``max_help_position``). That column matches the *option*
+        # indent, so options read nicely (name two columns above its help), but
+        # sub-command entries are indented one level deeper — their name lands on
+        # the very column the help text uses, so name and help collide. Pin the
+        # help column to two past the current indent instead, so every entry's
+        # help sits one level under its own name regardless of nesting depth.
+        if self._narrow:
+            saved = self._max_help_position
+            self._max_help_position = self._current_indent + self._indent_increment
+            try:
+                return super()._format_action(action)
+            finally:
+                self._max_help_position = saved
+        return super()._format_action(action)
 
 
 class WrapAwareArgumentParser(argparse.ArgumentParser):
