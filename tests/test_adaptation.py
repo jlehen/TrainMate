@@ -379,6 +379,44 @@ class TestAdaptation(unittest.TestCase):
         row = test_db.get_workout("2026-06-20", "running")
         self.assertEqual(row["adaptation_count"], 2)
 
+    def test_adapt_swap_inherits_displaced_session_as_original(self):
+        """A cross-sport swap (strength -> yoga) deletes the planned strength session
+        and inserts a yoga one. The new session should inherit the displaced strength
+        session's description + load as its `original_*` snapshot, so the Calendar event
+        can surface what was originally planned."""
+        test_db.save_workout(
+            "2026-07-02", "strength_training", "Heavy Legs",
+            "5x5 back squat + accessories.",
+            duration_minutes=60, rpe=7, tss=70,
+        )
+
+        service = trainmate.coach.CoachService(
+            db_instance=test_db, calendar_syncer_instance=Mock()
+        )
+        proposed = [{
+            "date": "2026-07-02", "sport_type": "yoga", "title": "Easy Mobility",
+            "description": "20 min easy mobility flow.",
+            "modification_reason": "Swapped from strength after a workload spike.",
+            "duration_minutes": 30, "rpe": 1, "tss": 4,
+        }]
+        service.workout_adapt_apply(
+            proposed, "Reduce load", "2026-07-02", "2026-07-02"
+        )
+
+        # The strength row is gone; the yoga row carries the strength session's
+        # planned description and load as its original snapshot.
+        self.assertIsNone(test_db.get_workout("2026-07-02", "strength_training"))
+        row = test_db.get_workout("2026-07-02", "yoga")
+        self.assertEqual(row["description"], "20 min easy mobility flow.")
+        self.assertEqual(row["original_description"], "5x5 back squat + accessories.")
+        self.assertEqual(row["original_duration_minutes"], 60)
+        self.assertEqual(row["original_tss"], 70)
+        self.assertEqual(row["original_rpe"], 7)
+        # Current load reflects the swapped-in yoga session.
+        self.assertEqual(row["duration_minutes"], 30)
+        self.assertEqual(row["tss"], 4)
+        self.assertEqual(row["rpe"], 1)
+
     def test_already_eased_tag_in_planned_prompt(self):
         """An already-eased session is tagged with its count + recency for the adapt
         prompt; an unadapted session is not."""

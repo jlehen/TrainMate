@@ -1105,7 +1105,12 @@ class CoachService:
         for pw in proposed_workouts:
             proposed_by_date.setdefault(pw['date'], []).append(pw)
 
-        # 2. Find and delete existing workouts that are being replaced or removed
+        # 2. Find and delete existing workouts that are being replaced or removed.
+        # A cross-sport swap (e.g. strength -> yoga) deletes the planned session and
+        # inserts a fresh one, which would otherwise lose all trace of what was planned.
+        # Remember the displaced session per date so its replacement can carry the
+        # originally-planned description + load through to the Calendar event.
+        displaced_by_date: Dict[str, Dict[str, Any]] = {}
         for ew in existing_workouts:
             ew_date = ew['date']
             if ew_date in proposed_by_date:
@@ -1117,6 +1122,7 @@ class CoachService:
                 if canonical_sport(ew['sport_type']) not in proposed_sports:
                     print(yellow(f"Removing overridden workout: {ew['title']} ({ew['sport_type']}) "
                           f"on {ew_date}"))
+                    displaced_by_date.setdefault(ew_date, ew)
                     if ew.get('google_event_id'):
                         try:
                             self._calendar_syncer.delete_workout_event(ew['google_event_id'])
@@ -1128,10 +1134,27 @@ class CoachService:
         for w in proposed_workouts:
             existing = self._db.get_workout(w['date'], w['sport_type'])
             orig_desc = None
+            orig_dur = orig_tss = orig_rpe = None
             ge_id = None
             if existing:
                 orig_desc = existing['original_description'] or existing['description']
                 ge_id = existing['google_event_id']
+            else:
+                # No same-sport session to adapt: this proposal swapped in a new sport.
+                # If it displaced a planned session that day, inherit that session's
+                # initially-planned description and load as this one's "original" snapshot,
+                # so the Calendar event surfaces what was originally on the plan.
+                displaced = displaced_by_date.get(w['date'])
+                if displaced:
+                    orig_desc = (
+                        displaced.get('original_description') or displaced.get('description')
+                    )
+                    orig_dur = (
+                        displaced.get('original_duration_minutes')
+                        or displaced.get('duration_minutes')
+                    )
+                    orig_tss = displaced.get('original_tss') or displaced.get('tss')
+                    orig_rpe = displaced.get('original_rpe') or displaced.get('rpe')
             # Origin is fixed at creation: preserve it when adapting an existing
             # session (None + COALESCE keeps 'manual'/'generated'); only a session
             # adapt newly introduces is coach-authored ('generated').
@@ -1143,6 +1166,9 @@ class CoachService:
                 title=w['title'],
                 description=w['description'],
                 original_description=orig_desc or w['description'],
+                original_duration_minutes=orig_dur,
+                original_tss=orig_tss,
+                original_rpe=orig_rpe,
                 modification_reason=w.get('modification_reason'),
                 adaptation_summary=reason,
                 google_event_id=ge_id,

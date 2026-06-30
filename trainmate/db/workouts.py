@@ -13,6 +13,8 @@ class WorkoutsMixin:
         modification_reason: Optional[str] = None, google_event_id: Optional[str] = None,
         duration_minutes: Optional[int] = None, rpe: Optional[int] = None,
         tss: Optional[int] = None, original_date: Optional[str] = None,
+        original_duration_minutes: Optional[int] = None,
+        original_tss: Optional[int] = None, original_rpe: Optional[int] = None,
         removed: bool = False, removed_reason: Optional[str] = None,
         source: Optional[str] = None, adaptation_summary: Optional[str] = None,
         macrocycle_id: Optional[int] = None, adapted_at: Optional[str] = None
@@ -37,10 +39,13 @@ class WorkoutsMixin:
         recording when the session first entered the plan (NULL on legacy rows).
 
         `original_duration_minutes` / `original_tss` / `original_rpe` snapshot the load the
-        session was planned with. They take the inserted load on INSERT and are then
-        COALESCE-preserved on every UPDATE (the live duration/rpe/tss reference resolves to
-        the pre-update value, so the first adaptation of a legacy row backfills them), giving
-        the plan a stable "planned vs. current" comparison without parsing the description.
+        session was planned with. When passed explicitly they seed that snapshot (used when a
+        cross-sport swap inherits the displaced session's planned load); otherwise they take
+        the inserted load on INSERT and are COALESCE-preserved on every UPDATE (the live
+        duration/rpe/tss reference resolves to the pre-update value, so the first adaptation of
+        a legacy row backfills them), giving the plan a stable "planned vs. current" comparison
+        without parsing the description. `original_description` carries the same intent for the
+        prose — a swap can seed it with the displaced session's description.
 
         `adapted_at` marks this save as a `workout adapt` easing: when given (a UTC ISO
         timestamp), it is stored and `adaptation_count` is bumped, giving the daily
@@ -77,9 +82,9 @@ class WorkoutsMixin:
                         rpe = COALESCE(?, rpe),
                         tss = COALESCE(?, tss),
                         original_duration_minutes =
-                            COALESCE(original_duration_minutes, duration_minutes),
-                        original_tss = COALESCE(original_tss, tss),
-                        original_rpe = COALESCE(original_rpe, rpe),
+                            COALESCE(original_duration_minutes, ?, duration_minutes),
+                        original_tss = COALESCE(original_tss, ?, tss),
+                        original_rpe = COALESCE(original_rpe, ?, rpe),
                         removed = ?, removed_reason = ?,
                         source = COALESCE(?, source),
                         adapted_at = COALESCE(?, adapted_at),
@@ -90,6 +95,7 @@ class WorkoutsMixin:
                       original_date,
                       modification_reason, adaptation_summary, ge_id,
                       duration_minutes, rpe, tss,
+                      original_duration_minutes, original_tss, original_rpe,
                       int(removed), removed_reason, source,
                       adapted_at, adapted_at,
                       workout_id))
@@ -109,7 +115,10 @@ class WorkoutsMixin:
                       modification_reason, adaptation_summary,
                       google_event_id, duration_minutes,
                       rpe, tss,
-                      duration_minutes, rpe, tss,
+                      original_duration_minutes if original_duration_minutes is not None
+                          else duration_minutes,
+                      original_rpe if original_rpe is not None else rpe,
+                      original_tss if original_tss is not None else tss,
                       int(removed), removed_reason, source, macrocycle_id,
                       datetime.now(timezone.utc).isoformat(),
                       adapted_at, 1 if adapted_at else 0))
