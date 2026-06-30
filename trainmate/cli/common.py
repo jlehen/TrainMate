@@ -62,9 +62,12 @@ def mark_adherence_from_results(
     events (title tag + 'Adherence' header). Future events are always skipped.
     Today's event is skipped only when no activity was matched — marking an
     unmatched today's session would falsely read as missed. Workouts without an
-    existing Calendar event are skipped. Best-effort per event: a Calendar failure
-    degrades to a warning. Returns the number of events marked; the caller owns
-    any summary line."""
+    existing Calendar event are skipped, as is any event already carrying this
+    exact verdict over unchanged content (matched via `marked_signature`), so
+    re-running compare over a settled range issues no redundant Calendar writes.
+    Best-effort per event: a Calendar failure degrades to a warning. Returns the
+    number of events actually (re)marked; the caller owns any summary line."""
+    from trainmate.calendar_state import adherence_signature
     import trainmate_cli as cli
     today_str = today_str or _today_str()
     threshold = config.minor_activity_load_threshold
@@ -86,8 +89,17 @@ def mark_adherence_from_results(
             "actual": actual,
             "reasons": verdict["reasons"],
         }
+        # Skip a no-op Calendar write: if the event already carries this exact
+        # verdict over unchanged content, re-pushing would just re-issue an
+        # identical update. Re-running compare over a settled past range is the
+        # common case, so this avoids a burst of pointless API writes.
+        signature = adherence_signature(w, adherence)
+        if w.get('marked_signature') == signature:
+            continue
         try:
             cli.calendar_syncer.sync_workout(w, adherence=adherence)
+            if w.get('id') is not None:
+                cli.db.mark_workout_adherence_pushed(w['id'], signature)
             marked += 1
         except Exception as e:
             print(yellow(f"Warning: could not mark {w['date']} on Calendar: {e}"))

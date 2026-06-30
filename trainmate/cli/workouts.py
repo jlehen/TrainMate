@@ -690,7 +690,7 @@ def run_workout_compare(args: argparse.Namespace) -> None:
         if marked:
             print(green(f"Marked {marked} past event(s) on Calendar with adherence."))
         else:
-            print(gray("No past Calendar events to mark in this range."))
+            print(gray("Calendar adherence already up to date for this range."))
 
 
 def run_workout_push(args: argparse.Namespace) -> None:

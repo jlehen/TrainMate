@@ -260,6 +260,21 @@ class WorkoutsMixin:
             )
             conn.commit()
 
+    def mark_workout_adherence_pushed(
+        self, workout_id: int, signature: str
+    ) -> None:
+        """Records a successful `workout compare --mark` push: stores the
+        adherence-inclusive signature (see trainmate.calendar_state.adherence_signature)
+        so a later compare over the same range can skip a no-op Calendar update when the
+        event already carries the same verdict. Orthogonal to `pushed_signature` — the
+        underlying `sync_workout` already refreshed that."""
+        with self._get_connection() as conn:
+            conn.execute(
+                "UPDATE workouts SET marked_signature = ? WHERE id = ?",
+                (signature, workout_id)
+            )
+            conn.commit()
+
     def mark_workout_removed(
         self, workout_id: int, reason: Optional[str] = None
     ) -> None:

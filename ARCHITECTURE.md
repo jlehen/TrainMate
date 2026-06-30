@@ -414,7 +414,9 @@ include_archived=False)` (excludes soft-removed and archived rows unless asked),
 `delete_workout_by_id` (hard delete), `mark_workout_removed(id, reason=None)` (soft
 delete — sets `removed=1`/`removed_reason`; the content change reads as `stale`),
 `mark_workout_pushed(id, google_event_id, signature)` (records a successful push — the
-only writer of `pushed_signature`), `restore_workout(id)` (clears the soft-delete
+only writer of `pushed_signature`),
+`mark_workout_adherence_pushed(id, signature)` (records a successful `compare --mark`
+push — the only writer of `marked_signature`), `restore_workout(id)` (clears the soft-delete
 flags — `workout restore`), `update_workout_date(id, date)` (moves a row — used by
 `workout swap`), `archive_future_workouts(from_date)` (soft-archives every live future
 row — sets `archived_at`, clears the Calendar handle, returns the pre-archive rows so
@@ -511,6 +513,11 @@ SQLite database at `trainmate.db` (path from `config.db_path`).
 |                        |            | last successful push. Freshness is *derived* by  |
 |                        |            | comparing it to the live hash — not stored. NULL  |
 |                        |            | ⟺ never pushed (see `trainmate.calendar_state`).  |
+| `marked_signature`     | TEXT       | Hash of calendar fields + adherence verdict at    |
+|                        |            | the last `compare --mark` push; lets re-marking   |
+|                        |            | skip a no-op Calendar write. Separate from        |
+|                        |            | `pushed_signature` (see §Calendar state). NULL ⟺  |
+|                        |            | never marked.                                     |
 | `modification_reason`  | TEXT       | Modification axis: non-NULL ⟺ modified. A short   |
 |                        |            | per-workout note. Kind (adapted/swapped/replaced) |
 |                        |            | derived via `trainmate.modification_state`.       |
@@ -614,9 +621,14 @@ kind flag. Checked **in order**:
     compared window); pass `--no-mark` to either to skip it. Best-effort — a Calendar
     failure never breaks the command, and it is a no-op when no calendar is configured.
     The shared pipeline (`mark_adherence_range` → `mark_adherence_from_results`) lives
-    in `cli/common.py` so the two entry points can't drift. Re-marking re-pushes the
-    (idempotent) event each run; no per-event skip signature is kept (the default
-    windows are small enough that it isn't worth the state).
+    in `cli/common.py` so the two entry points can't drift. Re-marking is a no-op when
+    nothing changed: each push stamps `marked_signature` (the adherence-aware counterpart
+    to `pushed_signature` — `calendar_state.adherence_signature(workout, adherence)` hashes
+    the calendar fields **plus** the verdict), and a later pass skips the Calendar write
+    when the row already carries that exact signature. It is kept in its **own** column
+    rather than folded into `pushed_signature`: doing the latter would make every marked
+    past row read `stale`. Because the content hash is folded in, any later edit to the
+    workout invalidates the marker and a re-mark follows automatically.
 
 **3. Removed?** = `removed = 1` — a **soft delete**. `workout rm` calls
 `mark_workout_removed` (`removed=1`, preserves `google_event_id`; content change reads
@@ -1456,7 +1468,9 @@ genuinely independent, so they're now **derived** (see [§5](#5-database-schema)
   successful push; any later edit through any path leaves it untouched and the row
   reads `stale` automatically — no flag to forget. The signature deliberately
   excludes `rpe` (never reaches Calendar) so editing RPE no longer marks a workout
-  for re-push.
+  for re-push. Backward adherence marking keeps its own `marked_signature` (folding
+  the verdict in) rather than reusing `pushed_signature`, because the latter would
+  make every marked past row read `stale`.
 - **Modification kind** is derived rather than stored for the same reason: a stored
   kind would reintroduce the hand-maintained denormalization the calendar rework
   removed.

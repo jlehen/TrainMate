@@ -388,6 +388,50 @@ class TestCalendarSync(unittest.TestCase):
         self.assertEqual(call.args[0]["google_event_id"], "evt-past")
         self.assertEqual(call.kwargs["adherence"]["status"], "done")
 
+    def test_mark_adherence_from_results_skips_noop_when_already_marked(self):
+        # Re-marking a settled past event is a no-op: the first pass writes and
+        # records the adherence signature; a second pass with that signature
+        # stored on the row skips the Calendar update entirely.
+        from trainmate.cli.common import mark_adherence_from_results
+
+        today = "2026-06-20"
+
+        def make_results():
+            return [{
+                "date": "2026-06-18",
+                "planned": {
+                    "id": 7, "date": "2026-06-18", "sport_type": "running",
+                    "title": "Run", "duration_minutes": 30, "tss": 30,
+                    "google_event_id": "evt-past",
+                },
+                "completed": {
+                    "activity_id": "a", "activity_name": "Morning Run",
+                    "activity_type": "running", "duration_sec": 1800,
+                    "rpe": 6, "tss": 32.0,
+                },
+            }]
+
+        # First pass: nothing recorded yet -> pushes and stamps the signature.
+        with patch("trainmate_cli.calendar_syncer") as mock_syncer, \
+                patch("trainmate_cli.db") as mock_db:
+            first = make_results()
+            marked = mark_adherence_from_results(first, today_str=today)
+            self.assertEqual(marked, 1)
+            self.assertEqual(mock_syncer.sync_workout.call_count, 1)
+            mock_db.mark_workout_adherence_pushed.assert_called_once()
+            wid, signature = mock_db.mark_workout_adherence_pushed.call_args.args
+            self.assertEqual(wid, 7)
+
+        # Second pass: the row now carries that signature -> skipped, no write.
+        with patch("trainmate_cli.calendar_syncer") as mock_syncer, \
+                patch("trainmate_cli.db") as mock_db:
+            second = make_results()
+            second[0]["planned"]["marked_signature"] = signature
+            marked = mark_adherence_from_results(second, today_str=today)
+            self.assertEqual(marked, 0)
+            mock_syncer.sync_workout.assert_not_called()
+            mock_db.mark_workout_adherence_pushed.assert_not_called()
+
     def test_sync_workout_removed(self):
         # Setup workout dictionary with removed details
         workout = {

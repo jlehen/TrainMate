@@ -44,6 +44,26 @@ def calendar_signature(workout) -> str:
     return hashlib.sha256(blob.encode("utf-8")).hexdigest()
 
 
+def adherence_signature(workout, adherence) -> str:
+    """Stable hash of a workout's calendar fields *plus* its backward-looking
+    adherence verdict, as rendered by `workout compare --mark`.
+
+    `mark_adherence_from_results` stores this on each adherence push and compares
+    the prospective signature against it to skip a no-op Calendar update when the
+    event already carries the same verdict. Kept distinct from `calendar_signature`
+    (and stored in its own `marked_signature` column) because the adherence verdict
+    isn't a workout field — folding it into the freshness hash would make every
+    marked past row read `stale`. `adherence` is the dict built in
+    `mark_adherence_from_results`: ``{"status", "actual", "reasons"}``.
+    """
+    payload = [calendar_signature(workout)]
+    payload.append(adherence.get("status") if adherence else None)
+    payload.append(adherence.get("actual") if adherence else None)
+    payload.append(list(adherence.get("reasons") or []) if adherence else None)
+    blob = json.dumps(payload, ensure_ascii=False, sort_keys=True)
+    return hashlib.sha256(blob.encode("utf-8")).hexdigest()
+
+
 def calendar_status(workout) -> CalendarStatus:
     """Derives {unpushed, synced, stale} from the row's stored signature."""
     if not workout.get("google_event_id"):

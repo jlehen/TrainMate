@@ -103,6 +103,7 @@ class BaseDB:
                     description TEXT,
                     original_description TEXT,
                     pushed_signature TEXT, -- hash of calendar fields at last push; NULL = never pushed. Freshness derived (see trainmate.calendar_state)
+                    marked_signature TEXT, -- hash of calendar fields + adherence verdict at last `compare --mark`; NULL = never marked (see trainmate.calendar_state.adherence_signature)
                     modification_reason TEXT, -- non-NULL <=> adapted/swapped; short per-workout note
                     adaptation_summary TEXT, -- batch-level adapt rationale, shared across the batch
                     google_event_id TEXT,
@@ -257,6 +258,16 @@ class BaseDB:
                     )
                 except sqlite3.OperationalError:
                     pass
+            # Adherence-mark freshness axis: hash of the calendar fields plus the
+            # backward-looking adherence verdict at the last `workout compare --mark`
+            # push. Lets compare skip a no-op Calendar update when the event already
+            # carries the same verdict (see trainmate.calendar_state.adherence_signature).
+            # Kept separate from `pushed_signature` on purpose: folding adherence into
+            # that hash would make every marked past row read `stale`. NULL = never marked.
+            try:
+                cursor.execute("ALTER TABLE workouts ADD COLUMN marked_signature TEXT")
+            except sqlite3.OperationalError:
+                pass
 
             # Completed activities table
             cursor.execute("""
