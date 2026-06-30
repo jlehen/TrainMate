@@ -28,14 +28,10 @@ def run_plan_generate(args: argparse.Namespace) -> None:
         # there are no history-derived coach learnings to inform the plan. Offer to seed
         # them before generating (skipped in non-interactive --auto mode).
         if cli.db.get_sync_state("reflect") is None and not getattr(args, 'auto', False):
-            try:
-                confirm = input(
-                    "\nNo training-history analysis found. Run 'data bootstrap' first to "
-                    "reconstruct past cycles and seed coach learnings? [y/N]: "
-                ).strip().lower()
-            except EOFError:
-                confirm = 'n'
-            if confirm in ('y', 'yes'):
+            if cli.prompt.confirm(
+                "No training-history analysis found. Run 'data bootstrap' first to "
+                "reconstruct past cycles and seed coach learnings?"
+            ):
                 cli.coach_service.data_bootstrap(
                     no_pull=args.no_pull, force_pull=getattr(args, 'force_pull', False)
                 )
@@ -54,15 +50,11 @@ def run_plan_generate(args: argparse.Namespace) -> None:
                 if macro:
                     current_hash = cli.coach_service._get_config_hash()
                     if macro.get('config_hash') != current_hash and not args.force:
-                        try:
-                            confirm = input(
-                                "\nConfiguration in config.yaml has changed since the last "
-                                "plan generation.\n"
-                                "Would you like to regenerate the periodization strategy? [y/N]: "
-                            ).strip().lower()
-                        except EOFError:
-                            confirm = 'n'
-                        if confirm in ('y', 'yes'):
+                        if cli.prompt.confirm(
+                            "Configuration in config.yaml has changed since the last "
+                            "plan generation.\n"
+                            "Would you like to regenerate the periodization strategy?"
+                        ):
                             args.force = True
                         else:
                             print("Keeping current periodization strategy. "
@@ -81,11 +73,11 @@ def run_plan_generate(args: argparse.Namespace) -> None:
             return
 
         if getattr(args, 'auto', False):
-            confirm = 'y'
+            apply = True
         else:
-            confirm = input("\nApply this new periodization strategy? [y/N]: ").strip().lower()
+            apply = cli.prompt.confirm("Apply this new periodization strategy?")
 
-        if confirm in ('y', 'yes'):
+        if apply:
             cli.coach_service.plan_apply(next_goal['id'], strategy, mesocycles)
             print(green(f"\nGenerated {len(mesocycles)} mesocycles. Save complete."))
             print(f"Run '{green('workout generate')}' to schedule workouts based on this plan.")
@@ -367,13 +359,9 @@ def run_plan_rm(args: argparse.Namespace) -> None:
 def run_plan_wipe(args: argparse.Namespace) -> None:
     """Wipes all plans from the database after confirmation."""
     if not args.yes:
-        try:
-            confirm = input(
-                "Are you sure you want to wipe all periodization plans? [y/N]: "
-            ).strip().lower()
-        except EOFError:
-            confirm = 'n'
-        if confirm not in ('y', 'yes'):
+        if not cli.prompt.confirm(
+            "Are you sure you want to wipe all periodization plans?", danger=True
+        ):
             print("Wipe cancelled.")
             return
 
@@ -421,15 +409,12 @@ def run_plan_rollback(args: argparse.Namespace) -> None:
 
     if not getattr(args, 'yes', False):
         created = fmt_date(str(target.get('created_at', ''))[:10]) if target.get('created_at') else '?'
-        try:
-            confirm = input(
-                f"\nRoll back the plan for '{goal['title']}' to the version generated "
-                f"{created} (plan ID {target_id})?\nThis archives the current plan's "
-                f"upcoming workouts and restores that version's on Google Calendar. [y/N]: "
-            ).strip().lower()
-        except EOFError:
-            confirm = 'n'
-        if confirm not in ('y', 'yes'):
+        if not cli.prompt.confirm(
+            f"Roll back the plan for '{goal['title']}' to the version generated "
+            f"{created} (plan ID {target_id})?\nThis archives the current plan's "
+            f"upcoming workouts and restores that version's on Google Calendar.",
+            danger=True,
+        ):
             print("Rollback cancelled.")
             return
 

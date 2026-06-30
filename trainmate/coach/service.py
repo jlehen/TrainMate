@@ -316,19 +316,23 @@ class CoachService:
                 f"  [{l['id']}|{l.get('sports') or 'general'}|{l['confidence']}] {l['text']}"
             )
             print(yellow(f"    proposed demotion → {target_disp}"))
-            try:
-                ans = input(
-                    "    Apply? [y=demote / N=keep / s=skip]: "
-                ).strip().lower()
-            except EOFError:
-                ans = "s"
-            if ans in ("y", "yes"):
+            import trainmate_cli as cli
+            ans = cli.prompt.choose(
+                f"Apply proposed demotion of learning [{l['id']}] → {target_disp}?",
+                [
+                    cli.Choice("demote", f"Demote → {target_disp}"),
+                    cli.Choice("keep", "Keep (dismiss + affirm)"),
+                    cli.Choice("skip", "Skip (leave pending)"),
+                ],
+                default="skip",
+            )
+            if ans == "demote":
                 result = self._db.demote_learning(l["id"])
                 if result == "retired":
                     print(red(f"    Retired learning [{l['id']}]."))
                 else:
                     print(green(f"    Demoted [{l['id']}] → {result}."))
-            elif ans in ("s", "skip"):
+            elif ans == "skip":
                 print(gray(f"    Left [{l['id']}] pending."))
             else:
                 self._db.keep_learning(l["id"])
@@ -1516,11 +1520,8 @@ class CoachService:
             if auto:
                 print(cyan("Skipping bootstrap (pass --force to re-run)."))
                 return {}
-            try:
-                ans = input("Re-run the full bootstrap anyway? [y/N]: ").strip().lower()
-            except EOFError:
-                ans = "n"
-            if ans not in ("y", "yes"):
+            import trainmate_cli as cli
+            if not cli.prompt.confirm("Re-run the full bootstrap anyway?"):
                 print(cyan("Bootstrap skipped."))
                 return {}
 

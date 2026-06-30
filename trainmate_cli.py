@@ -25,6 +25,12 @@ from trainmate import garmin
 from trainmate.google_calendar import calendar_syncer
 from trainmate.coach import coach_service
 from trainmate.config import config
+from trainmate.prompt import make_prompt, Choice, PromptCancelled
+
+# The active prompt transport (TtyPrompt on a terminal, JsonPrompt under the bot,
+# selected via TRAINMATE_FRONTEND). A patchable singleton like db/coach_service:
+# handlers reach it as ``cli.prompt`` to ask yes/no, one-of-N, or text questions.
+prompt = make_prompt()
 from trainmate.util import (
     bold, dim, green, red, yellow, cyan, blue, magenta, gray,
     color_acwr, visible_len, pad_visible, wrap_text, format_labeled_text,
@@ -1319,4 +1325,9 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except PromptCancelled:
+        # An interactive prompt was cancelled (front-end /cancel or idle timeout);
+        # abort the command without the traceback an uncaught BaseException prints.
+        print("Cancelled.")

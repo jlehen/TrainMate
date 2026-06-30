@@ -16,8 +16,11 @@ llm:
 #  # Allowlist of chat ids permitted to drive the bot. Empty/absent = nobody.
 #  allowed_chat_ids:
 #    - 123456789
-#  # Seconds a single command may run before it's killed (generation is slow).
+#  # Seconds a command may go silent before it's killed (generation is slow).
 #  #command_timeout_seconds: 180
+#  # Seconds to wait for you to answer an interactive prompt (tap a button or send
+#  # text) before the command is cancelled. Default 300.
+#  #prompt_timeout_seconds: 300
 #  # Column width replies wrap to. The CLI's terminal default (80) double-wraps on a
 #  # phone; ~48 fits portrait without the client re-wrapping. Raise on tablets.
 #  #wrap_width: 48

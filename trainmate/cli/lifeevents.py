@@ -101,13 +101,9 @@ def run_lifeevent_rm(args: argparse.Namespace) -> None:
 def run_lifeevent_wipe(args: argparse.Namespace) -> None:
     """Wipes all life events from the database after confirmation."""
     if not args.yes:
-        try:
-            confirm = input(
-                "Are you sure you want to wipe all life events? [y/N]: "
-            ).strip().lower()
-        except EOFError:
-            confirm = 'n'
-        if confirm not in ('y', 'yes'):
+        if not cli.prompt.confirm(
+            "Are you sure you want to wipe all life events?", danger=True
+        ):
             print("Wipe cancelled.")
             return
 

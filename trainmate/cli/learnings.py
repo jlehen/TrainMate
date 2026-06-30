@@ -151,13 +151,9 @@ def run_learning_keep(args: argparse.Namespace) -> None:
 def run_learning_wipe(args: argparse.Namespace) -> None:
     """Wipes all coach learnings from the database after confirmation."""
     if not args.yes:
-        try:
-            confirm = input(
-                "Are you sure you want to wipe all coach learnings? [y/N]: "
-            ).strip().lower()
-        except EOFError:
-            confirm = 'n'
-        if confirm not in ('y', 'yes'):
+        if not cli.prompt.confirm(
+            "Are you sure you want to wipe all coach learnings?", danger=True
+        ):
             print("Wipe cancelled.")
             return
 

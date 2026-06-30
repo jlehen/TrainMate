@@ -83,16 +83,26 @@ classes themselves.
   `coach_service`, `calendar_syncer` (pure reader — never pulls).
 - **`trainmate_bot.py`** — Telegram chat front-end. A message is treated as a CLI
   command line (leading `/` optional) and run through `trainmate_cli.py` *as a
-  subprocess*; stdout+stderr are ANSI-stripped and returned as a `<pre>` reply.
-  Running the real CLI keeps the bot in permanent parity with every command/flag
-  and isolates each call; a stream of `n` declines is fed on stdin so the
-  handlers' `input()` confirmations abort cleanly — destructive ops therefore
-  no-op over chat unless their `-y`/`--yes` flag is passed. Access is gated by a
+  subprocess*; stdout+stderr are ANSI-stripped and streamed back as `<pre>`
+  replies. Running the real CLI keeps the bot in permanent parity with every
+  command/flag and isolates each call. **Interactive commands** work over chat via
+  the prompt broker (§6): the CLI is launched with `TRAINMATE_FRONTEND=json` and
+  `-u` over a *persistent, unbuffered* subprocess, so a `confirm`/`choose`/`text`
+  prompt arrives as a sentinel-framed request line instead of blocking on
+  `input()`. The bot renders it as an inline keyboard (confirm → Yes/No, ⚠️ for
+  `danger`; choose → one button per option) or an awaited text reply, then writes
+  the answer back to the child's stdin so the command resumes. One in-flight
+  `_Session` per chat holds the process + pending-prompt state; a per-prompt
+  `nonce` (in the button `callback_data`) rejects stale taps. `/cancel` and an idle
+  `prompt_timeout` send a cancellation the CLI turns into a clean abort; a
+  between-output `command_timeout` kills a silent runaway. Access is gated by a
   numeric chat-id allowlist (`telegram.allowed_chat_ids`). Token + allowlist live
   under a `telegram:` block in `config.yaml` (or `TELEGRAM_BOT_TOKEN`). Launch
   with `./tm-bot`. The pure helpers (`parse_message_to_argv`, `chunk_text`,
-  `format_reply`, `is_authorized`) are import-safe without `python-telegram-bot`
-  (imported lazily in `main`) and unit-tested in `tests/test_bot.py`.
+  `format_reply`, `is_authorized`, plus the prompt-protocol helpers
+  `parse_prompt_request`, `prompt_buttons`, `decode_callback`) are import-safe
+  without `python-telegram-bot` (imported lazily in `main`) and unit-tested in
+  `tests/test_bot.py`.
 
 ### Package `trainmate/`
 
@@ -103,6 +113,9 @@ classes themselves.
 |                      |                      | `zone1_sec`–`zone5_sec`), `AthleteMetric`,       |
 |                      |                      | `AthleteBaseline`, `Macrocycle`, `Mesocycle`     |
 | `config.py`          | `config`             | Reads `config.yaml`; exposes typed properties.   |
+| `prompt.py`          | (`cli.prompt`)       | Front-end-agnostic prompt broker:                |
+|                      |                      | `confirm`/`choose`/`ask_text` over `TtyPrompt`   |
+|                      |                      | (input()) or `JsonPrompt` (chat/web). See §6.    |
 | `db/`                | `db`                 | SQLite wrapper; `Database` composed from         |
 |                      |                      | per-domain mixins. Full CRUD for all tables.     |
 | `coach/`             | `coach_service`      | `service.py` `CoachService` orchestrator +       |
@@ -811,6 +824,21 @@ from trainmate import garmin                     # module functions (pull, ensur
 `trainmate/garmin.py` exposes module-level functions rather than a singleton:
 `pull()`, `ensure_data()`, `recompute_derived()`, plus the `GarminClient` class
 and `GarminAuthRequired`.
+
+The **prompt broker** is a patchable singleton on the CLI entry module rather than
+in `trainmate/prompt.py` itself: `trainmate_cli.py` does `prompt = make_prompt()`,
+and handlers reach it as `cli.prompt`. `make_prompt()` selects the transport from
+`TRAINMATE_FRONTEND`: `TtyPrompt` (the default — `input()` with `[y/N]`, EOF→default)
+or `JsonPrompt` (`json` — the Telegram bot). Every interactive `input()` site routes
+through `cli.prompt.confirm(message, danger=…)` / `cli.prompt.choose(message, [Choice…],
+default=…)` / `cli.prompt.ask_text(...)`. `JsonPrompt` writes one sentinel-framed
+request line (`\x1eTM-PROMPT {json}`, fields `v/id/type/message/default/danger/choices`)
+to stdout and blocks reading one JSON answer line (`{v,id,answer}` or `{v,id,cancelled}`)
+from stdin. A cancellation raises `PromptCancelled` — deliberately a `BaseException`
+(like `KeyboardInterrupt`) so the handlers' broad `except Exception` can't mistake an
+abort for a command error; `trainmate_cli.main`'s `__main__` guard catches it and prints
+`Cancelled.`. Garmin MFA (`garmin.py`) stays outside the broker: it's gated by
+`sys.stdin.isatty()` and raises `GarminAuthRequired` off a TTY, so it never hangs the bot.
 
 For tests, the DB singleton can be overridden by patching the module-level `db`
 variable in affected modules (see `tests/test_adaptation.py` for the pattern:

@@ -186,13 +186,13 @@ def run_workout_adapt(args: argparse.Namespace) -> None:
             print(f"{date_col} | {sport_col} | {orig_col} | {new_col} | {stats_col}")
 
         if args.auto:
-            confirm = "y"
+            apply = True
         else:
-            confirm = input(
-                "\nApply these adaptations to your training plan and sync to Calendar? [y/N]: "
-            ).strip().lower()
+            apply = cli.prompt.confirm(
+                "Apply these adaptations to your training plan and sync to Calendar?"
+            )
 
-        if confirm == 'y':
+        if apply:
             print("\nApplying adaptations...")
             all_dates = [pw['date'] for pw in proposed_workouts]
             start_date_adapt = min(all_dates)
@@ -273,20 +273,16 @@ def run_workout_generate(args: argparse.Namespace) -> None:
                 if macro:
                     current_hash = cli.coach_service._get_config_hash()
                     if macro.get('config_hash') != current_hash:
-                        try:
-                            prompt = (
-                                yellow("\nWarning: config.yaml has changed since the active "
-                                       "periodization plan was generated.\n"
-                                       "Generating workouts using the out-of-date plan might "
-                                       "result in incorrect training targets.\n"
-                                       "It is highly recommended to run ")
-                                + green("'plan generate'")
-                                + yellow(" first. Proceed anyway? [y/N]: ")
-                            )
-                            confirm = input(prompt).strip().lower()
-                        except EOFError:
-                            confirm = 'n'
-                        if confirm not in ('y', 'yes'):
+                        message = (
+                            yellow("Warning: config.yaml has changed since the active "
+                                   "periodization plan was generated.\n"
+                                   "Generating workouts using the out-of-date plan might "
+                                   "result in incorrect training targets.\n"
+                                   "It is highly recommended to run ")
+                            + green("'plan generate'")
+                            + yellow(" first. Proceed anyway?")
+                        )
+                        if not cli.prompt.confirm(message):
                             print(
                                 yellow("Workout generation cancelled. Please run ")
                                 + green("'plan generate'")
@@ -901,8 +897,7 @@ def run_workout_swap(args: argparse.Namespace) -> None:
         for msg in warnings:
             print(yellow(f"  - {msg}"))
         if not args.force:
-            confirm = input("\nProceed with the swap anyway? [y/N]: ").strip().lower()
-            if confirm != 'y':
+            if not cli.prompt.confirm("Proceed with the swap anyway?"):
                 print("\nSwap cancelled.")
                 return
 
@@ -973,15 +968,10 @@ def run_workout_add(args: argparse.Namespace) -> None:
 def run_workout_wipe(args: argparse.Namespace) -> None:
     """Wipes all workouts from the database and Google Calendar after confirmation."""
     if not args.yes:
-        try:
-            msg = (
-                "Are you sure you want to wipe all workouts "
-                "(including Google Calendar events)? [y/N]: "
-            )
-            confirm = input(msg).strip().lower()
-        except EOFError:
-            confirm = 'n'
-        if confirm not in ('y', 'yes'):
+        if not cli.prompt.confirm(
+            "Are you sure you want to wipe all workouts "
+            "(including Google Calendar events)?", danger=True
+        ):
             print("Wipe cancelled.")
             return
 

@@ -94,13 +94,9 @@ def run_goal_rm(args: argparse.Namespace) -> None:
 def run_goal_wipe(args: argparse.Namespace) -> None:
     """Wipes all goals from the database after confirmation."""
     if not args.yes:
-        try:
-            confirm = input(
-                "Are you sure you want to wipe all training objectives? [y/N]: "
-            ).strip().lower()
-        except EOFError:
-            confirm = 'n'
-        if confirm not in ('y', 'yes'):
+        if not cli.prompt.confirm(
+            "Are you sure you want to wipe all training objectives?", danger=True
+        ):
             print("Wipe cancelled.")
             return
 

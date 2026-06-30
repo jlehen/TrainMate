@@ -117,11 +117,9 @@ def run_data_wipe(args: argparse.Namespace) -> None:
         window = ""
 
     if not args.yes:
-        try:
-            confirm = input(f"Are you sure you want to wipe {scope}{window}? [y/N]: ").strip().lower()
-        except EOFError:
-            confirm = 'n'
-        if confirm not in ('y', 'yes'):
+        if not cli.prompt.confirm(
+            f"Are you sure you want to wipe {scope}{window}?", danger=True
+        ):
             print("Wipe cancelled.")
             return
 

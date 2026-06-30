@@ -241,6 +241,13 @@ class Config:
         return int(self.get("telegram", {}).get("command_timeout_seconds", 180))
 
     @property
+    def telegram_prompt_timeout(self) -> int:
+        """Seconds the bot waits for the athlete to answer an interactive prompt
+        (tap a button or send text) before it cancels the command and kills the
+        parked CLI process. Default 300 (5 min)."""
+        return int(self.get("telegram", {}).get("prompt_timeout_seconds", 300))
+
+    @property
     def telegram_wrap_width(self) -> int:
         """Column width the CLI wraps prose to when driven by the bot (via the
         TRAINMATE_WRAP_WIDTH env var). The CLI's terminal default is 80, which a

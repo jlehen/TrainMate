@@ -151,11 +151,9 @@ def run_context_rm(args: argparse.Namespace) -> None:
         if len(rows) > 1 and not args.yes:
             for row in rows:
                 print(_context_line(row))
-            try:
-                confirm = input(f"Remove these {len(rows)} signals? [y/N]: ").strip().lower()
-            except EOFError:
-                confirm = "n"
-            if confirm not in ("y", "yes"):
+            if not cli.prompt.confirm(
+                f"Remove these {len(rows)} signals?", danger=True
+            ):
                 print("Removal cancelled.")
                 return
 

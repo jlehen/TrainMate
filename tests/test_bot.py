@@ -90,12 +90,50 @@ class FormatReplyTest(unittest.TestCase):
         self.assertIn("&amp;", parts[0])
 
 
-class RunCliTest(unittest.TestCase):
-    def test_runs_cli_help_and_strips_ansi(self):
-        # Exercises the real subprocess path against the actual CLI's --help.
-        out = bot.run_cli(["--help"], timeout=60)
-        self.assertIn("TrainMate", out)
-        self.assertNotIn("\033", out)
+class PromptProtocolTest(unittest.TestCase):
+    def test_parses_sentinel_framed_request(self):
+        from trainmate.prompt import PROMPT_SENTINEL
+        line = PROMPT_SENTINEL + '{"v":1,"id":"p1","type":"confirm","message":"go?"}\n'
+        req = bot.parse_prompt_request(line)
+        self.assertEqual(req["id"], "p1")
+        self.assertEqual(req["type"], "confirm")
+
+    def test_plain_output_is_not_a_request(self):
+        self.assertIsNone(bot.parse_prompt_request("All workouts wiped.\n"))
+
+    def test_confirm_buttons_yes_no(self):
+        rows = bot.prompt_buttons({"id": "p1", "type": "confirm"}, "ab12")
+        labels = [label for row in rows for label, _ in row]
+        datas = [data for row in rows for _, data in row]
+        self.assertIn("✅ Yes", labels)
+        self.assertEqual(datas, ["ab12:p1:y", "ab12:p1:n"])
+
+    def test_danger_confirm_uses_warning_label(self):
+        rows = bot.prompt_buttons({"id": "p1", "type": "confirm", "danger": True}, "ab12")
+        self.assertEqual(rows[0][0][0], "⚠️ Confirm")
+
+    def test_choose_buttons_one_per_choice(self):
+        req = {"id": "p2", "type": "choose",
+               "choices": [{"value": "demote", "label": "Demote"},
+                           {"value": "keep", "label": "Keep"}]}
+        rows = bot.prompt_buttons(req, "n0nce")
+        self.assertEqual(len(rows), 2)
+        self.assertEqual(rows[0][0], ("Demote", "n0nce:p2:demote"))
+
+    def test_text_prompt_has_no_buttons(self):
+        self.assertEqual(bot.prompt_buttons({"id": "p3", "type": "text"}, "n"), [])
+
+    def test_callback_roundtrips_through_buttons(self):
+        rows = bot.prompt_buttons({"id": "p1", "type": "confirm"}, "ab12")
+        _, data = rows[0][0]
+        self.assertEqual(bot.decode_callback(data), ("ab12", "p1", "y"))
+
+    def test_decode_callback_rejects_malformed(self):
+        self.assertIsNone(bot.decode_callback("only:two"))
+
+    def test_format_prompt_message_strips_ansi(self):
+        msg = bot.format_prompt_message({"message": "\033[33mProceed?\033[0m"})
+        self.assertEqual(msg, "Proceed?")
 
 
 class WrapWidthTest(unittest.TestCase):
