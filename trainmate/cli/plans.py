@@ -10,7 +10,8 @@ from trainmate.adherence import analyze_adherence, date_covered
 from trainmate.util import (
     bold, dim, green, red, yellow, cyan, blue, magenta, gray,
     color_acwr, visible_len, pad_visible, wrap_text, format_labeled_text,
-    format_labeled_block, today_str as _today_str, today_date as _today_date,
+    format_labeled_block, default_wrap_width, today_str as _today_str,
+    today_date as _today_date,
 )
 from trainmate.cli.common import fmt_date, ensure_recent_data
 
@@ -255,11 +256,12 @@ def run_plan_show(args: argparse.Namespace) -> None:
             f"[{bar}]{extra} {duration_desc}"
         )
               
-        focus_lines = textwrap.wrap(m['focus'], width=80)
+        width = default_wrap_width()
+        focus_lines = textwrap.wrap(m['focus'], width=max(20, width - 2))
         for line in focus_lines:
             print(f"  {line}")
         if m.get('feedback'):
-            fb_lines = textwrap.wrap(m['feedback'], width=80)
+            fb_lines = textwrap.wrap(m['feedback'], width=max(20, width - 4))
             print(f"  {bold('Mesocycle Feedback')}:")
             for line in fb_lines:
                 print(f"    {line}")

@@ -116,6 +116,61 @@ def pad_visible(s: str, width: int, align_left: bool = True) -> str:
         return padding + s
 
 
+def is_narrow_client() -> bool:
+    """True when the CLI is driven by a narrow front-end (e.g. the Telegram bot)
+    that asked for a tight wrap width via TRAINMATE_WRAP_WIDTH.
+
+    Wide columnar tables wrap unreadably in a phone-width monospace block, so on a
+    narrow client we collapse them to a vertical record layout instead. A real
+    terminal (default width 80) stays False and keeps the familiar table. The 70
+    threshold matches the CLI's argparse help formatter."""
+    return default_wrap_width() < 70
+
+
+def render_table(
+    headers: list, rows: list, narrow: Optional[bool] = None
+) -> str:
+    """Renders a table for the active client and returns it as text.
+
+    ``rows`` is a list of rows, each a list of pre-formatted cell strings (ANSI
+    colour is fine — widths are measured with visible_len) matching ``headers``.
+
+    On a normal-width terminal this is the familiar columnar table: a bold header,
+    ``" | "`` separators, and a gray rule, with each column auto-sized to its
+    widest cell. On a narrow client (the bot) the same data becomes one vertical
+    record per row — the first column as a heading, the remaining columns as
+    aligned ``label  value`` lines — so figures stay readable without the wide
+    line being re-wrapped by the client. Records are blank-line separated.
+
+    Returns the rendered text with no trailing newline."""
+    if narrow is None:
+        narrow = is_narrow_client()
+
+    if narrow:
+        label_w = max((visible_len(h) for h in headers[1:]), default=0)
+        blocks = []
+        for row in rows:
+            lines = [str(row[0])]
+            for header, cell in zip(headers[1:], row[1:]):
+                lines.append(f"  {pad_visible(header, label_w)}  {cell}")
+            blocks.append("\n".join(lines))
+        return "\n\n".join(blocks)
+
+    widths = []
+    for i, header in enumerate(headers):
+        cell_w = max((visible_len(str(row[i])) for row in rows), default=0)
+        widths.append(max(visible_len(header), cell_w))
+
+    out = [bold(" | ".join(pad_visible(h, widths[i]) for i, h in enumerate(headers)))]
+    total = sum(widths) + 3 * (len(widths) - 1)
+    out.append(gray("-" * total))
+    for row in rows:
+        out.append(
+            " | ".join(pad_visible(str(c), widths[i]) for i, c in enumerate(row))
+        )
+    return "\n".join(out)
+
+
 def wrap_text(text: str, width: Optional[int] = None) -> str:
     """Wraps text at the specified width while preserving layout and indentation.
 

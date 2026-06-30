@@ -9,7 +9,8 @@ from trainmate.adherence import analyze_adherence, date_covered
 from trainmate.util import (
     bold, dim, green, red, yellow, cyan, blue, magenta, gray,
     color_acwr, visible_len, pad_visible, wrap_text, format_labeled_text,
-    format_labeled_block, today_str as _today_str, today_date as _today_date,
+    format_labeled_block, render_table, is_narrow_client, default_wrap_width,
+    today_str as _today_str, today_date as _today_date,
 )
 from trainmate.cli.common import fmt_date, ensure_recent_data, mark_adherence_range
 
@@ -258,12 +259,11 @@ def run_data_show_metrics(args: argparse.Namespace) -> None:
         print("No metrics cached in this range.")
         return
 
-    print(bold(
-        f"{'Date':<12} | {'HRV':<8} | {'HRV Base':<9} | {'RHR':<8} | {'RHR Base':<8} | "
-        f"{'Sleep':<8} | {'Sleep Base':<10} | {'Stress':<6} | {'ACWR':<5} | "
-        f"{'Acute':<7} | {'Chronic':<7}"
-    ))
-    print(gray("-" * 107))
+    headers = [
+        "Date", "HRV", "HRV Base", "RHR", "RHR Base", "Sleep", "Sleep Base",
+        "Stress", "ACWR", "Acute", "Chronic",
+    ]
+    rows = []
 
     for m in metrics_history:
         base = cli.db.get_baseline(m['date'])
@@ -315,23 +315,13 @@ def run_data_show_metrics(args: argparse.Namespace) -> None:
             if base['sleep_baseline_mean'] is not None:
                 sleep_base_str = f"{base['sleep_baseline_mean']:.1f}"
 
-        date_col = pad_visible(m['date'], 12)
-        hrv_col = pad_visible(hrv_str, 8)
-        hrv_base_col = pad_visible(hrv_base_str, 9)
-        rhr_col = pad_visible(rhr_str, 8)
-        rhr_base_col = pad_visible(rhr_base_str, 8)
-        sleep_col = pad_visible(sleep_str, 8)
-        sleep_base_col = pad_visible(sleep_base_str, 10)
-        stress_col = pad_visible(stress_str, 6)
-        acwr_col = pad_visible(acwr_str, 5)
-        acute_col = pad_visible(acute_str, 7)
-        chronic_col = pad_visible(chronic_str, 7)
+        rows.append([
+            m['date'], hrv_str, hrv_base_str, rhr_str, rhr_base_str,
+            sleep_str, sleep_base_str, stress_str, acwr_str, acute_str,
+            chronic_str,
+        ])
 
-        print(
-            f"{date_col} | {hrv_col} | {hrv_base_col} | {rhr_col} | {rhr_base_col} | "
-            f"{sleep_col} | {sleep_base_col} | {stress_col} | {acwr_col} | "
-            f"{acute_col} | {chronic_col}"
-        )
+    print(render_table(headers, rows))
     print(gray("((v) suppressed/poor, (^) elevated compared to baseline)\n"))
 
 
@@ -392,12 +382,11 @@ def run_data_show_activities(args: argparse.Namespace) -> None:
         print("No completed activities found in this range.")
         return
 
-    print(bold(
-        f"{'Date':<12} | {'Time':<8} | {'Type':<20} | {'Name':<25} | "
-        f"{'Duration':<8} | {'Distance':<9} | {'Elev':<6} | {'Avg HR':<6} | "
-        f"{'Max HR':<6} | {'Avg Watts':<9} | {'RPE':<4} | {'TSS':<6}"
-    ))
-    print(gray("-" * 131))
+    headers = [
+        "Date", "Time", "Type", "Name", "Duration", "Distance", "Elev",
+        "Avg HR", "Max HR", "Avg Watts", "RPE", "TSS",
+    ]
+    rows = []
 
     for act in activities:
         dur_sec = act.get('duration_sec') or 0.0
@@ -447,24 +436,14 @@ def run_data_show_activities(args: argparse.Namespace) -> None:
         if len(time_str) > 8:
             time_str = time_str[:8]
 
-        date_col = pad_visible(act['date'], 12)
-        time_col = pad_visible(time_str, 8)
-        type_col = pad_visible(act['activity_type'].upper(), 20)
-        name_col = pad_visible(name_str, 25)
-        dur_col = pad_visible(dur_str, 8)
-        dist_col = pad_visible(dist_str, 9)
-        elev_col = pad_visible(elev_str, 6)
-        avg_hr_col = pad_visible(avg_hr_str, 6)
-        max_hr_col = pad_visible(max_hr_str, 6)
-        watts_col = pad_visible(watts_str, 9)
-        rpe_col = pad_visible(rpe_str, 4)
-        tss_col = pad_visible(tss_str, 6)
+        rows.append([
+            act['date'], time_str, act['activity_type'].upper(), name_str,
+            dur_str, dist_str, elev_str, avg_hr_str, max_hr_str, watts_str,
+            rpe_str, tss_str,
+        ])
 
-        print(
-            f"{date_col} | {time_col} | {type_col} | {name_col} | "
-            f"{dur_col} | {dist_col} | {elev_col} | {avg_hr_col} | "
-            f"{max_hr_col} | {watts_col} | {rpe_col} | {tss_col}"
-        )
+    table = render_table(headers, rows)
+    print(table)
 
     # Summary footer
     total_count = len(activities)
@@ -477,12 +456,20 @@ def run_data_show_activities(args: argparse.Namespace) -> None:
     tot_m = int((total_duration_sec % 3600) // 60)
     tot_dur_str = f"{tot_h}h {tot_m}m" if tot_h > 0 else f"{tot_m}m"
 
-    print(gray("-" * 131))
-    print(bold(
-        f"Summary: {total_count} activities | Duration: {tot_dur_str} | "
-        f"Distance: {total_distance_km:.1f} km | Elevation: {total_elevation_m:.0f} m | "
-        f"TSS: {total_tss:.1f}"
-    ))
+    narrow = is_narrow_client()
+    sep = "\n" if narrow else " | "
+    rule_width = (
+        default_wrap_width() if narrow
+        else max(visible_len(line) for line in table.splitlines())
+    )
+    print(gray("-" * rule_width))
+    print(bold(sep.join([
+        f"Summary: {total_count} activities",
+        f"Duration: {tot_dur_str}",
+        f"Distance: {total_distance_km:.1f} km",
+        f"Elevation: {total_elevation_m:.0f} m",
+        f"TSS: {total_tss:.1f}",
+    ])))
 
 
 def _show_activities_csv(activities: list) -> None:

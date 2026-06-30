@@ -11,7 +11,8 @@ from trainmate.sports import canonical_sport
 from trainmate.util import (
     bold, dim, green, red, yellow, cyan, blue, magenta, gray,
     color_acwr, visible_len, pad_visible, wrap_text, format_labeled_text,
-    format_labeled_block, today_str as _today_str, today_date as _today_date,
+    format_labeled_block, render_table, today_str as _today_str,
+    today_date as _today_date,
 )
 from trainmate.cli.common import fmt_date, ensure_recent_data, mark_adherence_from_results
 
@@ -44,10 +45,8 @@ def run_workout_adapt(args: argparse.Namespace) -> None:
         metrics_history = cli.db.get_metrics_cache(start_date=start_date, end_date=date_str)
         
         print(bold(cyan(f"\n=== METRICS TRAJECTORY (PAST {history_days} DAYS) ===")))
-        print(bold(
-            f"{'Date':<12} | {'HRV (ms)':<8} | {'RHR (bpm)':<9} | {'Sleep':<5} | {'ACWR':<5}"
-        ))
-        print(gray("-" * 50))
+        headers = ["Date", "HRV (ms)", "RHR (bpm)", "Sleep", "ACWR"]
+        rows = []
         for m in metrics_history:
             base = cli.db.get_baseline(m['date'])
             
@@ -80,12 +79,8 @@ def run_workout_adapt(args: argparse.Namespace) -> None:
                     else:
                         sleep_str = green(str(sleep_val))
             
-            date_col = pad_visible(m['date'], 12)
-            hrv_col = pad_visible(hrv_str, 8)
-            rhr_col = pad_visible(rhr_str, 9)
-            sleep_col = pad_visible(sleep_str, 5)
-            acwr_col = pad_visible(acwr_str, 5)
-            print(f"{date_col} | {hrv_col} | {rhr_col} | {sleep_col} | {acwr_col}")
+            rows.append([m['date'], hrv_str, rhr_str, sleep_str, acwr_str])
+        print(render_table(headers, rows))
         print(gray("((v) suppressed/poor, (^) elevated compared to baseline)\n"))
     except Exception as e:
         print(yellow(f"Warning: Could not display metrics trajectory: {e}"))
@@ -104,11 +99,11 @@ def run_workout_adapt(args: argparse.Namespace) -> None:
             return
 
         print(bold(yellow("\nPROPOSED WORKOUT ADAPTATIONS:")))
-        print(bold(
-            f"{'Date':<12} | {'Sport':<12} | {'Original Workout':<25} | "
-            f"{'Adapted Workout':<25} | {'Duration/RPE/TSS':<16}"
-        ))
-        print(gray("-" * 100))
+        headers = [
+            "Date", "Sport", "Original Workout", "Adapted Workout",
+            "Duration/RPE/TSS",
+        ]
+        rows = []
 
         # Pair each proposal with the session it adapts. An in-place adapt matches by
         # (date, sport) — get_workout is alias-aware, so it always finds the original.
@@ -168,22 +163,20 @@ def run_workout_adapt(args: argparse.Namespace) -> None:
                 if is_swap else pw['sport_type'].upper()
             )
 
-            date_col = pad_visible(cyan(pw['date']), 12)
-            sport_col = pad_visible(magenta(sport_label), 12)
-            orig_col = pad_visible(gray(orig_title), 25)
-            new_col = pad_visible(green(pw['title']), 25)
-            stats_col = pad_visible(yellow(stats_diff), 16)
-
-            print(f"{date_col} | {sport_col} | {orig_col} | {new_col} | {stats_col}")
+            rows.append([
+                cyan(pw['date']), magenta(sport_label), gray(orig_title),
+                green(pw['title']), yellow(stats_diff),
+            ])
 
         # Sessions being deleted outright (overridden with no replacement proposal).
         for ew in sorted(leftover_removed, key=lambda w: w['date']):
-            date_col = pad_visible(cyan(ew['date']), 12)
-            sport_col = pad_visible(magenta(ew['sport_type'].upper()), 12)
-            orig_col = pad_visible(gray(ew['title']), 25)
-            new_col = pad_visible(red("[Removed]"), 25)
-            stats_col = pad_visible(yellow(f"{_stats(ew)} -> removed"), 16)
-            print(f"{date_col} | {sport_col} | {orig_col} | {new_col} | {stats_col}")
+            rows.append([
+                cyan(ew['date']), magenta(ew['sport_type'].upper()),
+                gray(ew['title']), red("[Removed]"),
+                yellow(f"{_stats(ew)} -> removed"),
+            ])
+
+        print(render_table(headers, rows))
 
         if args.auto:
             apply = True
