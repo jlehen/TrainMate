@@ -79,8 +79,9 @@ def parse_message_to_argv(text: str, bot_username: Optional[str] = None) -> Opti
     """Turns a raw chat message into a CLI argv list, or None if there's nothing to run.
 
     The leading ``/`` Telegram puts on commands is stripped, as is the ``@botname``
-    suffix it appends in group chats. ``help`` and ``help <cmd>`` are rewritten to the
-    argparse-native ``--help`` / ``<cmd> --help`` so the CLI prints usage. Raises
+    suffix it appends in group chats. Bare ``help`` is passed through to the CLI's own
+    ``help`` command (the full command/sub-command tree); ``help <cmd>`` is rewritten to
+    the argparse-native ``<cmd> --help`` for that command's options. Raises
     ``ValueError`` on unbalanced quotes (so the caller can report it)."""
     text = (text or "").strip()
     if not text:
@@ -96,10 +97,11 @@ def parse_message_to_argv(text: str, bot_username: Optional[str] = None) -> Opti
         name, _, suffix = head.partition("@")
         if bot_username is None or suffix.lower() == bot_username.lower():
             argv[0] = name
-    # Map the chat-friendly 'help [cmd]' onto argparse's --help.
+    # Bare 'help' runs the CLI's own help command (full tree); 'help <cmd>' maps
+    # onto argparse's --help for that one command.
     if argv[0].lower() == "help":
         rest = argv[1:]
-        return rest + ["--help"] if rest else ["--help"]
+        return rest + ["--help"] if rest else ["help"]
     return argv
 
 

@@ -868,10 +868,13 @@ Invoked as `python trainmate_cli.py [--llm-model MODEL] <command> [subcommand] [
 patchable singletons; the handler functions, named
 `run_<command>_<subcommand>()`, live in the `trainmate/cli/` package
 (one module per command family: `status`, `goals`, `lifeevents`, `context`,
-`learnings`, `plans`, `workouts`, `data`).
+`learnings`, `plans`, `workouts`, `data`). `help` is the one exception — it
+just introspects the parser tree (`_print_command_tree` in `trainmate_cli.py`),
+so it has no handler of its own.
 
 | Command      | Subcommand   | Alias    | Description                                                              |
 |--------------|--------------|----------|--------------------------------------------------------------------------|
+| `help`       | —            | —        | Print every command and sub-command with its one-line help, recursing through the whole sub-parser tree (unlike `--help`, which only shows one level) |
 | `status`     | —            | `s`      | Show active goals, recent metrics, coach learnings                       |
 | `goal`       | `add`        | `g a`    | Add objective (`--title`, `--date`, `--sport`, `--desc`, `--priority`)   |
 | `goal`       | `edit`       | `g e`    | Edit objective by ID                                                     |

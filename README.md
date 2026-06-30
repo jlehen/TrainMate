@@ -123,7 +123,8 @@ Sync to your Google Calendar:
 python trainmate_cli.py workout push
 ```
 
-See `python trainmate_cli.py --help` for all available commands.
+See `python trainmate_cli.py --help` for all available commands, or
+`python trainmate_cli.py help` to see every command and its sub-commands at once.
 
 ## Running the Web UI
 

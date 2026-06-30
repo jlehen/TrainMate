@@ -185,6 +185,24 @@ def _subparser_choices(parser: argparse.ArgumentParser) -> dict:
     return {}
 
 
+def _print_command_tree(parser: argparse.ArgumentParser, indent: int = 0) -> None:
+    """Recursively prints every command/sub-command with its one-line help.
+
+    argparse's own --help only renders one level (a command's immediate
+    sub-commands); the 'help' command walks the whole sub-parser tree so the
+    entire surface area is visible without drilling into each command.
+    """
+    for action in parser._actions:
+        if not isinstance(action, argparse._SubParsersAction):
+            continue
+        for choice_action in action._choices_actions:
+            label = "  " * indent + bold(choice_action.metavar)
+            print(format_labeled_block(label, choice_action.help or ""))
+            _print_command_tree(action.choices[choice_action.dest], indent + 1)
+            if indent == 0:
+                print()
+
+
 def translate_dashless_argv(parser: argparse.ArgumentParser, tokens: list) -> list:
     """Rewrite network-appliance-style dashless options back into ``--flag`` form.
 
@@ -205,7 +223,11 @@ def translate_dashless_argv(parser: argparse.ArgumentParser, tokens: list) -> li
         unconditionally (so a value colliding with a keyword name — a goal literally
         titled ``date`` — is still taken as the value).
       * a sub-command/alias → emitted, then the remainder is translated in that
-        sub-parser's context (recursive descent mirroring the parser tree).
+        sub-parser's context (recursive descent mirroring the parser tree). This
+        also covers the top-level ``help`` command (a real sub-command), so it
+        takes priority over the next rule.
+      * the bare word ``help`` (not a sub-command at this level) → ``--help``,
+        argparse's own one-level help for the current command.
       * anything else → left as-is for argparse to bind positionally.
     """
     spec = _build_keyword_spec(parser)
@@ -219,6 +241,10 @@ def translate_dashless_argv(parser: argparse.ArgumentParser, tokens: list) -> li
             out.append(tok)
             i += 1
             continue
+        if tok_lower in sub_choices:
+            out.append(tok_lower)
+            out.extend(translate_dashless_argv(sub_choices[tok_lower], tokens[i + 1:]))
+            return out
         if tok_lower == "help":
             out.append("--help")
             return out
@@ -254,10 +280,6 @@ def translate_dashless_argv(parser: argparse.ArgumentParser, tokens: list) -> li
                 else:
                     i += 1
             continue
-        if tok_lower in sub_choices:
-            out.append(tok_lower)
-            out.extend(translate_dashless_argv(sub_choices[tok_lower], tokens[i + 1:]))
-            return out
         out.append(tok)
         i += 1
     return out
@@ -274,7 +296,14 @@ def main() -> None:
     )
     
     subparsers = parser.add_subparsers(dest="command", help="Available commands")
-    
+
+    # help command — prints every command and sub-command in one place. Registered
+    # as a real sub-command (rather than just argparse's own --help) so it can
+    # recurse through the whole sub-parser tree; see _print_command_tree.
+    subparsers.add_parser(
+        "help", help="Show every command and sub-command in one place"
+    )
+
     # Common parser for commands that support bypassing or forcing the auto-pull.
     # --no-pull and --force-pull are opposite ends of the same throttle, so they're
     # mutually exclusive.
@@ -1209,7 +1238,11 @@ def main() -> None:
         
     cmd = args.command.lower()
 
-    if cmd in ("status", "s"):
+    if cmd == "help":
+        print(bold(parser.description))
+        print()
+        _print_command_tree(parser)
+    elif cmd in ("status", "s"):
         run_status(verbose=args.verbose, no_pull=args.no_pull, force_pull=args.force_pull)
     elif cmd in ("goal", "g"):
         if not args.subcommand:

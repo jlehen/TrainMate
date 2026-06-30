@@ -59,6 +59,18 @@ class TestTrainMateCLI(unittest.TestCase):
         self.assertEqual(exit_code, 0)
         self.assertIn("pull", stdout)
 
+    def test_help_command_shows_full_command_tree(self):
+        exit_code, stdout, stderr = self.run_cli(["help"])
+        self.assertEqual(exit_code, 0)
+        # top-level commands
+        self.assertIn("goal", stdout)
+        self.assertIn("workout", stdout)
+        self.assertIn("data", stdout)
+        # and their sub-commands, which plain --help doesn't show recursively
+        self.assertIn("add", stdout)
+        self.assertIn("pull", stdout)
+        self.assertIn("push", stdout)
+
     def test_goal_commands(self):
         exit_code, stdout, stderr = self.run_cli(["goal", "list"])
         self.assertEqual(exit_code, 0)

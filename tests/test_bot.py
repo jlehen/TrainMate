@@ -36,8 +36,8 @@ class ParseMessageTest(unittest.TestCase):
     def test_strips_bot_suffix_when_username_unknown(self):
         self.assertEqual(bot.parse_message_to_argv("/status@SomeBot"), ["status"])
 
-    def test_help_alone_maps_to_dashdash_help(self):
-        self.assertEqual(bot.parse_message_to_argv("/help"), ["--help"])
+    def test_help_alone_maps_to_help_command(self):
+        self.assertEqual(bot.parse_message_to_argv("/help"), ["help"])
 
     def test_help_with_command_maps_to_command_help(self):
         self.assertEqual(bot.parse_message_to_argv("help workout"), ["workout", "--help"])
