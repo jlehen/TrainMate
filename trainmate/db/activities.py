@@ -76,6 +76,38 @@ class ActivitiesMixin:
             )
             conn.commit()
 
+    def prune_completed_activities(
+        self, start_date: str, end_date: str, keep_ids: List[str]
+    ) -> int:
+        """Deletes completed activities in [start_date, end_date] whose activity_id
+        is not in `keep_ids`. Used to reconcile a fresh Garmin pull with local
+        state: an activity removed upstream (e.g. a duplicate Zwift auto-upload the
+        user deleted in Garmin Connect) would otherwise linger and show up as an
+        unplanned activity. Returns the number of rows deleted.
+
+        Scoped to the pulled date range so a narrow pull never touches activities
+        outside the window it actually re-fetched."""
+        keep = {str(i) for i in keep_ids}
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT activity_id FROM completed_activities "
+                "WHERE date >= ? AND date <= ?",
+                (start_date, end_date),
+            )
+            stale = [
+                row["activity_id"]
+                for row in cursor.fetchall()
+                if row["activity_id"] not in keep
+            ]
+            for activity_id in stale:
+                cursor.execute(
+                    "DELETE FROM completed_activities WHERE activity_id = ?",
+                    (activity_id,),
+                )
+            conn.commit()
+            return len(stale)
+
     def get_completed_activities(
         self, start_date: Optional[str] = None, end_date: Optional[str] = None
     ) -> List[CompletedActivity]:

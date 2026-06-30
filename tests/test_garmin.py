@@ -254,6 +254,91 @@ class TestBackfillTss(unittest.TestCase):
         self.assertIsNone(row["tss"])
 
 
+class _FakeClient:
+    """Minimal GarminClient stand-in for _ingest_activities. `summaries` is the
+    activity list get_activities returns; set `raise_on_fetch` to simulate an API
+    failure. No HR/power so the zone/RPE lookups stay trivial."""
+
+    def __init__(self, summaries, raise_on_fetch=False):
+        self.summaries = summaries
+        self.raise_on_fetch = raise_on_fetch
+
+    def get_activities(self, start, end):
+        if self.raise_on_fetch:
+            raise RuntimeError("garmin down")
+        return self.summaries
+
+    def get_activity_hr_zones(self, activity_id):
+        return {f"zone{i}_sec": 0 for i in range(1, 6)}
+
+    def get_activity_power_zones(self, activity_id):
+        return {f"power_zone{i}_sec": None for i in range(1, 8)}
+
+    def get_activity_rpe(self, activity_id):
+        return None
+
+
+def _summary(activity_id, day, type_key="indoor_cycling"):
+    return {
+        "activityId": activity_id,
+        "startTimeLocal": f"{day} 08:00:00",
+        "activityType": {"typeKey": type_key},
+        "duration": 3600.0,
+        "averageHR": None,
+    }
+
+
+class TestIngestReconcilesDeletions(unittest.TestCase):
+    def setUp(self):
+        clear_all_tables(test_db)
+
+    def _seed(self, activity_id, day, type_key="indoor_cycling"):
+        test_db.save_completed_activity(
+            activity_id=activity_id, date=day, start_time=f"{day} 08:00:00",
+            activity_name=type_key, activity_type=type_key, duration_sec=3600.0,
+            distance_km=0.0, elevation_gain_m=0.0, avg_hr=None, max_hr=None,
+            rpe=None, tss=None,
+        )
+
+    def _ids(self):
+        return {a["activity_id"] for a in test_db.get_completed_activities()}
+
+    def test_drops_activity_deleted_upstream(self):
+        # The Zwift case: a duplicate auto-upload and the watch's own recording
+        # both stored locally; the user deletes the Zwift one in Garmin Connect.
+        self._seed("zwift_dup", _d(0), "virtual_ride")
+        self._seed("watch", _d(0), "indoor_cycling")
+
+        # Garmin now only returns the watch activity for today.
+        client = _FakeClient([_summary("watch", _d(0))])
+        with patch("builtins.print"):
+            garmin._ingest_activities(client, _d(0), _d(0), throttle=0)
+
+        self.assertEqual(self._ids(), {"watch"})
+
+    def test_failed_fetch_leaves_local_rows_intact(self):
+        # A swallowed error must NOT be read as "Garmin has no activities" and
+        # wipe the range.
+        self._seed("a1", _d(0))
+        client = _FakeClient([], raise_on_fetch=True)
+        with patch("builtins.print"):
+            garmin._ingest_activities(client, _d(0), _d(0), throttle=0)
+
+        self.assertEqual(self._ids(), {"a1"})
+
+    def test_prune_is_scoped_to_pulled_range(self):
+        # An activity outside the pulled window is untouched even when absent
+        # from the fetch result.
+        self._seed("today", _d(0))
+        self._seed("last_week", _d(-7))
+
+        client = _FakeClient([_summary("today", _d(0))])
+        with patch("builtins.print"):
+            garmin._ingest_activities(client, _d(0), _d(0), throttle=0)
+
+        self.assertEqual(self._ids(), {"today", "last_week"})
+
+
 class TestEnsureData(unittest.TestCase):
     def setUp(self):
         clear_all_tables(test_db)

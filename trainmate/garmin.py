@@ -140,12 +140,12 @@ class GarminClient:
         return metrics
 
     def get_activities(self, start_date: str, end_date: str) -> List[Dict[str, Any]]:
-        """Fetches the activity summary list within a date range (inclusive)."""
-        try:
-            return self.api.get_activities_by_date(start_date, end_date) or []
-        except Exception as e:
-            print(red(f"Error fetching activities {start_date}..{end_date}: {e}"))
-            return []
+        """Fetches the activity summary list within a date range (inclusive).
+
+        Raises on API failure rather than masking it as an empty list: the caller
+        reconciles deletions against this result, so a swallowed error would look
+        like "Garmin has no activities here" and wipe the local range."""
+        return self.api.get_activities_by_date(start_date, end_date) or []
 
     @staticmethod
     def _parse_zone_entries(data: Any, num_zones: int, prefix: str) -> Dict[str, int]:
@@ -421,11 +421,20 @@ def _safe_round(value: Any, ndigits: int = 1) -> float:
 # ==============================================================================
 
 def _ingest_activities(client: GarminClient, start: str, end: str, throttle: float) -> None:
-    activities = client.get_activities(start, end)
+    try:
+        activities = client.get_activities(start, end)
+    except Exception as e:
+        # Skip ingest AND deletion-reconcile on a failed fetch: an empty result
+        # here would otherwise be read as "Garmin has no activities" and prune
+        # the whole local range.
+        print(red(f"Error fetching activities {start}..{end}: {e}"))
+        return
     print(f"Found {len(activities)} activities in {start}..{end}.")
     underestimated = 0  # activities whose load is a weak estimate for lack of RPE
+    fetched_ids = []  # everything Garmin still has in this range, for deletion reconcile
     for idx, act in enumerate(activities):
         activity_id = str(act.get("activityId"))
+        fetched_ids.append(activity_id)
         start_time = act.get("startTimeLocal", "") or ""
         date_str = start_time.split(" ")[0] if start_time else ""
         if not date_str:
@@ -481,6 +490,14 @@ def _ingest_activities(client: GarminClient, start: str, end: str, throttle: flo
             "had low HR-zone coverage and no RPE; their load is an underestimate. "
             "Enter an RPE in Garmin for a better load value."
         ))
+
+    # Reconcile deletions: drop local rows in this range that Garmin no longer
+    # returns (e.g. a duplicate Zwift auto-upload the user deleted in Garmin
+    # Connect). Without this they linger and surface as unplanned activities.
+    pruned = db.prune_completed_activities(start, end, fetched_ids)
+    if pruned:
+        print(f"  Removed {pruned} activit{'y' if pruned == 1 else 'ies'} "
+              "deleted in Garmin since the last sync.")
 
 
 def _ingest_metrics(client: GarminClient, start: str, end: str, throttle: float) -> None:
