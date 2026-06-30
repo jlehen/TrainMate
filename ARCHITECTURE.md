@@ -4,22 +4,29 @@ This document is the primary reference for coding agents. Read it before
 reading source files — in most cases it will be sufficient. Read a source file
 only when you need to change it or when a specific detail is not covered here.
 
-Each section is **current-state reference**. The *why* behind non-obvious design
-choices (and what they replaced) lives in [§15 Design Rationale & History](#15-design-rationale--history)
-and the `DESIGN_*.md` files, so the reference sections stay lookup-friendly.
+**How this document is organized.** Each numbered section is **current-state
+reference** — terse, lookup-oriented facts. The *why* behind non-obvious design
+choices (and what they replaced) lives in one place: [§15 Design Rationale &
+History](#15-design-rationale--history) and the `DESIGN_*.md` files. Reference
+sections therefore link to §15 rather than re-explaining a decision. Each concept
+has **one canonical home**; other sections point to it instead of paraphrasing
+(e.g. the coach-learnings / confidence model is canonical in
+[§3](#3-coach-package-architecture), and [§4](#4-database--key-patterns) /
+[§5](#5-database-schema) only list the methods and columns that implement it).
 
 ## Contents
 
 1. [System Overview](#1-system-overview)
-2. [Module Map](#2-module-map)
+2. [Module Map](#2-module-map) · [Change recipes](#change-recipes-where-to-edit-for-a-given-task)
 3. [coach Package Architecture](#3-coach-package-architecture) — **canonical** coach-learnings / confidence model
+   · [CoachEngine](#coachengine) · [CoachService](#coachservice)
 4. [Database — Key Patterns](#4-database--key-patterns)
-5. [Database Schema](#5-database-schema)
+5. [Database Schema](#5-database-schema) — [workouts](#workouts) · [Workout state: four axes](#workout-state--four-orthogonal-axes-not-one-enum) · [other tables](#completed_activities)
 6. [Singletons](#6-singletons)
 7. [CLI Commands Reference](#7-cli-commands-reference)
 8. [Web API Endpoints](#8-web-api-endpoints)
 9. [Configuration (`config.yaml`)](#9-configuration-configyaml)
-10. [Key Data Flows](#10-key-data-flows)
+10. [Key Data Flows](#10-key-data-flows) — [Plan gen](#plan-generation-plan-generate) · [Workout gen](#workout-generation-workout-generate) · [Adaptation](#daily-adaptation-workout-adapt) · [Data pull](#data-pull-data-pull-and-auto-ensure) · [Analysis](#data-analysis-data-bootstrap--data-reflect)
 11. [Terminology: Plans vs. Workouts](#11-terminology-plans-vs-workouts)
 12. [Sports Science & Coaching Mathematics](#12-sports-science--coaching-mathematics)
 13. [Daily Context (Calendar Ingest)](#13-daily-context-calendar-ingest)
@@ -81,41 +88,39 @@ classes themselves.
   shared `common`.
 - **`trainmate_web.py`** — Flask REST API; thin handler functions calling `db`,
   `coach_service`, `calendar_syncer` (pure reader — never pulls).
-- **`trainmate_bot.py`** — Telegram chat front-end. A message is treated as a CLI
-  command line (leading `/` optional) and run through `trainmate_cli.py` *as a
-  subprocess*; stdout+stderr are ANSI-stripped and streamed back as `<pre>`
-  replies. Running the real CLI keeps the bot in permanent parity with every
-  command/flag and isolates each call. **Interactive commands** work over chat via
-  the prompt broker (§6): the CLI is launched with `TRAINMATE_FRONTEND=json` and
-  `-u` over a *persistent, unbuffered* subprocess, so a `confirm`/`choose`/`text`
-  prompt arrives as a sentinel-framed request line instead of blocking on
-  `input()`. The bot renders it as an inline keyboard (confirm → Yes/No, ⚠️ for
-  `danger`; choose → one button per option) or an awaited text reply, then writes
-  the answer back to the child's stdin so the command resumes. One in-flight
-  `_Session` per chat holds the process + pending-prompt state; a per-prompt
-  `nonce` (in the button `callback_data`) rejects stale taps. `/cancel` and an idle
-  `prompt_timeout` send a cancellation the CLI turns into a clean abort; a
-  between-output `command_timeout` kills a silent runaway. Access is gated by a
-  numeric chat-id allowlist (`telegram.allowed_chat_ids`). Token + allowlist live
-  under a `telegram:` block in `config.yaml` (or `TELEGRAM_BOT_TOKEN`). Launch
-  with `./tm-bot`. The pure helpers (`parse_message_to_argv`, `chunk_text`,
-  `format_reply`, `is_authorized`, plus the prompt-protocol helpers
-  `parse_prompt_request`, `prompt_buttons`, `decode_callback`) are import-safe
-  without `python-telegram-bot` (imported lazily in `main`) and unit-tested in
-  `tests/test_bot.py`.
+- **`trainmate_bot.py`** — Telegram chat front-end. Launch with `./tm-bot`. Each
+  fact below:
+  - **Model:** a message is treated as a CLI command line (leading `/` optional) and
+    run through `trainmate_cli.py` *as a subprocess*; stdout+stderr are ANSI-stripped
+    and streamed back as `<pre>` replies. Running the real CLI keeps the bot in
+    permanent parity with every command/flag and isolates each call.
+  - **Interactive commands** work over chat via the prompt broker ([§6](#6-singletons)):
+    the CLI is launched with `TRAINMATE_FRONTEND=json` and `-u` over a *persistent,
+    unbuffered* subprocess, so a `confirm`/`choose`/`text` prompt arrives as a
+    sentinel-framed request line instead of blocking on `input()`. The bot renders it
+    as an inline keyboard (confirm → Yes/No, ⚠️ for `danger`; choose → one button per
+    option) or an awaited text reply, then writes the answer back to the child's stdin
+    so the command resumes.
+  - **State / safety:** one in-flight `_Session` per chat holds the process +
+    pending-prompt state; a per-prompt `nonce` (in the button `callback_data`) rejects
+    stale taps. `/cancel` and an idle `prompt_timeout` send a cancellation the CLI
+    turns into a clean abort; a between-output `command_timeout` kills a silent runaway.
+  - **Access** is gated by a numeric chat-id allowlist (`telegram.allowed_chat_ids`).
+    Token + allowlist live under a `telegram:` block in `config.yaml` (or
+    `TELEGRAM_BOT_TOKEN`).
+  - **Pure helpers** (`parse_message_to_argv`, `chunk_text`, `format_reply`,
+    `is_authorized`, plus prompt-protocol helpers `parse_prompt_request`,
+    `prompt_buttons`, `decode_callback`) are import-safe without
+    `python-telegram-bot` (imported lazily in `main`) and unit-tested in
+    `tests/test_bot.py`.
 
 ### Package `trainmate/`
 
 | File                 | Class / Singleton    | Purpose                                          |
 |----------------------|----------------------|--------------------------------------------------|
-| `types.py`           | —                    | TypedDicts: `Objective`, `LifeEvent`, `Workout`, |
-|                      |                      | `CompletedActivity` (includes `bike_avg_watts`,  |
-|                      |                      | `zone1_sec`–`zone5_sec`), `AthleteMetric`,       |
-|                      |                      | `AthleteBaseline`, `Macrocycle`, `Mesocycle`     |
+| `types.py`           | —                    | TypedDicts: `Objective`, `LifeEvent`, `Workout`, `CompletedActivity` (incl. `bike_avg_watts`, `zone1_sec`–`zone5_sec`), `AthleteMetric`, `AthleteBaseline`, `Macrocycle`, `Mesocycle` |
 | `config.py`          | `config`             | Reads `config.yaml`; exposes typed properties.   |
-| `prompt.py`          | (`cli.prompt`)       | Front-end-agnostic prompt broker:                |
-|                      |                      | `confirm`/`choose`/`ask_text` over `TtyPrompt`   |
-|                      |                      | (input()) or `JsonPrompt` (chat/web). See §6.    |
+| `prompt.py`          | (`cli.prompt`)       | Front-end-agnostic prompt broker: `confirm`/`choose`/`ask_text` over `TtyPrompt` (`input()`) or `JsonPrompt` (chat/web). See [§6](#6-singletons). |
 | `db/`                | `db`                 | SQLite wrapper; `Database` composed from         |
 |                      |                      | per-domain mixins. Full CRUD for all tables.     |
 | `coach/`             | `coach_service`      | `service.py` `CoachService` orchestrator +       |
@@ -141,6 +146,26 @@ classes themselves.
 |                      |                      | free so DB + adherence share it without a cycle. |
 | `util.py`            | —                    | ANSI color helpers (`bold`, `green`, `red`, …),  |
 |                      |                      | `wrap_text`, `format_labeled_text`.              |
+
+### Change recipes (where to edit for a given task)
+
+Start here when you know *what* you want to change but not *which files*. The data
+flow for each lives in [§10](#10-key-data-flows).
+
+| To change…                       | Edit these                                                                 |
+|----------------------------------|----------------------------------------------------------------------------|
+| Daily adaptation logic           | `coach/service.py:workout_adapt*`, `coach/engine.py:_workout_adapt_logic`, prompt helpers in `coach/formatting.py` ([§10](#daily-adaptation-workout-adapt)) |
+| Plan / strategy generation       | `coach/service.py:plan_generate`, `coach/engine.py:_plan_generate_strategy` ([§10](#plan-generation-plan-generate)) |
+| Workout generation horizon       | `coach/service.py:workout_generate`, `cli/workouts.py` (flag parsing), `config.workout_generation_span_days` |
+| Coach-learnings / confidence     | `db/learnings.py`, `coach/service.py` (`_apply_learning_updates`), model is **canonical** in [§3](#3-coach-package-architecture) |
+| Backward analysis (bootstrap/reflect) | `coach/service.py:_run_workout_analysis`, `coach/engine.py:_data_analyze_logic` ([§10](#data-analysis-data-bootstrap--data-reflect)) |
+| Garmin pull / metrics / load model | `trainmate/garmin.py` (`pull`, `ensure_data`, `activity_load`), see [§12](#12-sports-science--coaching-mathematics) |
+| Calendar push / daily-context ingest | `trainmate/google_calendar.py`, see [§13](#13-daily-context-calendar-ingest) |
+| Workout state (modified/calendar/removed/archived) | `trainmate/modification_state.py`, `trainmate/calendar_state.py`, `db/workouts.py` ([§5](#workout-state--four-orthogonal-axes-not-one-enum)) |
+| A CLI command                    | `trainmate/cli/<family>.py` (`run_*`), dispatcher in `trainmate_cli.py` ([§7](#7-cli-commands-reference)) |
+| A web endpoint                   | `trainmate_web.py` (thin wrapper over `coach_service`/`db`) ([§8](#8-web-api-endpoints)) |
+| The Telegram bot                 | `trainmate_bot.py` (runs the CLI as a subprocess) ([§2](#entry-points)) |
+| DB schema / a new column         | the relevant `db/*.py` mixin + the table in [§5](#5-database-schema) |
 
 ---
 
@@ -277,40 +302,39 @@ called by the UIs.
   hashes, calls `CoachEngine._plan_generate_strategy()`, saves to DB. Auto-splits
   timelines > 24 weeks.
 - **`workout_generate(objective_id, end_date)`** — requires an existing macrocycle.
-  Fetches history, then **preserves a completed session**: if today's planned workout
-  already has a matching completed activity (decided by `_today_workout_completed`, a
-  one-day `analyze_adherence` pass), generation starts *tomorrow* so the finished
-  workout isn't overwritten; otherwise it starts today. Computes `num_days` from
-  `end_date` (or `config.workout_generation_span_days` if omitted) relative to that
-  start, calls `CoachEngine._workout_generate_logic()`. **Eager:** archives the previous
-  plan's future workouts from the generation start (tearing down their Calendar events),
-  saves the new workouts tagged with the active `macrocycle_id`, then pushes them to
-  Calendar straight away — the calendar always mirrors the active plan. A defensive
-  filter drops any model-emitted workout dated before the generation start so it can't
-  overwrite the preserved day. The archive (not delete) makes the regeneration undoable
-  via `plan_rollback` (DESIGN_plan_rollback.md).
+  - **Preserves a completed session:** if today's planned workout already has a
+    matching completed activity (`_today_workout_completed`, a one-day
+    `analyze_adherence` pass), generation starts *tomorrow*; otherwise today. A
+    defensive filter drops any model-emitted workout dated before the start.
+  - **Horizon:** `num_days` from `end_date` (or `config.workout_generation_span_days`)
+    relative to the start, then `CoachEngine._workout_generate_logic()`.
+  - **Eager:** archives the previous plan's future workouts from the start (tearing
+    down their Calendar events), saves the new workouts tagged with the active
+    `macrocycle_id`, and pushes them to Calendar immediately — calendar always mirrors
+    the active plan. Archive (not delete) makes regeneration undoable via
+    `plan_rollback` (DESIGN_plan_rollback.md).
 - **`plan_apply(objective_id, strategy, mesocycles)`** — persists an
   already-generated strategy + mesocycles to the DB (recomputes the goals/lifeevents/
   config hashes and snapshots). Used by the intermediate-goals branch of `plan generate`.
 - **`replan(force, objective_id)`** — convenience: `plan_generate` then
   `workout_generate`.
 - **`workout_adapt(target_date_str, message=None)`** — fetches metrics + workouts in
-  the rolling window, calls `CoachEngine._workout_adapt_logic()`. Returns
-  `(reason, proposed_workouts)`. The optional `message` (CLI `-m/--message`) is a
-  free-text athlete note for **this run only** — surfaced as a bounded section of the
-  adapt prompt and weighed as today's intent/constraints, but advisory (it does not
-  override clear fatigue signals) and **ephemeral** (never persisted or turned into a
-  learning; persistent context belongs in `daily_context` via `context add`). The prompt shows the LLM the whole forward plan
-  through the mesocycle end for context but instructs it to return **only sessions it
-  is actually changing** — omitted sessions are preserved (apply never drops a date
-  with no proposal), so the model is not pushed to re-author the entire block.
-  Sessions that already have a matching completed activity (incl. one performed
-  earlier on the evaluation date) are **locked history**: any proposal targeting such
-  a `(date, sport)` is dropped before returning, so a workout already finished today is
-  never "adapted". A **no-op backstop** (`_adapt_is_change`) then drops any proposal
-  that reproduces an existing same-sport session on every meaningful field (title,
-  description, duration/RPE/TSS — whitespace- and int/float-insensitive), so a session
-  the model re-lists unchanged is never re-stamped as adapted or needlessly re-synced.
+  the rolling window, calls `CoachEngine._workout_adapt_logic()`, returns
+  `(reason, proposed_workouts)`; caller decides whether to apply.
+  - **`message`** (CLI `-m/--message`): a free-text athlete note for **this run only**
+    — bounded prompt section, weighed as today's intent/constraints but advisory (does
+    not override clear fatigue) and **ephemeral** (never persisted; persistent context
+    belongs in `daily_context` via `context add`).
+  - **Only-changes contract:** the prompt shows the whole forward plan through the
+    mesocycle end but instructs the model to return **only sessions it is changing** —
+    omitted sessions are preserved (apply never drops a date with no proposal).
+  - **Locked history:** any proposal targeting a `(date, sport)` that already has a
+    matching completed activity (incl. one done earlier today) is dropped — a finished
+    workout is never "adapted".
+  - **No-op backstop** (`_adapt_is_change`): drops any proposal that reproduces an
+    existing same-sport session on every meaningful field (title, description,
+    duration/RPE/TSS — whitespace- and int/float-insensitive), so an unchanged re-list
+    is never re-stamped or needlessly re-synced.
 - **`workout_adapt_apply(proposed, reason, start, end)`** — deletes overridden
   workouts (+ calendar events), saves adapted workouts, syncs to Calendar. Each
   session keeps its short per-workout `change_reason` in `modification_reason`; the
@@ -500,61 +524,35 @@ SQLite database at `trainmate.db` (path from `config.db_path`).
 | `impact_description` | TEXT       |                                                |
 
 ### workouts
+
+Several state facts are **derived, not stored** — see [Workout state](#workout-state--four-orthogonal-axes-not-one-enum)
+below for the rules and [§15](#15-design-rationale--history) for why.
+
 | Column                 | Type       | Notes                                            |
 |------------------------|------------|--------------------------------------------------|
 | `id`                   | INTEGER PK |                                                  |
-| `date`                 | TEXT       | YYYY-MM-DD                                       |
+| `date`                 | TEXT       | YYYY-MM-DD (scheduled day)                       |
 | `sport_type`           | TEXT       |                                                  |
 | `title`                | TEXT       |                                                  |
 | `description`          | TEXT       | Current description (may be adapted)             |
-| `original_description` | TEXT       | Set once on creation, never overwritten          |
-|                        |            | (COALESCE)                                       |
-| `pushed_signature`     | TEXT       | Hash of calendar-relevant fields captured at the |
-|                        |            | last successful push. Freshness is *derived* by  |
-|                        |            | comparing it to the live hash — not stored. NULL  |
-|                        |            | ⟺ never pushed (see `trainmate.calendar_state`).  |
-| `marked_signature`     | TEXT       | Hash of calendar fields + adherence verdict at    |
-|                        |            | the last `compare --mark` push; lets re-marking   |
-|                        |            | skip a no-op Calendar write. Separate from        |
-|                        |            | `pushed_signature` (see §Calendar state). NULL ⟺  |
-|                        |            | never marked.                                     |
-| `modification_reason`  | TEXT       | Modification axis: non-NULL ⟺ modified. A short   |
-|                        |            | per-workout note. Kind (adapted/swapped/replaced) |
-|                        |            | derived via `trainmate.modification_state`.       |
-| `adaptation_summary`   | TEXT       | Long batch-level adapt rationale, stamped on      |
-|                        |            | every session of one `workout adapt` run and      |
-|                        |            | deduplicated when listed. NULL on swaps/manual/    |
-|                        |            | legacy rows.                                      |
-| `google_event_id`      | TEXT       | Non-NULL ⟺ a Calendar event exists (may be stale)|
+| `original_description` | TEXT       | Set once on creation, never overwritten (COALESCE) |
+| `pushed_signature`     | TEXT       | Hash of calendar-relevant fields at last successful push; freshness derived by comparing to the live hash. NULL ⟺ never pushed. Only writer: `mark_workout_pushed`. |
+| `marked_signature`     | TEXT       | Hash of calendar fields + adherence verdict at the last `compare --mark` push; lets re-marking skip a no-op write. Kept separate from `pushed_signature` ([§15](#15-design-rationale--history)). NULL ⟺ never marked. |
+| `modification_reason`  | TEXT       | Modification axis: non-NULL ⟺ modified. Short per-workout note; *kind* derived via `trainmate.modification_state`. |
+| `adaptation_summary`   | TEXT       | Long batch-level adapt rationale, stamped on every session of one `workout adapt` run, deduplicated when listed. NULL on swaps/manual/legacy rows. |
+| `google_event_id`      | TEXT       | Non-NULL ⟺ a Calendar event exists (may be stale) |
 | `duration_minutes`     | INTEGER    |                                                  |
-| `rpe`                  | INTEGER    | Expected RPE 1–10                                |
-| `tss`                  | INTEGER    | Expected Training Stress Score                   |
-| `removed`              | INTEGER    | 0/1 — soft-delete: 1 ⟺ removed via `workout rm`  |
+| `rpe`                  | INTEGER    | Expected RPE 1–10 (excluded from `pushed_signature`) |
+| `tss`                  | INTEGER    | Expected Training Stress Score                  |
+| `removed`              | INTEGER    | 0/1 — soft-delete: 1 ⟺ removed via `workout rm` |
 | `removed_reason`       | TEXT       | Athlete's reason for removal (`--reason`); optional |
-| `original_date`        | TEXT       | YYYY-MM-DD — set once on creation, never            |
-|                        |            | overwritten (COALESCE); used to detect swap-back   |
-| `source`               | TEXT       | Origin axis, fixed at creation: `generated`        |
-|                        |            | (plan/generate, or a session adapt newly adds) or  |
-|                        |            | `manual` (`workout add`). NULL on legacy rows.     |
-|                        |            | Orthogonal to adaptation — adapting keeps origin.  |
-| `macrocycle_id`        | INTEGER    | Plan version this row belongs to, fixed at creation|
-|                        |            | (never overwritten). Used by `plan rollback` to    |
-|                        |            | resurrect a version's workouts. NULL on legacy rows.|
-| `archived_at`          | TEXT       | Plan-version axis: non-NULL ⟺ archived (belonged to|
-|                        |            | a superseded plan version). Hidden from reads by   |
-|                        |            | default, event torn down. Distinct from `removed`. |
-|                        |            | See DESIGN_plan_rollback.md.                       |
-| `created_at`           | TEXT       | UTC ISO timestamp set once on INSERT, never        |
-|                        |            | overwritten — when the session first entered the   |
-|                        |            | plan. Distinct from `date`/`original_date` (the    |
-|                        |            | scheduled day). NULL on legacy rows.               |
-| `adapted_at`           | TEXT       | UTC ISO timestamp of the most recent `workout      |
-|                        |            | adapt` run that eased this row. NULL ⟺ never        |
-|                        |            | adapted. A *stored fact of WHEN* (not derivable),   |
-|                        |            | so the daily adaptation can avoid compounding cuts. |
-| `adaptation_count`     | INTEGER    | How many distinct adapt runs have eased this row    |
-|                        |            | (default 0). Bumped only when `adapted_at` is set;  |
-|                        |            | a fresh INSERT resets it, so regeneration clears it.|
+| `original_date`        | TEXT       | YYYY-MM-DD — set once on creation (COALESCE); used to detect swap-back |
+| `source`               | TEXT       | Origin axis, fixed at creation: `generated` (plan/generate, or an adapt newly adds) or `manual` (`workout add`). Orthogonal to adaptation. NULL on legacy rows. |
+| `macrocycle_id`        | INTEGER    | Plan version this row belongs to, fixed at creation. Used by `plan rollback` to resurrect a version's workouts. NULL on legacy rows. |
+| `archived_at`          | TEXT       | Plan-version axis: non-NULL ⟺ archived (belonged to a superseded plan version). Hidden from reads, event torn down. Distinct from `removed`. See DESIGN_plan_rollback.md. |
+| `created_at`           | TEXT       | UTC ISO; set once on INSERT — when the session entered the plan. Distinct from `date`/`original_date`. NULL on legacy rows. |
+| `adapted_at`           | TEXT       | UTC ISO of the most recent `workout adapt` run that eased this row. NULL ⟺ never adapted. Stored (not derivable) so adaptation can avoid compounding cuts. |
+| `adaptation_count`     | INTEGER    | Distinct adapt runs that eased this row (default 0). Bumped only with `adapted_at`; a fresh INSERT resets it. |
 
 #### Workout state = four orthogonal axes (not one enum)
 
@@ -574,24 +572,20 @@ kind flag. Checked **in order**:
 | `replaced` | reason starts `MANUAL_REPLACE_REASON_PREFIX` (`"Manually replaced previous "`) **or** `source == 'manual'` |
 | `adapted` | catch-all (a legacy adapt: rationale in `modification_reason`, no summary) |
 
-  - `adapted` takes precedence over `swapped` — a session adapted *then* swapped
-    keeps its summary and still reads `adapted`.
-  - `modification_reason` is set directly, so a swap-back to `original_date` can
-    clear it to NULL. `adaptation_summary` is COALESCE-preserved on re-save (only
-    an adapt writes it, never cleared).
+  - `adapted` takes precedence over `swapped` (an adapted-then-swapped session keeps
+    its summary and reads `adapted`). `modification_reason` is set directly (a
+    swap-back to `original_date` can clear it to NULL); `adaptation_summary` is
+    COALESCE-preserved (only an adapt writes it).
   - The two prefix constants are shared by `coach/service.py`'s swap and manual-add
-    writers so reader and writer can't drift (a test guards this).
-  - `workout list` markers `[ADAPTED]`/`[SWAPPED]`/`[REPLACED]` come from this
-    accessor; an `[ADAPTED]` session eased by more than one run reads `[ADAPTED ×N]`
-    from `adaptation_count`. *(The Calendar event summary's `[Adapted]`/before-after framing in
-    `google_calendar.sync_workout` is separate — it keys on whether the
-    **description** changed, not on the modification kind.)*
-  - **Recency is stored, the kind is not.** `adapted_at` / `adaptation_count` are
-    *stored* on the row because no other column carries *when* or *how often* a
-    session was eased — unlike the modification *kind*, which is fully derivable and
-    so deliberately is **not** stored. The daily adaptation surfaces these to its
-    prompt (`[ALREADY EASED …]` tag) so a re-run holds an already-eased session
-    instead of stacking another cut onto still-lagging recovery metrics.
+    writers so reader and writer can't drift (test-guarded).
+  - **Markers:** `workout list` shows `[ADAPTED]`/`[SWAPPED]`/`[REPLACED]` from this
+    accessor; `[ADAPTED ×N]` uses `adaptation_count`. *(The Calendar event summary's
+    `[Adapted]`/before-after framing in `google_calendar.sync_workout` is separate — it
+    keys on whether the **description** changed, not the modification kind.)*
+  - **Why recency is stored but kind is not** → [§15](#15-design-rationale--history).
+    The daily adaptation surfaces `adapted_at`/`adaptation_count` to its prompt
+    (`[ALREADY EASED …]` tag) so a re-run holds an already-eased session instead of
+    stacking another cut onto still-lagging recovery.
 
 **2. Calendar state** = derived by `trainmate.calendar_state.calendar_status(workout)`:
 
@@ -601,34 +595,22 @@ kind flag. Checked **in order**:
 | `synced` | `pushed_signature == ` current calendar-field hash |
 | `stale` | `pushed_signature != ` current hash |
 
-  - `pushed_signature` is the hash of calendar-relevant fields captured at the last
-    successful push; `mark_workout_pushed` is its **only** writer. Any edit through
-    any path leaves it untouched, so the row reads `stale` automatically.
-  - The signature excludes `rpe` (never reaches Calendar), so editing RPE does not
-    mark a workout for re-push.
-  - Push eligibility = `calendar_status != 'synced'`; calendar cleanup keys on
-    `google_event_id`.
+  - `mark_workout_pushed` is the **only** writer of `pushed_signature`; any edit
+    through any path leaves it untouched, so the row reads `stale` automatically. The
+    signature excludes `rpe` (never reaches Calendar). Push eligibility =
+    `calendar_status != 'synced'`; calendar cleanup keys on `google_event_id`.
   - **Backward adherence marking** is the past-looking counterpart to the forward
-    push. For each *strictly past* planned workout that already has an event, it
-    re-renders the event with an adherence verdict from `adherence.classify_adherence`
-    — a `[Done]`/`[Missed]`/`[Partial]`/`[Rest OK]`/`[Rest broken]` title tag and an
-    `Adherence:` description header (status, actual effort, discrepancy notes). It
-    reuses `sync_workout(workout, adherence=...)`, so the `pushed_signature` re-stamp
-    is unchanged (the workout fields are still fully represented, so the row stays
-    `synced`, not `stale`). Today/future events are skipped (a not-yet-done session
-    would falsely read as missed). It runs **by default** on both `data pull` (once
-    fresh activity data lands, over the pulled range) and `workout compare` (over the
-    compared window); pass `--no-mark` to either to skip it. Best-effort — a Calendar
-    failure never breaks the command, and it is a no-op when no calendar is configured.
-    The shared pipeline (`mark_adherence_range` → `mark_adherence_from_results`) lives
-    in `cli/common.py` so the two entry points can't drift. Re-marking is a no-op when
-    nothing changed: each push stamps `marked_signature` (the adherence-aware counterpart
-    to `pushed_signature` — `calendar_state.adherence_signature(workout, adherence)` hashes
-    the calendar fields **plus** the verdict), and a later pass skips the Calendar write
-    when the row already carries that exact signature. It is kept in its **own** column
-    rather than folded into `pushed_signature`: doing the latter would make every marked
-    past row read `stale`. Because the content hash is folded in, any later edit to the
-    workout invalidates the marker and a re-mark follows automatically.
+    push: for each *strictly past* planned workout with an event, it re-renders the
+    event with an adherence verdict from `adherence.classify_adherence` — a
+    `[Done]`/`[Missed]`/`[Partial]`/`[Rest OK]`/`[Rest broken]` title tag and an
+    `Adherence:` description header. Today/future are skipped. Reuses
+    `sync_workout(workout, adherence=...)` so the row stays `synced` (fields still
+    fully represented). Runs **by default** on `data pull` and `workout compare`
+    (`--no-mark` skips); best-effort, no-op without a calendar. Shared pipeline
+    `mark_adherence_range`→`mark_adherence_from_results` in `cli/common.py`. Each push
+    stamps `marked_signature` (calendar fields **plus** verdict) so a later pass skips
+    a no-op write; kept in its **own** column ([§15](#15-design-rationale--history) for
+    why), and any edit to the workout invalidates it so a re-mark follows.
 
 **3. Removed?** = `removed = 1` — a **soft delete**. `workout rm` calls
 `mark_workout_removed` (`removed=1`, preserves `google_event_id`; content change reads
@@ -901,67 +883,22 @@ so it has no handler of its own.
 | `plan`       | `generate`   | `p g`    | Generate/reuse macrocycle+mesocycles (`-f` to force, `--goal ID`)        |
 | `plan`       | `show`       | `p s`    | Show active periodization plan                                           |
 | `plan`       | `rm`         | `p d`    | Delete plan for a goal ID                                                |
-| `plan`       | `feedback`   | `p f`    | Add feedback (`--macro` or `--meso ID`, `--goal ID`, text;              |
-|              |              |          | `--edit` opens `$EDITOR` seeded with current feedback)                  |
+| `plan`       | `feedback`   | `p f`    | Add feedback (`--macro` or `--meso ID`, `--goal ID`, text; `--edit` opens `$EDITOR` seeded with current feedback) |
 | `plan`       | `wipe`       | —        | Delete all plans                                                         |
-| `workout`    | `list`       | `w l`    | Show planned workouts (`--type TYPE`, `--days N`,        |
-|              |              |          | `--weeks N`, `--from DATE`, `--until DATE`,              |
-|              |              |          | `--from-mesocycle`, `--until-mesocycle [ID]`,            |
-|              |              |          | `--mesocycle [ID]`, `--goal [ID]`, `--removed`).         |
-|              |              |          | Defaults to showing workouts from today for 7 days.      |
-| `workout`    | `compare`    | `w c`    | Compare planned workouts vs completed activities.        |
-|              |              |          | Calls `analyze_adherence()` and prints PLANNED/ACTUAL    |
-|              |              |          | per day; flags missed sessions (red), rest violations    |
-|              |              |          | (red), unplanned high-load activities (yellow), then     |
-|              |              |          | shows a discrepancy summary. Date range flags same as    |
-|              |              |          | `workout list` (`--type`, `--days`, `--weeks`,           |
-|              |              |          | `--from`, `--until`, `--from-mesocycle`,                 |
-|              |              |          | `--until-mesocycle [ID]`, `--mesocycle [ID]`,            |
-|              |              |          | `--goal [ID]`). Default: 14-day lookback. `--days`/      |
-|              |              |          | `--weeks` look *back* (not forward). End date is always  |
-|              |              |          | capped at today.                                         |
-| `workout`    | `generate`   | `w g`    | Generate workouts from active strategy (`--goal ID`,                     |
-|              |              |          | `--days N`, `--weeks N`, `--until DATE`,                                 |
-|              |              |          | `--until-goal [ID]`, `--until-mesocycle ID`). With no                    |
-|              |              |          | horizon flag, generates `config.workout_generation_span_days`                   |
-|              |              |          | ahead (28 default). Saves to DB only; run `push` after.                  |
-| `workout`    | `rm`         | `w r`    | Soft-remove workout by ID (`--reason TEXT` required);   |
-|              |              |          | marks `removed`, updates Calendar event to be marked    |
-|              |              |          | deleted; kept in DB, hidden from list/compare, shown    |
-|              |              |          | to coach as a cancellation (with the reason)            |
-| `workout`    | `restore`    | `w res`  | Restore soft-removed workout by ID. Clears `removed`    |
-|              |              |          | flags and syncs to Calendar to remove `[Deleted]` mark. |
+| `workout`    | `list`       | `w l`    | Show planned workouts. Defaults to today for 7 days. Flags: `--type TYPE`, `--days N`, `--weeks N`, `--from DATE`, `--until DATE`, `--from-mesocycle`, `--until-mesocycle [ID]`, `--mesocycle [ID]`, `--goal [ID]`, `--removed`. |
+| `workout`    | `compare`    | `w c`    | Compare planned vs completed (`analyze_adherence()`): prints PLANNED/ACTUAL per day, flags misses (red), rest violations (red), unplanned high-load (yellow), then a discrepancy summary. Same date flags as `workout list`; default 14-day lookback; `--days`/`--weeks` look *back*; end capped at today. |
+| `workout`    | `generate`   | `w g`    | Generate workouts from active strategy. No horizon flag → `config.workout_generation_span_days` ahead (28 default). Flags: `--goal ID`, `--days N`, `--weeks N`, `--until DATE`, `--until-goal [ID]`, `--until-mesocycle ID`. Saves to DB only; run `push` after. |
+| `workout`    | `rm`         | `w r`    | Soft-remove by ID (`--reason TEXT` required): marks `removed`, marks the Calendar event deleted; kept in DB, hidden from list/compare, shown to coach as a cancellation. |
+| `workout`    | `restore`    | `w res`  | Restore soft-removed workout by ID. Clears `removed` flags and syncs to Calendar to remove the `[Deleted]` mark. |
 | `workout`    | `adapt`      | `w a`    | Run daily adaptation check (`--date YYYY-MM-DD`, `-m` athlete note, `-y` auto-apply) |
-| `workout`    | `push`       | `w p`    | Sync planned workouts to Google Calendar. Defaults to                    |
-|              |              |          | today onward; pushes only unsynced workouts unless                       |
-|              |              |          | `-f`/`--force` re-pushes already-synced ones.                            |
-| `workout`    | `swap`       | `w s`    | Swap workouts between two dates (`<date1> <date2>`)     |
-|              |              |          | or two IDs (`--id1 X --id2 Y`). Requires `--reason`.    |
-|              |              |          | Runs recovery checks (consecutive hard days, weekly     |
-|              |              |          | load spikes, mesocycle crossings) and prompts on        |
-|              |              |          | warnings unless `-f`/`--force`. Syncs to Calendar       |
-|              |              |          | unless `--no-sync`. `--reason` is folded into the       |
-|              |              |          | `modification_reason` and shown to the coach.           |
+| `workout`    | `push`       | `w p`    | Sync planned workouts to Google Calendar. Defaults to today onward; pushes only unsynced unless `-f`/`--force` re-pushes already-synced ones. |
+| `workout`    | `swap`       | `w s`    | Swap two workouts by dates (`<date1> <date2>`) or IDs (`--id1 X --id2 Y`); `--reason` required. Runs recovery checks (consecutive hard days, load spikes, mesocycle crossings), prompts on warnings unless `-f`; syncs unless `--no-sync`; `--reason` folded into `modification_reason`. |
 | `workout`    | `wipe`       | —        | Delete all workouts                                                      |
 | `data`       | `pull`       | `d p`    | Fetch Garmin activities/metrics and Google Calendar context (`--days`/`--from`/`--until`/`--metrics-only`/`--activities-only`/`--sleep`). Defaults to the last 2 days ending today. |
-| `data`       | `bootstrap`  | `d b`    | Cold-start reconstruction over the full backlog; seeds  |
-|              |              |          | evidence-based learnings, sets the reflect watermark    |
-|              |              |          | (`--from`, `--until`, `--days`, `--weeks`, `--context`, |
-|              |              |          | `--force`, `--inspect-only`, `--auto`). No date filter →|
-|              |              |          | window auto-detected (since previous goal, else 12 wk). |
-| `data`       | `reflect`    | `d r`    | Incremental analysis since the reflect watermark;       |
-|              |              |          | updates learnings + resolves pending confidence         |
-|              |              |          | demotions (same flags as `bootstrap`). `--auto`:        |
-|              |              |          | unattended — staleness demotions auto-apply,            |
-|              |              |          | contradiction ones stay queued.                         |
-| `data`       | `show-metrics` | `d sm` | Show athlete metrics over a date range. Defaults to a    |
-|              |              |          | 7-day lookback ending today. Supports standard date     |
-|              |              |          | range options, `-a`/`--all` (shows all data),           |
-|              |              |          | `--no-pull` to bypass Garmin sync, and `--csv`.           |
-| `data`       | `show-activities` | `d sa` | Show completed activities over a date range. Defaults  |
-|              |              |          | to a 7-day lookback ending today. Supports date         |
-|              |              |          | options, `-a`/`--all`, `--type` filter, `--no-pull`,      |
-|              |              |          | and `--csv`.                                              |
+| `data`       | `bootstrap`  | `d b`    | Cold-start reconstruction over the full backlog; seeds evidence-based learnings, sets the reflect watermark. Flags: `--from`, `--until`, `--days`, `--weeks`, `--context`, `--force`, `--inspect-only`, `--auto`. No date filter → window auto-detected (since previous goal, else 12 wk). |
+| `data`       | `reflect`    | `d r`    | Incremental analysis since the reflect watermark; updates learnings + resolves pending demotions (same flags as `bootstrap`). `--auto`: unattended — staleness demotions auto-apply, contradiction ones stay queued. |
+| `data`       | `show-metrics` | `d sm` | Show athlete metrics over a date range (default 7-day lookback). Standard date-range options plus `-a`/`--all`, `--no-pull`, `--csv`. |
+| `data`       | `show-activities` | `d sa` | Show completed activities over a date range (default 7-day lookback). Date options plus `-a`/`--all`, `--type` filter, `--no-pull`, `--csv`. |
 | `data`       | `backfill-tss` | —      | Recompute the measured `tss` for all stored activities under the current zone model (no Garmin calls), then refresh derived workload |
 | `data`       | `wipe`       | `--garmin`, `--calendar`, `--from/--until/--days`, `-y` | Delete cached data. No scope flag = everything (Garmin evidence + daily context) and reset watermarks; `--garmin`/`--calendar` narrow the scope; date flags restrict to a window |
 
@@ -993,48 +930,27 @@ markers as `workout list` without re-deriving the rules (§5).
 
 | Method      | Path                            | Description                                  |
 |-------------|---------------------------------|----------------------------------------------|
-| GET         | `/api/status`                   | Active goal, latest metrics, coach learnings |
-|             |                                 | (under `coach_learnings.learnings` +         |
-|             |                                 | `.summary`), macrocycle+mesocycles,          |
-|             |                                 | `sync_state` (data freshness)                |
+| GET         | `/api/status`                   | Active goal, latest metrics, coach learnings (under `coach_learnings.learnings` + `.summary`), macrocycle+mesocycles, `sync_state` (data freshness) |
 | GET/POST    | `/api/objectives`               | List all / create objective                  |
 | DELETE/PUT  | `/api/objectives/<id>`          | Delete or update objective                   |
 | GET/POST    | `/api/life-events`              | List upcoming / create life event            |
 | DELETE/PUT  | `/api/life-events/<id>`         | Delete or update life event                  |
-| GET/POST    | `/api/workouts`                 | List workouts (`?start_date=&end_date=`,     |
-|             |                                 | `?sport_type=&include_removed=`) / add a session|
-|             |                                 | (`workout add`: `{date, sport_type, title,   |
-|             |                                 | description, duration_minutes?, rpe?, tss?,  |
-|             |                                 | reason?}`). Listed rows carry derived         |
-|             |                                 | `calendar_status` + `modification_status`.    |
-| GET         | `/api/workouts/compare`         | Plan-vs-actual adherence (`workout compare`); |
-|             |                                 | pure reader, no `ensure_data`. `?start_date=&|
-|             |                                 | end_date=&sport=` (default 14-day lookback,   |
-|             |                                 | end capped at today) → `{filters, days[],     |
-|             |                                 | discrepancies[], informational[]}`            |
+| GET/POST    | `/api/workouts`                 | List workouts (`?start_date=&end_date=&sport_type=&include_removed=`) / add a session (`{date, sport_type, title, description, duration_minutes?, rpe?, tss?, reason?}`). Listed rows carry derived `calendar_status` + `modification_status`. |
+| GET         | `/api/workouts/compare`         | Plan-vs-actual adherence (`workout compare`); pure reader, no `ensure_data`. `?start_date=&end_date=&sport=` (default 14-day lookback, end capped at today) → `{filters, days[], discrepancies[], informational[]}` |
 | POST        | `/api/workouts/<id>/remove`     | Soft-remove a workout (`{reason?}`)          |
 | POST        | `/api/workouts/<id>/restore`    | Restore a soft-removed workout               |
-| POST        | `/api/workouts/swap`            | Swap two workouts (`{ops:[{id,new_date}],    |
-|             |                                 | reason, force?, no_sync?}`); returns          |
-|             |                                 | `{warnings}` unapplied unless `force`         |
+| POST        | `/api/workouts/swap`            | Swap two workouts (`{ops:[{id,new_date}], reason, force?, no_sync?}`); returns `{warnings}` unapplied unless `force` |
 | POST        | `/api/plan`                     | Generate periodization plan (`{goal_id?}`)   |
-| GET         | `/api/plan/versions`            | List plan versions for a goal                |
-|             |                                 | (`?goal_id=`; active + superseded)           |
-| POST        | `/api/plan/rollback`            | Restore a plan version + its workouts        |
-|             |                                 | (`{goal_id?, version?}`; DESIGN_plan_rollback)|
+| GET         | `/api/plan/versions`            | List plan versions for a goal (`?goal_id=`; active + superseded) |
+| POST        | `/api/plan/rollback`            | Restore a plan version + its workouts (`{goal_id?, version?}`; DESIGN_plan_rollback) |
 | DELETE      | `/api/plan/<goal_id>`           | Delete plan for goal (all versions)          |
 | POST        | `/api/macrocycles/<id>/feedback`| Save macrocycle feedback (`{feedback}`)      |
 | POST        | `/api/mesocycles/<id>/feedback` | Save mesocycle feedback (`{feedback}`)       |
-| POST        | `/api/workouts/generate`        | Generate workouts (`{goal_id?}`); eager —    |
-|             |                                 | archives old + pushes new to Calendar        |
-| POST        | `/api/adapt`                    | Run daily adaptation check (read-only;       |
-|             |                                 | `{date?}` → `{reason, change_needed,         |
-|             |                                 | workouts}`)                                   |
-| POST        | `/api/adapt/apply`              | Apply proposed adaptations + sync            |
-|             |                                 | (`{workouts, reason}`)                        |
+| POST        | `/api/workouts/generate`        | Generate workouts (`{goal_id?}`); eager — archives old + pushes new to Calendar |
+| POST        | `/api/adapt`                    | Run daily adaptation check (read-only; `{date?}` → `{reason, change_needed, workouts}`) |
+| POST        | `/api/adapt/apply`              | Apply proposed adaptations + sync (`{workouts, reason}`) |
 | POST        | `/api/workouts/push`            | Sync workouts to Google Calendar             |
-| GET         | `/api/learnings`                | List coach learnings (`?sport=&confidence=&  |
-|             |                                 | dormant=`) + `summary`                        |
+| GET         | `/api/learnings`                | List coach learnings (`?sport=&confidence=&dormant=`) + `summary` |
 | GET         | `/api/learnings/<id>/evidence`  | Per-week evidence basis (supporting/contra)  |
 | PUT/DELETE  | `/api/learnings/<id>`           | Edit text / delete a learning                |
 | POST        | `/api/learnings/<id>/demote`    | Accept a pending confidence downgrade        |
@@ -1058,7 +974,7 @@ Required fields:
 | `google_calendar_id`   | str  | Target calendar ID                                            |
 | `garmin_email` / `garmin_password` | str | Garmin login; config.yaml only (kept out of the environment) |
 | `data_refresh_minutes` | int | Throttle window shared by Garmin pulls **and** Calendar-context syncs; reads inside it reuse the cache. Top-level config key `refresh_minutes` (default 120) |
-| `garmin_mutable_days` / `garmin_backfill_prompt_days` / `garmin_initial_backfill_days` / `garmin_throttle_seconds` | — | Auto-ensure tuning (see §8) |
+| `garmin_mutable_days` / `garmin_backfill_prompt_days` / `garmin_initial_backfill_days` / `garmin_throttle_seconds` | — | Auto-ensure tuning (see [§10 Data Pull](#data-pull-data-pull-and-auto-ensure)) |
 | `service_account_file` | str  | Path to service account JSON (default:                        |
 |                        |      | `service_account.json`)                                       |
 | `metrics_lookback_days`  | int  | Rolling window for adaptation (default: 15)                  |
@@ -1461,10 +1377,11 @@ Integration / manual test scripts (not part of the test suite):
 reference sections above describe only the current state; this section explains
 the non-obvious choices. The `DESIGN_*.md` files hold the full deep-dives.
 
-### Workout state: three derived axes, not a stored `status` enum
+### Workout state: derived axes, not a stored `status` enum
 A single `status` string once conflated *modified*, *calendar*, and *removed*.
-Each write path had to remember to set it correctly, and the three facts are
-genuinely independent, so they're now **derived** (see [§5](#5-database-schema)):
+Each write path had to remember to set it correctly, and the facts are genuinely
+independent, so the first three are now **derived** (the fourth, *archived*, is a
+stored lifecycle flag). See [§5](#workout-state--four-orthogonal-axes-not-one-enum):
 
 - **Calendar axis** replaced a hand-maintained `synced` boolean that every write
   path had to remember to reset. Now `pushed_signature` is written only on a
@@ -1484,6 +1401,11 @@ genuinely independent, so they're now **derived** (see [§5](#5-database-schema)
   prefixes, so it is never misread as a swap/replace.)
 - `adapted` takes precedence over `swapped`: a session adapted *then* swapped keeps
   its summary and still reads `adapted`.
+- **Recency *is* stored, kind is not.** `adapted_at` / `adaptation_count` are stored
+  columns because no other field carries *when* or *how often* a session was eased,
+  and the daily adaptation needs that to avoid compounding cuts on still-lagging
+  recovery. The modification *kind*, by contrast, is fully derivable — so storing it
+  would reintroduce exactly the denormalization the rest of this rework removed.
 
 ### Coach learnings: confidence dropped `suppress_reinforcement`
 Confidence is now a pure function of the per-learning evidence basis. Because
