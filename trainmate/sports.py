@@ -18,7 +18,7 @@ from typing import List
 SPORT_MAPPING = {
     "running": ["running", "indoor_running", "trail_running", "treadmill_running"],
     "road_biking": [
-        "road_biking", "indoor_cycling", "cycling", "virtual_cycling", "biking"
+        "road_biking", "indoor_cycling", "cycling", "virtual_ride", "biking"
     ],
     "hiking": ["hiking", "walking"],
     "strength_training": ["strength_training", "strength", "indoor_cardio", "fitness"],
