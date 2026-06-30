@@ -413,88 +413,62 @@ is unchanged.
   stay tagged with their `macrocycle_id` so `restore_macrocycle_workouts` can resurrect
   them (DESIGN_plan_rollback.md).
 
-### Key methods by domain
+### Methods by domain
 
-**Objectives:** `add_objective`, `get_objectives(status=)`,
-`get_objective(id)`, `update_objective(id, **kwargs)`, `delete_objective`,
-`wipe_objectives`
+Each domain mixin follows the same naming convention, so the full signatures are
+discoverable by reading the mixin in `trainmate/db/` (grep the file named for the
+domain). The convention: `add_*`/`save_*` (writers; `save_*` is an upsert),
+`get_*`/`get_*s` (single-row by id / ranged-or-filtered list), `update_*` (partial
+`**kwargs` patch), `delete_*` (hard delete), `wipe_*` (clear the domain). Only the
+methods whose behavior is *not* obvious from that convention are called out below.
 
-**Life Events:** `add_lifeevent`, `get_lifeevents(start_after=)`,
-`get_lifeevent(id)`, `update_lifeevent(id, **kwargs)`, `delete_lifeevent`,
-`wipe_lifeevents`
-
-**Daily Context:** `upsert_daily_context_by_event(google_event_id, …)`,
-`get_daily_context(start_date=, end_date=, metric=)`,
-`delete_daily_context_by_event(google_event_id)` — external signals reconciled
-by Calendar event id (cleared by `wipe_metrics`; see §13). For the `context`
-command: `get_daily_context_by_id(id)`, `delete_daily_context(id)`,
-`list_context_metrics()`.
-
-**Workouts:** `save_workout` (upsert),
-`get_workout(date, sport_type)`,
-`get_workouts(start_date, end_date, sport_type, include_removed=False,
-include_archived=False)` (excludes soft-removed and archived rows unless asked),
-`get_workout_by_id(id)`,
-`delete_workout_by_id` (hard delete), `mark_workout_removed(id, reason=None)` (soft
-delete — sets `removed=1`/`removed_reason`; the content change reads as `stale`),
-`mark_workout_pushed(id, google_event_id, signature)` (records a successful push — the
-only writer of `pushed_signature`),
-`mark_workout_adherence_pushed(id, signature)` (records a successful `compare --mark`
-push — the only writer of `marked_signature`), `restore_workout(id)` (clears the soft-delete
-flags — `workout restore`), `update_workout_date(id, date)` (moves a row — used by
-`workout swap`), `archive_future_workouts(from_date)` (soft-archives every live future
-row — sets `archived_at`, clears the Calendar handle, returns the pre-archive rows so
-the caller can delete events; used by eager generate + rollback),
-`restore_macrocycle_workouts(macrocycle_id)` (un-archives that plan version's
-most-recently-archived batch), `wipe_workouts`. `get_workouts`/`get_workout` exclude
-archived rows by default (DESIGN_plan_rollback.md).
-
-**Completed Activities:** `save_completed_activity` (upsert on `activity_id`),
-`get_completed_activities(start_date, end_date)`
-
-**Metrics & Baselines:** `save_metric_cache` (upsert),
-`get_metrics_cache(start_date, end_date)`, `save_baseline`,
-`get_baseline(date)` (returns closest prior baseline). Scoped wipes:
-`wipe_garmin_data(start, end)` (metrics/baselines/activities + the evidence-derived
-`analysis_cache`; resets the garmin/reflect/bootstrap watermarks on a full wipe,
-leaves them on a dated wipe since re-pull detects gaps by row presence),
-`wipe_calendar_context(start, end)` (daily context + always resets the Calendar
-sync token, since the incremental sync can't otherwise backfill deleted rows), and
-`wipe_metrics()` = both (full reset)
-
-**Coach Learnings:** `get_learnings()` (each record annotated with a computed
-`dormant` flag and its `proposed_confidence`), `get_learning_evidence(id)`,
-`add_learning(text, sports='general', confidence='tentative')` (seeds a synthetic
-basis sustaining the level), `update_learning(id, text)`, `delete_learning(id)`,
-`apply_learning_deltas(deltas, available_weeks=None, source='reflect')`,
-`recompute_all_confidence()`, `derive_staleness_proposals(auto=False)`,
-`demote_learning(id)`, `keep_learning(id)`, `wipe_learnings()`. Module-level
-helpers: `normalize_sports()`, `valid_confidence()`, `confidence_rank()`,
-`step_down()`, `derive_confidence()`, `learning_is_dormant()`; constants
-`CONFIDENCE_LEVELS` / `LEARNING_STALENESS_DAYS` / `RETIRE_PROPOSAL`. The
-evidence/confidence/decay model these implement is the **canonical** description in
-[§3](#3-coach-package-architecture); tables `coach_learnings` + `learning_evidence`
-in [§5](#5-database-schema). Periodization strategy lives in `macrocycles`, not here.
-
-**Analysis Cache:** `save_analysis_cache(horizon, fingerprint, window_start,
-window_end, reconstruction)` (upsert, one row per `horizon`),
-`get_analysis_cache(horizon)` (returns the row with `reconstruction` parsed
-from JSON, or `None`), `wipe_analysis_cache()`. Caches a backward-evaluation
-reconstruction keyed by an evidence fingerprint so a re-run over unchanged data
-reuses it instead of re-calling the LLM (table `analysis_cache`; see
-DESIGN_backward_evaluation.md §5.1).
-
-**Macrocycles/Mesocycles:** `save_macrocycle` (**supersedes** the existing active
-version for the objective — marks it `superseded`, keeps it — then inserts the new
-active one), `get_macrocycle_for_objective(objective_id)` (the active version only),
-`get_macrocycle(id)` (any version by id), `get_macrocycle_versions(objective_id)`
-(all versions, newest first), `get_previous_macrocycle(objective_id, before_id=None)`
-(walk-back navigation for rollback), `set_active_macrocycle(id)` (promote a version,
-superseding the rest), `get_last_macrocycle()`,
-`get_mesocycles_for_macrocycle(macrocycle_id)`, `get_mesocycle(id)`,
-`update_macrocycle_feedback(id, feedback)`, `update_mesocycle_feedback(id, feedback)`,
-`update_macrocycle_config_hash(id, hash)`, `delete_macrocycle_for_objective` (all
-versions), `wipe_plans`. Plan versioning + rollback: DESIGN_plan_rollback.md.
+- **Objectives** (`objectives.py`) · **Life Events** (`lifeevents.py`) — plain CRUD;
+  nothing beyond the convention.
+- **Daily Context** (`dailycontext.py`) — external signals are reconciled **by
+  Calendar event id**, so the writer/deleter are `*_by_event(google_event_id, …)`
+  variants alongside the id-based ones used by the `context` command. Cleared by
+  `wipe_metrics` (see §13).
+- **Workouts** (`workouts.py`) — `save_workout` upserts on `(date, sport_type)`
+  (alias-aware, see Key Patterns above). Three orthogonal lifecycle mutators beyond
+  CRUD: `mark_workout_removed` (soft delete — sets `removed=1`/`removed_reason`; the
+  content change then reads as `stale`) vs `delete_workout_by_id` (hard); the push
+  recorders `mark_workout_pushed` / `mark_workout_adherence_pushed` are the **only**
+  writers of `pushed_signature` / `marked_signature` respectively; and
+  `archive_future_workouts(from_date)` / `restore_macrocycle_workouts(macrocycle_id)`
+  drive the soft-archive used by eager generate + rollback (archive sets
+  `archived_at`, clears the Calendar handle, and returns the pre-archive rows so the
+  caller can delete the events). `get_workouts`/`get_workout` exclude soft-removed
+  **and** archived rows unless asked (`include_removed=`/`include_archived=`).
+  Rollback semantics: DESIGN_plan_rollback.md.
+- **Completed Activities** (`activities.py`) — `save_completed_activity` upserts on
+  `activity_id`.
+- **Metrics & Baselines** (`activities.py`) — `get_baseline(date)` returns the
+  *closest prior* baseline. The scoped wipes (in `wipes.py`) are the non-obvious part:
+  `wipe_garmin_data(start, end)` also clears the evidence-derived `analysis_cache`
+  and, on a *full* wipe, resets the garmin/reflect/bootstrap watermarks (a dated wipe
+  leaves them, since re-pull detects gaps by row presence);
+  `wipe_calendar_context(start, end)` always resets the Calendar sync token (the
+  incremental sync otherwise can't backfill deleted rows); `wipe_metrics()` = both.
+- **Coach Learnings** (`learnings.py`) — `get_learnings()` annotates each record with
+  a computed `dormant` flag and its `proposed_confidence`; `add_learning` seeds a
+  synthetic basis sustaining the level; plus the evidence/decay mutators
+  (`apply_learning_deltas`, `recompute_all_confidence`, `derive_staleness_proposals`,
+  `demote_learning`, `keep_learning`) and module-level helpers/constants
+  (`CONFIDENCE_LEVELS`, `LEARNING_STALENESS_DAYS`, `RETIRE_PROPOSAL`). The
+  evidence/confidence/decay model these implement is **canonical** in
+  [§3](#3-coach-package-architecture); tables in [§5](#5-database-schema).
+  Periodization strategy lives in `macrocycles`, not here.
+- **Analysis Cache** (`analysis.py`) — caches a backward-evaluation reconstruction
+  (one row per `horizon`) keyed by an evidence fingerprint, so a re-run over unchanged
+  data reuses it instead of re-calling the LLM; `get_analysis_cache` parses
+  `reconstruction` from JSON. See DESIGN_backward_evaluation.md §5.1.
+- **Macrocycles/Mesocycles** (`periodization.py`) — versioned: `save_macrocycle`
+  **supersedes** the objective's existing active version (marks it `superseded`, keeps
+  it) and inserts the new active one; `set_active_macrocycle(id)` promotes a version
+  and supersedes the rest. `get_macrocycle_for_objective` returns the active version
+  only, while `get_macrocycle(id)` / `get_macrocycle_versions` / `get_previous_macrocycle`
+  reach any version for walk-back navigation. Plan versioning + rollback:
+  DESIGN_plan_rollback.md.
 
 ---
 
