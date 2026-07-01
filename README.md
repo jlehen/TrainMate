@@ -46,9 +46,20 @@ does the coaching reasoning.
   *actually* did and seeding coach learnings — so it starts smart instead of cold,
   and reviews planned-vs-actual when it replans.
 
-- **Lifestyle context ingest.** Tag ordinary Google Calendar events (alcohol,
-  poor sleep, stress, travel) and TrainMate folds them into both daily adaptation
-  and long-term analysis.
+- **Three channels of real-world context.** TrainMate separates context by how
+  much it should move your training:
+  - *Life events* are **strategic** — the plan is built *around* them (a race
+    abroad, a business trip, an injury layoff). Adding or changing a life event
+    invalidates the current plan and triggers a regeneration, and every daily
+    adaptation is re-fed the standing list.
+  - *Daily context* adds **weighted signals** (alcohol, poor sleep, stress)
+    ingested automatically from tagged Google Calendar events. These don't
+    reshape the plan; they help the daily adaptation tell lifestyle noise from
+    training fatigue, and feed long-term analysis.
+  - `workout adapt --message` supplies **tactical**, one-off context for a single
+    run ("away with no gym today"). It isn't stored verbatim, but its effect is
+    loosely persisted into the affected session's adaptation reason, so the next
+    day's adapt sees *why* the session changed instead of blindly undoing it.
 
 - **Plan versioning & rollback.** Regenerating a plan supersedes the old one
   rather than destroying it, so you can roll back a plan (and its workouts) to a
