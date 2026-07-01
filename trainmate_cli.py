@@ -945,10 +945,13 @@ def main() -> None:
     w_adapt.add_argument(
         "-m", "--message", dest="message",
         help=(
-            "Free-text note to the coach for THIS adaptation only (e.g. 'knee is sore, "
-            "keep impact low', 'no bike access Thursday'). Advisory and ephemeral: it is "
-            "not stored and won't override clear fatigue signals. For persistent context "
-            "(alcohol, sleep, stress) use 'context add' instead."
+            "Ad-hoc, one-off signal to the coach for THIS adaptation run only (e.g. "
+            "'knee is sore, keep impact low', 'no bike access Thursday'). Advisory: it "
+            "won't override clear fatigue signals. The note itself isn't stored, but if "
+            "it drives a session change its cause is recorded in that session's reason so "
+            "a later run understands the tactical change; it stays a one-off and never "
+            "becomes durable block evidence. For persistent context (alcohol, sleep, "
+            "stress) use 'context add' instead."
         )
     )
     w_adapt.add_argument(

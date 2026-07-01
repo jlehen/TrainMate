@@ -624,6 +624,14 @@ schedule clearly unsafe load just because the athlete asks (if recovery signals 
 easing, ease and say why). Treat it as a one-off for this adaptation only: do NOT read it
 as durable evidence about the block, and do NOT permanently re-shape the mesocycle on its
 account.
+BUT record its FOOTPRINT: the note is gone on the next run, yet the sessions it changed
+persist. So when the note is what drives a session change (e.g. "no training access
+Thursday" -> that day set to rest/eased), name that external cause in the session's
+"change_reason" — e.g. "Rest — athlete away, no training access this day." A later
+adaptation, which will NOT see this note, reads that reason back with the plan and so
+won't blindly undo the tactical change (e.g. re-add a session on a day the athlete can't
+train). This footprint is the tactical session note only; it is still NOT durable block
+evidence and must not reshape the mesocycle.
 
 This daily adaptation is READ-ONLY with respect to the coach's durable observations:
 use the COACH LEARNINGS as context, but do NOT emit any learning updates here — durable,
@@ -650,7 +658,10 @@ evidence-backed observations are authored only by the weekly history analysis
             '        "yoga" | "ski_touring" | "rest",\n'
             '      "title": "Adapted Workout Title",\n'
             '      "change_reason": "One short sentence on why THIS specific session changed,\n'
-            '        e.g. \"Cut to easy Z2 to shed intensity.\" Keep it to a single sentence;\n'
+            '        e.g. \"Cut to easy Z2 to shed intensity.\" If an external constraint from\n'
+            '        the athlete\'s note drove the change rather than the metrics, name that\n'
+            '        cause here so a future run without the note understands it, e.g. \"Rest —\n'
+            '        athlete away, no training access this day.\" Keep it to a single sentence;\n'
             '        do not restate the overall reason.",\n'
             '      "description": "Start with the title on its own line in brackets followed by a\n'
             '        newline, e.g. \"[Tempo Run]\\n\", then an adapted description of intensity,\n'
