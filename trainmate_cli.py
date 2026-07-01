@@ -392,7 +392,7 @@ def main() -> None:
     goal_parser = subparsers.add_parser(
         "goal",
         aliases=["g"],
-        help="Manage training objectives / goals"
+        help="Manage training objectives / goals of your training plan"
     )
     goal_subparsers = goal_parser.add_subparsers(dest="subcommand", help="Goal sub-commands")
     
@@ -444,7 +444,7 @@ def main() -> None:
     lifeevent_parser = subparsers.add_parser(
         "lifeevent",
         aliases=["le", "e"],
-        help="Manage life events"
+        help="Manage life events around which your training plan will be built"
     )
     lifeevent_subparsers = lifeevent_parser.add_subparsers(
         dest="subcommand", help="Life event sub-commands"
