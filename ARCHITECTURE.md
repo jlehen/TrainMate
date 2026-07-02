@@ -648,7 +648,7 @@ cleared. `get_workouts`/`get_workout` exclude archived rows by default
 workouts are invisible to listings, adherence, generation, adaptation, and the calendar
 push until restored. See DESIGN_plan_rollback.md.
 
-### completed\_activities
+### completed_activities
 | Column              | Type    | Notes                                              |
 |---------------------|---------|----------------------------------------------------|
 | `activity_id`       | TEXT PK | Garmin activity ID                                 |
@@ -667,7 +667,7 @@ push until restored. See DESIGN_plan_rollback.md.
 | `zone1_sec`–`zone5_sec`     | INTEGER | Time in each HR zone (seconds); NULL if missing |
 | `power_zone1_sec`–`power_zone7_sec` | INTEGER | Time in each Coggan power zone (seconds); NULL unless a power meter recorded |
 
-### athlete_\metrics_\cache
+### athlete_metrics_cache
 | Column            | Type    | Notes                  |
 |-------------------|---------|------------------------|
 | `date`            | TEXT PK | YYYY-MM-DD             |
@@ -679,7 +679,7 @@ push until restored. See DESIGN_plan_rollback.md.
 | `chronic_workload`| REAL    | 28-day sum ÷ 4         |
 | `acwr`            | REAL    | acute / chronic        |
 
-### athlete_\baselines
+### athlete_baselines
 28-day rolling baseline computed during `garmin.recompute_derived()` (a full
 sweep run after every pull).
 
@@ -693,13 +693,13 @@ sweep run after every pull).
 | `sleep_baseline_mean`       | REAL    |
 | `sleep_baseline_std`        | REAL    |
 
-### sync_\state
+### sync_state
 Per-source sync progress, one row per `key`. The `garmin` row holds the pull
 watermark: `through_date` is the forward high-water mark (local YYYY-MM-DD) and
 only ever advances; `last_pull_utc` is an instant compared against now for the
 freshness interval. The `calendar_context` row instead holds `sync_token` (the
 opaque Calendar `nextSyncToken`) with `through_date` NULL. Each source populates
-only the columns it uses. See §8 (Data Pull), §13 (Daily Context),
+only the columns it uses. See §10 (Data Pull), §13 (Daily Context),
 `DESIGN_garmin_direct_pull.md`, and `DESIGN_calendar_context_ingest.md`.
 
 | Column          | Type    | Notes                                            |
@@ -709,7 +709,7 @@ only the columns it uses. See §8 (Data Pull), §13 (Daily Context),
 | `last_pull_utc` | TEXT    | ISO instant of last successful sync              |
 | `sync_token`    | TEXT    | Calendar `nextSyncToken` (calendar_context row)  |
 
-### daily_\context
+### daily_context
 External daily context signals (alcohol, sleep, stress, …) ingested from tagged
 Google Calendar events. TrainMate is domain-agnostic: `metric` is an opaque
 category and `value` an optional numeric magnitude. Reconciled by
@@ -726,7 +726,7 @@ category and `value` an optional numeric magnitude. Reconciled by
 | `google_event_id` | TEXT UNIQUE | Calendar event id — reconciliation key         |
 | `updated`         | TEXT        | Event `updated` RFC3339 (debug)                |
 
-### coach_\learnings
+### coach_learnings
 Discrete, addressable athlete-observation records. Confidence is **app-computed**
 from the `learning_evidence` basis (below), not asserted by the LLM. Full model:
 [§3](#3-coach-package-architecture).
@@ -742,7 +742,7 @@ from the `learning_evidence` basis (below), not asserted by the LLM. Full model:
 | `updated_at`          | TEXT       | ISO timestamp; last content/metadata change            |
 | `last_reinforced_at`  | TEXT       | ISO timestamp; drives decay → `dormant` (see §3); refreshed only by a *new* supporting week or a staleness demotion |
 
-### learning\_evidence
+### learning_evidence
 The per-learning **evidence basis**: the distinct training **weeks** backing each
 learning, tagged supporting/contradicting; `confidence` is a pure function of it.
 The `UNIQUE(learning_id, week_commencing, polarity)` constraint is the dedup
@@ -800,7 +800,7 @@ Regenerating a plan **supersedes** the prior version (kept) rather than deleting
 | `focus`         | TEXT                    | E.g. "Zone 2 aerobic base, high volume" |
 | `feedback`      | TEXT                    | Athlete feedback for next replanning    |
 
-### analysis\_cache
+### analysis_cache
 Cached backward-evaluation reconstruction (inferred cycles + insights), keyed by
 an evidence fingerprint. One row per `horizon`; cleared by `wipe_metrics`. See
 DESIGN_backward_evaluation.md §5.1.
@@ -898,13 +898,15 @@ so it has no handler of its own.
 | `learnings`  | `keep`       | —        | Dismiss + affirm a pending downgrade by ID                             |
 | `learnings`  | `wipe`       | —        | Delete all coach learnings                                             |
 | `plan`       | `generate`   | `p g`    | Generate/reuse macrocycle+mesocycles (`-f` to force, `--goal ID`)        |
-| `plan`       | `show`       | `p s`    | Show active periodization plan                                           |
+| `plan`       | `show`       | `p s`    | Show active periodization plan (`--version PLAN_ID` for a superseded one) |
+| `plan`       | `versions`   | `p v`    | List a goal's kept plan versions — active + superseded — with IDs and dates (`--goal ID`) |
+| `plan`       | `rollback`   | `p rb`   | Restore a superseded plan version + its workouts (`--goal ID`, `--version PLAN_ID`, `-y`); defaults to the chronologically previous version. The inverse of eager generation (DESIGN_plan_rollback.md) |
 | `plan`       | `rm`         | `p d`    | Delete plan for a goal ID                                                |
 | `plan`       | `feedback`   | `p f`    | Add feedback (`--macro` or `--meso ID`, `--goal ID`, text; `--edit` opens `$EDITOR` seeded with current feedback) |
 | `plan`       | `wipe`       | —        | Delete all plans                                                         |
 | `workout`    | `list`       | `w l`    | Show planned workouts. Defaults to today for 7 days. Flags: `--type TYPE`, `--days N`, `--weeks N`, `--from DATE`, `--until DATE`, `--from-mesocycle`, `--until-mesocycle [ID]`, `--mesocycle [ID]`, `--goal [ID]`, `--removed`. |
 | `workout`    | `compare`    | `w c`    | Compare planned vs completed (`analyze_adherence()`): prints PLANNED/ACTUAL per day, flags misses (red), rest violations (red), unplanned high-load (yellow), then a discrepancy summary. Same date flags as `workout list`; default 14-day lookback; `--days`/`--weeks` look *back*; end capped at today. |
-| `workout`    | `generate`   | `w g`    | Generate workouts from active strategy. No horizon flag → `config.workout_generation_span_days` ahead (28 default). Flags: `--goal ID`, `--days N`, `--weeks N`, `--until DATE`, `--until-goal [ID]`, `--until-mesocycle ID`. Saves to DB only; run `push` after. |
+| `workout`    | `generate`   | `w g`    | Generate workouts from active strategy. No horizon flag → `config.workout_generation_span_days` ahead (28 default). Flags: `--goal ID`, `--days N`, `--weeks N`, `--until DATE`, `--until-goal [ID]`, `--until-mesocycle ID`. Eager: archives the previous plan's future workouts and pushes the new ones to Calendar immediately. |
 | `workout`    | `rm`         | `w r`    | Soft-remove by ID (`--reason TEXT` required): marks `removed`, marks the Calendar event deleted; kept in DB, hidden from list/compare, shown to coach as a cancellation. |
 | `workout`    | `restore`    | `w res`  | Restore soft-removed workout by ID. Clears `removed` flags and syncs to Calendar to remove the `[Deleted]` mark. |
 | `workout`    | `adapt`      | `w a`    | Run daily adaptation check (`--date YYYY-MM-DD`, `-m` athlete note, `-y` auto-apply) |
@@ -1045,8 +1047,10 @@ Required fields:
 4. Calls `CoachEngine._workout_generate_logic(num_days=...)` → LLM →
    `{reasoning, workouts[]}`. **Read-only** w.r.t. coach learnings (see
    [§3](#3-coach-package-architecture)).
-5. Clears future unsynced workouts (`clear_future_workouts`), then saves new
-   workouts.
+5. Archives the previous plan's future workouts (`archive_future_workouts`,
+   tearing down their Calendar events), saves the new workouts tagged with the
+   active `macrocycle_id`, and pushes them to Calendar eagerly — undoable via
+   `plan rollback` (see [§3](#3-coach-package-architecture)).
 
 ### Daily Adaptation (`workout adapt`)
 1. `CoachService.workout_adapt()` fetches metrics + planned workouts + completed
