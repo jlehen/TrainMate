@@ -144,6 +144,36 @@ python trainmate_cli.py workout push
 See `python trainmate_cli.py --help` for all available commands, or
 `python trainmate_cli.py help` to see every command and its sub-commands at once.
 
+### Steering the plan: which channel, and how a regen behaves
+
+When life gets in the way, which tool you reach for depends on whether the
+change is *strategic* (it should reshape the plan) or *tactical* (it only
+affects a run or a few days). The three real-world context channels above map
+onto that choice:
+
+| Channel | Reach for it when… |
+| --- | --- |
+| `constraint add` | You're asking the coach to *work around* something — "no run Thursday", "only 45 min today", a trip, an injury layoff. One object covers every horizon: a blanket `hard` constraint deterministically rests those dates, while a sport-scoped `hard` and every `soft` one stay advisory. If it's big enough to reshape the plan, TrainMate **derives** that from its magnitude and asks to regenerate — or pass `--replan` to say so up front. |
+| `context add` (or tagged Calendar events) | You're *reporting* something that happened — alcohol, poor sleep, stress — so a rough morning reads as lifestyle noise, not "the block is too hard." Signals never reshape the plan. |
+| `workout adapt --message "…"` | Quick capture in the moment. A durable, constraint-shaped note ("away, no gym Thursday") is saved as a real `constraint` you can inspect and `rm`; a one-off nudge ("felt flat, ease today") is folded into that session's adaptation reason. |
+
+Alongside these, **manual overrides** (`workout add`, `rm`, `swap`) let you edit
+individual sessions by hand. Daily `adapt` treats a hand-added session as
+deliberate intent and re-balances the surrounding days around it — though it can
+still ease one if your recovery demands it (only *completed* sessions are locked
+history).
+
+Two things to know when you regenerate:
+
+- **A regen is not a cold start.** The new plan is fed your previous strategy, a
+  planned-vs-actual review of the blocks you've *already* trained, and your coach
+  learnings — so it refines the existing arc rather than redrawing it from scratch.
+- **`workout generate` archives and rebuilds all future workouts**, manual edits
+  included (they are recoverable via `plan rollback`, not deleted; a session you've
+  already completed today is preserved). So make strategic changes *first*
+  (a plan-shaping `constraint` → `plan generate` → `workout generate`), then layer
+  manual `add`/`swap` tweaks on top — not the other way around.
+
 ## Running the Web UI
 
 To start the Flask server locally:
