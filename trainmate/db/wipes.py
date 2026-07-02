@@ -10,12 +10,6 @@ class WipesMixin:
             conn.cursor().execute("DELETE FROM objectives")
             conn.commit()
 
-    def wipe_lifeevents(self) -> None:
-        """Deletes all life events from the database."""
-        with self._get_connection() as conn:
-            conn.cursor().execute("DELETE FROM lifeevents")
-            conn.commit()
-
     def wipe_constraints(self) -> None:
         """Deletes all constraints from the database."""
         with self._get_connection() as conn:

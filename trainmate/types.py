@@ -10,19 +10,6 @@ class Objective(TypedDict):
     priority: int
     status: str  # 'active', 'completed', 'archived'
 
-class LifeEvent(TypedDict):
-    """Represents a life event that impacts training availability.
-
-    Superseded by `Constraint` (DESIGN_constraints.md); retained while the
-    `lifeevent` forwarder and legacy `lifeevents` table live on.
-    """
-    id: Optional[int]
-    title: str
-    start_date: str
-    end_date: str
-    event_type: str  # 'business_trip', 'vacation', 'party', 'other'
-    impact_description: Optional[str]
-
 class Constraint(TypedDict):
     """A single directive — anything the athlete asks the coach to work around, at
     any horizon (DESIGN_constraints.md §5).

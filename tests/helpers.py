@@ -14,7 +14,6 @@ _ALL_TABLES = [
     "analysis_cache",
     "sync_state",
     "daily_context",
-    "lifeevents",
     "constraints",
     "objectives",
 ]

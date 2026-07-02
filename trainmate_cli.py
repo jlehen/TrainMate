@@ -124,7 +124,6 @@ from trainmate.cli.status import run_status
 from trainmate.cli.goals import (
     run_goal_add, run_goal_edit, run_goal_list, run_goal_rm, run_goal_wipe,
 )
-from trainmate.cli.lifeevents import run_lifeevent_forward
 from trainmate.cli.constraints import (
     run_constraint_add, run_constraint_edit, run_constraint_list,
     run_constraint_show, run_constraint_rm, run_constraint_wipe,
@@ -545,41 +544,6 @@ def main() -> None:
     cons_wipe = constraint_subparsers.add_parser("wipe", help="Wipe all constraints")
     cons_wipe.add_argument("-y", "--yes", action="store_true",
                            help="Skip confirmation prompt")
-
-    # lifeevent — deprecated forwarder to `constraint … --replan` (a life event was, by
-    # definition, plan-shaping). Retained for one release; emits a deprecation notice.
-    lifeevent_parser = subparsers.add_parser(
-        "lifeevent",
-        aliases=["le", "e"],
-        help="[deprecated] use 'constraint'; forwards to 'constraint … --replan'",
-    )
-    lifeevent_subparsers = lifeevent_parser.add_subparsers(
-        dest="subcommand", help="Life event sub-commands (deprecated)"
-    )
-    le_add = lifeevent_subparsers.add_parser("add", aliases=["a"])
-    le_add.add_argument("--title", required=True)
-    le_add.add_argument("--start", required=True)
-    le_add.add_argument("--end", required=True)
-    le_add.add_argument("--type")
-    le_add.add_argument("--desc", "--description", dest="desc")
-    le_edit = lifeevent_subparsers.add_parser("edit", aliases=["e"])
-    le_edit.add_argument("id", type=int)
-    le_edit.add_argument("--title")
-    le_edit.add_argument("--start")
-    le_edit.add_argument("--end")
-    le_edit.add_argument("--type")
-    le_edit.add_argument("--desc", "--description", dest="desc")
-    le_list = lifeevent_subparsers.add_parser("list", aliases=["l"])
-    le_list.add_argument("-v", "--verbose", action="store_true")
-    le_list.add_argument("--all", action="store_true")
-    le_list.add_argument("--sport")
-    le_list.add_argument("--type")
-    le_show = lifeevent_subparsers.add_parser("show", aliases=["s"])
-    le_show.add_argument("id", type=int)
-    le_rm = lifeevent_subparsers.add_parser("rm", aliases=["r"])
-    le_rm.add_argument("id", type=int)
-    le_wipe = lifeevent_subparsers.add_parser("wipe")
-    le_wipe.add_argument("-y", "--yes", action="store_true")
 
     # context command & subparsers — first-party daily-context authoring
     context_parser = subparsers.add_parser(
@@ -1360,7 +1324,7 @@ def main() -> None:
         sub = args.subcommand.lower()
         if sub in ("add", "a"):
             # The positional TITLE and the hidden --title alias both land here; prefer
-            # the flag form (used by the deprecated lifeevent forwarder).
+            # the flag form when supplied.
             if getattr(args, "title_opt", None):
                 args.title = args.title_opt
             run_constraint_add(args)
@@ -1374,11 +1338,6 @@ def main() -> None:
             run_constraint_show(args)
         elif sub == "wipe":
             run_constraint_wipe(args)
-    elif cmd in ("lifeevent", "le", "e"):
-        if not args.subcommand:
-            lifeevent_parser.print_help()
-            sys.exit(1)
-        run_lifeevent_forward(args)
     elif cmd in ("context", "ctx", "c"):
         # `c` is retired in favour of `ctx` (to avoid colliding with `cons`); kept one
         # release as a back-compat alias with a deprecation notice (DESIGN_constraints.md §4).
