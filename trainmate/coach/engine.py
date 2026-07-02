@@ -3,7 +3,7 @@ import hashlib
 from typing import Any, List, Optional, Dict
 from trainmate.config import config
 from trainmate.openrouter import openrouter_client
-from trainmate.types import Objective, LifeEvent, Workout, CompletedActivity
+from trainmate.types import Objective, Constraint, Workout, CompletedActivity
 from trainmate.util import today_date as _today_date, cyan
 from trainmate.coach.formatting import (
     format_metrics_history, format_completed_activities, format_baseline,
@@ -116,8 +116,28 @@ class CoachEngine:
 
         return "\n".join(lines)
 
+    @staticmethod
+    def _render_constraints(constraints: List[Constraint]) -> str:
+        """Renders active directives for the prompt, one per line (DESIGN_constraints.md
+        §6): `title | dates | binding | sport | type | description`. A blanket `hard`
+        (no sport) directive is already enforced deterministically before the LLM runs
+        (hard-rest pre-pass), so it appears here only as context; a `hard` directive
+        scoped to one sport is advisory — the LLM is trusted to honor it and choose any
+        substitute itself. `soft` ones are preferences the coach honors via judgement."""
+        lines = ""
+        for c in constraints:
+            sport = c.get('sport') or 'all sports'
+            ctype = c.get('type') or '—'
+            desc = c.get('description') or ''
+            lines += (
+                f"- Constraint: {c['title']} | Dates: {c['start_date']} to {c['end_date']} | "
+                f"Binding: {c.get('binding', 'soft')} | Sport: {sport} | Type: {ctype}"
+                + (f" | Details: {desc}" if desc else "") + "\n"
+            )
+        return lines
+
     def _build_system_prompt(
-        self, objectives: List[Objective], lifeevents: List[LifeEvent],
+        self, objectives: List[Objective], constraints: List[Constraint],
         guidelines: str, strategy: str, meso_text: str, learnings: str,
         profile: Optional[Dict[str, Any]], custom_task: str = ""
     ) -> str:
@@ -130,13 +150,7 @@ class CoachEngine:
                 f"Sport: {o['sport_type']} | Details: {details}\n"
             )
 
-        c_text = ""
-        for c in lifeevents:
-            impact = c.get('impact_description', '')
-            c_text += (
-                f"- Life Event: {c['title']} | Start: {c['start_date']} | "
-                f"End: {c['end_date']} | Type: {c['event_type']} | Impact: {impact}\n"
-            )
+        c_text = self._render_constraints(constraints)
 
         athlete_profile = self._format_athlete_profile(profile)
         system_prompt = f"""You are TrainMate Coach, an advanced AI sports science training coach.
@@ -149,8 +163,9 @@ COACHING ROLE AND OBJECTIVES:
    synergies between them (e.g. general base or strength building phases).
 3. Dynamically adjust training plans based on recent Garmin metrics (Resting HR, HRV, Sleep,
    ACWR) to optimize recovery and prevent injury.
-4. Shift or scale training volume and intensity around life events (business trip, vacation,
-   parties) to manage fatigue.
+4. Shift or scale training volume and intensity around the athlete's active constraints
+   (travel, injury, capacity/intensity caps, preferences) to manage fatigue and respect
+   what they've asked you to work around.
 5. Adhere to the day-by-day weekly availability schedule and day-dependent equipment access
    (e.g., do not schedule gym workouts on home-only days; do not schedule workouts on rest days;
    do not exceed daily availability or max sessions). Respect certainty percentages (higher
@@ -178,8 +193,8 @@ ATHLETE PROFILE & PREFERENCES:
 ACTIVE ATHLETE GOALS (CHRONOLOGICAL):
 {obj_text if obj_text else "No active goals."}
 
-UPCOMING LIFE EVENTS:
-{c_text if c_text else "No upcoming life events."}
+ACTIVE CONSTRAINTS (athlete-declared directives to work around):
+{c_text if c_text else "No active constraints."}
 
 {custom_task}
 """
@@ -205,21 +220,25 @@ UPCOMING LIFE EVENTS:
         cleaned.sort(key=lambda x: (str(x['target_date']), x['id'] or 0))
         return cleaned
 
-    def _clean_lifeevents(self, lifeevents: List[LifeEvent]) -> List[Dict[str, Any]]:
-        """The life-event fields that matter for planning, normalized and stably ordered.
+    def _clean_constraints(self, constraints: List[Constraint]) -> List[Dict[str, Any]]:
+        """The constraint fields that matter for planning, normalized and stably ordered.
 
-        Single source of truth for both the lifeevents_hash fingerprint and the snapshot
-        persisted on the macrocycle (see _clean_goals).
+        Single source of truth for both the constraints_hash fingerprint and the snapshot
+        persisted on the macrocycle (see _clean_goals). Fed only the plan-shaping
+        (`replan = 1`) constraints by the caller, so tactical directives don't flag the
+        plan stale (DESIGN_constraints.md §7).
         """
         cleaned = []
-        for c in lifeevents:
+        for c in constraints:
             cleaned.append({
                 'id': c.get('id'),
                 'title': c.get('title'),
                 'start_date': c.get('start_date'),
                 'end_date': c.get('end_date'),
-                'event_type': c.get('event_type'),
-                'impact_description': c.get('impact_description')
+                'binding': c.get('binding'),
+                'sport': c.get('sport'),
+                'type': c.get('type'),
+                'description': c.get('description'),
             })
         cleaned.sort(key=lambda x: (str(x['start_date']), x['id'] or 0))
         return cleaned
@@ -229,9 +248,10 @@ UPCOMING LIFE EVENTS:
         serialized = json.dumps(self._clean_goals(objectives), sort_keys=True)
         return hashlib.sha256(serialized.encode('utf-8')).hexdigest()
 
-    def _get_lifeevents_hash(self, lifeevents: List[LifeEvent]) -> str:
-        """Computes a hash representation of life events list to check for updates."""
-        serialized = json.dumps(self._clean_lifeevents(lifeevents), sort_keys=True)
+    def _get_constraints_hash(self, constraints: List[Constraint]) -> str:
+        """Computes a hash representation of the plan-shaping constraints to check for
+        updates (DESIGN_constraints.md §7 — computed over `replan = 1` constraints only)."""
+        serialized = json.dumps(self._clean_constraints(constraints), sort_keys=True)
         return hashlib.sha256(serialized.encode('utf-8')).hexdigest()
 
     def _get_config_hash(self) -> str:
@@ -246,19 +266,19 @@ UPCOMING LIFE EVENTS:
     def _get_evidence_fingerprint(
         self, completed_activities: List[CompletedActivity],
         metrics: List[Dict[str, Any]], window_start: str, window_end: str,
-        lifeevents: Optional[List[LifeEvent]] = None,
+        constraints: Optional[List[Constraint]] = None,
         daily_context: Optional[List[Dict[str, Any]]] = None
     ) -> str:
         """Fingerprints the *evidence* a backward evaluation reconstructs from — the
-        completed activities + daily metrics (+ overlapping life events) within a window —
+        completed activities + daily metrics (+ overlapping constraints) within a window —
         so a re-run over unchanged data can be detected (see DESIGN_backward_evaluation.md
         §5, §8).
 
         We hash the load-bearing fields (not just activity ids) so that a re-pull which
         *corrects* a value also shifts the fingerprint. Hashing the concrete activity-id
         set rather than only the date range narrows the overlapping/shrinking-window edge
-        (§7). Life events and `stress` are hashed because they now feed the analysis input
-        (DESIGN_richer_analysis_evidence.md §5).
+        (§7). Constraints and `stress` are hashed because they now feed the analysis input
+        as discounting context (DESIGN_richer_analysis_evidence.md §5, DESIGN_constraints.md §6).
 
         DELIBERATE OMISSIONS (§11 / richer-evidence §5): the prompt text and science/*.txt
         files are NOT hashed; neither is *baseline recomputation* that shifts a deviation
@@ -285,8 +305,9 @@ UPCOMING LIFE EVENTS:
         )
         evt_digest = sorted(
             (c.get('id'), c.get('start_date'), c.get('end_date'),
-             c.get('event_type'), c.get('impact_description'))
-            for c in (lifeevents or [])
+             c.get('binding'), c.get('sport'), c.get('type'),
+             c.get('title'), c.get('description'))
+            for c in (constraints or [])
         )
         # Daily context feeds the analysis input, so an added/edited/deleted signal must
         # shift the fingerprint (DESIGN_calendar_context_ingest.md §7).
@@ -296,7 +317,7 @@ UPCOMING LIFE EVENTS:
         )
         serialized = json.dumps(
             {'window': [window_start, window_end],
-             'activities': act_digest, 'metrics': met_digest, 'lifeevents': evt_digest,
+             'activities': act_digest, 'metrics': met_digest, 'constraints': evt_digest,
              'daily_context': ctx_digest},
             sort_keys=True
         )
@@ -304,7 +325,7 @@ UPCOMING LIFE EVENTS:
 
     def _plan_generate_strategy(
         self, next_goal: Objective, objectives: List[Objective],
-        lifeevents: List[LifeEvent], today_str: str, guidelines: str,
+        constraints: List[Constraint], today_str: str, guidelines: str,
         profile: Optional[Dict[str, Any]], previous_strategy_text: Optional[str] = None,
         plan_start_str: Optional[str] = None, athlete_feedback: Optional[str] = None,
         history_summary: Optional[str] = None, prior_training_text: Optional[str] = None
@@ -318,8 +339,8 @@ goal ({next_goal['target_date']}).
 Divide this timeframe into contiguous, sequential mesocycles (determining the duration of each
 block based on the periodization style guidelines provided in the science file). When planning
 mesocycles, it is acceptable to shorten/extend a block by a few days to align transition or
-recovery periods with upcoming life events, and we should also try to align transition
-boundaries with long life events (e.g. aligning a deload week or phase change with a vacation).
+recovery periods with the athlete's active constraints, and we should also try to align transition
+boundaries with long constraints (e.g. aligning a deload week or phase change with a travel block).
 Make sure there are no gaps between the end date of one mesocycle and the start date of the next.
 The first mesocycle must start on the start date ({plan_start}) and the last mesocycle must end
 on or around the goal date ({next_goal['target_date']}).
@@ -370,13 +391,7 @@ You MUST respond with a JSON object containing:
                 f"Sport: {o['sport_type']} | Details: {details}\n"
             )
 
-        c_text = ""
-        for c in lifeevents:
-            impact = c.get('impact_description', '')
-            c_text += (
-                f"- Life Event: {c['title']} | Start: {c['start_date']} | "
-                f"End: {c['end_date']} | Type: {c['event_type']} | Impact: {impact}\n"
-            )
+        c_text = self._render_constraints(constraints)
 
         athlete_profile = self._format_athlete_profile(profile)
         system_prompt = (
@@ -410,8 +425,8 @@ You MUST respond with a JSON object containing:
         system_prompt += (
             f"\nACTIVE ATHLETE GOALS (CHRONOLOGICAL):\n"
             f"{obj_text if obj_text else 'No active goals.'}\n\n"
-            f"UPCOMING LIFE EVENTS:\n"
-            f"{c_text if c_text else 'No upcoming life events.'}\n\n"
+            f"ACTIVE CONSTRAINTS (athlete-declared directives to work around):\n"
+            f"{c_text if c_text else 'No active constraints.'}\n\n"
             f"{custom_task}\n"
         )
 
@@ -428,7 +443,7 @@ You MUST respond with a JSON object containing:
         return result
 
     def _workout_generate_logic(
-        self, objectives: List[Objective], lifeevents: List[LifeEvent],
+        self, objectives: List[Objective], constraints: List[Constraint],
         today_str: str, guidelines: str, profile: Optional[Dict[str, Any]],
         strategy: str, meso_text: str, learnings: str,
         num_days: int = 28,
@@ -454,8 +469,8 @@ You MUST respond with a JSON object containing:
             f"TASK:\nGenerate a training schedule for the next {duration_desc} starting from {starting_phrase}.\n"
             "Ensure the weekly schedules/microcycles are designed specifically to match the focus, target\n"
             "volume, and intensity of the active mesocycle block(s) the athlete is in during this period, and\n"
-            "incorporate any deload weeks or exceptions for upcoming life events in accordance with the\n"
-            "science guidelines.\n"
+            "incorporate any deload weeks or exceptions for the athlete's active constraints in accordance\n"
+            "with the science guidelines.\n"
             "\n"
             "You MUST respond with a JSON object containing:\n"
             "{\n"
@@ -483,7 +498,7 @@ You MUST respond with a JSON object containing:
         )
         system_prompt = self._build_system_prompt(
             objectives=objectives,
-            lifeevents=lifeevents,
+            constraints=constraints,
             guidelines=guidelines,
             strategy=strategy,
             meso_text=meso_text,
@@ -528,11 +543,12 @@ You MUST respond with a JSON object containing:
         )
         return plan_data
 
+
     def _workout_adapt_logic(
         self, target_date_str: str, history_days: int, start_date_str: str,
         metrics: List[Dict[str, Any]], completed_activities: List[CompletedActivity],
         planned_workouts: List[Workout], baseline_str: str,
-        meso_end_date_str: str, objectives: List[Objective], lifeevents: List[LifeEvent],
+        meso_end_date_str: str, objectives: List[Objective], constraints: List[Constraint],
         guidelines: str, profile: Optional[Dict[str, Any]], strategy: str,
         meso_text: str, learnings: str, discrepancies: List[str],
         informational: Optional[List[CompletedActivity]] = None,
@@ -609,7 +625,7 @@ Recovery metrics LAG, so the morning after an easing often still looks depressed
 the very fatigue you already acted on; reading that as "still too hard" and cutting
 again would spiral the load down without ever letting it rebound. Default to HOLDING the
 already-eased form. Only cut it further if the metrics have clearly WORSENED since it was
-eased, or a genuinely NEW signal (a hard completed session, a fresh life/context event)
+eased, or a genuinely NEW signal (a hard completed session, a fresh constraint/context event)
 warrants it — and the more recently and more times it was already eased (see the tag),
 the higher your bar for touching it again. Restoring load toward the original as the
 athlete recovers is encouraged; deepening an already-fresh cut is not.
@@ -632,6 +648,19 @@ adaptation, which will NOT see this note, reads that reason back with the plan a
 won't blindly undo the tactical change (e.g. re-add a session on a day the athlete can't
 train). This footprint is the tactical session note only; it is still NOT durable block
 evidence and must not reshape the mesocycle.
+
+EXTRACTING A DURABLE CONSTRAINT FROM THE NOTE:
+Separately from adapting today's sessions, decide whether the note ALSO states something
+the coach must work around beyond today: unavailability, a time/intensity cap, an injury
+layoff, a venue/equipment limit, or a stated preference with a date or date range (e.g.
+"no run Thursday", "only 45 min today", "broke my ankle, out 6 weeks"). If so, return it in
+"new_constraints" below — one entry per distinct directive, exactly as if the athlete had
+run `constraint add`. A note that is only about how they feel right now ("felt flat, ease
+today") is NOT durable — leave "new_constraints" empty for it. When unsure, leave it out: a
+durable-looking note mis-filed as a constraint is worse than a missed one. This is
+extraction only — never invent a plan-shaping escalation, and never omit "start_date"/
+"end_date" (default both to today when the note doesn't say). The app, not you, decides
+bindingness and whether this becomes plan-shaping; do not guess at either.
 
 This daily adaptation is READ-ONLY with respect to the coach's durable observations:
 use the COACH LEARNINGS as context, but do NOT emit any learning updates here — durable,
@@ -670,12 +699,26 @@ evidence-backed observations are authored only by the weekly history analysis
             '      "rpe": 5,\n'
             '      "tss": 30.0\n'
             "    }\n"
+            "  ],\n"
+            '  "new_constraints": [\n'
+            "    // Optional. Directives extracted from the athlete's note this run (see\n"
+            "    // EXTRACTING A DURABLE CONSTRAINT above). Every entry is created exactly as\n"
+            "    // if the athlete had run `constraint add`. Omit entirely, or leave empty, if\n"
+            "    // the note was only a one-off nudge about today.\n"
+            "    {\n"
+            '      "title": "the directive, stated short (required)",\n'
+            '      "start_date": "YYYY-MM-DD (required; default today)",\n'
+            '      "end_date": "YYYY-MM-DD (required; == start for a single day)",\n'
+            '      "sport": "one sport this scopes to, or null/omit for all",\n'
+            '      "type": "optional opaque label (trip, injury, …) or null/omit",\n'
+            '      "description": "optional richer context or null/omit"\n'
+            "    }\n"
             "  ]\n"
             "}\n"
         )
         system_prompt = self._build_system_prompt(
             objectives=objectives,
-            lifeevents=lifeevents,
+            constraints=constraints,
             guidelines=guidelines,
             strategy=strategy,
             meso_text=meso_text,
@@ -842,15 +885,16 @@ Adherence Discrepancies & Violations:
             "the underlying training phases (macrocycle & mesocycles) that occurred.\n"
             "\n"
             "READING THE PER-WEEK CONTEXT FIELDS:\n"
-            "- 'life_events': non-training events overlapping the week (illness, travel,\n"
-            "  work crunch, etc.). Consider them as a possible explanation for load,\n"
-            "  performance, or recovery anomalies before attributing those to training\n"
-            "  adaptation; avoid authoring a training learning from a week whose anomaly a\n"
-            "  life event already explains.\n"
+            "- 'constraints': athlete-declared directives overlapping the week (illness,\n"
+            "  travel, work crunch, capacity caps, etc.). Consider them as a possible\n"
+            "  explanation for load, performance, or recovery anomalies before attributing\n"
+            "  those to training adaptation; avoid authoring a training learning from a week\n"
+            "  whose anomaly a constraint already explains. A constraint may only explain an\n"
+            "  anomaly away — never cite one as supporting evidence for a learning.\n"
             "- 'daily_context': externally-logged daily signals (e.g. alcohol, poor sleep,\n"
             "  high stress), each with a 'metric', an optional numeric 'value', and free\n"
             "  'text'. Present only on days one was logged. Treat these the same way as\n"
-            "  life events: a signal the day before (recovery lags) is a likely\n"
+            "  constraints: a signal the day before (recovery lags) is a likely\n"
             "  non-training explanation for a depressed next-morning metric, so weigh it\n"
             "  before attributing the dip to training load.\n"
             "- 'vs_baseline_z': how the week's morning metrics sat versus the athlete's\n"

@@ -38,7 +38,7 @@ has **one canonical home**; other sections point to it instead of paraphrasing
 ## 1. System Overview
 
 TrainMate is a local AI sports-science coaching application. The user
-configures goals and life events; TrainMate generates periodized training plans
+configures goals and constraints; TrainMate generates periodized training plans
 (macrocycle → mesocycles) and workout schedules (microcycles), then adapts them
 daily based on Garmin metrics. Plans and workouts can be pushed to Google
 Calendar.
@@ -84,8 +84,8 @@ classes themselves.
   singletons/helpers handlers reference via `import trainmate_cli as cli`, and a
   `__main__` alias. No business logic.
 - **`trainmate/cli/`** — per-command-family handler modules (`run_*()`): `status`,
-  `goals`, `lifeevents`, `context`, `learnings`, `plans`, `workouts`, `data`, plus
-  shared `common`.
+  `goals`, `constraints`, `lifeevents` (deprecated forwarder), `context`, `learnings`,
+  `plans`, `workouts`, `data`, plus shared `common`.
 - **`trainmate_web.py`** — Flask REST API; thin handler functions calling `db`,
   `coach_service`, `calendar_syncer` (pure reader — never pulls).
 - **`trainmate_bot.py`** — Telegram chat front-end. Launch with `./tm-bot`. Each
@@ -118,7 +118,7 @@ classes themselves.
 
 | File                 | Class / Singleton    | Purpose                                          |
 |----------------------|----------------------|--------------------------------------------------|
-| `types.py`           | —                    | TypedDicts: `Objective`, `LifeEvent`, `Workout`, `CompletedActivity` (incl. `bike_avg_watts`, `zone1_sec`–`zone5_sec`), `AthleteMetric`, `AthleteBaseline`, `Macrocycle`, `Mesocycle` |
+| `types.py`           | —                    | TypedDicts: `Objective`, `Constraint`, `LifeEvent` (legacy), `Workout`, `CompletedActivity` (incl. `bike_avg_watts`, `zone1_sec`–`zone5_sec`), `AthleteMetric`, `AthleteBaseline`, `Macrocycle`, `Mesocycle` |
 | `config.py`          | `config`             | Reads `config.yaml`; exposes typed properties.   |
 | `prompt.py`          | (`cli.prompt`)       | Front-end-agnostic prompt broker: `confirm`/`choose`/`ask_text` over `TtyPrompt` (`input()`) or `JsonPrompt` (chat/web). See [§6](#6-singletons). |
 | `db/`                | `db`                 | SQLite wrapper; `Database` composed from         |
@@ -203,14 +203,16 @@ Module-level function in `formatting.py`. Concatenates all `*.txt` files from
 `CoachService` or directly by tests).
 
 - **`_build_system_prompt(...)`** — assembles the main LLM system prompt
-  (guidelines, strategy, goals, life events, athlete profile).
+  (guidelines, strategy, goals, constraints, athlete profile). `_render_constraints`
+  renders the active directives block (`title | dates | binding | sport | type | description`).
 - **`_format_athlete_profile(profile)`** — formats `config.user_profile` into a
   readable prompt segment.
-- **`_clean_goals(objectives)` / `_clean_lifeevents(lifeevents)`** — the
+- **`_clean_goals(objectives)` / `_clean_constraints(constraints)`** — the
   planning-relevant fields, normalized and stably ordered. Single source of truth
   shared by the hash functions and the snapshots persisted on the macrocycle.
+  `_clean_constraints` is fed only the plan-shaping (replan=1) constraints.
 - **`_get_goals_hash(objectives)`** — SHA-256 of the `_clean_goals` list.
-- **`_get_lifeevents_hash(lifeevents)`** — SHA-256 of the `_clean_lifeevents` list.
+- **`_get_constraints_hash(constraints)`** — SHA-256 of the `_clean_constraints` list.
 - **`_get_config_hash()`** — SHA-256 of `user_profile` + `metrics_lookback_days`.
 - **`_plan_generate_strategy(...)`** — LLM call → `{strategy, mesocycles}`. Label
   `periodization_plan`.
@@ -221,6 +223,10 @@ Module-level function in `formatting.py`. Concatenates all `*.txt` files from
 - **`_workout_adapt_logic(...)`** — LLM call →
   `{change_needed, reason, adapted_workouts[]}`. **Read-only** w.r.t. learnings.
   Label `workout_adaptation`.
+- **`_classify_adapt_message(message, today)`** — LLM call classifying a `workout adapt
+  --message` note as a durable `constraint` (→ a row is created, honored this run and
+  future) or an `ephemeral` nudge (→ one-run hint folded into change_reason). Extract-only;
+  never escalates to plan-shaping (DESIGN_constraints.md §8). Label `adapt_message_classify`.
 - **`_data_analyze_logic(...)`** — LLM call → `{macrocycle_summary,
   inferred_macrocycle, inferred_mesocycles[], physiological_insights[],
   learning_updates[]}`. Reverse-engineers cycles from weekly summaries. Label
@@ -298,10 +304,13 @@ recompute does not silently demote them (see [§15](#15-design-rationale--histor
 **Orchestrator — owns all DB and calendar access.** Exposes the public API
 called by the UIs.
 
-- **`plan_generate(force, objective_id)`** — fetches objectives/lifeevents, checks
-  hashes, calls `CoachEngine._plan_generate_strategy()`, saves to DB. Auto-splits
-  timelines > 24 weeks.
+- **`plan_generate(force, objective_id)`** — fetches objectives/constraints, checks
+  hashes (constraints hash covers only the plan-shaping `replan=1` rows), calls
+  `CoachEngine._plan_generate_strategy()`, saves to DB. Auto-splits timelines > 24 weeks.
 - **`workout_generate(objective_id, end_date)`** — requires an existing macrocycle.
+  Applies the deterministic hard-constraint pre-pass to the generated workouts
+  (`_enforce_hard_constraints_generate`: hard no-sport dates → rest, hard sport-scoped
+  dates → that sport dropped) before saving.
   - **Preserves a completed session:** if today's planned workout already has a
     matching completed activity (`_today_workout_completed`, a one-day
     `analyze_adherence` pass), generation starts *tomorrow*; otherwise today. A
@@ -314,17 +323,25 @@ called by the UIs.
     the active plan. Archive (not delete) makes regeneration undoable via
     `plan_rollback` (DESIGN_plan_rollback.md).
 - **`plan_apply(objective_id, strategy, mesocycles)`** — persists an
-  already-generated strategy + mesocycles to the DB (recomputes the goals/lifeevents/
+  already-generated strategy + mesocycles to the DB (recomputes the goals/constraints/
   config hashes and snapshots). Used by the intermediate-goals branch of `plan generate`.
 - **`replan(force, objective_id)`** — convenience: `plan_generate` then
   `workout_generate`.
 - **`workout_adapt(target_date_str, message=None)`** — fetches metrics + workouts in
   the rolling window, calls `CoachEngine._workout_adapt_logic()`, returns
   `(reason, proposed_workouts)`; caller decides whether to apply.
-  - **`message`** (CLI `-m/--message`): a free-text athlete note for **this run only**
-    — bounded prompt section, weighed as today's intent/constraints but advisory (does
-    not override clear fatigue) and **ephemeral** (never persisted; persistent context
-    belongs in `daily_context` via `context add`).
+  - **`message`** (CLI `-m/--message`): a fast-capture inbox (DESIGN_constraints.md §8).
+    `_capture_message_constraints` classifies it (`_classify_adapt_message`): a
+    constraint-shaped note is persisted as a `constraint` row (`source='message'`,
+    `replan=0`, honored this run and every future run) and dropped from the ephemeral
+    hint; a nudge stays a one-run advisory note folded into `change_reason`. Auto-capture
+    never sets `replan=1` — a plan-shaping capture only *surfaces a suggestion* to escalate.
+  - **Hard-constraint pre-pass** (`_enforce_hard_constraints_adapt`): eases any future,
+    not-yet-completed planned session under a hard constraint to rest, regardless of the
+    model's proposals.
+  - **Constraint magnitude** (`constraint_plan_impact` / `constraint_is_plan_shaping`):
+    the §7 heuristic behind the `constraint add`/`edit` replan proposal — overlap with
+    future/key sessions, displaced load, duration; human-confirmed, never auto-regen.
   - **Only-changes contract:** the prompt shows the whole forward plan through the
     mesocycle end but instructs the model to return **only sessions it is changing** —
     omitted sessions are preserved (apply never drops a date with no proposal).
@@ -369,7 +386,7 @@ called by the UIs.
   them — the symmetric inverse of eager generation (DESIGN_plan_rollback.md).
 - **`_get_config_hash()`** — delegates to `CoachEngine._get_config_hash()`. Used by
   CLI/web to detect stale plans.
-- **`_get_coach_system_prompt(objectives, lifeevents, ...)`** — builds the system
+- **`_get_coach_system_prompt(objectives, constraints, ...)`** — builds the system
   prompt without making an LLM call (used by tests).
 
 **Singleton:** `coach_service = CoachService()` at the bottom of `coach/service.py`. Import as:
@@ -384,10 +401,10 @@ from trainmate.coach import coach_service
 **Package:** `trainmate/db/` · **Singleton:** `db = Database()` (in `__init__.py`)
 
 `Database` is composed from per-domain mixins — `base.py` (`BaseDB`:
-connection + schema setup), `objectives.py`, `lifeevents.py`, `dailycontext.py`,
-`workouts.py`, `activities.py`, `learnings.py`, `analysis.py`, `periodization.py`,
-`wipes.py` — all re-exported from `__init__.py` so `from trainmate.db import ...`
-is unchanged.
+connection + schema setup), `objectives.py`, `constraints.py`, `lifeevents.py` (legacy),
+`dailycontext.py`, `workouts.py`, `activities.py`, `learnings.py`, `analysis.py`,
+`periodization.py`, `wipes.py` — all re-exported from `__init__.py` so
+`from trainmate.db import ...` is unchanged.
 
 - Every method opens a fresh `sqlite3` connection (context manager), commits,
   and closes.
@@ -422,8 +439,13 @@ domain). The convention: `add_*`/`save_*` (writers; `save_*` is an upsert),
 `**kwargs` patch), `delete_*` (hard delete), `wipe_*` (clear the domain). Only the
 methods whose behavior is *not* obvious from that convention are called out below.
 
-- **Objectives** (`objectives.py`) · **Life Events** (`lifeevents.py`) — plain CRUD;
-  nothing beyond the convention.
+- **Objectives** (`objectives.py`) — plain CRUD; nothing beyond the convention.
+- **Constraints** (`constraints.py`) — the unified directive object. Beyond the CRUD
+  convention: `get_constraints(start, end)` returns rows overlapping a window (open-ended
+  when `end` is None — the plan form), and `list_constraint_types()` returns the distinct
+  opaque `type` labels in use (powers the `add` prompt).
+- **Life Events** (`lifeevents.py`) — legacy CRUD, retained read-only for the deprecated
+  `lifeevent` forwarder; superseded by Constraints.
 - **Daily Context** (`dailycontext.py`) — external signals are reconciled **by
   Calendar event id**, so the writer/deleter are `*_by_event(google_event_id, …)`
   variants alongside the id-based ones used by the `context` command. Cleared by
@@ -487,7 +509,26 @@ SQLite database at `trainmate.db` (path from `config.db_path`).
 | `priority`    | INTEGER    | 1 = highest                                          |
 | `description` | TEXT       |                                                      |
 
-### lifeevents
+### constraints
+The single directive object — everything the athlete asks the coach to work around,
+at any horizon (DESIGN_constraints.md). Supersedes `lifeevents`.
+| Column        | Type       | Notes                                                     |
+|---------------|------------|-----------------------------------------------------------|
+| `id`          | INTEGER PK |                                                           |
+| `start_date`  | TEXT       | YYYY-MM-DD                                                 |
+| `end_date`    | TEXT       | YYYY-MM-DD (== start for a single day)                     |
+| `binding`     | TEXT       | `hard` (deterministically enforced) \| `soft` (advisory)  |
+| `sport`       | TEXT       | NULL = all sports; else scopes to one sport               |
+| `type`        | TEXT       | Opaque user-vocabulary label (`trip`, `injury`, …); never branched on |
+| `title`       | TEXT       | The directive, stated short; the `list` display string    |
+| `description` | TEXT       | Optional richer context, read by the LLM                  |
+| `replan`      | INTEGER    | 1 = escalated to plan-shaping (built into the plan, §7)    |
+| `source`      | TEXT       | `manual` \| `message` \| `lifeevent` (migration)          |
+| `created`     | TEXT       | UTC ISO                                                    |
+
+### lifeevents (legacy)
+Superseded by `constraints`; kept read-only until the deprecated `lifeevent` forwarder is
+removed, then dropped. Rows were migrated verbatim (binding=`soft`, replan=1, source=`lifeevent`).
 | Column               | Type       | Notes                                          |
 |----------------------|------------|------------------------------------------------|
 | `id`                 | INTEGER PK |                                                |
@@ -726,15 +767,16 @@ guarantee (re-citing a counted week is an `INSERT OR IGNORE` no-op). Full model:
 | `objective_id`    | INTEGER FK→objectives | Cascade delete                                   |
 | `strategy`        | TEXT                  | LLM-generated strategy text                      |
 | `goals_hash`      | TEXT                  | SHA-256 of objectives at generation time         |
-| `lifeevents_hash` | TEXT                  | SHA-256 of life events at generation time        |
+| `constraints_hash`| TEXT                  | SHA-256 of the plan-shaping (replan=1) constraints at generation time (§7) |
 | `config_hash`     | TEXT                  | SHA-256 of `user_profile` +                      |
 |                   |                       | `metrics_lookback_days`                          |
 | `goals_snapshot`  | TEXT                  | JSON of the goals the plan was generated from    |
 |                   |                       | (same cleaned data the hash covers); NULL on     |
 |                   |                       | plans predating the column. Shown by `plan show` |
 |                   |                       | and the web strategy card.                       |
-| `lifeevents_snapshot` | TEXT              | JSON of the life events the plan was generated   |
-|                   |                       | from; NULL on pre-snapshot plans                 |
+| `constraints_snapshot` | TEXT             | JSON of the plan-shaping constraints the plan was |
+|                   |                       | generated from; NULL on pre-snapshot plans (older |
+|                   |                       | plans fall back to a legacy `lifeevents_snapshot`) |
 | `created_at`      | TEXT                  | ISO timestamp                                    |
 | `feedback`        | TEXT                  | Athlete feedback for next replanning             |
 | `status`          | TEXT                  | `active` or `superseded`. Exactly one active     |
@@ -767,7 +809,7 @@ DESIGN_backward_evaluation.md §5.1.
 |------------------|------------|----------------------------------------------------|
 | `id`             | INTEGER PK |                                                    |
 | `horizon`        | TEXT       | `long` \| `short` — UNIQUE; the cache slot         |
-| `fingerprint`    | TEXT       | Hash of activity-id set + metrics + overlapping life events + window |
+| `fingerprint`    | TEXT       | Hash of activity-id set + metrics + overlapping constraints + window |
 | `window_start`   | TEXT       | YYYY-MM-DD                                         |
 | `window_end`     | TEXT       | YYYY-MM-DD                                         |
 | `reconstruction` | TEXT       | JSON: inferred cycles + physiological insights     |
@@ -823,7 +865,7 @@ Invoked as `python trainmate_cli.py [--llm-model MODEL] <command> [subcommand] [
 `trainmate_cli.py` holds only `main()` (the argparse dispatcher) and the
 patchable singletons; the handler functions, named
 `run_<command>_<subcommand>()`, live in the `trainmate/cli/` package
-(one module per command family: `status`, `goals`, `lifeevents`, `context`,
+(one module per command family: `status`, `goals`, `constraints`, `lifeevents` (forwarder), `context`,
 `learnings`, `plans`, `workouts`, `data`). `help` is the one exception — it
 just introspects the parser tree (`_print_command_tree` in `trainmate_cli.py`),
 so it has no handler of its own.
@@ -837,16 +879,17 @@ so it has no handler of its own.
 | `goal`       | `rm`         | `g r`    | Remove objective by ID                                                   |
 | `goal`       | `list`       | `g l`    | List all objectives                                                      |
 | `goal`       | `wipe`       | —        | Delete all objectives                                                    |
-| `lifeevent`  | `add`        | `le a`   | Add life event (`--title`, `--start`, `--end`, `--type`, `--desc`)       |
-| `lifeevent`  | `edit`       | `le e`   | Edit life event by ID                                                    |
-| `lifeevent`  | `rm`         | `le r`   | Remove life event by ID                                                  |
-| `lifeevent`  | `list`       | `le l`   | List life events                                                         |
-| `lifeevent`  | `show`       | `le s`   | Show life event details by ID                                            |
-| `lifeevent`  | `wipe`       | —        | Delete all life events                                                   |
-| `context`    | `add`        | `c a`    | Author daily-context signal(s) (`text` or `-l/--label`, `-m METRIC`, `--value N`, `--from`, `--until`; one tagged all-day event per day, prompts if omitted) |
-| `context`    | `rm`         | `c r`    | Remove signal(s) by ID(s), or by `--from`/`--until`/`-m` (deletes calendar event + local row) |
-| `context`    | `list`       | `c l`    | List signals (`-m METRIC`, `--from`, `--until`; default window `metrics_lookback_days`) |
-| `context`    | `list-metrics` | `c lm` | Show distinct metrics in use with counts and date span                  |
+| `constraint` | `add`        | `cons a` | Author a directive (positional `TITLE`, `--start`, `--end`, `--sport`, `--hard`/`--soft`, `--type`, `--desc`, `--replan`/`--no-replan`; prompts for omitted mandatory fields) |
+| `constraint` | `edit`       | `cons e` | Adjust scope / bindingness / text / replan by ID                        |
+| `constraint` | `rm`         | `cons r` | Remove a directive by ID                                                |
+| `constraint` | `list`       | `cons l` | List active/upcoming directives (`--all`, `-v`, `--sport`, `--type`, `--from`, `--until`; default window `metrics_lookback_days`) |
+| `constraint` | `show`       | `cons s` | Show a directive in detail (incl. plan-shaping status)                  |
+| `constraint` | `wipe`       | —        | Delete all constraints                                                  |
+| `lifeevent`  | (all)        | `le`, `e` | **Deprecated** — forwards to `constraint … --replan` with a notice     |
+| `context`    | `add`        | `ctx a`  | Author daily-context signal(s) (`text` or `-l/--label`, `-m METRIC`, `--value N`, `--from`, `--until`; one tagged all-day event per day, prompts if omitted) |
+| `context`    | `rm`         | `ctx r`  | Remove signal(s) by ID(s), or by `--from`/`--until`/`-m` (deletes calendar event + local row) |
+| `context`    | `list`       | `ctx l`  | List signals (`-m METRIC`, `--from`, `--until`; default window `metrics_lookback_days`) |
+| `context`    | `list-metrics` | `ctx lm` | Show distinct metrics in use with counts and date span (`c` is a deprecated alias of `ctx`) |
 | `learnings`  | `list`       | `l`      | Show coach learnings (`--sport`, `--confidence`, `--dormant`)            |
 | `learnings`  | `show`       | —        | Show a learning's full text + per-week evidence basis by ID             |
 | `learnings`  | `edit`       | —        | Edit a learning's text by ID                                            |
@@ -907,8 +950,8 @@ markers as `workout list` without re-deriving the rules (§5).
 | GET         | `/api/status`                   | Active goal, latest metrics, coach learnings (under `coach_learnings.learnings` + `.summary`), macrocycle+mesocycles, `sync_state` (data freshness) |
 | GET/POST    | `/api/objectives`               | List all / create objective                  |
 | DELETE/PUT  | `/api/objectives/<id>`          | Delete or update objective                   |
-| GET/POST    | `/api/life-events`              | List upcoming / create life event            |
-| DELETE/PUT  | `/api/life-events/<id>`         | Delete or update life event                  |
+| GET/POST    | `/api/constraints`              | List active/upcoming directives / create one (supersedes `/api/life-events`) |
+| DELETE/PUT  | `/api/constraints/<id>`         | Delete or update a directive                 |
 | GET/POST    | `/api/workouts`                 | List workouts (`?start_date=&end_date=&sport_type=&include_removed=`) / add a session (`{date, sport_type, title, description, duration_minutes?, rpe?, tss?, reason?}`). Listed rows carry derived `calendar_status` + `modification_status`. |
 | GET         | `/api/workouts/compare`         | Plan-vs-actual adherence (`workout compare`); pure reader, no `ensure_data`. `?start_date=&end_date=&sport=` (default 14-day lookback, end capped at today) → `{filters, days[], discrepancies[], informational[]}` |
 | POST        | `/api/workouts/<id>/remove`     | Soft-remove a workout (`{reason?}`)          |
@@ -977,8 +1020,8 @@ Required fields:
 
 ### Plan Generation (`plan generate`)
 1. `CoachService.plan_generate()` fetches active objectives +
-   life events.
-2. Computes `goals_hash`, `lifeevents_hash`, `config_hash`.
+   constraints.
+2. Computes `goals_hash`, `constraints_hash` (plan-shaping constraints only), `config_hash`.
 3. If existing macrocycle has matching hashes and `force=False` → reuse.
 4. Otherwise: builds a read-only **planned-vs-actual review** of the prior plan
    via `_build_prior_training_context()` (Option A — anchored on the prior
@@ -1089,15 +1132,16 @@ watermark (stored in `sync_state` under the `reflect` key).
   `data bootstrap`; with no new evidence it returns early without an LLM call.
 
 The shared core then:
-1. Queries completed activities, physiological metrics, and life events
-   overlapping the window.
-2. Computes the evidence fingerprint (activities + metrics + overlapping life
-   events) and checks `analysis_cache[horizon]`. If the fingerprint matches and
+1. Queries completed activities, physiological metrics, and constraints
+   overlapping the window (discounting context only — a constraint may explain an
+   anomaly away, never support a learning).
+2. Computes the evidence fingerprint (activities + metrics + overlapping
+   constraints) and checks `analysis_cache[horizon]`. If the fingerprint matches and
    `--force` is absent → returns the cached reconstruction (no LLM call). `--force`
    recomputes regardless.
 3. Groups metrics and activities week-by-week using Monday-commencing ISO weeks,
    enriching each weekly summary (DESIGN_richer_analysis_evidence.md) with the
-   life events overlapping that week (tagged `full`/`partial`), `avg_sleep_score`/
+   constraints overlapping that week (tagged `full`/`partial`), `avg_sleep_score`/
    `avg_stress`, and `vs_baseline_z` (deterministic rhr/hrv/sleep z-scores vs the
    rolling baseline, omitted when unsupported). All deterministic — no extra LLM
    call. The per-day z is computed by the shared `_day_response_z(metric_row,
@@ -1284,7 +1328,7 @@ Calendar (tagged events) ──► google_calendar.sync_calendar_context
   only bridges to it via a guarded lazy import.
 - **Coach use:** two complementary paths. (1) *Qualitative* — each week's summary
   carries a `daily_context` list (all rows, no collapsing) the LLM reads beside the
-  metrics, the same way `life_events` contextualize anomalies. (2) *Quantitative*
+  metrics, the same way `constraints` contextualize anomalies. (2) *Quantitative*
   (`context_days`, step 3a above; DESIGN_quantitative_context_impact.md) — the
   optional numeric `value` is aligned per-episode against the bracketing mornings'
   recovery and day-of load, full-history, so the LLM can read dose-response,
@@ -1322,7 +1366,8 @@ venv/bin/python -m unittest discover -s tests -p "test_*.py"
 | `tests/test_analysis.py`       | `data_bootstrap`/`data_reflect`: date resolution, weekly |
 |                                | aggregation, cache reuse/force/inspect_only, learnings           |
 |                                | injection, reflect watermark advance/skip, bootstrap re-run      |
-|                                | guard, per-week life events + body-response z-scores             |
+|                                | guard, per-week constraints + body-response z-scores             |
+| `tests/test_constraints.py`    | constraint DB windowing, hard-rest pre-pass, §7 magnitude, §8 message capture |
 | `tests/test_cli.py`            | CLI command dispatch + output                                   |
 | `tests/test_calendar.py`       | `calendar_syncer.sync_workout` event description formatting      |
 | `tests/test_coach_format.py`   | `format_completed_activities` (HR/power-zone rendering)          |

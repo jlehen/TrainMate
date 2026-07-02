@@ -539,23 +539,23 @@ class TestContextDays(unittest.TestCase):
 
 
 class TestWeekLifeEvents(unittest.TestCase):
-    """Pure unit tests for per-week life-event bucketing (no DB)."""
+    """Pure unit tests for per-week constraint bucketing (no DB)."""
 
     @staticmethod
     def _d(s):
         return datetime.strptime(s, "%Y-%m-%d").date()
 
     def test_full_partial_and_non_overlap(self):
-        events = [
+        constraints = [
             {"title": "Flu", "start_date": "2026-06-01", "end_date": "2026-06-07",
-             "event_type": "illness", "impact_description": "bed-bound"},
+             "type": "illness", "description": "bed-bound"},
             {"title": "Trip", "start_date": "2026-06-05", "end_date": "2026-06-10",
-             "event_type": "travel", "impact_description": ""},
+             "type": "travel", "description": ""},
             {"title": "Later", "start_date": "2026-06-20", "end_date": "2026-06-21",
-             "event_type": "stress", "impact_description": ""},
+             "type": "stress", "description": ""},
         ]
-        out = coach_service._week_life_events(
-            events, self._d("2026-06-01"), self._d("2026-06-07")
+        out = coach_service._week_constraints(
+            constraints, self._d("2026-06-01"), self._d("2026-06-07")
         )
         titles = {e["title"]: e["coverage"] for e in out}
         self.assertEqual(titles, {"Flu": "full", "Trip": "partial"})  # "Later" excluded
@@ -563,13 +563,13 @@ class TestWeekLifeEvents(unittest.TestCase):
         self.assertEqual(out[0]["impact"], "bed-bound")
 
     def test_multiweek_event_buckets_into_each_week(self):
-        event = [{"title": "Long", "start_date": "2026-06-01", "end_date": "2026-06-14",
-                  "event_type": "injury", "impact_description": ""}]
-        wk1 = coach_service._week_life_events(
-            event, self._d("2026-06-01"), self._d("2026-06-07")
+        constraint = [{"title": "Long", "start_date": "2026-06-01", "end_date": "2026-06-14",
+                       "type": "injury", "description": ""}]
+        wk1 = coach_service._week_constraints(
+            constraint, self._d("2026-06-01"), self._d("2026-06-07")
         )
-        wk2 = coach_service._week_life_events(
-            event, self._d("2026-06-08"), self._d("2026-06-14")
+        wk2 = coach_service._week_constraints(
+            constraint, self._d("2026-06-08"), self._d("2026-06-14")
         )
         self.assertEqual([e["coverage"] for e in wk1], ["full"])
         self.assertEqual([e["coverage"] for e in wk2], ["full"])
@@ -608,8 +608,9 @@ class TestRicherEvidenceIntegration(unittest.TestCase):
             "2026-06-01", rhr_mean=50.0, rhr_std=4.0, hrv_mean=80.0,
             hrv_std=10.0, sleep_mean=70.0, sleep_std=8.0,
         )
-        test_db.add_lifeevent(
-            "Work crunch", "2026-06-01", "2026-06-07", "stress", "long hours, poor sleep"
+        test_db.add_constraint(
+            title="Work crunch", start_date="2026-06-01", end_date="2026-06-07",
+            binding="soft", type="stress", description="long hours, poor sleep",
         )
 
     @patch("trainmate.coach.engine.openrouter_client")
@@ -620,7 +621,7 @@ class TestRicherEvidenceIntegration(unittest.TestCase):
             from_date_str="2026-06-01", until_date_str="2026-06-07", no_pull=True
         )
         user_content = mock_client.complete.call_args[0][1]
-        self.assertIn("life_events", user_content)
+        self.assertIn("constraints", user_content)
         self.assertIn("Work crunch", user_content)
         self.assertIn("vs_baseline_z", user_content)
         self.assertIn("avg_stress", user_content)
@@ -644,15 +645,15 @@ class TestRicherEvidenceIntegration(unittest.TestCase):
 
     @patch("trainmate.coach.engine.openrouter_client")
     def test_editing_a_life_event_invalidates_the_cache(self, mock_client):
-        """A life-event change shifts the evidence fingerprint, so the next run recomputes
+        """A constraint change shifts the evidence fingerprint, so the next run recomputes
         rather than reusing the cached reconstruction."""
         self._seed_week()
         mock_client.complete.return_value = {"macrocycle_summary": "s", "learning_updates": []}
         coach_service.data_bootstrap(
             from_date_str="2026-06-01", until_date_str="2026-06-07", no_pull=True
         )
-        eid = test_db.get_lifeevents()[0]["id"]
-        test_db.update_lifeevent(eid, impact_description="changed")
+        eid = test_db.get_constraints()[0]["id"]
+        test_db.update_constraint(eid, description="changed")
         # Confirm + recompute (bootstrap already ran).
         with patch("builtins.input", return_value="y"):
             coach_service.data_bootstrap(

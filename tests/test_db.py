@@ -164,7 +164,7 @@ class TestDatabase(unittest.TestCase):
             objective_id=obj_id,
             strategy="aerobic focus plan",
             goals_hash="hashgoals123",
-            lifeevents_hash="hashconstraints456",
+            constraints_hash="hashconstraints456",
             mesocycles=[
                 {"name": "Base Building", "start_date": "2026-06-01",
                  "end_date": "2026-06-28", "focus": "Aerobic threshold"},

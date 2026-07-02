@@ -124,9 +124,10 @@ from trainmate.cli.status import run_status
 from trainmate.cli.goals import (
     run_goal_add, run_goal_edit, run_goal_list, run_goal_rm, run_goal_wipe,
 )
-from trainmate.cli.lifeevents import (
-    run_lifeevent_add, run_lifeevent_edit, run_lifeevent_list,
-    run_lifeevent_show, run_lifeevent_rm, run_lifeevent_wipe,
+from trainmate.cli.lifeevents import run_lifeevent_forward
+from trainmate.cli.constraints import (
+    run_constraint_add, run_constraint_edit, run_constraint_list,
+    run_constraint_show, run_constraint_rm, run_constraint_wipe,
 )
 from trainmate.cli.learnings import (
     run_learning_list, run_learning_show, run_learning_edit, run_learning_rm,
@@ -440,68 +441,150 @@ def main() -> None:
     g_wipe = goal_subparsers.add_parser("wipe", help="Wipe all training objectives")
     g_wipe.add_argument("-y", "--yes", action="store_true", help="Skip confirmation prompt")
     
-    # lifeevent command & subparsers
+    # constraint command & subparsers — the single directive object
+    # (DESIGN_constraints.md). Everything the athlete asks the coach to work around, at
+    # any horizon; supersedes `lifeevent`.
+    constraint_parser = subparsers.add_parser(
+        "constraint",
+        aliases=["cons"],
+        help="Author/list directives the coach works around (availability, caps, "
+             "preferences, disruptions)",
+        description=(
+            "Manage constraints — anything you ask the coach to work around, at any "
+            "horizon ('no run Thursday', 'only 45 min today', '3-week injury layoff'). "
+            "A blanket 'hard' constraint (no --sport) deterministically forces rest in "
+            "generate/adapt; a 'hard' constraint scoped to a sport, and every 'soft' one, "
+            "is advisory — the coach honors it by judgement. Whether a constraint reshapes "
+            "the plan is derived from its magnitude and human-confirmed, not picked up front."
+        ),
+    )
+    constraint_subparsers = constraint_parser.add_subparsers(
+        dest="subcommand", help="Constraint sub-commands"
+    )
+
+    def _add_binding_flags(p, default):
+        grp = p.add_mutually_exclusive_group()
+        grp.add_argument("--hard", dest="binding", action="store_const", const="hard",
+                         help="No training those dates (enforced); with --sport, that "
+                              "sport is unavailable (advisory)")
+        grp.add_argument("--soft", dest="binding", action="store_const", const="soft",
+                         help="Advisory preference/capacity hint (default)")
+        p.set_defaults(binding=default)
+
+    def _add_replan_flags(p):
+        grp = p.add_mutually_exclusive_group()
+        grp.add_argument("--replan", dest="replan", action="store_const", const=True,
+                         help="Escalate to plan-shaping and regenerate around it")
+        grp.add_argument("--no-replan", dest="replan", action="store_const", const=False,
+                         help="Keep out of the plan (honored by daily adapt only)")
+        p.set_defaults(replan=None)
+
+    # constraint add
+    cons_add = constraint_subparsers.add_parser(
+        "add", aliases=["a"], help="Author a directive over a day or range"
+    )
+    cons_add.add_argument("title", nargs="?", help="The directive, stated short "
+                          "(e.g. 'no run Thursday'); prompted if omitted")
+    cons_add.add_argument("--title", dest="title_opt", help=argparse.SUPPRESS)
+    cons_add.add_argument("--start", help="Start date (YYYY-MM-DD; default: today)")
+    cons_add.add_argument("--end", help="End date (YYYY-MM-DD; default: --start)")
+    cons_add.add_argument("--sport", help="Scope to one sport (default: all sports)")
+    cons_add.add_argument("--type", help="Optional opaque label (e.g. trip, injury)")
+    cons_add.add_argument("--desc", "--description", dest="desc",
+                          help="Optional richer context for the coach")
+    _add_binding_flags(cons_add, default="soft")
+    _add_replan_flags(cons_add)
+
+    # constraint edit
+    cons_edit = constraint_subparsers.add_parser(
+        "edit", aliases=["e"], help="Adjust scope / bindingness / text / replan"
+    )
+    cons_edit.add_argument("id", type=int, help="Constraint ID to edit")
+    cons_edit.add_argument("--title", help="New directive title")
+    cons_edit.add_argument("--start", help="New start date (YYYY-MM-DD)")
+    cons_edit.add_argument("--end", help="New end date (YYYY-MM-DD)")
+    cons_edit.add_argument("--sport", help="New sport scope ('' to clear)")
+    cons_edit.add_argument("--type", help="New opaque label ('' to clear)")
+    cons_edit.add_argument("--desc", "--description", dest="desc",
+                           help="New richer context ('' to clear)")
+    _add_binding_flags(cons_edit, default=None)
+    _add_replan_flags(cons_edit)
+
+    # constraint list
+    cons_list = constraint_subparsers.add_parser(
+        "list", aliases=["l"], help="List active/upcoming directives"
+    )
+    cons_list.add_argument("-v", "--verbose", action="store_true",
+                           help="Show details for each directive")
+    cons_list.add_argument("--all", action="store_true",
+                           help="Include past (expired) directives too")
+    cons_list.add_argument("--sport", help="Filter to directives affecting this sport")
+    cons_list.add_argument("--type", help="Filter to this opaque type label")
+    cons_list.add_argument(
+        "--from", "--from-date", dest="from_date", metavar="YYYY-MM-DD",
+        help="Override the default lower bound (config.metrics_lookback_days back)"
+    )
+    cons_list.add_argument(
+        "--until", "--until-date", dest="until_date", metavar="YYYY-MM-DD",
+        help="Bound the upper end too (default: open-ended/upcoming)"
+    )
+
+    # constraint show
+    cons_show = constraint_subparsers.add_parser(
+        "show", aliases=["s"], help="Show one directive in detail (incl. plan-shaping)"
+    )
+    cons_show.add_argument("id", type=int, help="Constraint ID to display")
+
+    # constraint rm
+    cons_rm = constraint_subparsers.add_parser(
+        "rm", aliases=["r"], help="Remove a directive by ID"
+    )
+    cons_rm.add_argument("id", type=int, help="Constraint ID to remove")
+
+    # constraint wipe
+    cons_wipe = constraint_subparsers.add_parser("wipe", help="Wipe all constraints")
+    cons_wipe.add_argument("-y", "--yes", action="store_true",
+                           help="Skip confirmation prompt")
+
+    # lifeevent — deprecated forwarder to `constraint … --replan` (a life event was, by
+    # definition, plan-shaping). Retained for one release; emits a deprecation notice.
     lifeevent_parser = subparsers.add_parser(
         "lifeevent",
         aliases=["le", "e"],
-        help="Manage life events around which your training plan will be built"
+        help="[deprecated] use 'constraint'; forwards to 'constraint … --replan'",
     )
     lifeevent_subparsers = lifeevent_parser.add_subparsers(
-        dest="subcommand", help="Life event sub-commands"
+        dest="subcommand", help="Life event sub-commands (deprecated)"
     )
-    
-    # lifeevent add
-    c_add = lifeevent_subparsers.add_parser("add", aliases=["a"], help="Add a new life event")
-    c_add.add_argument("--title", required=True, help="Life event title (e.g. Vacation to Spain)")
-    c_add.add_argument("--start", required=True, help="Start date (YYYY-MM-DD)")
-    c_add.add_argument("--end", required=True, help="End date (YYYY-MM-DD)")
-    c_add.add_argument(
-        "--type", required=True, choices=["business_trip", "vacation", "party", "other"],
-        help="Life event type"
-    )
-    c_add.add_argument("--desc", default="", help="Description/Impact description")
-
-    # lifeevent edit
-    le_edit = lifeevent_subparsers.add_parser(
-        "edit", aliases=["e"], help="Edit an existing life event"
-    )
-    le_edit.add_argument("id", type=int, help="Life event ID to edit")
-    le_edit.add_argument("--title", help="New life event title")
-    le_edit.add_argument("--start", help="New start date (YYYY-MM-DD)")
-    le_edit.add_argument("--end", help="New end date (YYYY-MM-DD)")
-    le_edit.add_argument(
-        "--type", choices=["business_trip", "vacation", "party", "other"],
-        help="New life event type"
-    )
-    le_edit.add_argument("--desc", help="New description/Impact description")
-    
-    # lifeevent rm
-    c_rm = lifeevent_subparsers.add_parser("rm", aliases=["r"], help="Remove a life event by ID")
-    c_rm.add_argument("id", type=int, help="Life event ID to remove")
-    
-    # lifeevent list
-    le_list = lifeevent_subparsers.add_parser(
-        "list", aliases=["l"], help="Show all logged life events"
-    )
-    le_list.add_argument(
-        "-v", "--verbose", action="store_true",
-        help="Show life event details including impact description"
-    )
-
-    # lifeevent show
-    le_show = lifeevent_subparsers.add_parser(
-        "show", aliases=["s"], help="Show details of a life event by ID"
-    )
-    le_show.add_argument("id", type=int, help="Life event ID to display")
-
-    # lifeevent wipe
-    le_wipe = lifeevent_subparsers.add_parser("wipe", help="Wipe all life events")
-    le_wipe.add_argument("-y", "--yes", action="store_true", help="Skip confirmation prompt")
+    le_add = lifeevent_subparsers.add_parser("add", aliases=["a"])
+    le_add.add_argument("--title", required=True)
+    le_add.add_argument("--start", required=True)
+    le_add.add_argument("--end", required=True)
+    le_add.add_argument("--type")
+    le_add.add_argument("--desc", "--description", dest="desc")
+    le_edit = lifeevent_subparsers.add_parser("edit", aliases=["e"])
+    le_edit.add_argument("id", type=int)
+    le_edit.add_argument("--title")
+    le_edit.add_argument("--start")
+    le_edit.add_argument("--end")
+    le_edit.add_argument("--type")
+    le_edit.add_argument("--desc", "--description", dest="desc")
+    le_list = lifeevent_subparsers.add_parser("list", aliases=["l"])
+    le_list.add_argument("-v", "--verbose", action="store_true")
+    le_list.add_argument("--all", action="store_true")
+    le_list.add_argument("--sport")
+    le_list.add_argument("--type")
+    le_show = lifeevent_subparsers.add_parser("show", aliases=["s"])
+    le_show.add_argument("id", type=int)
+    le_rm = lifeevent_subparsers.add_parser("rm", aliases=["r"])
+    le_rm.add_argument("id", type=int)
+    le_wipe = lifeevent_subparsers.add_parser("wipe")
+    le_wipe.add_argument("-y", "--yes", action="store_true")
 
     # context command & subparsers — first-party daily-context authoring
     context_parser = subparsers.add_parser(
         "context",
-        aliases=["c"],
+        aliases=["ctx", "c"],
         help="Author/list/remove daily-context signals (heat, sleep, stress, …)",
         description=(
             "Manage external daily-context signals — the same tagged Google Calendar "
@@ -1266,24 +1349,37 @@ def main() -> None:
             run_goal_list()
         elif sub == "wipe":
             run_goal_wipe(args)
+    elif cmd in ("constraint", "cons"):
+        if not args.subcommand:
+            constraint_parser.print_help()
+            sys.exit(1)
+        sub = args.subcommand.lower()
+        if sub in ("add", "a"):
+            # The positional TITLE and the hidden --title alias both land here; prefer
+            # the flag form (used by the deprecated lifeevent forwarder).
+            if getattr(args, "title_opt", None):
+                args.title = args.title_opt
+            run_constraint_add(args)
+        elif sub in ("edit", "e"):
+            run_constraint_edit(args)
+        elif sub in ("rm", "r"):
+            run_constraint_rm(args)
+        elif sub in ("list", "l"):
+            run_constraint_list(args)
+        elif sub in ("show", "s"):
+            run_constraint_show(args)
+        elif sub == "wipe":
+            run_constraint_wipe(args)
     elif cmd in ("lifeevent", "le", "e"):
         if not args.subcommand:
             lifeevent_parser.print_help()
             sys.exit(1)
-        sub = args.subcommand.lower()
-        if sub in ("add", "a"):
-            run_lifeevent_add(args)
-        elif sub in ("edit", "e"):
-            run_lifeevent_edit(args)
-        elif sub in ("rm", "r"):
-            run_lifeevent_rm(args)
-        elif sub in ("list", "l"):
-            run_lifeevent_list(args)
-        elif sub in ("show", "s"):
-            run_lifeevent_show(args)
-        elif sub == "wipe":
-            run_lifeevent_wipe(args)
-    elif cmd in ("context", "c"):
+        run_lifeevent_forward(args)
+    elif cmd in ("context", "ctx", "c"):
+        # `c` is retired in favour of `ctx` (to avoid colliding with `cons`); kept one
+        # release as a back-compat alias with a deprecation notice (DESIGN_constraints.md §4).
+        if cmd == "c":
+            print(yellow("Note: 'c' is deprecated; use 'ctx' for the context command."))
         if not args.subcommand:
             context_parser.print_help()
             sys.exit(1)

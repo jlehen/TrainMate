@@ -240,15 +240,16 @@ class PeriodizationMixin:
 
     def save_macrocycle(
         self, objective_id: int, strategy: str, goals_hash: str,
-        lifeevents_hash: str, mesocycles: List[Dict[str, Any]],
+        constraints_hash: str, mesocycles: List[Dict[str, Any]],
         config_hash: str = "", goals_snapshot: str = "",
-        lifeevents_snapshot: str = ""
+        constraints_snapshot: str = ""
     ) -> int:
         """Saves a macrocycle and its nested mesocycles for the objective.
 
-        goals_snapshot/lifeevents_snapshot are JSON of the goals and life events the plan
-        was generated from (the same cleaned data the hashes fingerprint), preserved so
-        the inputs can be shown later even after the live records change.
+        goals_snapshot/constraints_snapshot are JSON of the goals and plan-shaping
+        constraints the plan was generated from (the same cleaned data the hashes
+        fingerprint), preserved so the inputs can be shown later even after the live
+        records change.
 
         The previously-active macrocycle for the objective is *superseded* rather than
         deleted (see DESIGN_plan_rollback.md): it and its mesocycles are kept so that
@@ -266,11 +267,11 @@ class PeriodizationMixin:
 
             cursor.execute("""
                 INSERT INTO macrocycles (
-                    objective_id, strategy, goals_hash, lifeevents_hash, config_hash,
-                    goals_snapshot, lifeevents_snapshot, created_at
+                    objective_id, strategy, goals_hash, constraints_hash, config_hash,
+                    goals_snapshot, constraints_snapshot, created_at
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            """, (objective_id, strategy, goals_hash, lifeevents_hash, config_hash,
-                  goals_snapshot or None, lifeevents_snapshot or None, created_at))
+            """, (objective_id, strategy, goals_hash, constraints_hash, config_hash,
+                  goals_snapshot or None, constraints_snapshot or None, created_at))
             macrocycle_id = cursor.lastrowid
 
             for meso in mesocycles:

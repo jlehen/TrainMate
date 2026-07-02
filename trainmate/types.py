@@ -11,13 +11,39 @@ class Objective(TypedDict):
     status: str  # 'active', 'completed', 'archived'
 
 class LifeEvent(TypedDict):
-    """Represents a life event that impacts training availability."""
+    """Represents a life event that impacts training availability.
+
+    Superseded by `Constraint` (DESIGN_constraints.md); retained while the
+    `lifeevent` forwarder and legacy `lifeevents` table live on.
+    """
     id: Optional[int]
     title: str
     start_date: str
     end_date: str
     event_type: str  # 'business_trip', 'vacation', 'party', 'other'
     impact_description: Optional[str]
+
+class Constraint(TypedDict):
+    """A single directive — anything the athlete asks the coach to work around, at
+    any horizon (DESIGN_constraints.md §5).
+
+    `binding` ('hard'|'soft'), `sport` (None = all sports) and `replan` (1 = escalated
+    to plan-shaping) are read by deterministic code; `type` is an opaque
+    user-vocabulary label (never branched on), `title`/`description` are prose for
+    display and the LLM. `source` records authoring channel ('manual'|'message'|
+    'lifeevent').
+    """
+    id: Optional[int]
+    start_date: str
+    end_date: str
+    binding: str
+    sport: Optional[str]
+    type: Optional[str]
+    title: str
+    description: Optional[str]
+    replan: int
+    source: Optional[str]
+    created: Optional[str]
 
 class DailyContext(TypedDict):
     """An external daily context signal ingested from a tagged Calendar event.
@@ -109,7 +135,7 @@ class Macrocycle(TypedDict):
     objective_id: int
     strategy: str
     goals_hash: str
-    lifeevents_hash: str
+    constraints_hash: str
     config_hash: Optional[str]
     created_at: str
     feedback: Optional[str]

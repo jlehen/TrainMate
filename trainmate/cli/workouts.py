@@ -87,11 +87,31 @@ def run_workout_adapt(args: argparse.Namespace) -> None:
 
     print(f"Evaluating daily Garmin metrics adaptation for {date_str}...")
     try:
-        reason, proposed_workouts = cli.coach_service.workout_adapt(
+        reason, proposed_workouts, new_constraints = cli.coach_service.workout_adapt(
             date_str, message=getattr(args, 'message', None)
         )
+
+        # §8 two-confirmation flow, step 1: confirm any constraint(s) extracted from the
+        # athlete's note BEFORE the adaptation preview below — an independent commit that
+        # runs even when no workout changes are proposed. Declining discards the
+        # extraction; the note still informed this run's adaptation via the advisory text
+        # (already baked into `reason`/`proposed_workouts` from the same LLM call).
+        for candidate in new_constraints:
+            title = (candidate.get('title') or '').strip()
+            if not title:
+                continue
+            start = candidate.get('start_date') or date_str
+            end = candidate.get('end_date') or start
+            span = start if start == end else f"{start}..{end}"
+            if cli.prompt.confirm(f"Add constraint: {title} ({span})?"):
+                cid = cli.coach_service.capture_message_constraint(candidate, date_str)
+                if cid is not None:
+                    print(green(f"Captured constraint [{cid}]: {title} ({span})"))
+            else:
+                print("Discarded — not saved as a constraint.")
+
         print(f"\n{bold('Decision Summary')}:\n{wrap_text(reason)}")
-        
+
         if not proposed_workouts:
             print(green(
                 "\nAll metrics are green and workout plan is on track. No changes recommended."

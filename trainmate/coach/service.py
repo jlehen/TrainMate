@@ -4,8 +4,8 @@ from typing import Any, List, Optional, Tuple, Dict
 from trainmate.config import config
 from trainmate.db import db
 from trainmate.google_calendar import calendar_syncer
-from trainmate.types import Objective, LifeEvent, Workout
-from trainmate.adherence import analyze_adherence
+from trainmate.types import Objective, Constraint, Workout
+from trainmate.adherence import analyze_adherence, _planned_load
 from trainmate.sports import canonical_sport
 from trainmate.modification_state import SWAP_REASON_PREFIX, MANUAL_REPLACE_REASON_PREFIX
 from trainmate.garmin import activity_load
@@ -228,8 +228,8 @@ class CoachService:
     def _get_goals_hash(self, objectives: List[Objective]) -> str:
         return self.engine._get_goals_hash(objectives)
 
-    def _get_lifeevents_hash(self, lifeevents: List[LifeEvent]) -> str:
-        return self.engine._get_lifeevents_hash(lifeevents)
+    def _get_constraints_hash(self, constraints: List[Constraint]) -> str:
+        return self.engine._get_constraints_hash(constraints)
 
     def _load_science_guidelines(self) -> str:
         return _load_science_guidelines(config.app_science_dir, config.science_dir)
@@ -350,7 +350,7 @@ class CoachService:
         ))
 
     def _get_coach_system_prompt(
-        self, objectives: List[Objective], lifeevents: List[LifeEvent],
+        self, objectives: List[Objective], constraints: List[Constraint],
         custom_task: str = "", objective_id: Optional[int] = None
     ) -> str:
         guidelines = self._load_science_guidelines()
@@ -361,7 +361,7 @@ class CoachService:
         profile = config.user_profile
         return self.engine._build_system_prompt(
             objectives=objectives,
-            lifeevents=lifeevents,
+            constraints=constraints,
             guidelines=guidelines,
             strategy=strategy,
             meso_text=meso_text,
@@ -373,6 +373,103 @@ class CoachService:
     def plan_rm(self, objective_id: int) -> None:
         """Deletes the periodization plan for a specific objective."""
         self._db.delete_macrocycle_for_objective(objective_id)
+
+    def constraint_plan_impact(self, constraint: Dict[str, Any]) -> Dict[str, Any]:
+        """Magnitude of a directive against the active plan (DESIGN_constraints.md §7,
+        concrete formula): the planned load it displaces, expressed as a percentage of the
+        plan's trailing weekly planned load (a self-scaling ratio — no absolute TSS number
+        rots as the athlete's fitness changes), plus its span in days. The trailing week is
+        the 7 days immediately before the constraint's start, so the reference point isn't
+        itself affected by the constraint being evaluated. Feeds the human-confirmed replan
+        proposal only — never an automatic regen."""
+        start, end = constraint['start_date'], constraint['end_date']
+        window_start = max(start, _today_str())
+        rest = canonical_sport('rest')
+        cs = canonical_sport(constraint['sport']) if constraint.get('sport') else None
+
+        def _load(w_start: str, w_end: str) -> float:
+            sessions = [
+                w for w in self._db.get_workouts(start_date=w_start, end_date=w_end)
+                if canonical_sport(w.get('sport_type', '')) != rest
+            ]
+            if cs:
+                sessions = [w for w in sessions if canonical_sport(w['sport_type']) == cs]
+            return sum(_planned_load(w) for w in sessions)
+
+        displaced_load = _load(window_start, end)
+        days = (datetime.strptime(end, "%Y-%m-%d").date()
+                - datetime.strptime(start, "%Y-%m-%d").date()).days + 1
+
+        trailing_end_date = datetime.strptime(start, "%Y-%m-%d").date() - timedelta(days=1)
+        trailing_start_date = trailing_end_date - timedelta(days=6)
+        trailing_weekly_load = _load(
+            trailing_start_date.strftime("%Y-%m-%d"), trailing_end_date.strftime("%Y-%m-%d")
+        )
+        displaced_pct = (
+            (displaced_load / trailing_weekly_load * 100) if trailing_weekly_load > 0 else 0.0
+        )
+        return {
+            'days': days,
+            'displaced_load': displaced_load,
+            'trailing_weekly_load': trailing_weekly_load,
+            'displaced_pct': displaced_pct,
+        }
+
+    def capture_message_constraint(
+        self, candidate: Dict[str, Any], default_date_str: str
+    ) -> Optional[int]:
+        """Creates one durable constraint from a `new_constraints` candidate the CLI has
+        already confirmed with the athlete (DESIGN_constraints.md §8 two-confirmation
+        flow, step 1). Always `source='message'`, always `binding='soft'` — the LLM can
+        never mark an extracted constraint `hard` (trust boundary §8); a genuine hard
+        escalation is a deliberate human action (`constraint edit <id> --hard`). Never
+        sets `replan=1` either — a large capture only *surfaces a suggestion* to escalate,
+        which the human acts on separately."""
+        title = (candidate.get('title') or '').strip()
+        if not title:
+            return None
+        start = candidate.get('start_date') or default_date_str
+        end = candidate.get('end_date') or start
+        if end < start:
+            end = start
+        cid = self._db.add_constraint(
+            title=title, start_date=start, end_date=end, binding='soft',
+            sport=candidate.get('sport'), type=candidate.get('type'),
+            description=candidate.get('description'), replan=0, source='message',
+        )
+        constraint = self._db.get_constraint(cid)
+        impact = self.constraint_plan_impact(constraint)
+        if self.constraint_is_plan_shaping(constraint, impact):
+            print(yellow(
+                f"  This looks plan-shaping ({impact['days']} days, displaces "
+                f"~{impact['displaced_pct']:.0f}% of a typical week). To build it into "
+                f"the plan, run 'constraint edit {cid} --replan' or 'plan generate'."
+            ))
+        return cid
+
+    @staticmethod
+    def constraint_is_plan_shaping(
+        constraint: Dict[str, Any], impact: Dict[str, Any]
+    ) -> bool:
+        """Concrete §7 magnitude heuristic for whether to *propose* a replan. Two
+        independent triggers, either firing proposes a replan; deliberately no
+        per-session "importance" term (TrainMate has no per-workout priority field):
+
+        1. Displaced-load trigger (relative): the constraint's overlapping planned load
+           is >= config.replan_displaced_load_pct of the plan's trailing weekly planned
+           load (default 50 — wipes out at least half a typical week).
+        2. Hard-window floor: the constraint is `hard` and spans >= config.
+           replan_hard_span_days days (default 3), regardless of load overlap (it may
+           land in a light taper week yet still reshape everything after it).
+        """
+        if impact['displaced_pct'] >= config.replan_displaced_load_pct:
+            return True
+        if (
+            constraint.get('binding') == 'hard'
+            and impact['days'] >= config.replan_hard_span_days
+        ):
+            return True
+        return False
 
     def plan_generate(
         self, force: bool = False, objective_id: Optional[int] = None, auto_apply: bool = True
@@ -390,7 +487,7 @@ class CoachService:
             if not next_goal:
                 return "No active goals found. TrainMate needs at least one objective.", []
 
-        # Get future life events
+        # Compute plan-window dates (constraints are fetched below with the hashes).
         today_str = _today_str()
         today_date = datetime.strptime(today_str, "%Y-%m-%d").date()
 
@@ -465,12 +562,16 @@ class CoachService:
         # Compute current hashes
         # We need to fetch active objectives for hash computation so the hash covers the whole landscape
         objectives = self._db.get_objectives(status='active')
-        lifeevents = self._db.get_lifeevents(start_after=today_str)
+        # All active constraints feed the plan prompt; only the plan-shaping (replan=1)
+        # ones fingerprint the plan and are snapshotted, so a tactical "no run Thursday"
+        # never trips the reuse-vs-regen decision (DESIGN_constraints.md §7).
+        constraints = self._db.get_constraints(today_str)
+        replan_constraints = [c for c in constraints if c.get('replan')]
         goals_hash = self.engine._get_goals_hash(objectives)
-        lifeevents_hash = self.engine._get_lifeevents_hash(lifeevents)
+        constraints_hash = self.engine._get_constraints_hash(replan_constraints)
         config_hash = self.engine._get_config_hash()
         goals_snapshot = json.dumps(self.engine._clean_goals(objectives))
-        lifeevents_snapshot = json.dumps(self.engine._clean_lifeevents(lifeevents))
+        constraints_snapshot = json.dumps(self.engine._clean_constraints(replan_constraints))
 
         # Try to retrieve existing macrocycle
         strategy = ""
@@ -483,7 +584,7 @@ class CoachService:
         if existing_macro and not force:
             if (
                 existing_macro['goals_hash'] == goals_hash
-                and existing_macro['lifeevents_hash'] == lifeevents_hash
+                and existing_macro['constraints_hash'] == constraints_hash
                 and existing_macro.get('config_hash') == config_hash
             ):
                 reused = True
@@ -528,8 +629,8 @@ class CoachService:
                     feedback_text = "\n".join(fb_parts)
 
             # Generate new macrocycle strategy and mesocycles
-            print(cyan("Goals or life events have changed, or force generation requested. "
-                  "Determining new overall periodization strategy..."))
+            print(cyan("Goals or plan-shaping constraints have changed, or force generation "
+                  "requested. Determining new overall periodization strategy..."))
             guidelines = self._load_science_guidelines()
             profile = config.user_profile
             history_summary = self._get_recent_history_summary(today_str)
@@ -544,7 +645,7 @@ class CoachService:
             macro_data = self.engine._plan_generate_strategy(
                 next_goal=next_goal,
                 objectives=objectives,
-                lifeevents=lifeevents,
+                constraints=constraints,
                 today_str=today_str,
                 guidelines=guidelines,
                 profile=profile,
@@ -563,10 +664,10 @@ class CoachService:
                     objective_id=next_goal['id'],
                     strategy=strategy,
                     goals_hash=goals_hash,
-                    lifeevents_hash=lifeevents_hash,
+                    constraints_hash=constraints_hash,
                     config_hash=config_hash,
                     goals_snapshot=goals_snapshot,
-                    lifeevents_snapshot=lifeevents_snapshot,
+                    constraints_snapshot=constraints_snapshot,
                     mesocycles=mesocycles
                 )
 
@@ -586,19 +687,21 @@ class CoachService:
         """Saves a generated periodization plan to the database."""
         today_str = _today_str()
         objectives = self._db.get_objectives(status='active')
-        lifeevents = self._db.get_lifeevents(start_after=today_str)
+        replan_constraints = [
+            c for c in self._db.get_constraints(today_str) if c.get('replan')
+        ]
         goals_hash = self.engine._get_goals_hash(objectives)
-        lifeevents_hash = self.engine._get_lifeevents_hash(lifeevents)
+        constraints_hash = self.engine._get_constraints_hash(replan_constraints)
         config_hash = self.engine._get_config_hash()
 
         self._db.save_macrocycle(
             objective_id=objective_id,
             strategy=strategy,
             goals_hash=goals_hash,
-            lifeevents_hash=lifeevents_hash,
+            constraints_hash=constraints_hash,
             config_hash=config_hash,
             goals_snapshot=json.dumps(self.engine._clean_goals(objectives)),
-            lifeevents_snapshot=json.dumps(self.engine._clean_lifeevents(lifeevents)),
+            constraints_snapshot=json.dumps(self.engine._clean_constraints(replan_constraints)),
             mesocycles=mesocycles
         )
 
@@ -628,6 +731,107 @@ class CoachService:
             history_days=1,
         )
         return any(r['completed'] for r in matching)
+
+    @staticmethod
+    def _rest_workout(date: str, cause: str) -> Dict[str, Any]:
+        """A deterministic rest session the hard-constraint pre-pass places on a date the
+        athlete has barred from training (DESIGN_constraints.md §6). The title/description
+        are tagged "(forced constraint)" so it reads unmistakably as a code-enforced
+        override rather than an ordinary planned/adapted rest day. The change_reason names
+        the constraint so a later adaptation, which won't see the live constraint list in
+        the same run, reads the cause back with the plan."""
+        title = 'Rest (forced constraint)'
+        return {
+            'date': date,
+            'sport_type': 'rest',
+            'title': title,
+            'description': f"[{title}]\nNo training — {cause}.",
+            'duration_minutes': 0,
+            'rpe': 0,
+            'tss': 0,
+            'change_reason': f"Rest — {cause}.",
+        }
+
+    @classmethod
+    def _hard_rest_windows(
+        cls, constraints: List[Constraint]
+    ) -> List[Tuple[str, str, str]]:
+        """The `hard` + no-sport windows — the only edge that skips the LLM (§5): a
+        `hard` constraint scoped to one sport is advisory (rendered into the prompt as a
+        hard instruction; the LLM picks any substitute itself), so it is deliberately
+        excluded here. Returns [(start, end, title)]."""
+        return [
+            (c['start_date'], c['end_date'], c['title'])
+            for c in constraints
+            if c.get('binding') == 'hard' and not c.get('sport')
+        ]
+
+    @classmethod
+    def _enforce_hard_constraints_generate(
+        cls, workouts: List[Dict[str, Any]], constraints: List[Constraint]
+    ) -> List[Dict[str, Any]]:
+        """Forces hard, no-sport constraints onto a freshly generated workout list (§6): a
+        blanket hard window replaces its dates with a single rest, deterministically,
+        bypassing the LLM for that date entirely. A hard constraint scoped to a sport is
+        advisory only — left to the model via the prompt block, not enforced here (§5).
+        Operates only on dates the model actually scheduled, so it never invents days
+        beyond the generated span."""
+        full_rest = cls._hard_rest_windows(constraints)
+        if not full_rest:
+            return workouts
+        out: List[Dict[str, Any]] = []
+        rested: set = set()
+        for w in workouts:
+            day = w.get('date', '')
+            fr = next((t for (s, e, t) in full_rest if s <= day <= e), None)
+            if fr is not None:
+                if day not in rested:
+                    rested.add(day)
+                    out.append(cls._rest_workout(day, f"constraint '{fr}'"))
+                continue
+            out.append(w)
+        return out
+
+    @classmethod
+    def _enforce_hard_constraints_adapt(
+        cls, adapted: List[Dict[str, Any]], planned_workouts: List[Workout],
+        constraints: List[Constraint], completed_keys: Optional[set], from_date: str
+    ) -> List[Dict[str, Any]]:
+        """Eases planned sessions to rest on hard, no-sport constraint dates (§6). A hard
+        constraint scoped to a sport is advisory only (§5) — left to the model, not
+        enforced here. Only touches sessions on or after `from_date` that aren't already
+        rest or completed."""
+        full_rest = cls._hard_rest_windows(constraints)
+        if not full_rest:
+            return adapted
+        completed = completed_keys or set()
+        rest_sport = canonical_sport('rest')
+
+        forced_rest: Dict[str, str] = {}          # date -> constraint title
+        for w in planned_workouts:
+            day = w.get('date', '')
+            if day < from_date:
+                continue
+            sport = canonical_sport(w.get('sport_type', ''))
+            if sport == rest_sport or (day, sport) in completed:
+                continue
+            fr = next((t for (s, e, t) in full_rest if s <= day <= e), None)
+            if fr is not None:
+                forced_rest[day] = fr
+
+        if not forced_rest:
+            return adapted
+
+        cleaned = []
+        for w in adapted:
+            day = w.get('date', '')
+            if day in forced_rest:
+                continue  # whole day replaced with rest below
+            cleaned.append(w)
+
+        for day, title in sorted(forced_rest.items()):
+            cleaned.append(cls._rest_workout(day, f"constraint '{title}'"))
+        return cleaned
 
     def workout_generate(
         self, objective_id: Optional[int] = None, end_date: Optional[str] = None
@@ -688,7 +892,7 @@ class CoachService:
         else:
             num_days = config.workout_generation_span_days
 
-        lifeevents = self._db.get_lifeevents(start_after=today_str)
+        constraints = self._db.get_constraints(gen_start_str)
         guidelines = self._load_science_guidelines()
         profile = config.user_profile
 
@@ -701,7 +905,7 @@ class CoachService:
 
         plan_data = self.engine._workout_generate_logic(
             objectives=objectives,
-            lifeevents=lifeevents,
+            constraints=constraints,
             today_str=today_str,
             start_str=gen_start_str,
             guidelines=guidelines,
@@ -728,6 +932,13 @@ class CoachService:
         # completed session we deliberately kept.
         if gen_start_str != today_str:
             workouts = [w for w in workouts if w.get('date', '') >= gen_start_str]
+
+        # Deterministic hard-constraint pre-pass (DESIGN_constraints.md §6): a `hard`
+        # constraint with no sport forces its dates to rest regardless of what the LLM
+        # produced; a `hard` constraint scoped to a sport drops that sport on its dates
+        # (other sports flow normally). Applied after generation so the guarantee holds
+        # even if the model ignores the constraint block it was shown.
+        workouts = self._enforce_hard_constraints_generate(workouts, constraints)
 
         # Archive (don't delete) future workouts from the previous plan so they can be
         # resurrected by `plan rollback`, and tear down their Calendar events first so the
@@ -903,14 +1114,16 @@ class CoachService:
 
     def workout_adapt(
         self, target_date_str: Optional[str] = None, message: Optional[str] = None
-    ) -> Tuple[str, List[Workout]]:
+    ) -> Tuple[str, List[Workout], List[Dict[str, Any]]]:
         """Evaluates metrics/activities over a rolling window and adapts mesocycle if needed.
 
-        `message` is an optional free-text note from the athlete for THIS adaptation only
-        (e.g. "knee is sore, keep impact low"). It is advisory context fed to the prompt and
-        is NOT persisted or turned into a durable learning — consistent with daily adapt
-        being read-only w.r.t. coach observations. Persistent context belongs in
-        `daily_context` via `context add`.
+        `message` is an optional free-text note from the athlete, passed to the SAME LLM
+        call as advisory intent for today (DESIGN_constraints.md §8 — no separate
+        classification pass). That one call may also extract constraint-shaped directives
+        from the note; they come back as the third element, raw and UNCONFIRMED — the
+        caller must confirm each with the athlete (echo + y/N) before persisting it via
+        `capture_message_constraint`, per the two-confirmation flow. Nothing here creates
+        a constraint row or triggers a plan regen on its own.
         """
         if not target_date_str:
             target_date_str = _today_str()
@@ -1007,8 +1220,14 @@ class CoachService:
             objectives, objective_id=objective_id
         )
         learnings = self._get_learnings_text()
-        lifeevents = self._db.get_lifeevents(start_after=target_date_str)
 
+        # Active constraints overlapping the adaptation window (target date → mesocycle
+        # end), the single directive read path shared with generate (§6).
+        constraints = self._db.get_constraints(target_date_str, meso_end_date_str)
+
+        # §8: the athlete's note is passed straight through as advisory intent — no
+        # separate classification pass. The same LLM call also extracts any
+        # constraint-shaped directives from it (see `new_constraints` below).
         decision = self.engine._workout_adapt_logic(
             target_date_str=target_date_str,
             history_days=history_days,
@@ -1019,7 +1238,6 @@ class CoachService:
             baseline_str=baseline_str,
             meso_end_date_str=meso_end_date_str,
             objectives=objectives,
-            lifeevents=lifeevents,
             guidelines=guidelines,
             profile=profile,
             strategy=strategy,
@@ -1030,7 +1248,8 @@ class CoachService:
             removed_workouts=removed_workouts,
             daily_context=daily_context,
             completed_keys=completed_keys,
-            athlete_message=message
+            athlete_message=message,
+            constraints=constraints
         )
 
         # NOTE: daily adaptation is read-only w.r.t. coach learnings
@@ -1062,6 +1281,19 @@ class CoachService:
         # counts as a change and is kept.
         adapted = [w for w in adapted if self._adapt_is_change(w)]
 
+        # Deterministic hard-constraint pre-pass (§6): force rest onto any future,
+        # not-yet-completed planned session that falls under a hard constraint, so the
+        # guarantee holds regardless of what the model proposed.
+        adapted = self._enforce_hard_constraints_adapt(
+            adapted, planned_workouts, constraints, completed_keys, target_date_str
+        )
+
+        # §8: constraint-shaped directives the same LLM call extracted from the athlete's
+        # note, if any — raw and UNCONFIRMED. The caller must confirm each with the
+        # athlete before persisting it (via capture_message_constraint); nothing here
+        # writes a row.
+        new_constraints = (decision.get("new_constraints") or []) if message else []
+
         # Filter and structure returned workouts
         return reason, [
             {
@@ -1083,7 +1315,7 @@ class CoachService:
                 'rpe': w.get('rpe'),
                 'tss': w.get('tss')
             } for w in adapted
-        ]
+        ], new_constraints
 
     def workout_adapt_apply(
         self, proposed_workouts: List[Dict[str, Any]], reason: str,
@@ -1628,22 +1860,24 @@ class CoachService:
         return decision
 
     @staticmethod
-    def _week_life_events(
-        events: List[LifeEvent], week_start, week_end
+    def _week_constraints(
+        constraints: List[Constraint], week_start, week_end
     ) -> List[Dict[str, Any]]:
-        """Life events overlapping [week_start, week_end] (date objects), each tagged
-        'full' (spans the whole in-window week) or 'partial'. Dates are ISO strings so
-        lexicographic comparison is chronological (DESIGN_richer_analysis_evidence.md §2)."""
+        """Constraints overlapping [week_start, week_end] (date objects), each tagged
+        'full' (spans the whole in-window week) or 'partial'. Fed to the analysis as
+        discounting context only — a constraint may explain an anomaly away but is never
+        cited as supporting evidence (DESIGN_constraints.md §2, §6). Dates are ISO strings
+        so lexicographic comparison is chronological."""
         ws, we = week_start.strftime("%Y-%m-%d"), week_end.strftime("%Y-%m-%d")
         out: List[Dict[str, Any]] = []
-        for c in events:
+        for c in constraints:
             start, end = c.get('start_date'), c.get('end_date')
             if not start or not end or start > we or end < ws:
                 continue  # missing dates or no overlap with this week
             out.append({
                 "title": c.get('title'),
-                "type": c.get('event_type'),
-                "impact": c.get('impact_description') or "",
+                "type": c.get('type'),
+                "impact": c.get('description') or "",
                 "coverage": "full" if (start <= ws and end >= we) else "partial",
             })
         return out
@@ -1883,23 +2117,19 @@ class CoachService:
         completed_activities = self._db.get_completed_activities(
             start_date=from_str, end_date=until_str
         )
-        # Life events overlapping the window contextualize anomalies (illness/travel/work)
-        # so the model doesn't misattribute them to training. get_lifeevents(start_after)
-        # already drops events ending before the window; filter the tail end here
-        # (DESIGN_richer_analysis_evidence.md §2).
-        lifeevents = [
-            c for c in self._db.get_lifeevents(start_after=from_str)
-            if c.get('start_date') and c['start_date'] <= until_str
-        ]
+        # Constraints overlapping the window contextualize anomalies (illness/travel/work)
+        # so the model doesn't misattribute them to training. get_constraints(start, end)
+        # already returns only overlapping rows (DESIGN_constraints.md §6).
+        constraints = self._db.get_constraints(from_str, until_str)
         # External daily context signals (alcohol, sleep, stress, …) ingested from the
-        # calendar; they explain recovery anomalies the same way life events explain load
+        # calendar; they explain recovery anomalies the same way constraints explain load
         # ones (DESIGN_calendar_context_ingest.md §7).
         daily_context = self._db.get_daily_context(start_date=from_str, end_date=until_str)
 
         # Reuse path: if the evidence is unchanged since the last analysis, return the
         # cached reconstruction instead of paying for another LLM pass (unless --force).
         fingerprint = self.engine._get_evidence_fingerprint(
-            completed_activities, metrics, from_str, until_str, lifeevents, daily_context
+            completed_activities, metrics, from_str, until_str, constraints, daily_context
         )
         cached = self._db.get_analysis_cache(horizon)
         evidence_unchanged = bool(cached and cached.get("fingerprint") == fingerprint)
@@ -2018,7 +2248,7 @@ class CoachService:
             week_start, week_end = days_in_week[0], days_in_week[-1]
             baseline = self._db.get_baseline(week_end.strftime("%Y-%m-%d"))
             response = self._week_response_features(w_metrics, baseline)
-            week_events = self._week_life_events(lifeevents, week_start, week_end)
+            week_events = self._week_constraints(constraints, week_start, week_end)
             # All context signals for the week, handed to the LLM verbatim (no collapsing
             # of multiple metrics/day — DESIGN_calendar_context_ingest.md §7).
             week_context = sorted(
@@ -2075,7 +2305,7 @@ class CoachService:
                 "max_acwr": round(max_acwr, 2) if max_acwr is not None else None,
                 "rest_days": rest_days,
                 "highlights": highlights,
-                "life_events": week_events,
+                "constraints": week_events,
             }
             # Baseline-relative deviations, omitted whole when no metric/baseline supports
             # any component (so its absence reads as "no data", not "on baseline").

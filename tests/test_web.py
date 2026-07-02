@@ -104,7 +104,7 @@ class TestCompareEndpoint(unittest.TestCase):
         )
         test_db.save_macrocycle(
             objective_id=obj_id, strategy="s", goals_hash="g",
-            lifeevents_hash="l", config_hash="c",
+            constraints_hash="l", config_hash="c",
             mesocycles=[{
                 "name": "Base", "start_date": "2026-06-01",
                 "end_date": "2026-06-30", "focus": "aerobic base",
@@ -162,11 +162,11 @@ class TestPlanVersionsEndpoint(unittest.TestCase):
         }]
         v1 = test_db.save_macrocycle(
             objective_id=oid, strategy="First", goals_hash="g",
-            lifeevents_hash="l", mesocycles=meso,
+            constraints_hash="l", mesocycles=meso,
         )
         v2 = test_db.save_macrocycle(
             objective_id=oid, strategy="Second", goals_hash="g",
-            lifeevents_hash="l", mesocycles=meso,
+            constraints_hash="l", mesocycles=meso,
         )
 
         res = self.client.get("/api/plan/versions")

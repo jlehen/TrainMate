@@ -43,7 +43,7 @@ class TestPeriodization(unittest.TestCase):
 
     def test_hashing_helpers(self):
         hash1 = coach_service._get_goals_hash([])
-        hash2 = coach_service._get_lifeevents_hash([])
+        hash2 = coach_service._get_constraints_hash([])
         hash3 = coach_service._get_config_hash()
         self.assertIsNotNone(hash1)
         self.assertIsNotNone(hash2)
@@ -62,10 +62,10 @@ class TestPeriodization(unittest.TestCase):
 
         c = {
             "id": 1, "title": "Spain Trip", "start_date": "2026-07-01",
-            "end_date": "2026-07-08", "event_type": "vacation",
-            "impact_description": "easy",
+            "end_date": "2026-07-08", "binding": "soft", "sport": None,
+            "type": "vacation", "description": "easy",
         }
-        self.assertNotEqual(hash2, coach_service._get_lifeevents_hash([c]))
+        self.assertNotEqual(hash2, coach_service._get_constraints_hash([c]))
 
     @patch("trainmate.coach.service._today_str")
     @patch("trainmate.coach.engine.openrouter_client")
@@ -137,7 +137,7 @@ class TestPeriodization(unittest.TestCase):
             objective_id=obj_id,
             strategy="Run long and slow",
             goals_hash="hash1",
-            lifeevents_hash="hash2",
+            constraints_hash="hash2",
             mesocycles=[
                 {"name": "Base Building", "start_date": "2026-06-01",
                  "end_date": "2026-06-28", "focus": "Zone 2 runs"},
@@ -166,7 +166,7 @@ class TestPeriodization(unittest.TestCase):
             objective_id=obj_id,
             strategy="Keep heart rate low",
             goals_hash="old_goals_hash",
-            lifeevents_hash="old_constraints_hash",
+            constraints_hash="old_constraints_hash",
             mesocycles=[{
                 "name": "Base Building", "start_date": "2026-06-01",
                 "end_date": "2026-06-28", "focus": "Aerobic conditioning",
@@ -215,7 +215,7 @@ class TestPeriodization(unittest.TestCase):
         )
         test_db.save_macrocycle(
             objective_id=obj_id, strategy="Old strategy",
-            goals_hash="g", lifeevents_hash="l",
+            goals_hash="g", constraints_hash="l",
             mesocycles=[{
                 "name": "Base Building", "start_date": "2026-06-01",
                 "end_date": "2026-06-28", "focus": "Aerobic conditioning",
@@ -276,17 +276,21 @@ class TestPeriodization(unittest.TestCase):
             self.assertIn("Wednesday: 0.0 hours", prompt)
 
     @patch("trainmate.coach.engine.openrouter_client")
-    def test_plan_snapshots_goals_and_lifeevents(self, mock_client):
+    def test_plan_snapshots_goals_and_constraints(self, mock_client):
         import json
         obj_id = test_db.add_objective(
             title="Berlin Marathon", target_date="2026-10-15",
             sport_type="running", description="sub-3 attempt", priority=1,
         )
-        # A future life event that the plan should snapshot. A past one is excluded
-        # because plan generation only considers events from today onward.
-        test_db.add_lifeevent(
+        # A plan-shaping (replan=1) constraint the plan should snapshot. A tactical one
+        # is excluded because only plan-shaping constraints fingerprint/snapshot the plan.
+        test_db.add_constraint(
             title="Work trip", start_date="2026-08-01", end_date="2026-08-10",
-            event_type="travel", impact_description="limited training time",
+            binding="soft", type="travel", description="limited training time", replan=1,
+        )
+        test_db.add_constraint(
+            title="no run Thursday", start_date="2026-08-06", end_date="2026-08-06",
+            binding="soft", replan=0,
         )
 
         mock_client.complete.return_value = {
@@ -301,11 +305,12 @@ class TestPeriodization(unittest.TestCase):
 
         macro = test_db.get_macrocycle_for_objective(obj_id)
         self.assertIsNotNone(macro["goals_snapshot"])
-        self.assertIsNotNone(macro["lifeevents_snapshot"])
+        self.assertIsNotNone(macro["constraints_snapshot"])
 
         goals = json.loads(macro["goals_snapshot"])
-        events = json.loads(macro["lifeevents_snapshot"])
+        events = json.loads(macro["constraints_snapshot"])
         self.assertEqual([g["title"] for g in goals], ["Berlin Marathon"])
+        # Only the plan-shaping constraint is snapshotted, not the tactical one.
         self.assertEqual([e["title"] for e in events], ["Work trip"])
 
         # The snapshot must serialize exactly the data the hash fingerprints, so the
@@ -314,7 +319,7 @@ class TestPeriodization(unittest.TestCase):
             coach_service._get_goals_hash(goals), macro["goals_hash"]
         )
         self.assertEqual(
-            coach_service._get_lifeevents_hash(events), macro["lifeevents_hash"]
+            coach_service._get_constraints_hash(events), macro["constraints_hash"]
         )
 
     @patch("trainmate.coach.engine.openrouter_client")
@@ -640,7 +645,7 @@ class TestPeriodization(unittest.TestCase):
             objective_id=obj_id,
             strategy="Long runs",
             goals_hash="ghash",
-            lifeevents_hash="lehash",
+            constraints_hash="lehash",
             config_hash="confhash123",
             mesocycles=[],
         )
@@ -828,7 +833,7 @@ class TestPeriodization(unittest.TestCase):
             objective_id=obj_id,
             strategy="Keep heart rate low",
             goals_hash="hash1",
-            lifeevents_hash="hash2",
+            constraints_hash="hash2",
             mesocycles=[{
                 "name": "Base Phase", "start_date": "2026-06-01",
                 "end_date": "2026-06-28", "focus": "Base",

@@ -1,7 +1,8 @@
 # TrainMate
 
 TrainMate is a local, AI-powered sports-science coach. You tell it your goals
-(races, target dates, sports) and the life events that will get in the way; it
+(races, target dates, sports) and the constraints it must work around (travel, an
+injury layoff, a capped-time day); it
 designs a periodized training plan, writes your day-to-day workouts, and then
 **adapts them every day** in response to how your body is actually responding —
 resting heart rate, HRV, sleep, training load, and even lifestyle factors like a
@@ -15,7 +16,7 @@ does the coaching reasoning.
 
 ## What makes it intelligent
 
-- **Periodized planning.** From your goals, life events, and fitness profile,
+- **Periodized planning.** From your goals, constraints, and fitness profile,
   TrainMate builds a full macrocycle → mesocycle → microcycle structure (long-term
   strategy down to individual sessions). Timelines longer than ~24 weeks are
   automatically broken into intermediate goals.
@@ -46,20 +47,26 @@ does the coaching reasoning.
   *actually* did and seeding coach learnings — so it starts smart instead of cold,
   and reviews planned-vs-actual when it replans.
 
-- **Three channels of real-world context.** TrainMate separates context by how
-  much it should move your training:
-  - *Life events* are **strategic** — the plan is built *around* them (a race
-    abroad, a business trip, an injury layoff). Adding or changing a life event
-    invalidates the current plan and triggers a regeneration, and every daily
-    adaptation is re-fed the standing list.
+- **Real-world context: one principled split.** TrainMate separates *observations*
+  (things that happened / are true about you) from *directives* (things you ask the
+  coach to work around):
+  - *Constraints* are **directives** at any horizon — "no run Thursday", "only 45 min
+    today", "3-week injury layoff". A single `constraint` object bounds both plan
+    generation and daily adaptation. A blanket `hard` constraint (no sport) deterministically
+    nulls out training on its dates; a `hard` constraint scoped to a sport, and every `soft`
+    one, is advisory — preferences the coach honors by judgement. Whether a constraint
+    *reshapes the plan* is **derived** from its
+    magnitude and confirmed by you — never a category you pick blind. (Life events are
+    just plan-shaping constraints; the old `lifeevent` command now forwards to
+    `constraint`.)
   - *Daily context* adds **weighted signals** (alcohol, poor sleep, stress)
     ingested automatically from tagged Google Calendar events. These don't
     reshape the plan; they help the daily adaptation tell lifestyle noise from
     training fatigue, and feed long-term analysis.
-  - `workout adapt --message` supplies **tactical**, one-off context for a single
-    run ("away with no gym today"). It isn't stored verbatim, but its effect is
-    loosely persisted into the affected session's adaptation reason, so the next
-    day's adapt sees *why* the session changed instead of blindly undoing it.
+  - `workout adapt --message` is a **fast-capture inbox**: a durable, constraint-shaped
+    note ("away with no gym Thursday") is classified and saved as a real constraint you
+    can inspect and `rm`; a one-off nudge ("felt flat, ease today") stays a single-run
+    hint folded into the session's adaptation reason.
 
 - **Plan versioning & rollback.** Regenerating a plan supersedes the old one
   rather than destroying it, so you can roll back a plan (and its workouts) to a

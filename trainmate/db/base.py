@@ -48,50 +48,61 @@ class BaseDB:
                 )
             """)
 
-            # Check for existing tables from oldest to newest
+            # Legacy `lifeevents` table (superseded by `constraints`, see
+            # DESIGN_constraints.md). Kept read-only until the `lifeevent` forwarder is
+            # removed, so migrated rows and older tests still resolve. The old
+            # `constraints`→`lifeevents` auto-rename (and its `constraints_hash` sibling
+            # below) is deliberately GONE: the name `constraints` now belongs to the new
+            # table, and leaving the rename in place would hijack the new schema on any DB
+            # without a `lifeevents` table (§9 legacy-name hazard). The unrelated
+            # `life_events`→`lifeevents` rename is harmless and retained.
             cursor.execute(
                 "SELECT name FROM sqlite_master WHERE type='table' AND name='lifeevents'"
             )
             lifeevents_exists = cursor.fetchone()
-
             if not lifeevents_exists:
                 cursor.execute(
-                    "SELECT name FROM sqlite_master WHERE type='table' AND name='constraints'"
+                    "SELECT name FROM sqlite_master WHERE type='table' AND name='life_events'"
                 )
-                constraints_exists = cursor.fetchone()
-                if constraints_exists:
-                    cursor.execute("ALTER TABLE constraints RENAME TO lifeevents")
+                if cursor.fetchone():
+                    cursor.execute("ALTER TABLE life_events RENAME TO lifeevents")
                 else:
-                    cursor.execute(
-                        "SELECT name FROM sqlite_master WHERE type='table' AND name='life_events'"
-                    )
-                    life_events_exists = cursor.fetchone()
-                    if life_events_exists:
-                        cursor.execute("ALTER TABLE life_events RENAME TO lifeevents")
-                    else:
-                        # Create lifeevents table from scratch
-                        cursor.execute("""
-                            CREATE TABLE IF NOT EXISTS lifeevents (
-                                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                                title TEXT NOT NULL,
-                                start_date TEXT NOT NULL,
-                                end_date TEXT NOT NULL,
-                                -- event_type values: 'business_trip', 'vacation', 'party', 'other'
-                                event_type TEXT NOT NULL,
-                                impact_description TEXT
-                            )
-                        """)
-            else:
-                cursor.execute("""
-                    CREATE TABLE IF NOT EXISTS lifeevents (
-                        id INTEGER PRIMARY KEY AUTOINCREMENT,
-                        title TEXT NOT NULL,
-                        start_date TEXT NOT NULL,
-                        end_date TEXT NOT NULL,
-                        event_type TEXT NOT NULL,
-                        impact_description TEXT
-                    )
-                """)
+                    cursor.execute("""
+                        CREATE TABLE IF NOT EXISTS lifeevents (
+                            id INTEGER PRIMARY KEY AUTOINCREMENT,
+                            title TEXT NOT NULL,
+                            start_date TEXT NOT NULL,
+                            end_date TEXT NOT NULL,
+                            -- event_type values: 'business_trip', 'vacation', 'party', 'other'
+                            event_type TEXT NOT NULL,
+                            impact_description TEXT
+                        )
+                    """)
+
+            # Unified directives — everything the athlete asks the coach to work around, at
+            # any horizon (DESIGN_constraints.md §5). Supersedes `lifeevents`. `type` is an
+            # opaque user-vocabulary label (never branched on); `binding` ('hard'|'soft') and
+            # `sport` (NULL = all) let the deterministic edges skip the LLM; `replan` marks a
+            # directive currently escalated to plan-shaping (§7); `source` records how the row
+            # was authored ('manual'|'message'|'lifeevent').
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS constraints (
+                    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                    start_date  TEXT NOT NULL,
+                    end_date    TEXT NOT NULL,
+                    binding     TEXT NOT NULL,
+                    sport       TEXT,
+                    type        TEXT,
+                    title       TEXT NOT NULL,
+                    description TEXT,
+                    replan      INTEGER NOT NULL DEFAULT 0,
+                    source      TEXT,
+                    created     TEXT
+                )
+            """)
+            cursor.execute(
+                "CREATE INDEX IF NOT EXISTS idx_constraints_start ON constraints(start_date)"
+            )
 
             # Workouts table
             cursor.execute("""
@@ -400,23 +411,35 @@ class BaseDB:
                     objective_id INTEGER NOT NULL,
                     strategy TEXT NOT NULL,
                     goals_hash TEXT NOT NULL,
-                    lifeevents_hash TEXT NOT NULL,
+                    constraints_hash TEXT NOT NULL,
                     config_hash TEXT,
                     goals_snapshot TEXT,
-                    lifeevents_snapshot TEXT,
+                    constraints_snapshot TEXT,
                     created_at TEXT NOT NULL,
                     feedback TEXT DEFAULT NULL,
                     FOREIGN KEY (objective_id) REFERENCES objectives(id) ON DELETE CASCADE
                 )
             """)
 
-            # Migrate column constraints_hash to lifeevents_hash if constraints_hash exists
+            # Fold the plan's staleness fingerprint back to `constraints_hash` and its
+            # snapshot to `constraints_snapshot` (DESIGN_constraints.md §7/§9). The prior
+            # `lifeevents_hash`/`lifeevents_snapshot` names are renamed in place; existing
+            # snapshot VALUES are left untouched as legacy (the display code tolerates plans
+            # that predate a snapshot key). The old constraints_hash→lifeevents_hash rename
+            # is gone — this is its reversal.
             cursor.execute("PRAGMA table_info(macrocycles)")
             columns = [row['name'] for row in cursor.fetchall()]
-            if 'constraints_hash' in columns and 'lifeevents_hash' not in columns:
+            if 'lifeevents_hash' in columns and 'constraints_hash' not in columns:
                 cursor.execute(
-                    "ALTER TABLE macrocycles RENAME COLUMN constraints_hash TO lifeevents_hash"
+                    "ALTER TABLE macrocycles RENAME COLUMN lifeevents_hash TO constraints_hash"
                 )
+            if 'lifeevents_snapshot' in columns and 'constraints_snapshot' not in columns:
+                cursor.execute(
+                    "ALTER TABLE macrocycles "
+                    "RENAME COLUMN lifeevents_snapshot TO constraints_snapshot"
+                )
+            cursor.execute("PRAGMA table_info(macrocycles)")
+            columns = [row['name'] for row in cursor.fetchall()]
             if 'config_hash' not in columns:
                 cursor.execute(
                     "ALTER TABLE macrocycles ADD COLUMN config_hash TEXT"
@@ -429,9 +452,9 @@ class BaseDB:
                 cursor.execute(
                     "ALTER TABLE macrocycles ADD COLUMN goals_snapshot TEXT"
                 )
-            if 'lifeevents_snapshot' not in columns:
+            if 'constraints_snapshot' not in columns:
                 cursor.execute(
-                    "ALTER TABLE macrocycles ADD COLUMN lifeevents_snapshot TEXT"
+                    "ALTER TABLE macrocycles ADD COLUMN constraints_snapshot TEXT"
                 )
             # Plan-version axis (see DESIGN_plan_rollback.md). Regenerating a plan no
             # longer deletes the prior macrocycle: it is marked 'superseded' (with the
@@ -520,6 +543,14 @@ class BaseDB:
             cursor.execute(
                 "CREATE INDEX IF NOT EXISTS idx_daily_context_date ON daily_context(date)"
             )
+
+            # NOTE: the one-time lifeevents -> constraints row copy is deliberately NOT
+            # done here. Unlike every schema change above (idempotent by construction), a
+            # cross-table row copy has no natural guard, and — critically — it must also
+            # backfill `constraints_hash` on active macrocycles so migrating doesn't
+            # spuriously invalidate existing plans (DESIGN_constraints.md §7/§9). That is an
+            # explicit, operator-run one-off: scripts/migrate_lifeevents_to_constraints.py.
+            # The `lifeevents` table above is kept read-only until the forwarder is removed.
 
             conn.commit()
 

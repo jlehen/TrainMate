@@ -104,6 +104,20 @@ class Config:
         return int(raw)
 
     @property
+    def replan_displaced_load_pct(self) -> float:
+        """Displaced-load trigger for the §7 replan proposal: propose a replan when a
+        constraint's overlapping planned load is at least this percentage of the plan's
+        trailing weekly planned load (default 50 — half a typical week)."""
+        return float(self.get("coach", {}).get("replan_displaced_load_pct", 50))
+
+    @property
+    def replan_hard_span_days(self) -> int:
+        """Hard-window floor for the §7 replan proposal: a `hard` constraint spanning at
+        least this many days is intrinsically plan-shaping regardless of displaced load
+        (default 3)."""
+        return int(self.get("coach", {}).get("replan_hard_span_days", 3))
+
+    @property
     def learning_confidence_thresholds(self) -> dict[str, int]:
         """Distinct net supporting weeks required to reach each confidence level
         (evidence-based confidence; see DESIGN_evidence_based_confidence.md §3).

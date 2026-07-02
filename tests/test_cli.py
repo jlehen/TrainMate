@@ -128,55 +128,55 @@ class TestTrainMateCLI(unittest.TestCase):
         self.assertEqual(exit_code, 0)
         self.assertNotIn("Zurich Marathon", stdout)
 
-    def test_lifeevent_commands(self):
-        exit_code, stdout, stderr = self.run_cli(["lifeevent", "list"])
+    def test_constraint_commands(self):
+        exit_code, stdout, stderr = self.run_cli(["constraint", "list"])
         self.assertEqual(exit_code, 0)
-        self.assertIn("=== ATHLETE LIFE EVENTS ===", stdout)
-        self.assertNotIn("ID:", stdout)
+        self.assertIn("=== ATHLETE CONSTRAINTS ===", stdout)
 
+        # Quick capture: positional title, flag-free (no prompts), soft by default.
         exit_code, stdout, stderr = self.run_cli([
-            "lifeevent", "add",
-            "--title", "Ibiza Vacation",
-            "--start", "2026-07-01",
-            "--end", "2026-07-08",
-            "--type", "vacation",
-            "--desc", "50% intensity",
+            "constraint", "add", "Ibiza Vacation",
+            "--start", "2026-07-01", "--end", "2026-07-08",
+            "--type", "vacation", "--desc", "50% intensity",
         ])
         self.assertEqual(exit_code, 0)
-        self.assertIn("Life event 'Ibiza Vacation' logged", stdout)
+        self.assertIn("Added constraint [1]: Ibiza Vacation", stdout)
 
-        exit_code, stdout, stderr = self.run_cli(["lifeevent", "list"])
+        exit_code, stdout, stderr = self.run_cli(["cons", "list", "--all"])
         self.assertEqual(exit_code, 0)
         self.assertIn("Ibiza Vacation", stdout)
         self.assertIn("vacation", stdout)
         self.assertIn("ID: 1", stdout)
-        self.assertNotIn("Impact:", stdout)
+        self.assertNotIn("Details:", stdout)
 
-        exit_code, stdout, stderr = self.run_cli(["lifeevent", "list", "-v"])
+        exit_code, stdout, stderr = self.run_cli(["cons", "list", "--all", "-v"])
         self.assertEqual(exit_code, 0)
-        self.assertIn("Impact:\n    50% intensity", stdout)
+        self.assertIn("Details:\n    50% intensity", stdout)
 
-        exit_code, stdout, stderr = self.run_cli(["lifeevent", "list", "--verbose"])
-        self.assertEqual(exit_code, 0)
-        self.assertIn("Impact:\n    50% intensity", stdout)
-
-        exit_code, stdout, stderr = self.run_cli(["lifeevent", "show", "1"])
+        exit_code, stdout, stderr = self.run_cli(["constraint", "show", "1"])
         self.assertEqual(exit_code, 0)
         self.assertIn("Ibiza Vacation", stdout)
         self.assertIn("ID: 1", stdout)
-        self.assertIn("Impact:\n    50% intensity", stdout)
+        self.assertIn("Details:\n    50% intensity", stdout)
 
-        exit_code, stdout, stderr = self.run_cli(["lifeevent", "show", "999"])
+        exit_code, stdout, stderr = self.run_cli(["constraint", "show", "999"])
         self.assertEqual(exit_code, 0)
-        self.assertIn("Life event with ID 999 not found.", stdout)
+        self.assertIn("Constraint with ID 999 not found.", stdout)
 
-        exit_code, stdout, stderr = self.run_cli(["lifeevent", "rm", "1"])
+        exit_code, stdout, stderr = self.run_cli(["constraint", "rm", "1"])
         self.assertEqual(exit_code, 0)
-        self.assertIn("Life event with ID 1 removed successfully", stdout)
+        self.assertIn("Constraint [1] removed.", stdout)
 
-        exit_code, stdout, stderr = self.run_cli(["lifeevent", "list"])
+        exit_code, stdout, stderr = self.run_cli(["cons", "list", "--all"])
         self.assertEqual(exit_code, 0)
         self.assertNotIn("Ibiza Vacation", stdout)
+
+    def test_lifeevent_forwarder_deprecated(self):
+        """The retained `lifeevent` command warns and forwards to `constraint`."""
+        exit_code, stdout, stderr = self.run_cli(["lifeevent", "list"])
+        self.assertEqual(exit_code, 0)
+        self.assertIn("'lifeevent' is deprecated", stdout)
+        self.assertIn("=== ATHLETE CONSTRAINTS ===", stdout)
 
     @patch("trainmate_cli.calendar_syncer")
     def test_context_add_and_list(self, mock_calendar):
@@ -315,42 +315,40 @@ class TestTrainMateCLI(unittest.TestCase):
         self.assertEqual(exit_code, 0)
         self.assertIn("No fields to update", stdout)
 
-    def test_lifeevent_edit_command(self):
+    def test_constraint_edit_command(self):
         self.run_cli([
-            "lifeevent", "add",
-            "--title", "Summer Vacation",
-            "--start", "2026-08-01",
-            "--end", "2026-08-15",
-            "--type", "vacation",
-            "--desc", "No workouts",
+            "constraint", "add", "Summer Vacation",
+            "--start", "2026-08-01", "--end", "2026-08-15",
+            "--type", "vacation", "--desc", "No workouts",
         ])
 
-        events = test_db.get_lifeevents()
-        e_id = events[0]["id"]
+        constraints = test_db.get_constraints()
+        c_id = constraints[0]["id"]
 
         exit_code, stdout, stderr = self.run_cli([
-            "lifeevent", "edit", str(e_id),
+            "constraint", "edit", str(c_id),
             "--title", "Summer Vacation Adapted",
-            "--start", "2026-08-02",
-            "--end", "2026-08-16",
-            "--type", "business_trip",
-            "--desc", "Light running only",
+            "--start", "2026-08-02", "--end", "2026-08-16",
+            "--type", "trip", "--desc", "Light running only", "--hard",
         ])
         self.assertEqual(exit_code, 0)
-        self.assertIn(f"Life event with ID {e_id} updated successfully", stdout)
+        self.assertIn(f"Constraint [{c_id}] updated.", stdout)
 
-        edited = test_db.get_lifeevent(e_id)
+        edited = test_db.get_constraint(c_id)
         self.assertEqual(edited["title"], "Summer Vacation Adapted")
         self.assertEqual(edited["start_date"], "2026-08-02")
         self.assertEqual(edited["end_date"], "2026-08-16")
-        self.assertEqual(edited["event_type"], "business_trip")
-        self.assertEqual(edited["impact_description"], "Light running only")
+        self.assertEqual(edited["type"], "trip")
+        self.assertEqual(edited["binding"], "hard")
+        self.assertEqual(edited["description"], "Light running only")
 
-        exit_code, stdout, stderr = self.run_cli(["lifeevent", "edit", "999", "--title", "Fail"])
+        exit_code, stdout, stderr = self.run_cli(
+            ["constraint", "edit", "999", "--title", "Fail"]
+        )
         self.assertEqual(exit_code, 1)
-        self.assertIn("Life event with ID 999 not found", stdout)
+        self.assertIn("Constraint with ID 999 not found", stdout)
 
-        exit_code, stdout, stderr = self.run_cli(["lifeevent", "edit", str(e_id)])
+        exit_code, stdout, stderr = self.run_cli(["constraint", "edit", str(c_id)])
         self.assertEqual(exit_code, 0)
         self.assertIn("No fields to update", stdout)
 
@@ -367,6 +365,7 @@ class TestTrainMateCLI(unittest.TestCase):
                 "rpe": 5,
                 "tss": 40.0,
             }],
+            [],
         )
 
         exit_code, stdout, stderr = self.run_cli(["workout", "list"])
@@ -462,7 +461,7 @@ class TestTrainMateCLI(unittest.TestCase):
             objective_id=obj_id,
             strategy="Build base then taper",
             goals_hash="ghash",
-            lifeevents_hash="chash",
+            constraints_hash="chash",
             mesocycles=[{
                 "name": "Base Building",
                 "start_date": "2026-06-01",
@@ -487,7 +486,7 @@ class TestTrainMateCLI(unittest.TestCase):
             objective_id=obj_to_rm,
             strategy="Plan to delete",
             goals_hash="ghash",
-            lifeevents_hash="lhash",
+            constraints_hash="lhash",
             mesocycles=[],
         )
         exit_code, stdout, stderr = self.run_cli(["plan", "rm", str(obj_to_rm)])
@@ -533,14 +532,14 @@ class TestTrainMateCLI(unittest.TestCase):
         self.assertIn(f"[{learning_id}|general|tentative]", ln_stdout)
         self.assertIn("Rest well on Fridays", ln_stdout)
 
-        test_db.add_lifeevent(
-            title="Ibiza Trip", start_date="2026-07-01", end_date="2026-07-08",
-            event_type="vacation", impact_description="Rest weeks",
+        test_db.add_constraint(
+            title="Ibiza Trip", start_date="2026-07-01", end_date="2026-08-08",
+            binding="soft", type="vacation", description="Rest weeks",
         )
 
         goals = test_db.get_objectives()
         g_id = goals[0]["id"]
-        events = test_db.get_lifeevents()
+        events = test_db.get_constraints()
         e_id = events[0]["id"]
 
         exit_code_v, stdout_v, _ = self.run_cli(["status", "-v"])
@@ -550,12 +549,12 @@ class TestTrainMateCLI(unittest.TestCase):
             f"- [ACTIVE] ID: {g_id} | London Marathon (running) on 2026-09-20 (Priority: 1)",
             stdout_v,
         )
-        self.assertIn("Life Events:", stdout_v)
+        self.assertIn("Active Constraints:", stdout_v)
         self.assertIn(
-            f"- ID: {e_id} | Ibiza Trip (vacation): 2026-07-01 to 2026-07-08",
+            f"- ID: {e_id} | Ibiza Trip (vacation): 2026-07-01 to 2026-08-08",
             stdout_v,
         )
-        self.assertIn("  Impact:\n    Rest weeks", stdout_v)
+        self.assertIn("  Details:\n    Rest weeks", stdout_v)
 
         exit_code_vv, stdout_vv, _ = self.run_cli(["status", "--verbose"])
         self.assertEqual(exit_code_vv, 0)
@@ -842,13 +841,13 @@ class TestTrainMateCLI(unittest.TestCase):
         def count_goal(_):
             return len(test_db.get_objectives())
 
-        def seed_lifeevent():
-            test_db.add_lifeevent(
-                title="Wipe Event", start_date="2026-07-01",
-                end_date="2026-07-02", event_type="party",
+        def seed_constraint():
+            test_db.add_constraint(
+                title="Wipe Constraint", start_date="2026-07-01",
+                end_date="2026-07-02", binding="soft",
             )
-        def count_lifeevent(_):
-            return len(test_db.get_lifeevents())
+        def count_constraint(_):
+            return len(test_db.get_constraints())
 
         def seed_plan():
             obj_id = test_db.add_objective(
@@ -856,7 +855,7 @@ class TestTrainMateCLI(unittest.TestCase):
             )
             test_db.save_macrocycle(
                 objective_id=obj_id, strategy="Base", goals_hash="ghash",
-                lifeevents_hash="lhash",
+                constraints_hash="lhash",
                 mesocycles=[{
                     "name": "Meso1", "start_date": "2026-06-01",
                     "end_date": "2026-06-28", "focus": "Aerobic",
@@ -876,8 +875,8 @@ class TestTrainMateCLI(unittest.TestCase):
         cases = [
             (["goal", "wipe"], seed_goal, count_goal,
              "All training objectives wiped successfully."),
-            (["lifeevent", "wipe"], seed_lifeevent, count_lifeevent,
-             "All life events wiped successfully."),
+            (["constraint", "wipe"], seed_constraint, count_constraint,
+             "All constraints wiped successfully."),
             (["plan", "wipe"], seed_plan, count_plan,
              "All periodization plans wiped successfully."),
             (["data", "wipe"], seed_data, count_data,
@@ -1000,7 +999,7 @@ class TestTrainMateCLI(unittest.TestCase):
             objective_id=goal_id,
             strategy="Base strategy",
             goals_hash="ghash",
-            lifeevents_hash="lhash",
+            constraints_hash="lhash",
             mesocycles=[{
                 "name": "Base Building",
                 "start_date": (today_date - timedelta(days=2)).strftime("%Y-%m-%d"),
@@ -1374,11 +1373,11 @@ class TestTrainMateCLI(unittest.TestCase):
         }]
         v1 = test_db.save_macrocycle(
             objective_id=oid, strategy="First strategy alpha",
-            goals_hash="g", lifeevents_hash="l", mesocycles=meso,
+            goals_hash="g", constraints_hash="l", mesocycles=meso,
         )
         v2 = test_db.save_macrocycle(
             objective_id=oid, strategy="Second strategy beta",
-            goals_hash="g", lifeevents_hash="l", mesocycles=meso,
+            goals_hash="g", constraints_hash="l", mesocycles=meso,
         )
 
         exit_code, stdout, _ = self.run_cli(["plan", "versions"])
@@ -1508,7 +1507,7 @@ class TestDashlessEndToEnd(unittest.TestCase):
     @patch("trainmate_cli.garmin")
     @patch("trainmate_cli.coach_service")
     def test_workout_adapt_message_and_no_pull(self, mock_coach, mock_garmin):
-        mock_coach.workout_adapt.return_value = ("ok", [])
+        mock_coach.workout_adapt.return_value = ("ok", [], [])
         exit_code, _, _ = self.run_cli(
             ["w", "a", "auto", "message", "feeling sluggish lately", "no-pull"]
         )

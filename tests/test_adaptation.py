@@ -94,7 +94,7 @@ class TestAdaptation(unittest.TestCase):
                 "cycling", 1800.0, 12.0, 100.0, 132, 150, 4, 20.0,
             )
 
-            reason, proposed = coach_service.workout_adapt("2026-06-03")
+            reason, proposed, _new_constraints = coach_service.workout_adapt("2026-06-03")
 
             self.assertTrue(mock_client.complete.called)
             self.assertEqual(reason, "Fatigue detected, RHR is elevated and HRV is suppressed.")
@@ -140,7 +140,7 @@ class TestAdaptation(unittest.TestCase):
             test_db.save_metric_cache("2026-06-03", 56, 42, 60, 35, 14.0, 8.0, 1.75)
             test_db.save_baseline("2026-06-03", 50.0, 2.0, 60.0, 5.0, 80.0, 5.0)
 
-            reason, proposed = coach_service.workout_adapt("2026-06-03")
+            reason, proposed, _new_constraints = coach_service.workout_adapt("2026-06-03")
             self.assertEqual(reason, "On track.")
             self.assertEqual(proposed, [])
 
@@ -257,7 +257,7 @@ class TestAdaptation(unittest.TestCase):
                 "cycling", 4920.0, 30.0, 250.0, 132, 150, 4, 52.0,
             )
 
-            reason, proposed = coach_service.workout_adapt("2026-06-03")
+            reason, proposed, _new_constraints = coach_service.workout_adapt("2026-06-03")
 
             dates = {p["date"] for p in proposed}
             self.assertNotIn("2026-06-03", dates)  # completed session dropped
@@ -341,7 +341,7 @@ class TestAdaptation(unittest.TestCase):
                 duration_minutes=45, rpe=7, tss=55,
             )
 
-            reason, proposed = coach_service.workout_adapt("2026-06-03")
+            reason, proposed, _new_constraints = coach_service.workout_adapt("2026-06-03")
 
             dates = {p["date"] for p in proposed}
             self.assertEqual(dates, {"2026-06-06"})

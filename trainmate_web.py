@@ -141,9 +141,10 @@ def single_objective(obj_id: int) -> Any:
         return jsonify({"message": "Objective updated."})
 
 
-@app.route("/api/life-events", methods=["GET", "POST"])
-def manage_life_events() -> Any:
-    """API endpoint to list active life events or add a new life event."""
+@app.route("/api/constraints", methods=["GET", "POST"])
+def manage_constraints() -> Any:
+    """API endpoint to list active/upcoming constraints or add a new one
+    (DESIGN_constraints.md §6/§10 — supersedes /api/life-events)."""
     if request.method == "POST":
         data = request.json
         if not data:
@@ -152,35 +153,47 @@ def manage_life_events() -> Any:
         title = data.get("title")
         start = data.get("start_date")
         end = data.get("end_date")
-        e_type = data.get("event_type")
-        if not title or not start or not end or not e_type:
-            return jsonify({"error": "Missing title, start_date, end_date, or event_type"}), 400
+        if not title or not start or not end:
+            return jsonify({"error": "Missing title, start_date, or end_date"}), 400
 
-        event_id = db.add_lifeevent(
+        binding = data.get("binding") or "soft"
+        if binding not in ("hard", "soft"):
+            return jsonify({"error": "binding must be 'hard' or 'soft'"}), 400
+
+        constraint_id = db.add_constraint(
             title=title,
             start_date=start,
             end_date=end,
-            event_type=e_type,
-            impact_description=data.get("impact_description", "")
+            binding=binding,
+            sport=data.get("sport"),
+            type=data.get("type"),
+            description=data.get("description"),
+            replan=int(bool(data.get("replan", False))),
+            source="manual",
         )
-        return jsonify({"id": event_id, "message": "Life event logged successfully."}), 201
+        return jsonify({"id": constraint_id, "message": "Constraint added successfully."}), 201
 
-    # GET method — upcoming events (anchored on the machine-local day, like the CLI).
-    return jsonify(db.get_lifeevents(start_after=today_str()))
+    # GET method — active within the metrics lookback window plus everything upcoming,
+    # same default window as `constraint list` (anchored on the machine-local day).
+    window = config.metrics_lookback_days
+    start = (
+        datetime.strptime(today_str(), "%Y-%m-%d").date() - timedelta(days=window - 1)
+    ).strftime("%Y-%m-%d")
+    return jsonify(db.get_constraints(start))
 
 
-@app.route("/api/life-events/<int:event_id>", methods=["DELETE", "PUT"])
-def single_life_event(event_id: int) -> Any:
-    """API endpoint to update or delete a specific life event."""
+@app.route("/api/constraints/<int:constraint_id>", methods=["DELETE", "PUT"])
+def single_constraint(constraint_id: int) -> Any:
+    """API endpoint to update or delete a specific constraint."""
     if request.method == "DELETE":
-        db.delete_lifeevent(event_id)
-        return jsonify({"message": "Life event deleted."})
+        db.delete_constraint(constraint_id)
+        return jsonify({"message": "Constraint deleted."})
     elif request.method == "PUT":
         data = request.json
         if not data:
             return jsonify({"error": "No update fields provided"}), 400
-        db.update_lifeevent(event_id, **data)
-        return jsonify({"message": "Life event updated."})
+        db.update_constraint(constraint_id, **data)
+        return jsonify({"message": "Constraint updated."})
 
 
 # --- Workouts ---
@@ -585,7 +598,7 @@ def workout_adapt() -> Any:
     data = request.json or {}
     date_str = data.get("date") or today_str()
     try:
-        reason, proposed = coach_service.workout_adapt(date_str)
+        reason, proposed, _new_constraints = coach_service.workout_adapt(date_str)
         return jsonify({
             "message": "Daily adaptation check finished.",
             "reason": reason,

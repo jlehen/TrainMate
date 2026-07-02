@@ -16,6 +16,12 @@ class WipesMixin:
             conn.cursor().execute("DELETE FROM lifeevents")
             conn.commit()
 
+    def wipe_constraints(self) -> None:
+        """Deletes all constraints from the database."""
+        with self._get_connection() as conn:
+            conn.cursor().execute("DELETE FROM constraints")
+            conn.commit()
+
     def wipe_learnings(self) -> None:
         """Deletes all coach learnings (their evidence basis cascades)."""
         with self._get_connection() as conn:

@@ -56,7 +56,7 @@ class TestFeedback(unittest.TestCase):
             objective_id=obj_id,
             strategy="Keep heart rate low",
             goals_hash="ghash",
-            lifeevents_hash="lehash",
+            constraints_hash="lehash",
             mesocycles=[{
                 "name": "Base Building",
                 "start_date": "2026-06-01",
@@ -90,7 +90,7 @@ class TestFeedback(unittest.TestCase):
             objective_id=obj_id,
             strategy="Keep heart rate low",
             goals_hash="ghash",
-            lifeevents_hash="lehash",
+            constraints_hash="lehash",
             mesocycles=[{
                 "name": "Base Building",
                 "start_date": "2026-06-01",
@@ -139,7 +139,7 @@ class TestFeedback(unittest.TestCase):
             objective_id=obj_id,
             strategy="Keep heart rate low",
             goals_hash="ghash",
-            lifeevents_hash="lehash",
+            constraints_hash="lehash",
             mesocycles=[{
                 "name": "Base Building",
                 "start_date": "2026-06-01",
@@ -180,7 +180,7 @@ class TestFeedback(unittest.TestCase):
             sport_type="running", priority=1,
         )
         macro_id = test_db.save_macrocycle(
-            objective_id=obj_id, strategy="s", goals_hash="g", lifeevents_hash="l",
+            objective_id=obj_id, strategy="s", goals_hash="g", constraints_hash="l",
             mesocycles=[{"name": "Base", "start_date": "2026-06-01",
                          "end_date": "2026-06-28", "focus": "Z2"}],
         )

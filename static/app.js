@@ -271,7 +271,9 @@ function renderStrategyInputs(macrocycle) {
     if (!el) return;
 
     const rawGoals = macrocycle.goals_snapshot;
-    const rawEvents = macrocycle.lifeevents_snapshot;
+    // New snapshots carry constraint fields; legacy plans (pre-constraints-rename)
+    // carry the old lifeevents_snapshot — read whichever is present.
+    const rawEvents = macrocycle.constraints_snapshot ?? macrocycle.lifeevents_snapshot;
     if (rawGoals == null && rawEvents == null) {
         el.innerHTML = `<div class="strategy-inputs-note">`
             + `Inputs considered: not recorded (plan predates input snapshots).</div>`;
@@ -292,24 +294,32 @@ function renderStrategyInputs(macrocycle) {
         : `<li class="si-empty">None</li>`;
 
     const eventItems = events.length
-        ? events.map(e => `<li>`
-            + `<span class="si-title">${escapeHtml(e.title || "")}</span> `
-            + `<span class="si-meta">(${escapeHtml(e.event_type || "")}) `
-            + `· ${escapeHtml(e.start_date || "")} → ${escapeHtml(e.end_date || "")}</span>`
-            + (e.impact_description ? `<div class="si-desc">${escapeHtml(e.impact_description)}</div>` : "")
-            + `</li>`).join("")
+        ? events.map(e => {
+            // New snapshots carry constraint fields; legacy ones carry the old
+            // event_type/impact_description — read whichever is present.
+            const label = e.type || e.event_type || "";
+            const tags = [label, e.binding, e.sport ? `[${e.sport}]` : ""]
+                .filter(Boolean).map(escapeHtml).join(" ");
+            const detail = e.description || e.impact_description;
+            return `<li>`
+                + `<span class="si-title">${escapeHtml(e.title || "")}</span> `
+                + `<span class="si-meta">(${tags}) `
+                + `· ${escapeHtml(e.start_date || "")} → ${escapeHtml(e.end_date || "")}</span>`
+                + (detail ? `<div class="si-desc">${escapeHtml(detail)}</div>` : "")
+                + `</li>`;
+        }).join("")
         : `<li class="si-empty">None</li>`;
 
     el.innerHTML = `
         <details class="strategy-inputs-details">
             <summary>Inputs considered (${goals.length} goal${goals.length === 1 ? "" : "s"}, `
-                + `${events.length} life event${events.length === 1 ? "" : "s"})</summary>
+                + `${events.length} constraint${events.length === 1 ? "" : "s"})</summary>
             <div class="si-section">
                 <div class="si-heading"><i class="fa-solid fa-flag-checkered"></i> Goals considered</div>
                 <ul class="si-list">${goalItems}</ul>
             </div>
             <div class="si-section">
-                <div class="si-heading"><i class="fa-solid fa-calendar-day"></i> Life events considered</div>
+                <div class="si-heading"><i class="fa-solid fa-calendar-day"></i> Constraints considered</div>
                 <ul class="si-list">${eventItems}</ul>
             </div>
         </details>`;
@@ -509,17 +519,20 @@ window.deleteObjective = async function(id) {
     } catch (e) { logConsole("Failed to delete objective", "error"); }
 };
 
-// --- LIFE EVENTS ---
+// --- CONSTRAINTS (DESIGN_constraints.md — supersedes life events) ---
+// This form still speaks the old event_type/impact_description vocabulary in the UI;
+// it's translated to the constraint shape (type/binding/sport/description) at the
+// API boundary below.
 
 async function fetchEvents() {
     try {
-        const res = await fetch(`${API_BASE}/api/life-events`);
+        const res = await fetch(`${API_BASE}/api/constraints`);
         if (!res.ok) throw new Error();
         const events = await res.json();
         const container = document.getElementById("events-list");
         container.innerHTML = "";
         if (events.length === 0) {
-            container.innerHTML = `<div class="item-meta" style="padding:0.5rem;">No upcoming life events. Log travel or injuries.</div>`;
+            container.innerHTML = `<div class="item-meta" style="padding:0.5rem;">No upcoming constraints. Log travel or injuries.</div>`;
             return;
         }
         events.forEach(e => {
@@ -527,8 +540,8 @@ async function fetchEvents() {
             item.className = "list-item";
             item.innerHTML = `
                 <div class="item-info">
-                    <span class="item-title">${escapeHtml(e.title)} (${escapeHtml(e.event_type)})</span>
-                    <span class="item-meta">${e.start_date} to ${e.end_date}${e.impact_description ? " · " + escapeHtml(e.impact_description) : ""}</span>
+                    <span class="item-title">${escapeHtml(e.title)} (${escapeHtml(e.type || e.binding)})</span>
+                    <span class="item-meta">${e.start_date} to ${e.end_date}${e.description ? " · " + escapeHtml(e.description) : ""}</span>
                 </div>
                 <div class="item-actions">
                     <button class="btn-icon-only" title="Edit" onclick="editEvent(${e.id})"><i class="fa-solid fa-pen"></i></button>
@@ -543,9 +556,9 @@ async function fetchEvents() {
 window.editEvent = function(id) {
     const ev = (window._eventsCache || []).find(x => x.id === id);
     if (!ev) return;
-    openModal("Edit Life Event", [
+    openModal("Edit Constraint", [
         { id: "title", label: "Title", value: ev.title, required: true },
-        { id: "event_type", label: "Type", type: "select", value: ev.event_type, options: [
+        { id: "type", label: "Type", type: "select", value: ev.type, options: [
             { value: "vacation", label: "Vacation" },
             { value: "business_trip", label: "Business Trip" },
             { value: "party", label: "Party/Social" },
@@ -553,23 +566,23 @@ window.editEvent = function(id) {
         ]},
         { id: "start_date", label: "Start", type: "date", value: ev.start_date, required: true },
         { id: "end_date", label: "End", type: "date", value: ev.end_date, required: true },
-        { id: "impact_description", label: "Impact on training", type: "textarea", value: ev.impact_description || "" },
+        { id: "description", label: "Impact on training", type: "textarea", value: ev.description || "" },
     ], async (vals) => {
-        const res = await fetch(`${API_BASE}/api/life-events/${id}`, {
+        const res = await fetch(`${API_BASE}/api/constraints/${id}`, {
             method: "PUT", headers: { "Content-Type": "application/json" },
             body: JSON.stringify(vals),
         });
         const data = await res.json();
-        if (res.ok) { logConsole(data.message || "Life event updated."); closeModal(); fetchEvents(); }
+        if (res.ok) { logConsole(data.message || "Constraint updated."); closeModal(); fetchEvents(); }
         else logConsole(`Update failed: ${data.error}`, "error");
     });
 };
 
 window.deleteEvent = async function(id) {
-    if (!confirm("Delete this life event?")) return;
+    if (!confirm("Delete this constraint?")) return;
     try {
-        const res = await fetch(`${API_BASE}/api/life-events/${id}`, { method: "DELETE" });
-        if (res.ok) { logConsole("Life event deleted."); fetchEvents(); }
+        const res = await fetch(`${API_BASE}/api/constraints/${id}`, { method: "DELETE" });
+        if (res.ok) { logConsole("Constraint deleted."); fetchEvents(); }
     } catch (e) { logConsole("Failed to delete event", "error"); }
 };
 
@@ -1212,15 +1225,17 @@ document.getElementById("form-add-event").addEventListener("submit", async (e) =
     const title = document.getElementById("event-title").value;
     const start_date = document.getElementById("event-start").value;
     const end_date = document.getElementById("event-end").value;
-    const event_type = document.getElementById("event-type").value;
-    const impact_description = document.getElementById("event-desc").value;
-    logConsole(`Logging life event: ${title}...`, "system");
+    const type = document.getElementById("event-type").value;
+    const description = document.getElementById("event-desc").value;
+    logConsole(`Logging constraint: ${title}...`, "system");
     try {
-        const res = await fetch(`${API_BASE}/api/life-events`, {
+        // Default binding 'soft' — this form has no bindingness selector; a deliberate
+        // 'hard' block is authored via `constraint add --hard` or `constraint edit`.
+        const res = await fetch(`${API_BASE}/api/constraints`, {
             method: "POST", headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ title, start_date, end_date, event_type, impact_description }),
+            body: JSON.stringify({ title, start_date, end_date, type, description, binding: "soft" }),
         });
-        if (res.ok) { logConsole(`Logged life event '${title}'!`); document.getElementById("form-add-event").reset(); fetchEvents(); }
+        if (res.ok) { logConsole(`Logged constraint '${title}'!`); document.getElementById("form-add-event").reset(); fetchEvents(); }
         else { const data = await res.json(); logConsole(`Log event failed: ${data.error}`, "error"); }
     } catch (err) { logConsole(`Error logging event: ${err.message}`, "error"); }
 });

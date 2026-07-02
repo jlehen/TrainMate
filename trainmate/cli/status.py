@@ -228,16 +228,21 @@ def run_status(
             if g.get('description'):
                 print(format_labeled_block("  Description:", g['description']))
 
-        events = cli.db.get_lifeevents()
-        print(bold(cyan("\nLife Events:")))
-        if not events:
+        constraints = cli.db.get_constraints(_today_str())
+        print(bold(cyan("\nActive Constraints:")))
+        if not constraints:
             print("- None")
-        for e in events:
+        for c in constraints:
+            ctype = c.get('type')
+            type_str = f" ({magenta(ctype)})" if ctype else ""
+            sport_str = f" [{c['sport']}]" if c.get('sport') else ""
             print(
-                f"- ID: {e['id']} | {yellow(e['title'])} ({magenta(e['event_type'])}): "
-                f"{cyan(e['start_date'])} to {cyan(e['end_date'])}"
+                f"- ID: {c['id']} | {yellow(c['title'])}{type_str}: "
+                f"{cyan(c['start_date'])} to {cyan(c['end_date'])} "
+                f"| {c.get('binding', 'soft')}{sport_str}"
+                + (" | plan-shaping" if c.get('replan') else "")
             )
-            if e.get('impact_description'):
-                print(format_labeled_block("  Impact:", e['impact_description']))
+            if c.get('description'):
+                print(format_labeled_block("  Details:", c['description']))
 
     print(bold(cyan("\n================================")))

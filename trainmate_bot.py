@@ -69,7 +69,7 @@ MENU_COMMANDS = [
     ("data", "Pull/show Garmin metrics & activities"),
     ("context", "Author daily-context signals"),
     ("learnings", "Inspect coach learnings"),
-    ("lifeevent", "Manage life events"),
+    ("constraint", "Manage directives the coach works around"),
     ("cancel", "Abort the command awaiting your answer"),
     ("help", "Show command help"),
 ]

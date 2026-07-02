@@ -15,6 +15,7 @@ _ALL_TABLES = [
     "sync_state",
     "daily_context",
     "lifeevents",
+    "constraints",
     "objectives",
 ]
 
