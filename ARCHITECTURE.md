@@ -877,7 +877,7 @@ so it has no handler of its own.
 | `context`    | `add`        | `ctx a`  | Author daily-context signal(s) (`text` or `-l/--label`, `-m METRIC`, `--value N`, `--from`, `--until`; one tagged all-day event per day, prompts if omitted) |
 | `context`    | `rm`         | `ctx r`  | Remove signal(s) by ID(s), or by `--from`/`--until`/`-m` (deletes calendar event + local row) |
 | `context`    | `list`       | `ctx l`  | List signals (`-m METRIC`, `--from`, `--until`; default window `metrics_lookback_days`) |
-| `context`    | `list-metrics` | `ctx lm` | Show distinct metrics in use with counts and date span (`c` is a deprecated alias of `ctx`) |
+| `context`    | `list-metrics` | `ctx lm` | Show distinct metrics in use with counts and date span                   |
 | `learnings`  | `list`       | `l`      | Show coach learnings (`--sport`, `--confidence`, `--dormant`)            |
 | `learnings`  | `show`       | —        | Show a learning's full text + per-week evidence basis by ID             |
 | `learnings`  | `edit`       | —        | Edit a learning's text by ID                                            |
@@ -1328,7 +1328,7 @@ Calendar (tagged events) ──► google_calendar.sync_calendar_context
   evidence fingerprint so an added/edited/deleted signal invalidates the cached
   reconstruction.
 
-**Outbound flow (first-party authoring — `context` command, alias `c`):** for
+**Outbound flow (first-party authoring — `context` command, alias `ctx`):** for
 ad-hoc signals where standing up a syncer is overkill (a heatwave), the user can
 author the same tagged events directly, since the private-property tag is
 unsettable from the Calendar UI. `context add` writes one tagged all-day event

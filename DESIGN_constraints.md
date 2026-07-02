@@ -189,8 +189,7 @@ constraint add [--start YYYY-MM-DD] [--end YYYY-MM-DD] [--sport SPORT]
 
 To keep `cons` (constraint) and context from colliding in the head and at the
 prompt, the `context` command's canonical short alias becomes **`ctx`**; the
-single-letter `c` is retired (kept as a hidden back-compat alias for one release,
-emitting a deprecation notice). No data or schema change — parser config only.
+single-letter `c` is retired. No data or schema change — parser config only.
 
 ---
 

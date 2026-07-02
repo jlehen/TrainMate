@@ -548,7 +548,7 @@ def main() -> None:
     # context command & subparsers — first-party daily-context authoring
     context_parser = subparsers.add_parser(
         "context",
-        aliases=["ctx", "c"],
+        aliases=["ctx"],
         help="Author/list/remove daily-context signals (heat, sleep, stress, …)",
         description=(
             "Manage external daily-context signals — the same tagged Google Calendar "
@@ -1338,11 +1338,7 @@ def main() -> None:
             run_constraint_show(args)
         elif sub == "wipe":
             run_constraint_wipe(args)
-    elif cmd in ("context", "ctx", "c"):
-        # `c` is retired in favour of `ctx` (to avoid colliding with `cons`); kept one
-        # release as a back-compat alias with a deprecation notice (DESIGN_constraints.md §4).
-        if cmd == "c":
-            print(yellow("Note: 'c' is deprecated; use 'ctx' for the context command."))
+    elif cmd in ("context", "ctx"):
         if not args.subcommand:
             context_parser.print_help()
             sys.exit(1)

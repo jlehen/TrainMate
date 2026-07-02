@@ -42,7 +42,7 @@ or schema changes.
 
 ## 3. Command surface
 
-Top-level `context` (alias `c`), with subcommands:
+Top-level `context` (alias `ctx`), with subcommands:
 
 | Subcommand | Alias | Purpose |
 |---|---|---|
