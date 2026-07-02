@@ -9,7 +9,6 @@ working unchanged.
 
 from trainmate.db.base import BaseDB
 from trainmate.db.objectives import ObjectivesMixin
-from trainmate.db.lifeevents import LifeEventsMixin
 from trainmate.db.constraints import ConstraintsMixin
 from trainmate.db.dailycontext import DailyContextMixin
 from trainmate.db.workouts import WorkoutsMixin
@@ -32,7 +31,6 @@ from trainmate.db.wipes import WipesMixin
 
 class Database(
     ObjectivesMixin,
-    LifeEventsMixin,
     ConstraintsMixin,
     DailyContextMixin,
     WorkoutsMixin,

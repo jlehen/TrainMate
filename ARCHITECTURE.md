@@ -84,7 +84,7 @@ classes themselves.
   singletons/helpers handlers reference via `import trainmate_cli as cli`, and a
   `__main__` alias. No business logic.
 - **`trainmate/cli/`** — per-command-family handler modules (`run_*()`): `status`,
-  `goals`, `constraints`, `lifeevents` (deprecated forwarder), `context`, `learnings`,
+  `goals`, `constraints`, `context`, `learnings`,
   `plans`, `workouts`, `data`, plus shared `common`.
 - **`trainmate_web.py`** — Flask REST API; thin handler functions calling `db`,
   `coach_service`, `calendar_syncer` (pure reader — never pulls).
@@ -401,7 +401,7 @@ from trainmate.coach import coach_service
 **Package:** `trainmate/db/` · **Singleton:** `db = Database()` (in `__init__.py`)
 
 `Database` is composed from per-domain mixins — `base.py` (`BaseDB`:
-connection + schema setup), `objectives.py`, `constraints.py`, `lifeevents.py` (legacy),
+connection + schema setup), `objectives.py`, `constraints.py`,
 `dailycontext.py`, `workouts.py`, `activities.py`, `learnings.py`, `analysis.py`,
 `periodization.py`, `wipes.py` — all re-exported from `__init__.py` so
 `from trainmate.db import ...` is unchanged.
@@ -444,8 +444,6 @@ methods whose behavior is *not* obvious from that convention are called out belo
   convention: `get_constraints(start, end)` returns rows overlapping a window (open-ended
   when `end` is None — the plan form), and `list_constraint_types()` returns the distinct
   opaque `type` labels in use (powers the `add` prompt).
-- **Life Events** (`lifeevents.py`) — legacy CRUD, retained read-only for the deprecated
-  `lifeevent` forwarder; superseded by Constraints.
 - **Daily Context** (`dailycontext.py`) — external signals are reconciled **by
   Calendar event id**, so the writer/deleter are `*_by_event(google_event_id, …)`
   variants alongside the id-based ones used by the `context` command. Cleared by
@@ -526,17 +524,8 @@ at any horizon (DESIGN_constraints.md). Supersedes `lifeevents`.
 | `source`      | TEXT       | `manual` \| `message` \| `lifeevent` (migration)          |
 | `created`     | TEXT       | UTC ISO                                                    |
 
-### lifeevents (legacy)
-Superseded by `constraints`; kept read-only until the deprecated `lifeevent` forwarder is
-removed, then dropped. Rows were migrated verbatim (binding=`soft`, replan=1, source=`lifeevent`).
-| Column               | Type       | Notes                                          |
-|----------------------|------------|------------------------------------------------|
-| `id`                 | INTEGER PK |                                                |
-| `title`              | TEXT       |                                                |
-| `start_date`         | TEXT       | YYYY-MM-DD                                     |
-| `end_date`           | TEXT       | YYYY-MM-DD                                     |
-| `event_type`         | TEXT       | `business_trip`, `vacation`, `party`, `other`  |
-| `impact_description` | TEXT       |                                                |
+The old `lifeevents` table it superseded has been dropped (its rows were migrated
+verbatim into `constraints` as binding=`soft`, replan=1, source=`lifeevent`).
 
 ### workouts
 
@@ -865,7 +854,7 @@ Invoked as `python trainmate_cli.py [--llm-model MODEL] <command> [subcommand] [
 `trainmate_cli.py` holds only `main()` (the argparse dispatcher) and the
 patchable singletons; the handler functions, named
 `run_<command>_<subcommand>()`, live in the `trainmate/cli/` package
-(one module per command family: `status`, `goals`, `constraints`, `lifeevents` (forwarder), `context`,
+(one module per command family: `status`, `goals`, `constraints`, `context`,
 `learnings`, `plans`, `workouts`, `data`). `help` is the one exception — it
 just introspects the parser tree (`_print_command_tree` in `trainmate_cli.py`),
 so it has no handler of its own.
@@ -885,7 +874,6 @@ so it has no handler of its own.
 | `constraint` | `list`       | `cons l` | List active/upcoming directives (`--all`, `-v`, `--sport`, `--type`, `--from`, `--until`; default window `metrics_lookback_days`) |
 | `constraint` | `show`       | `cons s` | Show a directive in detail (incl. plan-shaping status)                  |
 | `constraint` | `wipe`       | —        | Delete all constraints                                                  |
-| `lifeevent`  | (all)        | `le`, `e` | **Deprecated** — forwards to `constraint … --replan` with a notice     |
 | `context`    | `add`        | `ctx a`  | Author daily-context signal(s) (`text` or `-l/--label`, `-m METRIC`, `--value N`, `--from`, `--until`; one tagged all-day event per day, prompts if omitted) |
 | `context`    | `rm`         | `ctx r`  | Remove signal(s) by ID(s), or by `--from`/`--until`/`-m` (deletes calendar event + local row) |
 | `context`    | `list`       | `ctx l`  | List signals (`-m METRIC`, `--from`, `--until`; default window `metrics_lookback_days`) |

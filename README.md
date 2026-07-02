@@ -57,8 +57,8 @@ does the coaching reasoning.
     one, is advisory — preferences the coach honors by judgement. Whether a constraint
     *reshapes the plan* is **derived** from its
     magnitude and confirmed by you — never a category you pick blind. (Life events are
-    just plan-shaping constraints; the old `lifeevent` command now forwards to
-    `constraint`.)
+    just plan-shaping constraints; the old `lifeevent` command has been removed in
+    favor of `constraint`.)
   - *Daily context* adds **weighted signals** (alcohol, poor sleep, stress)
     ingested automatically from tagged Google Calendar events. These don't
     reshape the plan; they help the daily adaptation tell lifestyle noise from

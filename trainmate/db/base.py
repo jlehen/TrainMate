@@ -48,36 +48,15 @@ class BaseDB:
                 )
             """)
 
-            # Legacy `lifeevents` table (superseded by `constraints`, see
-            # DESIGN_constraints.md). Kept read-only until the `lifeevent` forwarder is
-            # removed, so migrated rows and older tests still resolve. The old
-            # `constraints`→`lifeevents` auto-rename (and its `constraints_hash` sibling
-            # below) is deliberately GONE: the name `constraints` now belongs to the new
-            # table, and leaving the rename in place would hijack the new schema on any DB
-            # without a `lifeevents` table (§9 legacy-name hazard). The unrelated
-            # `life_events`→`lifeevents` rename is harmless and retained.
-            cursor.execute(
-                "SELECT name FROM sqlite_master WHERE type='table' AND name='lifeevents'"
-            )
-            lifeevents_exists = cursor.fetchone()
-            if not lifeevents_exists:
-                cursor.execute(
-                    "SELECT name FROM sqlite_master WHERE type='table' AND name='life_events'"
-                )
-                if cursor.fetchone():
-                    cursor.execute("ALTER TABLE life_events RENAME TO lifeevents")
-                else:
-                    cursor.execute("""
-                        CREATE TABLE IF NOT EXISTS lifeevents (
-                            id INTEGER PRIMARY KEY AUTOINCREMENT,
-                            title TEXT NOT NULL,
-                            start_date TEXT NOT NULL,
-                            end_date TEXT NOT NULL,
-                            -- event_type values: 'business_trip', 'vacation', 'party', 'other'
-                            event_type TEXT NOT NULL,
-                            impact_description TEXT
-                        )
-                    """)
+            # Drop the legacy `lifeevents` table (and its even older `life_events` name).
+            # It was superseded by `constraints` (DESIGN_constraints.md §5) and kept
+            # read-only for one release while the `lifeevent` forwarder deprecated out; both
+            # the forwarder and the table are now removed together (§10 step 8). The one-off
+            # row copy that migrated its contents into `constraints` has already run for any
+            # DB that had rows; dropping here reclaims the space. `DROP … IF EXISTS` is
+            # idempotent, so it is safe to leave in `_init_db` (which runs every invocation).
+            cursor.execute("DROP TABLE IF EXISTS lifeevents")
+            cursor.execute("DROP TABLE IF EXISTS life_events")
 
             # Unified directives — everything the athlete asks the coach to work around, at
             # any horizon (DESIGN_constraints.md §5). Supersedes `lifeevents`. `type` is an
@@ -543,14 +522,6 @@ class BaseDB:
             cursor.execute(
                 "CREATE INDEX IF NOT EXISTS idx_daily_context_date ON daily_context(date)"
             )
-
-            # NOTE: the one-time lifeevents -> constraints row copy is deliberately NOT
-            # done here. Unlike every schema change above (idempotent by construction), a
-            # cross-table row copy has no natural guard, and — critically — it must also
-            # backfill `constraints_hash` on active macrocycles so migrating doesn't
-            # spuriously invalidate existing plans (DESIGN_constraints.md §7/§9). That is an
-            # explicit, operator-run one-off: scripts/migrate_lifeevents_to_constraints.py.
-            # The `lifeevents` table above is kept read-only until the forwarder is removed.
 
             conn.commit()
 

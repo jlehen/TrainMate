@@ -184,10 +184,11 @@ class TestPeriodization(unittest.TestCase):
             {"reasoning": "Reasoning", "workouts": []},
         ]
 
-        # Life event triggers hash mismatch → replanning
-        test_db.add_lifeevent(
+        # A plan-shaping constraint triggers hash mismatch → replanning
+        test_db.add_constraint(
             title="Business Trip", start_date="2026-06-10", end_date="2026-06-12",
-            event_type="business_trip", impact_description="limited training time",
+            binding="soft", type="business_trip",
+            description="limited training time", replan=1,
         )
 
         coach_service.replan(force=False)

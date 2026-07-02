@@ -45,7 +45,7 @@ class TestTrainMateCLI(unittest.TestCase):
         self.assertEqual(exit_code, 0)
         self.assertIn("TrainMate - Local Training Coach CLI", stdout)
         self.assertIn("goal", stdout)
-        self.assertIn("lifeevent", stdout)
+        self.assertIn("constraint", stdout)
         self.assertIn("workout", stdout)
         self.assertIn("plan", stdout)
         self.assertIn("status", stdout)
@@ -170,13 +170,6 @@ class TestTrainMateCLI(unittest.TestCase):
         exit_code, stdout, stderr = self.run_cli(["cons", "list", "--all"])
         self.assertEqual(exit_code, 0)
         self.assertNotIn("Ibiza Vacation", stdout)
-
-    def test_lifeevent_forwarder_deprecated(self):
-        """The retained `lifeevent` command warns and forwards to `constraint`."""
-        exit_code, stdout, stderr = self.run_cli(["lifeevent", "list"])
-        self.assertEqual(exit_code, 0)
-        self.assertIn("'lifeevent' is deprecated", stdout)
-        self.assertIn("=== ATHLETE CONSTRAINTS ===", stdout)
 
     @patch("trainmate_cli.calendar_syncer")
     def test_context_add_and_list(self, mock_calendar):
@@ -831,7 +824,7 @@ class TestTrainMateCLI(unittest.TestCase):
         mock_garmin.pull.assert_not_called()
 
     def test_wipe_commands_confirmation_flow(self):
-        """goal/lifeevent/plan/data wipe share one confirmation flow: `n` cancels,
+        """goal/constraint/plan/data wipe share one confirmation flow: `n` cancels,
         `y` confirms, `-y` skips the prompt. (`workout wipe` is covered separately
         for its calendar side-effect.)"""
         def seed_goal():
