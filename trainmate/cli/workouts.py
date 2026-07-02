@@ -39,7 +39,7 @@ def run_workout_adapt(args: argparse.Namespace) -> None:
 
     # Display rolling trajectory
     try:
-        history_days = config.metrics_lookback_days
+        history_days = getattr(args, "lookback", None) or config.metrics_lookback_days
         date_obj = datetime.strptime(date_str, "%Y-%m-%d").date()
         start_date = (date_obj - timedelta(days=history_days - 1)).strftime("%Y-%m-%d")
         metrics_history = cli.db.get_metrics_cache(start_date=start_date, end_date=date_str)

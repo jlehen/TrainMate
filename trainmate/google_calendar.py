@@ -10,6 +10,10 @@ from trainmate.types import Workout
 from trainmate.calendar_state import calendar_signature
 from trainmate.util import yellow, dim
 
+# Events fetched per Calendar API page during a context sync (the response is paged
+# through with pageToken regardless, so this only tunes round-trips vs payload size).
+CALENDAR_SYNC_PAGE_SIZE = 250
+
 
 class CalendarSyncer:
     """Synchronizes planned and adapted workouts to Google Calendar as all-day events."""
@@ -334,7 +338,7 @@ class CalendarSyncer:
                 'calendarId': self.calendar_id,
                 'showDeleted': True,
                 'singleEvents': True,
-                'maxResults': 250,
+                'maxResults': CALENDAR_SYNC_PAGE_SIZE,
             }
             # syncToken and the initial-sync params are mutually exclusive beyond
             # pageToken; reuse the *same* base params so the token stays valid.

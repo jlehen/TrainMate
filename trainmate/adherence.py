@@ -1,6 +1,7 @@
 from datetime import timedelta
 from typing import List, Dict, Any, Tuple, Optional
 
+from trainmate.config import config
 from trainmate.garmin import activity_load, _rpe_tss
 from trainmate.sports import SPORT_MAPPING
 
@@ -33,13 +34,17 @@ def _planned_load(w: Dict[str, Any]) -> float:
 def _adherence_tolerance(exp_load: float) -> float:
     """Dynamic +/- tolerance for the duration/workload comparison: looser for
     easy sessions (where small absolute swings are large in %), tighter for hard
-    ones. Linearly interpolated between 50% at load 20 and 15% at load 100."""
-    if exp_load <= 20.0:
-        return 0.50
-    if exp_load >= 100.0:
-        return 0.15
-    fraction = (exp_load - 20.0) / (100.0 - 20.0)
-    return 0.50 - fraction * (0.50 - 0.15)
+    ones. Linearly interpolated between `easy_pct` at `low_load` and `hard_pct`
+    at `high_load` (config.adherence_tolerance)."""
+    t = config.adherence_tolerance
+    easy_pct, hard_pct = t["easy_pct"], t["hard_pct"]
+    low_load, high_load = t["low_load"], t["high_load"]
+    if exp_load <= low_load:
+        return easy_pct
+    if exp_load >= high_load:
+        return hard_pct
+    fraction = (exp_load - low_load) / (high_load - low_load)
+    return easy_pct - fraction * (easy_pct - hard_pct)
 
 
 def _discrepancy_reasons(

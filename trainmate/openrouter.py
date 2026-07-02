@@ -169,7 +169,10 @@ class OpenRouterClient:
         resp_data = None
         try:
             print(f"Querying OpenRouter with model: {self.model}")
-            response = requests.post(self.api_url, headers=headers, json=payload, timeout=45)
+            response = requests.post(
+                self.api_url, headers=headers, json=payload,
+                timeout=config.llm_request_timeout,
+            )
             response.raise_for_status()
             resp_data = response.json()
             

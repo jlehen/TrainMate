@@ -15,12 +15,8 @@ RETIRE_PROPOSAL = "retire"
 # A learning is "dormant" — kept in the DB but excluded from LLM prompts — once it has gone
 # unreinforced for longer than the budget for its confidence level. Decay is soft: a dormant
 # learning revives the moment new supporting evidence lands (or a staleness demotion re-arms
-# its clock). Crossing the budget also proposes a one-level staleness demotion (§7/§8).
-LEARNING_STALENESS_DAYS = {
-    "tentative": 21,
-    "moderate": 60,
-    "established": 180,
-}
+# its clock). Crossing the budget also proposes a one-level staleness demotion (§7/§8). The
+# per-level budgets (days) are tunable via `config.learning_staleness_days`.
 
 
 def normalize_sports(value: Any) -> str:
@@ -89,8 +85,9 @@ def learning_is_dormant(learning: Dict[str, Any], now: Optional[datetime] = None
         ref_dt = datetime.fromisoformat(ref)
     except (ValueError, TypeError):
         return False
-    budget = LEARNING_STALENESS_DAYS.get(
-        learning.get("confidence") or "tentative", LEARNING_STALENESS_DAYS["tentative"]
+    staleness_days = config.learning_staleness_days
+    budget = staleness_days.get(
+        learning.get("confidence") or "tentative", staleness_days["tentative"]
     )
     return (now - ref_dt) > timedelta(days=budget)
 

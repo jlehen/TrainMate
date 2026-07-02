@@ -19,9 +19,16 @@ from trainmate.config import config
 from trainmate.db import db
 from trainmate.util import today_date, today_str, yellow, red, dim
 
+# Sports-science windows for the acute:chronic workload ratio (Gabbett/Banister
+# lineage): a 7-day acute load over a 28-day chronic load, the chronic expressed
+# as a rolling weekly average (28/7 = 4 weeks). Standard constants, not tunables.
+ACUTE_WINDOW_DAYS = 7
+CHRONIC_WINDOW_DAYS = 28
+CHRONIC_WEEKS = CHRONIC_WINDOW_DAYS / ACUTE_WINDOW_DAYS  # 4.0
+
 # Raw history needed before a displayed window so ACWR/chronic-load/baselines
 # (28-day lookbacks) are correct for the earliest displayed day.
-DERIVATION_PAD_DAYS = 28
+DERIVATION_PAD_DAYS = CHRONIC_WINDOW_DAYS
 
 
 class GarminAuthRequired(Exception):
@@ -237,13 +244,10 @@ POWER_ZONE_TSS_PER_SEC = (0.0069, 0.0117, 0.0178, 0.0250, 0.0333, 0.0506, 0.0711
 # across Garmin's 5-zone HR model (Z1 recovery -> Z5 above threshold).
 HR_ZONE_TSS_PER_SEC = (0.0055, 0.0111, 0.0166, 0.0222, 0.0277)
 
-# Minimum fraction of an activity's duration that must fall inside an HR zone
-# for hrTSS to be trusted. Garmin's HR zone 1 has a non-zero lower bound, so
-# time spent below it (easy walks, yoga, lift-served skiing) lands in no zone
-# and hrTSS badly undercounts. Below this coverage we defer to RPE instead.
-# Calibrated against the activity history: genuine aerobic sessions cluster at
-# >=0.77 coverage, low-intensity ones at <0.3, with a clean gap at 0.5.
-HR_ZONE_COVERAGE_MIN = 0.5
+# The minimum HR-zone coverage before hrTSS is trusted lives in config as
+# `garmin.hr_zone_coverage_min` (default 0.5). Garmin's HR zone 1 has a non-zero
+# lower bound, so time spent below it (easy walks, yoga, lift-served skiing) lands
+# in no zone and hrTSS badly undercounts; below the threshold we defer to RPE.
 
 
 def _zone_tss(
@@ -274,12 +278,6 @@ def _rpe_tss(rpe: float, duration_sec: float) -> float:
     monitoring exercise training", validated for resistance work by Sweet et
     al. (2004). Maps the Borg CR-10 1-10 scale to duration: (RPE*10) per hour."""
     return round((rpe * 10.0) * (duration_sec / 3600.0), 1)
-
-
-# Default ratio of RPE-implied load to measured (power/HR) load above which a
-# session is flagged to the coach as "felt harder than it measured" (hidden
-# fatigue: heat, sleep debt, muscular damage). Overridable via config.yaml.
-RPE_DIVERGENCE_RATIO_DEFAULT = 1.5
 
 
 def measured_tss(
@@ -324,7 +322,7 @@ def compute_load(
         # Trust hrTSS only when the HR zones cover enough of the session; sparse
         # coverage means the effort sat below zone 1 (low-intensity work) and
         # hrTSS undercounts, so prefer the user's RPE when available.
-        if _hr_zone_coverage(hr_zone_sec, duration_sec) >= HR_ZONE_COVERAGE_MIN:
+        if _hr_zone_coverage(hr_zone_sec, duration_sec) >= config.hr_zone_coverage_min:
             return hr, "hr", None
         if rpe:
             return _rpe_tss(float(rpe), duration_sec), "rpe", None
@@ -347,7 +345,7 @@ def _measurement_is_load(act: Dict[str, Any], duration_sec: float) -> bool:
     has_hr = any(act.get(f"zone{i}_sec") for i in range(1, 6))
     if not has_hr:
         return True  # no zone data to second-guess the stored measurement
-    return _hr_zone_coverage(act, duration_sec) >= HR_ZONE_COVERAGE_MIN
+    return _hr_zone_coverage(act, duration_sec) >= config.hr_zone_coverage_min
 
 
 def _divergence_ratio(act: Dict[str, Any], duration_sec: float) -> Optional[float]:
@@ -365,7 +363,7 @@ def _divergence_ratio(act: Dict[str, Any], duration_sec: float) -> Optional[floa
 
 
 def _divergence_threshold() -> float:
-    return float(config.get("coach", {}).get("rpe_divergence_ratio", RPE_DIVERGENCE_RATIO_DEFAULT))
+    return config.rpe_divergence_ratio
 
 
 def activity_load(act: Dict[str, Any]) -> float:
@@ -601,9 +599,9 @@ def recompute_derived() -> None:
         date_str = m["date"]
         date_obj = _to_date(date_str)
 
-        acute = sum(daily_load.get((date_obj - timedelta(days=d)).isoformat(), 0.0) for d in range(7))
-        total_28 = sum(daily_load.get((date_obj - timedelta(days=d)).isoformat(), 0.0) for d in range(28))
-        chronic = total_28 / 4.0
+        acute = sum(daily_load.get((date_obj - timedelta(days=d)).isoformat(), 0.0) for d in range(ACUTE_WINDOW_DAYS))
+        total_chronic = sum(daily_load.get((date_obj - timedelta(days=d)).isoformat(), 0.0) for d in range(CHRONIC_WINDOW_DAYS))
+        chronic = total_chronic / CHRONIC_WEEKS
         if chronic > 0.0:
             acwr = acute / chronic
         elif acute > 0.0:

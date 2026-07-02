@@ -49,6 +49,13 @@ class Config:
         return self.get("llm", {}).get("model", "google/gemini-3.5-flash")
 
     @property
+    def llm_request_timeout(self) -> int:
+        """Seconds an OpenRouter HTTP request may run before it's aborted
+        (openrouter.py). Generation is slow — the old hard-coded 45s tripped on
+        large plans — so the default is generous. Under `llm:`. Default 120."""
+        return int(self.get("llm", {}).get("request_timeout_seconds", 120))
+
+    @property
     def service_account_file(self) -> str:
         """Gets the service account file path. Resolves relative path to absolute."""
         path = self.get("google", {}).get("service_account_file", "service_account.json")
@@ -141,6 +148,42 @@ class Config:
         """
         return float(self.get("coach", {}).get("minor_activity_load_threshold", 25.0))
 
+    @property
+    def rpe_divergence_ratio(self) -> float:
+        """Ratio of RPE-implied load to measured (power/HR) load above which a
+        session is flagged 'felt harder than it measured' and its load taken from
+        RPE instead (garmin.py). Under `coach:`. Default 1.5; set very high to
+        disable."""
+        return float(self.get("coach", {}).get("rpe_divergence_ratio", 1.5))
+
+    @property
+    def adherence_tolerance(self) -> dict[str, float]:
+        """Bounds of the dynamic +/- tolerance band for the duration/workload
+        adherence comparison (adherence.py): `easy_pct` at planned loads <=
+        `low_load`, `hard_pct` at loads >= `high_load`, linearly interpolated
+        between. Looser for easy sessions (small absolute swings read large in %),
+        tighter for hard ones. Under `coach:`."""
+        raw = self.get("coach", {}).get("adherence_tolerance") or {}
+        return {
+            "easy_pct": float(raw.get("easy_pct", 0.50)),
+            "hard_pct": float(raw.get("hard_pct", 0.15)),
+            "low_load": float(raw.get("low_load", 20.0)),
+            "high_load": float(raw.get("high_load", 100.0)),
+        }
+
+    @property
+    def learning_staleness_days(self) -> dict[str, int]:
+        """Days a learning may go unreinforced before it goes dormant and earns a
+        one-level staleness demotion, per confidence level (db/learnings.py). The
+        tunable sibling of `learning_confidence_thresholds`. Overridable via the
+        top-level `learning_staleness_days` map."""
+        raw = self.get("learning_staleness_days") or {}
+        return {
+            "tentative": int(raw.get("tentative", 21)),
+            "moderate": int(raw.get("moderate", 60)),
+            "established": int(raw.get("established", 180)),
+        }
+
     # --- Garmin direct-pull knobs (see DESIGN_garmin_direct_pull.md §13) ---
     @property
     def garmin_email(self) -> Optional[str]:
@@ -188,6 +231,16 @@ class Config:
     def garmin_throttle_seconds(self) -> float:
         """Default sleep between Garmin API calls; --sleep overrides on `data pull` (default 0.2)."""
         return float(self.get("garmin", {}).get("throttle_seconds", 0.2))
+
+    @property
+    def hr_zone_coverage_min(self) -> float:
+        """Minimum fraction of an activity's duration that must fall inside a known
+        HR zone before hrTSS is trusted (garmin.py); below it, effort sat under
+        zone 1 and hrTSS undercounts, so RPE is preferred. Under `garmin:`.
+        Default 0.5 — calibrated against the activity history, where genuine aerobic
+        sessions cluster at >=0.77 coverage and low-intensity ones at <0.3, with a
+        clean gap at 0.5."""
+        return float(self.get("garmin", {}).get("hr_zone_coverage_min", 0.5))
 
     @property
     def calendar_context_tag(self) -> str:
@@ -268,6 +321,26 @@ class Config:
         phone-width monospace block then double-wraps; ~48 fits portrait without
         the client re-wrapping. Default 48."""
         return int(self.get("telegram", {}).get("wrap_width", 48))
+
+    # --- Web front-end (trainmate_web.py) ---
+    @property
+    def web_host(self) -> str:
+        """Interface the Flask web UI binds to. Defaults to loopback (127.0.0.1)
+        so the dev server isn't exposed on all interfaces; set to 0.0.0.0 under
+        `web:` to serve the LAN. Under `web:`."""
+        return self.get("web", {}).get("host", "127.0.0.1")
+
+    @property
+    def web_port(self) -> int:
+        """TCP port the web UI listens on. Under `web:`. Default 5000."""
+        return int(self.get("web", {}).get("port", 5000))
+
+    @property
+    def web_debug(self) -> bool:
+        """Whether Flask runs with the Werkzeug debugger/reloader. Defaults to
+        False — the interactive debugger is a remote-code-execution vector on any
+        traceback and must never be on for a reachable bind. Under `web:`."""
+        return bool(self.get("web", {}).get("debug", False))
 
 # Singleton instance
 config = Config()

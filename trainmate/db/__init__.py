@@ -23,7 +23,6 @@ from trainmate.db.learnings import (
     derive_confidence,
     learning_is_dormant,
     CONFIDENCE_LEVELS,
-    LEARNING_STALENESS_DAYS,
     RETIRE_PROPOSAL,
 )
 from trainmate.db.analysis import AnalysisCacheMixin
@@ -60,6 +59,5 @@ __all__ = [
     "derive_confidence",
     "learning_is_dormant",
     "CONFIDENCE_LEVELS",
-    "LEARNING_STALENESS_DAYS",
     "RETIRE_PROPOSAL",
 ]

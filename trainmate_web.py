@@ -777,4 +777,4 @@ def sync_metrics() -> Any:
 
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000, debug=True)
+    app.run(host=config.web_host, port=config.web_port, debug=config.web_debug)

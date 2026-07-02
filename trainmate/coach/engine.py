@@ -11,6 +11,13 @@ from trainmate.coach.formatting import (
     format_removed_workouts, format_daily_context,
 )
 
+# Macrocycle duration bounds (weeks) enforced when turning a goal into a periodization
+# plan: shorter than MIN can't be periodized; longer than MAX is split into sequential
+# intermediate goals. These mirror the science guidelines (science/periodization.txt) and
+# are shared by the control flow (service.py) and the split-prompt text below.
+MIN_PLAN_WEEKS = 5
+MAX_PLAN_WEEKS = 24
+
 
 # Shared JSON-output instruction for incrementally updating coach learnings. The LLM emits
 # only deltas; the app owns the merge so unchanged observations are never lost. The model
@@ -812,7 +819,7 @@ Adherence Discrepancies & Violations:
     def _generate_intermediate_goals(
         self, next_goal: Objective, today_str: str, duration_weeks: float
     ) -> Dict[str, Any]:
-        """Queries the LLM to generate intermediate objectives to split a >24w timeline."""
+        """Queries the LLM to generate intermediate objectives to split a >MAX_PLAN_WEEKS timeline."""
         orig_title = next_goal['title']
         target_date = next_goal['target_date']
         sport_type = next_goal['sport_type']
@@ -821,14 +828,14 @@ Adherence Discrepancies & Violations:
 
         system_prompt = (
             "You are TrainMate Coach, an advanced AI sports science training coach.\n"
-            "You help split long-term training timelines (exceeding 24 weeks) into "
+            f"You help split long-term training timelines (exceeding {MAX_PLAN_WEEKS} weeks) into "
             "multiple sequential macrocycles.\n"
             "You do this by proposing sports-science-sensible intermediate training goals "
             "(e.g., a base fitness check, a 10K tune-up, or a half marathon test) "
             "that anchor each macrocycle container.\n\n"
             "GUIDELINES FOR INTERMEDIATE GOALS:\n"
             "1. Each macrocycle container leading to a goal must respect the duration constraints\n"
-            "   detailed in the science guidelines (5 to 24 weeks).\n"
+            f"   detailed in the science guidelines ({MIN_PLAN_WEEKS} to {MAX_PLAN_WEEKS} weeks).\n"
             f"2. The target dates for all proposed goals must be sequential, start after "
             f"today ({today_str}), and lead chronologically up to the final event date "
             f"({target_date}).\n"

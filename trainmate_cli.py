@@ -1026,6 +1026,10 @@ def main() -> None:
     )
     w_adapt.add_argument("--date", help="Date in YYYY-MM-DD format (defaults to UTC today)")
     w_adapt.add_argument(
+        "--lookback", type=int, metavar="DAYS",
+        help="Days of recovery-metrics trajectory to display (default: config metrics_lookback_days)"
+    )
+    w_adapt.add_argument(
         "-m", "--message", dest="message",
         help=(
             "Ad-hoc, one-off signal to the coach for THIS adaptation run only (e.g. "

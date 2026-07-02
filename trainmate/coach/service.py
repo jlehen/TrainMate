@@ -10,7 +10,7 @@ from trainmate.sports import canonical_sport
 from trainmate.modification_state import SWAP_REASON_PREFIX, MANUAL_REPLACE_REASON_PREFIX
 from trainmate.garmin import activity_load
 from trainmate.util import today_str as _today_str, today_date as _today_date, cyan, green, yellow, bold, red, gray
-from trainmate.coach.engine import CoachEngine
+from trainmate.coach.engine import CoachEngine, MIN_PLAN_WEEKS, MAX_PLAN_WEEKS
 from trainmate.coach.formatting import format_baseline, _load_science_guidelines
 
 # Fallback look-back for `reflect` when no watermark exists yet (bootstrap not run).
@@ -517,17 +517,17 @@ class CoachService:
         duration_days = (target_date - plan_start_date).days
         duration_weeks = duration_days / 7.0
 
-        if duration_weeks < 5:
+        if duration_weeks < MIN_PLAN_WEEKS:
             raise ValueError(
                 f"Goal '{next_goal['title']}' is too close "
                 f"({duration_weeks:.1f} weeks away from the start date "
                 f"{plan_start_date.strftime('%Y-%m-%d')}). "
-                f"TrainMate requires at least 5 weeks to generate a periodization plan."
+                f"TrainMate requires at least {MIN_PLAN_WEEKS} weeks to generate a periodization plan."
             )
 
-        if duration_weeks > 24:
+        if duration_weeks > MAX_PLAN_WEEKS:
             print(cyan(f"Goal '{next_goal['title']}' is {duration_weeks:.1f} "
-                  "weeks away (> 24 weeks)."))
+                  f"weeks away (> {MAX_PLAN_WEEKS} weeks)."))
             print("Querying LLM to generate intermediate objectives...")
             goals_data = self.engine._generate_intermediate_goals(
                 next_goal=next_goal,
@@ -729,6 +729,7 @@ class CoachService:
             completed_activities=completed_activities or [],
             start_date_obj=today_date_obj,
             history_days=1,
+            minor_activity_load_threshold=config.minor_activity_load_threshold,
         )
         return any(r['completed'] for r in matching)
 
