@@ -373,9 +373,9 @@ Determine the overall periodization strategy (macrocycle) from {plan_start} unti
 goal ({next_goal['target_date']}).
 Divide this timeframe into contiguous, sequential mesocycles (determining the duration of each
 block based on the periodization style guidelines provided in the science file). When planning
-mesocycles, it is acceptable to shorten/extend a block by a few days to align transition or
-recovery periods with the athlete's active constraints, and we should also try to align transition
-boundaries with long constraints (e.g. aligning a deload week or phase change with a travel block).
+mesocycles, it is acceptable to shorten/extend a block by a few days to align its transition or
+recovery boundaries with the athlete's active constraints (e.g. aligning a deload week or phase
+change with a long travel block).
 Make sure there are no gaps between the end date of one mesocycle and the start date of the next.
 The first mesocycle must start on the start date ({plan_start}) and the last mesocycle must end
 on or around the goal date ({next_goal['target_date']}).
@@ -599,6 +599,24 @@ You MUST respond with a JSON object containing:
         model is told to weigh it as today's intent without treating it as a durable
         signal about the block.
         """
+        # has_message gates BOTH the note-handling instructions here and the note DATA
+        # section further down; they must move together, or the model gets told about a
+        # section that isn't present. Computed once and reused in both places.
+        has_message = bool(athlete_message and athlete_message.strip())
+        # Shared change_reason wording, with the note-footprint clause spliced in only when
+        # a note could actually have driven the change.
+        change_reason_field = (
+            '      "change_reason": "One short sentence on why THIS specific session\n'
+            '        changed, e.g. \"Cut to easy Z2 to shed intensity.\"'
+            + (
+                ' If an external\n'
+                '        constraint from the athlete\'s note drove the change rather than\n'
+                '        the metrics, name that cause here so a future run without the note\n'
+                '        understands it, e.g. \"Rest — athlete away, no training access this\n'
+                '        day.\"' if has_message else ''
+            )
+            + ' Keep it to a single sentence; do not restate the overall reason.",\n'
+        )
         custom_task = f"""
 TASK:
 Analyze the athlete's actual workout adherence and physiological metrics trajectory
@@ -664,25 +682,23 @@ eased, or a genuinely NEW signal (a hard completed session, a fresh constraint/c
 warrants it — and the more recently and more times it was already eased (see the tag),
 the higher your bar for touching it again. Restoring load toward the original as the
 athlete recovers is encouraged; deepening an already-fresh cut is not.
+"""
 
+        if has_message:
+            custom_task += """
 ATHLETE'S NOTE FOR TODAY:
-If the user content includes a section titled "ATHLETE'S NOTE FOR THIS ADAPTATION", it is
-a free-text note the athlete attached to THIS run — extra intent or constraints the
+The user content includes a section titled "ATHLETE'S NOTE FOR THIS ADAPTATION": a
+free-text note the athlete attached to THIS run — extra intent or constraints the
 metrics can't show (e.g. a niggle to protect, no access to a sport/venue on a given day,
 or how they feel). Weigh it as today's intent alongside the data: honour stated
 constraints, and let it tip a judgement call. It is advisory, not an override — do NOT
 schedule clearly unsafe load just because the athlete asks (if recovery signals warrant
 easing, ease and say why). Treat it as a one-off for this adaptation only: do NOT read it
 as durable evidence about the block, and do NOT permanently re-shape the mesocycle on its
-account.
-BUT record its FOOTPRINT: the note is gone on the next run, yet the sessions it changed
-persist. So when the note is what drives a session change (e.g. "no training access
-Thursday" -> that day set to rest/eased), name that external cause in the session's
-"change_reason" — e.g. "Rest — athlete away, no training access this day." A later
-adaptation, which will NOT see this note, reads that reason back with the plan and so
-won't blindly undo the tactical change (e.g. re-add a session on a day the athlete can't
-train). This footprint is the tactical session note only; it is still NOT durable block
-evidence and must not reshape the mesocycle.
+account. When the note drives a session change, name that external cause in the session's
+"change_reason" (see the schema) so a later run without the note won't blindly undo it.
+This footprint is the tactical session note only; it is still NOT durable block evidence
+and must not reshape the mesocycle.
 
 EXTRACTING A DURABLE CONSTRAINT FROM THE NOTE:
 Separately from adapting today's sessions, decide whether the note ALSO states something
@@ -696,60 +712,71 @@ durable-looking note mis-filed as a constraint is worse than a missed one. This 
 extraction only — never invent a plan-shaping escalation, and never omit "start_date"/
 "end_date" (default both to today when the note doesn't say). The app, not you, decides
 bindingness and whether this becomes plan-shaping; do not guess at either.
+"""
 
+        custom_task += """
 This daily adaptation is READ-ONLY with respect to the coach's durable observations:
 use the COACH LEARNINGS as context, but do NOT emit any learning updates here — durable,
 evidence-backed observations are authored only by the weekly history analysis
 (`data bootstrap` / `data reflect`).
-""" + (
-            "You MUST respond with a JSON object containing:\n"
-            "{\n"
-            '  "change_needed": true | false,\n'
-            '  "reason": "Overall rationale for the whole adaptation: the readiness/load\n'
-            '    picture and the strategy applied across the block. This is the batch-level\n'
-            '    summary, shared by every adapted workout below — do NOT repeat it per\n'
-            '    workout; keep per-workout notes in "change_reason".",\n'
-            '  "adapted_workouts": [\n'
-            "    // Include ONLY sessions you are actually changing. Omit any session that\n"
-            "    // stays exactly as planned — it is preserved automatically, so re-listing\n"
-            "    // an unchanged session (even verbatim) is wrong and counts as a spurious\n"
-            "    // adaptation. EXCEPTION: if you change one session on a date that holds\n"
-            "    // ANOTHER session of a different sport you are keeping, include BOTH that\n"
-            "    // day so the kept one is not dropped.\n"
-            "    {\n"
-            '      "date": "YYYY-MM-DD",\n'
-            '      "sport_type": "running" | "road_biking" | "hiking" | "strength_training" |\n'
-            '        "yoga" | "ski_touring" | "rest",\n'
-            '      "title": "Adapted Workout Title",\n'
-            '      "change_reason": "One short sentence on why THIS specific session changed,\n'
-            '        e.g. \"Cut to easy Z2 to shed intensity.\" If an external constraint from\n'
-            '        the athlete\'s note drove the change rather than the metrics, name that\n'
-            '        cause here so a future run without the note understands it, e.g. \"Rest —\n'
-            '        athlete away, no training access this day.\" Keep it to a single sentence;\n'
-            '        do not restate the overall reason.",\n'
-            '      "description": "Start with the title on its own line in brackets followed by a\n'
-            '        newline, e.g. \"[Tempo Run]\\n\", then an adapted description of intensity,\n'
-            '        duration, heart rate zones, and goals.",\n'
-            '      "duration_minutes": 45,\n'
-            '      "rpe": 5,\n'
-            '      "tss": 30.0\n'
-            "    }\n"
-            "  ],\n"
-            '  "new_constraints": [\n'
-            "    // Optional. Directives extracted from the athlete's note this run (see\n"
-            "    // EXTRACTING A DURABLE CONSTRAINT above). Every entry is created exactly as\n"
-            "    // if the athlete had run `constraint add`. Omit entirely, or leave empty, if\n"
-            "    // the note was only a one-off nudge about today.\n"
-            "    {\n"
-            '      "title": "the directive, stated short (required)",\n'
-            '      "start_date": "YYYY-MM-DD (required; default today)",\n'
-            '      "end_date": "YYYY-MM-DD (required; == start for a single day)",\n'
-            '      "sport": "one sport this scopes to, or null/omit for all",\n'
-            '      "type": "optional opaque label (trip, injury, …) or null/omit",\n'
-            '      "description": "optional richer context or null/omit"\n'
-            "    }\n"
-            "  ]\n"
-            "}\n"
+"""
+
+        # Each entry is one top-level member of the response object, without its trailing
+        # comma — the ",\n".join below places the separators, so no code hand-writes a
+        # comma and the has_message branch can't desync the punctuation.
+        schema_members = [
+            '  "change_needed": true | false',
+            (
+                '  "reason": "Overall rationale for the whole adaptation: the readiness/load\n'
+                '    picture and the strategy applied across the block. This is the batch-level\n'
+                '    summary, shared by every adapted workout below — do NOT repeat it per\n'
+                '    workout; keep per-workout notes in "change_reason"."'
+            ),
+            (
+                '  "adapted_workouts": [\n'
+                "    // Include ONLY sessions you are actually changing. Omit any session that\n"
+                "    // stays exactly as planned — it is preserved automatically, so re-listing\n"
+                "    // an unchanged session (even verbatim) is wrong and counts as a spurious\n"
+                "    // adaptation. EXCEPTION: if you change one session on a date that holds\n"
+                "    // ANOTHER session of a different sport you are keeping, include BOTH that\n"
+                "    // day so the kept one is not dropped.\n"
+                "    {\n"
+                '      "date": "YYYY-MM-DD",\n'
+                '      "sport_type": "running" | "road_biking" | "hiking" | "strength_training" |\n'
+                '        "yoga" | "ski_touring" | "rest",\n'
+                '      "title": "Adapted Workout Title",\n'
+                + change_reason_field +
+                '      "description": "Start with the title on its own line in brackets followed by a\n'
+                '        newline, e.g. \"[Tempo Run]\\n\", then an adapted description of intensity,\n'
+                '        duration, heart rate zones, and goals.",\n'
+                '      "duration_minutes": 45,\n'
+                '      "rpe": 5,\n'
+                '      "tss": 30.0\n'
+                "    }\n"
+                "  ]"
+            ),
+        ]
+        if has_message:
+            schema_members.append(
+                '  "new_constraints": [\n'
+                "    // Optional. Directives extracted from the athlete's note this run (see\n"
+                "    // EXTRACTING A DURABLE CONSTRAINT above). Every entry is created exactly as\n"
+                "    // if the athlete had run `constraint add`. Omit entirely, or leave empty, if\n"
+                "    // the note was only a one-off nudge about today.\n"
+                "    {\n"
+                '      "title": "the directive, stated short (required)",\n'
+                '      "start_date": "YYYY-MM-DD (required; default today)",\n'
+                '      "end_date": "YYYY-MM-DD (required; == start for a single day)",\n'
+                '      "sport": "one sport this scopes to, or null/omit for all",\n'
+                '      "type": "optional opaque label (trip, injury, …) or null/omit",\n'
+                '      "description": "optional richer context or null/omit"\n'
+                "    }\n"
+                "  ]"
+            )
+        custom_task += (
+            "You MUST respond with a JSON object containing:\n{\n"
+            + ",\n".join(schema_members)
+            + "\n}\n"
         )
         system_prompt = self._build_system_prompt(
             objectives=objectives,
@@ -790,10 +817,11 @@ evidence-backed observations are authored only by the weekly history analysis
                 "but not adherence failures):\n" + format_completed_activities(informational) + "\n"
             )
 
-        # Ephemeral, this-run-only note from the athlete (see custom_task guidance). Omitted
+        # Ephemeral, this-run-only note from the athlete (see custom_task guidance). Same
+        # has_message gate as the instructions above, so the two never disagree. Omitted
         # entirely when absent so a message-less run is byte-for-byte the prior behaviour.
         message_section = ""
-        if athlete_message and athlete_message.strip():
+        if has_message:
             message_section = (
                 "\nATHLETE'S NOTE FOR THIS ADAPTATION (free-text intent/constraints for "
                 "today only — advisory, not an override; do not treat as durable evidence "
@@ -808,8 +836,7 @@ Adaptation Range: {target_date_str} to {meso_end_date_str}
 Athlete's Metrics History (Past {history_days} Days):
 {metrics_text}
 
-Externally-Logged Daily Context (alcohol, poor sleep, stress, etc. — a signal the day
-before a depressed morning is a likely non-training explanation; recovery lags):
+Externally-Logged Daily Context (alcohol, poor sleep, stress, etc.):
 {context_text}
 
 Baseline Reference:
@@ -817,10 +844,9 @@ Baseline Reference:
 
 Planned Workouts (recent window for adherence + already-scheduled sessions through
 the adaptation range). This is the full forward plan for CONTEXT — most of it will
-usually be fine and should be left untouched. Return a session in "adapted_workouts"
-ONLY if you are genuinely changing it; sessions you omit stay exactly as planned (they
-are NOT dropped). Do not re-list a session just to keep it, and do not reword a session
-you don't mean to change — that registers as a spurious adaptation.
+usually be fine and should be left untouched; return a session in "adapted_workouts"
+only if you are genuinely changing it (the schema's "adapted_workouts" comment covers
+omitting unchanged sessions and why re-listing one is a spurious adaptation).
 When you DO change a session, modify it in place: preserve its date and sport_type
 unless deliberately swapping the sport. Only invent a brand-new session for a date that
 currently has none.
@@ -940,28 +966,37 @@ Adherence Discrepancies & Violations:
             "  roughly a week, so read a high-load week together with the NEXT week's\n"
             "  'vs_baseline_z'. A null component means 'no data' — never treat it as zero.\n"
             "\n"
-            "READING 'context_days' (quantitative context impact, full history):\n"
-            "- A separate block, per external signal category (e.g. alcohol), of aligned\n"
-            "  EPISODES. An episode is a run of one or more signal-days; each has a 'days'\n"
-            "  dose sequence ({date, value, load_tss} — the signal magnitude and that day's\n"
-            "  training load) and a 'surrounding_mornings' strip bracketing it: k mornings\n"
-            "  before (drink-free, the local 'normal'), the run during, and k after.\n"
-            "- Each morning carries 'prev_day_load_tss' and 'vs_normal' (baseline-relative\n"
-            "  z per recovery channel, same sign convention as 'vs_baseline_z'). Read a\n"
-            "  morning's PRECEDING-day dose (match the morning's prior date against 'days')\n"
-            "  AND its 'prev_day_load_tss' TOGETHER before blaming a low morning on the\n"
-            "  signal — a hard training day the day before is the competing explanation.\n"
-            "- Read the before -> during -> after arc to judge how LARGE the effect is, how\n"
-            "  many days it PERSISTS, and whether back-to-back signal-days STACK (cumulative\n"
-            "  cost). Compare high- vs low-dose days at similar load (the signal's share)\n"
-            "  and high- vs low-load days at similar dose (training's share).\n"
-            "- Weigh the NUMBER of distinct episodes and the spread of doses: a handful is\n"
-            "  weak evidence; do not over-read. 'value' may be a true count, a subjective\n"
-            "  rank, or absent (presence-only) — calibrate how much to read into it.\n"
-            "- A missing channel or morning is 'no data', never zero. When you author a\n"
-            "  durable conclusion from this, cite the in-window week(s) the signal-days\n"
-            "  fall in via the learning evidence protocol, like any other observation.\n"
-            "\n"
+        )
+
+        # Gate this reading guide on the same context_days that gates the DATA block below,
+        # so the guide never describes a section the model wasn't given.
+        if context_days:
+            custom_task += (
+                "READING 'context_days' (quantitative context impact, full history):\n"
+                "- A separate block, per external signal category (e.g. alcohol), of aligned\n"
+                "  EPISODES. An episode is a run of one or more signal-days; each has a 'days'\n"
+                "  dose sequence ({date, value, load_tss} — the signal magnitude and that day's\n"
+                "  training load) and a 'surrounding_mornings' strip bracketing it: k mornings\n"
+                "  before (drink-free, the local 'normal'), the run during, and k after.\n"
+                "- Each morning carries 'prev_day_load_tss' and 'vs_normal' (baseline-relative\n"
+                "  z per recovery channel, same sign convention as 'vs_baseline_z'). Read a\n"
+                "  morning's PRECEDING-day dose (match the morning's prior date against 'days')\n"
+                "  AND its 'prev_day_load_tss' TOGETHER before blaming a low morning on the\n"
+                "  signal — a hard training day the day before is the competing explanation.\n"
+                "- Read the before -> during -> after arc to judge how LARGE the effect is, how\n"
+                "  many days it PERSISTS, and whether back-to-back signal-days STACK (cumulative\n"
+                "  cost). Compare high- vs low-dose days at similar load (the signal's share)\n"
+                "  and high- vs low-load days at similar dose (training's share).\n"
+                "- Weigh the NUMBER of distinct episodes and the spread of doses: a handful is\n"
+                "  weak evidence; do not over-read. 'value' may be a true count, a subjective\n"
+                "  rank, or absent (presence-only) — calibrate how much to read into it.\n"
+                "- A missing channel or morning is 'no data', never zero. When you author a\n"
+                "  durable conclusion from this, cite the in-window week(s) the signal-days\n"
+                "  fall in via the learning evidence protocol, like any other observation.\n"
+                "\n"
+            )
+
+        custom_task += (
             "You MUST respond with a JSON object containing:\n"
             "{\n"
             '  "macrocycle_summary": "High-level summary of the training period.",\n'
