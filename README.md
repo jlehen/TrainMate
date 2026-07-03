@@ -117,6 +117,42 @@ Edit `config.yaml` to include your specific IDs and profile (use
 - `garmin_email` and `garmin_password` (config.yaml is gitignored, keeping
   credentials out of the environment; FTP/LTHR come from `user_profile`).
 
+### Personalizing TrainMate
+
+**Goals.** Don't fill in `goal add` flags cold. The title, target date, sport,
+and priority are much easier to get right once you've actually thought the goal
+through — so brainstorm it first with an LLM (ChatGPT, Claude, whatever you
+use) through a short interview: what's the event, why does it matter, what's
+your current fitness, what constraints (time, injuries, other goals) does the
+plan need to respect. Then turn the outcome of that conversation into your
+`goal add` call(s).
+
+**The `science/` directory.** Every `.txt` file in the top-level `science/`
+directory (gitignored, empty by default) is injected into TrainMate's coaching
+prompts alongside the built-in guidelines in `trainmate/science/` — it's how
+you teach the coach the training philosophy you actually want it to follow,
+rather than a generic one.
+
+The easiest way to build one of these files is to pick articles, YouTube
+videos, or podcasts that reflect your preferred approach, pull their text with
+[Link2Text](https://github.com/jlehen/Link2Text), and hand the result to an
+LLM to synthesize into a single guideline doc. For reference, here are the
+sources TrainMate's author used to generate `science/jeremie_science_summary.txt`:
+
+| # | Title | URL |
+| - | --- | --- |
+| 1 | How to mix Weighlifting with High Intensity Cycling? | https://www.youtube.com/watch?v=ThDnA-Ct2DE |
+| 2 | The Simple Framework That Actually Builds FTP | https://www.youtube.com/watch?v=pt-VIQuQGdc |
+| 3 | Periodization Training Simplified: A Strategic Guide \| NASM Blog | https://blog.nasm.org/periodization-training-simplified |
+| 4 | Dr. Andy Galpin Unveils the 9 Core Principles of Training: Ultimate Human Performance Blueprint | https://www.youtube.com/watch?v=rBlaGSwOXSA |
+| 5 | Block Periodization in Action: A Case Study | https://www.trainingpeaks.com/blog/block-periodization-in-action/ |
+| 6 | Cycling Power Zones Explained | https://www.trainingpeaks.com/blog/power-training-levels/ |
+| 7 | Exploring Types of Periodization | https://www.trainingpeaks.com/blog/exploring-periodization-methods/ |
+| 8 | Implementing Block Periodization in Endurance Training | https://www.trainingpeaks.com/blog/implementing-block-periodization/ |
+| 9 | Polarized vs. Pyramidal Training — Which is Better For Your Athletes? | https://www.trainingpeaks.com/coach-blog/polarized-pyramidal-training-which-is-better/ |
+| 10 | Easy Ways to Customize Your Readymade Endurance Training Plan | https://www.trainingpeaks.com/blog/customize-your-training-plan/ |
+| 11 | Number One Mistake Cyclists Make with Weight Training | https://www.youtube.com/watch?v=PsEMv2oOscQ |
+
 ### Basic Usage (CLI)
 
 Add a goal:
