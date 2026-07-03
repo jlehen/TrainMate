@@ -225,6 +225,44 @@ class CoachService:
     def _get_config_hash(self) -> str:
         return self.engine._get_config_hash()
 
+    def _get_config_snapshot(self) -> str:
+        """JSON of the current physiological thresholds, persisted on the macrocycle
+        so config_changed() can judge later drift against real values."""
+        return json.dumps(self.engine._get_config_thresholds(), sort_keys=True)
+
+    def config_changed(self, macro: Dict[str, Any]) -> Optional[str]:
+        """Whether config.yaml has drifted plan-shapingly since `macro` was generated.
+
+        Returns a human-readable reason, or None when the plan is still current. Two
+        axes (see engine._clean_profile): the fingerprint over plan-shaping profile
+        fields, and the physiological thresholds, which only count as drift past
+        `coach.threshold_replan_pct` relative change — a small FTP/LTHR retest
+        correction feeds the next workout generation without invalidating the
+        periodization strategy. Macrocycles predating the threshold snapshot judge on
+        the fingerprint alone.
+        """
+        if macro.get('config_hash') != self.engine._get_config_hash():
+            return "athlete profile changed"
+
+        snapshot_raw = macro.get('config_snapshot')
+        if not snapshot_raw:
+            return None
+        try:
+            old_thresholds = json.loads(snapshot_raw)
+        except (ValueError, TypeError):
+            return None
+
+        current = self.engine._get_config_thresholds()
+        tolerance = config.threshold_replan_pct / 100.0
+        for key in sorted(set(old_thresholds) | set(current)):
+            old_val, new_val = old_thresholds.get(key), current.get(key)
+            if old_val is None or new_val is None:
+                return f"{key} was {'added' if old_val is None else 'removed'}"
+            if old_val and abs(new_val - old_val) / abs(old_val) > tolerance:
+                pct = (new_val - old_val) / old_val * 100.0
+                return f"{key} changed {old_val:g} → {new_val:g} ({pct:+.1f}%)"
+        return None
+
     def _get_goals_hash(self, objectives: List[Objective]) -> str:
         return self.engine._get_goals_hash(objectives)
 
@@ -570,6 +608,7 @@ class CoachService:
         goals_hash = self.engine._get_goals_hash(objectives)
         constraints_hash = self.engine._get_constraints_hash(replan_constraints)
         config_hash = self.engine._get_config_hash()
+        config_snapshot = self._get_config_snapshot()
         goals_snapshot = json.dumps(self.engine._clean_goals(objectives))
         constraints_snapshot = json.dumps(self.engine._clean_constraints(replan_constraints))
 
@@ -585,7 +624,7 @@ class CoachService:
             if (
                 existing_macro['goals_hash'] == goals_hash
                 and existing_macro['constraints_hash'] == constraints_hash
-                and existing_macro.get('config_hash') == config_hash
+                and self.config_changed(existing_macro) is None
             ):
                 reused = True
                 strategy = existing_macro['strategy']
@@ -666,6 +705,7 @@ class CoachService:
                     goals_hash=goals_hash,
                     constraints_hash=constraints_hash,
                     config_hash=config_hash,
+                    config_snapshot=config_snapshot,
                     goals_snapshot=goals_snapshot,
                     constraints_snapshot=constraints_snapshot,
                     mesocycles=mesocycles
@@ -700,6 +740,7 @@ class CoachService:
             goals_hash=goals_hash,
             constraints_hash=constraints_hash,
             config_hash=config_hash,
+            config_snapshot=self._get_config_snapshot(),
             goals_snapshot=json.dumps(self.engine._clean_goals(objectives)),
             constraints_snapshot=json.dumps(self.engine._clean_constraints(replan_constraints)),
             mesocycles=mesocycles

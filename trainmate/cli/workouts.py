@@ -284,11 +284,12 @@ def run_workout_generate(args: argparse.Namespace) -> None:
             if next_goal:
                 macro = cli.db.get_macrocycle_for_objective(next_goal['id'])
                 if macro:
-                    current_hash = cli.coach_service._get_config_hash()
-                    if macro.get('config_hash') != current_hash:
+                    change_reason = cli.coach_service.config_changed(macro)
+                    if change_reason:
                         message = (
-                            yellow("Warning: config.yaml has changed since the active "
-                                   "periodization plan was generated.\n"
+                            yellow("Warning: plan-shaping config.yaml settings have "
+                                   "changed since the active periodization plan was "
+                                   f"generated ({change_reason}).\n"
                                    "Generating workouts using the out-of-date plan might "
                                    "result in incorrect training targets.\n"
                                    "It is highly recommended to run ")
@@ -304,7 +305,10 @@ def run_workout_generate(args: argparse.Namespace) -> None:
                             return
                         else:
                             print("Proceeding. Updating configuration hash in database.")
-                            cli.db.update_macrocycle_config_hash(macro['id'], current_hash)
+                            cli.db.update_macrocycle_config_hash(
+                                macro['id'], cli.coach_service._get_config_hash(),
+                                cli.coach_service._get_config_snapshot()
+                            )
 
         workout_kwargs = {}
         if args.goal_id is not None:

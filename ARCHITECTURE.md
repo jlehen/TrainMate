@@ -213,7 +213,12 @@ Module-level function in `formatting.py`. Concatenates all `*.txt` files from
   `_clean_constraints` is fed only the plan-shaping (replan=1) constraints.
 - **`_get_goals_hash(objectives)`** — SHA-256 of the `_clean_goals` list.
 - **`_get_constraints_hash(constraints)`** — SHA-256 of the `_clean_constraints` list.
-- **`_get_config_hash()`** — SHA-256 of `user_profile` + `metrics_lookback_days`.
+- **`_get_config_hash()`** — SHA-256 of `_clean_profile()`: the `user_profile` block
+  minus the physiological thresholds (`max_hr`/`lthr`/`ftp`). Thresholds are instead
+  snapshotted raw on the macrocycle (`_get_config_thresholds()`) and only flag the
+  plan stale past `coach.threshold_replan_pct` relative drift (default 5%) — see
+  `CoachService.config_changed()`. Prompt-context knobs (`metrics_lookback_days`)
+  are not fingerprinted at all.
 - **`_plan_generate_strategy(...)`** — LLM call → `{strategy, mesocycles}`. Label
   `periodization_plan`.
 - **`_workout_generate_logic(...)`** — LLM call → `{reasoning, workouts[]}`. Accepts
@@ -384,8 +389,14 @@ called by the UIs.
   workouts. Archives the current plan's future workouts (deleting their events), flips
   the active macrocycle, resurrects the target version's archived workouts, and re-pushes
   them — the symmetric inverse of eager generation (DESIGN_plan_rollback.md).
-- **`_get_config_hash()`** — delegates to `CoachEngine._get_config_hash()`. Used by
-  CLI/web to detect stale plans.
+- **`_get_config_hash()` / `_get_config_snapshot()`** — delegate to
+  `CoachEngine._get_config_hash()` / `_get_config_thresholds()` (as JSON).
+- **`config_changed(macro)`** — the single staleness judgment used by the CLI
+  (`plan generate`, `workout generate`, `status`) and the `plan_generate` reuse
+  check. Returns a human-readable reason when the plan-shaping profile fingerprint
+  mismatches or a physiological threshold drifted more than
+  `coach.threshold_replan_pct` from the macrocycle's `config_snapshot`, else None.
+  Macrocycles without a snapshot (legacy) judge on the fingerprint alone.
 - **`_get_coach_system_prompt(objectives, constraints, ...)`** — builds the system
   prompt without making an LLM call (used by tests).
 
@@ -757,8 +768,12 @@ guarantee (re-citing a counted week is an `INSERT OR IGNORE` no-op). Full model:
 | `strategy`        | TEXT                  | LLM-generated strategy text                      |
 | `goals_hash`      | TEXT                  | SHA-256 of objectives at generation time         |
 | `constraints_hash`| TEXT                  | SHA-256 of the plan-shaping (replan=1) constraints at generation time (§7) |
-| `config_hash`     | TEXT                  | SHA-256 of `user_profile` +                      |
-|                   |                       | `metrics_lookback_days`                          |
+| `config_hash`     | TEXT                  | SHA-256 of the plan-shaping `user_profile`       |
+|                   |                       | fields (thresholds excluded)                     |
+| `config_snapshot` | TEXT                  | JSON of the `max_hr`/`lthr`/`ftp` values the plan |
+|                   |                       | was generated with; staleness only past          |
+|                   |                       | `coach.threshold_replan_pct` drift. NULL on      |
+|                   |                       | plans predating the column.                      |
 | `goals_snapshot`  | TEXT                  | JSON of the goals the plan was generated from    |
 |                   |                       | (same cleaned data the hash covers); NULL on     |
 |                   |                       | plans predating the column. Shown by `plan show` |
@@ -997,6 +1012,9 @@ Required fields:
 | `learning_confidence_thresholds` | dict | Distinct net supporting weeks to reach each confidence |
 |                         |      | level: `{moderate: 3, established: 5}` (defaults). Tentative ≥1 |
 |                         |      | and proposed-retirement ≤0 are fixed. Re-levels on recompute. |
+| `threshold_replan_pct`  | float| Relative drift (%) a physiological threshold may move from   |
+|                         |      | the plan-generation value before the plan is flagged stale   |
+|                         |      | (default: 5). Under `coach:`.                                |
 | `user_profile`          | dict | Must contain `lthr` or `ftp` (see below)                     |
 
 `user_profile` keys: `name`, `birth_year`, `max_hr`, `lthr`, `ftp`,
@@ -1012,7 +1030,8 @@ Required fields:
 1. `CoachService.plan_generate()` fetches active objectives +
    constraints.
 2. Computes `goals_hash`, `constraints_hash` (plan-shaping constraints only), `config_hash`.
-3. If existing macrocycle has matching hashes and `force=False` → reuse.
+3. If existing macrocycle has matching goals/constraints hashes,
+   `config_changed()` reports no drift, and `force=False` → reuse.
 4. Otherwise: builds a read-only **planned-vs-actual review** of the prior plan
    via `_build_prior_training_context()` (Option A — anchored on the prior
    plan's elapsed mesocycle windows, plus the cached reconstruction's summary,

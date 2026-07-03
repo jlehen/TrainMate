@@ -631,9 +631,59 @@ class TestPeriodization(unittest.TestCase):
         self.assertIsNotNone(initial_hash)
 
         original_profile = dict(trainmate.coach.config.data["user_profile"])
+        original_coach = dict(trainmate.coach.config.data.get("coach") or {})
         try:
             trainmate.coach.config.data["user_profile"]["weekly_target_hours"] = 20.0
             self.assertNotEqual(initial_hash, coach_service._get_config_hash())
+            trainmate.coach.config.data["user_profile"] = dict(original_profile)
+
+            # Physiological thresholds are tolerance-checked via the snapshot, not
+            # fingerprinted — editing one must not shift the hash.
+            trainmate.coach.config.data["user_profile"]["ftp"] = 999
+            self.assertEqual(initial_hash, coach_service._get_config_hash())
+            trainmate.coach.config.data["user_profile"] = dict(original_profile)
+
+            # Prompt-context knobs are not plan-shaping.
+            trainmate.coach.config.data["coach"] = dict(original_coach)
+            trainmate.coach.config.data["coach"]["metrics_lookback_days"] = 99
+            self.assertEqual(initial_hash, coach_service._get_config_hash())
+        finally:
+            trainmate.coach.config.data["user_profile"] = original_profile
+            trainmate.coach.config.data["coach"] = original_coach
+
+    def test_config_changed_threshold_tolerance(self):
+        original_profile = dict(trainmate.coach.config.data["user_profile"])
+        try:
+            trainmate.coach.config.data["user_profile"]["ftp"] = 220
+            macro = {
+                "config_hash": coach_service._get_config_hash(),
+                "config_snapshot": coach_service._get_config_snapshot(),
+            }
+            self.assertIsNone(coach_service.config_changed(macro))
+
+            # Within the default 5% band: still current.
+            trainmate.coach.config.data["user_profile"]["ftp"] = 228
+            self.assertIsNone(coach_service.config_changed(macro))
+
+            # Past the band: stale, with the threshold named in the reason.
+            trainmate.coach.config.data["user_profile"]["ftp"] = 250
+            reason = coach_service.config_changed(macro)
+            self.assertIsNotNone(reason)
+            self.assertIn("ftp", reason)
+
+            # Non-threshold profile edits still trip the fingerprint.
+            trainmate.coach.config.data["user_profile"]["ftp"] = 220
+            trainmate.coach.config.data["user_profile"]["weekly_target_hours"] = 20.0
+            self.assertEqual(
+                coach_service.config_changed(macro), "athlete profile changed"
+            )
+
+            # Legacy macrocycle without a snapshot: fingerprint alone decides.
+            trainmate.coach.config.data["user_profile"] = dict(original_profile)
+            trainmate.coach.config.data["user_profile"]["ftp"] = 250
+            legacy = {"config_hash": coach_service._get_config_hash(),
+                      "config_snapshot": None}
+            self.assertIsNone(coach_service.config_changed(legacy))
         finally:
             trainmate.coach.config.data["user_profile"] = original_profile
 
@@ -655,9 +705,16 @@ class TestPeriodization(unittest.TestCase):
         self.assertEqual(macro["config_hash"], "confhash123")
 
         test_db.update_macrocycle_config_hash(macro_id, "newconfhash456")
-        self.assertEqual(
-            test_db.get_macrocycle_for_objective(obj_id)["config_hash"], "newconfhash456"
+        macro = test_db.get_macrocycle_for_objective(obj_id)
+        self.assertEqual(macro["config_hash"], "newconfhash456")
+        self.assertIsNone(macro["config_snapshot"])
+
+        test_db.update_macrocycle_config_hash(
+            macro_id, "confhash789", '{"ftp": 220.0}'
         )
+        macro = test_db.get_macrocycle_for_objective(obj_id)
+        self.assertEqual(macro["config_hash"], "confhash789")
+        self.assertEqual(macro["config_snapshot"], '{"ftp": 220.0}')
 
     def test_validation_under_5_weeks(self):
         today = datetime.now(timezone.utc).date()

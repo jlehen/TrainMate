@@ -261,12 +261,40 @@ ACTIVE CONSTRAINTS (athlete-declared directives to work around):
         serialized = json.dumps(self._clean_constraints(constraints), sort_keys=True)
         return hashlib.sha256(serialized.encode('utf-8')).hexdigest()
 
-    def _get_config_hash(self) -> str:
-        """Computes a hash representation of the relevant user config to check for updates."""
-        data_to_hash = {
-            'user_profile': config.user_profile,
-            'metrics_lookback_days': config.metrics_lookback_days
+    # Physiological thresholds live in user_profile but are excluded from the config
+    # fingerprint: they anchor per-workout zone targets (recomputed from live config at
+    # every workout generation), not the phase structure. They are instead snapshotted
+    # on the macrocycle and only flag the plan stale past a relative drift tolerance
+    # (`coach.threshold_replan_pct`) — see service.config_changed().
+    PROFILE_THRESHOLD_FIELDS = ('max_hr', 'lthr', 'ftp')
+
+    def _clean_profile(self) -> Dict[str, Any]:
+        """The user_profile fields that shape the periodization strategy.
+
+        Single source of truth for the config_hash fingerprint. Excludes the
+        physiological thresholds (tolerance-checked separately, see above); every
+        other profile field — availability, target hours, preferences, injuries,
+        equipment — is plan-shaping. Deliberately NOT fingerprinted: prompt-context
+        knobs such as `coach.metrics_lookback_days`, which change what the coach
+        *sees*, not what the plan should be.
+        """
+        return {
+            k: v for k, v in config.user_profile.items()
+            if k not in self.PROFILE_THRESHOLD_FIELDS
         }
+
+    def _get_config_thresholds(self) -> Dict[str, float]:
+        """The current physiological thresholds, normalized for the macrocycle
+        snapshot and the drift comparison in service.config_changed()."""
+        profile = config.user_profile
+        return {
+            k: float(profile[k]) for k in self.PROFILE_THRESHOLD_FIELDS
+            if profile.get(k) is not None
+        }
+
+    def _get_config_hash(self) -> str:
+        """Computes a hash of the plan-shaping user config (see _clean_profile)."""
+        data_to_hash = {'user_profile': self._clean_profile()}
         serialized = json.dumps(data_to_hash, sort_keys=True)
         return hashlib.sha256(serialized.encode('utf-8')).hexdigest()
 

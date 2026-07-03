@@ -241,7 +241,7 @@ class PeriodizationMixin:
     def save_macrocycle(
         self, objective_id: int, strategy: str, goals_hash: str,
         constraints_hash: str, mesocycles: List[Dict[str, Any]],
-        config_hash: str = "", goals_snapshot: str = "",
+        config_hash: str = "", config_snapshot: str = "", goals_snapshot: str = "",
         constraints_snapshot: str = ""
     ) -> int:
         """Saves a macrocycle and its nested mesocycles for the objective.
@@ -249,7 +249,9 @@ class PeriodizationMixin:
         goals_snapshot/constraints_snapshot are JSON of the goals and plan-shaping
         constraints the plan was generated from (the same cleaned data the hashes
         fingerprint), preserved so the inputs can be shown later even after the live
-        records change.
+        records change. config_snapshot is JSON of the physiological thresholds the
+        plan was generated with, kept as raw values (not a hash) so staleness can be
+        judged against a drift tolerance (coach/service.config_changed).
 
         The previously-active macrocycle for the objective is *superseded* rather than
         deleted (see DESIGN_plan_rollback.md): it and its mesocycles are kept so that
@@ -268,10 +270,11 @@ class PeriodizationMixin:
             cursor.execute("""
                 INSERT INTO macrocycles (
                     objective_id, strategy, goals_hash, constraints_hash, config_hash,
-                    goals_snapshot, constraints_snapshot, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    config_snapshot, goals_snapshot, constraints_snapshot, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (objective_id, strategy, goals_hash, constraints_hash, config_hash,
-                  goals_snapshot or None, constraints_snapshot or None, created_at))
+                  config_snapshot or None, goals_snapshot or None,
+                  constraints_snapshot or None, created_at))
             macrocycle_id = cursor.lastrowid
 
             for meso in mesocycles:
@@ -284,14 +287,25 @@ class PeriodizationMixin:
             conn.commit()
             return int(macrocycle_id)
 
-    def update_macrocycle_config_hash(self, macrocycle_id: int, config_hash: str) -> None:
-        """Updates the config hash for a specific macrocycle."""
+    def update_macrocycle_config_hash(
+        self, macrocycle_id: int, config_hash: str,
+        config_snapshot: Optional[str] = None
+    ) -> None:
+        """Updates the config hash (and, when provided, the threshold snapshot) for a
+        specific macrocycle — the "keep current plan, accept new config" path."""
         with self._get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute(
-                "UPDATE macrocycles SET config_hash = ? WHERE id = ?",
-                (config_hash, macrocycle_id)
-            )
+            if config_snapshot is not None:
+                cursor.execute(
+                    "UPDATE macrocycles SET config_hash = ?, config_snapshot = ? "
+                    "WHERE id = ?",
+                    (config_hash, config_snapshot, macrocycle_id)
+                )
+            else:
+                cursor.execute(
+                    "UPDATE macrocycles SET config_hash = ? WHERE id = ?",
+                    (config_hash, macrocycle_id)
+                )
             conn.commit()
 
     def delete_macrocycle_for_objective(self, objective_id: int) -> None:

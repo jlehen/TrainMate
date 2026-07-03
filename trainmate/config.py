@@ -118,6 +118,15 @@ class Config:
         return float(self.get("coach", {}).get("replan_displaced_load_pct", 50))
 
     @property
+    def threshold_replan_pct(self) -> float:
+        """Relative drift (percent) a physiological threshold (max_hr/lthr/ftp) may
+        move from the value the active plan was generated with before the plan is
+        flagged stale (coach/service.config_changed). Small retest corrections flow
+        into workout targets without invalidating the periodization strategy; a
+        genuine fitness shift past this band suggests a replan (default 5)."""
+        return float(self.get("coach", {}).get("threshold_replan_pct", 5.0))
+
+    @property
     def replan_hard_span_days(self) -> int:
         """Hard-window floor for the §7 replan proposal: a `hard` constraint spanning at
         least this many days is intrinsically plan-shaping regardless of displaced load

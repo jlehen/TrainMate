@@ -49,18 +49,21 @@ def run_plan_generate(args: argparse.Namespace) -> None:
             if next_goal:
                 macro = cli.db.get_macrocycle_for_objective(next_goal['id'])
                 if macro:
-                    current_hash = cli.coach_service._get_config_hash()
-                    if macro.get('config_hash') != current_hash and not args.force:
+                    change_reason = cli.coach_service.config_changed(macro)
+                    if change_reason and not args.force:
                         if cli.prompt.confirm(
-                            "Configuration in config.yaml has changed since the last "
-                            "plan generation.\n"
+                            "Plan-shaping configuration in config.yaml has changed "
+                            f"since the last plan generation ({change_reason}).\n"
                             "Would you like to regenerate the periodization strategy?"
                         ):
                             args.force = True
                         else:
                             print("Keeping current periodization strategy. "
                                    "Updating configuration hash in database.")
-                            cli.db.update_macrocycle_config_hash(macro['id'], current_hash)
+                            cli.db.update_macrocycle_config_hash(
+                                macro['id'], cli.coach_service._get_config_hash(),
+                                cli.coach_service._get_config_snapshot()
+                            )
 
         plan_kwargs = {'auto_apply': False}
         if args.goal_id is not None:

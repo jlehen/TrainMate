@@ -60,11 +60,11 @@ def run_status(
         # Query active mesocycle
         macro = cli.db.get_macrocycle_for_objective(next_goal['id'])
         if macro:
-            current_hash = cli.coach_service._get_config_hash()
-            if macro.get('config_hash') != current_hash:
+            change_reason = cli.coach_service.config_changed(macro)
+            if change_reason:
                 print(yellow(
-                    "\nWarning: config.yaml has changed since the active periodization plan "
-                    "was generated.\nRun "
+                    "\nWarning: plan-shaping config.yaml settings have changed since the "
+                    f"active periodization plan was generated ({change_reason}).\nRun "
                 ) + green("'plan generate'") + yellow(" to regenerate."))
             
             mesos = cli.db.get_mesocycles_for_macrocycle(macro['id'])

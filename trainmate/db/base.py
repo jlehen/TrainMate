@@ -392,6 +392,7 @@ class BaseDB:
                     goals_hash TEXT NOT NULL,
                     constraints_hash TEXT NOT NULL,
                     config_hash TEXT,
+                    config_snapshot TEXT,
                     goals_snapshot TEXT,
                     constraints_snapshot TEXT,
                     created_at TEXT NOT NULL,
@@ -434,6 +435,15 @@ class BaseDB:
             if 'constraints_snapshot' not in columns:
                 cursor.execute(
                     "ALTER TABLE macrocycles ADD COLUMN constraints_snapshot TEXT"
+                )
+            # Physiological thresholds (max_hr/lthr/ftp) the plan was generated with,
+            # as JSON. Unlike the profile fields folded into config_hash, thresholds
+            # only flag the plan stale past a relative drift tolerance, which needs
+            # the original values, not a hash (coach/service.config_changed). NULL on
+            # macrocycles created before this column existed (treated as no drift).
+            if 'config_snapshot' not in columns:
+                cursor.execute(
+                    "ALTER TABLE macrocycles ADD COLUMN config_snapshot TEXT"
                 )
             # Plan-version axis (see DESIGN_plan_rollback.md). Regenerating a plan no
             # longer deletes the prior macrocycle: it is marked 'superseded' (with the
