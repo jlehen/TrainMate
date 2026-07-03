@@ -1,0 +1,79 @@
+BENCHMARK (FITNESS TEST) GUIDELINES
+===================================
+
+A benchmark workout is a standardized, repeatable maximal or threshold effort
+whose result establishes the athlete's THRESHOLD ANCHOR. All training zones and
+session targets are derived as a percentage of that anchor. Keeping the anchor
+current is what keeps every downstream zone/target accurate.
+
+This is a sport-generic concept. The protocol and the unit of the anchor differ
+by sport, but the pipeline is always the same:
+
+   benchmark workout  ->  threshold anchor  ->  training zones / targets
+
+
+1. WHEN TO RE-BENCHMARK
+-----------------------
+Default cadence: every 4-6 weeks (roughly once per mesocycle). Zones drift out
+of calibration over a training block; testing more often than every ~3-4 weeks
+sits inside measurement noise and adds unnecessary fatigue.
+
+Re-benchmark (beyond the calendar default) when:
+   - Transitioning between periodization phases/blocks (e.g. base -> build).
+   - Returning from a detraining gap (illness, injury layoff, travel block).
+   - Sessions systematically decouple from target zones (planned efforts feel
+     consistently too easy or too hard for their prescribed intensity).
+
+Do NOT re-benchmark when the athlete is fatigued: schedule tests on a fresh day
+(positive/neutral TSB, good recovery metrics) so the result reflects fitness,
+not fatigue. An anchor set from a bad test mis-scales every subsequent workout.
+
+Passive estimation: where enough session data exists, the anchor can be modeled
+from normal training (e.g. a cycling power-duration curve, or estimated 1RM from
+rep-max sets) instead of a dedicated test. Prefer modeled estimates to reduce
+disruptive maximal testing, and reserve formal benchmarks for confirmation and
+for phase transitions.
+
+
+2. BENCHMARK PROTOCOL AND ANCHOR BY SPORT
+-----------------------------------------
+   Cycling:
+     - Protocol: 20-min maximal steady effort (FTP = avg power x 0.95), or a
+       ramp test.
+     - Anchor: FTP (power). Zones = % of FTP.
+
+   Running:
+     - Protocol: 30-min time trial (avg pace/HR of last 20 min ~= threshold),
+       Critical Speed test, or a 5k time trial.
+     - Anchor: Threshold pace / Critical Speed. Zones = % of threshold pace
+       (or pace bands).
+
+   Swimming:
+     - Protocol: Critical Swim Speed test (e.g. 400m + 200m time trials).
+     - Anchor: CSS (pace per 100m). Zones = offsets from CSS pace.
+
+   Rowing:
+     - Protocol: 2k test, or 30-min test.
+     - Anchor: Threshold pace/power. Zones = % of threshold.
+
+   Strength:
+     - Protocol: 1RM test, or estimated 1RM (e1RM) from a reps-to-near-failure
+       or velocity-based set (safer, lower fatigue).
+     - Anchor: 1RM (load). Working loads = % of 1RM.
+
+   General aerobic (fallback):
+     - Protocol: Cooper test / maximal aerobic speed or power test.
+     - Anchor: MAS / MAP / VO2max proxy.
+
+
+3. COACHING DIRECTIVES
+----------------------
+   - Treat the threshold anchor as the single source of truth for zone
+     derivation; when a benchmark updates it, recompute all dependent zones.
+   - Keep the benchmark protocol and conditions consistent run-to-run so results
+     are comparable over time.
+   - Adapt cadence to test cost: passively-estimated anchors (e.g. FTP) can
+     update often and cheaply; fatiguing maximal tests (1RM, 2k row) warrant the
+     4-6 week cadence and a rested day.
+   - A rising anchor confirms progressive overload is working; a stalled or
+     falling anchor across blocks signals plateau or under-recovery.
