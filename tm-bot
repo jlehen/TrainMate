@@ -4,12 +4,58 @@ set -e
 # Get the directory where this script is located
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 
-# Check if virtual environment exists
-if [ ! -d "$SCRIPT_DIR/venv" ]; then
-    echo "Initializing virtual environment..."
-    python3 -m venv "$SCRIPT_DIR/venv"
-    echo "Initialization complete! Install dependencies: venv/bin/pip install -r requirements.txt"
+# Must match trainmate_bot.py's RESTART_EXIT_CODE.
+RESTART_EXIT_CODE=75
+
+if [ "$TM_BOT_SUPERVISED" = "1" ]; then
+    # Worker: today's venv-check-and-exec, untouched.
+    if [ ! -d "$SCRIPT_DIR/venv" ]; then
+        echo "Initializing virtual environment..."
+        python3 -m venv "$SCRIPT_DIR/venv"
+        echo "Initialization complete! Install dependencies: venv/bin/pip install -r requirements.txt"
+    fi
+
+    exec "$SCRIPT_DIR/venv/bin/python" "$SCRIPT_DIR/trainmate_bot.py" "$@"
 fi
 
-# Run the Telegram bot front-end with the passed arguments
-exec "$SCRIPT_DIR/venv/bin/python" "$SCRIPT_DIR/trainmate_bot.py" "$@"
+# Supervisor: relaunch the worker only when it exits with RESTART_EXIT_CODE
+# (which is what a /restart from Telegram triggers). Any other exit -- code 0,
+# a crash, a signal-induced death, operator Ctrl-C, whatever -- ends the
+# supervisor too. See DESIGN_bot_restart.md section 4; no backoff or
+# crash-loop handling by design.
+child_pid=""
+
+_on_signal() {
+    sig="$1"
+    echo "tm-bot: supervisor got SIG$sig, stopping worker..."
+    if [ -n "$child_pid" ]; then
+        kill -TERM "$child_pid" 2>/dev/null || true
+        for _ in 1 2 3 4 5; do
+            kill -0 "$child_pid" 2>/dev/null || break
+            sleep 0.2
+        done
+        if kill -0 "$child_pid" 2>/dev/null; then
+            kill -KILL "$child_pid" 2>/dev/null || true
+        fi
+    fi
+    trap - INT TERM
+    kill -s "$sig" $$
+}
+trap '_on_signal INT' INT
+trap '_on_signal TERM' TERM
+
+echo "tm-bot: supervisor starting (pid $$)"
+while true; do
+    echo "tm-bot: launching worker..."
+    TM_BOT_SUPERVISED=1 "$0" "$@" &
+    child_pid=$!
+    rc=0
+    wait "$child_pid" || rc=$?
+    child_pid=""
+    if [ "$rc" -eq "$RESTART_EXIT_CODE" ]; then
+        echo "tm-bot: worker requested restart (exit $rc), relaunching..."
+        continue
+    fi
+    echo "tm-bot: worker exited (code $rc); supervisor stopping."
+    exit "$rc"
+done

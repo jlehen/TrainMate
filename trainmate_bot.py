@@ -20,6 +20,17 @@ The pure helpers (parse/format/auth/prompt-encoding) are import-safe without
 ``python-telegram-bot`` so they can be unit-tested; the library is imported lazily
 inside ``main``.
 
+``tm-bot`` runs this module twice removed: it's a supervisor loop that relaunches
+a worker (this process) whenever the worker exits with ``RESTART_EXIT_CODE`` —
+which is exactly what ``/restart`` does. This module doesn't know it's being
+supervised; it just exits with that code. See ``DESIGN_bot_restart.md``.
+
+Because a restart needs the athlete to be able to reach ``/restart`` at all, and
+because the athlete's answer to an open prompt has to arrive live, Telegram
+polling (``getUpdates``) is only paused while a command is silently computing
+with no prompt open — never while idle or while a prompt is awaiting an answer.
+See ``_pause_polling``/``_resume_polling`` in ``main``.
+
 Run with: ``./tm-bot`` (or ``venv/bin/python trainmate_bot.py``). Configure the
 token + allowlist under a ``telegram:`` block in config.yaml (see
 config_template.yaml).
@@ -31,6 +42,7 @@ import json
 import os
 import secrets
 import shlex
+import signal
 import sys
 from typing import Dict, List, Optional, Tuple
 
@@ -43,6 +55,12 @@ from trainmate.util import ANSI_ESCAPE
 MAX_MESSAGE_CHARS = 3800
 
 CLI_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "trainmate_cli.py")
+
+# Exit code that tells the tm-bot supervisor to relaunch us (rather than exit for
+# good). Arbitrary, borrowed from EX_TEMPFAIL in sysexits.h — just needs to not
+# collide with Python's own exit code for uncaught exceptions (1). Must match the
+# supervisor's RESTART_EXIT_CODE in tm-bot.
+RESTART_EXIT_CODE = 75
 
 WELCOME = (
     "TrainMate is connected. Send any CLI command — the leading slash is "
@@ -257,6 +275,24 @@ def main() -> None:
 
     application = Application.builder().token(token).post_init(_post_init).build()
     bot = application.bot
+    updater = application.updater
+
+    # Polling (getUpdates) runs continuously except while a command subprocess is
+    # silently computing with no prompt open — see the module docstring and
+    # DESIGN_bot_restart.md §5.1. _drive() calls these around that phase; the lock
+    # just guards against overlapping pause/resume calls, since start_polling()/
+    # stop() aren't safe to double-call concurrently.
+    _polling_lock = asyncio.Lock()
+
+    async def _pause_polling() -> None:
+        async with _polling_lock:
+            if updater.running:
+                await updater.stop()
+
+    async def _resume_polling() -> None:
+        async with _polling_lock:
+            if not updater.running:
+                await updater.start_polling(allowed_updates=Update.ALL_TYPES)
 
     async def _flush_output(session: "_Session", buf: List[str]) -> None:
         text = "\n".join(buf).strip()
@@ -302,8 +338,15 @@ def main() -> None:
 
     async def _drive(session: "_Session") -> None:
         """Reads the CLI's stdout, streaming prose to the chat and handling each
-        prompt request inline, until the process exits."""
+        prompt request inline, until the process exits.
+
+        Polling is paused for the silent-compute span (no prompt open) and resumed
+        around each prompt, so the athlete can still reach /cancel, /restart, or
+        answer a prompt while a subprocess is blocked on stdin, but sending
+        anything during silent compute just queues at Telegram until polling
+        resumes (§5.1)."""
         buf: List[str] = []
+        await _pause_polling()
         try:
             while True:
                 # Inactivity watchdog over the compute phase: a command that goes
@@ -327,7 +370,9 @@ def main() -> None:
                 if req is not None:
                     await _flush_output(session, buf)
                     buf = []
+                    await _resume_polling()
                     response = await _present_prompt(session, req)
+                    await _pause_polling()
                     try:
                         session.proc.stdin.write((json.dumps(response) + "\n").encode())
                         await session.proc.stdin.drain()
@@ -349,6 +394,7 @@ def main() -> None:
                     session.proc.kill()
                 except ProcessLookupError:
                     pass
+            await _resume_polling()  # back to idle: always end this session live
 
     async def _start_command(chat_id: int, argv: List[str]) -> None:
         proc = await asyncio.create_subprocess_exec(
@@ -378,6 +424,33 @@ def main() -> None:
                 pass
         return "Cancelling…"
 
+    async def _restart(chat_id: int) -> None:
+        """Cleans up any live session, replies, then hard-exits with
+        RESTART_EXIT_CODE for the tm-bot supervisor to relaunch us.
+
+        Under §5.1's polling model this can only ever be reached while idle or
+        while a prompt is open (never mid-compute, since polling — and thus
+        message delivery — is paused for that whole span). If a prompt is open,
+        answer it as cancelled so the CLI subprocess gets a chance to abort
+        cleanly (same as _cancel's mid-prompt path); we wait briefly for it to
+        exit on its own before force-killing, so os._exit() below never leaves it
+        orphaned and blocked on stdin forever."""
+        session = sessions.get(chat_id)
+        if session is not None and session.awaiting is not None:
+            fut = session.answer_future
+            if fut is not None and not fut.done():
+                fut.set_result({"v": PROMPT_PROTOCOL_VERSION, "id": session.awaiting.get("id"),
+                                "cancelled": True})
+            try:
+                await asyncio.wait_for(session.proc.wait(), timeout=2.0)
+            except asyncio.TimeoutError:
+                try:
+                    session.proc.kill()
+                except ProcessLookupError:
+                    pass
+        await bot.send_message(chat_id=chat_id, text="Restarting…")
+        os._exit(RESTART_EXIT_CODE)
+
     async def on_message(update: "Update", context) -> None:
         message = update.effective_message
         chat = update.effective_chat
@@ -401,6 +474,9 @@ def main() -> None:
             return
         if token_low == "start":
             await message.reply_text(WELCOME)
+            return
+        if token_low == "restart":
+            await _restart(chat.id)
             return
 
         session = sessions.get(chat.id)
@@ -468,11 +544,30 @@ def main() -> None:
         except Exception:
             pass
 
+    async def _serve() -> None:
+        """Runs the bot until SIGINT/SIGTERM. Equivalent to
+        Application.run_polling(), but with polling started/stopped explicitly
+        (via the Updater directly) instead of being wired to the Application's own
+        lifetime — run_polling() doesn't expose a way to pause fetching without
+        tearing the whole thing down, and _pause_polling/_resume_polling need to
+        do exactly that mid-session (§5.1)."""
+        stop_event = asyncio.Event()
+        loop = asyncio.get_running_loop()
+        for sig in (signal.SIGINT, signal.SIGTERM):
+            loop.add_signal_handler(sig, stop_event.set)
+        async with application:
+            await application.start()
+            await updater.start_polling(allowed_updates=Update.ALL_TYPES)
+            await stop_event.wait()
+            if updater.running:
+                await updater.stop()
+            await application.stop()
+
     # filters.TEXT catches commands too (a '/status' message is still text).
     application.add_handler(MessageHandler(filters.TEXT, on_message))
     application.add_handler(CallbackQueryHandler(on_callback))
     print("TrainMate Telegram bot started. Press Ctrl-C to stop.")
-    application.run_polling(allowed_updates=Update.ALL_TYPES)
+    asyncio.run(_serve())
 
 
 async def _post_init(app) -> None:
