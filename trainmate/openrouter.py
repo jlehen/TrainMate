@@ -176,6 +176,16 @@ class OpenRouterClient:
             response.raise_for_status()
             resp_data = response.json()
             
+            if "error" in resp_data:
+                err_obj = resp_data["error"]
+                err_msg = err_obj.get("message") if isinstance(err_obj, dict) else str(err_obj)
+                print(f"OpenRouter API error: {err_msg}")
+                self._log_exchange(
+                    label, system_content, user_content,
+                    response_data=resp_data, error_msg=f"OpenRouter Error: {err_msg}"
+                )
+                raise ValueError(f"OpenRouter API error: {err_msg}")
+
             # Print token usage details for prompt caching verification
             usage = resp_data.get("usage", {})
             print(
