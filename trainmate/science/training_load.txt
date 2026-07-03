@@ -1,29 +1,111 @@
-ACUTE:CHRONIC WORKLOAD RATIO (ACWR) GUIDELINES
-==============================================
+TRAINING LOAD MONITORING GUIDELINES (ACWR + FITNESS/FATIGUE MODEL)
+==================================================================
 
-The Acute:Chronic Workload Ratio (ACWR) is a model used to monitor an athlete's training load and
-predict injury risk. It compares the amount of training performed in the short term (acute
-workload) to the amount of training performed in the long term (chronic workload).
+Training load monitoring answers two related questions:
+  (a) Is load being ramped safely, or spiking into injury risk?   -> ACWR
+  (b) Where is the athlete on the fitness / fatigue / freshness curve, and how
+      should load progress week over week and taper into an event?  -> PMC (CTL/ATL/TSB)
 
-1. Calculations:
-   - Acute Workload: Typically calculated as the sum of training workload over the past 7 days.
-   - Chronic Workload: Typically calculated as the average weekly training workload over the past
-     28 days (total load over 28 days divided by 4).
-   - Workload metric: TSS + RPE * Duration
+Both models operate on the same underlying daily training load.
+   - Load metric (per session): TSS, or (RPE * Duration) when power/pace is
+     unavailable. Sum per calendar day to get daily load.
+
+
+1. ACUTE:CHRONIC WORKLOAD RATIO (ACWR)
+--------------------------------------
+The ACWR compares short-term load to long-term load to flag load spikes.
+
+   - Acute Workload:   sum of daily load over the past 7 days.
+   - Chronic Workload: average weekly load over the past 28 days
+                       (total 28-day load / 4).
    - ACWR = Acute Workload / Chronic Workload
 
-2. Workload Ranges and Interpretation:
-   - ACWR < 0.8: Under-training. Represents an increased risk of injury if training volume is
-     spiked suddenly, as fitness levels are declining or low.
-   - ACWR 0.8 - 1.3: The "Sweet Spot". Training load is safely building or being maintained.
-     Injury risk is minimized.
-   - ACWR 1.3 - 1.5: The "Danger Zone". Athlete is reaching elevated fatigue. Caution is advised.
-   - ACWR > 1.5: The "Injury Threshold". Training load has spiked too fast (acute load is 1.5x
-     greater than average chronic load). High risk of injury. Workloads should be reduced
-     immediately to allow recovery and adaptation.
+   Interpretation:
+   - ACWR < 0.8:       Under-training. Fitness low/declining; a sudden spike from
+                       here is itself risky.
+   - ACWR 0.8 - 1.3:   "Sweet Spot". Load is safely building or maintained.
+   - ACWR 1.3 - 1.5:   "Danger Zone". Elevated fatigue; caution advised.
+   - ACWR > 1.5:       "Injury Threshold". Acute load has spiked too fast.
+                       Reduce load immediately.
 
-3. Coaching Directives:
-   - When ACWR rises above 1.3, keep subsequent workouts at low intensity or reduce planned volume
-     to prevent crossing 1.5.
-   - When ACWR drops below 0.8, build workload gradually (no more than a 10-15% increase in weekly
-     volume) to safely raise fitness.
+   Caveat: ACWR is a useful guardrail, not a precise predictor. Its coupled
+   rolling-average form has known methodological weaknesses, so treat it as one
+   input, cross-checked against the fitness/fatigue model below and recovery
+   metrics (HRV, RHR, sleep).
+
+
+2. FITNESS / FATIGUE / FORM (PERFORMANCE MANAGEMENT CHART, PMC)
+--------------------------------------------------------------
+The PMC (Banister impulse-response model) tracks three exponentially-weighted
+moving averages of daily load. It captures accumulated fitness, short-term
+fatigue, and the balance between them ("form").
+
+   - CTL (Chronic Training Load) = "Fitness"
+       Exponentially-weighted moving average of daily load, ~42-day time
+       constant. Rises slowly; represents accumulated fitness.
+   - ATL (Acute Training Load) = "Fatigue"
+       Exponentially-weighted moving average of daily load, ~7-day time
+       constant. Rises and falls quickly; represents recent fatigue.
+   - TSB (Training Stress Balance) = "Form" = CTL(yesterday) - ATL(yesterday)
+       Positive = fresh/tapered; negative = fatigued/loaded.
+
+   TSB interpretation (approximate bands):
+   - TSB > +25:        Very fresh but detraining risk if sustained (fitness
+                       decaying). Only appropriate right before an A event.
+   - TSB +5 to +25:    Peaked / race-ready freshness. Target band for an A-event
+                       taper.
+   - TSB -10 to +5:    Neutral / "grey zone". Maintenance or light build.
+   - TSB -10 to -30:   Productive overload. Normal and desirable inside a build
+                       block: fitness is being built while fatigue is carried.
+   - TSB < -30:        Excessive fatigue. High overreaching / injury risk;
+                       insert recovery.
+
+   Relationship to ACWR: ATL vs CTL is conceptually the same acute-vs-chronic
+   comparison as ACWR, over exponential (not flat) windows. Use ACWR/ramp-rate
+   for injury-risk pacing; use TSB for freshness, peaking, and tapering.
+
+
+3. WEEK-OVER-WEEK PROGRESSION: CTL RAMP RATE
+--------------------------------------------
+"How much to increase load week over week" is governed by the CTL ramp rate:
+the weekly rise in CTL, expressed in load units per day per week (e.g. TSS/day
+per week).
+
+   - Ramp rate ~3-5:   Sustainable for most athletes building fitness.
+   - Ramp rate ~5-7:   Aggressive; acceptable for experienced athletes in a
+                       focused build block, monitored closely.
+   - Ramp rate > 8:    High risk of non-functional overreaching / injury.
+                       Avoid outside short, deliberate overload weeks.
+
+   As a volume heuristic, this aligns with limiting weekly volume increases to
+   roughly 5-10% (the classic "10% rule" is a soft ceiling, not a validated
+   law). Ramp on load, not on a fixed percentage, and back off when recovery
+   metrics or TSB indicate the athlete is not absorbing the load.
+
+   ACWR vs ramp rate - complementary, not redundant: ACWR (short flat windows,
+   relative) detects an acute one-week spike; ramp rate (42-day EWMA, absolute)
+   detects an unsustainable multi-week climb. They often move together but can
+   diverge - a single big week can push ACWR > 1.5 while ramp stays fine, and a
+   smooth relentless build can hold ACWR near the sweet spot while ramp exceeds
+   8. Treat EITHER crossing its red line as a caution; a safe ACWR does not
+   clear an aggressive ramp, and vice versa.
+
+
+4. COACHING DIRECTIVES
+----------------------
+   - Build CTL gradually via ramp rate; keep ACWR in the 0.8-1.3 sweet spot.
+     Check both: a red flag on EITHER (ACWR > 1.5 OR ramp rate > 8) warrants
+     caution even when the other looks fine.
+   - When ACWR rises above 1.3, favor lower-intensity sessions or trimming
+     planned volume to avoid crossing 1.5.
+   - When ACWR drops below 0.8, rebuild load gradually; a ramp rate around 5 or
+     below (roughly a 10-15% weekly volume increase) is a reasonable ceiling.
+   - When TSB falls below -30, default to recovery/deload and override continued
+     loading regardless of ACWR - unless this is a short, deliberate overreach
+     block, in which case cap its duration and watch recovery metrics closely.
+   - To peak for an A event, taper load so TSB rises into the +5 to +25 band by
+     event day while preserving intensity (see periodization deload/realization
+     protocol).
+   - Sustained TSB well above +25 means fitness is decaying: resume building.
+   - Cross-check all of the above against recovery metrics (HRV, RHR, sleep);
+     depressed recovery overrides a "safe" ACWR/TSB.
