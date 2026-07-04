@@ -1,10 +1,11 @@
 # Review: DESIGN_pmc_fitness_fatigue.md
 
-**Status:** Findings recorded 2026-07-04, not yet folded into the design.
-Reviewed against the design at its initial snapshot (same branch, previous
-commit) and against every file it references. Findings 1–5 should be resolved
-in the document before implementation; 6–8 are implementation decisions the
-doc should make explicitly; the rest is an editing pass.
+**Status:** Findings recorded 2026-07-04 — **all folded into the design rev. 2**
+(2026-07-04); see the design's §9 for the resolution map. Reviewed against the
+design at its initial snapshot (same branch, previous commit) and against every
+file it references. Findings 1–5 were blocking; 6–8 implementation decisions the
+doc now makes explicitly; the rest an editing pass. This file is retained as the
+historical review record — the findings below describe the *rev. 1* design.
 
 ---
 
