@@ -1,7 +1,8 @@
 # Review: DESIGN_pmc_fitness_fatigue.md
 
-**Status:** Findings recorded 2026-07-04 — **all folded into the design rev. 2**
-(2026-07-04); see the design's §9 for the resolution map. Reviewed against the
+**Status:** Findings recorded 2026-07-04 — **all folded into the design**
+(rev. 2, then refined by author decisions in rev. 3, both 2026-07-04); see the
+design's §9 for the resolution map. Reviewed against the
 design at its initial snapshot (same branch, previous commit) and against every
 file it references. Findings 1–5 were blocking; 6–8 implementation decisions the
 doc now makes explicitly; the rest an editing pass. This file is retained as the
