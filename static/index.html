@@ -10,6 +10,9 @@
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=Plus+Jakarta+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <!-- FontAwesome Icons -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- uPlot (Progress tab PMC chart) -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/uplot@1.6.30/dist/uPlot.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/uplot@1.6.30/dist/uPlot.iife.min.js"></script>
     <!-- Custom Stylesheet -->
     <link rel="stylesheet" href="style.css">
 </head>
@@ -40,6 +43,7 @@
             <button class="main-tab-btn" data-tab="view-workouts" onclick="switchMainTab('view-workouts')"><i class="fa-solid fa-calendar-days"></i> Workouts</button>
             <button class="main-tab-btn" data-tab="view-learnings" onclick="switchMainTab('view-learnings')"><i class="fa-solid fa-brain"></i> Learnings</button>
             <button class="main-tab-btn" data-tab="view-history" onclick="switchMainTab('view-history')"><i class="fa-solid fa-clock-rotate-left"></i> History</button>
+            <button class="main-tab-btn" data-tab="view-progress" onclick="switchMainTab('view-progress')"><i class="fa-solid fa-chart-line"></i> Progress</button>
         </nav>
 
         <!-- CONFIG WARNING BANNER -->
@@ -411,6 +415,29 @@
             <div class="card">
                 <h3 class="subhead"><i class="fa-solid fa-wine-glass"></i> Daily Context</h3>
                 <div id="context-table"></div>
+            </div>
+        </div>
+
+        <!-- ============ PROGRESS VIEW ============ -->
+        <div id="view-progress" class="main-view">
+            <div class="card">
+                <h2><i class="fa-solid fa-chart-line"></i> Progress Timeline</h2>
+                <div class="filter-row">
+                    <button class="btn btn-secondary btn-sm progress-range-btn active" data-range="8w">8 weeks</button>
+                    <button class="btn btn-secondary btn-sm progress-range-btn" data-range="season">Season</button>
+                    <button class="btn btn-secondary btn-sm progress-range-btn" data-range="all">All</button>
+                </div>
+                <div id="progress-warnings"></div>
+            </div>
+
+            <div class="card">
+                <h3 class="subhead"><i class="fa-solid fa-heart-pulse"></i> Fitness / Fatigue / Form</h3>
+                <div id="progress-pmc-chart" class="progress-chart-container"></div>
+            </div>
+
+            <div class="card">
+                <h3 class="subhead"><i class="fa-solid fa-layer-group"></i> Weekly Load: Planned vs Actual</h3>
+                <div id="progress-weekly-chart"></div>
             </div>
         </div>
 

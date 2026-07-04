@@ -19,7 +19,7 @@ def date_covered(
     return any(start <= date_str <= end for start, end in covered_ranges)
 
 
-def _planned_load(w: Dict[str, Any]) -> float:
+def planned_load(w: Dict[str, Any]) -> float:
     """Expected load of a planned workout as a single value (mirrors the actual
     side): the coach's planned TSS, or sRPE (RPE x 10 x hours) when no TSS was
     assigned. Replaces the former `tss + rpe*hours` blend."""
@@ -57,7 +57,7 @@ def _discrepancy_reasons(
     act_load = activity_load(matched_act)
 
     p_duration = w.get("duration_minutes") or 0
-    exp_load = _planned_load(w)
+    exp_load = planned_load(w)
 
     tolerance = _adherence_tolerance(exp_load)
     tol_pct = f"+/-{tolerance*100:.0f}%"

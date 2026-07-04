@@ -101,6 +101,11 @@ class PromptProtocolTest(unittest.TestCase):
     def test_plain_output_is_not_a_request(self):
         self.assertIsNone(bot.parse_prompt_request("All workouts wiped.\n"))
 
+    def test_photo_line_is_not_a_prompt_request(self):
+        from trainmate.prompt import PHOTO_SENTINEL
+        line = PHOTO_SENTINEL + '{"path": "/tmp/x.png", "caption": "FORM today"}\n'
+        self.assertIsNone(bot.parse_prompt_request(line))
+
     def test_confirm_buttons_yes_no(self):
         rows = bot.prompt_buttons({"id": "p1", "type": "confirm"}, "ab12")
         labels = [label for row in rows for label, _ in row]
@@ -134,6 +139,43 @@ class PromptProtocolTest(unittest.TestCase):
     def test_format_prompt_message_strips_ansi(self):
         msg = bot.format_prompt_message({"message": "\033[33mProceed?\033[0m"})
         self.assertEqual(msg, "Proceed?")
+
+
+class PhotoProtocolTest(unittest.TestCase):
+    def test_roundtrips_through_emit_photo(self):
+        import io
+        from trainmate.prompt import emit_photo
+        out = io.StringIO()
+        emit_photo("/tmp/chart.png", caption="FORM today   CTL 55", out=out)
+        line = out.getvalue()
+        req = bot.parse_photo_request(line)
+        self.assertEqual(req["path"], "/tmp/chart.png")
+        self.assertEqual(req["caption"], "FORM today   CTL 55")
+
+    def test_emit_photo_without_caption(self):
+        import io
+        from trainmate.prompt import emit_photo
+        out = io.StringIO()
+        emit_photo("/tmp/chart.png", out=out)
+        req = bot.parse_photo_request(out.getvalue())
+        self.assertEqual(req["path"], "/tmp/chart.png")
+        self.assertIsNone(req["caption"])
+
+    def test_non_photo_line_returns_none(self):
+        self.assertIsNone(bot.parse_photo_request("All workouts wiped.\n"))
+
+    def test_prompt_line_is_not_a_photo_request(self):
+        from trainmate.prompt import PROMPT_SENTINEL
+        line = PROMPT_SENTINEL + '{"v":1,"id":"p1","type":"confirm","message":"go?"}\n'
+        self.assertIsNone(bot.parse_photo_request(line))
+
+    def test_unknown_sentinel_is_dropped_not_forwarded(self):
+        # A future CLI sentinel this bot build doesn't understand: both parsers
+        # must return None so _drive()'s catch-all drop rule applies (§7.2).
+        line = "\x1eTM-FUTURE-THING {\"x\": 1}\n"
+        self.assertIsNone(bot.parse_prompt_request(line))
+        self.assertIsNone(bot.parse_photo_request(line))
+        self.assertTrue(line.startswith(bot._SENTINEL_PREFIX))
 
 
 class WrapWidthTest(unittest.TestCase):

@@ -121,6 +121,7 @@ def _edit_text_in_editor(initial: str) -> Optional[str]:
 # them and so they remain attributes of this module (test compatibility).
 from trainmate.cli.common import fmt_date, ensure_recent_data
 from trainmate.cli.status import run_status
+from trainmate.cli.progress import run_progress
 from trainmate.cli.goals import (
     run_goal_add, run_goal_edit, run_goal_list, run_goal_rm, run_goal_wipe,
 )
@@ -387,7 +388,33 @@ def main() -> None:
         "-v", "--verbose", action="store_true",
         help="Show all training objectives/goals and life events"
     )
-    
+
+    # progress command — the projected Performance Management Chart
+    progress_parser = subparsers.add_parser(
+        "progress",
+        aliases=["prog"],
+        parents=[pull_bypass_parser],
+        help="Show the training progress timeline: measured load to date, projected forward",
+        description=(
+            "Show a single continuous timeline of training load: past days measured "
+            "from completed activities, future days planned from the current plan, one "
+            "fitness/fatigue model (CTL/ATL/TSB) run across the seam. Projects to plan "
+            "end (or each objective the plan reaches) so you can see whether the plan "
+            "as written delivers peak fitness with positive form on race day."
+        )
+    )
+    progress_parser.add_argument(
+        "--weeks", type=int, default=8, metavar="N",
+        help="Weeks of past weekly load to show (default: 8). The future half always "
+             "runs to plan end."
+    )
+    progress_parser.add_argument(
+        "--chart", nargs="?", const=True, default=False, metavar="PATH",
+        help="Also render the two-panel chart (PMC + weekly load) to a PNG "
+             "(default: ./progress.png; requires matplotlib). Additive — the "
+             "text output above still prints."
+    )
+
     # goal command & subparsers
     goal_parser = subparsers.add_parser(
         "goal",
@@ -705,7 +732,6 @@ def main() -> None:
     # plan command & subparsers
     plan_parser = subparsers.add_parser(
         "plan",
-        aliases=["p"],
         help="Manage and consult the periodized training plan (macrocycles & mesocycles)"
     )
     plan_subparsers = plan_parser.add_subparsers(
@@ -1302,6 +1328,8 @@ def main() -> None:
         _print_command_tree(parser)
     elif cmd in ("status", "s"):
         run_status(verbose=args.verbose, no_pull=args.no_pull, force_pull=args.force_pull)
+    elif cmd in ("progress", "prog"):
+        run_progress(args)
     elif cmd in ("goal", "g"):
         if not args.subcommand:
             goal_parser.print_help()
@@ -1414,7 +1442,7 @@ def main() -> None:
             run_data_show_activities(args)
         elif sub == "wipe":
             run_data_wipe(args)
-    elif cmd in ("plan", "p"):
+    elif cmd == "plan":
         if not args.subcommand:
             plan_parser.print_help()
             sys.exit(1)

@@ -39,6 +39,24 @@ from typing import List, Optional, Sequence
 PROMPT_SENTINEL = "\x1eTM-PROMPT "
 PROMPT_PROTOCOL_VERSION = 1
 
+# Sibling one-way sentinel: a command that rendered a chart tells the front-end
+# where the PNG lives (no answer expected, unlike TM-PROMPT). Framing is the
+# same \x1e-prefixed single line, so a front-end that doesn't recognise it can
+# drop it instead of forwarding raw protocol bytes as chat text
+# (DESIGN_progress_timeline.md §7.2).
+PHOTO_SENTINEL = "\x1eTM-PHOTO "
+
+
+def emit_photo(path: str, caption: Optional[str] = None, out=None) -> None:
+    """Writes one sentinel-framed photo-ready line: ``\\x1eTM-PHOTO {json}``,
+    ``{"path": ..., "caption": ...}``. The caption travels in the payload
+    because the front-end has no other way to know it — it must not re-parse
+    forwarded chat text (§7.2)."""
+    if out is None:
+        out = sys.stdout
+    out.write(PHOTO_SENTINEL + json.dumps({"path": path, "caption": caption}) + "\n")
+    out.flush()
+
 
 class PromptCancelled(BaseException):
     """Raised when the front-end cancels an in-flight prompt (``/cancel`` or idle

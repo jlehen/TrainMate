@@ -5,7 +5,7 @@ from trainmate.config import config
 from trainmate.db import db
 from trainmate.google_calendar import calendar_syncer
 from trainmate.types import Objective, Constraint, Workout
-from trainmate.adherence import analyze_adherence, _planned_load
+from trainmate.adherence import analyze_adherence, planned_load
 from trainmate.sports import canonical_sport
 from trainmate.modification_state import SWAP_REASON_PREFIX, MANUAL_REPLACE_REASON_PREFIX
 from trainmate import garmin
@@ -582,7 +582,7 @@ class CoachService:
             ]
             if cs:
                 sessions = [w for w in sessions if canonical_sport(w['sport_type']) == cs]
-            return sum(_planned_load(w) for w in sessions)
+            return sum(planned_load(w) for w in sessions)
 
         displaced_load = _load(window_start, end)
         days = (datetime.strptime(end, "%Y-%m-%d").date()

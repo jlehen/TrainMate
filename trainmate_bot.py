@@ -47,7 +47,7 @@ import sys
 from typing import Dict, List, Optional, Tuple
 
 from trainmate.config import config
-from trainmate.prompt import PROMPT_SENTINEL, PROMPT_PROTOCOL_VERSION
+from trainmate.prompt import PROMPT_SENTINEL, PROMPT_PROTOCOL_VERSION, PHOTO_SENTINEL
 from trainmate.util import ANSI_ESCAPE
 
 # Telegram caps a message at 4096 chars; we wrap replies in <pre>…</pre> (7 chars
@@ -81,6 +81,7 @@ WELCOME = (
 # still works whether or not it's listed here).
 MENU_COMMANDS = [
     ("status", "Athlete status, goals, recent metrics"),
+    ("progress", "Training progress timeline (add --chart for a PNG)"),
     ("workout", "List/generate/adapt/swap workouts"),
     ("plan", "Show/generate periodization plans"),
     ("goal", "Manage training goals"),
@@ -144,6 +145,27 @@ def parse_prompt_request(line: str) -> Optional[dict]:
         return json.loads(line[len(PROMPT_SENTINEL):])
     except json.JSONDecodeError:
         return None
+
+
+def parse_photo_request(line: str) -> Optional[dict]:
+    """Decodes a sentinel-framed photo-ready line, or None if it isn't one.
+
+    `trainmate.prompt.emit_photo` writes ``\\x1eTM-PHOTO {json}`` (fields
+    ``path``/``caption``) on its own stdout line — the CLI's ``--chart`` path
+    (DESIGN_progress_timeline.md §7.2)."""
+    if not line.startswith(PHOTO_SENTINEL):
+        return None
+    try:
+        return json.loads(line[len(PHOTO_SENTINEL):])
+    except json.JSONDecodeError:
+        return None
+
+
+# Any other \x1e-prefixed sentinel a future CLI version might emit: recognised
+# framing but not (yet) understood by this bot build. Dropped rather than
+# forwarded as chat text, so a stale bot degrades to a silently-missing
+# feature instead of leaking raw protocol bytes (§7.2).
+_SENTINEL_PREFIX = "\x1e"
 
 
 def prompt_buttons(req: dict, nonce: str) -> List[List[Tuple[str, str]]]:
@@ -303,6 +325,25 @@ def main() -> None:
             await bot.send_message(chat_id=session.chat_id, text=part, parse_mode=ParseMode.HTML)
         _log(session.chat_id, "<<", f"{text.count(chr(10)) + 1} line(s)")
 
+    async def _send_photo(session: "_Session", req: dict) -> None:
+        """Sends the chart PNG a `--chart` run pointed at, then unlinks the temp
+        file regardless of send outcome (§7.2) — the CLI wrote it with
+        `delete=False` specifically so the bot owns cleanup."""
+        path = req.get("path")
+        caption = req.get("caption")
+        session.sent = True
+        try:
+            with open(path, "rb") as f:
+                await bot.send_photo(chat_id=session.chat_id, photo=f, caption=caption)
+            _log(session.chat_id, "<<", f"photo {path}")
+        except Exception as e:
+            await bot.send_message(chat_id=session.chat_id, text=f"Could not send chart: {e}")
+        finally:
+            try:
+                os.unlink(path)
+            except OSError:
+                pass
+
     async def _present_prompt(session: "_Session", req: dict) -> dict:
         """Renders a prompt, parks until the athlete answers, returns the response
         dict to write back to the CLI's stdin. Idle timeout -> cancellation."""
@@ -366,7 +407,17 @@ def main() -> None:
                 if not line:
                     break
                 raw = line.decode("utf-8", "replace")
+                photo_req = parse_photo_request(raw)
+                if photo_req is not None:
+                    await _flush_output(session, buf)
+                    buf = []
+                    await _send_photo(session, photo_req)
+                    continue
                 req = parse_prompt_request(raw)
+                if req is None and raw.rstrip("\n").startswith(_SENTINEL_PREFIX):
+                    # Recognised framing but an unknown sentinel (a future CLI
+                    # version) — drop rather than forward as chat text.
+                    continue
                 if req is not None:
                     await _flush_output(session, buf)
                     buf = []

@@ -2,7 +2,7 @@ import os
 from datetime import datetime, timedelta
 from flask import Flask, jsonify, request, send_from_directory
 from typing import Any, Dict, List
-from trainmate import garmin
+from trainmate import garmin, progression
 from trainmate.db import db
 from trainmate.adherence import analyze_adherence, date_covered
 from trainmate.calendar_state import calendar_status
@@ -451,6 +451,78 @@ def compare_workouts() -> Any:
         "days": days,
         "discrepancies": discrepancies,
         "informational": informational,
+    })
+
+
+@app.route("/api/timeline", methods=["GET"])
+def get_timeline() -> Any:
+    """Progress timeline: measured load to date + planned load through plan
+    end, with the CTL/ATL/TSB fitness/fatigue model run across the seam
+    (DESIGN_progress_timeline.md §6). Pure reader — never calls
+    `garmin.ensure_data`; data freshness is already surfaced via `sync_state`
+    on the Dashboard. Not cached: recomputed per request so the projection
+    moves the instant `adapt`/`generate`/`swap`/`remove` rewrite future
+    workouts.
+
+    Query params `?start_date=&end_date=` clip the *returned* window only
+    (default: today - 56 days -> plan end); the underlying computation always
+    runs over full history (CTL/ATL seeding needs it)."""
+    today = today_str()
+    activities = db.get_completed_activities()
+    workouts = db.get_workouts()
+
+    objectives = db.get_objectives(status='active')
+    objectives.sort(key=lambda o: str(o['target_date']))
+
+    governing_macro = None
+    for obj in objectives:
+        macro = db.get_macrocycle_for_objective(obj['id'])
+        if macro:
+            governing_macro = macro
+            break
+    mesocycles = (
+        db.get_mesocycles_for_macrocycle(governing_macro['id']) if governing_macro else []
+    )
+    cache = db.get_analysis_cache("long")
+    inferred = (cache.get("reconstruction") or {}).get("inferred_mesocycles", []) if cache else []
+    meso_spans = progression.meso_bands(mesocycles, inferred)
+
+    days = progression.fitness_series(progression.daily_loads(activities, workouts, today))
+    weeks = progression.weekly_aggregates(activities, workouts, today, meso_spans)
+    plan_end = progression.plan_end(workouts)
+    zero_load_count = progression.zero_load_workout_count(workouts)
+
+    default_start = (
+        datetime.strptime(today, "%Y-%m-%d").date() - timedelta(days=56)
+    ).strftime("%Y-%m-%d")
+    start_date = request.args.get("start_date") or default_start
+    end_date = request.args.get("end_date") or (plan_end or today)
+
+    warnings: List[str] = []
+    if plan_end is not None:
+        next_objective = next((o for o in objectives if o['target_date'] > plan_end), None)
+        if next_objective:
+            end_d = datetime.strptime(plan_end, "%Y-%m-%d").date()
+            target_d = datetime.strptime(next_objective['target_date'], "%Y-%m-%d").date()
+            weeks_before = max(0, round((target_d - end_d).days / 7))
+            warnings.append(
+                f"plan generated through {plan_end} ({weeks_before} wks before "
+                f"objective {next_objective['target_date']})"
+            )
+    if zero_load_count:
+        warnings.append(
+            f"{zero_load_count} planned workout"
+            f"{'s' if zero_load_count != 1 else ''} have neither TSS nor RPE and count as 0 load"
+        )
+
+    return jsonify({
+        "today": today,
+        "plan_end": plan_end,
+        "days": [d for d in days if start_date <= d["date"] <= end_date],
+        "weeks": [w for w in weeks if start_date <= w["week_commencing"] <= end_date],
+        "meso_bands": meso_spans,
+        "objectives": objectives,
+        "warnings": warnings,
     })
 
 

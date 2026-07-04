@@ -16,6 +16,9 @@ trainmate.db
 # Logs
 logs
 
+# Chart output (tm progress --chart)
+progress.png
+
 # Python caches
 __pycache__/
 *.pyc
