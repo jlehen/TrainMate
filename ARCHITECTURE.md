@@ -133,7 +133,8 @@ classes themselves.
 |                      |                      | maintains the `sync_state` watermark, and        |
 |                      |                      | `ensure_data()` auto-refreshes on read. Owns the |
 |                      |                      | load model: `measured_tss`, `activity_load`,     |
-|                      |                      | `rpe_divergence` (see §12).                       |
+|                      |                      | `rpe_divergence`, and the PMC EWMAs              |
+|                      |                      | `compute_pmc` (CTL/ATL/TSB) (see §12).            |
 | `google_calendar.py` | `calendar_syncer`    | Creates/updates/deletes all-day Google Calendar  |
 |                      |                      | events for workouts (outbound), and ingests       |
 |                      |                      | tagged daily-context events into `daily_context` |
@@ -480,6 +481,10 @@ methods whose behavior is *not* obvious from that convention are called out belo
   leaves them, since re-pull detects gaps by row presence);
   `wipe_calendar_context(start, end)` always resets the Calendar sync token (the
   incremental sync otherwise can't backfill deleted rows); `wipe_metrics()` = both.
+  A dated `wipe_garmin_data` is followed by `garmin.recompute_derived()` **at the
+  command layer** (`cli/data.py`, not inside the db method — that would be a circular
+  import / uncommitted-read): deleted load stays baked into every later day's CTL/ATL
+  EWMA until a sweep re-derives it, so the wipe must trigger one (DESIGN_pmc_fitness_fatigue.md §4).
 - **Coach Learnings** (`learnings.py`) — `get_learnings()` annotates each record with
   a computed `dormant` flag and its `proposed_confidence`; `add_learning` seeds a
   synthetic basis sustaining the level; plus the evidence/decay mutators
@@ -675,9 +680,20 @@ push until restored. See DESIGN_plan_rollback.md.
 | `hrv`             | INTEGER | Overnight HRV average  |
 | `sleep_score`     | INTEGER | 0–100                  |
 | `stress`          | INTEGER |                        |
-| `acute_workload`  | REAL    | 7-day rolling sum      |
-| `chronic_workload`| REAL    | 28-day sum ÷ 4         |
+| `acute_workload`  | REAL    | acute (default 7-day) rolling sum |
+| `chronic_workload`| REAL    | chronic (default 28-day) sum ÷ (chronic/acute weeks) |
 | `acwr`            | REAL    | acute / chronic        |
+| `ctl`             | REAL    | Fitness — CTL, 42-day EWMA of daily load (PMC). NULL in the leading-edge warm-up window and on pre-recompute rows |
+| `atl`             | REAL    | Fatigue — ATL, 7-day EWMA of daily load |
+| `tsb`             | REAL    | Form — TSB = CTL(yesterday) − ATL(yesterday) |
+
+CTL/ATL/TSB (the Performance Management Chart, DESIGN_pmc_fitness_fatigue.md) are the
+EWMA half of the load model, computed alongside ACWR in `garmin.recompute_derived()`
+over every calendar day (rest days decay the EWMAs) and upserted onto existing metrics
+rows. The four windows (acute/chronic/CTL/ATL) are config-backed under `garmin:`; the
+defaults are the supported configuration. The warm-up window (first τ_ctl days of
+history) is suppressed at every surface, and a convergence caveat is shown while the
+effective history is short.
 
 ### athlete_baselines
 28-day rolling baseline computed during `garmin.recompute_derived()` (a full
@@ -802,6 +818,7 @@ Regenerating a plan **supersedes** the prior version (kept) rather than deleting
 | `start_date`    | TEXT                    | YYYY-MM-DD                              |
 | `end_date`      | TEXT                    | YYYY-MM-DD                              |
 | `focus`         | TEXT                    | E.g. "Zone 2 aerobic base, high volume" |
+| `phase`         | TEXT                    | Structured phase (base/build/peak/taper/recovery), classified at plan generation; NULL on old/bootstrap blocks. Drives phase-aware TSB color (DESIGN_pmc_fitness_fatigue.md §4.4) |
 | `feedback`      | TEXT                    | Athlete feedback for next replanning    |
 
 ### analysis_cache
@@ -1038,11 +1055,20 @@ Required fields:
    reverse-engineered macro/mesocycle blocks, and physiological insights;
    written to no `feedback` field), prints it, and passes it as
    `prior_training_text` into `CoachEngine._plan_generate_strategy()` →
-   LLM → `{strategy, mesocycles}`.  See DESIGN_backward_evaluation.md §6.
+   LLM → `{strategy, mesocycles}`.  See DESIGN_backward_evaluation.md §6. Each
+   mesocycle also carries a structured `phase` (base/build/peak/taper/recovery): the
+   LLM emits it, and `normalize_meso_phase()` validates it (falling back to focus-text
+   inference, else NULL). It drives phase-aware TSB color (DESIGN_pmc_fitness_fatigue.md §4.4).
 5. If timeline > 24 weeks: calls `CoachEngine._generate_intermediate_goals()`
    first, saves intermediate objectives, then re-runs with the first goal.
 6. Saves new macrocycle + mesocycles to DB (old ones deleted via
    `save_macrocycle`).
+
+The strategy/plan and adapt prompts also receive a **forward taper projection**
+(`_pmc_projection_line`): the app deterministically walks the plan's own `tss` forward
+from current CTL/ATL to the highest-priority upcoming event and reports projected
+event-day TSB against the +5..+25 taper band — the one place the PMC compute reads the
+plan (read-only), so the coach reads a number instead of simulating two decays.
 
 ### Workout Generation (`workout generate`)
 1. CLI resolves the generation horizon (end date) from flags in priority order:
@@ -1103,8 +1129,9 @@ design: `DESIGN_garmin_direct_pull.md`.
    been pulled. Activities with low HR-zone coverage and no RPE are reported in
    an aggregated warning (their load is an underestimate).
 2. `garmin.recompute_derived()` runs a **full sweep** over all cached days:
-   acute/chronic workload + ACWR (7/28-day windows) and the 28-day
-   RHR/HRV/sleep baseline. A full sweep is cheap locally and avoids
+   acute/chronic workload + ACWR (default 7/28-day windows), the PMC EWMAs
+   CTL/ATL/TSB (`compute_pmc`, walking every calendar day so rest days decay),
+   and the 28-day RHR/HRV/sleep baseline. A full sweep is cheap locally and avoids
    windowed-recompute bugs.
 3. The `sync_state` watermark advances (`through_date` forward only,
    `last_pull_utc` = now).

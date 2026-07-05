@@ -8,7 +8,7 @@ from trainmate.config import config
 from trainmate.adherence import analyze_adherence, date_covered
 from trainmate.util import (
     bold, dim, green, red, yellow, cyan, blue, magenta, gray,
-    color_acwr, visible_len, pad_visible, wrap_text, format_labeled_text,
+    color_acwr, color_tsb, visible_len, pad_visible, wrap_text, format_labeled_text,
     format_labeled_block, render_table, is_narrow_client, default_wrap_width,
     today_str as _today_str, today_date as _today_date,
 )
@@ -126,6 +126,14 @@ def run_data_wipe(args: argparse.Namespace) -> None:
 
     if garmin:
         cli.db.wipe_garmin_data(start, end)
+        # A ranged wipe leaves deleted load baked into the EWMA CTL/ATL of every later
+        # surviving day (an EWMA carries it forward forever, unlike ACWR's bounded flat
+        # window), so recompute the derived metrics now that the wipe has committed. Run
+        # at the command layer, not inside the db method: recompute_derived() lives in
+        # garmin.py (which imports db, so a call from db/wipes.py would be a circular
+        # import) and opens its own connection, so calling it before the wipe's commit
+        # would deadlock or miss the deletes (DESIGN_pmc_fitness_fatigue.md §4).
+        cli.garmin.recompute_derived()
     if calendar:
         cli.db.wipe_calendar_context(start, end)
     print(green(f"Wiped {scope}{window}."))
@@ -261,9 +269,13 @@ def run_data_show_metrics(args: argparse.Namespace) -> None:
 
     headers = [
         "Date", "HRV", "HRV Base", "RHR", "RHR Base", "Sleep", "Sleep Base",
-        "Stress", "ACWR", "Acute", "Chronic",
+        "Stress", "ACWR", "Acute", "Chronic", "CTL", "ATL", "TSB",
     ]
     rows = []
+
+    # PMC values inside the leading-edge warm-up window are artifacts, so they render as
+    # "—" here (never "0.0") just like NULLs (DESIGN_pmc_fitness_fatigue.md §6.2).
+    warmup_cutoff = cli.garmin.pmc_warmup_cutoff()
 
     for m in metrics_history:
         base = cli.db.get_baseline(m['date'])
@@ -283,6 +295,14 @@ def run_data_show_metrics(args: argparse.Namespace) -> None:
         acwr_str = color_acwr(acwr_val) if acwr_val is not None else "N/A"
         acute_str = f"{acute_val:.1f}" if acute_val is not None else "N/A"
         chronic_str = f"{chronic_val:.1f}" if chronic_val is not None else "N/A"
+
+        in_warmup = bool(warmup_cutoff and m['date'] < warmup_cutoff)
+        ctl_v = None if in_warmup else m.get('ctl')
+        atl_v = None if in_warmup else m.get('atl')
+        tsb_v = None if in_warmup else m.get('tsb')
+        ctl_str = f"{ctl_v:.1f}" if ctl_v is not None else "—"
+        atl_str = f"{atl_v:.1f}" if atl_v is not None else "—"
+        tsb_str = color_tsb(tsb_v) if tsb_v is not None else "—"
 
         hrv_base_str = "N/A"
         rhr_base_str = "N/A"
@@ -318,7 +338,7 @@ def run_data_show_metrics(args: argparse.Namespace) -> None:
         rows.append([
             m['date'], hrv_str, hrv_base_str, rhr_str, rhr_base_str,
             sleep_str, sleep_base_str, stress_str, acwr_str, acute_str,
-            chronic_str,
+            chronic_str, ctl_str, atl_str, tsb_str,
         ])
 
     print(render_table(headers, rows))
@@ -331,8 +351,11 @@ def _show_metrics_csv(metrics_history: list) -> None:
     writer.writerow([
         "date", "hrv", "hrv_baseline", "rhr", "rhr_baseline",
         "sleep_score", "sleep_baseline", "stress", "acwr",
-        "acute_workload", "chronic_workload",
+        "acute_workload", "chronic_workload", "ctl", "atl", "tsb",
     ])
+    # Suppressed (warm-up) or NULL PMC values are emitted as empty cells, never 0, so
+    # downstream parsing can't read a zero as data (DESIGN_pmc_fitness_fatigue.md §6.2).
+    warmup_cutoff = cli.garmin.pmc_warmup_cutoff()
     for m in metrics_history:
         base = cli.db.get_baseline(m['date'])
         hrv_base = None
@@ -342,10 +365,17 @@ def _show_metrics_csv(metrics_history: list) -> None:
             hrv_base = base.get('hrv_baseline_mean')
             rhr_base = base.get('rhr_baseline_mean')
             sleep_base = base.get('sleep_baseline_mean')
+        in_warmup = bool(warmup_cutoff and m['date'] < warmup_cutoff)
+        ctl_v = None if in_warmup else m.get('ctl')
+        atl_v = None if in_warmup else m.get('atl')
+        tsb_v = None if in_warmup else m.get('tsb')
         writer.writerow([
             m['date'], m['hrv'], hrv_base, m['rhr'], rhr_base,
             m['sleep_score'], sleep_base, m['stress'], m['acwr'],
             m['acute_workload'], m['chronic_workload'],
+            "" if ctl_v is None else ctl_v,
+            "" if atl_v is None else atl_v,
+            "" if tsb_v is None else tsb_v,
         ])
 
 

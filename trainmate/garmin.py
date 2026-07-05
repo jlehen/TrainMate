@@ -20,15 +20,32 @@ from trainmate.db import db
 from trainmate.util import today_date, today_str, yellow, red, dim
 
 # Sports-science windows for the acute:chronic workload ratio (Gabbett/Banister
-# lineage): a 7-day acute load over a 28-day chronic load, the chronic expressed
-# as a rolling weekly average (28/7 = 4 weeks). Standard constants, not tunables.
-ACUTE_WINDOW_DAYS = 7
-CHRONIC_WINDOW_DAYS = 28
-CHRONIC_WEEKS = CHRONIC_WINDOW_DAYS / ACUTE_WINDOW_DAYS  # 4.0
+# lineage): a short acute load over a longer chronic load, the chronic expressed as
+# a rolling weekly average (chronic/acute weeks). The PMC (CTL/ATL) EWMA time
+# constants live alongside them. All four are config-backed under `garmin:`
+# (config.acwr_acute_days / acwr_chronic_days / pmc_ctl_days / pmc_atl_days) so they
+# can be experimented with, but the science file's interpretation bands and the
+# CLI colors are calibrated to the defaults (7/28/42/7) — non-default constants
+# change what the numbers *mean* while the bands keep judging them against the
+# standard values, so the defaults are the supported configuration. Read live every
+# sweep rather than frozen at import, so an edit can't drift derived values apart
+# (e.g. a stored CHRONIC_WEEKS would go stale against a changed window).
 
-# Raw history needed before a displayed window so ACWR/chronic-load/baselines
-# (28-day lookbacks) are correct for the earliest displayed day.
-DERIVATION_PAD_DAYS = CHRONIC_WINDOW_DAYS
+
+def _derivation_pad_days() -> int:
+    """Raw history needed *before* a displayed window so ACWR/chronic-load/baselines
+    and the CTL EWMA are warm for the earliest displayed day. Read live from config.
+
+    `max(acwr_chronic_days, 28, ceil(1.5*pmc_ctl_days))` (= 63 at defaults): the 28
+    floor pins the pad to the hardcoded 28-day baseline lookback in recompute_derived()
+    even if the chronic window is shrunk below it; the 1.5*τ_ctl term warms CTL to
+    ~78% at the left edge (the §3.3(b) accuracy caveat carries the residual). See
+    DESIGN_pmc_fitness_fatigue.md §3.4."""
+    return max(
+        config.acwr_chronic_days,
+        28,
+        math.ceil(1.5 * config.pmc_ctl_days),
+    )
 
 
 class GarminAuthRequired(Exception):
@@ -580,6 +597,210 @@ def _mean_std(values: List[float]) -> Tuple[float, float]:
     return mean, math.sqrt(variance)
 
 
+# ==============================================================================
+# Performance Management Chart — CTL (fitness) / ATL (fatigue) / TSB (form)
+# All pure, unit-testable without a DB. See DESIGN_pmc_fitness_fatigue.md §3.
+# ==============================================================================
+
+# Daily load below which a calendar day counts as "rest" for effective-history gap
+# detection (§3.3b). Not zero, so a token easy day inside a layoff still reads as rest.
+_PMC_NEAR_ZERO_LOAD = 1.0
+
+
+def compute_pmc(
+    daily_load: Dict[str, float],
+    start: str, end: str,
+    ctl_days: int, atl_days: int,
+) -> Dict[str, Tuple[float, float, float]]:
+    """CTL/ATL/TSB per calendar day via the classic Coggan discrete 1/τ EWMA.
+
+    Walks EVERY calendar day in [start, end] (not just days with load), so rest days
+    and gaps decay the EWMAs with zero load. Both EWMAs seed at 0 at `start`.
+
+        ctl_d = ctl_{d-1} + (load_d - ctl_{d-1}) / ctl_days
+        atl_d = atl_{d-1} + (load_d - atl_{d-1}) / atl_days
+        tsb_d = ctl_{d-1} - atl_{d-1}   # yesterday's values — the form you woke up with
+
+    The TSB off-by-one is deliberate and load-bearing (training_load.txt §2): today's
+    form must NOT include today's workout. Returns {ISO date -> (ctl, atl, tsb)},
+    rounded to 1 dp; internal state stays full-precision. Empty {} on a degenerate span.
+    """
+    out: Dict[str, Tuple[float, float, float]] = {}
+    if not start or not end:
+        return out
+    cur, last = _to_date(start), _to_date(end)
+    if cur > last:
+        return out
+    ctl = atl = 0.0
+    while cur <= last:
+        ds = cur.isoformat()
+        load = daily_load.get(ds, 0.0)
+        tsb = ctl - atl                       # yesterday's (pre-update) balance
+        ctl = ctl + (load - ctl) / ctl_days
+        atl = atl + (load - atl) / atl_days
+        out[ds] = (round(ctl, 1), round(atl, 1), round(tsb, 1))
+        cur += timedelta(days=1)
+    return out
+
+
+def pmc_warmup_cutoff_for(start: Optional[str], ctl_days: int) -> Optional[str]:
+    """ISO date at/after which PMC display values have cleared the leading-edge warm-up.
+    A date d is a warm-up artifact (suppress it) iff d < cutoff = start + ctl_days.
+    Returns None when there is no history start."""
+    if not start:
+        return None
+    return (_to_date(start) + timedelta(days=ctl_days)).isoformat()
+
+
+def pmc_effective_history(
+    daily_load: Dict[str, float], start: str, end: str, ctl_days: int
+) -> Tuple[int, Optional[str]]:
+    """Effective history behind `end`: (n_days, effective_start_iso).
+
+    The EWMA re-warms from a low floor not only at DB start but after any layoff long
+    enough to decay CTL back toward zero (a run of >= ctl_days near-zero-load days).
+    Effective history is measured from the first loaded day after the most recent such
+    gap, or the first loaded day overall if there is none — so the §3.3(b) convergence
+    caveat re-arms on a comeback even when total history is long. (0, None) if no load."""
+    if not start or not end:
+        return 0, None
+    cur, last = _to_date(start), _to_date(end)
+    eff_start: Optional[Any] = None
+    zero_run = 0
+    while cur <= last:
+        load = daily_load.get(cur.isoformat(), 0.0)
+        if load < _PMC_NEAR_ZERO_LOAD:
+            zero_run += 1
+        else:
+            if eff_start is None or zero_run >= ctl_days:
+                eff_start = cur
+            zero_run = 0
+        cur += timedelta(days=1)
+    if eff_start is None:
+        return 0, None
+    return (last - eff_start).days + 1, eff_start.isoformat()
+
+
+def pmc_convergence_pct(n_days: int, ctl_days: int) -> int:
+    """CTL convergence proxy after `n_days` of effective history: 1 - e^{-n/τ}, as an
+    integer percent (63% at τ, 78% at 1.5τ, 86% at 2τ, 95% at 3τ). A constant-load
+    convergence figure, not a literal error bar — framed to the LLM as "~X% converged."""
+    if ctl_days <= 0:
+        return 100
+    return round(100.0 * (1.0 - math.exp(-n_days / ctl_days)))
+
+
+def pmc_ramp(
+    ctl_by_date: Dict[str, Optional[float]], date_iso: str, window: int = 7
+) -> Optional[float]:
+    """CTL ramp = ctl(date) - ctl(date - window days), in load units per week.
+
+    Uses the exact d-window day, else the nearest EARLIER day carrying a CTL value
+    (interior-gap rule, §3.1). Returns None when `date` has no CTL, or when fewer than
+    `window` days of history precede it (no value at/under date-window → don't emit
+    garbage). Reads whatever CTL series it is given — callers pass the FULL stored
+    series, never a short prompt window, so a small window never spuriously drops it."""
+    today_ctl = ctl_by_date.get(date_iso)
+    if today_ctl is None:
+        return None
+    target = _to_date(date_iso) - timedelta(days=window)
+    best_date = None
+    best_val = None
+    for ds, v in ctl_by_date.items():
+        if v is None:
+            continue
+        d = _to_date(ds)
+        if d <= target and (best_date is None or d > best_date):
+            best_date, best_val = d, v
+    if best_val is None:
+        return None
+    return round(today_ctl - best_val, 1)
+
+
+def project_taper(
+    anchor_ctl: float, anchor_atl: float, anchor_date: str, event_date: str,
+    load_for_date, ctl_days: int, atl_days: int,
+) -> Dict[str, float]:
+    """Forward-projects event-day CTL/ATL/TSB from an anchor by walking the same §3.1
+    recurrence day-by-day from anchor_date+1 through event_date. `load_for_date` maps an
+    ISO date to that day's load (caller supplies actual completed load up to today and
+    planned load after). Event-day TSB is CTL(event-1) - ATL(event-1), the form the
+    athlete wakes up with on race day. Pure. Returns {'ctl','atl','tsb'} rounded 1 dp."""
+    ctl, atl = float(anchor_ctl), float(anchor_atl)
+    cur = _to_date(anchor_date) + timedelta(days=1)
+    end = _to_date(event_date)
+    tsb = ctl - atl
+    while cur <= end:
+        load = load_for_date(cur.isoformat())
+        tsb = ctl - atl                       # form on `cur` = yesterday's balance
+        ctl = ctl + (load - ctl) / ctl_days
+        atl = atl + (load - atl) / atl_days
+        cur += timedelta(days=1)
+    return {'ctl': round(ctl, 1), 'atl': round(atl, 1), 'tsb': round(tsb, 1)}
+
+
+def daily_load_by_date(
+    activities: Optional[List[Dict[str, Any]]] = None
+) -> Dict[str, float]:
+    """Sums per-activity load (via the activity_load fallback hierarchy) per ISO date.
+    Reads all completed activities from the DB when none are passed. The same series
+    recompute_derived() and the PMC surfaces build their EWMAs and caveats from."""
+    if activities is None:
+        activities = db.get_completed_activities()
+    daily: Dict[str, float] = {}
+    for act in activities:
+        d = act["date"]
+        daily[d] = daily.get(d, 0.0) + activity_load(act)
+    return daily
+
+
+def pmc_history_start() -> Optional[str]:
+    """Earliest ISO date with any Garmin evidence — min(first activity, first metrics
+    row). The single source the warm-up cutoff and effective-history clock derive from."""
+    firsts = []
+    acts = db.get_completed_activities()
+    if acts:
+        firsts.append(acts[0]["date"])           # sorted date ASC
+    metric_dates = db.get_metric_dates()
+    if metric_dates:
+        firsts.append(metric_dates[0])
+    return min(firsts) if firsts else None
+
+
+def pmc_warmup_cutoff() -> Optional[str]:
+    """DB-backed single-source warm-up cutoff (§3.3a), passed to every surface — the
+    per-day lines, weekly digest, and CLI — so none of them re-derives it differently."""
+    return pmc_warmup_cutoff_for(pmc_history_start(), config.pmc_ctl_days)
+
+
+def pmc_data_caveat(
+    as_of: Optional[str] = None,
+    daily_load: Optional[Dict[str, float]] = None,
+) -> Optional[Dict[str, Any]]:
+    """Convergence caveat for when today's own PMC values are still warming (§3.3b).
+
+    Returns {'n_days','pct','effective_start'} while effective history is short
+    (< 3*τ_ctl ≈ the 95% mark), else None (the artifact is then negligible). `as_of`
+    defaults to today. The caller renders the coach/user wording; the direction of any
+    discount is the LLM's to judge from the athlete's pre-DB history — only the
+    magnitude is ours."""
+    ctl_days = config.pmc_ctl_days
+    start = pmc_history_start()
+    if not start:
+        return None
+    end = as_of or today_str()
+    if daily_load is None:
+        daily_load = daily_load_by_date()
+    n_days, eff_start = pmc_effective_history(daily_load, start, end, ctl_days)
+    if n_days <= 0 or n_days >= 3 * ctl_days:
+        return None
+    return {
+        "n_days": n_days,
+        "pct": pmc_convergence_pct(n_days, ctl_days),
+        "effective_start": eff_start,
+    }
+
+
 def recompute_derived() -> None:
     """Recomputes acute/chronic workload, ACWR, and 28-day baselines for ALL cached
     days. A full sweep is trivially cheap on a local DB and avoids windowed-recompute
@@ -595,13 +816,33 @@ def recompute_derived() -> None:
     metrics = db.get_metrics_cache()  # sorted by date asc
     by_date = {m["date"]: m for m in metrics}
 
+    # Window constants read live from config every sweep (never frozen at import), so an
+    # edit can't drift derived values apart. CHRONIC_WEEKS is computed inline from the two
+    # windows — never stored or a standalone param — so it can never disagree with them.
+    acute_days = config.acwr_acute_days
+    chronic_days = config.acwr_chronic_days
+    chronic_weeks = chronic_days / acute_days
+
+    # PMC (CTL/ATL/TSB) over EVERY calendar day so rest/gap days decay the EWMAs. The
+    # span ends at max(last activity, last metrics): an activities-only pull can leave
+    # trailing activity days past the last metrics row, and those carry load that must be
+    # walked. Upserted onto existing metrics rows only (activity-only days feed the EWMA
+    # but create no cache row).
+    span_dates = list(daily_load.keys()) + [m["date"] for m in metrics]
+    pmc: Dict[str, Tuple[float, float, float]] = {}
+    if span_dates:
+        pmc = compute_pmc(
+            daily_load, min(span_dates), max(span_dates),
+            config.pmc_ctl_days, config.pmc_atl_days,
+        )
+
     for m in metrics:
         date_str = m["date"]
         date_obj = _to_date(date_str)
 
-        acute = sum(daily_load.get((date_obj - timedelta(days=d)).isoformat(), 0.0) for d in range(ACUTE_WINDOW_DAYS))
-        total_chronic = sum(daily_load.get((date_obj - timedelta(days=d)).isoformat(), 0.0) for d in range(CHRONIC_WINDOW_DAYS))
-        chronic = total_chronic / CHRONIC_WEEKS
+        acute = sum(daily_load.get((date_obj - timedelta(days=d)).isoformat(), 0.0) for d in range(acute_days))
+        total_chronic = sum(daily_load.get((date_obj - timedelta(days=d)).isoformat(), 0.0) for d in range(chronic_days))
+        chronic = total_chronic / chronic_weeks
         if chronic > 0.0:
             acwr = acute / chronic
         elif acute > 0.0:
@@ -609,10 +850,14 @@ def recompute_derived() -> None:
         else:
             acwr = 1.0
 
+        ctl_atl_tsb = pmc.get(date_str)
+        ctl, atl, tsb = ctl_atl_tsb if ctl_atl_tsb else (None, None, None)
+
         db.save_metric_cache(
             date=date_str, rhr=m.get("rhr"), hrv=m.get("hrv"),
             sleep_score=m.get("sleep_score"), stress=m.get("stress"),
             acute_workload=acute, chronic_workload=chronic, acwr=acwr,
+            ctl=ctl, atl=atl, tsb=tsb,
         )
 
         rhr_vals, hrv_vals, sleep_vals = [], [], []
@@ -742,7 +987,7 @@ def ensure_data(start_date: str, end_date: str, force: bool = False) -> None:
         return
 
     today = today_str()
-    pad_start = _shift(start_date, -DERIVATION_PAD_DAYS)
+    pad_start = _shift(start_date, -_derivation_pad_days())
     req_end = min(end_date, today)  # can't pull the future
     if req_end < pad_start:
         return  # window lies entirely in the future
@@ -841,7 +1086,9 @@ def _warn_manual(start: str, end: str, *, cold: bool) -> None:
     else:
         print(yellow(
             f"This view needs Garmin data back to {start}, which hasn't been pulled. "
-            "Baselines and ACWR may be incomplete. To backfill, run:"
+            "Baselines and ACWR may be incomplete. Fitness/fatigue (CTL/ATL/TSB) also "
+            "warm up over ~6 weeks of history, so on a shallow backfill freshness can "
+            "read artificially low. To backfill, run:"
         ))
     print(f"  {_pull_command(start, end)}")
 

@@ -9,9 +9,13 @@ from trainmate.adherence import analyze_adherence, _planned_load
 from trainmate.sports import canonical_sport
 from trainmate.modification_state import SWAP_REASON_PREFIX, MANUAL_REPLACE_REASON_PREFIX
 from trainmate.garmin import activity_load
-from trainmate.util import today_str as _today_str, today_date as _today_date, cyan, green, yellow, bold, red, gray
-from trainmate.coach.engine import CoachEngine, MIN_PLAN_WEEKS, MAX_PLAN_WEEKS
-from trainmate.coach.formatting import format_baseline, _load_science_guidelines
+from trainmate.util import today_str as _today_str, today_date as _today_date, cyan, green, yellow, bold, red, gray, dim
+from trainmate.coach.engine import (
+    CoachEngine, MIN_PLAN_WEEKS, MAX_PLAN_WEEKS, normalize_meso_phase,
+)
+from trainmate.coach.formatting import (
+    format_baseline, _load_science_guidelines, PMC_TSB_LAG_NOTE,
+)
 
 # Fallback look-back for `reflect` when no watermark exists yet (bootstrap not run).
 DEFAULT_REFLECT_WEEKS = 4
@@ -98,10 +102,247 @@ class CoachService:
                     f"  - Current ACWR (Acute:Chronic Workload Ratio): "
                     f"{acwrs[-1]:.2f} (latest)"
                 )
+            # PMC (CTL/ATL/TSB) + the single ramp line, so the strategy/plan prompt can
+            # reason about current freshness and a sustainable build rate against the
+            # science directives (DESIGN_pmc_fitness_fatigue.md §5.2).
+            for pmc_line in self._pmc_summary_lines(metrics, today_str):
+                lines.append("  " + pmc_line)
         else:
             lines.append("Physiological Metrics (Past 15 days):\n  - No metrics found.")
 
         return "\n".join(lines)
+
+    # ------------------------------------------------------------------ PMC helpers
+    def _pmc_summary_lines(
+        self, metrics: List[Dict[str, Any]], as_of: str
+    ) -> List[str]:
+        """The PMC block for the data summary (strategy/plan prompt): the latest
+        Fitness/Fatigue line, the single CTL ramp line, the §3.3(b) convergence caveat,
+        the forward taper projection (§5.3), and the TSB-lag footnote — each omitted when
+        it has nothing to say. Order: values, then trust/caveat, then projection."""
+        out: List[str] = []
+        cutoff = self._pmc_warmup_cutoff()
+        latest = self._pmc_latest_line(metrics, cutoff)
+        if latest:
+            out.append(latest)
+        ramp = self._pmc_ramp_line()
+        if ramp:
+            out.append(ramp)
+        caveat = self._pmc_caveat_line(as_of)
+        if caveat:
+            out.append(caveat)
+        projection = self._pmc_projection_line(as_of, cutoff)
+        if projection:
+            out.append(projection)
+        if latest:
+            out.append(PMC_TSB_LAG_NOTE)
+        return out
+
+    def _pmc_history_start(self) -> Optional[str]:
+        """Earliest ISO date with any Garmin evidence in THIS service's db (self._db),
+        so tests injecting a db and production both read the same source."""
+        starts = []
+        acts = self._db.get_completed_activities()
+        if acts:
+            starts.append(acts[0]['date'])          # sorted date ASC
+        metric_dates = self._db.get_metric_dates()
+        if metric_dates:
+            starts.append(metric_dates[0])
+        return min(starts) if starts else None
+
+    def _pmc_daily_load(self) -> Dict[str, float]:
+        from trainmate import garmin
+        return garmin.daily_load_by_date(self._db.get_completed_activities())
+
+    def _pmc_warmup_cutoff(self) -> Optional[str]:
+        from trainmate import garmin
+        return garmin.pmc_warmup_cutoff_for(
+            self._pmc_history_start(), config.pmc_ctl_days
+        )
+
+    def _pmc_latest_line(
+        self, metrics: List[Dict[str, Any]], warmup_cutoff: Optional[str]
+    ) -> Optional[str]:
+        """'- Fitness/Fatigue (PMC): CTL .. ATL .. TSB ..' from the latest past-warm-up
+        row carrying PMC values, or None."""
+        for m in reversed(metrics):
+            if warmup_cutoff and m['date'] < warmup_cutoff:
+                continue
+            ctl, atl, tsb = m.get('ctl'), m.get('atl'), m.get('tsb')
+            if ctl is None and atl is None and tsb is None:
+                continue
+            parts = []
+            if ctl is not None:
+                parts.append(f"CTL {ctl:.1f} (fitness)")
+            if atl is not None:
+                parts.append(f"ATL {atl:.1f} (fatigue)")
+            if tsb is not None:
+                parts.append(f"TSB {tsb:.1f} (form)")
+            return "- Fitness/Fatigue (PMC): " + ", ".join(parts)
+        return None
+
+    def _pmc_ramp_line(self) -> Optional[str]:
+        """The single '- CTL ramp rate: +4.2/week (last 7 days)' line, computed from the
+        FULL stored CTL series (never a short prompt window, so a small window can't drop
+        it — §3.1/§5.2). None inside the warm-up window or at a <7-day span edge."""
+        from trainmate import garmin
+        cutoff = self._pmc_warmup_cutoff()
+        all_metrics = self._db.get_metrics_cache()
+        ctl_by_date = {m['date']: m.get('ctl') for m in all_metrics}
+        latest = None
+        for m in all_metrics:
+            if m.get('ctl') is None:
+                continue
+            if cutoff and m['date'] < cutoff:
+                continue
+            latest = m['date']
+        if latest is None:
+            return None
+        ramp = garmin.pmc_ramp(ctl_by_date, latest)
+        if ramp is None:
+            return None
+        return f"- CTL ramp rate: {ramp:+.1f}/week (last 7 days)"
+
+    def _pmc_caveat_line(self, as_of: Optional[str] = None) -> Optional[str]:
+        """The §3.3(b) convergence caveat, stated as a *condition* (not an assertion that
+        fitness is understated — a genuine beginner's low CTL is correct). None once
+        effective history is long enough that the artifact is negligible."""
+        from trainmate import garmin
+        start = self._pmc_history_start()
+        if not start:
+            return None
+        as_of = as_of or _today_str()
+        ctl_days = config.pmc_ctl_days
+        n_days, eff_start = garmin.pmc_effective_history(
+            self._pmc_daily_load(), start, as_of, ctl_days
+        )
+        if n_days <= 0 or n_days >= 3 * ctl_days:
+            return None
+        cav = {
+            "n_days": n_days,
+            "pct": garmin.pmc_convergence_pct(n_days, ctl_days),
+            "effective_start": eff_start,
+        }
+        ref = cav.get("effective_start") or "the start of history"
+        return (
+            f"- PMC data caveat: CTL is based on {cav['n_days']} days of history "
+            f"(~{cav['pct']}% converged). If the athlete trained regularly before {ref}, "
+            f"true fitness is higher than shown and low TSB / high ramp are partly "
+            f"warm-up artifacts; if they did not, the low values are real."
+        )
+
+    def _pmc_prompt_context(
+        self, as_of: Optional[str] = None
+    ) -> Tuple[Optional[str], Optional[str]]:
+        """(warmup_cutoff, extra_lines) for the generate/adapt metrics block: the single
+        ramp line, the convergence caveat, and the taper projection — a single line each
+        beside the per-day block, never repeated per day (§5.2/§5.3)."""
+        cutoff = self._pmc_warmup_cutoff()
+        as_of = as_of or _today_str()
+        lines: List[str] = []
+        ramp = self._pmc_ramp_line()
+        if ramp:
+            lines.append(ramp)
+        caveat = self._pmc_caveat_line(as_of)
+        if caveat:
+            lines.append(caveat)
+        projection = self._pmc_projection_line(as_of, cutoff)
+        if projection:
+            lines.append(projection)
+        return cutoff, ("\n".join(lines) if lines else None)
+
+    def _pmc_projection_line(
+        self, as_of: str, warmup_cutoff: Optional[str]
+    ) -> Optional[str]:
+        """Forward taper projection (§5.3): event-day TSB projected deterministically over
+        the plan's own workouts, so the coach reads a concrete number against the
+        +5..+25 directive instead of simulating two decays. Anchored to the athlete's
+        highest-priority upcoming objective (ties -> nearest date), decayed from the
+        latest metrics row forward to today over actual load, then walked over planned
+        `tss`. Best-effort and surfaced honestly: unplanned tail, unquantified workouts,
+        and a warm-up anchor each self-annotate. None when there is no upcoming event, no
+        plan reaching it, or a NULL anchor."""
+        from trainmate import garmin
+
+        def _d(s: str):
+            return datetime.strptime(s, "%Y-%m-%d").date()
+
+        # 1. Highest-priority upcoming active objective; ties broken by the nearest date.
+        # (get_active_objective returns soonest-regardless-of-priority, which is wrong here.)
+        upcoming = [
+            o for o in self._db.get_objectives(status='active')
+            if o.get('target_date') and o['target_date'] >= as_of
+        ]
+        if not upcoming:
+            return None
+        upcoming.sort(key=lambda o: (-int(o.get('priority') or 0), o['target_date']))
+        event = upcoming[0]
+        event_date = event['target_date']
+
+        # 2. Anchor = the latest metrics row carrying CTL/ATL. NULL anchor -> suppress the
+        # line rather than print a confident number over nothing.
+        anchor = None
+        for m in self._db.get_metrics_cache():
+            if m.get('ctl') is not None and m.get('atl') is not None:
+                anchor = m
+        if anchor is None:
+            return None
+        anchor_date = anchor['date']
+        if anchor_date >= event_date:
+            return None  # event already reached/passed by the anchor
+
+        # 3. Daily load: actual completed load from the anchor forward to today (catches a
+        # stale anchor up so "from today" really starts at today), then planned load to the
+        # event. Removed workouts are already excluded by get_workouts; rest days = 0.
+        actual_daily = self._pmc_daily_load()
+        planned = self._db.get_workouts(start_date=as_of, end_date=event_date)
+        planned_daily: Dict[str, float] = {}
+        missing_tss = 0
+        last_planned_date: Optional[str] = None
+        for w in planned:
+            if (w.get('sport_type') or '').lower() == 'rest':
+                continue
+            d = w['date']
+            last_planned_date = d if last_planned_date is None else max(last_planned_date, d)
+            tss = w.get('tss')
+            if tss is None:
+                missing_tss += 1
+                continue
+            planned_daily[d] = planned_daily.get(d, 0.0) + float(tss)
+
+        def load_for_date(ds: str) -> float:
+            return actual_daily.get(ds, 0.0) if ds <= as_of else planned_daily.get(ds, 0.0)
+
+        proj = garmin.project_taper(
+            anchor['ctl'], anchor['atl'], anchor_date, event_date,
+            load_for_date, config.pmc_ctl_days, config.pmc_atl_days,
+        )
+
+        line = (
+            f"- Projected event-day TSB (from current plan): {proj['tsb']:+.0f}   "
+            f"[taper target band +5..+25, for \"{event['title']}\" on {event_date}]"
+        )
+        notes = []
+        # Unplanned tail: days after the last planned workout are assumed rest, which
+        # inflates projected TSB — say so.
+        tail_ref = last_planned_date or as_of
+        tail_days = (_d(event_date) - _d(tail_ref)).days
+        if last_planned_date is None or tail_days > 0:
+            notes.append(
+                f"last {tail_days} days before the event are unplanned; assumes rest "
+                f"— realized TSB likely lower"
+            )
+        if missing_tss:
+            notes.append(
+                f"{missing_tss} planned workouts lack a TSS estimate, counted as 0"
+            )
+        if warmup_cutoff and anchor_date < warmup_cutoff:
+            notes.append(
+                "anchor is inside the CTL warm-up window — treat as approximate"
+            )
+        if notes:
+            line += " (note: " + "; ".join(notes) + ")"
+        return line
 
     def _build_prior_training_context(
         self, prior_macro: Optional[Dict[str, Any]], today_str: str
@@ -697,6 +938,20 @@ class CoachService:
             strategy = macro_data.get("strategy", "Endurance preparation strategy.")
             mesocycles = macro_data.get("mesocycles", [])
 
+            # Normalize each block's structured phase (§4.4) before it is persisted or
+            # displayed: trust the LLM's `phase` when it's a clean vocabulary value, else
+            # infer from the focus text, else None. The green race-ready TSB color fires
+            # only in peak/taper, so an unclassified block silently never lights it up —
+            # emit a dim diagnostic of the miss rate (the codebase has no logging
+            # framework) so a persistently high rate is visible in normal use.
+            for meso in mesocycles:
+                meso["phase"] = normalize_meso_phase(
+                    meso.get("phase"), meso.get("focus", "")
+                )
+            n_none = sum(1 for meso in mesocycles if meso.get("phase") is None)
+            if mesocycles:
+                print(dim(f"phase: {n_none}/{len(mesocycles)} blocks unclassified"))
+
             # Save it
             if next_goal['id'] is not None and auto_apply:
                 self._db.save_macrocycle(
@@ -945,6 +1200,7 @@ class CoachService:
         )
         learnings = self._get_learnings_text()
 
+        pmc_cutoff, pmc_context = self._pmc_prompt_context(today_str)
         plan_data = self.engine._workout_generate_logic(
             objectives=objectives,
             constraints=constraints,
@@ -958,7 +1214,9 @@ class CoachService:
             num_days=num_days,
             metrics=metrics,
             completed_activities=completed_activities,
-            baseline=baseline
+            baseline=baseline,
+            pmc_warmup_cutoff=pmc_cutoff,
+            pmc_context=pmc_context
         )
 
         # NOTE: workout generation is read-only w.r.t. coach learnings (see
@@ -1270,6 +1528,7 @@ class CoachService:
         # §8: the athlete's note is passed straight through as advisory intent — no
         # separate classification pass. The same LLM call also extracts any
         # constraint-shaped directives from it (see `new_constraints` below).
+        pmc_cutoff, pmc_context = self._pmc_prompt_context(target_date_str)
         decision = self.engine._workout_adapt_logic(
             target_date_str=target_date_str,
             history_days=history_days,
@@ -1291,7 +1550,9 @@ class CoachService:
             daily_context=daily_context,
             completed_keys=completed_keys,
             athlete_message=message,
-            constraints=constraints
+            constraints=constraints,
+            pmc_warmup_cutoff=pmc_cutoff,
+            pmc_context=pmc_context
         )
 
         # NOTE: daily adaptation is read-only w.r.t. coach learnings
@@ -2219,6 +2480,11 @@ class CoachService:
             if monday_str in weeks_data:
                 weeks_data[monday_str]["activities"].append(act)
 
+        # PMC weekly trajectory (DESIGN_pmc_fitness_fatigue.md §5.4): the warm-up cutoff
+        # and a full in-window date->CTL map, both read once, for end_ctl/week_ramp/min_tsb.
+        pmc_cutoff = self._pmc_warmup_cutoff()
+        ctl_by_date = {m['date']: m.get('ctl') for m in metrics}
+
         # Build summaries per week
         weekly_summaries = []
         for monday_str in sorted(weeks_data.keys()):
@@ -2280,6 +2546,35 @@ class CoachService:
             acwrs = [m['acwr'] for m in w_metrics if m.get('acwr') is not None]
             if acwrs:
                 max_acwr = max(acwrs)
+
+            # PMC weekly trajectory: end_ctl (last day's CTL), min_tsb (deepest overload),
+            # week_ramp (end_ctl vs CTL 7 days earlier). Guards (§5.4): a week entirely
+            # inside the warm-up window emits all None (no phantom overreach from seeding);
+            # week_ramp is additionally suppressed when its -7d lookback lands before the
+            # cutoff (straddle guard) or has no in-window value (first-week boundary) — a
+            # ramp measured against a warm-up or absent baseline would read huge.
+            end_ctl = week_ramp = min_tsb = None
+            past_warmup = [
+                m for m in w_metrics
+                if (pmc_cutoff is None or m['date'] >= pmc_cutoff)
+            ]
+            ctl_days = [m for m in past_warmup if m.get('ctl') is not None]
+            if ctl_days:
+                end_row = max(ctl_days, key=lambda m: m['date'])
+                end_ctl = end_row['ctl']
+                ref_date = (
+                    datetime.strptime(end_row['date'], "%Y-%m-%d").date()
+                    - timedelta(days=7)
+                ).strftime("%Y-%m-%d")
+                ref_ctl = ctl_by_date.get(ref_date)
+                if (
+                    ref_ctl is not None
+                    and (pmc_cutoff is None or ref_date >= pmc_cutoff)
+                ):
+                    week_ramp = round(end_ctl - ref_ctl, 1)
+            tsbs = [m['tsb'] for m in past_warmup if m.get('tsb') is not None]
+            if tsbs:
+                min_tsb = min(tsbs)
 
             active_dates = {act['date'] for act in w_activities}
             rest_days = len(days_in_week) - len(active_dates)
@@ -2345,6 +2640,9 @@ class CoachService:
                 "avg_sleep_score": response["avg_sleep_score"],
                 "avg_stress": response["avg_stress"],
                 "max_acwr": round(max_acwr, 2) if max_acwr is not None else None,
+                "end_ctl": round(end_ctl, 1) if end_ctl is not None else None,
+                "week_ramp": week_ramp,
+                "min_tsb": round(min_tsb, 1) if min_tsb is not None else None,
                 "rest_days": rest_days,
                 "highlights": highlights,
                 "constraints": week_events,

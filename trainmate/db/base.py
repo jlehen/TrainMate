@@ -309,9 +309,22 @@ class BaseDB:
                     stress INTEGER,
                     acute_workload REAL,
                     chronic_workload REAL,
-                    acwr REAL
+                    acwr REAL,
+                    ctl REAL,
+                    atl REAL,
+                    tsb REAL
                 )
             """)
+            # Performance Management Chart columns (DESIGN_pmc_fitness_fatigue.md §4):
+            # CTL/ATL/TSB, back-populated for the whole history by the next
+            # recompute_derived() sweep. NULL-tolerant on existing rows; no migration.
+            for col in ("ctl", "atl", "tsb"):
+                try:
+                    cursor.execute(
+                        f"ALTER TABLE athlete_metrics_cache ADD COLUMN {col} REAL"
+                    )
+                except sqlite3.OperationalError:
+                    pass
 
             # Athlete baselines table
             cursor.execute("""
@@ -468,10 +481,18 @@ class BaseDB:
                     start_date TEXT NOT NULL,
                     end_date TEXT NOT NULL,
                     focus TEXT NOT NULL,
+                    phase TEXT,
                     feedback TEXT DEFAULT NULL,
                     FOREIGN KEY (macrocycle_id) REFERENCES macrocycles(id) ON DELETE CASCADE
                 )
             """)
+            # Structured periodization phase (DESIGN_pmc_fitness_fatigue.md §4.4), for
+            # phase-aware TSB color. Additive and NULL-tolerant: plans generated before it
+            # carry NULL until regenerated. No migration.
+            try:
+                cursor.execute("ALTER TABLE mesocycles ADD COLUMN phase TEXT")
+            except sqlite3.OperationalError:
+                pass
 
             # Backward-evaluation reconstruction cache (see DESIGN_backward_evaluation.md
             # §5.1). Each row is a cached reconstruction (inferred cycles + physiological

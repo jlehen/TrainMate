@@ -101,6 +101,46 @@ def color_acwr(acwr: float) -> str:
         return red(acwr_str)
 
 
+# The +5..+25 TSB band reads as "race-ready good" only in a peaking block; mid-build the
+# same freshness means fitness is decaying, so green is gated to these phases (§6.1).
+# Derived from the shared MESO_PHASES vocabulary so the reader's gate can't drift from the
+# writer's enum: if the vocabulary ever drops peak/taper, green simply stops firing.
+from trainmate.types import MESO_PHASES  # noqa: E402  (kept beside its only consumer)
+_TSB_RACE_READY_PHASES = tuple(p for p in ("peak", "taper") if p in MESO_PHASES)
+
+
+def color_tsb(tsb: float, phase: Optional[str] = None) -> str:
+    """Phase-aware TSB (form) coloring (DESIGN_pmc_fitness_fatigue.md §6.1).
+
+    The two risk ends color regardless of phase: < -30 red (excessive fatigue), > +25
+    yellow (detraining / over-tapered). The +5..+25 race-ready band is green ONLY in a
+    peak/taper block, where freshness *is* the goal; uncolored otherwise (including
+    phase=None from old plans or no active mesocycle) because mid-build a high TSB means
+    fitness is decaying, not that you're great. The -30..+5 band is uncolored in every
+    phase — its meaning is phase-dependent and belongs to the coach. Bands are half-open
+    so no value is double-claimed."""
+    s = f"{tsb:.1f}"
+    if tsb < -30:
+        return red(s)
+    if tsb > 25:
+        return yellow(s)
+    if 5 <= tsb <= 25 and phase in _TSB_RACE_READY_PHASES:
+        return green(s)
+    return s
+
+
+def color_ramp(ramp: float) -> str:
+    """CTL ramp-rate coloring, bands touching so no value falls in an uncolored gap
+    (§6.1): >= 8 red (unsustainable), 5 <= ramp < 8 yellow (watch), else plain. No green
+    band — a low ramp is correct during a taper, so green would wrongly bless it."""
+    s = f"{ramp:+.1f}"
+    if ramp >= 8:
+        return red(s)
+    if 5 <= ramp < 8:
+        return yellow(s)
+    return s
+
+
 def visible_len(s: str) -> int:
     """Calculates visible length of a string, ignoring ANSI escape codes."""
     return len(ANSI_ESCAPE.sub('', s))

@@ -391,7 +391,9 @@ class TestEnsureData(unittest.TestCase):
             self.assertIn("data pull --from", printed)
 
     def test_fresh_data_no_pull(self):
-        for i in range(60, -1, -1):
+        # Cover the full derivation pad (now max(chronic, 28, 1.5*ctl)=63 days) so the
+        # padded window has no missing days to fetch.
+        for i in range(75, -1, -1):
             test_db.save_metric_cache(date=_d(-i), rhr=50, hrv=70, sleep_score=80, stress=20)
         # Recent watermark -> mutable zone considered fresh, nothing to fetch.
         garmin.db.set_sync_state(through_date=_d(0), last_pull_utc=datetime.now(timezone.utc).isoformat())
@@ -401,7 +403,8 @@ class TestEnsureData(unittest.TestCase):
 
     def test_interior_gap_present_rows_are_not_holes(self):
         # All-null rows still count as "pulled" -> not treated as a gap to refetch.
-        for i in range(60, -1, -1):
+        # Cover the full 63-day derivation pad so the padded window has no real hole.
+        for i in range(75, -1, -1):
             test_db.save_metric_cache(date=_d(-i), rhr=None, hrv=None, sleep_score=None, stress=None)
         garmin.db.set_sync_state(through_date=_d(0), last_pull_utc=datetime.now(timezone.utc).isoformat())
         with patch.object(garmin, "pull") as mock_pull:

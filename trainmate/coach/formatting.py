@@ -41,15 +41,56 @@ def _adapt_recency_tag(workout: Workout, eval_date: Optional[str]) -> str:
     )
 
 
-def format_metrics_history(metrics: List[Dict[str, Any]]) -> str:
-    """Formats metrics cache history to a readable block for LLM prompts."""
+# The printed CTL | ATL | TSB triple won't subtract to the shown TSB, because TSB is
+# CTL(yesterday) - ATL(yesterday) (training_load.txt §2) while CTL/ATL are today's. This
+# lag is correct (matching TrainingPeaks) but reads as an arithmetic error, so a one-line
+# footnote states it wherever the triple is surfaced (per-day block, summary, tm status).
+PMC_TSB_LAG_NOTE = (
+    "(Note: TSB is CTL(yesterday) - ATL(yesterday), so it won't equal the shown "
+    "same-day CTL - ATL; this ~1-day lag is expected, not an error.)"
+)
+
+
+def format_metrics_history(
+    metrics: List[Dict[str, Any]], warmup_cutoff: Optional[str] = None
+) -> str:
+    """Formats metrics cache history to a readable block for LLM prompts.
+
+    One None-omission convention for the whole line: every field (RHR, HRV, Sleep,
+    Stress, ACWR, and the PMC triple CTL/ATL/TSB) is emitted only when present, so a
+    NULL value is silently dropped rather than crashing a `:.2f`/rendering `Nonebpm`
+    (DESIGN_pmc_fitness_fatigue.md §5.1). The PMC triple is additionally suppressed for
+    rows dated before `warmup_cutoff` (garmin.pmc_warmup_cutoff), where the EWMAs are
+    still leading-edge warm-up artifacts (§3.3a). The TSB-lag footnote is appended once
+    when any row showed PMC."""
     metrics_lines = []
+    shown_pmc = False
     for m in metrics:
-        metrics_lines.append(
-            f"- {m['date']}: RHR={m['rhr']}bpm, HRV={m['hrv']}ms, "
-            f"Sleep={m['sleep_score']}, Stress={m['stress']}, ACWR={m['acwr']:.2f}"
-        )
-    return "\n".join(metrics_lines)
+        fields = []
+        if m.get('rhr') is not None:
+            fields.append(f"RHR={m['rhr']}bpm")
+        if m.get('hrv') is not None:
+            fields.append(f"HRV={m['hrv']}ms")
+        if m.get('sleep_score') is not None:
+            fields.append(f"Sleep={m['sleep_score']}")
+        if m.get('stress') is not None:
+            fields.append(f"Stress={m['stress']}")
+        if m.get('acwr') is not None:
+            fields.append(f"ACWR={m['acwr']:.2f}")
+        in_warmup = bool(warmup_cutoff and m['date'] < warmup_cutoff)
+        if not in_warmup:
+            if m.get('ctl') is not None:
+                fields.append(f"CTL={m['ctl']:.1f}")
+                shown_pmc = True
+            if m.get('atl') is not None:
+                fields.append(f"ATL={m['atl']:.1f}")
+            if m.get('tsb') is not None:
+                fields.append(f"TSB={m['tsb']:.1f}")
+        metrics_lines.append(f"- {m['date']}: " + ", ".join(fields))
+    out = "\n".join(metrics_lines)
+    if shown_pmc:
+        out += "\n" + PMC_TSB_LAG_NOTE
+    return out
 
 
 def format_daily_context(daily_context: List[Dict[str, Any]]) -> str:

@@ -7,9 +7,11 @@ from trainmate.config import config
 from trainmate.adherence import analyze_adherence, date_covered
 from trainmate.util import (
     bold, dim, green, red, yellow, cyan, blue, magenta, gray,
-    color_acwr, visible_len, pad_visible, wrap_text, format_labeled_text,
-    format_labeled_block, today_str as _today_str, today_date as _today_date,
+    color_acwr, color_tsb, color_ramp, visible_len, pad_visible, wrap_text,
+    format_labeled_text, format_labeled_block,
+    today_str as _today_str, today_date as _today_date,
 )
+from trainmate.coach.formatting import PMC_TSB_LAG_NOTE
 from trainmate.cli.common import fmt_date, ensure_recent_data
 
 
@@ -36,6 +38,10 @@ def run_status(
     ensure_recent_data(no_pull=no_pull, force_pull=force_pull)
     print(bold(cyan("=== TRAINMATE ATHLETE STATUS ===")))
     
+    # Structured phase of the active mesocycle, captured for phase-aware TSB coloring in
+    # the metrics section below; None when there's no active block (color stays phase-blind).
+    active_phase = None
+
     # Active Goal & Periodization Strategy
     objectives = cli.db.get_objectives(status='active')
     if objectives:
@@ -77,6 +83,7 @@ def run_status(
                     break
             
             if active_meso:
+                active_phase = active_meso.get('phase')
                 print(
                     f"{bold('Active Mesocycle')}: {green(active_meso['name'])} "
                     f"({cyan(active_meso['start_date'])} to {cyan(active_meso['end_date'])})"
@@ -145,6 +152,41 @@ def run_status(
             f"- ACWR       : {color_acwr(acwr)} "
             f"(Acute: {acute:.1f}, Chronic: {chronic:.1f})"
         )
+
+        # Fitness/Fatigue/Form (CTL/ATL/TSB) + ramp. Never zero-fill: a NULL or warm-up
+        # field renders "—" (a printed "TSB 0.0" reads as a meaningful neutral balance,
+        # not as missing data), and the whole line is dropped when all three are absent
+        # (DESIGN_pmc_fitness_fatigue.md §6.1). TSB is phase-aware; ramp comes from the
+        # full stored CTL series.
+        from trainmate import garmin
+        warmup_cutoff = garmin.pmc_warmup_cutoff()
+        in_warmup = bool(warmup_cutoff and last_metrics['date'] < warmup_cutoff)
+        ctl_v = None if in_warmup else last_metrics.get('ctl')
+        atl_v = None if in_warmup else last_metrics.get('atl')
+        tsb_v = None if in_warmup else last_metrics.get('tsb')
+        if ctl_v is not None or atl_v is not None or tsb_v is not None:
+            ctl_s = f"{ctl_v:.1f}" if ctl_v is not None else "—"
+            atl_s = f"{atl_v:.1f}" if atl_v is not None else "—"
+            tsb_s = color_tsb(tsb_v, active_phase) if tsb_v is not None else "—"
+            ramp_s = "—"
+            if not in_warmup:
+                all_metrics = cli.db.get_metrics_cache()
+                ctl_by_date = {m['date']: m.get('ctl') for m in all_metrics}
+                ramp_v = garmin.pmc_ramp(ctl_by_date, last_metrics['date'])
+                if ramp_v is not None:
+                    ramp_s = color_ramp(ramp_v) + "/wk"
+            print(
+                f"- Fitness    : CTL {ctl_s} | ATL {atl_s} | TSB {tsb_s} | Ramp {ramp_s}"
+            )
+            print(dim(f"  {PMC_TSB_LAG_NOTE}"))
+            # Young/warming DB: warn WHY freshness may read low (the convergence caveat).
+            caveat = garmin.pmc_data_caveat(last_metrics['date'])
+            if caveat:
+                print(dim(
+                    f"  PMC still warming: CTL based on {caveat['n_days']} days "
+                    f"(~{caveat['pct']}% converged); low TSB/high ramp may be partly "
+                    f"a warm-up artifact."
+                ))
         
         # Baselines
         if baseline:

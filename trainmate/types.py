@@ -105,6 +105,13 @@ class AthleteMetric(TypedDict):
     acute_workload: Optional[float]
     chronic_workload: Optional[float]
     acwr: Optional[float]
+    # Performance Management Chart (DESIGN_pmc_fitness_fatigue.md §3). CTL = fitness
+    # (42-day EWMA of load), ATL = fatigue (7-day EWMA), TSB = form = CTL(yesterday) -
+    # ATL(yesterday). Suppressed at display inside the leading-edge warm-up window and
+    # NULL on any pre-recompute row.
+    ctl: Optional[float]
+    atl: Optional[float]
+    tsb: Optional[float]
 
 class AthleteBaseline(TypedDict):
     """Represents rolling baseline stats calculated for an athlete."""
@@ -127,6 +134,13 @@ class Macrocycle(TypedDict):
     created_at: str
     feedback: Optional[str]
 
+# The fixed periodization-phase vocabulary (DESIGN_pmc_fitness_fatigue.md §4.4). One
+# source of truth, imported by both the writer (normalize_meso_phase) and the reader
+# (color_tsb), so the two enums can never drift. Ordered coarse-to-fine over a block's
+# arc; membership, not order, is what callers rely on.
+MESO_PHASES = ("base", "build", "peak", "taper", "recovery")
+
+
 class Mesocycle(TypedDict):
     """Represents a specific block/phase of training within a macrocycle."""
     id: Optional[int]
@@ -135,4 +149,9 @@ class Mesocycle(TypedDict):
     start_date: str
     end_date: str
     focus: str
+    # Structured periodization phase from MESO_PHASES, classified at plan generation
+    # (§4.4). Optional: pre-existing plans and bootstrap-inferred blocks predate it and
+    # carry None -> phase-blind TSB color. The free-text `focus` is the human label; this
+    # pins it to a fixed vocabulary the color map can branch on.
+    phase: Optional[str]
     feedback: Optional[str]

@@ -279,10 +279,12 @@ class PeriodizationMixin:
 
             for meso in mesocycles:
                 cursor.execute("""
-                    INSERT INTO mesocycles (macrocycle_id, name, start_date, end_date, focus)
-                    VALUES (?, ?, ?, ?, ?)
+                    INSERT INTO mesocycles (
+                        macrocycle_id, name, start_date, end_date, focus, phase
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?)
                 """, (macrocycle_id, meso['name'], meso['start_date'], meso['end_date'],
-                      meso['focus']))
+                      meso['focus'], meso.get('phase')))
 
             conn.commit()
             return int(macrocycle_id)

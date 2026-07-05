@@ -251,6 +251,38 @@ class Config:
         clean gap at 0.5."""
         return float(self.get("garmin", {}).get("hr_zone_coverage_min", 0.5))
 
+    # --- Load-model windows (ACWR + PMC; see DESIGN_pmc_fitness_fatigue.md §3.4) ---
+    # These are computation constants living beside the workload windows they replace,
+    # under `garmin:`. The science file's interpretation bands (ACWR 0.8-1.3, TSB
+    # -30/+25, ramp 3-5/8) are calibrated to the DEFAULTS: non-default constants change
+    # what the numbers *mean* while the prompts and colors keep judging them against the
+    # standard bands. They are for deliberate experimentation, not casual tuning — the
+    # defaults are the supported configuration. A change takes effect on the next sweep
+    # that calls recompute_derived() (next pull/backfill/wipe); nothing recomputes on a
+    # config edit alone.
+    @property
+    def acwr_acute_days(self) -> int:
+        """Acute (short) workload window for ACWR (garmin.py). Under `garmin:`. Default 7."""
+        return int(self.get("garmin", {}).get("acwr_acute_days", 7))
+
+    @property
+    def acwr_chronic_days(self) -> int:
+        """Chronic (long) workload window for ACWR, expressed as a rolling weekly average
+        of chronic_days/acute_days weeks (garmin.py). Under `garmin:`. Default 28."""
+        return int(self.get("garmin", {}).get("acwr_chronic_days", 28))
+
+    @property
+    def pmc_ctl_days(self) -> int:
+        """CTL (fitness) EWMA time constant τ, in days — the classic 42-day Coggan
+        constant (garmin.py, DESIGN_pmc_fitness_fatigue.md §3). Under `garmin:`. Default 42."""
+        return int(self.get("garmin", {}).get("pmc_ctl_days", 42))
+
+    @property
+    def pmc_atl_days(self) -> int:
+        """ATL (fatigue) EWMA time constant τ, in days — the classic 7-day Coggan
+        constant (garmin.py). Under `garmin:`. Default 7."""
+        return int(self.get("garmin", {}).get("pmc_atl_days", 7))
+
     @property
     def calendar_context_tag(self) -> str:
         """Gets the source tag for calendar events."""
