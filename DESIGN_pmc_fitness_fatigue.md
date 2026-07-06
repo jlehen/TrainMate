@@ -1,7 +1,37 @@
 # Design: PMC Fitness/Fatigue/Form (CTL · ATL · TSB)
 
-**Status:** Proposed (rev. 3) · **Date:** 2026-07-04 · **Branch:** worktree-design-pmc-fitness-fatigue
+**Status:** Proposed (rev. 5) · **Date:** 2026-07-04 · **Branch:** worktree-design-pmc-fitness-fatigue
 
+> **Rev. 5 (2026-07-04):** §4.4 (`Mesocycle.phase`) promoted from a sketch to an
+> end-to-end implementation spec — a single `MESO_PHASES` vocabulary source in
+> `types.py`; the exact `phase` key added to the `_plan_generate_strategy` JSON
+> schema (`engine.py` L409–418 — the prompt lives in `engine.py`, not `service.py`
+> as rev. 3 implied); a pure `normalize_meso_phase()` parser with the keyword
+> fallback map at the `service.py` L698 seam; the empty-phase diagnostic as a
+> `print(dim(...))` line (the codebase has no logging framework); and `phase`
+> threaded through `save_macrocycle`'s INSERT (`db/periodization.py` L280–285).
+> Three factual corrections from a code-verification pass: `_warn_manual` is in
+> `garmin.py` L836, not `status.py` (§3.3b); `get_active_objective()` is
+> `db/objectives.py` L47–50, not `objectives.py` L48–49 (§5.3); the science file
+> is `trainmate/science/training_load.txt` (§ intro).
+>
+> **Rev. 4 (2026-07-04):** second review pass, folded in. Correctness: the taper
+> projection anchors to the **highest-priority** upcoming event (ties → nearest),
+> decays a stale/missing anchor to today, and ignores removed workouts (§5.3); the
+> `wipe → recompute` call moves to the **command layer** so it runs after the delete
+> commits and avoids a db→garmin import cycle (§4); the warm-up accuracy caveat now
+> also covers **re-warm-ups after a long gap**, not just the left edge (§3.3b); the
+> weekly-digest ramp is suppressed when its −7d lookback lands in the warm-up zone
+> (§5.4); ramp is computed from the **full** stored history, not the prompt slice
+> (§3.1, §5.2). Honesty: the beginner caveat is now **conditional** rather than
+> asserting fitness is understated (§3.3b). Cleanups: `CHRONIC_WEEKS` is deleted and
+> computed inline from the two window params (§3.4); the `Mesocycle.phase` color
+> falls back to the free-text focus and logs empty-phase rate (§4.4); a TSB lag
+> footnote, corrected "~78% (not 'converged')" wording, the `hr_zone_coverage_min`
+> config precedent, a single-source warm-up cutoff, and non-overlapping color bands
+> (§3.3a, §3.4, §5.1, §6.1). A new-user "PMC is dark for ~6 weeks" limitation is
+> stated in §7.
+>
 > **Rev. 3 (2026-07-04):** author decisions on the four rev. 2 open forks, folded
 > in. (1) Warm-up: 42-day display blank **plus** a data-sufficiency caveat that
 > warns the user and the LLM when today's values are still warming (§3.3). (2)
@@ -19,7 +49,7 @@
 > None/NULL handling (§5.1, §6), a real fix for `wipe_garmin_data` staleness
 > (§4), a wider derivation pad (§3.4).
 
-`science/training_load.txt` (f0bb707) documents the full Performance Management
+`trainmate/science/training_load.txt` (f0bb707) documents the full Performance Management
 Chart model — CTL (fitness), ATL (fatigue), TSB (form), and the CTL ramp rate —
 and its §4 coaching directives tell the coach things like *"when TSB falls below
 −30, default to recovery"* and *"taper so TSB rises into +5..+25 by event day"*.
@@ -131,6 +161,12 @@ tsb_d = ctl_{d-1} − atl_{d-1}          # yesterday's values, per the science f
   garbage). Because the pass walks *every* calendar day in memory (not just
   rows), a true interior gap in the CTL series is impossible — the fallback
   matters only at the young-DB left edge and at analysis-window slices (§5.4).
+  **Ramp reads the full stored CTL series, never the windowed prompt slice.**
+  The generate/adapt prompts carry only a short metrics window (15 days for
+  generate, `history_days` for adapt), so computing ramp from those rows alone
+  would wrongly omit it whenever the window is < 8 days even though the DB holds
+  years of CTL. The single ramp line (§5.2) is derived from a full-history
+  lookup at prompt-assembly time and injected alongside the slice.
 
 ### 3.2 Persistence
 
@@ -179,35 +215,59 @@ Two-part handling, per author decision:
 are the seed for later days), but **suppress at every surface** — treat as
 `None`, same omission convention as any other missing field — every
 CTL/ATL/TSB/ramp whose date is within the first **`τ_ctl` days (default 42)** of
-DB history. One cutoff date, `history_start + τ_ctl`, computed once and applied
-in the per-day lines (§5.1), the weekly digest (§5.4), and the CLI (§6). This is
-a *display* rule: stored rows keep their converging values, so a window starting
-past the cutoff reads warm numbers without recompute.
+DB history. One cutoff date, `history_start + τ_ctl`, is computed by a **single
+helper** (e.g. `pmc_warmup_cutoff()` beside `compute_pmc`, reading the earliest
+metrics/activity date) and passed to the per-day lines (§5.1), the weekly digest
+(§5.4), and the CLI (§6) — so the four surfaces can't each derive it four
+slightly-different ways. This is a *display* rule: stored rows keep their
+converging values, so a window starting past the cutoff reads warm numbers
+without recompute.
 
 **(b) Caveat + convergence % when *today itself* is still warming.** Blanking
 the leading edge does nothing for a *young DB*, where even today's value is
-warm-up quality. The EWMA converges as `1 − e^{−d/τ}` for `d` days of history
-(63% at d=τ, 78% at 1.5τ, 86% at 2τ, 95% at 3τ). So when the history behind the
-latest value is short, compute that figure and surface it — the author asked for
-the accuracy percentage, and it costs one `exp`:
+warm-up quality. The EWMA converges as `1 − e^{−d/τ}` for `d` days of
+**effective** history behind the latest value (63% at d=τ, 78% at 1.5τ, 86% at
+2τ, 95% at 3τ). So when that effective history is short, compute the figure and
+surface it — the author asked for the accuracy percentage, and it costs one
+`exp`:
 
 - **To the coach** — one line appended to the data summary (§5.2):
-  `- PMC data caveat: CTL is based on N days of history (~X% converged); it
-  understates true fitness by roughly (100−X)%. Discount low TSB / high ramp as
-  partly warm-up artifact.`  with `X = round(100 · (1 − e^{−N/τ_ctl}))`.
+  `- PMC data caveat: CTL is based on N days of history (~X% converged). If the
+  athlete trained regularly before {history_start}, true fitness is higher than
+  shown and low TSB / high ramp are partly warm-up artifacts; if they did not,
+  the low values are real.`  with `X = round(100 · (1 − e^{−N/τ_ctl}))`. The
+  caveat states the *condition* rather than asserting understatement, because a
+  genuine beginner's low CTL is correct, not an artifact (the direction is the
+  LLM's to judge from the athlete's pre-DB history; only the magnitude is ours).
 - **To the user** — a matching short `tm status` warning, and the `_warn_manual`
-  baseline text (`status.py`, finding #4a) gains a PMC line so a young-DB user
-  sees *why* freshness reads low.
+  baseline text (`garmin.py` L836 — a module function, not in `status.py`; the
+  ACWR-mention `cold=False` branch, finding #4a) gains a PMC line so a young-DB
+  user sees *why* freshness reads low.
 
 Trigger the caveat while `N < 3·τ_ctl` (≈126 days, the ~95% mark); above that
 the artifact is negligible and the line is dropped. The percentage is strictly
-more useful than a bare "limited data" flag: it gives the LLM both the direction
-(understates) and the rough magnitude of the discount. It is a convergence proxy
-under a constant-load assumption, **not** a literal error bar on a varying
-signal — framed to the LLM as "~X% converged," which is exactly how a
-TrainingPeaks-style chart's ramp-in is implicitly read. No manual starting-CTL
-machinery is needed; the practical fix for a young DB remains a deeper Garmin
-backfill via `tm data pull --start`.
+more useful than a bare "limited data" flag: it gives the LLM the rough
+magnitude of the possible discount, leaving the *direction* to the LLM's
+knowledge of the athlete's pre-DB history. It is a convergence proxy under a
+constant-load assumption, **not** a literal error bar on a varying signal —
+framed to the LLM as "~X% converged," which is exactly how a TrainingPeaks-style
+chart's ramp-in is implicitly read. No manual starting-CTL machinery is needed;
+the practical fix for a young DB remains a deeper Garmin backfill via
+`tm data pull --start`.
+
+**Re-warm-ups after a gap.** The warm-up problem is not unique to the start of
+DB history: an EWMA re-warms from a low floor after *any* layoff long enough to
+decay CTL back toward zero (injury, off-season, travel — a run of ≳ τ_ctl
+near-zero-load days). Coming back, CTL climbs from that low floor again,
+re-tripping low TSB / high ramp exactly as at DB start — yet this region is
+neither inside the first τ_ctl days (so §3.3a won't blank it) nor short on
+*total* history (so a naïve `N = today − history_start` won't flag it). So `N`
+above is **effective** history: days since the most recent such gap, or since
+history start if none. Detecting the gap is cheap — the calendar-day pass
+already holds the full daily-load series, so a run of ≳ τ_ctl near-zero-load
+days ending after `history_start` resets the effective-history clock. The
+caveat (b) then fires on a comeback too; the §3.3(a) blank still only covers the
+true left edge.
 
 The §3.4 data pad is the complementary *data* backstop (it warms CTL by pulling
 prior history); (a) is the *display* backstop for the leading edge; (b) is the
@@ -218,7 +278,8 @@ long enough yet.
 
 All four window/time-constant numbers become config params via the existing
 `config.py` property + `config_template.yaml` pattern (like
-`rpe_divergence_ratio`), under the **`garmin:`** section (they are computation
+`hr_zone_coverage_min`, already a `garmin:` param — *not* `rpe_divergence_ratio`,
+which lives under `coach:`), under the **`garmin:`** section (they are computation
 constants living beside the windows they replace; the coach never reads them
 directly):
 
@@ -229,17 +290,26 @@ directly):
 | `pmc_ctl_days` | 42 | (new) CTL time constant |
 | `pmc_atl_days` | 7 | (new) ATL time constant |
 
-`CHRONIC_WEEKS` stays derived (`chronic/acute`). The `garmin.py` header comment
-"Standard constants, not tunables" (L24) becomes false and must be rewritten to
-say these are config-backed with the calibration caveat below. Ramp rate stays a
-fixed 7-day delta — "per week" is its definition, not a tunable window.
+`CHRONIC_WEEKS` is **deleted, not merely derived.** It is exactly
+`chronic_days / acute_days`, so both a stored constant (frozen at import from the
+old hardcoded windows — a config edit then wouldn't move it) and a standalone
+param (settable inconsistently with the windows, silently corrupting ACWR) are
+wrong. Compute it inline where chronic is normalized —
+`chronic = total_chronic / (config.acwr_chronic_days / config.acwr_acute_days)` —
+reading the live params every sweep, so it can never drift from the windows it is
+defined by. The `garmin.py` header comment "Standard constants, not tunables"
+(L24) becomes false and must be rewritten to say these are config-backed with the
+calibration caveat below. Ramp rate stays a fixed 7-day delta — "per week" is its
+definition, not a tunable window.
 
 **Derivation pad (finding #4).** Rev. 1's `DERIVATION_PAD_DAYS = chronic` is
 under-padded two ways:
 
-1. **CTL needs ~1.5 × τ_ctl ≈ 63 days** of prior data to be converged at the
-   left edge of a displayed window; a 28-day pad neither pulls nor warms enough
-   history for it.
+1. **CTL needs ~1.5 × τ_ctl ≈ 63 days** of prior data to reach ~78% convergence
+   at the left edge of a displayed window (full 95% takes 3·τ_ctl ≈ 126 days; the
+   63-day pad is a deliberate cost/coverage tradeoff, with the §3.3(b) accuracy
+   caveat carrying the residual — *not* "converged" as rev. 1 claimed); a 28-day
+   pad neither pulls nor warms enough history even for that.
 2. Making `acwr_chronic_days` configurable while pad = chronic is a latent
    corruption: set chronic to 14 and the pad drops **below the hardcoded 28-day
    baseline lookback** in `recompute_derived()` (`for d in range(1, 29)`,
@@ -284,17 +354,25 @@ analyses.
 - `db/activities.py` `save_metric_cache()`: three new optional params with the
   same `COALESCE(excluded.x, cache.x)` semantics as `acute_workload`, so a
   metrics-only Garmin save never nulls out previously-computed PMC values.
-- **`db/wipes.py` `wipe_garmin_data()` must call `recompute_derived()` at the
-  end (finding #5).** It deletes activity/metrics rows by range and *never*
-  recomputes today — for ACWR the resulting staleness is bounded (flat 28-day
-  window, so only ≤28 days after the wiped range read stale values until the
-  next pull). An EWMA has no such bound: deleted load stays baked into
-  `ctl_{d}`/`atl_{d}` for **every** subsequent day, forever, until some future
-  pull happens to sweep. This is an existing latent issue for ACWR that PMC
-  turns unbounded, so the fix belongs here. `recompute_derived()` reads the
-  post-delete DB, so calling it after the deletes (still inside, or right after,
-  the connection block) fully re-derives the surviving span. Cost is one extra
-  full sweep per wipe — wipes are rare and manual; acceptable.
+- **A wipe must be followed by `recompute_derived()` — at the command layer, not
+  inside the db method (finding #5).** `wipe_garmin_data()` deletes
+  activity/metrics rows by range and *never* recomputes today. For ACWR the
+  staleness is bounded (flat 28-day window: only ≤28 days after the wiped range
+  read stale values until the next pull). An EWMA has no such bound: deleted load
+  stays baked into `ctl_{d}`/`atl_{d}` for **every** subsequent day, forever,
+  until some future pull sweeps. This existing latent ACWR issue becomes
+  unbounded under PMC, so it must be fixed now. **Where the recompute goes
+  matters.** `recompute_derived()` lives in `garmin.py`, which imports `db`
+  (`garmin.py` L19); a module-level call from `db/wipes.py` would be a circular
+  import. And it opens its own connection, so calling it *inside* the wipe's
+  `with self._get_connection()` block (before `conn.commit()`, `wipes.py` L77)
+  either won't see the uncommitted deletes or hits SQLite `database is locked`.
+  So the recompute belongs one level up, at the command layer that already
+  imports both: `cli/data.py` L128 does `db.wipe_garmin_data(...)`, and calls
+  `garmin.recompute_derived()` immediately after — once the wipe has returned and
+  its transaction committed. The `wipe_metrics()` wrapper (`db/wipes.py` L99) and
+  any other wipe entry point follow the same "wipe, then recompute" rule. Cost is
+  one extra full sweep per wipe — wipes are rare and manual; acceptable.
 
 ### 4.4 `Mesocycle.phase` (structured phase, for phase-aware TSB color)
 
@@ -304,19 +382,96 @@ rev. 2 dropped the green band entirely. Rev. 3 instead gives the color real
 context via a structured phase (author decision), which is independently
 reusable (plan display, future coach signals). **This is the largest new surface
 in the design** — it reaches into plan generation — and could reasonably be
-split into its own follow-up PR; specified here for completeness:
+split into its own follow-up PR; specified end-to-end below so it needs no
+further design. Five touchpoints, in dependency order.
 
-- `types.py` `Mesocycle`: add `phase: Optional[str]` from a fixed, documented
-  vocabulary `{base, build, peak, taper, recovery}`. `Optional` because
-  pre-existing plans predate it.
-- `db/base.py`: idempotent `ALTER TABLE mesocycles ADD COLUMN phase TEXT`
-  (same pattern as §4's metrics columns); `CREATE TABLE` gains it for fresh DBs.
-- **Generation** (`coach/service.py` plan-generation prompt + parse): the
-  mesocycle object the LLM emits gains a `phase` field drawn from that
-  vocabulary, alongside the existing free-text `focus`. Parsing validates
-  against the vocabulary; an unknown or missing value stores `None`.
-- Consumed only by `color_tsb` (§6.1), passed from `status.py` (which already
-  loads the active mesocycle, L70–84).
+**Vocabulary — one source.** A frozen tuple
+`MESO_PHASES = ("base", "build", "peak", "taper", "recovery")` defined once in
+`types.py` beside `Mesocycle`, imported by both the parser (step 3) and
+`color_tsb` (§6.1), so the writer's enum and the reader's enum can never drift.
+
+**(1) Type & storage.**
+- `types.py` `Mesocycle` (a `TypedDict`, L130–138): add `phase: Optional[str]`.
+  `Optional` because pre-existing plans and bootstrap-inferred blocks predate it.
+- `db/base.py`: idempotent `ALTER TABLE mesocycles ADD COLUMN phase TEXT` in the
+  same `try/except sqlite3.OperationalError` block used for §4's metrics columns;
+  the `mesocycles` `CREATE TABLE IF NOT EXISTS` (L463–474) gains `phase TEXT` for
+  fresh DBs.
+
+**(2) Generation — prompt & schema (`engine.py` `_plan_generate_strategy`, NOT
+`service.py`).** The LLM already emits each mesocycle as a JSON object with
+`name`/`start_date`/`end_date`/`focus` — the response-schema block at L409–418.
+Add a fifth key so the model classifies the block as it writes it:
+
+```
+  "phase": "one of: base | build | peak | taper | recovery"
+```
+
+The `name`/`focus` text already carries phase language ("Base Building",
+"Peak & Taper"); `phase` just pins it to the fixed vocabulary. No other prompt
+change is needed — the L432+ system prompt already frames the model as designing
+periodized blocks.
+
+**(3) Parse & normalize (`service.py`, the `mesocycles = macro_data.get("mesocycles", [])`
+seam at L698).** Today the raw LLM dicts flow straight into `save_macrocycle`
+(L702) with no per-field validation. Insert one normalization pass *between* L698
+and that call, running every block through a **pure helper** (unit-testable, no
+DB):
+
+```python
+def normalize_meso_phase(raw_phase: Optional[str], focus: str) -> Optional[str]:
+    """LLM phase → validated vocabulary; else infer from focus text; else None."""
+    if raw_phase and raw_phase.strip().lower() in MESO_PHASES:
+        return raw_phase.strip().lower()
+    text = f"{raw_phase or ''} {focus}".lower()
+    for kw, phase in (              # most specific first; first hit wins
+        ("taper", "taper"), ("race", "taper"), ("peak", "peak"),
+        ("deload", "recovery"), ("recover", "recovery"), ("rest", "recovery"),
+        ("base", "base"), ("aerobic", "base"),
+        ("build", "build"), ("progress", "build"),
+    ):
+        if kw in text:
+            return phase
+    return None                     # neither the field nor the focus classified it
+```
+
+Applied as `meso["phase"] = normalize_meso_phase(meso.get("phase"), meso["focus"])`
+over each block before the L702 `save_macrocycle`. Any other path that re-persists
+mesocycles (regeneration) runs the same pass.
+
+**(4) Empty-phase diagnostic.** The payoff of this surface is the green
+race-ready color (§6.1), which fires *only* in `peak`/`taper`: if the model never
+emits a clean value **and** the focus-inference whiffs, the surface silently never
+lights up. The codebase has **no logging framework** (diagnostics are `print()` +
+color helpers), so emit a dim one-liner at generation time —
+`print(dim(f"phase: {n_none}/{len(mesocycles)} blocks unclassified"))` where
+`n_none` counts the `None` results from step 3 — so a persistent non-zero rate is
+visible in normal use and tells us whether to harden the prompt.
+
+**(5) Persistence (`db/periodization.py` `save_macrocycle`, the mesocycle INSERT
+at L280–285).** Add `phase` to the column list and bind `meso.get("phase")`:
+
+```python
+INSERT INTO mesocycles (macrocycle_id, name, start_date, end_date, focus, phase)
+VALUES (?, ?, ?, ?, ?, ?)
+```
+
+with `meso.get("phase")` appended to the params tuple. Nothing else in the write
+path changes.
+
+**Read-back & consumption.** `get_mesocycles_for_macrocycle` and
+`get_active_mesocycle` already `return dict(row)` (`periodization.py` L114, L179),
+so once the column exists `phase` reaches callers unchanged. `status.py` already
+loads the active mesocycle (L70–77); it passes `active_meso.get('phase')` — use
+`.get`, so a meso dict assembled without the key can't `KeyError`; §6.1's prose
+sketch of `active_meso['phase']` should read `.get('phase')` to match — into
+`color_tsb` (§6.1), the field's only consumer.
+
+**Out of scope for phase.** Bootstrap reverse-engineering emits
+`inferred_mesocycles` (`engine.py` L1008, consumed at `service.py` L198) as
+reconstruction *context*, not via the plan-generation write path; those get no
+phase and degrade to `phase = NULL` → phase-blind color. Only forward plan
+generation classifies blocks.
 
 Because the field is additive and NULL-tolerant end-to-end, it needs no
 migration and imposes no ordering dependency on the rest of the design: plans
@@ -353,6 +508,12 @@ past-warm-up row:
 
 - The three PMC fields are omitted wholesale during the §3.3 warm-up window and
   for any pre-recompute NULL row.
+- **TSB won't equal the shown CTL − ATL.** Per §3.1, `TSB = CTL(yesterday) −
+  ATL(yesterday)`, but the line shows *today's* CTL/ATL — so in the example
+  `62.4 − 71.7 = −9.3 ≠ −8.9`. This is correct (matching TrainingPeaks' lag),
+  but reads as an arithmetic error to a human or the LLM, so a one-line footnote
+  states the lag wherever the triple is surfaced (per-day block, summary,
+  `tm status`).
 - **Ramp is *not* on the per-day line.** Ramp is a slow-moving weekly figure;
   stamping it on all ~30 daily lines is repetition the LLM must wade through.
   Per author decision it reaches the coach as a **single line** instead (§5.2) —
@@ -378,9 +539,11 @@ Two summary lines, added after the existing ACWR line:
   (`engine.py` L557) and adapt (L792) — *and* the strategy/plan prompts. So the
   same one-liner is emitted into **both** contexts: once in the data summary,
   and once in the generate/adapt metrics context (a single line beside the
-  per-day block, not repeated per day). One number, stated once per prompt,
-  right where next week's load is decided — no 30× repetition, no seven-line
-  mental subtraction.
+  per-day block, not repeated per day). It is computed from the **full stored
+  CTL series** (§3.1), independent of the short prompt window (15 days for
+  generate, `history_days` for adapt), so a small window never spuriously drops
+  it. One number, stated once per prompt, right where next week's load is
+  decided — no 30× repetition, no seven-line mental subtraction.
 - The §3.3(b) **warm-up caveat line** (with the convergence %) appends here too
   when today's values are still warming, so every prompt that reads PMC also
   reads how much to trust it.
@@ -402,18 +565,42 @@ date and is forward-looking, so it must stay out of the pure, plan-independent
 backward pass (which remains Garmin-only). This is the one place PMC reads the
 plan, and it reads it read-only.
 
-Inputs: today's CTL/ATL (latest metrics row), the active objective's
-`target_date` (event day — `objectives` already carry it, used in `status.py`),
-and planned `Workout.tss` for the days today→event. Walk §3.1's recurrence
-forward from today over planned daily load (sum of that day's planned `tss`;
-rest days = 0). Emit into the plan/adapt prompts, gated to a future A-event:
+**Event selection.** The projection anchors to the athlete's **highest-priority
+upcoming active objective**, ties broken by the nearest `target_date` (author
+decision). This is *not* what `get_active_objective()` returns today — it sorts
+`target_date ASC LIMIT 1`, i.e. soonest-regardless-of-priority
+(`db/objectives.py` L47–50) — so the projection needs a priority-first selection
+(`ORDER BY priority DESC, target_date ASC LIMIT 1` over `status='active' AND
+target_date >= today`). There is no separate "A-event" tier in the schema
+(`Objective` carries only `priority`), so the `+5..+25` band is labeled as the
+coach's peak/taper target *for the chosen event*, meaningful when that event is
+being tapered for — not as an unconditional "A-event" gate.
+
+Inputs: the latest metrics row's CTL/ATL as the anchor, the chosen objective's
+`target_date`, and planned `Workout.tss` for the days anchor→event. Walk §3.1's
+recurrence forward over planned daily load (sum of that day's planned `tss` for
+**non-removed** workouts; rest days = 0). Emit into the plan/adapt prompts:
 
 ```
 - Projected event-day TSB (from current plan): +12   [taper target band +5..+25]
 ```
 
-Two honesty guards (the author's "warn if not all workouts are planned yet"):
+Honesty guards (the author's "warn if not all workouts are planned yet", plus
+the anchor-quality guards a projected number needs):
 
+- **Stale anchor.** The latest metrics row may be several days old (recent days
+  unpulled or activity-only). Decay CTL/ATL forward from the anchor date to today
+  over actual daily load *before* projecting the plan, so "from today" really
+  starts at today — don't silently start the walk from last week's values.
+- **Warm-up / missing anchor.** If the anchor row is inside the §3.3 warm-up
+  window or its CTL/ATL is NULL, the projection inherits warm-up-grade
+  uncertainty: carry the §3.3(b) accuracy caveat onto the projection line (or
+  suppress the line entirely when the anchor is NULL), rather than printing a
+  confident number over a shaky start.
+- **Removed workouts.** A planned workout can be marked `removed = True`
+  (`Workout`, `types.py` L66); its `tss` must **not** count toward projected
+  load, or a cancelled session inflates the projection. Filter removed workouts
+  (and honor `original_date` for moved ones) when summing planned daily load.
 - **Plan doesn't reach the event.** If the last planned workout precedes the
   event, the tail days are assumed zero-load, which inflates projected TSB. The
   line self-annotates: `(note: last N days before the event are unplanned;
@@ -439,7 +626,11 @@ Two guards (findings #1 and the boundary smaller-finding):
 
 - **Warm-up:** weeks entirely inside the §3.3 warm-up window emit `None` for all
   three (the digest formatter omits them) — otherwise every bootstrap narrates a
-  phantom overreach block from seeding artifacts.
+  phantom overreach block from seeding artifacts. **Straddle guard:** for a week
+  that only *partly* clears the cutoff, `end_ctl`/`min_tsb` may show but
+  `week_ramp` is still suppressed whenever its `−7d` lookback lands *before* the
+  warm-up cutoff — otherwise the first shown week reports a huge ramp measured
+  against a suppressed (warm-up) baseline.
 - **Week boundary:** `week_ramp` reaches into the *previous* week's slice for the
   `−7d` CTL. The first week of an analysis window has no prior week → `week_ramp`
   is omitted (None-guarded), and it is exactly where the warm-up artifacts would
@@ -494,11 +685,18 @@ One line under ACWR (`cli/status.py`, near L141–145):
   structured `Mesocycle.phase` (§4.4) that `status.py` already has to hand.
   `status.py` passes `active_meso['phase'] if active_meso else None`. The
   `−30..+5` band stays uncolored in all phases (its meaning is phase-dependent
-  and belongs to the coach).
+  and belongs to the coach). **Bands are half-open so no value is double-claimed**
+  (rev. 1's `+5..+25` and `−30..+5` both claimed +5): `< −30` red,
+  `−30 ≤ tsb < +5` uncolored, `+5 ≤ tsb ≤ +25` green (peak/taper only),
+  `> +25` yellow.
 - **Ramp bands must touch (finding #8):** `≥ 8` red, `5–8` yellow (i.e.
   `5 ≤ ramp < 8`), else plain. Rev. 1's "`>8` red, `5–7` yellow" left 7.5
   rendering plain between a yellow 6.0 and a red 9.0. No green band: a low ramp
   is correct during a taper, so green would wrongly bless it.
+- **TSB lag footnote (§5.1).** `TSB = CTL(yesterday) − ATL(yesterday)`, so the
+  printed `CTL | ATL | TSB` triple won't subtract to the shown TSB; a dim
+  one-line footnote under the Fitness line states this so the user doesn't read
+  it as a bug.
 
 ### 6.2 `tm data show-metrics`
 
@@ -541,6 +739,16 @@ additions each have a clean seam and could be separate PRs if preferred: the
 `Mesocycle.phase` enum + phase-aware green (§4.4, §6.1) touches plan generation;
 the forward projection (§5.3) is the only plan-coupled piece of the compute
 path. Neither blocks the core.
+
+**Known limitation — PMC is dark for the first ~6 weeks of a fresh install.**
+CTL is a 42-day EWMA, so it needs months of history to be trustworthy. Cold-start
+backfill defaults to 90 days (`garmin_initial_backfill_days`); §3.3(a) blanks the
+first 42, and the §3.3(b) caveat runs to ~126 days. So a new user sees **no** PMC
+for ~6 weeks, then caveated (63–78% converged) numbers for weeks more, and never
+reaches the un-caveated 126-day mark within the default backfill — whereas ACWR is
+trustworthy at 28 days. This is inherent to the model, not a bug; stated here so
+new-user emptiness is expected. The only real remedy is a deeper Garmin backfill
+(`tm data pull --start`), itself bounded by Garmin's own retention.
 
 **Out of scope, deliberately:**
 
@@ -601,7 +809,9 @@ Forward projection (§5.3, pure helper + service wiring):
   contribute 0 and trigger the "M lack a TSS estimate" annotation.
 - plan ending before the event triggers the "last N days unplanned" annotation
   and the tail is treated as rest.
-- no active future A-event / no plan → no projection line emitted (not a crash).
+- no active future objective / no plan → no projection line emitted (not a
+  crash); with several, the highest-priority upcoming one is chosen (ties →
+  nearest).
 
 DB integration (temp DB):
 
@@ -610,9 +820,28 @@ DB integration (temp DB):
 - **COALESCE regression:** a metrics-only re-pull (no activity change) must
   **not** null previously-stored PMC values — the whole persistence story (§4)
   relies on this and nothing else pins it.
-- **`wipe_garmin_data()` recomputes:** after a dated wipe, no surviving row past
-  the wiped range still carries load-through-the-gap in its CTL/ATL (finding #5
-  regression).
+- **wipe-then-recompute:** after a dated wipe *followed by the command-layer
+  `recompute_derived()`*, no surviving row past the wiped range still carries
+  load-through-the-gap in its CTL/ATL (finding #5 regression). The recompute runs
+  after the wipe's transaction commits (no lock, sees the deletes).
+
+Rev. 4 additions:
+
+- **Event selection:** two active future objectives, the lower-priority one
+  sooner → the projection anchors to the higher-priority one; equal priority →
+  the nearer date wins.
+- **Projection anchor:** a stale latest-metrics row decays to today before the
+  plan walk; a `removed=True` workout in range does not raise projected load; a
+  warm-up-window anchor carries the accuracy caveat, and a NULL anchor suppresses
+  the line rather than crashing.
+- **Digest straddle:** a week whose `−7d` CTL lookback lands before the warm-up
+  cutoff omits `week_ramp` while still showing `end_ctl`/`min_tsb`.
+- **Effective-history caveat:** a DB with a ≳ τ_ctl near-zero-load gap re-arms the
+  convergence caveat after the gap even though total history is long.
+- **Ramp from full history:** an 8-day prompt window still emits the ramp line
+  (computed from the full stored series), not omitted.
+- **`CHRONIC_WEEKS` inline:** changing `acwr_acute_days`/`acwr_chronic_days`
+  moves the normalized chronic value in the same sweep (no frozen 4.0).
 
 ---
 
@@ -643,3 +872,22 @@ resolution; see the header note for the four decisions.
 | — | ARCHITECTURE.md absent from rollout | §7 adds it (rows ~L132 and ~L478, plus plan-generation flow) |
 | — | Weekly-digest ramp crosses week boundaries | §5.4 None-guards the first week; reinforced by warm-up guard |
 | — | Missing tests (empty DB, COALESCE, d−7 gap, NULL status) | all added in §8, plus rev. 3 projection / phase-color / caveat tests |
+
+Rows below are the **rev. 4** second-review pass (all folded into the body above):
+
+| # | Finding | Resolution |
+|---|---|---|
+| R4 | Taper anchored to soonest event, not highest-priority | §5.3 selects `priority DESC, target_date ASC`; ties → nearest; no schema "A-event" |
+| R4 | `wipe → recompute` import cycle + uncommitted-read/lock | §4 moves the recompute to the command layer, run after the wipe commits |
+| R4 | Warm-up unguarded after a long training gap (comeback) | §3.3(b) uses *effective* history; caveat re-arms on comebacks |
+| R4 | Beginner: caveat wrongly asserts fitness is understated | §3.3(b) reworded conditional on pre-DB training history |
+| R4 | Projection: warm-up/stale anchor + removed workouts | §5.3 adds stale-anchor decay, warm-up caveat, removed-filter |
+| R4 | Digest straddle week ramps off a warm-up baseline | §5.4 suppresses `week_ramp` when its −7d lands pre-cutoff |
+| R4 | Ramp dropped when the prompt window is < 8 days | §3.1/§5.2 compute ramp from the full stored CTL series |
+| R4 | `1.5·τ_ctl` mislabeled "converged" (really ~78%) | §3.4 states ~78%; the §3.3(b) accuracy caveat carries the residual |
+| R4 | TSB ≠ shown CTL − ATL reads as a bug | §5.1/§6.1 add a one-line lag footnote |
+| R4 | `garmin:` precedent cited a `coach:` param | §3.4 cites `hr_zone_coverage_min` |
+| R4 | `Mesocycle.phase` green fails on any non-enum value | §4.4 falls back to focus-text inference + logs empty-phase rate |
+| R4 | TSB color band overlap at +5 | §6.1 bands are half-open, each value owned once |
+| R4 | `CHRONIC_WEEKS` frozen at import vs configurable windows | §3.4 deletes it; computed inline from the two window params |
+| R4 | Warm-up cutoff computed per-surface (four ways) | §3.3(a) one helper computes it, passed to all four surfaces |
