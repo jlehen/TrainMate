@@ -161,6 +161,23 @@ class TestWarmupAndConvergence(unittest.TestCase):
         self.assertEqual(eff, comeback.isoformat())
         self.assertEqual(n, 10)
 
+    def test_token_session_does_not_defeat_layoff_detection(self):
+        # A single ~20-TSS jog in the middle of a 12-week layoff must NOT split it
+        # into two sub-threshold runs (the rest test is a trailing WEEKLY sum, not
+        # per-day): the caveat still re-arms at the comeback.
+        daily = {}
+        for i in range(30):
+            daily[(date(2026, 1, 1) + timedelta(days=i)).isoformat()] = 60.0
+        gap_start = date(2026, 1, 31)
+        daily[(gap_start + timedelta(days=42)).isoformat()] = 20.0   # token test jog
+        comeback = gap_start + timedelta(days=84)
+        for i in range(10):
+            daily[(comeback + timedelta(days=i)).isoformat()] = 60.0
+        end = (comeback + timedelta(days=9)).isoformat()
+        n, eff = pmc_effective_history(daily, "2026-01-01", end, 42)
+        self.assertEqual(eff, comeback.isoformat())
+        self.assertEqual(n, 10)
+
 
 # ==============================================================================
 # Ramp lookup (§3.1 interior-gap / young-DB rules)
@@ -188,6 +205,30 @@ class TestRamp(unittest.TestCase):
 
     def test_none_when_date_absent(self):
         self.assertIsNone(pmc_ramp({"2026-01-01": 5.0}, "2026-02-01"))
+
+    def test_older_baseline_is_scaled_per_week(self):
+        # Baseline 10 days back (interior hole at d-7): the delta is normalized to a
+        # per-7-day rate, so a multi-week span can't masquerade as "/week".
+        ctl_by_date = {"2026-01-02": 10.0, "2026-01-12": 20.0}
+        self.assertEqual(pmc_ramp(ctl_by_date, "2026-01-12"), 7.0)  # (20-10)*7/10
+
+    def test_fallback_is_bounded_at_two_windows(self):
+        # Nearest earlier value is 23 days old -> beyond the 2*window bound: omit
+        # rather than report a month-scale delta as a weekly ramp.
+        ctl_by_date = {"2025-12-20": 10.0, "2026-01-12": 20.0}
+        self.assertIsNone(pmc_ramp(ctl_by_date, "2026-01-12"))
+
+    def test_straddle_guard_suppresses_warmup_baseline(self):
+        # The -7d baseline lands before the warm-up cutoff -> the ramp would be
+        # measured against a suppressed warm-up artifact: omit (§5.4 straddle guard).
+        ctl_by_date = {"2026-01-05": 10.0, "2026-01-12": 20.0}
+        self.assertIsNone(
+            pmc_ramp(ctl_by_date, "2026-01-12", warmup_cutoff="2026-01-06")
+        )
+        # At/after the cutoff the same baseline is fine.
+        self.assertEqual(
+            pmc_ramp(ctl_by_date, "2026-01-12", warmup_cutoff="2026-01-05"), 10.0
+        )
 
 
 # ==============================================================================
@@ -235,6 +276,16 @@ class TestNormalizeMesoPhase(unittest.TestCase):
     def test_unclassifiable_returns_none(self):
         self.assertIsNone(normalize_meso_phase(None, "Miscellaneous stuff"))
         self.assertIsNone(normalize_meso_phase("nonsense", ""))
+
+    def test_race_language_does_not_imply_taper(self):
+        # "race" is not a keyword: race-pace work mid-build must not classify the
+        # block as taper (which would light the green race-ready TSB color there).
+        self.assertEqual(
+            normalize_meso_phase(None, "Build block: threshold plus race-pace intervals"),
+            "build",
+        )
+        # Race language alone stays unclassified (phase-blind color) rather than taper.
+        self.assertIsNone(normalize_meso_phase(None, "Race simulation weekend"))
 
 
 # ==============================================================================
@@ -310,6 +361,42 @@ class TestFormatMetricsHistory(unittest.TestCase):
         self.assertNotIn("CTL", out)
         self.assertNotIn(PMC_TSB_LAG_NOTE, out)
 
+    def test_all_null_row_marked_no_data(self):
+        # A pulled-but-empty day must not render a dangling "- 2026-06-01: " line.
+        rows = [{"date": "2026-06-01", "rhr": None, "hrv": None, "sleep_score": None,
+                 "stress": None, "acwr": None, "ctl": None, "atl": None, "tsb": None}]
+        out = format_metrics_history(rows)
+        self.assertIn("- 2026-06-01: (no data)", out)
+
+    def test_partial_pmc_row_still_gets_lag_footnote(self):
+        # The footnote explains the TSB lag; it must appear whenever ANY of the
+        # triple is shown, not only when CTL happens to be non-NULL.
+        rows = [{"date": "2026-07-02", "rhr": 52, "hrv": 61, "sleep_score": 78,
+                 "stress": 31, "acwr": 1.1, "ctl": None, "atl": 71.7, "tsb": -8.9}]
+        out = format_metrics_history(rows)
+        self.assertIn("TSB=-8.9", out)
+        self.assertIn(PMC_TSB_LAG_NOTE, out)
+
+
+class TestDisplayValues(unittest.TestCase):
+    """garmin.pmc_display_values — the one warm-up blanking rule the status line,
+    show-metrics table, and CSV all share."""
+
+    def test_warmup_row_blanks_all_three(self):
+        row = {"date": "2026-01-05", "ctl": 20.0, "atl": 55.0, "tsb": -30.0}
+        self.assertEqual(
+            garmin.pmc_display_values(row, "2026-02-12"), (None, None, None)
+        )
+
+    def test_past_cutoff_returns_stored_values(self):
+        row = {"date": "2026-03-01", "ctl": 62.4, "atl": 71.7, "tsb": None}
+        self.assertEqual(
+            garmin.pmc_display_values(row, "2026-02-12"), (62.4, 71.7, None)
+        )
+        self.assertEqual(
+            garmin.pmc_display_values(row, None), (62.4, 71.7, None)
+        )
+
 
 # ==============================================================================
 # DB integration — recompute upsert, COALESCE, wipe-then-recompute
@@ -362,6 +449,37 @@ class TestPMCIntegration(_DBBackedTest):
         after = next(m for m in test_db.get_metrics_cache() if m["date"] == d40)["ctl"]
         self.assertEqual(before, after)
 
+    def test_config_windows_move_normalized_chronic_in_same_sweep(self):
+        # chronic_weeks is computed INLINE from the live windows (never a frozen
+        # CHRONIC_WEEKS): with acute=14/chronic=28 and steady 60/day, chronic
+        # normalizes by 2 (not the default 4), so chronic == acute and ACWR == 1.0.
+        base = date(2026, 3, 1)
+        for i in range(60):
+            d = (base + timedelta(days=i)).isoformat()
+            test_db.save_metric_cache(date=d, rhr=50, hrv=70, sleep_score=80, stress=20)
+            self._add_activity(f"a{i}", d, 60.0)
+        with unittest.mock.patch.dict(
+            garmin.config.data,
+            {"garmin": {"acwr_acute_days": 14, "acwr_chronic_days": 28}},
+        ):
+            garmin.recompute_derived()
+        late = next(
+            m for m in test_db.get_metrics_cache()
+            if m["date"] == (base + timedelta(days=59)).isoformat()
+        )
+        self.assertAlmostEqual(late["acute_workload"], 840.0, delta=0.1)
+        self.assertAlmostEqual(late["chronic_workload"], 840.0, delta=0.1)
+        self.assertAlmostEqual(late["acwr"], 1.0, delta=0.01)
+
+    def test_nonpositive_config_window_fails_loud(self):
+        # The windows are EWMA/averaging divisors; a zero must be rejected at read
+        # time with a clear message, not crash recompute mid-sweep (or store
+        # negative-window nonsense).
+        for key in ("acwr_acute_days", "acwr_chronic_days", "pmc_ctl_days", "pmc_atl_days"):
+            with unittest.mock.patch.dict(garmin.config.data, {"garmin": {key: 0}}):
+                with self.assertRaises(ValueError):
+                    getattr(garmin.config, key)
+
     def test_wipe_then_recompute_clears_load_through_the_gap(self):
         base = date(2026, 3, 1)
         for i in range(60):
@@ -384,7 +502,7 @@ class TestPMCIntegration(_DBBackedTest):
 
 
 class TestPMCService(_DBBackedTest):
-    """Service-level PMC surfacing: taper-projection event selection + ramp line."""
+    """Service-level PMC surfacing: taper-projection event selection/guards + ramp line."""
 
     def setUp(self):
         self._use_test_db()
@@ -397,27 +515,48 @@ class TestPMCService(_DBBackedTest):
         for i in range(60):
             d = (base + timedelta(days=i)).isoformat()
             test_db.save_metric_cache(date=d, rhr=50, hrv=70, sleep_score=80, stress=20)
-            test_db.save_completed_activity(
-                activity_id=f"a{i}", date=d, start_time=f"{d} 09:00:00",
-                activity_name="Run", activity_type="running", duration_sec=3600.0,
-                distance_km=10.0, elevation_gain_m=0.0, avg_hr=150, max_hr=170,
-                rpe=None, tss=60.0,
-                zone1_sec=0, zone2_sec=1800, zone3_sec=1800, zone4_sec=0, zone5_sec=0,
-            )
+            self._add_activity(f"a{i}", d, 60.0)
         garmin.recompute_derived()
+
+    def _add_activity(self, aid, date_str, tss):
+        test_db.save_completed_activity(
+            activity_id=aid, date=date_str, start_time=f"{date_str} 09:00:00",
+            activity_name="Run", activity_type="running", duration_sec=3600.0,
+            distance_km=10.0, elevation_gain_m=0.0, avg_hr=150, max_hr=170,
+            rpe=None, tss=tss,
+            zone1_sec=0, zone2_sec=1800, zone3_sec=1800, zone4_sec=0, zone5_sec=0,
+        )
+
+    def _plan_workout(self, date_str, tss, **kwargs):
+        test_db.save_workout(
+            date=date_str, sport_type="running", title="Planned Run",
+            description="steady", tss=tss, **kwargs
+        )
+
+    def _projection(self):
+        return self.svc._pmc_projection_line(
+            date.today().isoformat(), self.svc._pmc_warmup_cutoff()
+        )
+
+    @staticmethod
+    def _projected_tsb(line):
+        import re
+        return int(re.search(r"Projected event-day TSB \(from current plan\): ([+-]\d+)", line).group(1))
 
     def test_projection_picks_highest_priority_event(self):
         today = date.today()
-        # Lower-priority event sooner, higher-priority event later.
+        # Priority 1 = HIGHEST (the CLI convention): the A-race must win over a
+        # sooner, lower-priority (higher-numbered) tune-up.
         test_db.add_objective(
             title="Tune-up 10K", target_date=(today + timedelta(days=20)).isoformat(),
-            sport_type="running", priority=1,
+            sport_type="running", priority=3,
         )
         test_db.add_objective(
             title="Goal Marathon", target_date=(today + timedelta(days=40)).isoformat(),
-            sport_type="running", priority=3,
+            sport_type="running", priority=1,
         )
-        line = self.svc._pmc_projection_line(today.isoformat(), self.svc._pmc_warmup_cutoff())
+        self._plan_workout((today + timedelta(days=3)).isoformat(), 60)
+        line = self._projection()
         self.assertIsNotNone(line)
         self.assertIn("Goal Marathon", line)
         self.assertNotIn("Tune-up 10K", line)
@@ -432,7 +571,8 @@ class TestPMCService(_DBBackedTest):
             title="Nearer Same-Pri", target_date=(today + timedelta(days=25)).isoformat(),
             sport_type="running", priority=2,
         )
-        line = self.svc._pmc_projection_line(today.isoformat(), self.svc._pmc_warmup_cutoff())
+        self._plan_workout((today + timedelta(days=3)).isoformat(), 60)
+        line = self._projection()
         self.assertIn("Nearer Same-Pri", line)
 
     def test_no_upcoming_event_no_projection(self):
@@ -444,6 +584,113 @@ class TestPMCService(_DBBackedTest):
         self.assertIsNone(
             self.svc._pmc_projection_line(date.today().isoformat(), None)
         )
+
+    def test_empty_plan_no_projection(self):
+        # An upcoming event but no planned workouts at all -> no line: a decay-only
+        # walk is not a projection "from current plan" (§8).
+        test_db.add_objective(
+            title="Planless Race", target_date=(date.today() + timedelta(days=20)).isoformat(),
+            sport_type="running", priority=1,
+        )
+        self.assertIsNone(self._projection())
+
+    def test_removed_workout_does_not_raise_projection(self):
+        today = date.today()
+        test_db.add_objective(
+            title="Race", target_date=(today + timedelta(days=15)).isoformat(),
+            sport_type="running", priority=1,
+        )
+        self._plan_workout((today + timedelta(days=3)).isoformat(), 50)
+        before = self._projected_tsb(self._projection())
+        # A cancelled 500-TSS session must not count toward projected load.
+        self._plan_workout(
+            (today + timedelta(days=4)).isoformat(), 500,
+            removed=True, removed_reason="cancelled",
+        )
+        self.assertEqual(self._projected_tsb(self._projection()), before)
+
+    def test_missing_tss_and_unplanned_tail_annotations(self):
+        today = date.today()
+        test_db.add_objective(
+            title="Race", target_date=(today + timedelta(days=20)).isoformat(),
+            sport_type="running", priority=1,
+        )
+        # One quantified workout, one without a TSS estimate; plan stops 10+ days
+        # before the event.
+        self._plan_workout((today + timedelta(days=2)).isoformat(), 60)
+        test_db.save_workout(
+            date=(today + timedelta(days=3)).isoformat(), sport_type="running",
+            title="Unquantified", description="fartlek", tss=None,
+        )
+        line = self._projection()
+        self.assertIn("lack a TSS estimate", line)
+        self.assertIn("days before the event are unplanned", line)
+
+    def test_stale_anchor_decays_over_actual_load(self):
+        # Metrics (and their stored CTL/ATL anchor) end 10 days ago; the actual load
+        # completed since then must feed the projection walk, so heavy recent training
+        # lowers projected event-day TSB versus an empty gap.
+        clear_all_tables(test_db)
+        base = date.today() - timedelta(days=69)
+        for i in range(60):                       # ends 10 days ago
+            d = (base + timedelta(days=i)).isoformat()
+            test_db.save_metric_cache(date=d, rhr=50, hrv=70, sleep_score=80, stress=20)
+            self._add_activity(f"a{i}", d, 60.0)
+        garmin.recompute_derived()
+        today = date.today()
+        test_db.add_objective(
+            title="Race", target_date=(today + timedelta(days=10)).isoformat(),
+            sport_type="running", priority=1,
+        )
+        self._plan_workout((today + timedelta(days=2)).isoformat(), 40)
+        rested = self._projected_tsb(self._projection())
+        # Now fill the anchor->today gap with heavy actual load (no recompute: the
+        # anchor row is unchanged; only the walk's actual-load path should see it).
+        for i in range(1, 10):
+            self._add_activity(f"gap{i}", (today - timedelta(days=i)).isoformat(), 200.0)
+        loaded = self._projected_tsb(self._projection())
+        self.assertLess(loaded, rested)
+
+    def test_todays_planned_workout_counts(self):
+        # Anchor = yesterday's metrics row; a still-planned session dated TODAY must
+        # contribute its TSS to the walk (it hasn't happened yet, but it isn't rest).
+        clear_all_tables(test_db)
+        base = date.today() - timedelta(days=60)
+        for i in range(60):                       # ends yesterday
+            d = (base + timedelta(days=i)).isoformat()
+            test_db.save_metric_cache(date=d, rhr=50, hrv=70, sleep_score=80, stress=20)
+            self._add_activity(f"a{i}", d, 60.0)
+        garmin.recompute_derived()
+        today = date.today()
+        test_db.add_objective(
+            title="Race", target_date=(today + timedelta(days=10)).isoformat(),
+            sport_type="running", priority=1,
+        )
+        self._plan_workout((today + timedelta(days=2)).isoformat(), 40)
+        without_today = self._projected_tsb(self._projection())
+        self._plan_workout(today.isoformat(), 200)   # today's long run, not yet done
+        with_today = self._projected_tsb(self._projection())
+        self.assertLess(with_today, without_today)
+
+    def test_warmup_anchor_carries_caveat(self):
+        # A history entirely inside the warm-up window still projects, but the line
+        # must self-annotate that the anchor is warm-up grade.
+        clear_all_tables(test_db)
+        base = date.today() - timedelta(days=19)
+        for i in range(20):
+            d = (base + timedelta(days=i)).isoformat()
+            test_db.save_metric_cache(date=d, rhr=50, hrv=70, sleep_score=80, stress=20)
+            self._add_activity(f"a{i}", d, 60.0)
+        garmin.recompute_derived()
+        today = date.today()
+        test_db.add_objective(
+            title="Race", target_date=(today + timedelta(days=10)).isoformat(),
+            sport_type="running", priority=1,
+        )
+        self._plan_workout((today + timedelta(days=2)).isoformat(), 40)
+        line = self._projection()
+        self.assertIsNotNone(line)
+        self.assertIn("warm-up window", line)
 
     def test_ramp_line_from_full_history(self):
         # Steady 60/day -> CTL still climbing over 60 days, so ramp is positive & present.

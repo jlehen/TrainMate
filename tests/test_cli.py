@@ -1225,8 +1225,10 @@ class TestTrainMateCLI(unittest.TestCase):
     @patch("trainmate_cli.garmin")
     def test_data_show_metrics_command(self, mock_garmin):
         # garmin is mocked (to stub ensure_data); the PMC read helpers are pure DB reads,
-        # so give them a real cutoff (None = no warm-up suppression) instead of a Mock.
+        # so give them real behavior (None cutoff = no warm-up suppression) instead of Mocks.
+        from trainmate import garmin as real_garmin
         mock_garmin.pmc_warmup_cutoff.return_value = None
+        mock_garmin.pmc_display_values.side_effect = real_garmin.pmc_display_values
         test_db.save_metric_cache(
             date="2026-06-03", rhr=50, hrv=75, sleep_score=80, stress=20,
             acute_workload=4.0, chronic_workload=3.5, acwr=1.14

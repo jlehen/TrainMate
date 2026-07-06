@@ -133,7 +133,9 @@ def run_data_wipe(args: argparse.Namespace) -> None:
         # garmin.py (which imports db, so a call from db/wipes.py would be a circular
         # import) and opens its own connection, so calling it before the wipe's commit
         # would deadlock or miss the deletes (DESIGN_pmc_fitness_fatigue.md §4).
-        cli.garmin.recompute_derived()
+        # dbh=cli.db: sweep the SAME database the wipe just ran against, not garmin's
+        # import-time singleton (they diverge when the db has been rebound/injected).
+        cli.garmin.recompute_derived(dbh=cli.db)
     if calendar:
         cli.db.wipe_calendar_context(start, end)
     print(green(f"Wiped {scope}{window}."))
@@ -275,7 +277,7 @@ def run_data_show_metrics(args: argparse.Namespace) -> None:
 
     # PMC values inside the leading-edge warm-up window are artifacts, so they render as
     # "—" here (never "0.0") just like NULLs (DESIGN_pmc_fitness_fatigue.md §6.2).
-    warmup_cutoff = cli.garmin.pmc_warmup_cutoff()
+    warmup_cutoff = cli.garmin.pmc_warmup_cutoff(dbh=cli.db)
 
     for m in metrics_history:
         base = cli.db.get_baseline(m['date'])
@@ -296,10 +298,7 @@ def run_data_show_metrics(args: argparse.Namespace) -> None:
         acute_str = f"{acute_val:.1f}" if acute_val is not None else "N/A"
         chronic_str = f"{chronic_val:.1f}" if chronic_val is not None else "N/A"
 
-        in_warmup = bool(warmup_cutoff and m['date'] < warmup_cutoff)
-        ctl_v = None if in_warmup else m.get('ctl')
-        atl_v = None if in_warmup else m.get('atl')
-        tsb_v = None if in_warmup else m.get('tsb')
+        ctl_v, atl_v, tsb_v = cli.garmin.pmc_display_values(m, warmup_cutoff)
         ctl_str = f"{ctl_v:.1f}" if ctl_v is not None else "—"
         atl_str = f"{atl_v:.1f}" if atl_v is not None else "—"
         tsb_str = color_tsb(tsb_v) if tsb_v is not None else "—"
@@ -355,7 +354,7 @@ def _show_metrics_csv(metrics_history: list) -> None:
     ])
     # Suppressed (warm-up) or NULL PMC values are emitted as empty cells, never 0, so
     # downstream parsing can't read a zero as data (DESIGN_pmc_fitness_fatigue.md §6.2).
-    warmup_cutoff = cli.garmin.pmc_warmup_cutoff()
+    warmup_cutoff = cli.garmin.pmc_warmup_cutoff(dbh=cli.db)
     for m in metrics_history:
         base = cli.db.get_baseline(m['date'])
         hrv_base = None
@@ -365,10 +364,7 @@ def _show_metrics_csv(metrics_history: list) -> None:
             hrv_base = base.get('hrv_baseline_mean')
             rhr_base = base.get('rhr_baseline_mean')
             sleep_base = base.get('sleep_baseline_mean')
-        in_warmup = bool(warmup_cutoff and m['date'] < warmup_cutoff)
-        ctl_v = None if in_warmup else m.get('ctl')
-        atl_v = None if in_warmup else m.get('atl')
-        tsb_v = None if in_warmup else m.get('tsb')
+        ctl_v, atl_v, tsb_v = cli.garmin.pmc_display_values(m, warmup_cutoff)
         writer.writerow([
             m['date'], m['hrv'], hrv_base, m['rhr'], rhr_base,
             m['sleep_score'], sleep_base, m['stress'], m['acwr'],

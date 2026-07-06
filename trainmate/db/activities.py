@@ -133,6 +133,15 @@ class ActivitiesMixin:
                 )
             return [dict(row) for row in cursor.fetchall()]  # type: ignore
 
+    def get_first_activity_date(self) -> Optional[str]:
+        """MIN(date) over completed activities — the cheap history-start lookup, so
+        callers don't fetch every row (all zone columns included) to read one date."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT MIN(date) AS d FROM completed_activities")
+            row = cursor.fetchone()
+            return row["d"] if row else None
+
     # --- Athlete Metrics Cache ---
     def save_metric_cache(
         self, date: str, rhr: Optional[int], hrv: Optional[int],

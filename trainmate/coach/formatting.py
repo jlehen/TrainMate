@@ -79,14 +79,19 @@ def format_metrics_history(
             fields.append(f"ACWR={m['acwr']:.2f}")
         in_warmup = bool(warmup_cutoff and m['date'] < warmup_cutoff)
         if not in_warmup:
-            if m.get('ctl') is not None:
-                fields.append(f"CTL={m['ctl']:.1f}")
-                shown_pmc = True
-            if m.get('atl') is not None:
-                fields.append(f"ATL={m['atl']:.1f}")
-            if m.get('tsb') is not None:
-                fields.append(f"TSB={m['tsb']:.1f}")
-        metrics_lines.append(f"- {m['date']}: " + ", ".join(fields))
+            pmc_fields = [
+                f"{label}={m[key]:.1f}"
+                for label, key in (("CTL", "ctl"), ("ATL", "atl"), ("TSB", "tsb"))
+                if m.get(key) is not None
+            ]
+            if pmc_fields:
+                fields.extend(pmc_fields)
+                shown_pmc = True   # any of the triple warrants the lag footnote
+        # An all-null row (pulled, but Garmin had nothing) still gets a line — marked
+        # explicitly rather than left dangling as "- 2026-07-02: ".
+        metrics_lines.append(
+            f"- {m['date']}: " + (", ".join(fields) if fields else "(no data)")
+        )
     out = "\n".join(metrics_lines)
     if shown_pmc:
         out += "\n" + PMC_TSB_LAG_NOTE

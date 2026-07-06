@@ -1140,9 +1140,12 @@ design: `DESIGN_garmin_direct_pull.md`.
 
 **Auto-ensure.** Read-side commands call `garmin.ensure_data(start, end)` at
 entry (idempotent per process via an in-memory memo). It pulls the
-28-day-padded required window where the gap is small/recent and **prints a
-copy-pastable `data pull` command for large backfills** (cold start, big
-forward/backward gaps), always continuing with cached data. The same entry point also
+derivation-padded required window (pad = `max(chronic, 28, 1.5·τ_ctl)` ≈ 63 days)
+where the gap is small/recent and **prints a copy-pastable `data pull` command for
+large backfills** (cold start, big forward/backward gaps), always continuing with
+cached data. Gaps lying entirely *before* the requested window — derivation-pad
+warm-up data the user never asked to view, bounded by the pad itself — always pull
+automatically, so widening the pad in an upgrade self-heals instead of nagging. The same entry point also
 rides along a best-effort Calendar daily-context sync (`google_calendar.sync_calendar_context`),
 gated by the same `data_refresh_minutes` throttle. When that throttle keeps a read on
 cached data (Garmin or Calendar), a one-line note says so. These commands support

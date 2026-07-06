@@ -157,22 +157,21 @@ def run_status(
         # field renders "—" (a printed "TSB 0.0" reads as a meaningful neutral balance,
         # not as missing data), and the whole line is dropped when all three are absent
         # (DESIGN_pmc_fitness_fatigue.md §6.1). TSB is phase-aware; ramp comes from the
-        # full stored CTL series.
-        from trainmate import garmin
-        warmup_cutoff = garmin.pmc_warmup_cutoff()
+        # full stored CTL series. All garmin helpers read cli.db (dbh=), the same
+        # database the metrics above came from.
+        warmup_cutoff = cli.garmin.pmc_warmup_cutoff(dbh=cli.db)
         in_warmup = bool(warmup_cutoff and last_metrics['date'] < warmup_cutoff)
-        ctl_v = None if in_warmup else last_metrics.get('ctl')
-        atl_v = None if in_warmup else last_metrics.get('atl')
-        tsb_v = None if in_warmup else last_metrics.get('tsb')
+        ctl_v, atl_v, tsb_v = cli.garmin.pmc_display_values(last_metrics, warmup_cutoff)
         if ctl_v is not None or atl_v is not None or tsb_v is not None:
             ctl_s = f"{ctl_v:.1f}" if ctl_v is not None else "—"
             atl_s = f"{atl_v:.1f}" if atl_v is not None else "—"
             tsb_s = color_tsb(tsb_v, active_phase) if tsb_v is not None else "—"
             ramp_s = "—"
             if not in_warmup:
-                all_metrics = cli.db.get_metrics_cache()
-                ctl_by_date = {m['date']: m.get('ctl') for m in all_metrics}
-                ramp_v = garmin.pmc_ramp(ctl_by_date, last_metrics['date'])
+                ctl_by_date = {m['date']: m.get('ctl') for m in metrics}
+                ramp_v = cli.garmin.pmc_ramp(
+                    ctl_by_date, last_metrics['date'], warmup_cutoff=warmup_cutoff
+                )
                 if ramp_v is not None:
                     ramp_s = color_ramp(ramp_v) + "/wk"
             print(
@@ -180,7 +179,7 @@ def run_status(
             )
             print(dim(f"  {PMC_TSB_LAG_NOTE}"))
             # Young/warming DB: warn WHY freshness may read low (the convergence caveat).
-            caveat = garmin.pmc_data_caveat(last_metrics['date'])
+            caveat = cli.garmin.pmc_data_caveat(last_metrics['date'], dbh=cli.db)
             if caveat:
                 print(dim(
                     f"  PMC still warming: CTL based on {caveat['n_days']} days "

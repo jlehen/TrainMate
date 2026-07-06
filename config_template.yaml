@@ -78,6 +78,7 @@ garmin:
   # changes what the numbers MEAN while the bands keep judging them at the standard
   # values. The defaults are the supported configuration. A change takes effect on the
   # next `data pull`/`data wipe`/backfill (nothing recomputes on a config edit alone).
+  # All four must be positive integers (they are EWMA/averaging divisors).
   #acwr_acute_days: 7      # ACWR acute (short) workload window
   #acwr_chronic_days: 28   # ACWR chronic (long) window, as a rolling weekly average
   #pmc_ctl_days: 42        # CTL (fitness) EWMA time constant, in days

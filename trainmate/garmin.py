@@ -602,9 +602,12 @@ def _mean_std(values: List[float]) -> Tuple[float, float]:
 # All pure, unit-testable without a DB. See DESIGN_pmc_fitness_fatigue.md §3.
 # ==============================================================================
 
-# Daily load below which a calendar day counts as "rest" for effective-history gap
-# detection (§3.3b). Not zero, so a token easy day inside a layoff still reads as rest.
-_PMC_NEAR_ZERO_LOAD = 1.0
+# Trailing 7-day summed load below which the athlete counts as resting for
+# effective-history gap detection (§3.3b). Judged per WEEK, not per day, so a token
+# easy session inside a layoff (a ~20-TSS walk/jog) still reads as rest instead of
+# splitting the layoff in two and defeating the comeback caveat; a genuine return to
+# training (several sessions a week) clears it immediately.
+_PMC_REST_WEEK_LOAD = 30.0
 
 
 def compute_pmc(
@@ -658,18 +661,24 @@ def pmc_effective_history(
     """Effective history behind `end`: (n_days, effective_start_iso).
 
     The EWMA re-warms from a low floor not only at DB start but after any layoff long
-    enough to decay CTL back toward zero (a run of >= ctl_days near-zero-load days).
-    Effective history is measured from the first loaded day after the most recent such
-    gap, or the first loaded day overall if there is none — so the §3.3(b) convergence
-    caveat re-arms on a comeback even when total history is long. (0, None) if no load."""
+    enough to decay CTL back toward zero (a run of >= ctl_days functionally-rested days).
+    A day counts as rested when the trailing 7-day summed load is under
+    _PMC_REST_WEEK_LOAD — a weekly criterion, so an isolated token session inside a
+    layoff cannot split it into two sub-threshold runs. Effective history is measured
+    from the first trained day after the most recent such gap, or the first trained day
+    overall if there is none — so the §3.3(b) convergence caveat re-arms on a comeback
+    even when total history is long. (0, None) if no load."""
     if not start or not end:
         return 0, None
     cur, last = _to_date(start), _to_date(end)
     eff_start: Optional[Any] = None
     zero_run = 0
+    week: List[float] = []
     while cur <= last:
-        load = daily_load.get(cur.isoformat(), 0.0)
-        if load < _PMC_NEAR_ZERO_LOAD:
+        week.append(daily_load.get(cur.isoformat(), 0.0))
+        if len(week) > 7:
+            week.pop(0)
+        if sum(week) < _PMC_REST_WEEK_LOAD:
             zero_run += 1
         else:
             if eff_start is None or zero_run >= ctl_days:
@@ -691,30 +700,40 @@ def pmc_convergence_pct(n_days: int, ctl_days: int) -> int:
 
 
 def pmc_ramp(
-    ctl_by_date: Dict[str, Optional[float]], date_iso: str, window: int = 7
+    ctl_by_date: Dict[str, Optional[float]], date_iso: str, window: int = 7,
+    warmup_cutoff: Optional[str] = None,
 ) -> Optional[float]:
     """CTL ramp = ctl(date) - ctl(date - window days), in load units per week.
 
     Uses the exact d-window day, else the nearest EARLIER day carrying a CTL value
-    (interior-gap rule, §3.1). Returns None when `date` has no CTL, or when fewer than
-    `window` days of history precede it (no value at/under date-window → don't emit
-    garbage). Reads whatever CTL series it is given — callers pass the FULL stored
-    series, never a short prompt window, so a small window never spuriously drops it."""
+    (interior-gap rule, §3.1) — bounded at 2*window back, and scaled to a per-window
+    rate when the baseline is older than `window` days, so a stored-series hole can
+    never quietly report a multi-week delta as "/week". Returns None when `date` has
+    no CTL, when no usable baseline exists at/under date-window (don't emit garbage),
+    or when the baseline lands before `warmup_cutoff` — a ramp measured against a
+    suppressed warm-up-artifact CTL would read as a phantom overload spike (the §5.4
+    straddle guard, applied here so every surface gets it). Reads whatever CTL series
+    it is given — callers pass the FULL stored series, never a short prompt window,
+    so a small window never spuriously drops it."""
     today_ctl = ctl_by_date.get(date_iso)
     if today_ctl is None:
         return None
     target = _to_date(date_iso) - timedelta(days=window)
+    oldest = _to_date(date_iso) - timedelta(days=2 * window)
     best_date = None
     best_val = None
     for ds, v in ctl_by_date.items():
         if v is None:
             continue
         d = _to_date(ds)
-        if d <= target and (best_date is None or d > best_date):
+        if oldest <= d <= target and (best_date is None or d > best_date):
             best_date, best_val = d, v
     if best_val is None:
         return None
-    return round(today_ctl - best_val, 1)
+    if warmup_cutoff and best_date.isoformat() < warmup_cutoff:
+        return None
+    span = (_to_date(date_iso) - best_date).days
+    return round((today_ctl - best_val) * window / span, 1)
 
 
 def project_taper(
@@ -740,13 +759,14 @@ def project_taper(
 
 
 def daily_load_by_date(
-    activities: Optional[List[Dict[str, Any]]] = None
+    activities: Optional[List[Dict[str, Any]]] = None, dbh=None
 ) -> Dict[str, float]:
     """Sums per-activity load (via the activity_load fallback hierarchy) per ISO date.
-    Reads all completed activities from the DB when none are passed. The same series
-    recompute_derived() and the PMC surfaces build their EWMAs and caveats from."""
+    Reads all completed activities from `dbh` (default: the module db) when none are
+    passed. The same series recompute_derived() and the PMC surfaces build their EWMAs
+    and caveats from."""
     if activities is None:
-        activities = db.get_completed_activities()
+        activities = (dbh or db).get_completed_activities()
     daily: Dict[str, float] = {}
     for act in activities:
         d = act["date"]
@@ -754,28 +774,46 @@ def daily_load_by_date(
     return daily
 
 
-def pmc_history_start() -> Optional[str]:
+def pmc_history_start(dbh=None) -> Optional[str]:
     """Earliest ISO date with any Garmin evidence — min(first activity, first metrics
-    row). The single source the warm-up cutoff and effective-history clock derive from."""
+    row). The single source the warm-up cutoff and effective-history clock derive from.
+
+    `dbh` defaults to the module db; callers holding their own handle (CoachService's
+    injected db, the CLI's rebindable one) pass it so the cutoff is derived from the
+    same database as the metrics it gates."""
+    dbh = dbh or db
     firsts = []
-    acts = db.get_completed_activities()
-    if acts:
-        firsts.append(acts[0]["date"])           # sorted date ASC
-    metric_dates = db.get_metric_dates()
+    first_activity = dbh.get_first_activity_date()
+    if first_activity:
+        firsts.append(first_activity)
+    metric_dates = dbh.get_metric_dates()
     if metric_dates:
         firsts.append(metric_dates[0])
     return min(firsts) if firsts else None
 
 
-def pmc_warmup_cutoff() -> Optional[str]:
+def pmc_warmup_cutoff(dbh=None) -> Optional[str]:
     """DB-backed single-source warm-up cutoff (§3.3a), passed to every surface — the
     per-day lines, weekly digest, and CLI — so none of them re-derives it differently."""
-    return pmc_warmup_cutoff_for(pmc_history_start(), config.pmc_ctl_days)
+    return pmc_warmup_cutoff_for(pmc_history_start(dbh), config.pmc_ctl_days)
+
+
+def pmc_display_values(
+    m: Dict[str, Any], warmup_cutoff: Optional[str]
+) -> Tuple[Optional[float], Optional[float], Optional[float]]:
+    """(ctl, atl, tsb) of a metrics row for DISPLAY: all None inside the §3.3(a)
+    warm-up window (stored values there are leading-edge artifacts), the stored
+    values (each possibly None) otherwise. The one blanking rule every user surface
+    (status line, show-metrics table, CSV) shares."""
+    if warmup_cutoff and m["date"] < warmup_cutoff:
+        return None, None, None
+    return m.get("ctl"), m.get("atl"), m.get("tsb")
 
 
 def pmc_data_caveat(
     as_of: Optional[str] = None,
     daily_load: Optional[Dict[str, float]] = None,
+    dbh=None,
 ) -> Optional[Dict[str, Any]]:
     """Convergence caveat for when today's own PMC values are still warming (§3.3b).
 
@@ -785,12 +823,12 @@ def pmc_data_caveat(
     discount is the LLM's to judge from the athlete's pre-DB history — only the
     magnitude is ours."""
     ctl_days = config.pmc_ctl_days
-    start = pmc_history_start()
+    start = pmc_history_start(dbh)
     if not start:
         return None
     end = as_of or today_str()
     if daily_load is None:
-        daily_load = daily_load_by_date()
+        daily_load = daily_load_by_date(dbh=dbh)
     n_days, eff_start = pmc_effective_history(daily_load, start, end, ctl_days)
     if n_days <= 0 or n_days >= 3 * ctl_days:
         return None
@@ -801,19 +839,20 @@ def pmc_data_caveat(
     }
 
 
-def recompute_derived() -> None:
+def recompute_derived(dbh=None) -> None:
     """Recomputes acute/chronic workload, ACWR, and 28-day baselines for ALL cached
     days. A full sweep is trivially cheap on a local DB and avoids windowed-recompute
-    bugs (an activity affects 28 days of derived values)."""
-    activities = db.get_completed_activities()
-    daily_load: Dict[str, float] = {}
-    for act in activities:
-        date_str = act["date"]
-        # One unified load per activity via the fallback hierarchy (power TSS ->
-        # hrTSS -> sRPE), not the old `tss + rpe*hours` blend.
-        daily_load[date_str] = daily_load.get(date_str, 0.0) + activity_load(act)
+    bugs (an activity affects 28 days of derived values).
 
-    metrics = db.get_metrics_cache()  # sorted by date asc
+    `dbh` defaults to the module db; the post-wipe recompute (cli/data.py) passes the
+    CLI's own handle so it sweeps the same database the wipe just ran against, even
+    when the singleton has been rebound (tests, embeddings that inject a db)."""
+    dbh = dbh or db
+    # One unified load per activity via the fallback hierarchy (power TSS ->
+    # hrTSS -> sRPE), not the old `tss + rpe*hours` blend.
+    daily_load = daily_load_by_date(dbh=dbh)
+
+    metrics = dbh.get_metrics_cache()  # sorted by date asc
     by_date = {m["date"]: m for m in metrics}
 
     # Window constants read live from config every sweep (never frozen at import), so an
@@ -853,7 +892,7 @@ def recompute_derived() -> None:
         ctl_atl_tsb = pmc.get(date_str)
         ctl, atl, tsb = ctl_atl_tsb if ctl_atl_tsb else (None, None, None)
 
-        db.save_metric_cache(
+        dbh.save_metric_cache(
             date=date_str, rhr=m.get("rhr"), hrv=m.get("hrv"),
             sleep_score=m.get("sleep_score"), stress=m.get("stress"),
             acute_workload=acute, chronic_workload=chronic, acwr=acwr,
@@ -876,7 +915,7 @@ def recompute_derived() -> None:
             rhr_mean, rhr_std = _mean_std(rhr_vals)
             hrv_mean, hrv_std = _mean_std(hrv_vals)
             sleep_mean, sleep_std = _mean_std(sleep_vals)
-            db.save_baseline(
+            dbh.save_baseline(
                 date=date_str, rhr_mean=rhr_mean, rhr_std=rhr_std,
                 hrv_mean=hrv_mean, hrv_std=hrv_std,
                 sleep_mean=sleep_mean, sleep_std=sleep_std,
@@ -1047,11 +1086,18 @@ def ensure_data(start_date: str, end_date: str, force: bool = False) -> None:
 
     auto_regions: List[Tuple[str, str]] = []
     surfaced_regions: List[Tuple[str, str]] = []
+    pad_days = _derivation_pad_days()
     for region in _contiguous_regions(to_fetch):
         span = (_to_date(region[1]) - _to_date(region[0])).days + 1
         # Small gaps (incl. the cheap recent mutable-zone refresh, always <=
         # mutable_days) pull automatically; large ones are surfaced as a command.
-        if span <= prompt_days:
+        # Regions lying entirely BEFORE the requested window exist only to warm the
+        # derivation pad — they are bounded by the pad itself and were never asked
+        # for by the user, so they always auto-pull: without this, widening the pad
+        # (28 -> 63 days for CTL) would leave every pre-existing install nagging
+        # "run data pull --from ..." on each command instead of healing itself.
+        limit = max(prompt_days, pad_days) if region[1] < start_date else prompt_days
+        if span <= limit:
             auto_regions.append(region)
         else:
             surfaced_regions.append(region)

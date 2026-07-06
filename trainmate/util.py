@@ -5,6 +5,8 @@ import textwrap
 from datetime import date
 from typing import Optional
 
+from trainmate.types import MESO_PHASES
+
 # ANSI escape codes for terminal coloring
 ANSI_ESCAPE = re.compile(r'(?:\033|\x1b)\[[0-9;]*m')
 
@@ -103,10 +105,11 @@ def color_acwr(acwr: float) -> str:
 
 # The +5..+25 TSB band reads as "race-ready good" only in a peaking block; mid-build the
 # same freshness means fitness is decaying, so green is gated to these phases (§6.1).
-# Derived from the shared MESO_PHASES vocabulary so the reader's gate can't drift from the
-# writer's enum: if the vocabulary ever drops peak/taper, green simply stops firing.
-from trainmate.types import MESO_PHASES  # noqa: E402  (kept beside its only consumer)
-_TSB_RACE_READY_PHASES = tuple(p for p in ("peak", "taper") if p in MESO_PHASES)
+# Asserted against the shared MESO_PHASES vocabulary so a renamed phase fails loudly at
+# import instead of the green cue silently never firing again.
+_TSB_RACE_READY_PHASES = ("peak", "taper")
+assert set(_TSB_RACE_READY_PHASES) <= set(MESO_PHASES), \
+    "_TSB_RACE_READY_PHASES drifted from the MESO_PHASES vocabulary"
 
 
 def color_tsb(tsb: float, phase: Optional[str] = None) -> str:

@@ -25,14 +25,17 @@ def normalize_meso_phase(raw_phase: Optional[str], focus: str) -> Optional[str]:
 
     Pure and unit-testable. Trusts a clean enum value first; otherwise scans the
     combined phase+focus text for phase keywords, most specific first (a "peak & taper"
-    focus resolves to taper, "deload"/"recover"/"rest" to recovery, etc.). Returning
-    None (neither the field nor the focus classified it) degrades the TSB color to
-    phase-blind rather than guessing."""
+    focus resolves to taper, "deload"/"recover"/"rest" to recovery, etc.). "race" is
+    deliberately NOT a keyword: race language shows up in non-taper blocks too
+    ("race-pace intervals" mid-build), and misreading one as taper lights the green
+    race-ready TSB color exactly where it misleads — an unclassified block (None,
+    phase-blind color) is the safe failure. Returning None (neither the field nor the
+    focus classified it) degrades the TSB color to phase-blind rather than guessing."""
     if raw_phase and raw_phase.strip().lower() in MESO_PHASES:
         return raw_phase.strip().lower()
     text = f"{raw_phase or ''} {focus}".lower()
     for kw, phase in (              # most specific first; first hit wins
-        ("taper", "taper"), ("race", "taper"), ("peak", "peak"),
+        ("taper", "taper"), ("peak", "peak"),
         ("deload", "recovery"), ("recover", "recovery"), ("rest", "recovery"),
         ("base", "base"), ("aerobic", "base"),
         ("build", "build"), ("progress", "build"),
