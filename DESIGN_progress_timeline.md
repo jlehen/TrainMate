@@ -1,26 +1,49 @@
 # Design: Progress Timeline (past + projected training progression)
 
-**Status:** Implemented (rev 4 — implementability review folded in: photo caption
-carried in the TM-PHOTO payload, CLI weekly bars defined as absolute load on
-a shared max-anchored scale, table fixed-width at the 48-col budget,
-sparkline sampling pinned, seed mean pinned as calendar mean (rest days
-count as 0), endpoint returns all active objectives with renderers clipping.
-Rev 3:
-projection clamped to the generated plan, planned-side sRPE fallback via
-`adherence`, layered mesocycle labels incl. the bootstrap reconstruction,
-in-progress-week rule, empty states, CLI auto-ensure) ·
-**Date:** 2026-07-03 · **Companion to:**
-ARCHITECTURE.md §12 (load model), `DESIGN_backward_evaluation.md` (the
-analysis-side view of the past; this doc is the *presentation*-side view of
-past **and future**)
+**Status:** Rework specced (rev 5) · **Date:** 2026-07-07 · **Companion to:**
+ARCHITECTURE.md §12 (load model), `DESIGN_pmc_fitness_fatigue.md` (the
+**shipped** backward PMC core this feature consumes — and whose deferred
+Phase 2 projection this feature delivers, §4), `DESIGN_backward_evaluation.md`
+(the analysis-side view of the past; this doc is the *presentation*-side view
+of past **and future**)
+
+> **Rev 5 (2026-07-07) — realigned on the shipped PMC core.** Between rev 4 and
+> this revision, the PMC fitness/fatigue feature merged to main
+> (`DESIGN_pmc_fitness_fatigue.md`, merge `ca8591b`): `garmin.compute_pmc()` now
+> computes CTL/ATL/TSB over full history on every `recompute_derived()` sweep,
+> stores them on `athlete_metrics_cache`, and surfaces them in the coach prompts,
+> `tm status`, and `tm data show-metrics`. That obsoletes rev 4's §4 ("new math,
+> additive"): this feature no longer computes anything about the *past* — it
+> reads the stored series (recomputing under different conventions would make
+> `tm progress` disagree with `tm status` on the same day's CTL, a variant of
+> the very seam-lie §3 exists to prevent) — and its projection becomes a forward
+> fold of the same recurrence seeded from the last stored row, which is exactly
+> the PMC design's deferred **Phase 2**, generalized from one event-day number
+> to the full daily series. Consequences threaded through: τ constants come from
+> config (`pmc_ctl_days`/`pmc_atl_days`), not module constants; rev 4's
+> mean-seeding is **superseded** by the shipped zero-seed + warm-up-blanking +
+> young-DB-caveat scheme (rationale preserved in §4); the §3.3 warm-up rules and
+> `pmc_data_caveat` flag are adopted wholesale; `compute_pmc()` gains an
+> optional `seed` parameter (the single change to the shipped core). The rev-4
+> implementation snapshot on this branch predates the PMC merge (see
+> `CODE_REVIEW_progress_timeline.md`) and is reworked to this rev before merge.
+>
+> Rev 4 (implementability review): photo caption carried in the TM-PHOTO
+> payload, CLI weekly bars as absolute load on a shared max-anchored scale,
+> table fixed-width at the 48-col budget, sparkline sampling pinned, endpoint
+> returns all active objectives with renderers clipping. Rev 3: projection
+> clamped to the generated plan, planned-side sRPE fallback via `adherence`,
+> layered mesocycle labels incl. the bootstrap reconstruction, in-progress-week
+> rule, empty states, CLI auto-ensure.
 
 A single continuous timeline that shows how training load has actually
 accumulated and where the current plan takes it: **past days are measured
 load** (from `completed_activities`), **future days are planned load** (from
 `workouts`), and one fitness/fatigue model runs across the seam. The
 centerpiece is a projected Performance Management Chart — CTL (fitness), ATL
-(fatigue), TSB (form) — computed over actuals up to today and continued
-forward over the plan as far as workouts have been generated, so the user can
+(fatigue), TSB (form) — read from the stored PMC series up to the last pull
+and continued forward over the plan as far as workouts have been generated
+(§4), so the user can
 see *whether the plan as currently written delivers peak fitness with
 positive form on race day*. Below it, weekly planned-vs-actual load bars
 labeled by mesocycle make the periodization wave and adherence visible at a
@@ -38,18 +61,22 @@ computation (§5) feeds all three; only the rendering differs (§7).
 TrainMate holds both halves of the progression story but never draws them in
 one place:
 
-- The **past** is visible only as tables (`workout compare`, the History tab)
-  — per-day adherence, no accumulation, no trend.
+- The **past** is visible as tables (`workout compare`, the History tab) and —
+  since the PMC merge — as *today's* CTL/ATL/TSB numbers (`tm status`, the
+  coach prompts). But there is still no trend: "am I fitter than in April?"
+  means scanning `tm data show-metrics` rows and integrating by eye.
 - The **future** is visible only as a list of workouts and a mesocycle
   strategy blob — the periodization wave (build/recover, volume ramp) exists
   in the data (every planned workout carries `tss`) but the user cannot *see*
   it.
-- Nothing connects them. "Am I on track?" currently requires reading the
-  plan, the compare view, and the metrics table and doing the integration in
-  one's head.
+- Nothing connects them. The stored PMC series stops at the last pull; nothing
+  projects it forward over the plan — the PMC design defers exactly this as
+  its Phase 2 ("forward taper projection"), and this feature is where it ships
+  (§4). "Am I on track?" currently requires reading the plan, the compare
+  view, and the metrics table and doing the integration in one's head.
 
 The data is already sufficient — no new ingestion, no LLM calls, no schema
-change. As of writing: ~6 months of completed activities, a TSS-annotated
+change (the `ctl`/`atl`/`tsb` columns already exist and are populated, §4). As of writing: ~6 months of completed activities, a TSS-annotated
 plan through the first objective (2026-09-30), 9 mesocycles, and three active
 objectives spanning to 2027-01-31. Note that the plan reaching the objective
 is a **snapshot, not an invariant**: `workout generate` defaults to a rolling
@@ -79,7 +106,9 @@ numbers-first projection of the same content:
 - **Top panel (daily):** CTL, ATL, TSB lines. Solid up to today, dashed
   beyond, **ending at plan end** — never extrapolated past the last
   generated workout (§3). Vertical "today" rule; flag markers on objective
-  `target_date`s that fall inside the window.
+  `target_date`s that fall inside the window. Days inside the PMC warm-up
+  window carry no values and render blank (§4) — with the default 8-week
+  window and months of history the cutoff is normally off-canvas.
 - **Bottom panel (weekly):** for past weeks, planned TSS and actual load as
   paired bars (adherence at a glance); for future weeks, planned only. The
   mesocycle band beneath labels each week's block via the layered lookup
@@ -98,8 +127,10 @@ The past and future halves must be in the same units or the seam is a lie.
 - **Past days** (`date < today`): daily load = Σ `garmin.activity_load(act)`
   over that day's `completed_activities`. This is the canonical derived load
   (power TSS → hrTSS → sRPE fallback, §12), **not** the stored `tss` column —
-  the same currency the ACWR pipeline already uses. This also absorbs the ~24
-  activities with NULL `tss` without special-casing.
+  the same currency the ACWR pipeline already uses, and byte-identical to the
+  `daily_load` series `recompute_derived()` feeds `compute_pmc()`, so the
+  load bars and the stored CTL/ATL/TSB they sit under agree by construction.
+  This also absorbs the ~24 activities with NULL `tss` without special-casing.
 - **Future days** (`date > today`): daily load = Σ `adherence.planned_load(w)`
   over that day's non-`removed` `workouts` rows — the coach's `tss` when set,
   else sRPE (RPE × 10 × hours) from `rpe` + `duration_minutes`. This is the
@@ -168,42 +199,91 @@ can't diverge.
   indistinguishable from genuine rest: they zero-fill and CTL decays as if
   the athlete rested. `sync_state` watermarks can't disambiguate per-day.
 
-## 4. Fitness/fatigue model (new math, additive to §12)
+## 4. Fitness/fatigue model — consume the shipped PMC core, fold it forward
 
-Standard impulse-response PMC (Banister via Coggan's simplification),
-exponentially weighted:
+The backward half of this model **already ships** (`DESIGN_pmc_fitness_fatigue.md`,
+merged `ca8591b`): `garmin.compute_pmc()` walks every calendar day of history
+with the classic Coggan discrete `1/τ` recurrence
 
 ```
-CTL_d = CTL_{d-1} + (load_d − CTL_{d-1}) / 42
-ATL_d = ATL_{d-1} + (load_d − ATL_{d-1}) / 7
+CTL_d = CTL_{d-1} + (load_d − CTL_{d-1}) / τ_ctl    # config pmc_ctl_days, default 42
+ATL_d = ATL_{d-1} + (load_d − ATL_{d-1}) / τ_atl    # config pmc_atl_days, default 7
 TSB_d = CTL_{d-1} − ATL_{d-1}          (form going *into* day d)
 ```
 
-- Time constants **42 / 7 days** are module constants in code, like
-  `HR_ZONE_TSS_PER_SEC` — not config. Nobody tunes these in practice.
-- **Seeding:** the series is always computed over the **full history**
-  regardless of the requested display window. The recursion starts on the
-  first `completed_activities` date, seeded at the **mean daily load of the
-  first 42 days** of history for CTL and the first 7 days for ATL (less
-  history than that: mean over what exists). This is a **calendar mean**:
-  zero-load days count as 0 in the numerator and stay in the denominator
-  (÷42, not ÷days-trained) — that is the value the recursion itself
-  converges to; skipping rest days would seed at trained-every-day fitness,
-  the very overestimate seeding exists to avoid. Seeding at 0 would assume an
-  untrained athlete at data start, and that error decays only as
-  `e^(−age/42)` — after a dated `data wipe --garmin` + short re-pull the
-  whole visible window would read low. Mean-seeding makes the start
-  self-consistent with the athlete's opening training level, demoting the
-  transient to a second-order error, and costs three lines. The endpoint is
-  cheap enough (a few hundred rows) that full-history computation costs
-  nothing.
-- **Relationship to existing acute/chronic workload:** none replaced. The
-  rolling-sum acute (7-day Σ) / chronic (28-day Σ/4) / ACWR in
-  `athlete_metrics_cache` remain the injury-risk vocabulary used by
-  adaptation prompts. CTL/ATL/TSB is a *presentation-side* model with
-  different semantics (asymptotic fitness/form, not ratio-based risk). §12
-  gains a subsection documenting it; the two coexist the way they do in the
-  sports-science literature.
+and `recompute_derived()` stores the result on `athlete_metrics_cache`
+(`ctl`/`atl`/`tsb` columns, full-sweep on every pull/backfill/wipe path). Those
+stored numbers already reach the coach prompts, `tm status`, and `tm data
+show-metrics`. This feature therefore computes **nothing new about the past**
+and gains a hard consistency requirement instead:
+
+- **Past half: read, don't recompute.** Past DayPoints take `ctl`/`atl`/`tsb`
+  verbatim from the stored metrics rows. `tm progress` and `tm status` must
+  show the *same* CTL for the same day — two implementations of "fitness
+  today" disagreeing across commands would be a variant of the seam-lie §3
+  exists to prevent. Days with load but no metrics row (possible for trailing
+  activity days past the last metrics pull) carry no PMC point; renderers
+  join the line across the gap.
+- **Warm-up rules adopted wholesale** (PMC design §3.3): points dated before
+  `pmc_warmup_cutoff_for(history_start, τ_ctl)` carry `null` PMC values
+  (leading-edge artifacts — same blanking `pmc_display_values` applies on the
+  status line); when today's own history is short, the `pmc_data_caveat()`
+  young-DB flag joins the payload `warnings` and the CLI output; and while
+  the *entire* history is still inside the warm-up window the PMC panel is
+  suppressed outright with the still-warming message — the weekly bars don't
+  depend on PMC and render regardless.
+- **Future half: the anchored fold.** From the last stored metrics row (the
+  *anchor*: date A, values `(CTL_A, ATL_A)`), the same recurrence is folded
+  forward over the §3 merged daily loads — actual for A+1..today (so a stale
+  anchor decays over what actually happened), planned beyond today — through
+  plan end. Implementation: `compute_pmc()` gains an optional
+  `seed=(ctl0, atl0)` parameter (default `(0.0, 0.0)` — the **only** change to
+  the shipped core, pinned in `tests/test_pmc.py`), and `progression.py` calls
+  it for the fold rather than owning a second copy of the recurrence. The
+  anchor values are the stored 1-dp roundings; the reseeding error is
+  second-order and decays with τ.
+- **Time constants come from config** (`config.pmc_ctl_days` /
+  `config.pmc_atl_days`) — rev 4 pinned them as module constants, which is now
+  wrong twice over: the config params exist (PMC design §3.4), and a τ
+  mismatch between the stored past and the folded future would kink every
+  line exactly at the seam.
+- **No anchor** (no metrics rows at all — activities present but metrics never
+  pulled) → no PMC series; rendered as the young-DB state above: bars render,
+  the PMC panel shows the message.
+
+**This is PMC Phase 2, generalized.** `DESIGN_pmc_fitness_fatigue.md` defers
+"forward taper projection" — event-day TSB folded over the plan's own workouts
+— as Phase 2. The anchored fold above *is* that projection, generalized from
+one event-day number to the full daily series, and §3 already carries its
+honesty guards under other names: stale-anchor decay (the A+1..today segment),
+removed workouts excluded, unquantified workouts warned (the
+neither-TSS-nor-RPE → 0 warning), plan-not-reaching-the-event annotated (the
+plan-end banner). One deliberate difference: where Phase 2 zero-fills
+unplanned tail days up to the event and annotates, this feature **stops at
+plan end** (§3) — a projection over assumed rest is a statement about missing
+data, and the per-objective figures are only shown for objectives the plan
+reaches. Phase 2's remaining deliverable — the projected event-day TSB *line
+in the coach prompts* — is not part of this feature, but becomes a one-call
+follow-on into the §5 fold (§8).
+
+**Superseded (rev 4 → rev 5): mean-seeding.** Rev 4 specced its own recursion
+seeded at the calendar-mean daily load of the first τ days of history, to
+avoid the from-zero warm-up transient. The shipped core solves the same
+problem differently — zero-seed + display blanking of the first τ_ctl days +
+the derivation pad (§3.4) as the data backstop + the young-DB flag — and
+running both conventions side by side would make the chart disagree with the
+status line over exactly the region where the difference matters. Stored
+convention wins; the mean-seed rationale stays recorded here as the rejected
+alternative (it remains the better *single-surface* answer, but consistency
+across surfaces outranks it).
+
+**Relationship to existing acute/chronic workload:** unchanged from the PMC
+design: the rolling-sum acute/chronic/ACWR stay the injury-risk vocabulary,
+the PMC EWMAs are the fitness/form vocabulary, and both coexist the way they
+do in the sports-science literature. (Rev 4 called CTL/ATL/TSB "a
+presentation-side model" — no longer true: the backward core is coach-facing.
+What *this* feature owns is presentation: the trend picture, the seam, and
+the projection.)
 
 ## 5. New module: `trainmate/progression.py`
 
@@ -217,15 +297,25 @@ patch-before-import pattern (`tests/test_analysis.py` precedent) — the
 functions are still deterministic given rows + config.
 
 ```python
-DayPoint = dict  # {date, load, source: 'actual'|'planned', ctl, atl, tsb}
+DayPoint = dict  # {date, load, source: 'actual'|'planned',
+                 #  ctl, atl, tsb: float | None}
+                 # None inside the warm-up window, on days with no stored
+                 # metrics row, or when there is no anchor (§4).
                  # tsb is day-ENTERING form (§4): CTL_{d-1} − ATL_{d-1}
 
 def daily_loads(activities, workouts, today) -> list[DayPoint]
     # merged per-day load series per §3 (no gaps: zero-load days included,
     # from first activity date through plan end)
 
-def fitness_series(day_points) -> list[DayPoint]
-    # folds §4 recursion over the output of daily_loads
+def fitness_series(day_points, metrics_rows, ctl_days, atl_days,
+                   warmup_cutoff) -> list[DayPoint]
+    # past: ctl/atl/tsb copied verbatim from the stored rows, nulled before
+    # warmup_cutoff (pmc_display_values semantics); from the last stored row:
+    # garmin.compute_pmc(..., seed=(ctl_A, atl_A)) folded over the day_points
+    # loads through plan end (§4). Never recomputes the past. The caller
+    # fetches metrics_rows, the config τs, and the cutoff (via
+    # garmin.pmc_history_start / pmc_warmup_cutoff_for) so this stays
+    # row-in/row-out.
 
 def weekly_aggregates(activities, workouts, today, meso_spans) -> list[dict]
     # {week_commencing (Monday, per learning_evidence precedent),
@@ -241,7 +331,9 @@ def weekly_aggregates(activities, workouts, today, meso_spans) -> list[dict]
 ## 6. Web API: `GET /api/timeline`
 
 Thin handler in `trainmate_web.py`: `db` reads (`get_completed_activities`,
-`get_workouts`, macrocycle versions + mesocycles for the governing objective
+`get_workouts`, `get_metrics_cache` for the stored PMC rows (§4), the
+first-evidence dates behind `garmin.pmc_history_start` for the warm-up
+cutoff, macrocycle versions + mesocycles for the governing objective
 (§6.1), active objectives, `get_analysis_cache("long")` for the bootstrap
 reconstruction) + the §5 functions. Properties, consistent with the existing
 API's stance (§8 of ARCHITECTURE.md):
@@ -256,8 +348,9 @@ API's stance (§8 of ARCHITECTURE.md):
   complexity than recomputing.
 - Query params `?start_date=&end_date=` (matching `/api/workouts` and
   `/api/activities` naming) clip the **returned** window only (default:
-  today − 56 days → plan end); computation always runs over full history
-  (§4 seeding).
+  today − 56 days → plan end); the stored past series is full-history by
+  construction and the fold starts at the anchor (§4), so a clipped window
+  never changes any value inside it.
 
 ```jsonc
 {
@@ -267,6 +360,8 @@ API's stance (§8 of ARCHITECTURE.md):
     {"date": "2026-07-02", "load": 62.4, "source": "actual",
      "ctl": 55.1, "atl": 61.0, "tsb": -5.9},   // tsb = day-entering (§4)
     {"date": "2026-07-04", "load": 80.0, "source": "planned", ...}
+    // ctl/atl/tsb are null inside the warm-up window, on days without a
+    // stored metrics row, and everywhere when there is no anchor (§4)
   ],
   "weeks": [
     {"week_commencing": "2026-06-22", "planned_load": 320,
@@ -289,6 +384,8 @@ API's stance (§8 of ARCHITECTURE.md):
   "warnings": [
     "plan generated through 2026-07-31 (9 wks before objective 2026-09-30)",
     "2 planned workouts have neither TSS nor RPE and count as 0 load"
+    // plus, on a young DB, the §4 pmc_data_caveat flag, e.g.
+    // "PMC still warming: CTL based on 38 days of history"
   ]
 }
 ```
@@ -371,6 +468,17 @@ Build 3   w/c 07-06   360  (planned)
 (When the plan reaches an objective, the banner is replaced by the per-
 objective line: `🏁 2026-09-30 Trail marathon — projected CTL 68, TSB +12`.)
 
+- **The FORM line is `tm status`'s Fitness line.** Same stored latest row,
+  same `garmin.pmc_ramp` over the full stored CTL series, same
+  `color_tsb`/`color_ramp`, and the same `PMC_TSB_LAG_NOTE` footnote wherever
+  TSB is printed (the PMC design's §6.1 conventions, reused not reimplemented).
+  `tm status` stays the snapshot; `tm progress` adds the trajectory and the
+  projection. The two commands showing different numbers for "CTL today" is a
+  bug by definition (§4), pinned by a test (§9).
+- **Warm-up states** (§4): on a young DB the FORM line and projection are
+  replaced by the still-warming message (mirroring the status line), and the
+  `pmc_data_caveat` line joins the warning footer; the WEEKLY LOAD section
+  renders regardless.
 - **Sparkline semantics.** The FORM line's `CTL ▁▂▂▃▃▅▅▆ (8w)` is one cell
   per displayed week (default 8, follows `--weeks`), sampling CTL on the
   week's **last day**, min–max scaled over those weeks. Range-stretching can
@@ -513,6 +621,16 @@ additive:
 3. **Zone-distribution stack.** Weekly stacked zone1–5 time (HR and power
    variants) from `completed_activities`; past-only until planned workouts
    carry intensity targets.
+4. **Coach-facing event-day TSB line** — the original deliverable of PMC
+   Phase 2 (`DESIGN_pmc_fitness_fatigue.md`, end of doc): emit
+   `Projected event-day TSB (from current plan): +12` into the plan/adapt
+   prompts at prompt-assembly time. Once this feature ships it is one call
+   into the §5 fold (pick the event per Phase 2's
+   `ORDER BY priority DESC, target_date ASC` rule, read the folded TSB on
+   `target_date`, carry the §3 warnings verbatim); the projection math,
+   stale-anchor decay, and honesty guards all come from §4. Phase 2's
+   zero-fill-to-event behavior (with its assumes-rest annotation) is the one
+   piece not covered here, since this feature stops at plan end (§4).
 
 *(Rev 1 listed Telegram `/chart` and a CLI sparkline as follow-ons; both
 were promoted into v1 — see §7.1–7.2 — because the CLI and the bot are the
@@ -522,39 +640,56 @@ the §7.2 photo transport for free where they need a chart in chat.)*
 
 ## 9. Testing
 
+- `tests/test_pmc.py` (the shipped core's suite) gains the one new-core test:
+  `seed=(0,0)` is byte-identical to the current behavior, and a series split
+  at an arbitrary date and re-folded with `seed=` the first half's final
+  values reproduces the unsplit series exactly — the property the §4 anchor
+  fold rests on. The recursion values themselves (hand-computed CTL/ATL/TSB,
+  TSB off-by-one, calendar-gap decay) are already pinned there and are *not*
+  re-tested in this feature's suite.
 - `tests/test_progression.py` — pure-function tests (patch-before-import
-  pattern, §5): fixture activities + workouts spanning the today-seam;
-  assert seam rule incl. the zero-load-activity case (§3), recursion values
-  against hand-computed CTL/ATL/TSB, mean-load seeding incl. the
-  shorter-than-42-days fallback (§4), zero-gap day filling, planned-side
-  sRPE fallback + no-tss-no-rpe warning counting (rest rows excluded),
-  Monday week bucketing, in-progress-week elapsed split, plan-end clamp,
-  §6.1 majority-overlap labeling over fixture spans, and the three empty
-  states.
+  pattern, §5): fixture activities + workouts + metrics rows spanning the
+  today-seam; assert seam rule incl. the zero-load-activity case (§3),
+  past points equal the stored rows verbatim and are nulled before the
+  warm-up cutoff (§4), the anchored fold over a zero-load tail reproduces
+  the closed-form decay `ctl_A·(1−1/τ)^d`, planned load raises the
+  projection, seam continuity under **non-default τ** (config plumbed, no
+  kink at the anchor), no-anchor / young-DB suppression, zero-gap day
+  filling, planned-side sRPE fallback + no-tss-no-rpe warning counting
+  (rest rows excluded), Monday week bucketing, in-progress-week elapsed
+  split, plan-end clamp, §6.1 majority-overlap labeling over fixture spans,
+  and the three empty states.
 - CLI renderer tests (`tests/test_cli_progress.py` or alongside existing CLI
   tests): the pure formatting helpers (§7.1) over fixture series — plan-end
   banner vs per-objective projection lines, past / in-progress / ungoverned
   / future week rows, bar scaling (shared max anchor incl. a future planned
-  week; ungoverned week still gets a bar), warning footer; plus a narrow
-  `TRAINMATE_WRAP_WIDTH` variant asserting nothing exceeds 48 chars.
+  week; ungoverned week still gets a bar), warning footer, the FORM line
+  agreeing with the status line's values over the same fixture rows (§7.1)
+  and carrying `PMC_TSB_LAG_NOTE`, the young-DB still-warming state; plus a
+  narrow `TRAINMATE_WRAP_WIDTH` variant asserting nothing exceeds 48 chars.
 - `tests/test_bot.py`: `parse_photo_request` round-trip with `emit_photo`
   framing (sentinel/JSON incl. the `caption` field, non-photo lines return
   `None`, unknown-sentinel lines dropped) — same pattern as the existing
   `parse_prompt_request` tests. The matplotlib rendering itself stays untested (visual output),
   matching the front-end stance below.
 - Endpoint test alongside the existing web tests: payload shape (incl.
-  `plan_end`, in-progress week fields, `meso_bands` layering), window
-  clipping vs full-history computation (a point *inside* the window must
-  reflect load *before* the window), pure-reader property (no Garmin/LLM
-  mocks needed — that's the assertion).
+  `plan_end`, in-progress week fields, `meso_bands` layering, nullable
+  `ctl`/`atl`/`tsb` with the warm-up nulls and the young-DB caveat in
+  `warnings`), window clipping vs the full-history stored series (a point
+  *inside* the window must reflect load *before* the window), pure-reader
+  property (no Garmin/LLM mocks needed — that's the assertion).
 - Web front-end stays untested, per existing practice.
 
 ## 10. Rollout
 
 Ordered by usage (CLI/bot before web), each step independently shippable:
 
-1. `trainmate/progression.py` + `tests/test_progression.py`; promote
-   `adherence._planned_load` → `adherence.planned_load` (public, §3).
+1. `garmin.compute_pmc` gains the optional `seed` parameter (+ its
+   `tests/test_pmc.py` tests, §9); `trainmate/progression.py` +
+   `tests/test_progression.py` — reading stored rows + the anchored fold per
+   §4/§5 (the rev-4 snapshot's own `CTL_DAYS`/`ATL_DAYS` constants,
+   mean-seeding, and full-history recursion are deleted in the rework);
+   promote `adherence._planned_load` → `adherence.planned_load` (public, §3).
 2. `tm progress` text mode (`trainmate/cli/progress.py` with auto-ensure,
    dispatcher entry + `prog` alias, removal of the `p` alias for `plan`,
    formatting-helper tests). This alone lights up Telegram text via parity —
@@ -569,9 +704,12 @@ Ordered by usage (CLI/bot before web), each step independently shippable:
    stylesheet; vendored `seriesBarsPlugin`).
 6. ARCHITECTURE.md: §2 module map (+`progression.py`, +`cli/progress.py`,
    bot photo protocol bullet), §7 CLI command table (+`progress`), §8
-   endpoint table + front-end tab list (+Progress), §12 new PMC subsection
-   (constants, coexistence with rolling-sum ACWR), §14 test-file table
-   (+`test_progression.py`, +CLI renderer tests), §15 pointer to this doc.
+   endpoint table + front-end tab list (+Progress), §12 — **fold into the
+   existing PMC documentation**, don't duplicate it: the core (constants,
+   storage, warm-up rules) is already documented with the PMC feature; §12
+   gains only the projection layer (stored-series + anchored fold, pointer
+   to this doc), §14 test-file table (+`test_progression.py`, +CLI renderer
+   tests), §15 pointer to this doc.
 
 ## 11. Open questions
 

@@ -5,6 +5,14 @@ DESIGN_progress_timeline.md (rev 4) — `trainmate/progression.py`,
 `trainmate/cli/progress.py`, `/api/timeline`, the Progress tab, the photo
 transport, and all associated tests.
 
+> **Superseded in part (2026-07-07):** this review targets the rev-4 snapshot,
+> which predates the PMC merge to main (`DESIGN_pmc_fitness_fatigue.md`,
+> `ca8591b`). Design rev 5 reworks the very foundation this review calls
+> trustworthy: `progression.py`'s own recursion, `CTL_DAYS`/`ATL_DAYS`, and
+> mean-seeding are replaced by reading the stored `athlete_metrics_cache`
+> series plus an anchored `compute_pmc(seed=...)` fold (see the rev-5 note and
+> §4 there). The presentation-layer findings below still stand.
+
 **Verdict:** the pure-math foundation (`progression.py`) is trustworthy, but
 the presentation layer betrays it. Five blocking findings, then smaller
 issues, then what's good. Tests run: 76 pass across `test_progression.py`,

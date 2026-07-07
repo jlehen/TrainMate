@@ -1336,35 +1336,34 @@ Sum of workloads over past 28 days ÷ 4 (≈ average weekly load).
 - > 1.5: elevated injury risk
 
 ### Fitness/Fatigue/Form (PMC) model
-`trainmate/progression.py` — a *presentation-side* model, separate from the
-rolling-sum acute/chronic/ACWR above (different semantics: asymptotic
-fitness/form, not a ratio-based risk score; the two coexist the way they do
-in the sports-science literature). Standard impulse-response PMC (Banister
-via Coggan's simplification), exponentially weighted over the merged
-past-measured/future-planned load series (past days: `activity_load` above;
-future days: `adherence.planned_load` over non-removed `workouts` — see
-DESIGN_progress_timeline.md §3 for the full seam rule):
+Two layers, one recurrence — separate from the rolling-sum
+acute/chronic/ACWR above (different semantics: asymptotic fitness/form, not
+a ratio-based risk score; the two coexist the way they do in the
+sports-science literature).
 
-```
-CTL_d = CTL_{d-1} + (load_d − CTL_{d-1}) / 42
-ATL_d = ATL_{d-1} + (load_d − ATL_{d-1}) / 7
-TSB_d = CTL_{d-1} − ATL_{d-1}          (form going *into* day d)
-```
+**Backward core** (`garmin.py`, DESIGN_pmc_fitness_fatigue.md): the classic
+Coggan discrete `1/τ` EWMAs walked over every calendar day of history —
+`compute_pmc()`, with TSB = *yesterday's* CTL − ATL (day-entering form) —
+stored per day on `athlete_metrics_cache` (`ctl`/`atl`/`tsb`) by every
+`recompute_derived()` sweep. Time constants come from config
+(`pmc_ctl_days`/`pmc_atl_days`, default 42/7; the defaults are the supported
+configuration). Leading-edge warm-up blanking (`pmc_warmup_cutoff_for`),
+the young-DB caveat (`pmc_data_caveat`), and the ramp rate (`pmc_ramp`)
+gate/derive display values. Consumers: coach prompts, `tm status`,
+`tm data show-metrics`.
 
-- **42 / 7 days** (`progression.CTL_DAYS`/`ATL_DAYS`) are module constants,
-  like `HR_ZONE_TSS_PER_SEC` — not config.
-- **Seeding:** always computed over the full history (regardless of the
-  requested display window), seeded at the **calendar mean** daily load of
-  the first 42 (CTL) / 7 (ATL) days — zero-load rest days count in the
-  numerator and stay in the denominator. Less history than that: mean over
-  what exists. See DESIGN_progress_timeline.md §4 for why (avoids both a
-  trained-every-day overestimate and a from-zero underestimate after a
-  dated `data wipe`).
-- **Consumers:** `tm progress` (CLI, numbers-first + optional `--chart` PNG
-  via matplotlib), the Telegram bot (text for free via CLI parity, plus the
-  photo transport for the chart), and `GET /api/timeline` (the web
-  **Progress** tab, uPlot). One computation feeds all three; only the
-  rendering differs. Full design: DESIGN_progress_timeline.md.
+**Projection layer** (`trainmate/progression.py`, DESIGN_progress_timeline.md):
+past days read the stored series verbatim (never recomputed — `tm progress`
+and `tm status` must agree); from the last stored row the same recurrence is
+folded forward (`compute_pmc(..., seed=(ctl, atl))`) over the merged
+actual-then-planned daily load series (past: `activity_load` above; future:
+`adherence.planned_load` over non-removed `workouts` — see
+DESIGN_progress_timeline.md §3 for the seam rule), stopping at the last
+generated workout. Consumers: `tm progress` (CLI, numbers-first + optional
+`--chart` PNG via matplotlib), the Telegram bot (text for free via CLI
+parity, plus the photo transport for the chart), and `GET /api/timeline`
+(the web **Progress** tab, uPlot). One computation feeds all three; only
+the rendering differs.
 
 ### Daily Readiness Signals
 - HRV drops > 1 std below baseline mean → flag potential overtraining
