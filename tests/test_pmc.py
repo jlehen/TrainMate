@@ -1,8 +1,8 @@
 """PMC (CTL/ATL/TSB fitness-fatigue-form) tests — see DESIGN_pmc_fitness_fatigue.md §8.
 
-Split into pure-math (compute_pmc / warm-up / ramp / projection / phase / color),
-formatting (format_metrics_history + status/CSV None handling), and a couple of DB
-integration checks (recompute upsert, COALESCE preservation, wipe-then-recompute).
+Split into pure-math (compute_pmc / warm-up / ramp / color), formatting
+(format_metrics_history + status/CSV None handling), and a couple of DB integration
+checks (recompute upsert, COALESCE preservation, wipe-then-recompute).
 """
 import os
 import unittest
@@ -13,11 +13,7 @@ from tests.helpers import clear_all_tables
 from trainmate.db import Database
 import trainmate.db
 import trainmate.garmin as garmin
-from trainmate.garmin import (
-    compute_pmc, pmc_warmup_cutoff_for, pmc_effective_history,
-    pmc_convergence_pct, pmc_ramp, project_taper,
-)
-from trainmate.coach.engine import normalize_meso_phase
+from trainmate.garmin import compute_pmc, pmc_warmup_cutoff_for, pmc_ramp
 from trainmate.coach.formatting import format_metrics_history, PMC_TSB_LAG_NOTE
 from trainmate.util import color_tsb, color_ramp
 
@@ -126,57 +122,51 @@ class TestComputePMC(unittest.TestCase):
 
 
 # ==============================================================================
-# Warm-up cutoff / effective history / convergence
+# Warm-up cutoff (§3.3a) + static still-warming-up flag (§3.3b)
 # ==============================================================================
 
-class TestWarmupAndConvergence(unittest.TestCase):
+class TestWarmup(unittest.TestCase):
     def test_cutoff_is_start_plus_tau(self):
         self.assertEqual(pmc_warmup_cutoff_for("2026-01-01", 42), "2026-02-12")
         self.assertIsNone(pmc_warmup_cutoff_for(None, 42))
 
-    def test_convergence_pct_curve(self):
-        self.assertEqual(pmc_convergence_pct(42, 42), 63)      # 1 tau -> 63%
-        self.assertEqual(pmc_convergence_pct(63, 42), 78)      # 1.5 tau -> 78%
-        self.assertEqual(pmc_convergence_pct(126, 42), 95)     # 3 tau -> 95%
-        # A tau change moves the figure.
-        self.assertNotEqual(pmc_convergence_pct(42, 42), pmc_convergence_pct(42, 21))
 
-    def test_effective_history_no_gap(self):
-        daily = {(date(2026, 1, 1) + timedelta(days=i)).isoformat(): 50.0 for i in range(30)}
-        n, eff = pmc_effective_history(daily, "2026-01-01", "2026-01-30", 42)
-        self.assertEqual(n, 30)
-        self.assertEqual(eff, "2026-01-01")
+class TestStaticFlag(_DBBackedTest):
+    """garmin.pmc_data_caveat — the static "still warming up" flag (§3.3b): fires with a
+    plain N=today-history_start while N < 3*tau_ctl, then drops. No convergence-% figure."""
 
-    def test_effective_history_rearms_after_long_gap(self):
-        # 20 loaded days, then a >=42-day layoff, then a comeback: effective history
-        # resets to the comeback's first loaded day even though total history is long.
-        daily = {}
-        for i in range(20):
-            daily[(date(2026, 1, 1) + timedelta(days=i)).isoformat()] = 60.0
-        comeback = date(2026, 1, 1) + timedelta(days=20 + 50)   # after a 50-day gap
-        for i in range(10):
-            daily[(comeback + timedelta(days=i)).isoformat()] = 60.0
-        end = (comeback + timedelta(days=9)).isoformat()
-        n, eff = pmc_effective_history(daily, "2026-01-01", end, 42)
-        self.assertEqual(eff, comeback.isoformat())
-        self.assertEqual(n, 10)
+    def setUp(self):
+        self._use_test_db()
+        clear_all_tables(test_db)
 
-    def test_token_session_does_not_defeat_layoff_detection(self):
-        # A single ~20-TSS jog in the middle of a 12-week layoff must NOT split it
-        # into two sub-threshold runs (the rest test is a trailing WEEKLY sum, not
-        # per-day): the caveat still re-arms at the comeback.
-        daily = {}
-        for i in range(30):
-            daily[(date(2026, 1, 1) + timedelta(days=i)).isoformat()] = 60.0
-        gap_start = date(2026, 1, 31)
-        daily[(gap_start + timedelta(days=42)).isoformat()] = 20.0   # token test jog
-        comeback = gap_start + timedelta(days=84)
-        for i in range(10):
-            daily[(comeback + timedelta(days=i)).isoformat()] = 60.0
-        end = (comeback + timedelta(days=9)).isoformat()
-        n, eff = pmc_effective_history(daily, "2026-01-01", end, 42)
-        self.assertEqual(eff, comeback.isoformat())
-        self.assertEqual(n, 10)
+    def test_flag_fires_for_young_db_with_right_n(self):
+        # 30 days of history behind today -> flag fires; N is today - history_start.
+        base = date.today() - timedelta(days=30)
+        for i in range(31):
+            test_db.save_metric_cache(
+                date=(base + timedelta(days=i)).isoformat(),
+                rhr=50, hrv=70, sleep_score=80, stress=20,
+            )
+        cav = garmin.pmc_data_caveat(date.today().isoformat(), dbh=test_db)
+        self.assertIsNotNone(cav)
+        self.assertEqual(cav["n_days"], 30)
+        self.assertEqual(cav["history_start"], base.isoformat())
+        self.assertNotIn("pct", cav)              # static flag — no convergence figure
+
+    def test_flag_drops_once_history_exceeds_three_tau(self):
+        # >= 3*tau_ctl (126 days) of history -> artifact negligible, no flag.
+        base = date.today() - timedelta(days=130)
+        for i in range(131):
+            test_db.save_metric_cache(
+                date=(base + timedelta(days=i)).isoformat(),
+                rhr=50, hrv=70, sleep_score=80, stress=20,
+            )
+        self.assertIsNone(
+            garmin.pmc_data_caveat(date.today().isoformat(), dbh=test_db)
+        )
+
+    def test_no_history_no_flag(self):
+        self.assertIsNone(garmin.pmc_data_caveat(date.today().isoformat(), dbh=test_db))
 
 
 # ==============================================================================
@@ -232,63 +222,6 @@ class TestRamp(unittest.TestCase):
 
 
 # ==============================================================================
-# Forward taper projection (§5.3)
-# ==============================================================================
-
-class TestProjection(unittest.TestCase):
-    def test_decay_only_matches_closed_form(self):
-        # No planned load -> pure decay. ctl decays by (1-1/tau) each day.
-        anchor_ctl, anchor_atl = 50.0, 40.0
-        proj = project_taper(
-            anchor_ctl, anchor_atl, "2026-01-01", "2026-01-11",
-            lambda ds: 0.0, 42, 7,
-        )
-        # Event-day CTL is ctl_{event-1}: 10 daily decays from the anchor's next day
-        # gives ctl after 9 updates (anchor+1..event-1), rounded.
-        ctl = anchor_ctl
-        for _ in range(9):
-            ctl = ctl + (0.0 - ctl) / 42
-        atl = anchor_atl
-        for _ in range(9):
-            atl = atl + (0.0 - atl) / 7
-        self.assertAlmostEqual(proj["tsb"], round(ctl - atl, 1), delta=0.2)
-
-    def test_planned_load_raises_projection(self):
-        decay = project_taper(50.0, 40.0, "2026-01-01", "2026-01-15", lambda ds: 0.0, 42, 7)
-        loaded = project_taper(50.0, 40.0, "2026-01-01", "2026-01-15", lambda ds: 80.0, 42, 7)
-        self.assertGreater(loaded["ctl"], decay["ctl"])
-
-
-# ==============================================================================
-# Phase normalization (§4.4)
-# ==============================================================================
-
-class TestNormalizeMesoPhase(unittest.TestCase):
-    def test_clean_enum_value(self):
-        self.assertEqual(normalize_meso_phase("Taper", "anything"), "taper")
-        self.assertEqual(normalize_meso_phase("build", ""), "build")
-
-    def test_focus_inference(self):
-        self.assertEqual(normalize_meso_phase(None, "Peak & Taper block"), "taper")
-        self.assertEqual(normalize_meso_phase("", "Aerobic base building"), "base")
-        self.assertEqual(normalize_meso_phase(None, "Deload / recovery week"), "recovery")
-
-    def test_unclassifiable_returns_none(self):
-        self.assertIsNone(normalize_meso_phase(None, "Miscellaneous stuff"))
-        self.assertIsNone(normalize_meso_phase("nonsense", ""))
-
-    def test_race_language_does_not_imply_taper(self):
-        # "race" is not a keyword: race-pace work mid-build must not classify the
-        # block as taper (which would light the green race-ready TSB color there).
-        self.assertEqual(
-            normalize_meso_phase(None, "Build block: threshold plus race-pace intervals"),
-            "build",
-        )
-        # Race language alone stays unclassified (phase-blind color) rather than taper.
-        self.assertIsNone(normalize_meso_phase(None, "Race simulation weekend"))
-
-
-# ==============================================================================
 # Color bands (§6.1) — strip ANSI to assert which band claimed a value
 # ==============================================================================
 
@@ -304,23 +237,19 @@ class TestColors(unittest.TestCase):
     def _has_color(self, s, code):
         return f"\033[{code}m" in s
 
-    def test_tsb_phase_aware_green(self):
-        # +12 green under taper/peak, uncolored under build and None.
-        self.assertTrue(self._has_color(color_tsb(12.0, "taper"), "32"))
-        self.assertTrue(self._has_color(color_tsb(12.0, "peak"), "32"))
-        self.assertFalse(self._has_color(color_tsb(12.0, "build"), "32"))
-        self.assertFalse(self._has_color(color_tsb(12.0, None), "32"))
+    def test_tsb_risk_ends_only(self):
+        # Phase-blind: only the two risk ends color. < -30 red, > +25 yellow.
+        self.assertTrue(self._has_color(color_tsb(-31.0), "31"))    # red
+        self.assertTrue(self._has_color(color_tsb(26.0), "33"))     # yellow
 
-    def test_tsb_risk_ends_regardless_of_phase(self):
-        for phase in (None, "build", "taper"):
-            self.assertTrue(self._has_color(color_tsb(-31.0, phase), "31"))   # red
-            self.assertTrue(self._has_color(color_tsb(26.0, phase), "33"))    # yellow
-
-    def test_tsb_half_open_bands(self):
-        # +5 is race-ready (green under taper); the -30..+5 band stays uncolored.
-        self.assertTrue(self._has_color(color_tsb(5.0, "taper"), "32"))
-        self.assertFalse(self._has_color(color_tsb(4.9, "taper"), "32"))
-        self.assertFalse(self._has_color(color_tsb(0.0, "taper"), "32"))
+    def test_tsb_midrange_uncolored_no_green(self):
+        # No green band and no phase argument: the -30..+25 middle is always plain,
+        # including the old race-ready +5..+25 region.
+        for v in (12.0, 5.0, 0.0, -10.0, -30.0, 25.0):
+            s = color_tsb(v)
+            self.assertFalse(self._has_color(s, "32"))   # never green
+            self.assertFalse(self._has_color(s, "31"))   # not red
+            self.assertFalse(self._has_color(s, "33"))   # not yellow
 
     def test_ramp_bands_touch(self):
         self.assertTrue(self._has_color(color_ramp(9.0), "31"))    # >=8 red
@@ -502,7 +431,7 @@ class TestPMCIntegration(_DBBackedTest):
 
 
 class TestPMCService(_DBBackedTest):
-    """Service-level PMC surfacing: taper-projection event selection/guards + ramp line."""
+    """Service-level PMC surfacing: the single CTL ramp line from full history."""
 
     def setUp(self):
         self._use_test_db()
@@ -526,171 +455,6 @@ class TestPMCService(_DBBackedTest):
             rpe=None, tss=tss,
             zone1_sec=0, zone2_sec=1800, zone3_sec=1800, zone4_sec=0, zone5_sec=0,
         )
-
-    def _plan_workout(self, date_str, tss, **kwargs):
-        test_db.save_workout(
-            date=date_str, sport_type="running", title="Planned Run",
-            description="steady", tss=tss, **kwargs
-        )
-
-    def _projection(self):
-        return self.svc._pmc_projection_line(
-            date.today().isoformat(), self.svc._pmc_warmup_cutoff()
-        )
-
-    @staticmethod
-    def _projected_tsb(line):
-        import re
-        return int(re.search(r"Projected event-day TSB \(from current plan\): ([+-]\d+)", line).group(1))
-
-    def test_projection_picks_highest_priority_event(self):
-        today = date.today()
-        # Priority 1 = HIGHEST (the CLI convention): the A-race must win over a
-        # sooner, lower-priority (higher-numbered) tune-up.
-        test_db.add_objective(
-            title="Tune-up 10K", target_date=(today + timedelta(days=20)).isoformat(),
-            sport_type="running", priority=3,
-        )
-        test_db.add_objective(
-            title="Goal Marathon", target_date=(today + timedelta(days=40)).isoformat(),
-            sport_type="running", priority=1,
-        )
-        self._plan_workout((today + timedelta(days=3)).isoformat(), 60)
-        line = self._projection()
-        self.assertIsNotNone(line)
-        self.assertIn("Goal Marathon", line)
-        self.assertNotIn("Tune-up 10K", line)
-
-    def test_projection_ties_break_on_nearest_date(self):
-        today = date.today()
-        test_db.add_objective(
-            title="Later Same-Pri", target_date=(today + timedelta(days=45)).isoformat(),
-            sport_type="running", priority=2,
-        )
-        test_db.add_objective(
-            title="Nearer Same-Pri", target_date=(today + timedelta(days=25)).isoformat(),
-            sport_type="running", priority=2,
-        )
-        self._plan_workout((today + timedelta(days=3)).isoformat(), 60)
-        line = self._projection()
-        self.assertIn("Nearer Same-Pri", line)
-
-    def test_no_upcoming_event_no_projection(self):
-        # Only a past objective -> no line, not a crash.
-        test_db.add_objective(
-            title="Done", target_date=(date.today() - timedelta(days=5)).isoformat(),
-            sport_type="running", priority=1,
-        )
-        self.assertIsNone(
-            self.svc._pmc_projection_line(date.today().isoformat(), None)
-        )
-
-    def test_empty_plan_no_projection(self):
-        # An upcoming event but no planned workouts at all -> no line: a decay-only
-        # walk is not a projection "from current plan" (§8).
-        test_db.add_objective(
-            title="Planless Race", target_date=(date.today() + timedelta(days=20)).isoformat(),
-            sport_type="running", priority=1,
-        )
-        self.assertIsNone(self._projection())
-
-    def test_removed_workout_does_not_raise_projection(self):
-        today = date.today()
-        test_db.add_objective(
-            title="Race", target_date=(today + timedelta(days=15)).isoformat(),
-            sport_type="running", priority=1,
-        )
-        self._plan_workout((today + timedelta(days=3)).isoformat(), 50)
-        before = self._projected_tsb(self._projection())
-        # A cancelled 500-TSS session must not count toward projected load.
-        self._plan_workout(
-            (today + timedelta(days=4)).isoformat(), 500,
-            removed=True, removed_reason="cancelled",
-        )
-        self.assertEqual(self._projected_tsb(self._projection()), before)
-
-    def test_missing_tss_and_unplanned_tail_annotations(self):
-        today = date.today()
-        test_db.add_objective(
-            title="Race", target_date=(today + timedelta(days=20)).isoformat(),
-            sport_type="running", priority=1,
-        )
-        # One quantified workout, one without a TSS estimate; plan stops 10+ days
-        # before the event.
-        self._plan_workout((today + timedelta(days=2)).isoformat(), 60)
-        test_db.save_workout(
-            date=(today + timedelta(days=3)).isoformat(), sport_type="running",
-            title="Unquantified", description="fartlek", tss=None,
-        )
-        line = self._projection()
-        self.assertIn("lack a TSS estimate", line)
-        self.assertIn("days before the event are unplanned", line)
-
-    def test_stale_anchor_decays_over_actual_load(self):
-        # Metrics (and their stored CTL/ATL anchor) end 10 days ago; the actual load
-        # completed since then must feed the projection walk, so heavy recent training
-        # lowers projected event-day TSB versus an empty gap.
-        clear_all_tables(test_db)
-        base = date.today() - timedelta(days=69)
-        for i in range(60):                       # ends 10 days ago
-            d = (base + timedelta(days=i)).isoformat()
-            test_db.save_metric_cache(date=d, rhr=50, hrv=70, sleep_score=80, stress=20)
-            self._add_activity(f"a{i}", d, 60.0)
-        garmin.recompute_derived()
-        today = date.today()
-        test_db.add_objective(
-            title="Race", target_date=(today + timedelta(days=10)).isoformat(),
-            sport_type="running", priority=1,
-        )
-        self._plan_workout((today + timedelta(days=2)).isoformat(), 40)
-        rested = self._projected_tsb(self._projection())
-        # Now fill the anchor->today gap with heavy actual load (no recompute: the
-        # anchor row is unchanged; only the walk's actual-load path should see it).
-        for i in range(1, 10):
-            self._add_activity(f"gap{i}", (today - timedelta(days=i)).isoformat(), 200.0)
-        loaded = self._projected_tsb(self._projection())
-        self.assertLess(loaded, rested)
-
-    def test_todays_planned_workout_counts(self):
-        # Anchor = yesterday's metrics row; a still-planned session dated TODAY must
-        # contribute its TSS to the walk (it hasn't happened yet, but it isn't rest).
-        clear_all_tables(test_db)
-        base = date.today() - timedelta(days=60)
-        for i in range(60):                       # ends yesterday
-            d = (base + timedelta(days=i)).isoformat()
-            test_db.save_metric_cache(date=d, rhr=50, hrv=70, sleep_score=80, stress=20)
-            self._add_activity(f"a{i}", d, 60.0)
-        garmin.recompute_derived()
-        today = date.today()
-        test_db.add_objective(
-            title="Race", target_date=(today + timedelta(days=10)).isoformat(),
-            sport_type="running", priority=1,
-        )
-        self._plan_workout((today + timedelta(days=2)).isoformat(), 40)
-        without_today = self._projected_tsb(self._projection())
-        self._plan_workout(today.isoformat(), 200)   # today's long run, not yet done
-        with_today = self._projected_tsb(self._projection())
-        self.assertLess(with_today, without_today)
-
-    def test_warmup_anchor_carries_caveat(self):
-        # A history entirely inside the warm-up window still projects, but the line
-        # must self-annotate that the anchor is warm-up grade.
-        clear_all_tables(test_db)
-        base = date.today() - timedelta(days=19)
-        for i in range(20):
-            d = (base + timedelta(days=i)).isoformat()
-            test_db.save_metric_cache(date=d, rhr=50, hrv=70, sleep_score=80, stress=20)
-            self._add_activity(f"a{i}", d, 60.0)
-        garmin.recompute_derived()
-        today = date.today()
-        test_db.add_objective(
-            title="Race", target_date=(today + timedelta(days=10)).isoformat(),
-            sport_type="running", priority=1,
-        )
-        self._plan_workout((today + timedelta(days=2)).isoformat(), 40)
-        line = self._projection()
-        self.assertIsNotNone(line)
-        self.assertIn("warm-up window", line)
 
     def test_ramp_line_from_full_history(self):
         # Steady 60/day -> CTL still climbing over 60 days, so ramp is positive & present.

@@ -692,8 +692,8 @@ EWMA half of the load model, computed alongside ACWR in `garmin.recompute_derive
 over every calendar day (rest days decay the EWMAs) and upserted onto existing metrics
 rows. The four windows (acute/chronic/CTL/ATL) are config-backed under `garmin:`; the
 defaults are the supported configuration. The warm-up window (first τ_ctl days of
-history) is suppressed at every surface, and a convergence caveat is shown while the
-effective history is short.
+history) is suppressed at every surface, and a static "still warming up" flag is shown
+while total history is short (< 3·τ_ctl).
 
 ### athlete_baselines
 28-day rolling baseline computed during `garmin.recompute_derived()` (a full
@@ -818,7 +818,6 @@ Regenerating a plan **supersedes** the prior version (kept) rather than deleting
 | `start_date`    | TEXT                    | YYYY-MM-DD                              |
 | `end_date`      | TEXT                    | YYYY-MM-DD                              |
 | `focus`         | TEXT                    | E.g. "Zone 2 aerobic base, high volume" |
-| `phase`         | TEXT                    | Structured phase (base/build/peak/taper/recovery), classified at plan generation; NULL on old/bootstrap blocks. Drives phase-aware TSB color (DESIGN_pmc_fitness_fatigue.md §4.4) |
 | `feedback`      | TEXT                    | Athlete feedback for next replanning    |
 
 ### analysis_cache
@@ -1055,20 +1054,16 @@ Required fields:
    reverse-engineered macro/mesocycle blocks, and physiological insights;
    written to no `feedback` field), prints it, and passes it as
    `prior_training_text` into `CoachEngine._plan_generate_strategy()` →
-   LLM → `{strategy, mesocycles}`.  See DESIGN_backward_evaluation.md §6. Each
-   mesocycle also carries a structured `phase` (base/build/peak/taper/recovery): the
-   LLM emits it, and `normalize_meso_phase()` validates it (falling back to focus-text
-   inference, else NULL). It drives phase-aware TSB color (DESIGN_pmc_fitness_fatigue.md §4.4).
+   LLM → `{strategy, mesocycles}`.  See DESIGN_backward_evaluation.md §6.
 5. If timeline > 24 weeks: calls `CoachEngine._generate_intermediate_goals()`
    first, saves intermediate objectives, then re-runs with the first goal.
 6. Saves new macrocycle + mesocycles to DB (old ones deleted via
    `save_macrocycle`).
 
-The strategy/plan and adapt prompts also receive a **forward taper projection**
-(`_pmc_projection_line`): the app deterministically walks the plan's own `tss` forward
-from current CTL/ATL to the highest-priority upcoming event and reports projected
-event-day TSB against the +5..+25 taper band — the one place the PMC compute reads the
-plan (read-only), so the coach reads a number instead of simulating two decays.
+The strategy/plan and adapt prompts also receive the current PMC block: the latest
+Fitness/Fatigue (CTL/ATL/TSB) line, the single CTL ramp line, and the still-warming-up
+flag (DESIGN_pmc_fitness_fatigue.md §5.2). Forward taper projection — projecting
+event-day TSB over the plan's own workouts — is a deferred Phase 2 follow-up.
 
 ### Workout Generation (`workout generate`)
 1. CLI resolves the generation horizon (end date) from flags in priority order:

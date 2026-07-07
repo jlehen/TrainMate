@@ -5,8 +5,6 @@ import textwrap
 from datetime import date
 from typing import Optional
 
-from trainmate.types import MESO_PHASES
-
 # ANSI escape codes for terminal coloring
 ANSI_ESCAPE = re.compile(r'(?:\033|\x1b)\[[0-9;]*m')
 
@@ -103,32 +101,20 @@ def color_acwr(acwr: float) -> str:
         return red(acwr_str)
 
 
-# The +5..+25 TSB band reads as "race-ready good" only in a peaking block; mid-build the
-# same freshness means fitness is decaying, so green is gated to these phases (§6.1).
-# Asserted against the shared MESO_PHASES vocabulary so a renamed phase fails loudly at
-# import instead of the green cue silently never firing again.
-_TSB_RACE_READY_PHASES = ("peak", "taper")
-assert set(_TSB_RACE_READY_PHASES) <= set(MESO_PHASES), \
-    "_TSB_RACE_READY_PHASES drifted from the MESO_PHASES vocabulary"
+def color_tsb(tsb: float) -> str:
+    """TSB (form) coloring — colors only the two risk ends, phase-blind
+    (DESIGN_pmc_fitness_fatigue.md §6.1).
 
-
-def color_tsb(tsb: float, phase: Optional[str] = None) -> str:
-    """Phase-aware TSB (form) coloring (DESIGN_pmc_fitness_fatigue.md §6.1).
-
-    The two risk ends color regardless of phase: < -30 red (excessive fatigue), > +25
-    yellow (detraining / over-tapered). The +5..+25 race-ready band is green ONLY in a
-    peak/taper block, where freshness *is* the goal; uncolored otherwise (including
-    phase=None from old plans or no active mesocycle) because mid-build a high TSB means
-    fitness is decaying, not that you're great. The -30..+5 band is uncolored in every
-    phase — its meaning is phase-dependent and belongs to the coach. Bands are half-open
-    so no value is double-claimed."""
+    < -30 red (excessive fatigue), > +25 yellow (detraining / over-tapered). The
+    -30..+25 middle stays uncolored: its meaning is phase-dependent (mid-build a +15
+    means fitness is decaying; peaking, it means race-ready), and that interpretive call
+    belongs to the coach reading the science file, not to a phase-blind color map. Bands
+    are half-open so no value is double-claimed."""
     s = f"{tsb:.1f}"
     if tsb < -30:
         return red(s)
     if tsb > 25:
         return yellow(s)
-    if 5 <= tsb <= 25 and phase in _TSB_RACE_READY_PHASES:
-        return green(s)
     return s
 
 

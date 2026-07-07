@@ -3,7 +3,7 @@ import hashlib
 from typing import Any, List, Optional, Dict
 from trainmate.config import config
 from trainmate.openrouter import openrouter_client
-from trainmate.types import Objective, Constraint, Workout, CompletedActivity, MESO_PHASES
+from trainmate.types import Objective, Constraint, Workout, CompletedActivity
 from trainmate.util import today_date as _today_date, cyan
 from trainmate.coach.formatting import (
     format_metrics_history, format_completed_activities, format_baseline,
@@ -17,32 +17,6 @@ from trainmate.coach.formatting import (
 # are shared by the control flow (service.py) and the split-prompt text below.
 MIN_PLAN_WEEKS = 5
 MAX_PLAN_WEEKS = 24
-
-
-def normalize_meso_phase(raw_phase: Optional[str], focus: str) -> Optional[str]:
-    """LLM `phase` field -> validated MESO_PHASES vocabulary; else infer from the
-    free-text focus; else None (DESIGN_pmc_fitness_fatigue.md §4.4).
-
-    Pure and unit-testable. Trusts a clean enum value first; otherwise scans the
-    combined phase+focus text for phase keywords, most specific first (a "peak & taper"
-    focus resolves to taper, "deload"/"recover"/"rest" to recovery, etc.). "race" is
-    deliberately NOT a keyword: race language shows up in non-taper blocks too
-    ("race-pace intervals" mid-build), and misreading one as taper lights the green
-    race-ready TSB color exactly where it misleads — an unclassified block (None,
-    phase-blind color) is the safe failure. Returning None (neither the field nor the
-    focus classified it) degrades the TSB color to phase-blind rather than guessing."""
-    if raw_phase and raw_phase.strip().lower() in MESO_PHASES:
-        return raw_phase.strip().lower()
-    text = f"{raw_phase or ''} {focus}".lower()
-    for kw, phase in (              # most specific first; first hit wins
-        ("taper", "taper"), ("peak", "peak"),
-        ("deload", "recovery"), ("recover", "recovery"), ("rest", "recovery"),
-        ("base", "base"), ("aerobic", "base"),
-        ("build", "build"), ("progress", "build"),
-    ):
-        if kw in text:
-            return phase
-    return None                     # neither the field nor the focus classified it
 
 
 # Shared JSON-output instruction for incrementally updating coach learnings. The LLM emits
@@ -440,8 +414,7 @@ You MUST respond with a JSON object containing:
       "start_date": "YYYY-MM-DD",
       "end_date": "YYYY-MM-DD",
       "focus": "Key focus and description of this block (e.g., volume progression,
-        aerobic threshold, rest, peak load, etc.)",
-      "phase": "one of: base | build | peak | taper | recovery"
+        aerobic threshold, rest, peak load, etc.)"
     }}
   ]
 }}
@@ -585,9 +558,9 @@ You MUST respond with a JSON object containing:
         history_text_parts = []
         if metrics:
             metrics_text = format_metrics_history(metrics, pmc_warmup_cutoff)
-            # The single CTL ramp line + convergence caveat + taper projection ride
-            # beside the per-day block (not repeated per day), so the prompt that sets
-            # next week's load sees the fitness trajectory (§5.2/§5.3).
+            # The single CTL ramp line + warm-up flag ride beside the per-day block (not
+            # repeated per day), so the prompt that sets next week's load sees the fitness
+            # trajectory (§5.2).
             if pmc_context:
                 metrics_text += "\n" + pmc_context
             history_text_parts.append(
@@ -827,8 +800,8 @@ evidence-backed observations are authored only by the weekly history analysis
         )
 
         metrics_text = format_metrics_history(metrics, pmc_warmup_cutoff)
-        # Single ramp line + convergence caveat + taper projection beside the per-day
-        # block, so adapt sees the fatigue trajectory and where the taper lands (§5.2/§5.3).
+        # Single ramp line + warm-up flag beside the per-day block, so adapt sees the
+        # fatigue trajectory (§5.2).
         if pmc_context:
             metrics_text += "\n" + pmc_context
         context_text = (

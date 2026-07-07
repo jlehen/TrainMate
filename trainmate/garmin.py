@@ -602,13 +602,6 @@ def _mean_std(values: List[float]) -> Tuple[float, float]:
 # All pure, unit-testable without a DB. See DESIGN_pmc_fitness_fatigue.md §3.
 # ==============================================================================
 
-# Trailing 7-day summed load below which the athlete counts as resting for
-# effective-history gap detection (§3.3b). Judged per WEEK, not per day, so a token
-# easy session inside a layoff (a ~20-TSS walk/jog) still reads as rest instead of
-# splitting the layoff in two and defeating the comeback caveat; a genuine return to
-# training (several sessions a week) clears it immediately.
-_PMC_REST_WEEK_LOAD = 30.0
-
 
 def compute_pmc(
     daily_load: Dict[str, float],
@@ -655,50 +648,6 @@ def pmc_warmup_cutoff_for(start: Optional[str], ctl_days: int) -> Optional[str]:
     return (_to_date(start) + timedelta(days=ctl_days)).isoformat()
 
 
-def pmc_effective_history(
-    daily_load: Dict[str, float], start: str, end: str, ctl_days: int
-) -> Tuple[int, Optional[str]]:
-    """Effective history behind `end`: (n_days, effective_start_iso).
-
-    The EWMA re-warms from a low floor not only at DB start but after any layoff long
-    enough to decay CTL back toward zero (a run of >= ctl_days functionally-rested days).
-    A day counts as rested when the trailing 7-day summed load is under
-    _PMC_REST_WEEK_LOAD — a weekly criterion, so an isolated token session inside a
-    layoff cannot split it into two sub-threshold runs. Effective history is measured
-    from the first trained day after the most recent such gap, or the first trained day
-    overall if there is none — so the §3.3(b) convergence caveat re-arms on a comeback
-    even when total history is long. (0, None) if no load."""
-    if not start or not end:
-        return 0, None
-    cur, last = _to_date(start), _to_date(end)
-    eff_start: Optional[Any] = None
-    zero_run = 0
-    week: List[float] = []
-    while cur <= last:
-        week.append(daily_load.get(cur.isoformat(), 0.0))
-        if len(week) > 7:
-            week.pop(0)
-        if sum(week) < _PMC_REST_WEEK_LOAD:
-            zero_run += 1
-        else:
-            if eff_start is None or zero_run >= ctl_days:
-                eff_start = cur
-            zero_run = 0
-        cur += timedelta(days=1)
-    if eff_start is None:
-        return 0, None
-    return (last - eff_start).days + 1, eff_start.isoformat()
-
-
-def pmc_convergence_pct(n_days: int, ctl_days: int) -> int:
-    """CTL convergence proxy after `n_days` of effective history: 1 - e^{-n/τ}, as an
-    integer percent (63% at τ, 78% at 1.5τ, 86% at 2τ, 95% at 3τ). A constant-load
-    convergence figure, not a literal error bar — framed to the LLM as "~X% converged."""
-    if ctl_days <= 0:
-        return 100
-    return round(100.0 * (1.0 - math.exp(-n_days / ctl_days)))
-
-
 def pmc_ramp(
     ctl_by_date: Dict[str, Optional[float]], date_iso: str, window: int = 7,
     warmup_cutoff: Optional[str] = None,
@@ -736,28 +685,6 @@ def pmc_ramp(
     return round((today_ctl - best_val) * window / span, 1)
 
 
-def project_taper(
-    anchor_ctl: float, anchor_atl: float, anchor_date: str, event_date: str,
-    load_for_date, ctl_days: int, atl_days: int,
-) -> Dict[str, float]:
-    """Forward-projects event-day CTL/ATL/TSB from an anchor by walking the same §3.1
-    recurrence day-by-day from anchor_date+1 through event_date. `load_for_date` maps an
-    ISO date to that day's load (caller supplies actual completed load up to today and
-    planned load after). Event-day TSB is CTL(event-1) - ATL(event-1), the form the
-    athlete wakes up with on race day. Pure. Returns {'ctl','atl','tsb'} rounded 1 dp."""
-    ctl, atl = float(anchor_ctl), float(anchor_atl)
-    cur = _to_date(anchor_date) + timedelta(days=1)
-    end = _to_date(event_date)
-    tsb = ctl - atl
-    while cur <= end:
-        load = load_for_date(cur.isoformat())
-        tsb = ctl - atl                       # form on `cur` = yesterday's balance
-        ctl = ctl + (load - ctl) / ctl_days
-        atl = atl + (load - atl) / atl_days
-        cur += timedelta(days=1)
-    return {'ctl': round(ctl, 1), 'atl': round(atl, 1), 'tsb': round(tsb, 1)}
-
-
 def daily_load_by_date(
     activities: Optional[List[Dict[str, Any]]] = None, dbh=None
 ) -> Dict[str, float]:
@@ -776,7 +703,7 @@ def daily_load_by_date(
 
 def pmc_history_start(dbh=None) -> Optional[str]:
     """Earliest ISO date with any Garmin evidence — min(first activity, first metrics
-    row). The single source the warm-up cutoff and effective-history clock derive from.
+    row). The single source the warm-up cutoff and the still-warming-up flag derive from.
 
     `dbh` defaults to the module db; callers holding their own handle (CoachService's
     injected db, the CLI's rebindable one) pass it so the cutoff is derived from the
@@ -812,31 +739,28 @@ def pmc_display_values(
 
 def pmc_data_caveat(
     as_of: Optional[str] = None,
-    daily_load: Optional[Dict[str, float]] = None,
     dbh=None,
 ) -> Optional[Dict[str, Any]]:
-    """Convergence caveat for when today's own PMC values are still warming (§3.3b).
+    """Static "still warming up" flag for when today's own PMC values are short on
+    history (§3.3b). A 42-day CTL EWMA needs months to settle, so while total history
+    behind today is short the latest value is warm-up grade even though the leading-edge
+    blanking (§3.3a) can't suppress *today*.
 
-    Returns {'n_days','pct','effective_start'} while effective history is short
-    (< 3*τ_ctl ≈ the 95% mark), else None (the artifact is then negligible). `as_of`
-    defaults to today. The caller renders the coach/user wording; the direction of any
-    discount is the LLM's to judge from the athlete's pre-DB history — only the
-    magnitude is ours."""
+    Returns {'n_days','history_start'} while N = today − history_start is under 3·τ_ctl
+    (≈126 days), else None (above that the artifact is negligible). This is a flat flag,
+    not a computed accuracy figure: a young/just-returned athlete simply sees low numbers
+    under a plain flag. The caller renders the coach/user wording; the *direction* of any
+    discount (is a low CTL an artifact or a real beginner?) is the LLM's to judge from the
+    athlete's pre-DB history — the app only flags that the number is young."""
     ctl_days = config.pmc_ctl_days
     start = pmc_history_start(dbh)
     if not start:
         return None
     end = as_of or today_str()
-    if daily_load is None:
-        daily_load = daily_load_by_date(dbh=dbh)
-    n_days, eff_start = pmc_effective_history(daily_load, start, end, ctl_days)
+    n_days = (_to_date(end) - _to_date(start)).days
     if n_days <= 0 or n_days >= 3 * ctl_days:
         return None
-    return {
-        "n_days": n_days,
-        "pct": pmc_convergence_pct(n_days, ctl_days),
-        "effective_start": eff_start,
-    }
+    return {"n_days": n_days, "history_start": start}
 
 
 def recompute_derived(dbh=None) -> None:

@@ -37,10 +37,6 @@ def run_status(
     """Displays current athlete goals, Garmin metrics, baselines, and memories."""
     ensure_recent_data(no_pull=no_pull, force_pull=force_pull)
     print(bold(cyan("=== TRAINMATE ATHLETE STATUS ===")))
-    
-    # Structured phase of the active mesocycle, captured for phase-aware TSB coloring in
-    # the metrics section below; None when there's no active block (color stays phase-blind).
-    active_phase = None
 
     # Active Goal & Periodization Strategy
     objectives = cli.db.get_objectives(status='active')
@@ -83,7 +79,6 @@ def run_status(
                     break
             
             if active_meso:
-                active_phase = active_meso.get('phase')
                 print(
                     f"{bold('Active Mesocycle')}: {green(active_meso['name'])} "
                     f"({cyan(active_meso['start_date'])} to {cyan(active_meso['end_date'])})"
@@ -156,16 +151,16 @@ def run_status(
         # Fitness/Fatigue/Form (CTL/ATL/TSB) + ramp. Never zero-fill: a NULL or warm-up
         # field renders "—" (a printed "TSB 0.0" reads as a meaningful neutral balance,
         # not as missing data), and the whole line is dropped when all three are absent
-        # (DESIGN_pmc_fitness_fatigue.md §6.1). TSB is phase-aware; ramp comes from the
-        # full stored CTL series. All garmin helpers read cli.db (dbh=), the same
-        # database the metrics above came from.
+        # (DESIGN_pmc_fitness_fatigue.md §6.1). TSB colors only its two risk ends
+        # (phase-blind); ramp comes from the full stored CTL series. All garmin helpers
+        # read cli.db (dbh=), the same database the metrics above came from.
         warmup_cutoff = cli.garmin.pmc_warmup_cutoff(dbh=cli.db)
         in_warmup = bool(warmup_cutoff and last_metrics['date'] < warmup_cutoff)
         ctl_v, atl_v, tsb_v = cli.garmin.pmc_display_values(last_metrics, warmup_cutoff)
         if ctl_v is not None or atl_v is not None or tsb_v is not None:
             ctl_s = f"{ctl_v:.1f}" if ctl_v is not None else "—"
             atl_s = f"{atl_v:.1f}" if atl_v is not None else "—"
-            tsb_s = color_tsb(tsb_v, active_phase) if tsb_v is not None else "—"
+            tsb_s = color_tsb(tsb_v) if tsb_v is not None else "—"
             ramp_s = "—"
             if not in_warmup:
                 ctl_by_date = {m['date']: m.get('ctl') for m in metrics}
@@ -178,13 +173,12 @@ def run_status(
                 f"- Fitness    : CTL {ctl_s} | ATL {atl_s} | TSB {tsb_s} | Ramp {ramp_s}"
             )
             print(dim(f"  {PMC_TSB_LAG_NOTE}"))
-            # Young/warming DB: warn WHY freshness may read low (the convergence caveat).
+            # Young/warming DB: warn WHY freshness may read low (the still-warming flag).
             caveat = cli.garmin.pmc_data_caveat(last_metrics['date'], dbh=cli.db)
             if caveat:
                 print(dim(
-                    f"  PMC still warming: CTL based on {caveat['n_days']} days "
-                    f"(~{caveat['pct']}% converged); low TSB/high ramp may be partly "
-                    f"a warm-up artifact."
+                    f"  PMC still warming: CTL based on {caveat['n_days']} days of "
+                    f"history; low TSB/high ramp may be partly a warm-up artifact."
                 ))
         
         # Baselines
