@@ -758,7 +758,7 @@ def pmc_data_caveat(
         return None
     end = as_of or today_str()
     n_days = (_to_date(end) - _to_date(start)).days
-    if n_days <= 0 or n_days >= 3 * ctl_days:
+    if n_days < 0 or n_days >= 3 * ctl_days:
         return None
     return {"n_days": n_days, "history_start": start}
 
@@ -1057,8 +1057,8 @@ def _warn_manual(start: str, end: str, *, cold: bool) -> None:
         print(yellow(
             f"This view needs Garmin data back to {start}, which hasn't been pulled. "
             "Baselines and ACWR may be incomplete. Fitness/fatigue (CTL/ATL/TSB) also "
-            "warm up over ~6 weeks of history, so on a shallow backfill freshness can "
-            "read artificially low. To backfill, run:"
+            f"warm up over the first ~{config.pmc_ctl_days} days of history, so on a "
+            "shallow backfill freshness can read artificially low. To backfill, run:"
         ))
     print(f"  {_pull_command(start, end)}")
 

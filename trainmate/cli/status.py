@@ -155,31 +155,31 @@ def run_status(
         # (phase-blind); ramp comes from the full stored CTL series. All garmin helpers
         # read cli.db (dbh=), the same database the metrics above came from.
         warmup_cutoff = cli.garmin.pmc_warmup_cutoff(dbh=cli.db)
-        in_warmup = bool(warmup_cutoff and last_metrics['date'] < warmup_cutoff)
         ctl_v, atl_v, tsb_v = cli.garmin.pmc_display_values(last_metrics, warmup_cutoff)
         if ctl_v is not None or atl_v is not None or tsb_v is not None:
             ctl_s = f"{ctl_v:.1f}" if ctl_v is not None else "—"
             atl_s = f"{atl_v:.1f}" if atl_v is not None else "—"
             tsb_s = color_tsb(tsb_v) if tsb_v is not None else "—"
-            ramp_s = "—"
-            if not in_warmup:
-                ctl_by_date = {m['date']: m.get('ctl') for m in metrics}
-                ramp_v = cli.garmin.pmc_ramp(
-                    ctl_by_date, last_metrics['date'], warmup_cutoff=warmup_cutoff
-                )
-                if ramp_v is not None:
-                    ramp_s = color_ramp(ramp_v) + "/wk"
+            ctl_by_date = {m['date']: m.get('ctl') for m in metrics}
+            ramp_v = cli.garmin.pmc_ramp(
+                ctl_by_date, last_metrics['date'], warmup_cutoff=warmup_cutoff
+            )
+            ramp_s = color_ramp(ramp_v) + "/wk" if ramp_v is not None else "—"
             print(
                 f"- Fitness    : CTL {ctl_s} | ATL {atl_s} | TSB {tsb_s} | Ramp {ramp_s}"
             )
-            print(dim(f"  {PMC_TSB_LAG_NOTE}"))
-            # Young/warming DB: warn WHY freshness may read low (the still-warming flag).
-            caveat = cli.garmin.pmc_data_caveat(last_metrics['date'], dbh=cli.db)
-            if caveat:
-                print(dim(
-                    f"  PMC still warming: CTL based on {caveat['n_days']} days of "
-                    f"history; low TSB/high ramp may be partly a warm-up artifact."
-                ))
+            if tsb_v is not None:
+                print(dim(f"  {PMC_TSB_LAG_NOTE}"))
+        # Young/warming DB (§3.3b): say WHY freshness reads low — shown even while the
+        # values themselves are warm-up-suppressed above (the suppression is the reason).
+        caveat = cli.garmin.pmc_data_caveat(dbh=cli.db)
+        if caveat:
+            ctl_days = config.pmc_ctl_days
+            print(dim(
+                f"  PMC still warming: CTL based on {caveat['n_days']} days of "
+                f"history (a {ctl_days}-day average needs ~{3 * ctl_days} days to "
+                f"settle); fitness/freshness may read low."
+            ))
         
         # Baselines
         if baseline:

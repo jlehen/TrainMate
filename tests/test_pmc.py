@@ -153,6 +153,17 @@ class TestStaticFlag(_DBBackedTest):
         self.assertEqual(cav["history_start"], base.isoformat())
         self.assertNotIn("pct", cav)              # static flag — no convergence figure
 
+    def test_flag_fires_on_first_pull_day(self):
+        # N = 0 (history starts today) is the youngest possible DB — the flag must
+        # fire, not be excluded by an off-by-one at the boundary.
+        test_db.save_metric_cache(
+            date=date.today().isoformat(),
+            rhr=50, hrv=70, sleep_score=80, stress=20,
+        )
+        cav = garmin.pmc_data_caveat(date.today().isoformat(), dbh=test_db)
+        self.assertIsNotNone(cav)
+        self.assertEqual(cav["n_days"], 0)
+
     def test_flag_drops_once_history_exceeds_three_tau(self):
         # >= 3*tau_ctl (126 days) of history -> artifact negligible, no flag.
         base = date.today() - timedelta(days=130)
@@ -298,13 +309,22 @@ class TestFormatMetricsHistory(unittest.TestCase):
         self.assertIn("- 2026-06-01: (no data)", out)
 
     def test_partial_pmc_row_still_gets_lag_footnote(self):
-        # The footnote explains the TSB lag; it must appear whenever ANY of the
-        # triple is shown, not only when CTL happens to be non-NULL.
+        # The footnote explains the TSB lag; it must appear whenever TSB is shown,
+        # even when CTL happens to be NULL.
         rows = [{"date": "2026-07-02", "rhr": 52, "hrv": 61, "sleep_score": 78,
                  "stress": 31, "acwr": 1.1, "ctl": None, "atl": 71.7, "tsb": -8.9}]
         out = format_metrics_history(rows)
         self.assertIn("TSB=-8.9", out)
         self.assertIn(PMC_TSB_LAG_NOTE, out)
+
+    def test_no_tsb_no_lag_footnote(self):
+        # ...and conversely: a CTL/ATL-only block shows no TSB, so there is no lag
+        # on display to explain and the footnote must be omitted.
+        rows = [{"date": "2026-07-02", "rhr": 52, "hrv": 61, "sleep_score": 78,
+                 "stress": 31, "acwr": 1.1, "ctl": 62.4, "atl": 71.7, "tsb": None}]
+        out = format_metrics_history(rows)
+        self.assertIn("CTL=62.4", out)
+        self.assertNotIn(PMC_TSB_LAG_NOTE, out)
 
 
 class TestDisplayValues(unittest.TestCase):

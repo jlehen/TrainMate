@@ -1,6 +1,6 @@
 # Design: PMC Fitness/Fatigue/Form (CTL · ATL · TSB)
 
-**Status:** Proposed (rev. 6) · **Date:** 2026-07-06 · **Branch:** worktree-design-pmc-fitness-fatigue
+**Status:** Proposed (rev. 7) · **Date:** 2026-07-07 · **Branch:** worktree-design-pmc-fitness-fatigue
 
 > **Rev. 6 (2026-07-06) — scope rebalance.** Revs. 1–5 grew this design to cover
 > every conceivable case; the aggregate complexity outran the payoff. This revision
@@ -34,6 +34,17 @@
 > Net effect: the shipping feature is the top ~30% of the old design that carried
 > ~90% of the value. Full rev. 1–5 history (and the cut §4.4 / rev-5 §3.3b specs) is
 > in git.
+
+> **Rev. 7 (2026-07-07) — post-implementation review fixes.** Four code-review
+> findings folded back into the spec: (1) the §3.1 ramp fallback now *rescales* the
+> nearest-earlier delta to a per-week rate and bounds the lookback at 14 days — an
+> unscaled gap delta labeled "/week" would misstate the rate the bands judge (the
+> implementation was right; the spec text was stale). (2) The §3.3(b) flag fires
+> from `N = 0` — a first-pull DB is the youngest case, not an excluded one.
+> (3) The §3.3(b) caveat wording is parameterized by τ_ctl, and while the whole
+> history is still inside the warm-up window it states that values are *suppressed*
+> instead of caveating numbers that aren't shown — and `tm status` shows it even
+> then. (4) The TSB-lag footnote appears only where TSB itself is shown.
 
 `trainmate/science/training_load.txt` (f0bb707) documents the full Performance Management
 Chart model — CTL (fitness), ATL (fatigue), TSB (form), and the CTL ramp rate —
@@ -137,9 +148,12 @@ tsb_d = ctl_{d-1} − atl_{d-1}          # yesterday's values, per the science f
 - **Ramp rate is derived, never stored:** `ramp = ctl_d − ctl_{d-7}` computed
   where displayed (status line, coach summary, weekly digest). Storing it would
   just denormalize a subtraction. Interior-gap rule for the `d−7` lookup: use
-  the nearest **earlier** in-memory CTL if the exact `d−7` day has no value; if
-  fewer than 7 days of history precede `d`, **omit** the ramp (don't emit
-  garbage). **Ramp reads the full stored CTL series, never the windowed prompt
+  the nearest **earlier** in-memory CTL if the exact `d−7` day has no value,
+  **rescaling the delta to a per-week rate** (`Δ · 7 / span`) — an unscaled
+  10-day delta labeled "/week" would overstate the rate the bands judge — and
+  bounding the fallback at 14 days back (beyond that, omit rather than
+  extrapolate); if fewer than 7 days of history precede `d`, **omit** the ramp
+  (don't emit garbage). **Ramp reads the full stored CTL series, never the windowed prompt
   slice.** The generate/adapt prompts carry only a short metrics window (15 days
   for generate, `history_days` for adapt), so computing ramp from those rows
   alone would wrongly omit it whenever the window is < 8 days even though the DB
@@ -203,20 +217,27 @@ total history behind the latest value is short, surface a single **static** flag
 not a computed accuracy figure:
 
 - **To the coach** — one line appended to the data summary (§5.2):
-  `- PMC data caveat: CTL is based on N days of history (a 42-day average needs
-  months to settle). If the athlete trained regularly before {history_start},
-  true fitness is higher than shown and low TSB / high ramp are partly warm-up
-  artifacts; if they did not, the low values are real.` — `N = today −
-  history_start`. The caveat states the *condition* rather than asserting
-  understatement, because a genuine beginner's low CTL is correct, not an
-  artifact (the direction is the LLM's to judge from the athlete's pre-DB
-  history; the app only flags that the number is young).
+  `- PMC data caveat: CTL is based on N days of history (a {τ_ctl}-day average
+  needs months to settle). If the athlete trained regularly before
+  {history_start}, true fitness is higher than shown and low TSB / high ramp are
+  partly warm-up artifacts; if they did not, the low values are real.` — `N =
+  today − history_start`, and the τ in the wording reads the live config (a
+  hardcoded "42" would lie under a non-default τ_ctl — the same frozen-constant
+  drift §3.4 kills `CHRONIC_WEEKS` over). The caveat states the *condition*
+  rather than asserting understatement, because a genuine beginner's low CTL is
+  correct, not an artifact (the direction is the LLM's to judge from the
+  athlete's pre-DB history; the app only flags that the number is young).
+  While `N < τ_ctl` the *entire* history is still inside the §3.3(a) warm-up
+  window, so every surfaced value is suppressed; then the line instead states
+  that PMC is suppressed and why, rather than caveating numbers the prompt
+  doesn't contain.
 - **To the user** — a matching short `tm status` line, and the `_warn_manual`
   baseline text (`garmin.py` L836) gains a PMC sentence so a young-DB user sees
   *why* freshness reads low.
 
-Fire the flag while `N < 3·τ_ctl` (≈126 days); above that the artifact is
-negligible and the line is dropped.
+Fire the flag while `0 ≤ N < 3·τ_ctl` (≈126 days) — including `N = 0`, the
+first-pull day, which is the youngest history a DB can have; above the ceiling
+the artifact is negligible and the line is dropped.
 
 > **What rev. 6 deliberately does *not* do here.** Rev. 5 turned this into a
 > convergence-percentage figure (`1 − e^{−N/τ}` → "~78% converged") plus
@@ -354,7 +375,8 @@ CTL/ATL/TSB alike). For a fully-populated, past-warm-up row:
 - **TSB won't equal the shown CTL − ATL.** Per §3.1, `TSB = CTL(yesterday) −
   ATL(yesterday)`, but the line shows *today's* CTL/ATL. This is correct
   (matching TrainingPeaks' lag) but reads as an arithmetic error, so a one-line
-  footnote states the lag wherever the triple is surfaced.
+  footnote states the lag wherever TSB itself is surfaced (a CTL/ATL-only block
+  has no lag to explain, so it gets no footnote).
 - **Ramp is *not* on the per-day line.** Ramp is a slow-moving weekly figure;
   stamping it on all ~30 daily lines is repetition the LLM must wade through. It
   reaches the coach as a **single line** instead (§5.2).
@@ -548,10 +570,11 @@ retention.
 
 Ramp (`pmc_ramp`):
 
-- exact 7-day delta; nearest-earlier fallback at an interior d−7 gap; omit when
-  fewer than 7 days precede; omit when the baseline lands before the warm-up
-  cutoff (straddle guard); computed from full history so an 8-day prompt window
-  still emits it.
+- exact 7-day delta; nearest-earlier fallback at an interior d−7 gap, rescaled
+  to a per-week rate (`Δ · 7 / span`); omit when the nearest baseline is more
+  than 14 days back; omit when fewer than 7 days precede; omit when the baseline
+  lands before the warm-up cutoff (straddle guard); computed from full history
+  so an 8-day prompt window still emits it.
 
 Formatting / surfacing:
 

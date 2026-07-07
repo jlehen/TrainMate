@@ -130,7 +130,8 @@ class CoachService:
         caveat = self._pmc_caveat_line(as_of)
         if caveat:
             out.append(caveat)
-        if latest:
+        # The footnote explains the TSB lag, so only a line actually showing TSB needs it.
+        if latest and "TSB" in latest:
             out.append(PMC_TSB_LAG_NOTE)
         return out
 
@@ -183,16 +184,27 @@ class CoachService:
     def _pmc_caveat_line(self, as_of: Optional[str] = None) -> Optional[str]:
         """The §3.3(b) static "still warming up" flag, stated as a *condition* (not an
         assertion that fitness is understated — a genuine beginner's low CTL is correct).
-        None once history is long enough that the warm-up artifact is negligible."""
+        None once history is long enough that the warm-up artifact is negligible.
+
+        While N < τ_ctl the ENTIRE history is still inside the §3.3(a) warm-up window, so
+        every surface suppresses the values themselves; then this line explains the
+        absence instead of caveating numbers the prompt doesn't contain."""
         cav = garmin.pmc_data_caveat(as_of or _today_str(), dbh=self._db)
         if not cav:
             return None
+        ctl_days = config.pmc_ctl_days
+        if cav["n_days"] < ctl_days:
+            return (
+                f"- PMC (CTL/ATL/TSB): suppressed — only {cav['n_days']} days of "
+                f"history; values are leading-edge warm-up artifacts for the first "
+                f"{ctl_days} days."
+            )
         return (
             f"- PMC data caveat: CTL is based on {cav['n_days']} days of history "
-            f"(a 42-day average needs months to settle). If the athlete trained "
-            f"regularly before {cav['history_start']}, true fitness is higher than "
-            f"shown and low TSB / high ramp are partly warm-up artifacts; if they "
-            f"did not, the low values are real."
+            f"(a {ctl_days}-day average needs months to settle). If the athlete "
+            f"trained regularly before {cav['history_start']}, true fitness is higher "
+            f"than shown and low TSB / high ramp are partly warm-up artifacts; if "
+            f"they did not, the low values are real."
         )
 
     def _pmc_prompt_context(

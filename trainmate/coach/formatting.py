@@ -62,9 +62,10 @@ def format_metrics_history(
     (DESIGN_pmc_fitness_fatigue.md §5.1). The PMC triple is additionally suppressed for
     rows dated before `warmup_cutoff` (garmin.pmc_warmup_cutoff), where the EWMAs are
     still leading-edge warm-up artifacts (§3.3a). The TSB-lag footnote is appended once
-    when any row showed PMC."""
+    when any row showed TSB (it explains the TSB lag; a CTL/ATL-only block has no lag
+    to explain)."""
     metrics_lines = []
-    shown_pmc = False
+    shown_tsb = False
     for m in metrics:
         fields = []
         if m.get('rhr') is not None:
@@ -86,14 +87,15 @@ def format_metrics_history(
             ]
             if pmc_fields:
                 fields.extend(pmc_fields)
-                shown_pmc = True   # any of the triple warrants the lag footnote
+                if m.get('tsb') is not None:
+                    shown_tsb = True
         # An all-null row (pulled, but Garmin had nothing) still gets a line — marked
         # explicitly rather than left dangling as "- 2026-07-02: ".
         metrics_lines.append(
             f"- {m['date']}: " + (", ".join(fields) if fields else "(no data)")
         )
     out = "\n".join(metrics_lines)
-    if shown_pmc:
+    if shown_tsb:
         out += "\n" + PMC_TSB_LAG_NOTE
     return out
 
