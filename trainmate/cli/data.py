@@ -126,15 +126,10 @@ def run_data_wipe(args: argparse.Namespace) -> None:
 
     if garmin:
         cli.db.wipe_garmin_data(start, end)
-        # A ranged wipe leaves deleted load baked into the EWMA CTL/ATL of every later
-        # surviving day (an EWMA carries it forward forever, unlike ACWR's bounded flat
-        # window), so recompute the derived metrics now that the wipe has committed. Run
-        # at the command layer, not inside the db method: recompute_derived() lives in
-        # garmin.py (which imports db, so a call from db/wipes.py would be a circular
-        # import) and opens its own connection, so calling it before the wipe's commit
-        # would deadlock or miss the deletes (DESIGN_pmc_fitness_fatigue.md §4).
-        # dbh=cli.db: sweep the SAME database the wipe just ran against, not garmin's
-        # import-time singleton (they diverge when the db has been rebound/injected).
+        # A ranged wipe leaves deleted load baked into later days' CTL/ATL EWMAs, so
+        # recompute after the wipe commits. Done here at the command layer (not the db
+        # method) to avoid a garmin<->db circular import, and pinned to cli.db so it
+        # sweeps the same database the wipe ran against. See DESIGN_pmc_fitness_fatigue.md §4.
         cli.garmin.recompute_derived(dbh=cli.db)
     if calendar:
         cli.db.wipe_calendar_context(start, end)

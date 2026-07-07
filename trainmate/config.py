@@ -251,19 +251,13 @@ class Config:
         clean gap at 0.5."""
         return float(self.get("garmin", {}).get("hr_zone_coverage_min", 0.5))
 
-    # --- Load-model windows (ACWR + PMC; see DESIGN_pmc_fitness_fatigue.md §3.4) ---
-    # These are computation constants living beside the workload windows they replace,
-    # under `garmin:`. The science file's interpretation bands (ACWR 0.8-1.3, TSB
-    # -30/+25, ramp 3-5/8) are calibrated to the DEFAULTS: non-default constants change
-    # what the numbers *mean* while the prompts and colors keep judging them against the
-    # standard bands. They are for deliberate experimentation, not casual tuning — the
-    # defaults are the supported configuration. A change takes effect on the next sweep
-    # that calls recompute_derived() (next pull/backfill/wipe); nothing recomputes on a
-    # config edit alone.
+    # --- Load-model windows (ACWR + PMC), config-backed under `garmin:`. Non-default
+    # values are experimental; calibration caveat in config_template.yaml and
+    # DESIGN_pmc_fitness_fatigue.md §3.4. ---
     def _load_window_days(self, key: str, default: int) -> int:
-        """A `garmin:` load-model window/time-constant, validated positive: all four are
-        EWMA or averaging divisors, so a zero would crash recompute mid-sweep and a
-        negative would silently store nonsense — fail loud at read time instead."""
+        """A `garmin:` load window/time-constant, validated positive — all four are
+        EWMA/averaging divisors, so a non-positive value would crash recompute or store
+        nonsense. Fail loud at read time."""
         v = int(self.get("garmin", {}).get(key, default))
         if v <= 0:
             raise ValueError(

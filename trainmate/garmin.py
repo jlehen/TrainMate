@@ -19,17 +19,11 @@ from trainmate.config import config
 from trainmate.db import db
 from trainmate.util import today_date, today_str, yellow, red, dim
 
-# Sports-science windows for the acute:chronic workload ratio (Gabbett/Banister
-# lineage): a short acute load over a longer chronic load, the chronic expressed as
-# a rolling weekly average (chronic/acute weeks). The PMC (CTL/ATL) EWMA time
-# constants live alongside them. All four are config-backed under `garmin:`
-# (config.acwr_acute_days / acwr_chronic_days / pmc_ctl_days / pmc_atl_days) so they
-# can be experimented with, but the science file's interpretation bands and the
-# CLI colors are calibrated to the defaults (7/28/42/7) — non-default constants
-# change what the numbers *mean* while the bands keep judging them against the
-# standard values, so the defaults are the supported configuration. Read live every
-# sweep rather than frozen at import, so an edit can't drift derived values apart
-# (e.g. a stored CHRONIC_WEEKS would go stale against a changed window).
+# Acute:chronic workload ratio (Gabbett/Banister lineage) plus the PMC CTL/ATL EWMA
+# time constants. All four are config-backed under `garmin:` and read live every sweep
+# (not frozen at import) so an edit can't drift derived values apart. Non-default
+# windows are experimental — calibration caveat in config_template.yaml and
+# DESIGN_pmc_fitness_fatigue.md §3.4.
 
 
 def _derivation_pad_days() -> int:
