@@ -10,11 +10,12 @@ from trainmate.sports import canonical_sport
 from trainmate.modification_state import SWAP_REASON_PREFIX, MANUAL_REPLACE_REASON_PREFIX
 from trainmate import garmin
 from trainmate.garmin import activity_load
-from trainmate.util import today_str as _today_str, today_date as _today_date, cyan, green, yellow, bold, red, gray
-from trainmate.coach.engine import CoachEngine, MIN_PLAN_WEEKS, MAX_PLAN_WEEKS
-from trainmate.coach.formatting import (
-    format_baseline, _load_science_guidelines, PMC_TSB_LAG_NOTE,
+from trainmate.util import (
+    today_str as _today_str, today_date as _today_date,
+    cyan, green, yellow, bold, red, gray, PMC_TSB_LAG_NOTE,
 )
+from trainmate.coach.engine import CoachEngine, MIN_PLAN_WEEKS, MAX_PLAN_WEEKS
+from trainmate.coach.formatting import format_baseline, _load_science_guidelines
 
 # Fallback look-back for `reflect` when no watermark exists yet (bootstrap not run).
 DEFAULT_REFLECT_WEEKS = 4
@@ -120,23 +121,23 @@ class CoachService:
         and the TSB-lag footnote — each omitted when it has nothing to say. Order: values,
         then trust/caveat."""
         out: List[str] = []
-        cutoff = self._pmc_warmup_cutoff()
+        # History start (and the cutoff/caveat derived from it) is read ONCE here and
+        # passed down — no helper below re-derives it.
+        start = garmin.pmc_history_start(dbh=self._db)
+        cutoff = garmin.pmc_warmup_cutoff_for(start, config.pmc_ctl_days)
         latest = self._pmc_latest_line(metrics, cutoff)
         if latest:
             out.append(latest)
-        ramp = self._pmc_ramp_line()
+        ramp = self._pmc_ramp_line(cutoff)
         if ramp:
             out.append(ramp)
-        caveat = self._pmc_caveat_line(as_of)
+        caveat = self._pmc_caveat_line(garmin.pmc_data_caveat(start, as_of))
         if caveat:
             out.append(caveat)
         # The footnote explains the TSB lag, so only a line actually showing TSB needs it.
         if latest and "TSB" in latest:
             out.append(PMC_TSB_LAG_NOTE)
         return out
-
-    def _pmc_warmup_cutoff(self) -> Optional[str]:
-        return garmin.pmc_warmup_cutoff(dbh=self._db)
 
     def _pmc_latest_line(
         self, metrics: List[Dict[str, Any]], warmup_cutoff: Optional[str]
@@ -159,12 +160,11 @@ class CoachService:
             return "- Fitness/Fatigue (PMC): " + ", ".join(parts)
         return None
 
-    def _pmc_ramp_line(self) -> Optional[str]:
+    def _pmc_ramp_line(self, cutoff: Optional[str]) -> Optional[str]:
         """The single '- CTL ramp rate: +4.2/week (last 7 days)' line, computed from the
         FULL stored CTL series (never a short prompt window, so a small window can't drop
         it — §3.1/§5.2). None inside the warm-up window, at a <7-day span edge, or when
         the -7d baseline itself lands in the warm-up zone (pmc_ramp's straddle guard)."""
-        cutoff = self._pmc_warmup_cutoff()
         all_metrics = self._db.get_metrics_cache()
         ctl_by_date = {m['date']: m.get('ctl') for m in all_metrics}
         latest = None
@@ -181,15 +181,14 @@ class CoachService:
             return None
         return f"- CTL ramp rate: {ramp:+.1f}/week (last 7 days)"
 
-    def _pmc_caveat_line(self, as_of: Optional[str] = None) -> Optional[str]:
-        """The §3.3(b) static "still warming up" flag, stated as a *condition* (not an
-        assertion that fitness is understated — a genuine beginner's low CTL is correct).
-        None once history is long enough that the warm-up artifact is negligible.
+    def _pmc_caveat_line(self, cav: Optional[Dict[str, Any]]) -> Optional[str]:
+        """Renders the §3.3(b) static "still warming up" flag (a garmin.pmc_data_caveat
+        dict, or None) as a summary line, stated as a *condition* (not an assertion that
+        fitness is understated — a genuine beginner's low CTL is correct).
 
         While N < τ_ctl the ENTIRE history is still inside the §3.3(a) warm-up window, so
         every surface suppresses the values themselves; then this line explains the
         absence instead of caveating numbers the prompt doesn't contain."""
-        cav = garmin.pmc_data_caveat(as_of or _today_str(), dbh=self._db)
         if not cav:
             return None
         ctl_days = config.pmc_ctl_days
@@ -212,17 +211,47 @@ class CoachService:
     ) -> Tuple[Optional[str], Optional[str]]:
         """(warmup_cutoff, extra_lines) for the generate/adapt metrics block: the single
         ramp line and the still-warming-up flag — a single line each beside the per-day
-        block, never repeated per day (§5.2)."""
-        cutoff = self._pmc_warmup_cutoff()
-        as_of = as_of or _today_str()
+        block, never repeated per day (§5.2). History start is read ONCE and passed down."""
+        start = garmin.pmc_history_start(dbh=self._db)
+        cutoff = garmin.pmc_warmup_cutoff_for(start, config.pmc_ctl_days)
         lines: List[str] = []
-        ramp = self._pmc_ramp_line()
+        ramp = self._pmc_ramp_line(cutoff)
         if ramp:
             lines.append(ramp)
-        caveat = self._pmc_caveat_line(as_of)
+        caveat = self._pmc_caveat_line(garmin.pmc_data_caveat(start, as_of))
         if caveat:
             lines.append(caveat)
         return cutoff, ("\n".join(lines) if lines else None)
+
+    @staticmethod
+    def _pmc_week_summary(
+        w_metrics: List[Dict[str, Any]],
+        ctl_by_date: Dict[str, Optional[float]],
+        warmup_cutoff: Optional[str],
+    ) -> Tuple[Optional[float], Optional[float], Optional[float]]:
+        """(end_ctl, week_ramp, min_tsb) for one week of the analysis digest (§5.4):
+        end_ctl = last day's CTL, min_tsb = deepest overload, week_ramp = end_ctl vs CTL
+        7 days earlier. Guards: a week entirely inside the warm-up window emits all None
+        (no phantom overreach from seeding artifacts); week_ramp comes from pmc_ramp,
+        which applies the §3.1 nearest-earlier interior-gap rule, the straddle guard
+        (a -7d lookback before the cutoff would ramp off a warm-up baseline), and the
+        first-week boundary omit (no baseline in the window slice)."""
+        end_ctl = week_ramp = min_tsb = None
+        past_warmup = [
+            m for m in w_metrics
+            if (warmup_cutoff is None or m['date'] >= warmup_cutoff)
+        ]
+        ctl_days = [m for m in past_warmup if m.get('ctl') is not None]
+        if ctl_days:
+            end_row = max(ctl_days, key=lambda m: m['date'])
+            end_ctl = end_row['ctl']
+            week_ramp = garmin.pmc_ramp(
+                ctl_by_date, end_row['date'], warmup_cutoff=warmup_cutoff
+            )
+        tsbs = [m['tsb'] for m in past_warmup if m.get('tsb') is not None]
+        if tsbs:
+            min_tsb = min(tsbs)
+        return end_ctl, week_ramp, min_tsb
 
     def _build_prior_training_context(
         self, prior_macro: Optional[Dict[str, Any]], today_str: str
@@ -2347,7 +2376,9 @@ class CoachService:
 
         # PMC weekly trajectory (DESIGN_pmc_fitness_fatigue.md §5.4): the warm-up cutoff
         # and a full in-window date->CTL map, both read once, for end_ctl/week_ramp/min_tsb.
-        pmc_cutoff = self._pmc_warmup_cutoff()
+        pmc_cutoff = garmin.pmc_warmup_cutoff_for(
+            garmin.pmc_history_start(dbh=self._db), config.pmc_ctl_days
+        )
         ctl_by_date = {m['date']: m.get('ctl') for m in metrics}
 
         # Build summaries per week
@@ -2412,28 +2443,9 @@ class CoachService:
             if acwrs:
                 max_acwr = max(acwrs)
 
-            # PMC weekly trajectory: end_ctl (last day's CTL), min_tsb (deepest overload),
-            # week_ramp (end_ctl vs CTL 7 days earlier). Guards (§5.4): a week entirely
-            # inside the warm-up window emits all None (no phantom overreach from seeding);
-            # week_ramp comes from pmc_ramp, which applies the §3.1 nearest-earlier
-            # interior-gap rule (a one-day cache hole can't drop the week), the straddle
-            # guard (a -7d lookback before the cutoff would ramp off a warm-up baseline),
-            # and the first-week boundary omit (no baseline in the window slice).
-            end_ctl = week_ramp = min_tsb = None
-            past_warmup = [
-                m for m in w_metrics
-                if (pmc_cutoff is None or m['date'] >= pmc_cutoff)
-            ]
-            ctl_days = [m for m in past_warmup if m.get('ctl') is not None]
-            if ctl_days:
-                end_row = max(ctl_days, key=lambda m: m['date'])
-                end_ctl = end_row['ctl']
-                week_ramp = garmin.pmc_ramp(
-                    ctl_by_date, end_row['date'], warmup_cutoff=pmc_cutoff
-                )
-            tsbs = [m['tsb'] for m in past_warmup if m.get('tsb') is not None]
-            if tsbs:
-                min_tsb = min(tsbs)
+            end_ctl, week_ramp, min_tsb = self._pmc_week_summary(
+                w_metrics, ctl_by_date, pmc_cutoff
+            )
 
             active_dates = {act['date'] for act in w_activities}
             rest_days = len(days_in_week) - len(active_dates)

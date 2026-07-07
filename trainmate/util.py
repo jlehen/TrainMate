@@ -101,6 +101,18 @@ def color_acwr(acwr: float) -> str:
         return red(acwr_str)
 
 
+# The printed CTL | ATL | TSB triple won't subtract to the shown TSB, because TSB is
+# CTL(yesterday) - ATL(yesterday) (training_load.txt §2) while CTL/ATL are today's. This
+# lag is correct (matching TrainingPeaks) but reads as an arithmetic error, so this
+# one-line footnote rides wherever TSB is surfaced (per-day prompt block, coach summary,
+# tm status). Lives here — not in coach.formatting — because both the CLI and the coach
+# layer render it.
+PMC_TSB_LAG_NOTE = (
+    "(Note: TSB is CTL(yesterday) - ATL(yesterday), so it won't equal the shown "
+    "same-day CTL - ATL; this ~1-day lag is expected, not an error.)"
+)
+
+
 def color_tsb(tsb: float) -> str:
     """TSB (form) coloring — colors only the two risk ends, phase-blind
     (DESIGN_pmc_fitness_fatigue.md §6.1).

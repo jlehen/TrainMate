@@ -8,10 +8,9 @@ from trainmate.adherence import analyze_adherence, date_covered
 from trainmate.util import (
     bold, dim, green, red, yellow, cyan, blue, magenta, gray,
     color_acwr, color_tsb, color_ramp, visible_len, pad_visible, wrap_text,
-    format_labeled_text, format_labeled_block,
+    format_labeled_text, format_labeled_block, PMC_TSB_LAG_NOTE,
     today_str as _today_str, today_date as _today_date,
 )
-from trainmate.coach.formatting import PMC_TSB_LAG_NOTE
 from trainmate.cli.common import fmt_date, ensure_recent_data
 
 
@@ -154,7 +153,10 @@ def run_status(
         # (DESIGN_pmc_fitness_fatigue.md §6.1). TSB colors only its two risk ends
         # (phase-blind); ramp comes from the full stored CTL series. All garmin helpers
         # read cli.db (dbh=), the same database the metrics above came from.
-        warmup_cutoff = cli.garmin.pmc_warmup_cutoff(dbh=cli.db)
+        history_start = cli.garmin.pmc_history_start(dbh=cli.db)
+        warmup_cutoff = cli.garmin.pmc_warmup_cutoff_for(
+            history_start, config.pmc_ctl_days
+        )
         ctl_v, atl_v, tsb_v = cli.garmin.pmc_display_values(last_metrics, warmup_cutoff)
         if ctl_v is not None or atl_v is not None or tsb_v is not None:
             ctl_s = f"{ctl_v:.1f}" if ctl_v is not None else "—"
@@ -172,7 +174,7 @@ def run_status(
                 print(dim(f"  {PMC_TSB_LAG_NOTE}"))
         # Young/warming DB (§3.3b): say WHY freshness reads low — shown even while the
         # values themselves are warm-up-suppressed above (the suppression is the reason).
-        caveat = cli.garmin.pmc_data_caveat(dbh=cli.db)
+        caveat = cli.garmin.pmc_data_caveat(history_start)
         if caveat:
             ctl_days = config.pmc_ctl_days
             print(dim(

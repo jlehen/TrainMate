@@ -277,7 +277,9 @@ def run_data_show_metrics(args: argparse.Namespace) -> None:
 
     # PMC values inside the leading-edge warm-up window are artifacts, so they render as
     # "—" here (never "0.0") just like NULLs (DESIGN_pmc_fitness_fatigue.md §6.2).
-    warmup_cutoff = cli.garmin.pmc_warmup_cutoff(dbh=cli.db)
+    warmup_cutoff = cli.garmin.pmc_warmup_cutoff_for(
+        cli.garmin.pmc_history_start(dbh=cli.db), config.pmc_ctl_days
+    )
 
     for m in metrics_history:
         base = cli.db.get_baseline(m['date'])
@@ -354,7 +356,9 @@ def _show_metrics_csv(metrics_history: list) -> None:
     ])
     # Suppressed (warm-up) or NULL PMC values are emitted as empty cells, never 0, so
     # downstream parsing can't read a zero as data (DESIGN_pmc_fitness_fatigue.md §6.2).
-    warmup_cutoff = cli.garmin.pmc_warmup_cutoff(dbh=cli.db)
+    warmup_cutoff = cli.garmin.pmc_warmup_cutoff_for(
+        cli.garmin.pmc_history_start(dbh=cli.db), config.pmc_ctl_days
+    )
     for m in metrics_history:
         base = cli.db.get_baseline(m['date'])
         hrv_base = None

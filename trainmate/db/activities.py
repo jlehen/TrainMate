@@ -142,6 +142,15 @@ class ActivitiesMixin:
             row = cursor.fetchone()
             return row["d"] if row else None
 
+    def get_first_metric_date(self) -> Optional[str]:
+        """MIN(date) over the metrics cache — same cheap lookup as
+        get_first_activity_date, for the other half of pmc_history_start."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT MIN(date) AS d FROM athlete_metrics_cache")
+            row = cursor.fetchone()
+            return row["d"] if row else None
+
     # --- Athlete Metrics Cache ---
     def save_metric_cache(
         self, date: str, rhr: Optional[int], hrv: Optional[int],

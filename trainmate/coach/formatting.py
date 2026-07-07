@@ -3,6 +3,7 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional, Set, Tuple
 from trainmate.types import Workout, CompletedActivity
 from trainmate.garmin import activity_load, rpe_divergence
+from trainmate.util import PMC_TSB_LAG_NOTE
 from trainmate.sports import canonical_sport
 from trainmate.modification_state import modification_status
 
@@ -41,16 +42,6 @@ def _adapt_recency_tag(workout: Workout, eval_date: Optional[str]) -> str:
     )
 
 
-# The printed CTL | ATL | TSB triple won't subtract to the shown TSB, because TSB is
-# CTL(yesterday) - ATL(yesterday) (training_load.txt §2) while CTL/ATL are today's. This
-# lag is correct (matching TrainingPeaks) but reads as an arithmetic error, so a one-line
-# footnote states it wherever the triple is surfaced (per-day block, summary, tm status).
-PMC_TSB_LAG_NOTE = (
-    "(Note: TSB is CTL(yesterday) - ATL(yesterday), so it won't equal the shown "
-    "same-day CTL - ATL; this ~1-day lag is expected, not an error.)"
-)
-
-
 def format_metrics_history(
     metrics: List[Dict[str, Any]], warmup_cutoff: Optional[str] = None
 ) -> str:
@@ -60,7 +51,7 @@ def format_metrics_history(
     Stress, ACWR, and the PMC triple CTL/ATL/TSB) is emitted only when present, so a
     NULL value is silently dropped rather than crashing a `:.2f`/rendering `Nonebpm`
     (DESIGN_pmc_fitness_fatigue.md §5.1). The PMC triple is additionally suppressed for
-    rows dated before `warmup_cutoff` (garmin.pmc_warmup_cutoff), where the EWMAs are
+    rows dated before `warmup_cutoff` (garmin.pmc_warmup_cutoff_for), where the EWMAs are
     still leading-edge warm-up artifacts (§3.3a). The TSB-lag footnote is appended once
     when any row showed TSB (it explains the TSB lag; a CTL/ATL-only block has no lag
     to explain)."""

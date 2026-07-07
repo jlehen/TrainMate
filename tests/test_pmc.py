@@ -14,8 +14,8 @@ from trainmate.db import Database
 import trainmate.db
 import trainmate.garmin as garmin
 from trainmate.garmin import compute_pmc, pmc_warmup_cutoff_for, pmc_ramp
-from trainmate.coach.formatting import format_metrics_history, PMC_TSB_LAG_NOTE
-from trainmate.util import color_tsb, color_ramp
+from trainmate.coach.formatting import format_metrics_history
+from trainmate.util import color_tsb, color_ramp, PMC_TSB_LAG_NOTE
 
 
 TEST_DB_PATH = os.path.join(os.path.dirname(__file__), "test_trainmate_pmc.db")
@@ -131,53 +131,33 @@ class TestWarmup(unittest.TestCase):
         self.assertIsNone(pmc_warmup_cutoff_for(None, 42))
 
 
-class TestStaticFlag(_DBBackedTest):
+class TestStaticFlag(unittest.TestCase):
     """garmin.pmc_data_caveat — the static "still warming up" flag (§3.3b): fires with a
-    plain N=today-history_start while N < 3*tau_ctl, then drops. No convergence-% figure."""
+    plain N=today-history_start while N < 3*tau_ctl, then drops. No convergence-% figure.
+    Pure: takes the history start the caller already fetched (pmc_history_start)."""
 
-    def setUp(self):
-        self._use_test_db()
-        clear_all_tables(test_db)
-
-    def test_flag_fires_for_young_db_with_right_n(self):
-        # 30 days of history behind today -> flag fires; N is today - history_start.
-        base = date.today() - timedelta(days=30)
-        for i in range(31):
-            test_db.save_metric_cache(
-                date=(base + timedelta(days=i)).isoformat(),
-                rhr=50, hrv=70, sleep_score=80, stress=20,
-            )
-        cav = garmin.pmc_data_caveat(date.today().isoformat(), dbh=test_db)
+    def test_flag_fires_for_young_history_with_right_n(self):
+        start = (date.today() - timedelta(days=30)).isoformat()
+        cav = garmin.pmc_data_caveat(start)
         self.assertIsNotNone(cav)
         self.assertEqual(cav["n_days"], 30)
-        self.assertEqual(cav["history_start"], base.isoformat())
+        self.assertEqual(cav["history_start"], start)
         self.assertNotIn("pct", cav)              # static flag — no convergence figure
 
     def test_flag_fires_on_first_pull_day(self):
         # N = 0 (history starts today) is the youngest possible DB — the flag must
         # fire, not be excluded by an off-by-one at the boundary.
-        test_db.save_metric_cache(
-            date=date.today().isoformat(),
-            rhr=50, hrv=70, sleep_score=80, stress=20,
-        )
-        cav = garmin.pmc_data_caveat(date.today().isoformat(), dbh=test_db)
+        cav = garmin.pmc_data_caveat(date.today().isoformat())
         self.assertIsNotNone(cav)
         self.assertEqual(cav["n_days"], 0)
 
     def test_flag_drops_once_history_exceeds_three_tau(self):
         # >= 3*tau_ctl (126 days) of history -> artifact negligible, no flag.
-        base = date.today() - timedelta(days=130)
-        for i in range(131):
-            test_db.save_metric_cache(
-                date=(base + timedelta(days=i)).isoformat(),
-                rhr=50, hrv=70, sleep_score=80, stress=20,
-            )
-        self.assertIsNone(
-            garmin.pmc_data_caveat(date.today().isoformat(), dbh=test_db)
-        )
+        start = (date.today() - timedelta(days=130)).isoformat()
+        self.assertIsNone(garmin.pmc_data_caveat(start))
 
     def test_no_history_no_flag(self):
-        self.assertIsNone(garmin.pmc_data_caveat(date.today().isoformat(), dbh=test_db))
+        self.assertIsNone(garmin.pmc_data_caveat(None))
 
 
 # ==============================================================================
@@ -365,6 +345,16 @@ class TestPMCIntegration(_DBBackedTest):
             zone1_sec=0, zone2_sec=1800, zone3_sec=1800, zone4_sec=0, zone5_sec=0,
         )
 
+    def test_history_start_is_min_of_activity_and_metric_dates(self):
+        # pmc_history_start = min(first activity, first metrics row), via the two cheap
+        # MIN() lookups; None on an empty DB.
+        self.assertIsNone(garmin.pmc_history_start(dbh=test_db))
+        test_db.save_metric_cache(
+            date="2026-03-05", rhr=50, hrv=70, sleep_score=80, stress=20
+        )
+        self._add_activity("hs0", "2026-03-02", 50.0)
+        self.assertEqual(garmin.pmc_history_start(dbh=test_db), "2026-03-02")
+
     def test_recompute_populates_and_activity_only_days_create_no_row(self):
         base = date(2026, 3, 1)
         for i in range(60):
@@ -450,6 +440,66 @@ class TestPMCIntegration(_DBBackedTest):
         self.assertLess(row["ctl"], ctl_before)
 
 
+class TestWeekSummary(unittest.TestCase):
+    """CoachService._pmc_week_summary — the §5.4 weekly-digest guards, pure.
+
+    A "week" is 7 rows Mon 2026-03-09 .. Sun 2026-03-15 with CTL rising 1/day from
+    a series that started 2026-03-02 at 10.0 (so ctl(03-08)=16, ctl(03-15)=23)."""
+
+    @staticmethod
+    def _rows(start_iso, ctls, tsbs=None):
+        base = date.fromisoformat(start_iso)
+        return [
+            {"date": (base + timedelta(days=i)).isoformat(),
+             "ctl": c, "tsb": (tsbs[i] if tsbs else -5.0)}
+            for i, c in enumerate(ctls)
+        ]
+
+    def setUp(self):
+        from trainmate.coach.service import CoachService
+        self.summary = CoachService._pmc_week_summary
+        series = self._rows("2026-03-02", [10.0 + i for i in range(14)])
+        self.ctl_by_date = {m["date"]: m["ctl"] for m in series}
+        self.week = self._rows(
+            "2026-03-09", [17.0 + i for i in range(7)],
+            tsbs=[-5, -6, -9, -4, -3, -2, -1],
+        )
+
+    def test_normal_week(self):
+        end_ctl, week_ramp, min_tsb = self.summary(self.week, self.ctl_by_date, None)
+        self.assertEqual(end_ctl, 23.0)          # last day's CTL
+        self.assertEqual(week_ramp, 7.0)         # ctl(03-15) - ctl(03-08)
+        self.assertEqual(min_tsb, -9)            # deepest overload
+
+    def test_week_inside_warmup_is_all_none(self):
+        # A week entirely inside the warm-up window emits all None — otherwise every
+        # bootstrap narrates a phantom overreach block from seeding artifacts.
+        self.assertEqual(
+            self.summary(self.week, self.ctl_by_date, "2026-04-01"),
+            (None, None, None),
+        )
+
+    def test_straddle_week_shows_values_but_suppresses_ramp(self):
+        # Cutoff mid-week: end_ctl/min_tsb come from the post-cutoff days, but the
+        # ramp's -7d baseline (03-08) lands before the cutoff -> suppressed (straddle
+        # guard), so the first shown week can't report a huge ramp measured against a
+        # suppressed warm-up baseline.
+        end_ctl, week_ramp, min_tsb = self.summary(
+            self.week, self.ctl_by_date, "2026-03-12"
+        )
+        self.assertEqual(end_ctl, 23.0)
+        self.assertIsNone(week_ramp)
+        self.assertEqual(min_tsb, -4)            # only 03-12..15 count
+
+    def test_first_week_has_no_ramp_baseline(self):
+        # No prior week in the window slice -> week_ramp omitted, values still shown.
+        window_only = {m["date"]: m["ctl"] for m in self.week}
+        end_ctl, week_ramp, min_tsb = self.summary(self.week, window_only, None)
+        self.assertEqual(end_ctl, 23.0)
+        self.assertIsNone(week_ramp)
+        self.assertEqual(min_tsb, -9)
+
+
 class TestPMCService(_DBBackedTest):
     """Service-level PMC surfacing: the single CTL ramp line from full history."""
 
@@ -478,7 +528,10 @@ class TestPMCService(_DBBackedTest):
 
     def test_ramp_line_from_full_history(self):
         # Steady 60/day -> CTL still climbing over 60 days, so ramp is positive & present.
-        line = self.svc._pmc_ramp_line()
+        cutoff = garmin.pmc_warmup_cutoff_for(
+            garmin.pmc_history_start(dbh=test_db), garmin.config.pmc_ctl_days
+        )
+        line = self.svc._pmc_ramp_line(cutoff)
         self.assertIsNotNone(line)
         self.assertIn("CTL ramp rate:", line)
 

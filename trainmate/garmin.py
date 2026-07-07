@@ -661,68 +661,40 @@ def pmc_ramp(
     no CTL, when no usable baseline exists at/under date-window (don't emit garbage),
     or when the baseline lands before `warmup_cutoff` — a ramp measured against a
     suppressed warm-up-artifact CTL would read as a phantom overload spike (the §5.4
-    straddle guard, applied here so every surface gets it). Reads whatever CTL series
-    it is given — callers pass the FULL stored series, never a short prompt window,
-    so a small window never spuriously drops it."""
+    straddle guard, applied here so every surface gets it). Callers pass the FULL
+    stored series, never a short prompt window, so a small window never spuriously
+    drops it."""
     today_ctl = ctl_by_date.get(date_iso)
     if today_ctl is None:
         return None
-    target = _to_date(date_iso) - timedelta(days=window)
-    oldest = _to_date(date_iso) - timedelta(days=2 * window)
-    best_date = None
-    best_val = None
-    for ds, v in ctl_by_date.items():
-        if v is None:
+    # The baseline can only live on one of the `window` days in [d-2w, d-w]; look
+    # those up directly (nearest to d-w first) instead of scanning the whole series.
+    d0 = _to_date(date_iso)
+    for offset in range(window, 2 * window + 1):
+        base_date = (d0 - timedelta(days=offset)).isoformat()
+        val = ctl_by_date.get(base_date)
+        if val is None:
             continue
-        d = _to_date(ds)
-        if oldest <= d <= target and (best_date is None or d > best_date):
-            best_date, best_val = d, v
-    if best_val is None:
-        return None
-    if warmup_cutoff and best_date.isoformat() < warmup_cutoff:
-        return None
-    span = (_to_date(date_iso) - best_date).days
-    return round((today_ctl - best_val) * window / span, 1)
-
-
-def daily_load_by_date(
-    activities: Optional[List[Dict[str, Any]]] = None, dbh=None
-) -> Dict[str, float]:
-    """Sums per-activity load (via the activity_load fallback hierarchy) per ISO date.
-    Reads all completed activities from `dbh` (default: the module db) when none are
-    passed. The same series recompute_derived() and the PMC surfaces build their EWMAs
-    and caveats from."""
-    if activities is None:
-        activities = (dbh or db).get_completed_activities()
-    daily: Dict[str, float] = {}
-    for act in activities:
-        d = act["date"]
-        daily[d] = daily.get(d, 0.0) + activity_load(act)
-    return daily
+        if warmup_cutoff and base_date < warmup_cutoff:
+            return None
+        return round((today_ctl - val) * window / offset, 1)
+    return None
 
 
 def pmc_history_start(dbh=None) -> Optional[str]:
     """Earliest ISO date with any Garmin evidence — min(first activity, first metrics
-    row). The single source the warm-up cutoff and the still-warming-up flag derive from.
+    row); two MIN() queries. The single source the warm-up cutoff and the
+    still-warming-up flag derive from — callers fetch it ONCE per command and pass it
+    (or the cutoff derived from it) down, so no two surfaces can compute it differently.
 
     `dbh` defaults to the module db; callers holding their own handle (CoachService's
     injected db, the CLI's rebindable one) pass it so the cutoff is derived from the
     same database as the metrics it gates."""
     dbh = dbh or db
-    firsts = []
-    first_activity = dbh.get_first_activity_date()
-    if first_activity:
-        firsts.append(first_activity)
-    metric_dates = dbh.get_metric_dates()
-    if metric_dates:
-        firsts.append(metric_dates[0])
+    firsts = [
+        d for d in (dbh.get_first_activity_date(), dbh.get_first_metric_date()) if d
+    ]
     return min(firsts) if firsts else None
-
-
-def pmc_warmup_cutoff(dbh=None) -> Optional[str]:
-    """DB-backed single-source warm-up cutoff (§3.3a), passed to every surface — the
-    per-day lines, weekly digest, and CLI — so none of them re-derives it differently."""
-    return pmc_warmup_cutoff_for(pmc_history_start(dbh), config.pmc_ctl_days)
 
 
 def pmc_display_values(
@@ -738,29 +710,28 @@ def pmc_display_values(
 
 
 def pmc_data_caveat(
+    history_start: Optional[str],
     as_of: Optional[str] = None,
-    dbh=None,
 ) -> Optional[Dict[str, Any]]:
     """Static "still warming up" flag for when today's own PMC values are short on
-    history (§3.3b). A 42-day CTL EWMA needs months to settle, so while total history
+    history (§3.3b). A τ_ctl-day CTL EWMA needs months to settle, so while total history
     behind today is short the latest value is warm-up grade even though the leading-edge
     blanking (§3.3a) can't suppress *today*.
 
-    Returns {'n_days','history_start'} while N = today − history_start is under 3·τ_ctl
+    Pure: takes the pmc_history_start() the caller already fetched. Returns
+    {'n_days','history_start'} while N = today − history_start is under 3·τ_ctl
     (≈126 days), else None (above that the artifact is negligible). This is a flat flag,
     not a computed accuracy figure: a young/just-returned athlete simply sees low numbers
     under a plain flag. The caller renders the coach/user wording; the *direction* of any
     discount (is a low CTL an artifact or a real beginner?) is the LLM's to judge from the
     athlete's pre-DB history — the app only flags that the number is young."""
-    ctl_days = config.pmc_ctl_days
-    start = pmc_history_start(dbh)
-    if not start:
+    if not history_start:
         return None
     end = as_of or today_str()
-    n_days = (_to_date(end) - _to_date(start)).days
-    if n_days < 0 or n_days >= 3 * ctl_days:
+    n_days = (_to_date(end) - _to_date(history_start)).days
+    if n_days < 0 or n_days >= 3 * config.pmc_ctl_days:
         return None
-    return {"n_days": n_days, "history_start": start}
+    return {"n_days": n_days, "history_start": history_start}
 
 
 def recompute_derived(dbh=None) -> None:
@@ -774,7 +745,10 @@ def recompute_derived(dbh=None) -> None:
     dbh = dbh or db
     # One unified load per activity via the fallback hierarchy (power TSS ->
     # hrTSS -> sRPE), not the old `tss + rpe*hours` blend.
-    daily_load = daily_load_by_date(dbh=dbh)
+    daily_load: Dict[str, float] = {}
+    for act in dbh.get_completed_activities():
+        date_str = act["date"]
+        daily_load[date_str] = daily_load.get(date_str, 0.0) + activity_load(act)
 
     metrics = dbh.get_metrics_cache()  # sorted by date asc
     by_date = {m["date"]: m for m in metrics}
