@@ -133,21 +133,44 @@ class ActivitiesMixin:
                 )
             return [dict(row) for row in cursor.fetchall()]  # type: ignore
 
+    def get_first_activity_date(self) -> Optional[str]:
+        """MIN(date) over completed activities — the cheap history-start lookup, so
+        callers don't fetch every row (all zone columns included) to read one date."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT MIN(date) AS d FROM completed_activities")
+            row = cursor.fetchone()
+            return row["d"] if row else None
+
+    def get_first_metric_date(self) -> Optional[str]:
+        """MIN(date) over the metrics cache — same cheap lookup as
+        get_first_activity_date, for the other half of pmc_history_start."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT MIN(date) AS d FROM athlete_metrics_cache")
+            row = cursor.fetchone()
+            return row["d"] if row else None
+
     # --- Athlete Metrics Cache ---
     def save_metric_cache(
         self, date: str, rhr: Optional[int], hrv: Optional[int],
         sleep_score: Optional[int], stress: Optional[int],
         acute_workload: Optional[float] = None, chronic_workload: Optional[float] = None,
-        acwr: Optional[float] = None
+        acwr: Optional[float] = None, ctl: Optional[float] = None,
+        atl: Optional[float] = None, tsb: Optional[float] = None
     ) -> None:
-        """Caches daily athlete metrics in the database, updating on conflict."""
+        """Caches daily athlete metrics in the database, updating on conflict.
+
+        ctl/atl/tsb (the PMC triple) use the same COALESCE-preserve semantics as
+        acute/chronic/acwr: a metrics-only Garmin save (which passes them as None) never
+        nulls out PMC values a prior recompute stored (DESIGN_pmc_fitness_fatigue.md §4)."""
         with self._get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("""
                 INSERT INTO athlete_metrics_cache (
                     date, rhr, hrv, sleep_score, stress, acute_workload,
-                    chronic_workload, acwr
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    chronic_workload, acwr, ctl, atl, tsb
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(date) DO UPDATE SET
                     rhr=excluded.rhr,
                     hrv=excluded.hrv,
@@ -159,9 +182,12 @@ class ActivitiesMixin:
                     chronic_workload=COALESCE(
                         excluded.chronic_workload, athlete_metrics_cache.chronic_workload
                     ),
-                    acwr=COALESCE(excluded.acwr, athlete_metrics_cache.acwr)
+                    acwr=COALESCE(excluded.acwr, athlete_metrics_cache.acwr),
+                    ctl=COALESCE(excluded.ctl, athlete_metrics_cache.ctl),
+                    atl=COALESCE(excluded.atl, athlete_metrics_cache.atl),
+                    tsb=COALESCE(excluded.tsb, athlete_metrics_cache.tsb)
             """, (date, rhr, hrv, sleep_score, stress, acute_workload,
-                  chronic_workload, acwr))
+                  chronic_workload, acwr, ctl, atl, tsb))
             conn.commit()
 
     def get_metrics_cache(

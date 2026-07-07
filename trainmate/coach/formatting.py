@@ -3,6 +3,7 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional, Set, Tuple
 from trainmate.types import Workout, CompletedActivity
 from trainmate.garmin import activity_load, rpe_divergence
+from trainmate.util import PMC_TSB_LAG_NOTE
 from trainmate.sports import canonical_sport
 from trainmate.modification_state import modification_status
 
@@ -41,15 +42,53 @@ def _adapt_recency_tag(workout: Workout, eval_date: Optional[str]) -> str:
     )
 
 
-def format_metrics_history(metrics: List[Dict[str, Any]]) -> str:
-    """Formats metrics cache history to a readable block for LLM prompts."""
+def format_metrics_history(
+    metrics: List[Dict[str, Any]], warmup_cutoff: Optional[str] = None
+) -> str:
+    """Formats metrics cache history to a readable block for LLM prompts.
+
+    One None-omission convention for the whole line: every field (RHR, HRV, Sleep,
+    Stress, ACWR, and the PMC triple CTL/ATL/TSB) is emitted only when present, so a
+    NULL value is silently dropped rather than crashing a `:.2f`/rendering `Nonebpm`
+    (DESIGN_pmc_fitness_fatigue.md §5.1). The PMC triple is additionally suppressed for
+    rows dated before `warmup_cutoff` (garmin.pmc_warmup_cutoff_for), where the EWMAs are
+    still leading-edge warm-up artifacts (§3.3a). The TSB-lag footnote is appended once
+    when any row showed TSB (it explains the TSB lag; a CTL/ATL-only block has no lag
+    to explain)."""
     metrics_lines = []
+    shown_tsb = False
     for m in metrics:
+        fields = []
+        if m.get('rhr') is not None:
+            fields.append(f"RHR={m['rhr']}bpm")
+        if m.get('hrv') is not None:
+            fields.append(f"HRV={m['hrv']}ms")
+        if m.get('sleep_score') is not None:
+            fields.append(f"Sleep={m['sleep_score']}")
+        if m.get('stress') is not None:
+            fields.append(f"Stress={m['stress']}")
+        if m.get('acwr') is not None:
+            fields.append(f"ACWR={m['acwr']:.2f}")
+        in_warmup = bool(warmup_cutoff and m['date'] < warmup_cutoff)
+        if not in_warmup:
+            pmc_fields = [
+                f"{label}={m[key]:.1f}"
+                for label, key in (("CTL", "ctl"), ("ATL", "atl"), ("TSB", "tsb"))
+                if m.get(key) is not None
+            ]
+            if pmc_fields:
+                fields.extend(pmc_fields)
+                if m.get('tsb') is not None:
+                    shown_tsb = True
+        # An all-null row (pulled, but Garmin had nothing) still gets a line — marked
+        # explicitly rather than left dangling as "- 2026-07-02: ".
         metrics_lines.append(
-            f"- {m['date']}: RHR={m['rhr']}bpm, HRV={m['hrv']}ms, "
-            f"Sleep={m['sleep_score']}, Stress={m['stress']}, ACWR={m['acwr']:.2f}"
+            f"- {m['date']}: " + (", ".join(fields) if fields else "(no data)")
         )
-    return "\n".join(metrics_lines)
+    out = "\n".join(metrics_lines)
+    if shown_tsb:
+        out += "\n" + PMC_TSB_LAG_NOTE
+    return out
 
 
 def format_daily_context(daily_context: List[Dict[str, Any]]) -> str:

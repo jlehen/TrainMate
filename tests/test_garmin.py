@@ -390,8 +390,26 @@ class TestEnsureData(unittest.TestCase):
             printed = " ".join(str(c.args[0]) for c in mock_print.call_args_list if c.args)
             self.assertIn("data pull --from", printed)
 
+    def test_pad_only_gap_auto_pulls(self):
+        # Upgrade path: a DB whose history satisfied the old 28-day pad now has a
+        # ~35-day hole that exists only to warm the wider 63-day derivation pad. It
+        # lies entirely BEFORE the requested window, is bounded by the pad, and was
+        # never user-requested — so it must auto-pull, not nag "run data pull --from"
+        # on every command.
+        for i in range(33, -1, -1):   # covers window + the old 28-day pad
+            test_db.save_metric_cache(date=_d(-i), rhr=50, hrv=70, sleep_score=80, stress=20)
+        garmin.db.set_sync_state(through_date=_d(0), last_pull_utc=datetime.now(timezone.utc).isoformat())
+        with patch.object(garmin, "pull") as mock_pull:
+            with patch("builtins.print") as mock_print:
+                garmin.ensure_data(_d(-5), _d(0))
+            mock_pull.assert_called()   # pad region pulled automatically
+            printed = " ".join(str(c.args[0]) for c in mock_print.call_args_list if c.args)
+            self.assertNotIn("data pull --from", printed)
+
     def test_fresh_data_no_pull(self):
-        for i in range(60, -1, -1):
+        # Cover the full derivation pad (now max(chronic, 28, 1.5*ctl)=63 days) so the
+        # padded window has no missing days to fetch.
+        for i in range(75, -1, -1):
             test_db.save_metric_cache(date=_d(-i), rhr=50, hrv=70, sleep_score=80, stress=20)
         # Recent watermark -> mutable zone considered fresh, nothing to fetch.
         garmin.db.set_sync_state(through_date=_d(0), last_pull_utc=datetime.now(timezone.utc).isoformat())
@@ -401,7 +419,8 @@ class TestEnsureData(unittest.TestCase):
 
     def test_interior_gap_present_rows_are_not_holes(self):
         # All-null rows still count as "pulled" -> not treated as a gap to refetch.
-        for i in range(60, -1, -1):
+        # Cover the full 63-day derivation pad so the padded window has no real hole.
+        for i in range(75, -1, -1):
             test_db.save_metric_cache(date=_d(-i), rhr=None, hrv=None, sleep_score=None, stress=None)
         garmin.db.set_sync_state(through_date=_d(0), last_pull_utc=datetime.now(timezone.utc).isoformat())
         with patch.object(garmin, "pull") as mock_pull:

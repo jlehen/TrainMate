@@ -309,9 +309,22 @@ class BaseDB:
                     stress INTEGER,
                     acute_workload REAL,
                     chronic_workload REAL,
-                    acwr REAL
+                    acwr REAL,
+                    ctl REAL,
+                    atl REAL,
+                    tsb REAL
                 )
             """)
+            # Performance Management Chart columns (DESIGN_pmc_fitness_fatigue.md §4):
+            # CTL/ATL/TSB, back-populated for the whole history by the next
+            # recompute_derived() sweep. NULL-tolerant on existing rows; no migration.
+            for col in ("ctl", "atl", "tsb"):
+                try:
+                    cursor.execute(
+                        f"ALTER TABLE athlete_metrics_cache ADD COLUMN {col} REAL"
+                    )
+                except sqlite3.OperationalError:
+                    pass
 
             # Athlete baselines table
             cursor.execute("""

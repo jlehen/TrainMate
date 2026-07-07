@@ -101,6 +101,47 @@ def color_acwr(acwr: float) -> str:
         return red(acwr_str)
 
 
+# The printed CTL | ATL | TSB triple won't subtract to the shown TSB, because TSB is
+# CTL(yesterday) - ATL(yesterday) (training_load.txt §2) while CTL/ATL are today's. This
+# lag is correct (matching TrainingPeaks) but reads as an arithmetic error, so this
+# one-line footnote rides wherever TSB is surfaced (per-day prompt block, coach summary,
+# tm status). Lives here — not in coach.formatting — because both the CLI and the coach
+# layer render it.
+PMC_TSB_LAG_NOTE = (
+    "(Note: TSB is CTL(yesterday) - ATL(yesterday), so it won't equal the shown "
+    "same-day CTL - ATL; this ~1-day lag is expected, not an error.)"
+)
+
+
+def color_tsb(tsb: float) -> str:
+    """TSB (form) coloring — colors only the two risk ends, phase-blind
+    (DESIGN_pmc_fitness_fatigue.md §6.1).
+
+    < -30 red (excessive fatigue), > +25 yellow (detraining / over-tapered). The
+    -30..+25 middle stays uncolored: its meaning is phase-dependent (mid-build a +15
+    means fitness is decaying; peaking, it means race-ready), and that interpretive call
+    belongs to the coach reading the science file, not to a phase-blind color map. Bands
+    are half-open so no value is double-claimed."""
+    s = f"{tsb:.1f}"
+    if tsb < -30:
+        return red(s)
+    if tsb > 25:
+        return yellow(s)
+    return s
+
+
+def color_ramp(ramp: float) -> str:
+    """CTL ramp-rate coloring, bands touching so no value falls in an uncolored gap
+    (§6.1): >= 8 red (unsustainable), 5 <= ramp < 8 yellow (watch), else plain. No green
+    band — a low ramp is correct during a taper, so green would wrongly bless it."""
+    s = f"{ramp:+.1f}"
+    if ramp >= 8:
+        return red(s)
+    if 5 <= ramp < 8:
+        return yellow(s)
+    return s
+
+
 def visible_len(s: str) -> int:
     """Calculates visible length of a string, ignoring ANSI escape codes."""
     return len(ANSI_ESCAPE.sub('', s))

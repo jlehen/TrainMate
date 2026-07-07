@@ -1224,6 +1224,13 @@ class TestTrainMateCLI(unittest.TestCase):
 
     @patch("trainmate_cli.garmin")
     def test_data_show_metrics_command(self, mock_garmin):
+        # garmin is mocked (to stub ensure_data); the PMC read helpers are pure DB reads,
+        # so give them real behavior (None history start = no warm-up suppression)
+        # instead of Mocks.
+        from trainmate import garmin as real_garmin
+        mock_garmin.pmc_history_start.return_value = None
+        mock_garmin.pmc_warmup_cutoff_for.side_effect = real_garmin.pmc_warmup_cutoff_for
+        mock_garmin.pmc_display_values.side_effect = real_garmin.pmc_display_values
         test_db.save_metric_cache(
             date="2026-06-03", rhr=50, hrv=75, sleep_score=80, stress=20,
             acute_workload=4.0, chronic_workload=3.5, acwr=1.14
@@ -1258,6 +1265,108 @@ class TestTrainMateCLI(unittest.TestCase):
         self.assertIn("=== ATHLETE METRICS (All Time) ===", stdout)
         self.assertIn("2026-06-03", stdout)
         mock_garmin.ensure_data.assert_not_called()
+
+    @patch("trainmate.cli.status.ensure_recent_data")
+    def test_status_pmc_never_zero_fills_and_explains_warmup(self, _ens):
+        # §6.1/§8: pulled-but-never-recomputed rows have NULL PMC — status must not
+        # print "CTL 0.0 | ... | TSB 0.0" (a zero TSB reads as a real neutral balance).
+        # The whole Fitness line drops, but the §3.3(b) still-warming flag shows WHY.
+        today = datetime.now().date()
+        for i in range(40, -1, -1):
+            test_db.save_metric_cache(
+                date=(today - timedelta(days=i)).isoformat(),
+                rhr=50, hrv=70, sleep_score=80, stress=20,
+            )
+        exit_code, stdout, stderr = self.run_cli(["status"])
+        self.assertEqual(exit_code, 0)
+        self.assertNotIn("CTL 0.0", stdout)
+        self.assertNotIn("- Fitness", stdout)
+        self.assertIn("PMC still warming", stdout)
+        self.assertIn("40 days", stdout)
+
+    @patch("trainmate.cli.status.ensure_recent_data")
+    def test_status_pmc_line_past_warmup(self, _ens):
+        # A DB with 60 days of steady load, recomputed: the latest row is past the
+        # 42-day warm-up cutoff, so status shows real CTL/ATL/TSB, a ramp, the TSB-lag
+        # footnote, and (59 < 126 days) the still-warming flag.
+        from trainmate import garmin as real_garmin
+        today = datetime.now().date()
+        for i in range(59, -1, -1):
+            ds = (today - timedelta(days=i)).isoformat()
+            test_db.save_metric_cache(
+                date=ds, rhr=50, hrv=70, sleep_score=80, stress=20
+            )
+            test_db.save_completed_activity(
+                activity_id=f"pmc{i}", date=ds, start_time=f"{ds} 09:00:00",
+                activity_name="Run", activity_type="running", duration_sec=3600,
+                distance_km=10.0, elevation_gain_m=0.0, avg_hr=150, max_hr=170,
+                rpe=None, tss=60.0,
+            )
+        real_garmin.recompute_derived(dbh=test_db)
+        exit_code, stdout, stderr = self.run_cli(["status"])
+        self.assertEqual(exit_code, 0)
+        self.assertIn("- Fitness    : CTL ", stdout)
+        self.assertIn("/wk", stdout)                       # ramp rendered
+        self.assertIn("TSB is CTL(yesterday)", stdout)     # lag footnote rides with TSB
+        self.assertIn("PMC still warming", stdout)
+        self.assertNotIn("CTL 0.0", stdout)
+
+    @patch("trainmate_cli.garmin")
+    def test_show_metrics_csv_empty_cells_for_null_pmc(self, mock_garmin):
+        # §6.2: NULL/suppressed PMC values emit EMPTY CSV cells, never 0, so downstream
+        # parsing can't read a zero as data.
+        from trainmate import garmin as real_garmin
+        mock_garmin.pmc_history_start.return_value = None
+        mock_garmin.pmc_warmup_cutoff_for.side_effect = real_garmin.pmc_warmup_cutoff_for
+        mock_garmin.pmc_display_values.side_effect = real_garmin.pmc_display_values
+        test_db.save_metric_cache(
+            date="2026-06-03", rhr=50, hrv=75, sleep_score=80, stress=20,
+            acute_workload=4.0, chronic_workload=3.5, acwr=1.14,
+        )
+        exit_code, stdout, stderr = self.run_cli(["data", "show-metrics", "--all", "--csv"])
+        self.assertEqual(exit_code, 0)
+        header = stdout.splitlines()[0]
+        self.assertTrue(header.endswith("ctl,atl,tsb"))
+        row = next(l for l in stdout.splitlines() if l.startswith("2026-06-03"))
+        self.assertTrue(row.endswith(",,,"), row)          # three empty cells, not zeros
+
+    def test_data_wipe_recomputes_pmc_at_command_layer(self):
+        # §4: a dated Garmin wipe must be followed by recompute_derived() at the command
+        # layer — deleted load otherwise stays baked into every later day's CTL forever.
+        # Exercises the real `data wipe` command, not the db method + recompute directly.
+        from trainmate import garmin as real_garmin
+        base = datetime(2026, 3, 1).date()
+        for i in range(60):
+            ds = (base + timedelta(days=i)).isoformat()
+            test_db.save_metric_cache(
+                date=ds, rhr=50, hrv=70, sleep_score=80, stress=20
+            )
+            test_db.save_completed_activity(
+                activity_id=f"wipe{i}", date=ds, start_time=f"{ds} 09:00:00",
+                activity_name="Run", activity_type="running", duration_sec=3600,
+                distance_km=10.0, elevation_gain_m=0.0, avg_hr=150, max_hr=170,
+                rpe=None, tss=70.0,
+            )
+        real_garmin.recompute_derived(dbh=test_db)
+        later = (base + timedelta(days=59)).isoformat()
+        ctl_before = next(
+            m for m in test_db.get_metrics_cache() if m["date"] == later
+        )["ctl"]
+
+        exit_code, stdout, stderr = self.run_cli([
+            "data", "wipe", "--garmin",
+            "--from", base.isoformat(),
+            "--until", (base + timedelta(days=20)).isoformat(),
+            "-y",
+        ])
+        self.assertEqual(exit_code, 0)
+        row = next(
+            (m for m in test_db.get_metrics_cache() if m["date"] == later), None
+        )
+        self.assertIsNotNone(row)
+        # Deleted early load no longer inflates a later surviving day's CTL.
+        self.assertIsNotNone(row["ctl"])
+        self.assertLess(row["ctl"], ctl_before)
 
     @patch("trainmate_cli.garmin")
     def test_data_show_activities_command(self, mock_garmin):

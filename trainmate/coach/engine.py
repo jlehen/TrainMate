@@ -335,7 +335,8 @@ ACTIVE CONSTRAINTS (athlete-declared directives to work around):
         )
         met_digest = sorted(
             (m.get('date'), m.get('rhr'), m.get('hrv'), m.get('sleep_score'),
-             m.get('stress'), m.get('acwr'))
+             m.get('stress'), m.get('acwr'),
+             m.get('ctl'), m.get('atl'), m.get('tsb'))
             for m in metrics
         )
         evt_digest = sorted(
@@ -485,7 +486,9 @@ You MUST respond with a JSON object containing:
         start_str: Optional[str] = None,
         metrics: Optional[List[Dict[str, Any]]] = None,
         completed_activities: Optional[List[CompletedActivity]] = None,
-        baseline: Optional[Dict[str, Any]] = None
+        baseline: Optional[Dict[str, Any]] = None,
+        pmc_warmup_cutoff: Optional[str] = None,
+        pmc_context: Optional[str] = None
     ) -> Dict[str, Any]:
         """Queries LLM to generate workouts for a given number of days based on active strategy.
 
@@ -554,7 +557,12 @@ You MUST respond with a JSON object containing:
 
         history_text_parts = []
         if metrics:
-            metrics_text = format_metrics_history(metrics)
+            metrics_text = format_metrics_history(metrics, pmc_warmup_cutoff)
+            # The single CTL ramp line + warm-up flag ride beside the per-day block (not
+            # repeated per day), so the prompt that sets next week's load sees the fitness
+            # trajectory (§5.2).
+            if pmc_context:
+                metrics_text += "\n" + pmc_context
             history_text_parts.append(
                 f"Athlete's Metrics History (Past 15 Days):\n{metrics_text}"
             )
@@ -590,7 +598,9 @@ You MUST respond with a JSON object containing:
         removed_workouts: Optional[List[Workout]] = None,
         daily_context: Optional[List[Dict[str, Any]]] = None,
         completed_keys: Optional[set] = None,
-        athlete_message: Optional[str] = None
+        athlete_message: Optional[str] = None,
+        pmc_warmup_cutoff: Optional[str] = None,
+        pmc_context: Optional[str] = None
     ) -> Dict[str, Any]:
         """Queries LLM to evaluate metrics/activities and adapt workouts if needed.
 
@@ -789,7 +799,11 @@ evidence-backed observations are authored only by the weekly history analysis
             custom_task=custom_task
         )
 
-        metrics_text = format_metrics_history(metrics)
+        metrics_text = format_metrics_history(metrics, pmc_warmup_cutoff)
+        # Single ramp line + warm-up flag beside the per-day block, so adapt sees the
+        # fatigue trajectory (§5.2).
+        if pmc_context:
+            metrics_text += "\n" + pmc_context
         context_text = (
             format_daily_context(daily_context) if daily_context
             else "No external daily-context signals logged in this window."

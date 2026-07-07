@@ -8,8 +8,12 @@ from trainmate.types import Objective, Constraint, Workout
 from trainmate.adherence import analyze_adherence, _planned_load
 from trainmate.sports import canonical_sport
 from trainmate.modification_state import SWAP_REASON_PREFIX, MANUAL_REPLACE_REASON_PREFIX
+from trainmate import garmin
 from trainmate.garmin import activity_load
-from trainmate.util import today_str as _today_str, today_date as _today_date, cyan, green, yellow, bold, red, gray
+from trainmate.util import (
+    today_str as _today_str, today_date as _today_date,
+    cyan, green, yellow, bold, red, gray, PMC_TSB_LAG_NOTE,
+)
 from trainmate.coach.engine import CoachEngine, MIN_PLAN_WEEKS, MAX_PLAN_WEEKS
 from trainmate.coach.formatting import format_baseline, _load_science_guidelines
 
@@ -98,10 +102,156 @@ class CoachService:
                     f"  - Current ACWR (Acute:Chronic Workload Ratio): "
                     f"{acwrs[-1]:.2f} (latest)"
                 )
+            # PMC (CTL/ATL/TSB) + the single ramp line, so the strategy/plan prompt can
+            # reason about current freshness and a sustainable build rate against the
+            # science directives (DESIGN_pmc_fitness_fatigue.md §5.2).
+            for pmc_line in self._pmc_summary_lines(metrics, today_str):
+                lines.append("  " + pmc_line)
         else:
             lines.append("Physiological Metrics (Past 15 days):\n  - No metrics found.")
 
         return "\n".join(lines)
+
+    # ------------------------------------------------------------------ PMC helpers
+    def _pmc_summary_lines(
+        self, metrics: List[Dict[str, Any]], as_of: str
+    ) -> List[str]:
+        """The PMC block for the data summary (strategy/plan prompt): the latest
+        Fitness/Fatigue line, the single CTL ramp line, the §3.3(b) still-warming-up flag,
+        and the TSB-lag footnote — each omitted when it has nothing to say. Order: values,
+        then trust/caveat."""
+        out: List[str] = []
+        # History start (and the cutoff/caveat derived from it) is read ONCE here and
+        # passed down — no helper below re-derives it.
+        start = garmin.pmc_history_start(dbh=self._db)
+        cutoff = garmin.pmc_warmup_cutoff_for(start, config.pmc_ctl_days)
+        latest = self._pmc_latest_line(metrics, cutoff)
+        if latest:
+            out.append(latest)
+        ramp = self._pmc_ramp_line(cutoff)
+        if ramp:
+            out.append(ramp)
+        caveat = self._pmc_caveat_line(garmin.pmc_data_caveat(start, as_of))
+        if caveat:
+            out.append(caveat)
+        # The footnote explains the TSB lag, so only a line actually showing TSB needs it.
+        if latest and "TSB" in latest:
+            out.append(PMC_TSB_LAG_NOTE)
+        return out
+
+    def _pmc_latest_line(
+        self, metrics: List[Dict[str, Any]], warmup_cutoff: Optional[str]
+    ) -> Optional[str]:
+        """'- Fitness/Fatigue (PMC): CTL .. ATL .. TSB ..' from the latest past-warm-up
+        row carrying PMC values, or None."""
+        for m in reversed(metrics):
+            if warmup_cutoff and m['date'] < warmup_cutoff:
+                continue
+            ctl, atl, tsb = m.get('ctl'), m.get('atl'), m.get('tsb')
+            if ctl is None and atl is None and tsb is None:
+                continue
+            parts = []
+            if ctl is not None:
+                parts.append(f"CTL {ctl:.1f} (fitness)")
+            if atl is not None:
+                parts.append(f"ATL {atl:.1f} (fatigue)")
+            if tsb is not None:
+                parts.append(f"TSB {tsb:.1f} (form)")
+            return "- Fitness/Fatigue (PMC): " + ", ".join(parts)
+        return None
+
+    def _pmc_ramp_line(self, cutoff: Optional[str]) -> Optional[str]:
+        """The single '- CTL ramp rate: +4.2/week (last 7 days)' line, computed from the
+        FULL stored CTL series (never a short prompt window, so a small window can't drop
+        it — §3.1/§5.2). None inside the warm-up window, at a <7-day span edge, or when
+        the -7d baseline itself lands in the warm-up zone (pmc_ramp's straddle guard)."""
+        all_metrics = self._db.get_metrics_cache()
+        ctl_by_date = {m['date']: m.get('ctl') for m in all_metrics}
+        latest = None
+        for m in all_metrics:
+            if m.get('ctl') is None:
+                continue
+            if cutoff and m['date'] < cutoff:
+                continue
+            latest = m['date']
+        if latest is None:
+            return None
+        ramp = garmin.pmc_ramp(ctl_by_date, latest, warmup_cutoff=cutoff)
+        if ramp is None:
+            return None
+        return f"- CTL ramp rate: {ramp:+.1f}/week (last 7 days)"
+
+    def _pmc_caveat_line(self, cav: Optional[Dict[str, Any]]) -> Optional[str]:
+        """Renders the §3.3(b) static "still warming up" flag (a garmin.pmc_data_caveat
+        dict, or None) as a summary line, stated as a *condition* (not an assertion that
+        fitness is understated — a genuine beginner's low CTL is correct).
+
+        While N < τ_ctl the ENTIRE history is still inside the §3.3(a) warm-up window, so
+        every surface suppresses the values themselves; then this line explains the
+        absence instead of caveating numbers the prompt doesn't contain."""
+        if not cav:
+            return None
+        ctl_days = config.pmc_ctl_days
+        if cav["n_days"] < ctl_days:
+            return (
+                f"- PMC (CTL/ATL/TSB): suppressed — only {cav['n_days']} days of "
+                f"history; values are leading-edge warm-up artifacts for the first "
+                f"{ctl_days} days."
+            )
+        return (
+            f"- PMC data caveat: CTL is based on {cav['n_days']} days of history "
+            f"(a {ctl_days}-day average needs months to settle). If the athlete "
+            f"trained regularly before {cav['history_start']}, true fitness is higher "
+            f"than shown and low TSB / high ramp are partly warm-up artifacts; if "
+            f"they did not, the low values are real."
+        )
+
+    def _pmc_prompt_context(
+        self, as_of: Optional[str] = None
+    ) -> Tuple[Optional[str], Optional[str]]:
+        """(warmup_cutoff, extra_lines) for the generate/adapt metrics block: the single
+        ramp line and the still-warming-up flag — a single line each beside the per-day
+        block, never repeated per day (§5.2). History start is read ONCE and passed down."""
+        start = garmin.pmc_history_start(dbh=self._db)
+        cutoff = garmin.pmc_warmup_cutoff_for(start, config.pmc_ctl_days)
+        lines: List[str] = []
+        ramp = self._pmc_ramp_line(cutoff)
+        if ramp:
+            lines.append(ramp)
+        caveat = self._pmc_caveat_line(garmin.pmc_data_caveat(start, as_of))
+        if caveat:
+            lines.append(caveat)
+        return cutoff, ("\n".join(lines) if lines else None)
+
+    @staticmethod
+    def _pmc_week_summary(
+        w_metrics: List[Dict[str, Any]],
+        ctl_by_date: Dict[str, Optional[float]],
+        warmup_cutoff: Optional[str],
+    ) -> Tuple[Optional[float], Optional[float], Optional[float]]:
+        """(end_ctl, week_ramp, min_tsb) for one week of the analysis digest (§5.4):
+        end_ctl = last day's CTL, min_tsb = deepest overload, week_ramp = end_ctl vs CTL
+        7 days earlier. Guards: a week entirely inside the warm-up window emits all None
+        (no phantom overreach from seeding artifacts); week_ramp comes from pmc_ramp,
+        which applies the §3.1 nearest-earlier interior-gap rule, the straddle guard
+        (a -7d lookback before the cutoff would ramp off a warm-up baseline), and the
+        first-week boundary omit (no baseline in the window slice)."""
+        end_ctl = week_ramp = min_tsb = None
+        past_warmup = [
+            m for m in w_metrics
+            if (warmup_cutoff is None or m['date'] >= warmup_cutoff)
+        ]
+        ctl_days = [m for m in past_warmup if m.get('ctl') is not None]
+        if ctl_days:
+            end_row = max(ctl_days, key=lambda m: m['date'])
+            end_ctl = end_row['ctl']
+            week_ramp = garmin.pmc_ramp(
+                ctl_by_date, end_row['date'], warmup_cutoff=warmup_cutoff
+            )
+        tsbs = [m['tsb'] for m in past_warmup if m.get('tsb') is not None]
+        if tsbs:
+            min_tsb = min(tsbs)
+        return end_ctl, week_ramp, min_tsb
 
     def _build_prior_training_context(
         self, prior_macro: Optional[Dict[str, Any]], today_str: str
@@ -945,6 +1095,7 @@ class CoachService:
         )
         learnings = self._get_learnings_text()
 
+        pmc_cutoff, pmc_context = self._pmc_prompt_context(today_str)
         plan_data = self.engine._workout_generate_logic(
             objectives=objectives,
             constraints=constraints,
@@ -958,7 +1109,9 @@ class CoachService:
             num_days=num_days,
             metrics=metrics,
             completed_activities=completed_activities,
-            baseline=baseline
+            baseline=baseline,
+            pmc_warmup_cutoff=pmc_cutoff,
+            pmc_context=pmc_context
         )
 
         # NOTE: workout generation is read-only w.r.t. coach learnings (see
@@ -1270,6 +1423,7 @@ class CoachService:
         # §8: the athlete's note is passed straight through as advisory intent — no
         # separate classification pass. The same LLM call also extracts any
         # constraint-shaped directives from it (see `new_constraints` below).
+        pmc_cutoff, pmc_context = self._pmc_prompt_context(target_date_str)
         decision = self.engine._workout_adapt_logic(
             target_date_str=target_date_str,
             history_days=history_days,
@@ -1291,7 +1445,9 @@ class CoachService:
             daily_context=daily_context,
             completed_keys=completed_keys,
             athlete_message=message,
-            constraints=constraints
+            constraints=constraints,
+            pmc_warmup_cutoff=pmc_cutoff,
+            pmc_context=pmc_context
         )
 
         # NOTE: daily adaptation is read-only w.r.t. coach learnings
@@ -2152,7 +2308,6 @@ class CoachService:
         # Ensure Garmin data covers the analysis window (auto-pull recent/small gaps,
         # surface a command for large backfills) before reading it unless no_pull is True.
         if not no_pull:
-            from trainmate import garmin
             garmin.ensure_data(from_str, until_str, force=force_pull)
 
         metrics = self._db.get_metrics_cache(start_date=from_str, end_date=until_str)
@@ -2219,6 +2374,13 @@ class CoachService:
             if monday_str in weeks_data:
                 weeks_data[monday_str]["activities"].append(act)
 
+        # PMC weekly trajectory (DESIGN_pmc_fitness_fatigue.md §5.4): the warm-up cutoff
+        # and a full in-window date->CTL map, both read once, for end_ctl/week_ramp/min_tsb.
+        pmc_cutoff = garmin.pmc_warmup_cutoff_for(
+            garmin.pmc_history_start(dbh=self._db), config.pmc_ctl_days
+        )
+        ctl_by_date = {m['date']: m.get('ctl') for m in metrics}
+
         # Build summaries per week
         weekly_summaries = []
         for monday_str in sorted(weeks_data.keys()):
@@ -2280,6 +2442,10 @@ class CoachService:
             acwrs = [m['acwr'] for m in w_metrics if m.get('acwr') is not None]
             if acwrs:
                 max_acwr = max(acwrs)
+
+            end_ctl, week_ramp, min_tsb = self._pmc_week_summary(
+                w_metrics, ctl_by_date, pmc_cutoff
+            )
 
             active_dates = {act['date'] for act in w_activities}
             rest_days = len(days_in_week) - len(active_dates)
@@ -2345,6 +2511,9 @@ class CoachService:
                 "avg_sleep_score": response["avg_sleep_score"],
                 "avg_stress": response["avg_stress"],
                 "max_acwr": round(max_acwr, 2) if max_acwr is not None else None,
+                "end_ctl": round(end_ctl, 1) if end_ctl is not None else None,
+                "week_ramp": week_ramp,
+                "min_tsb": round(min_tsb, 1) if min_tsb is not None else None,
                 "rest_days": rest_days,
                 "highlights": highlights,
                 "constraints": week_events,

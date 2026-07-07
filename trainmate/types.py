@@ -105,6 +105,13 @@ class AthleteMetric(TypedDict):
     acute_workload: Optional[float]
     chronic_workload: Optional[float]
     acwr: Optional[float]
+    # Performance Management Chart (DESIGN_pmc_fitness_fatigue.md §3). CTL = fitness
+    # (42-day EWMA of load), ATL = fatigue (7-day EWMA), TSB = form = CTL(yesterday) -
+    # ATL(yesterday). Suppressed at display inside the leading-edge warm-up window and
+    # NULL on any pre-recompute row.
+    ctl: Optional[float]
+    atl: Optional[float]
+    tsb: Optional[float]
 
 class AthleteBaseline(TypedDict):
     """Represents rolling baseline stats calculated for an athlete."""
