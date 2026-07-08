@@ -1,6 +1,6 @@
 # Design: PMC Fitness/Fatigue/Form (CTL · ATL · TSB)
 
-**Status:** Proposed (rev. 7) · **Date:** 2026-07-07 · **Branch:** worktree-design-pmc-fitness-fatigue
+**Status:** Shipped (rev. 7, merged to main in `ca8591b`) · **Date:** 2026-07-07 · **Branch:** worktree-design-pmc-fitness-fatigue
 
 > **Rev. 6 (2026-07-06) — scope rebalance.** Revs. 1–5 grew this design to cover
 > every conceivable case; the aggregate complexity outran the payoff. This revision

@@ -1,12 +1,50 @@
 # Design: Progress Timeline (past + projected training progression)
 
-**Status:** Rework specced (rev 5) · **Date:** 2026-07-07 · **Companion to:**
+**Status:** Rework specced (rev 6) · **Date:** 2026-07-08 · **Companion to:**
 ARCHITECTURE.md §12 (load model), `DESIGN_pmc_fitness_fatigue.md` (the
 **shipped** backward PMC core this feature consumes — and whose deferred
 Phase 2 projection this feature delivers, §4), `DESIGN_backward_evaluation.md`
 (the analysis-side view of the past; this doc is the *presentation*-side view
 of past **and future**)
 
+> **Rev 6 (2026-07-08) — review decisions (all rev-5 review findings).**
+> The five critical holes, resolved:
+> (1) **The anchor is strictly before today.** A morning auto-ensure pull
+> writes today's metrics row (load 0) before the evening session happens;
+> anchoring the fold on it silently dropped today's planned session from the
+> projection (~12 TSB too optimistic per 100-TSS session) and made the CLI
+> (which pulls) disagree with the pure-reader endpoint. Today is now always
+> fold territory per the §3 today-rule; the `tm status` ≡ `tm progress`
+> invariant is correspondingly restated: TSB always identical, CTL/ATL
+> identical once today's load has synced, and the FORM line tags today's
+> source (§7.1). (2) **Full-precision storage.** `compute_pmc()` stops
+> rounding its outputs; rounding moves to display (where every consumer
+> already formats `:.1f`, and where acute/chronic/ACWR storage already set
+> the precedent). The seed is thereby exact and the §9 split/refold test can
+> legitimately demand exactness — with 1-dp anchors it was flaky by
+> construction. The shipped-core change count is now two (seed + unrounding),
+> not one. (3) The anchor skips trailing rows with **NULL PMC columns** (the
+> interrupted-pull state, PMC design §5.1). (4) **Plan end = last generated
+> workout** — a manually-added far-future placeholder no longer drags a
+> months-long decay ghost (§3). (5) **The lapsed plan** (plan end < today,
+> the rolling horizon outrun) is a specced fourth empty state (§3).
+>
+> Consistency batch: payload assembly is shared via `assemble_timeline()` —
+> callers fetch rows only — pinned by a CLI≡endpoint equivalence test
+> (§5/§9); §6.1 gains earlier-objectives plan layers, a label-independent
+> governed-week rule, the `created_at` timestamp pin, and band trimming; the
+> objective-selection divergence vs Phase 2 is acknowledged as deliberate
+> (§6.1); the bootstrap cache's `--force` staleness is stated honestly, with
+> defensive parsing and corrected path/field names (§6.1); the config-edit
+> seam kink is an accepted limitation (§3); a plan with no history renders
+> its planned bars instead of a blank tab (§3). Edge cases, pinned without
+> machinery: elapsed-planned counts today only once synced, straddling
+> weeks/bands return whole, zero-max bars / blank and flat sparklines /
+> `--weeks ≥ 1` defined, the 48-col budget covers every line via
+> `visible_len` (mock redrawn), `planned_load` treats explicit `tss=0` as 0
+> with the warning wording aligned, a mid-week plan end marks the partial
+> final week, completed objectives keep their flags (§6/§11).
+>
 > **Rev 5 (2026-07-07) — realigned on the shipped PMC core.** Between rev 4 and
 > this revision, the PMC fitness/fatigue feature merged to main
 > (`DESIGN_pmc_fitness_fatigue.md`, merge `ca8591b`): `garmin.compute_pmc()` now
@@ -87,7 +125,8 @@ rule exists for exactly this. This feature is a pure read-side derivation.
 ## 2. What the picture shows
 
 The canonical layout — two panels on a shared time axis (default window:
-8 weeks back → **plan end**, the last generated workout date). The web tab
+8 weeks back → **max(today, plan end)**, plan end being the last generated
+workout date, §3). The web tab
 (§7.3) and the Telegram PNG (§7.2) render it as drawn; the CLI (§7.1) is a
 numbers-first projection of the same content:
 
@@ -137,18 +176,41 @@ The past and future halves must be in the same units or the seam is a lie.
   *existing* planned-side valuation the adherence verdicts already use
   (`adherence._planned_load`, promoted public in step 1 of §10); inventing a
   stricter "NULL tss → 0" rule here would make the weekly bars disagree with
-  the adherence percentages shown beside them. Rows with **neither** tss nor
-  rpe+duration contribute 0 and are counted into the payload `warnings`
-  field (mirroring the aggregated-underestimate pattern of §12). `rest` rows
-  are excluded from that warning — a rest day legitimately has no load.
+  the adherence percentages shown beside them. One fix folded into the
+  promotion: `_planned_load`'s `if tss:` treats an explicit `tss=0` as
+  unset and falls through to sRPE — the public `planned_load` tests
+  `tss is not None` (an explicit 0 means 0; a one-line behavior change to
+  adherence, pinned by a test). Non-`rest` rows that value to **0** —
+  no usable TSS and no RPE+duration — are counted into the payload
+  `warnings` field, worded to match that predicate: *"2 planned workouts
+  lack TSS/RPE — count as 0"* (mirroring the aggregated-underestimate
+  pattern of §12). `rest` rows are excluded — a rest day legitimately has
+  no load.
 - **Today**: actual if any completed activity **with load > 0** exists for
   today, else planned (a zero-load activity — no power, HR, or RPE — must
   not suppress a planned session). Accepted approximation: a two-session day
   where only one is done yet counts actual-only until the second syncs.
+  This rule governs the projection too: even when a metrics row for today
+  already exists (a morning pull writes one before the evening session has
+  happened), the fold values today by this rule — the stored today-row never
+  anchors the projection (§4).
 
-**Plan end.** The projection runs exactly to the last non-removed workout
-date and stops — no zero-fill beyond it (a decaying ghost line would read as
-fitness collapse, which is a statement about missing data, not the plan).
+**Plan end.** The projection runs exactly to the last non-removed
+**generated** workout date (`workouts.source = 'generated'`) and stops — no
+zero-fill beyond it (a decaying ghost line would read as fitness collapse,
+which is a statement about missing data, not the plan). Manual rows
+(`workout add` / `POST /api/workouts`) count toward daily loads inside that
+range but never *extend* it: one manually-added race-day placeholder months
+out would otherwise drag plan end there and draw the projection over months
+of assumed rest — the exact ghost this rule forbids, through the front door.
+Non-removed workouts dated after plan end are counted into `warnings`
+("1 workout beyond plan end — not projected"). Fallback: a DB with no
+generated workouts at all (fully manual planning) uses the last non-removed
+workout of any source. A plan ending mid-week leaves the final future
+week's planned total genuinely partial (Mon–Wed only); the week is marked
+like the in-progress row — `*` plus a footnote naming the date ("plan ends
+07-31 (Wed)") — rather than resliced or hidden: the bar stays honest, the
+marker explains it.
 When plan end < the next objective's `target_date`, every surface annotates
 the gap — payload `warnings`, CLI banner, chart label: *"plan generated
 through 2026-07-31 (9 wks before objective)"* — and per-objective projected
@@ -158,16 +220,27 @@ The CLI hint names the fix (`workout generate --until-goal`).
 **In-progress week.** The current week is neither past nor future: comparing
 a full-week planned total against a partial actual reads as poor adherence
 every Monday. Rule, identical on all three surfaces: the current week's
-planned figure covers **elapsed days only** (Monday through today), the row
-is marked *"in progress"*, and the payload carries both `planned_load`
-(full week) and `planned_load_elapsed` plus `in_progress: true` so renderers
-can't diverge.
+planned figure covers **elapsed days only** — Monday through yesterday,
+plus today **iff today's load has synced** (today's §3 source is `actual`).
+Including an unfinished today would make an evening-training athlete read
+<100% all day, every day — the Monday-morning problem in one-day miniature —
+and would count today *against* actual where the today-rule counts it *in
+lieu of* actual. The row is marked *"in progress"*, and the payload carries
+both `planned_load` (full week) and `planned_load_elapsed` plus
+`in_progress: true` so renderers can't diverge.
 
 **Empty states** (all reachable on a fresh install; none may crash):
 
-- *No completed activities at all* → no series to compute. CLI prints "No
-  activity history yet — run `tm data pull` first"; the endpoint returns
-  empty `days`/`weeks` plus that warning; the web tab shows the message.
+- *No completed activities at all* (fresh install — a plan may already be
+  generated) → no past series and no PMC (no anchor, §4), but the planned
+  future still renders: weekly bars for planned weeks, PMC panel suppressed,
+  and the warning "no activity history yet — run `tm data pull` first" on
+  every surface. A blank tab would be strictly less useful than showing the
+  plan about to start. (Rev 5 said "empty `days`/`weeks`", contradicting
+  §4's "the weekly bars don't depend on PMC and render regardless" — the §4
+  reading wins. Consequence for §5 `daily_loads`: the series starts at
+  min(first activity, first planned workout), since "first activity" alone
+  is undefined here.)
 - *No planned workouts* → the classic past-only PMC: solid lines to today,
   no dashed segment, window ends today, note "no plan generated — projection
   unavailable". As with the plan-end banner, the CLI names the fix:
@@ -175,6 +248,13 @@ can't diverge.
   lights up the §6.1 inferred meso labels). `data bootstrap` cannot
   substitute for a plan here: it reconstructs the past, it generates no
   future workouts, so it enriches this state but never adds the projection.
+- *Plan lapsed* (plan end < today — the rolling 28-day horizon outrun by a
+  few weeks without `workout generate`) → same shape as *no planned
+  workouts*: solid lines to today, no dashed segment, window ends at today
+  (hence the §2 default `max(today, plan end)`), no per-objective projection
+  lines, banner "plan lapsed 2026-05-20 — run `workout generate`". Past
+  weeks keep their planned/actual bars and percentages — the plan existed
+  when they ran; only the projection is absent.
 - *Weeks with actual load but no governing plan* (pre-adoption history
   inside the window) → actual bar renders, planned shows `—`, **no
   adherence percentage** (never divide by zero) — matching `adherence.py`'s
@@ -198,6 +278,14 @@ can't diverge.
 - Days with no Garmin data (sync gap, vacation, dated wipe) are
   indistinguishable from genuine rest: they zero-fill and CTL decays as if
   the athlete rested. `sync_state` watermarks can't disambiguate per-day.
+- Between a config edit (the τ constants, or the thresholds feeding
+  `activity_load`) and the next pull, the stored past line and the
+  live-computed bars/fold run under different constants — the projection
+  can visibly kink where it meets the stored line. Transient and
+  self-healing: the CLI auto-ensures (a pull re-sweeps everything under the
+  new config); the web tab is a pure reader and shows the kink until the
+  next pull happens elsewhere. Detecting the mismatch (config fingerprints
+  on stored rows) would be machinery out of proportion to the harm.
 
 ## 4. Fitness/fatigue model — consume the shipped PMC core, fold it forward
 
@@ -217,11 +305,14 @@ stored numbers already reach the coach prompts, `tm status`, and `tm data
 show-metrics`. This feature therefore computes **nothing new about the past**
 and gains a hard consistency requirement instead:
 
-- **Past half: read, don't recompute.** Past DayPoints take `ctl`/`atl`/`tsb`
+- **Past half: read, don't recompute.** Past DayPoints — dates strictly
+  before today; today belongs to the fold below — take `ctl`/`atl`/`tsb`
   verbatim from the stored metrics rows. `tm progress` and `tm status` must
-  show the *same* CTL for the same day — two implementations of "fitness
-  today" disagreeing across commands would be a variant of the seam-lie §3
-  exists to prevent. Days with load but no metrics row (possible for trailing
+  show the *same* CTL for the same past day — two implementations of
+  "fitness on day d" disagreeing across commands would be a variant of the
+  seam-lie §3 exists to prevent. (For *today*, where the fold deliberately
+  runs ahead of a stored load-0 row, the precise consistency contract is in
+  §7.1.) Days with load but no metrics row (possible for trailing
   activity days past the last metrics pull) carry no PMC point; renderers
   join the line across the gap.
 - **Warm-up rules adopted wholesale** (PMC design §3.3): points dated before
@@ -232,24 +323,49 @@ and gains a hard consistency requirement instead:
   the *entire* history is still inside the warm-up window the PMC panel is
   suppressed outright with the still-warming message — the weekly bars don't
   depend on PMC and render regardless.
-- **Future half: the anchored fold.** From the last stored metrics row (the
-  *anchor*: date A, values `(CTL_A, ATL_A)`), the same recurrence is folded
-  forward over the §3 merged daily loads — actual for A+1..today (so a stale
-  anchor decays over what actually happened), planned beyond today — through
+- **Future half: the anchored fold.** The *anchor* is the latest stored
+  metrics row dated **strictly before today** whose `ctl`/`atl` are non-NULL
+  (date A, values `(CTL_A, ATL_A)`). Both qualifiers are load-bearing:
+  - *Strictly before today.* A morning auto-ensure pull writes today's row
+    with load 0 before the evening session has happened; anchoring on it
+    would drop today's planned session from the projection entirely (one
+    100-TSS session ≈ 12 TSB too optimistic for tomorrow) and make the CLI
+    (which pulls, §7.1) systematically disagree with the pure-reader
+    endpoint (§6) about the first projected days. Today is always fold
+    territory, loaded per the §3 today-rule; a stored today-row is ignored
+    by the projection (consistency consequence and the FORM-line source tag:
+    §7.1).
+  - *Non-NULL.* A pull that dies between `_ingest_metrics` and
+    `recompute_derived()` leaves trailing rows with NULL PMC columns (PMC
+    design §5.1); seeding from one is a `TypeError`. Skip back to the newest
+    valid row; if none exists anywhere, that is the no-anchor state below.
+  From the anchor, the same recurrence is folded forward over the §3 merged
+  daily loads — actual for A+1..yesterday (so a stale anchor decays over
+  what actually happened), the §3 rule for today, planned beyond — through
   plan end. Implementation: `compute_pmc()` gains an optional
-  `seed=(ctl0, atl0)` parameter (default `(0.0, 0.0)` — the **only** change to
-  the shipped core, pinned in `tests/test_pmc.py`), and `progression.py` calls
-  it for the fold rather than owning a second copy of the recurrence. The
-  anchor values are the stored 1-dp roundings; the reseeding error is
-  second-order and decays with τ.
+  `seed=(ctl0, atl0)` parameter (default `(0.0, 0.0)`, pinned in
+  `tests/test_pmc.py`), and `progression.py` calls it for the fold rather
+  than owning a second copy of the recurrence.
+- **Stored values become full-precision** — the second (and last) change to
+  the shipped core: `compute_pmc()` drops the 1-dp rounding of its outputs
+  (garmin.py:631); values are stored exact and rounded only at display —
+  which every consumer already does (`:.1f` in status / show-metrics /
+  prompt formatting), and which acute/chronic/ACWR storage already
+  practices, so CTL/ATL/TSB rounding-at-storage was the odd one out. This
+  makes the seed exact: a fold from any anchor reproduces the unbroken
+  series bit-identically (the §9 refold test), where a 1-dp-rounded anchor
+  carried up to ±0.05 of error that could cross display-rounding boundaries
+  on arbitrary fixtures. Existing rounded rows self-heal on the next
+  `recompute_derived()` full sweep (every pull).
 - **Time constants come from config** (`config.pmc_ctl_days` /
   `config.pmc_atl_days`) — rev 4 pinned them as module constants, which is now
   wrong twice over: the config params exist (PMC design §3.4), and a τ
   mismatch between the stored past and the folded future would kink every
   line exactly at the seam.
-- **No anchor** (no metrics rows at all — activities present but metrics never
-  pulled) → no PMC series; rendered as the young-DB state above: bars render,
-  the PMC panel shows the message.
+- **No anchor** (no metrics row before today with non-NULL PMC columns —
+  metrics never pulled, or only ever pulled this morning) → no PMC series;
+  rendered as the young-DB state above: bars render, the PMC panel shows the
+  message.
 
 **This is PMC Phase 2, generalized.** `DESIGN_pmc_fitness_fatigue.md` defers
 "forward taper projection" — event-day TSB folded over the plan's own workouts
@@ -305,12 +421,13 @@ DayPoint = dict  # {date, load, source: 'actual'|'planned',
 
 def daily_loads(activities, workouts, today) -> list[DayPoint]
     # merged per-day load series per §3 (no gaps: zero-load days included,
-    # from first activity date through plan end)
+    # from min(first activity, first planned workout) through plan end)
 
 def fitness_series(day_points, metrics_rows, ctl_days, atl_days,
                    warmup_cutoff) -> list[DayPoint]
-    # past: ctl/atl/tsb copied verbatim from the stored rows, nulled before
-    # warmup_cutoff (pmc_display_values semantics); from the last stored row:
+    # past (dates < today): ctl/atl/tsb copied verbatim from the stored rows,
+    # nulled before warmup_cutoff (pmc_display_values semantics); from the
+    # anchor (latest row strictly before today with non-NULL ctl/atl, §4):
     # garmin.compute_pmc(..., seed=(ctl_A, atl_A)) folded over the day_points
     # loads through plan end (§4). Never recomputes the past. The caller
     # fetches metrics_rows, the config τs, and the cutoff (via
@@ -323,9 +440,21 @@ def weekly_aggregates(activities, workouts, today, meso_spans) -> list[dict]
     #  meso_label?, meso_source?}
     # planned = Σ adherence.planned_load over non-removed workouts (the
     # *adapted* plan — "what the plan asked at the time"; original_tss is
-    # reserved for the drift follow-on, §8). meso_spans is the precomputed
-    # labeled-span list from §6.1 — the caller (CLI handler / endpoint)
-    # assembles it from db + analysis_cache so this stays row-in/row-out.
+    # reserved for the drift follow-on, §8). meso_spans is the §6.1 layered
+    # span list, built by assemble_timeline below.
+
+def assemble_timeline(activities, workouts, metrics_rows, macro_versions,
+                      mesocycles, inferred_mesocycles, objectives, today,
+                      ctl_days, atl_days, warmup_cutoff) -> dict
+    # The ENTIRE §6 payload — days, weeks, meso_bands, objectives, warnings
+    # (exact strings included) — built here and ONLY here, from the helpers
+    # above plus the §6.1 layered lookup. Callers do db reads and hand rows
+    # in; neither the CLI handler nor the endpoint owns any assembly or
+    # warning-wording logic. This is deliberate: the rev-4 snapshot let each
+    # caller assemble its own payload and the two copies had already
+    # diverged on when the plan-gap warning fires and how it is worded
+    # (CODE_REVIEW finding #5). Purity and sharing are not in conflict —
+    # this stays row-in/row-out.
 ```
 
 ## 6. Web API: `GET /api/timeline`
@@ -335,8 +464,11 @@ Thin handler in `trainmate_web.py`: `db` reads (`get_completed_activities`,
 first-evidence dates behind `garmin.pmc_history_start` for the warm-up
 cutoff, macrocycle versions + mesocycles for the governing objective
 (§6.1), active objectives, `get_analysis_cache("long")` for the bootstrap
-reconstruction) + the §5 functions. Properties, consistent with the existing
-API's stance (§8 of ARCHITECTURE.md):
+reconstruction) + one call to `assemble_timeline` (§5) — the handler fetches
+rows and serializes the result; it assembles nothing itself, and the CLI
+handler is the same shape, so the two surfaces render one payload (§5).
+Properties, consistent with the existing API's stance (§8 of
+ARCHITECTURE.md):
 
 - **Pure reader.** No `ensure_data`, no Garmin, no calendar, no LLM (reading
   the cached bootstrap reconstruction is a `db` read, not an analysis run).
@@ -348,20 +480,27 @@ API's stance (§8 of ARCHITECTURE.md):
   complexity than recomputing.
 - Query params `?start_date=&end_date=` (matching `/api/workouts` and
   `/api/activities` naming) clip the **returned** window only (default:
-  today − 56 days → plan end); the stored past series is full-history by
-  construction and the fold starts at the anchor (§4), so a clipped window
-  never changes any value inside it.
+  today − 56 days → max(today, plan end), §2); the stored past series is
+  full-history by construction and the fold starts at the anchor (§4), so a
+  clipped window never changes any value inside it. Clipping semantics,
+  pinned: `days` clip by date; `weeks` and `meso_bands` are returned
+  **whole** whenever they overlap the window — a mid-week `start_date`
+  returns the straddling week entire, never resliced (reslicing would
+  change its totals and silently corrupt the adherence percentage) and
+  never silently dropped.
 
 ```jsonc
 {
   "today": "2026-07-03",
-  "plan_end": "2026-07-31",        // last non-removed workout date, or null
+  "plan_end": "2026-07-31",        // last non-removed generated workout (§3), or null
   "days": [   // §5 DayPoint series, window-clipped
     {"date": "2026-07-02", "load": 62.4, "source": "actual",
      "ctl": 55.1, "atl": 61.0, "tsb": -5.9},   // tsb = day-entering (§4)
     {"date": "2026-07-04", "load": 80.0, "source": "planned", ...}
     // ctl/atl/tsb are null inside the warm-up window, on days without a
-    // stored metrics row, and everywhere when there is no anchor (§4)
+    // stored metrics row, and everywhere when there is no anchor (§4).
+    // Today's ctl/atl/tsb come from the §4 fold, never the stored today-row;
+    // its `source` field is the web counterpart of the §7.1 FORM-line tag.
   ],
   "weeks": [
     {"week_commencing": "2026-06-22", "planned_load": 320,
@@ -376,14 +515,16 @@ API's stance (§8 of ARCHITECTURE.md):
     {"label": "Build 2", "source": "plan",
      "start_date": "2026-06-19", "end_date": "2026-07-16"}
   ],
-  "objectives": [   // ALL active objectives, unfiltered — renderers clip to
-                    // their window (the web tab re-windows client-side, §7.3,
-                    // so pre-filtering would drop flags from wider zooms)
+  "objectives": [   // ALL active AND completed objectives, unfiltered — a
+                    // race three weeks ago still gets its flag (seeing the
+                    // TSB you raced at is half the point of a PMC); renderers
+                    // clip to their window (the web tab re-windows
+                    // client-side, §7.3, so pre-filtering would drop flags)
     {"id": 1, "title": "...", "target_date": "2026-09-30", "priority": 1}
   ],
   "warnings": [
     "plan generated through 2026-07-31 (9 wks before objective 2026-09-30)",
-    "2 planned workouts have neither TSS nor RPE and count as 0 load"
+    "2 planned workouts lack TSS/RPE — count as 0"
     // plus, on a young DB, the §4 pmc_data_caveat flag, e.g.
     // "PMC still warming: CTL based on 38 days of history"
   ]
@@ -400,18 +541,38 @@ spans drive the CLI meso column and the chart band:
    the objective the current workouts implement). Its mesocycles label the
    weeks they cover. With three active objectives this is the deliberate,
    documented choice; later objectives' plans don't exist yet anyway.
-2. **Superseded plan versions** — for past weeks that predate the active
-   version: versions are kept (ARCHITECTURE §11), and `macrocycles.
-   created_at` identifies which version was in force during a given week
-   (latest version created before the week ended). Consistent with the
-   planned-load bars, which likewise show "what the plan asked at the time".
-3. **Bootstrap reconstruction** — for weeks before any plan: the
-   `inferred_mesocycles` from `analysis_cache["long"]` (`data bootstrap`'s
-   reverse-engineered blocks — name, span, focus). These are *descriptive*
+   (Deliberately different from two neighboring rules: Phase 2's event
+   selection `ORDER BY priority DESC, target_date ASC` — the coach's
+   event-day-TSB line (§8.4) may anchor a higher-priority *later* race —
+   and `db.get_active_objective()`'s earliest-active-plan-or-not. Meso
+   labels must follow whichever plan the current workouts implement; the
+   divergence is by design, not a bug.)
+2. **Earlier and superseded plan versions** — for past weeks the current
+   version doesn't cover: versions are kept (ARCHITECTURE §11), and
+   `macrocycles.created_at` identifies which version was in force during a
+   given week — the latest version created before the week ended, across
+   **all objectives' macrocycles, completed objectives included** (the day
+   objective 1 completes, the weeks its plan governed must keep their
+   labels, not fall to `—` while their planned bars still render).
+   Timestamp-vs-date pin: `created_at` is a UTC ISO timestamp, the week end
+   is a date — a version is "created before the week ended" iff
+   `created_at[:10] <= week_sunday`. Consistent with the planned-load bars,
+   which likewise show "what the plan asked at the time".
+3. **Bootstrap reconstruction** — for weeks before any plan: `data
+   bootstrap`'s reverse-engineered blocks from `analysis_cache["long"]`,
+   nested at `cache["reconstruction"]["inferred_mesocycles"]` (fields
+   `name`/`start_date`/`end_date`/`focus_detected`, engine.py:1022 — rev 5
+   misnamed both the path and the focus field). These are *descriptive*
    (what the athlete actually did), not prescriptive, so they render
-   `~`-prefixed in text and hatched/lighter as chart bands. Pre-plan history
-   never changes, so the one-shot nature of the bootstrap cache is not a
-   staleness concern here.
+   `~`-prefixed in text and hatched/lighter as chart bands. Staleness,
+   honestly: `data bootstrap --force` *rewrites* this cache up to the
+   present, so the blocks are LLM output that can change shape between runs
+   and can sprawl over plan-governed weeks — the label layering (plan wins)
+   and the band trimming below contain that, and a re-run relabeling
+   *pre-plan* weeks is acceptable precisely because this layer is
+   descriptive. The dates are LLM-authored strings: blocks with unparseable
+   dates are skipped (and counted into `warnings`), spans sorted, overlaps
+   resolved by the trim rule — never compared raw.
 4. **No match** (bootstrap never run, or a genuine gap) → no label (`—`).
 
 Week → block assignment: neither real nor inferred mesocycles are
@@ -419,6 +580,24 @@ Monday-aligned, so a week belongs to the block covering the **majority of
 its days** (tie → the later block, so a block starting mid-week owns that
 week from its first majority). Labels longer than the CLI column (8 chars)
 are truncated with `…`.
+
+**Governed weeks — pinned independently of labels.** A week is *governed*
+iff it overlaps plan mesocycle coverage (`get_mesocycle_ranges()` of the
+version in force per layer 1–2). Governance — not the label — decides
+whether the planned total and adherence percentage render or show `—` (§3
+empty states). The two must not be conflated: the rev-4 snapshot inferred
+governance from the label vote, so a labeling nit silently deleted planned
+data (CODE_REVIEW finding #3). Corner pins: a governed week whose planned
+rows were all `removed` shows planned 0 with `—` for the percentage (never
+divide by zero); an ungoverned week with actual load stays the §3
+informational case.
+
+**Band trimming.** `meso_bands` are date spans, not per-week votes, so
+overlaps are possible where an inferred block runs into plan coverage (the
+transition week). Precedence follows the layers: plan bands win; inferred
+bands are trimmed to the non-overlapping remainder and dropped when fully
+covered. The payload never contains overlapping bands — renderers draw
+spans as given.
 
 ## 7. Front-ends — all three in v1
 
@@ -451,36 +630,47 @@ adherence percentages — sparklines are garnish, not the load-bearing
 content.
 
 ```
-FORM today   CTL 55   ATL 61   TSB −6     CTL ▁▂▂▃▃▅▅▆ (8w)
-Projected at plan end 07-31:  CTL 61  TSB +1
+FORM today (actual)  CTL 55  ATL 61  TSB −6
+CTL 8w ▁▂▂▃▃▅▅▆   plan end 07-31: CTL 61 TSB +1
 ⚠ plan generated through 07-31 — 9 wks before
-  🏁 2026-09-30 Trail marathon (workout generate --until-goal)
+  🏁 2026-09-30 Trail marathon
+  (workout generate --until-goal)
 
 WEEKLY LOAD          plan  actual
 ~Base     w/c 05-25    —   ▓▓▓▓▓▓▓░░  262    —
 Build 2   w/c 06-22   320  ▓▓▓▓▓░░░░  214   67%
 Build 3   w/c 06-29*  150  ▓▓▓░░░░░░  138   92%
 Build 3   w/c 07-06   360  (planned)
-~ inferred (bootstrap) · * in progress: plan = Mon–Fri
-⚠ 2 planned workouts have neither TSS nor RPE; count as 0
+~ inferred · * in progress (plan = Mon–Fri)
+⚠ 2 planned workouts lack TSS/RPE — count as 0
 ```
 
 (When the plan reaches an objective, the banner is replaced by the per-
-objective line: `🏁 2026-09-30 Trail marathon — projected CTL 68, TSB +12`.)
+objective line, wrapped inside the same width budget:
+`🏁 2026-09-30 Trail marathon` / `   projected CTL 68, TSB +12`.)
 
-- **The FORM line is `tm status`'s Fitness line.** Same stored latest row,
-  same `garmin.pmc_ramp` over the full stored CTL series, same
-  `color_tsb`/`color_ramp`, and the same `PMC_TSB_LAG_NOTE` footnote wherever
-  TSB is printed (the PMC design's §6.1 conventions, reused not reimplemented).
-  `tm status` stays the snapshot; `tm progress` adds the trajectory and the
-  projection. The two commands showing different numbers for "CTL today" is a
-  bug by definition (§4), pinned by a test (§9).
+- **The FORM line shows today per the §4 fold** — and tags where today's
+  load came from: `FORM today (actual)` once today's session has synced,
+  `FORM today (planned)` while the fold is counting the planned session in
+  its place. Presentation conventions are `tm status`'s, reused not
+  reimplemented: same `garmin.pmc_ramp` over the stored CTL series, same
+  `color_tsb`/`color_ramp`, same `PMC_TSB_LAG_NOTE` footnote wherever TSB is
+  printed (the PMC design's §6.1 conventions). The consistency contract with
+  `tm status` (pinned by tests, §9): **TSB today is always identical** (it is
+  day-entering — computed from yesterday's values, which both commands read
+  from the same stored rows); **CTL/ATL today are identical whenever today's
+  load has synced** (full-precision storage + the same recurrence make the
+  fold reproduce the stored row bit-exactly, §4) and differ *deliberately*
+  while a planned session is pending — progress includes it, status shows
+  the stored load-0 snapshot; the `(planned)` tag is what keeps that honest
+  rather than confusing. `tm status` stays the snapshot; `tm progress` adds
+  the trajectory and the projection.
 - **Warm-up states** (§4): on a young DB the FORM line and projection are
   replaced by the still-warming message (mirroring the status line), and the
   `pmc_data_caveat` line joins the warning footer; the WEEKLY LOAD section
   renders regardless.
-- **Sparkline semantics.** The FORM line's `CTL ▁▂▂▃▃▅▅▆ (8w)` is one cell
-  per displayed week (default 8, follows `--weeks`), sampling CTL on the
+- **Sparkline semantics.** The second header line's `CTL 8w ▁▂▂▃▃▅▅▆` is one
+  cell per displayed week (default 8, follows `--weeks`), sampling CTL on the
   week's **last day**, min–max scaled over those weeks. Range-stretching can
   make a small climb look steep, accepted: the real numbers sit on the same
   line (numbers-first — the sparkline is garnish).
@@ -495,6 +685,12 @@ objective line: `🏁 2026-09-30 Trail marathon — projected CTL 68, TSB +12`.)
   absolute-scale bars (§7.3). Future weeks stay number-only (`(planned)`),
   per the mock. In the mock above the scale anchor is the 360-planned week:
   262→7 cells, 214→5, 138→3.
+- **Degenerate inputs, pinned** (no machinery — each is a one-line guard):
+  all displayed weeks at zero load → bars render empty, no division by the
+  zero max; sparkline cells with no CTL (warm-up edge inside the window, or
+  no anchor) render blank, and a flat series (min = max) renders all cells
+  at the floor glyph; `--weeks` must be ≥ 1, rejected at argparse (the
+  rev-4 snapshot's `or 8` silently swallowed 0).
 - **Width-aware** via the existing `TRAINMATE_WRAP_WIDTH` mechanism
   (`util.default_wrap_width`). Budget: the bot's `telegram_wrap_width`
   default is **48** — column layout above is meso 8 (truncated per §6.1) +
@@ -503,7 +699,13 @@ objective line: `🏁 2026-09-30 Trail marathon — projected CTL 68, TSB +12`.)
   laid out once for the 48-column budget and does not widen on a wider
   terminal — CLI and Telegram render identically (what you see on a TTY is
   what the bot sends), and the width test stays a single assertion. Wider
-  terminals just get whitespace on the right.
+  terminals just get whitespace on the right. The budget covers **every**
+  line, not just the table (rev 5's own mock FORM line measured ~59 — the
+  doc seeded the violation): the FORM header is two lines (values, then
+  sparkline + projection), banner / per-objective / footnote lines wrap
+  through the existing `wrap_text`, and width is measured with
+  `visible_len` — `⚠`/`🏁` are double-width in most terminals — never
+  `len`.
 - Past weeks: planned vs actual bar + percentage; `—` planned/percentage for
   ungoverned weeks (§3 empty states); future weeks: planned number only;
   current week per the §3 in-progress rule. Objective lines only for
@@ -640,12 +842,15 @@ the §7.2 photo transport for free where they need a chart in chat.)*
 
 ## 9. Testing
 
-- `tests/test_pmc.py` (the shipped core's suite) gains the one new-core test:
-  `seed=(0,0)` is byte-identical to the current behavior, and a series split
-  at an arbitrary date and re-folded with `seed=` the first half's final
-  values reproduces the unsplit series exactly — the property the §4 anchor
-  fold rests on. The recursion values themselves (hand-computed CTL/ATL/TSB,
-  TSB off-by-one, calendar-gap decay) are already pinned there and are *not*
+- `tests/test_pmc.py` (the shipped core's suite) covers the two core changes:
+  `seed=(0,0)` reproduces current behavior, and a series split at an
+  arbitrary date and re-folded with `seed=` the first half's final values
+  reproduces the unsplit series **exactly** — a legitimate demand only
+  *because* storage is now full-precision (§4); against 1-dp-rounded anchors
+  this test would be flaky by construction. The existing pinned
+  hand-computed values switch to comparing `round(x, 1)` (the unrounding is
+  a deliberate output change). The recursion values themselves (TSB
+  off-by-one, calendar-gap decay) are already pinned there and are *not*
   re-tested in this feature's suite.
 - `tests/test_progression.py` — pure-function tests (patch-before-import
   pattern, §5): fixture activities + workouts + metrics rows spanning the
@@ -654,19 +859,33 @@ the §7.2 photo transport for free where they need a chart in chat.)*
   warm-up cutoff (§4), the anchored fold over a zero-load tail reproduces
   the closed-form decay `ctl_A·(1−1/τ)^d`, planned load raises the
   projection, seam continuity under **non-default τ** (config plumbed, no
-  kink at the anchor), no-anchor / young-DB suppression, zero-gap day
-  filling, planned-side sRPE fallback + no-tss-no-rpe warning counting
-  (rest rows excluded), Monday week bucketing, in-progress-week elapsed
-  split, plan-end clamp, §6.1 majority-overlap labeling over fixture spans,
-  and the three empty states.
+  kink at the anchor), the morning-pull case (a stored load-0 row for today
+  is ignored as anchor; today folds per §3 and the planned session raises
+  tomorrow's ATL), trailing NULL-PMC rows skipped when picking the anchor,
+  no-anchor / young-DB suppression, zero-gap day filling, planned-side sRPE
+  fallback + zero-valued-row warning counting (rest rows excluded; explicit
+  `tss=0` values to 0, not the sRPE fallback), Monday week bucketing,
+  in-progress-week elapsed split (today counted only once synced), plan-end clamp incl. the
+  generated-only rule (a manual workout beyond plan end leaves it unchanged
+  and warns; no-generated-workouts fallback), the lapsed plan (plan_end <
+  today → no fold, window ends today), §6.1 majority-overlap labeling over
+  fixture spans (incl. a completed objective's weeks keeping their plan
+  labels), governance decided by meso-range overlap rather than labels
+  (all-removed week → planned 0, `—` percentage), band trimming (payload
+  never contains overlapping spans), and the four empty states.
 - CLI renderer tests (`tests/test_cli_progress.py` or alongside existing CLI
   tests): the pure formatting helpers (§7.1) over fixture series — plan-end
   banner vs per-objective projection lines, past / in-progress / ungoverned
   / future week rows, bar scaling (shared max anchor incl. a future planned
-  week; ungoverned week still gets a bar), warning footer, the FORM line
-  agreeing with the status line's values over the same fixture rows (§7.1)
-  and carrying `PMC_TSB_LAG_NOTE`, the young-DB still-warming state; plus a
-  narrow `TRAINMATE_WRAP_WIDTH` variant asserting nothing exceeds 48 chars.
+  week; ungoverned week still gets a bar), warning footer, the §7.1
+  status-consistency contract over a fixture pair (today synced: FORM ≡
+  status verbatim, `(actual)` tag; today pending: TSB equal, CTL/ATL
+  deliberately diverge, `(planned)` tag), `PMC_TSB_LAG_NOTE` carried, the
+  lapsed-plan banner, the partial-final-week marker, the degenerate inputs
+  (zero-max bar scale, blank and flat sparklines, `--weeks 0` rejected), the
+  young-DB still-warming state; plus a narrow `TRAINMATE_WRAP_WIDTH` variant
+  asserting `visible_len(line) ≤ 48` for **every** output line (not `len` —
+  emoji are double-width).
 - `tests/test_bot.py`: `parse_photo_request` round-trip with `emit_photo`
   framing (sentinel/JSON incl. the `caption` field, non-photo lines return
   `None`, unknown-sentinel lines dropped) — same pattern as the existing
@@ -676,20 +895,27 @@ the §7.2 photo transport for free where they need a chart in chat.)*
   `plan_end`, in-progress week fields, `meso_bands` layering, nullable
   `ctl`/`atl`/`tsb` with the warm-up nulls and the young-DB caveat in
   `warnings`), window clipping vs the full-history stored series (a point
-  *inside* the window must reflect load *before* the window), pure-reader
-  property (no Garmin/LLM mocks needed — that's the assertion).
+  *inside* the window must reflect load *before* the window; a mid-week
+  `start_date` returns the straddling week whole), pure-reader
+  property (no Garmin/LLM mocks needed — that's the assertion), and the
+  CLI≡endpoint equivalence test: one fixture DB through the CLI handler's
+  rows and the endpoint's rows produces the identical `assemble_timeline`
+  payload — warnings, wording and all (the test that would have caught
+  CODE_REVIEW finding #5).
 - Web front-end stays untested, per existing practice.
 
 ## 10. Rollout
 
 Ordered by usage (CLI/bot before web), each step independently shippable:
 
-1. `garmin.compute_pmc` gains the optional `seed` parameter (+ its
-   `tests/test_pmc.py` tests, §9); `trainmate/progression.py` +
+1. `garmin.compute_pmc` gains the optional `seed` parameter and drops its
+   1-dp output rounding (full-precision storage, §4) (+ the
+   `tests/test_pmc.py` updates, §9); `trainmate/progression.py` +
    `tests/test_progression.py` — reading stored rows + the anchored fold per
    §4/§5 (the rev-4 snapshot's own `CTL_DAYS`/`ATL_DAYS` constants,
    mean-seeding, and full-history recursion are deleted in the rework);
-   promote `adherence._planned_load` → `adherence.planned_load` (public, §3).
+   promote `adherence._planned_load` → `adherence.planned_load` (public,
+   incl. the `tss is not None` fix, §3).
 2. `tm progress` text mode (`trainmate/cli/progress.py` with auto-ensure,
    dispatcher entry + `prog` alias, removal of the `p` alias for `plan`,
    formatting-helper tests). This alone lights up Telegram text via parity —
@@ -719,9 +945,9 @@ Ordered by usage (CLI/bot before web), each step independently shippable:
 - **Multi-objective seasons** — live today, not hypothetical: three
   objectives are active (2026-09-30 → 2027-01-31) while the plan only
   extends through the first. The *governing objective* for meso labels is
-  defined (§6.1); v1 draws flags for `active` objectives whose `target_date`
-  falls inside the *displayed* window — clipping is the renderer's job, the
-  endpoint returns all active objectives (§6) — later ones are simply
+  defined (§6.1); v1 draws flags for `active` and `completed` objectives
+  whose `target_date` falls inside the *displayed* window — clipping is the
+  renderer's job, the endpoint returns them all (§6) — later ones are simply
   off-canvas until their plan exists; `priority` can gate flags if the panel
   gets noisy.
 - **Planned-today undercount** (§3 today rule; rev 2 mislabeled this
