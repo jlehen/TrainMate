@@ -1352,50 +1352,7 @@ header {
 .modal-body textarea { min-height: 80px; resize: vertical; }
 
 /* --- PROGRESS TAB (DESIGN_progress_timeline.md §7.3) --- */
+/* V1 frames the server-rendered PNG (§7.2); the interactive uPlot tab is a
+   follow-on (§8.5), so the bar/legend styles it needed are gone with it. */
 .progress-range-btn.active { background: var(--gradient-primary); color: #fff; border-color: transparent; }
-.progress-chart-container { width: 100%; min-height: 320px; }
-
-.progress-weekly-bars {
-    display: flex;
-    align-items: flex-end;
-    gap: 0.5rem;
-    height: 220px;
-    padding: 0.5rem 0.25rem 0;
-    overflow-x: auto;
-}
-.progress-week-col {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    flex: 1 0 44px;
-    min-width: 44px;
-    height: 100%;
-}
-.progress-week-bars {
-    display: flex;
-    align-items: flex-end;
-    gap: 3px;
-    flex: 1;
-    width: 100%;
-    justify-content: center;
-}
-.progress-bar { width: 12px; border-radius: 3px 3px 0 0; min-height: 2px; transition: var(--transition-smooth); }
-.progress-bar.planned { background: rgba(245, 158, 11, 0.55); }
-.progress-bar.actual { background: var(--accent-blue); }
-.progress-week-meso {
-    margin-top: 0.4rem;
-    font-size: 0.6rem;
-    color: var(--text-muted);
-    max-width: 100%;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-}
-.progress-week-meso.meso-inferred { font-style: italic; }
-.progress-week-label { font-size: 0.65rem; color: var(--text-secondary); margin-top: 0.15rem; }
-
-.progress-legend { display: flex; gap: 1.25rem; margin-top: 0.75rem; font-size: 0.75rem; color: var(--text-secondary); align-items: center; }
-.progress-swatch { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 0.35rem; }
-.progress-swatch.planned { background: rgba(245, 158, 11, 0.55); }
-.progress-swatch.actual { background: var(--accent-blue); }
-.progress-legend-note { color: var(--text-muted); }
+.progress-image { width: 100%; max-width: 100%; height: auto; display: block; border-radius: var(--radius-md, 8px); }

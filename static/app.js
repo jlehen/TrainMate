@@ -1040,170 +1040,44 @@ async function fetchHistory() {
 }
 
 // --- PROGRESS TAB (DESIGN_progress_timeline.md §7.3) ---
+// V1 is the picture, not an app: an <img> pointing at GET /api/timeline.png plus
+// quick-range buttons that set ?weeks= and reload it. The empty / still-warming
+// states are drawn inside the PNG by the server renderer, identical to the bot
+// photo. A 503 (matplotlib missing) shows the endpoint's install hint verbatim.
 
-let progressRange = "8w";
-let progressChart = null; // the live uPlot instance, so re-fetching can destroy() it first
-
-function progressStartDate(today) {
-    // Quick-range buttons resolve to a ?start_date= the server clips to. The
-    // server defaults start_date to today-56 when the param is *absent*
-    // (§6), so "all" can't just omit it — it passes an explicit early date
-    // instead, well before any real training history.
-    if (progressRange === "all") return "1970-01-01";
-    if (progressRange === "season") {
-        const d = parseLocalDate(today);
-        d.setDate(d.getDate() - 168); // ~24 weeks back
-        return d.toISOString().split("T")[0];
-    }
-    const d = parseLocalDate(today);
-    d.setDate(d.getDate() - 56); // 8 weeks back, matching the CLI default
-    return d.toISOString().split("T")[0];
-}
+let progressWeeks = "8";
 
 async function fetchProgress() {
-    const today = todayStr();
-    const start = progressStartDate(today);
-    const qs = start ? `?start_date=${start}` : "";
+    const img = document.getElementById("progress-image");
+    const errEl = document.getElementById("progress-image-error");
+    const url = `${API_BASE}/api/timeline.png?weeks=${progressWeeks}`;
     try {
-        const res = await fetch(`${API_BASE}/api/timeline${qs}`);
-        const data = await res.json();
-        renderProgressWarnings(data.warnings || []);
-        renderPMCChart(data);
-        renderWeeklyBars(data);
+        const res = await fetch(url);
+        if (!res.ok) {
+            // 503 (matplotlib absent) or 400 (bad weeks) — show the body text.
+            const text = await res.text();
+            img.style.display = "none";
+            errEl.style.display = "";
+            errEl.textContent = text || `Progress chart unavailable (HTTP ${res.status}).`;
+            return;
+        }
+        const blob = await res.blob();
+        if (img.dataset.objectUrl) URL.revokeObjectURL(img.dataset.objectUrl);
+        const objectUrl = URL.createObjectURL(blob);
+        img.dataset.objectUrl = objectUrl;
+        img.src = objectUrl;
+        img.style.display = "";
+        errEl.style.display = "none";
     } catch (e) {
         logConsole(`Progress load error: ${e.message}`, "error");
     }
-}
-
-function renderProgressWarnings(warnings) {
-    const el = document.getElementById("progress-warnings");
-    if (!warnings.length) { el.innerHTML = ""; return; }
-    el.innerHTML = warnings.map(w =>
-        `<div class="cli-guidance"><i class="fa-solid fa-triangle-exclamation"></i> ${escapeHtml(w)}</div>`
-    ).join("");
-}
-
-function renderPMCChart(data) {
-    const container = document.getElementById("progress-pmc-chart");
-    if (progressChart) { progressChart.destroy(); progressChart = null; }
-    if (!data.days || !data.days.length) {
-        container.innerHTML = `<div class="item-meta">No activity history yet — run <code>data pull</code> first.</div>`;
-        return;
-    }
-    if (typeof uPlot === "undefined") {
-        container.innerHTML = `<div class="item-meta">Chart library failed to load (uPlot CDN unreachable).</div>`;
-        return;
-    }
-
-    // uPlot wants epoch seconds at UTC midnight on both axes (date-only data —
-    // the classic local-vs-UTC off-by-one foot-gun, §7.3).
-    const toEpoch = (dateStr) => Date.parse(dateStr + "T00:00:00Z") / 1000;
-    const xs = data.days.map(d => toEpoch(d.date));
-    const todayEpoch = toEpoch(data.today);
-
-    // Solid (actual) / dashed (planned) split: each series is duplicated into
-    // a past half and a future half, with a null gap so uPlot doesn't draw a
-    // seam connector, and the legend collapses each pair via `show` labeling.
-    const splitSeries = (key) => {
-        const past = data.days.map(d => (toEpoch(d.date) <= todayEpoch ? d[key] : null));
-        const future = data.days.map(d => (toEpoch(d.date) >= todayEpoch ? d[key] : null));
-        return [past, future];
-    };
-    const [ctlPast, ctlFuture] = splitSeries("ctl");
-    const [atlPast, atlFuture] = splitSeries("atl");
-    const [tsbPast, tsbFuture] = splitSeries("tsb");
-
-    const opts = {
-        width: container.clientWidth || 800,
-        height: 320,
-        scales: { x: { time: true } },
-        series: [
-            {},
-            { label: "CTL", stroke: "#3b82f6", width: 2 },
-            { label: "CTL (planned)", stroke: "#3b82f6", width: 2, dash: [6, 4] },
-            { label: "ATL", stroke: "#ef4444", width: 2 },
-            { label: "ATL (planned)", stroke: "#ef4444", width: 2, dash: [6, 4] },
-            { label: "TSB", stroke: "#10b981", width: 2 },
-            { label: "TSB (planned)", stroke: "#10b981", width: 2, dash: [6, 4] },
-        ],
-        axes: [{}, { label: "Load" }],
-        hooks: {
-            draw: [(u) => {
-                // "Today" rule + objective flags — small draw hook per §7.3.
-                const ctx = u.ctx;
-                const drawVLine = (epoch, color) => {
-                    const x = u.valToPos(epoch, "x", true);
-                    ctx.save();
-                    ctx.strokeStyle = color;
-                    ctx.setLineDash([4, 4]);
-                    ctx.beginPath();
-                    ctx.moveTo(x, u.bbox.top);
-                    ctx.lineTo(x, u.bbox.top + u.bbox.height);
-                    ctx.stroke();
-                    ctx.restore();
-                };
-                drawVLine(todayEpoch, "#94a3b8");
-                (data.objectives || []).forEach(o => {
-                    const oEpoch = toEpoch(o.target_date);
-                    if (oEpoch >= xs[0] && oEpoch <= xs[xs.length - 1]) {
-                        drawVLine(oEpoch, "#f59e0b");
-                    }
-                });
-            }],
-        },
-    };
-
-    progressChart = new uPlot(
-        opts, [xs, ctlPast, ctlFuture, atlPast, atlFuture, tsbPast, tsbFuture], container
-    );
-}
-
-function renderWeeklyBars(data) {
-    // Paired planned/actual bars aren't stock uPlot (§7.3's seriesBarsPlugin
-    // note); a plain flex/DOM bar chart gets the same information across with
-    // far less code and still gets hover-to-inspect via the title attribute.
-    const container = document.getElementById("progress-weekly-chart");
-    const weeks = data.weeks || [];
-    if (!weeks.length) {
-        container.innerHTML = `<div class="item-meta">No weekly load in range.</div>`;
-        return;
-    }
-    const scaleMax = Math.max(
-        1, ...weeks.map(w => Math.max(w.planned_load || 0, w.actual_load || 0))
-    );
-    container.innerHTML = `
-        <div class="progress-weekly-bars">
-            ${weeks.map(w => {
-                const plannedPct = w.planned_load != null ? (w.planned_load / scaleMax * 100) : 0;
-                const actualPct = (w.actual_load || 0) / scaleMax * 100;
-                const pct = (w.planned_load) ? Math.round(w.actual_load / w.planned_load * 100) + "%" : "—";
-                const mesoClass = w.meso_source === "inferred" ? "meso-inferred" : "meso-plan";
-                const label = w.meso_label ? escapeHtml(w.meso_label) : "—";
-                return `
-                    <div class="progress-week-col" title="w/c ${w.week_commencing}: planned ${w.planned_load ?? '—'}, actual ${Math.round(w.actual_load)} (${pct})">
-                        <div class="progress-week-bars">
-                            <div class="progress-bar planned" style="height:${plannedPct}%"></div>
-                            <div class="progress-bar actual" style="height:${actualPct}%"></div>
-                        </div>
-                        <div class="progress-week-meso ${mesoClass}">${label}</div>
-                        <div class="progress-week-label">${w.week_commencing.slice(5)}${w.in_progress ? "*" : ""}</div>
-                    </div>
-                `;
-            }).join("")}
-        </div>
-        <div class="progress-legend">
-            <span><i class="progress-swatch planned"></i> planned</span>
-            <span><i class="progress-swatch actual"></i> actual</span>
-            <span class="progress-legend-note">~ inferred (bootstrap) · * in progress</span>
-        </div>
-    `;
 }
 
 document.querySelectorAll(".progress-range-btn").forEach(btn => {
     btn.addEventListener("click", () => {
         document.querySelectorAll(".progress-range-btn").forEach(b => b.classList.remove("active"));
         btn.classList.add("active");
-        progressRange = btn.dataset.range;
+        progressWeeks = btn.dataset.weeks;
         fetchProgress();
     });
 });

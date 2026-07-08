@@ -103,6 +103,49 @@ class PeriodizationMixin:
             row = cursor.fetchone()
             return dict(row) if row else None  # type: ignore
 
+    def get_governing_macrocycle(self) -> Optional[Macrocycle]:
+        """The macrocycle of the *governing objective* — the earliest active objective
+        that has a plan (i.e. the objective the current workouts implement). Its
+        mesocycles label the timeline weeks (DESIGN_progress_timeline.md §6.1).
+
+        Deliberately distinct from `get_active_objective()` (earliest active,
+        plan-or-not) and from Phase 2's priority-ordered event pick: meso labels must
+        follow whichever plan the current workouts implement. Returns None when no
+        active objective has a macrocycle yet."""
+        for obj in self.get_objectives(status='active'):  # ORDER BY target_date ASC
+            macro = self.get_macrocycle_for_objective(obj['id'])
+            if macro:
+                return macro
+        return None
+
+    def get_governance_versions(self) -> List[Dict[str, Any]]:
+        """Every macrocycle *version* — all objectives, active AND superseded,
+        completed objectives included — as
+        ``{objective_id, created_at, ranges: [(start, end), ...]}`` where ``ranges``
+        are the version's mesocycle spans.
+
+        The raw material for the version-in-force governance rule
+        (DESIGN_progress_timeline.md §6.1): a week is governed iff, per objective, the
+        latest version created before the week ended covers it — so a week whose plan
+        was later superseded still counts as having had a plan. Superseded versions
+        are kept (see DESIGN_plan_rollback.md), so they are included here on purpose;
+        this is why it can't reuse `get_mesocycle_ranges` (active-only)."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT id, objective_id, created_at FROM macrocycles"
+            )
+            macros = [dict(row) for row in cursor.fetchall()]
+        out: List[Dict[str, Any]] = []
+        for m in macros:
+            mesos = self.get_mesocycles_for_macrocycle(m['id'])
+            out.append({
+                'objective_id': m['objective_id'],
+                'created_at': m['created_at'],
+                'ranges': [(x['start_date'], x['end_date']) for x in mesos],
+            })
+        return out
+
     def get_mesocycles_for_macrocycle(self, macrocycle_id: int) -> List[Mesocycle]:
         """Fetches all mesocycles in chronological order belonging to a macrocycle."""
         with self._get_connection() as conn:

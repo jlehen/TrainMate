@@ -454,76 +454,55 @@ def compare_workouts() -> Any:
     })
 
 
-@app.route("/api/timeline", methods=["GET"])
-def get_timeline() -> Any:
-    """Progress timeline: measured load to date + planned load through plan
-    end, with the CTL/ATL/TSB fitness/fatigue model run across the seam
-    (DESIGN_progress_timeline.md §6). Pure reader — never calls
-    `garmin.ensure_data`; data freshness is already surfaced via `sync_state`
-    on the Dashboard. Not cached: recomputed per request so the projection
-    moves the instant `adapt`/`generate`/`swap`/`remove` rewrite future
+@app.route("/api/timeline.png", methods=["GET"])
+def get_timeline_png() -> Any:
+    """Progress timeline as a PNG image (DESIGN_progress_timeline.md §6): measured
+    load to date + planned load through plan end, with the CTL/ATL/TSB model run
+    across the seam. The same §7.2 renderer draws the Telegram photo, so bot and web
+    show the identical picture.
+
+    Pure reader — never calls `garmin.ensure_data`; freshness is surfaced via
+    `sync_state` on the Dashboard. Not cached: recomputed per request so the
+    projection moves the instant `adapt`/`generate`/`swap`/`remove` rewrite future
     workouts.
 
-    Query params `?start_date=&end_date=` clip the *returned* window only
-    (default: today - 56 days -> plan end); the underlying computation always
-    runs over full history (CTL/ATL seeding needs it)."""
+    `?weeks=N` re-windows the past half exactly like the CLI's `--weeks` (default 8,
+    must be >= 1 else 400; `all` extends to full history). The future half always runs
+    to plan end. matplotlib absent (optional tier, §7.2) -> 503 with the install hint
+    the tab shows verbatim."""
     today = today_str()
-    activities = db.get_completed_activities()
-    workouts = db.get_workouts()
+    raw_weeks = request.args.get("weeks", "8")
+    if raw_weeks == "all":
+        start_date = "0001-01-01"
+    else:
+        try:
+            weeks_n = int(raw_weeks)
+        except ValueError:
+            return jsonify({"error": "weeks must be an integer or 'all'"}), 400
+        if weeks_n < 1:
+            return jsonify({"error": "weeks must be >= 1"}), 400
+        start_date = (
+            datetime.strptime(today, "%Y-%m-%d").date() - timedelta(days=7 * weeks_n)
+        ).strftime("%Y-%m-%d")
 
-    objectives = db.get_objectives(status='active')
-    objectives.sort(key=lambda o: str(o['target_date']))
+    from trainmate import timeline
+    payload = timeline.build_timeline_payload(db)
+    end_date = payload["plan_end"] or today
+    if end_date < today:
+        end_date = today
+    clipped = progression.clip_payload(payload, start_date, end_date)
 
-    governing_macro = None
-    for obj in objectives:
-        macro = db.get_macrocycle_for_objective(obj['id'])
-        if macro:
-            governing_macro = macro
-            break
-    mesocycles = (
-        db.get_mesocycles_for_macrocycle(governing_macro['id']) if governing_macro else []
-    )
-    cache = db.get_analysis_cache("long")
-    inferred = (cache.get("reconstruction") or {}).get("inferred_mesocycles", []) if cache else []
-    meso_spans = progression.meso_bands(mesocycles, inferred)
-
-    days = progression.fitness_series(progression.daily_loads(activities, workouts, today))
-    weeks = progression.weekly_aggregates(activities, workouts, today, meso_spans)
-    plan_end = progression.plan_end(workouts)
-    zero_load_count = progression.zero_load_workout_count(workouts)
-
-    default_start = (
-        datetime.strptime(today, "%Y-%m-%d").date() - timedelta(days=56)
-    ).strftime("%Y-%m-%d")
-    start_date = request.args.get("start_date") or default_start
-    end_date = request.args.get("end_date") or (plan_end or today)
-
-    warnings: List[str] = []
-    if plan_end is not None:
-        next_objective = next((o for o in objectives if o['target_date'] > plan_end), None)
-        if next_objective:
-            end_d = datetime.strptime(plan_end, "%Y-%m-%d").date()
-            target_d = datetime.strptime(next_objective['target_date'], "%Y-%m-%d").date()
-            weeks_before = max(0, round((target_d - end_d).days / 7))
-            warnings.append(
-                f"plan generated through {plan_end} ({weeks_before} wks before "
-                f"objective {next_objective['target_date']})"
-            )
-    if zero_load_count:
-        warnings.append(
-            f"{zero_load_count} planned workout"
-            f"{'s' if zero_load_count != 1 else ''} have neither TSS nor RPE and count as 0 load"
+    try:
+        from trainmate import chart
+        png = chart.render_timeline_png(clipped)
+    except ImportError:
+        return (
+            "matplotlib is not installed — run: "
+            "venv/bin/pip install -r requirements.txt",
+            503,
+            {"Content-Type": "text/plain"},
         )
-
-    return jsonify({
-        "today": today,
-        "plan_end": plan_end,
-        "days": [d for d in days if start_date <= d["date"] <= end_date],
-        "weeks": [w for w in weeks if start_date <= w["week_commencing"] <= end_date],
-        "meso_bands": meso_spans,
-        "objectives": objectives,
-        "warnings": warnings,
-    })
+    return app.response_class(png, mimetype="image/png")
 
 
 # --- Plan & Workout Generation ---

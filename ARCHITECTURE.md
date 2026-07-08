@@ -154,11 +154,18 @@ classes themselves.
 |                      |                      | load valuation `progression.py` reuses.          |
 | `progression.py`     | —                    | Pure functions merging past (measured) + future  |
 |                      |                      | (planned) load into one series and folding the   |
-|                      |                      | CTL/ATL/TSB fitness/fatigue model across the seam |
-|                      |                      | (`daily_loads`, `fitness_series`, `weekly_aggregates`, |
-|                      |                      | `meso_bands`); feeds `tm progress`, the bot photo |
-|                      |                      | chart, and `/api/timeline` (see §12, §15,        |
-|                      |                      | DESIGN_progress_timeline.md).                    |
+|                      |                      | stored CTL/ATL/TSB series forward across the seam |
+|                      |                      | (`daily_loads`, `fitness_series` — reads stored   |
+|                      |                      | rows + anchored fold, `weekly_aggregates`,        |
+|                      |                      | `meso_bands`). `assemble_timeline` builds the     |
+|                      |                      | whole payload; `clip_payload` windows it (see §12,|
+|                      |                      | §15, DESIGN_progress_timeline.md).                |
+| `timeline.py`        | —                    | The one row-fetching path (`build_timeline_payload`) |
+|                      |                      | behind `tm progress` and `/api/timeline.png`, so  |
+|                      |                      | both surfaces assemble one identical payload.     |
+| `chart.py`           | —                    | `render_timeline_png(payload)` — the single §2    |
+|                      |                      | two-panel chart drawing (matplotlib, lazy import, |
+|                      |                      | `Agg`), shared by the bot photo and the web PNG.  |
 | `sports.py`          | —                    | Canonical sport vocabulary (`SPORT_MAPPING`,     |
 |                      |                      | `canonical_sport`, `sport_aliases`); dependency- |
 |                      |                      | free so DB + adherence share it without a cycle. |
@@ -178,7 +185,7 @@ flow for each lives in [§10](#10-key-data-flows).
 | Coach-learnings / confidence     | `db/learnings.py`, `coach/service.py` (`_apply_learning_updates`), model is **canonical** in [§3](#3-coach-package-architecture) |
 | Backward analysis (bootstrap/reflect) | `coach/service.py:_run_workout_analysis`, `coach/engine.py:_data_analyze_logic` ([§10](#data-analysis-data-bootstrap--data-reflect)) |
 | Garmin pull / metrics / load model | `trainmate/garmin.py` (`pull`, `ensure_data`, `activity_load`), see [§12](#12-sports-science--coaching-mathematics) |
-| Progress timeline / PMC projection | `trainmate/progression.py`, `cli/progress.py`, `/api/timeline` in `trainmate_web.py`, see [§12](#fitnessfatigueform-pmc-model), DESIGN_progress_timeline.md |
+| Progress timeline / PMC projection | `trainmate/progression.py` (pure math), `trainmate/timeline.py` (shared row-fetch), `trainmate/chart.py` (PNG), `cli/progress.py` (text), `/api/timeline.png` in `trainmate_web.py`, see [§12](#fitnessfatigueform-pmc-model), DESIGN_progress_timeline.md |
 | Calendar push / daily-context ingest | `trainmate/google_calendar.py`, see [§13](#13-daily-context-calendar-ingest) |
 | Workout state (modified/calendar/removed/archived) | `trainmate/modification_state.py`, `trainmate/calendar_state.py`, `db/workouts.py` ([§5](#workout-state--four-orthogonal-axes-not-one-enum)) |
 | A CLI command                    | `trainmate/cli/<family>.py` (`run_*`), dispatcher in `trainmate_cli.py` ([§7](#7-cli-commands-reference)) |
@@ -982,9 +989,10 @@ CRUD + plan delete), **Workouts** (date/sport/removed-filtered list with derived
 state markers, manual add, swap, remove/restore, and the compare/adherence view),
 **Learnings** (filterable manager with per-week evidence, edit, demote/keep),
 **History** (read-only activities/metrics/daily-context tables), and **Progress**
-(the projected PMC chart via uPlot CDN + a plain-DOM weekly planned-vs-actual bar
-panel, quick-range buttons, lazy-loaded like the other tabs; DESIGN_progress_timeline.md
-§7.3) — and surfaces every endpoint below. The deliberately-CLI-only flows (`data
+(an `<img>` framing the server-rendered `/api/timeline.png` chart + quick-range
+buttons `8w`/`26w`/`all`, lazy-loaded like the other tabs; the interactive uPlot
+tab is a follow-on, DESIGN_progress_timeline.md §7.3/§8.5) — and surfaces every
+endpoint below. The deliberately-CLI-only flows (`data
 bootstrap`/`reflect` and
 Garmin `data pull`) are not web actions; the UI shows the command to run instead
 (interactive / MFA-bound, DESIGN_garmin_direct_pull.md §11). `GET /api/workouts`
@@ -1019,7 +1027,7 @@ markers as `workout list` without re-deriving the rules (§5).
 | PUT/DELETE  | `/api/learnings/<id>`           | Edit text / delete a learning                |
 | POST        | `/api/learnings/<id>/demote`    | Accept a pending confidence downgrade        |
 | POST        | `/api/learnings/<id>/keep`      | Dismiss + affirm a pending downgrade         |
-| GET         | `/api/timeline`                 | Progress timeline: merged past/planned load + CTL/ATL/TSB (`?start_date=&end_date=`, default today-56d → plan end; computation always runs over full history). Pure reader, not cached — recomputed per request. `{today, plan_end, days[], weeks[], meso_bands[], objectives[], warnings[]}` (DESIGN_progress_timeline.md §6) |
+| GET         | `/api/timeline.png`             | Progress timeline as a PNG image (same §7.2 renderer as the bot photo): merged past/planned load + projected CTL/ATL/TSB. `?weeks=N` (default 8, ≥1 else 400; `all` = full history) re-windows the past half. Pure reader, not cached. matplotlib absent → 503 with install hint. The JSON payload endpoint ships with the interactive tab follow-on (DESIGN_progress_timeline.md §6/§8.5) |
 | GET         | `/api/activities`               | Completed activities (`?start_date=&end_date=`)|
 | GET         | `/api/daily-context`            | Daily-context signals (`?start_date=&end_date=`)|
 | POST        | `/api/metrics/pull`             | Returns 409 — Garmin pulls are CLI-only      |
@@ -1353,17 +1361,22 @@ gate/derive display values. Consumers: coach prompts, `tm status`,
 `tm data show-metrics`.
 
 **Projection layer** (`trainmate/progression.py`, DESIGN_progress_timeline.md):
-past days read the stored series verbatim (never recomputed — `tm progress`
-and `tm status` must agree); from the last stored row the same recurrence is
-folded forward (`compute_pmc(..., seed=(ctl, atl))`) over the merged
-actual-then-planned daily load series (past: `activity_load` above; future:
-`adherence.planned_load` over non-removed `workouts` — see
-DESIGN_progress_timeline.md §3 for the seam rule), stopping at the last
-generated workout. Consumers: `tm progress` (CLI, numbers-first + optional
-`--chart` PNG via matplotlib), the Telegram bot (text for free via CLI
-parity, plus the photo transport for the chart), and `GET /api/timeline`
-(the web **Progress** tab, uPlot). One computation feeds all three; only
-the rendering differs.
+this is PMC Phase 2, generalized to the full daily series. Past days read the
+stored series verbatim (never recomputed — `tm progress` and `tm status` must
+agree); the *anchor* is the latest stored row **strictly before today** with
+non-NULL PMC, and from it the same recurrence is folded forward
+(`compute_pmc(..., seed=(ctl, atl))`) over the merged actual-then-planned daily
+load series (past: `activity_load` above; future: `adherence.planned_load` over
+non-removed `workouts` — see DESIGN_progress_timeline.md §3 for the seam rule),
+stopping at the last generated workout. `compute_pmc` stores its outputs at
+**full precision** (rounding moved to display) so the fold reproduces the stored
+series bit-exactly. `assemble_timeline` builds the whole payload; `timeline.
+build_timeline_payload` is the one row-fetching path behind both surfaces.
+Consumers: `tm progress` (CLI, numbers-first + optional `--chart` PNG), the
+Telegram bot (text for free via CLI parity, plus the photo transport for the
+chart), and `GET /api/timeline.png` (the web **Progress** tab, framing the same
+`chart.render_timeline_png` PNG). One computation and one chart renderer feed
+all three; only the delivery differs.
 
 ### Daily Readiness Signals
 - HRV drops > 1 std below baseline mean → flag potential overtraining
@@ -1473,13 +1486,22 @@ venv/bin/python -m unittest discover -s tests -p "test_*.py"
 | `tests/test_garmin.py`         | Garmin transforms (load model), zone parsing, watermark/         |
 |                                | auto-ensure policy, recompute, `backfill_tss`                    |
 | `tests/test_progression.py`    | `progression.py` pure functions: merged-load seam rule (incl. the |
-|                                | zero-load-activity case), CTL/ATL/TSB recursion + calendar-mean  |
-|                                | seeding (incl. shorter-than-window fallback), zero-gap day filling, |
-|                                | plan-end clamp, Monday week bucketing, in-progress-week elapsed  |
-|                                | split, §6.1 majority-overlap meso labeling, empty states         |
-| `tests/test_cli_progress.py`   | `cli/progress.py` formatting helpers: sparkline/bar scaling, meso |
-|                                | label truncation, weekly-row rendering (past/in-progress/future/ |
-|                                | ungoverned), and the 48-column table-width budget                |
+|                                | zero-load-activity case), stored-read past + anchored fold        |
+|                                | (closed-form decay, morning-pull today-row ignored, trailing-NULL |
+|                                | anchor skip, no-anchor suppression, non-default τ continuity),    |
+|                                | generated-only plan-end clamp, Monday bucketing, in-progress      |
+|                                | elapsed split (today only once synced), §6.1 majority-overlap     |
+|                                | labeling, version-in-force governance, band trimming,             |
+|                                | `assemble_timeline` payload + warnings, `clip_payload`, empty states |
+| `tests/test_cli_progress.py`   | `cli/progress.py` formatting helpers + `render_progress`: sparkline/|
+|                                | bar scaling, label truncation, weekly-row rendering (past/in-      |
+|                                | progress/future/ungoverned), plan-gap vs per-objective projection, |
+|                                | lapsed/no-plan/still-warming banners, partial-final-week marker,   |
+|                                | and the 48-column width budget (via `visible_len`)               |
+| `tests/test_pmc.py`            | `compute_pmc` (also): `seed=(0,0)` reproduces from-zero, split/re- |
+|                                | fold reproduces the unsplit series exactly, full-precision output |
+| `tests/test_web.py`            | (also) `GET /api/timeline.png`: PNG magic bytes, `?weeks`         |
+|                                | validation, matplotlib-absent 503, CLI≡endpoint payload equivalence |
 | `tests/test_utils.py`          | `util.py` helpers (text wrapping, ANSI width, ACWR coloring)     |
 
 Tests inject a fresh in-memory SQLite DB by assigning `test_db` to module-level
@@ -1552,13 +1574,17 @@ Past load (measured) and future load (planned) previously lived in disconnected
 views — `workout compare` (per-day adherence, no accumulation) and the workout/
 mesocycle listings (periodization visible in the data but never drawn). `tm
 progress` / the bot photo / the web **Progress** tab draw them as one continuous
-timeline instead, with a CTL/ATL/TSB fitness/fatigue model run across the seam so
-the projection visibly moves the instant `adapt`/`generate`/`swap`/`remove` rewrite
-future `workouts`. `trainmate/progression.py` is the single row-in/row-out
-computation all three front-ends share (CLI/bot directly, the web via `/api/timeline`);
-`meso_bands()` deliberately stops short of resolving *which* macrocycle version
-governed a past week — that needs db + the governing-objective choice, which stays
-the caller's job, so the pure function never touches `db`. The endpoint is
-deliberately uncached (a fingerprint scheme would just re-derive "did anything
-change" at higher complexity than recomputing a few hundred rows). Full design:
-DESIGN_progress_timeline.md; PMC model constants: [§12](#fitnessfatigueform-pmc-model).
+timeline instead, with the stored CTL/ATL/TSB series folded forward across the seam
+so the projection visibly moves the instant `adapt`/`generate`/`swap`/`remove`
+rewrite future `workouts`. `trainmate/progression.py` is the single row-in/row-out
+computation (`assemble_timeline`); `trainmate/timeline.py` is the one db-reads path
+both front-ends call, so CLI and endpoint render one identical payload (the fix for
+the rev-4 divergence where each caller assembled its own — pinned by a CLI≡endpoint
+equivalence test). `chart.py` is the single PNG renderer shared by the bot photo and
+`/api/timeline.png`. Governance (does a week show planned totals?) follows the
+*version in force* that week — independent of the cosmetic meso label, so a labeling
+nit can't silently delete planned data. The v1 web tab frames the server-rendered
+PNG; the interactive uPlot tab and its JSON endpoint are a follow-on (§8.5). The
+endpoint is deliberately uncached (a fingerprint scheme would just re-derive "did
+anything change" at higher complexity than recomputing a few hundred rows). Full
+design: DESIGN_progress_timeline.md; PMC model: [§12](#fitnessfatigueform-pmc-model).

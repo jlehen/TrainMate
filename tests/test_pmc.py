@@ -120,6 +120,36 @@ class TestComputePMC(unittest.TestCase):
         # end < start must not throw and returns {}.
         self.assertEqual(compute_pmc({}, "2026-02-01", "2026-01-01", 42, 7), {})
 
+    def test_seed_default_reproduces_from_zero(self):
+        # The default seed (0, 0) is the from-zero full-history sweep.
+        daily = {(date(2026, 1, 1) + timedelta(days=i)).isoformat(): 50.0
+                 for i in range(30)}
+        a = compute_pmc(daily, "2026-01-01", "2026-01-30", 42, 7)
+        b = compute_pmc(daily, "2026-01-01", "2026-01-30", 42, 7, seed=(0.0, 0.0))
+        self.assertEqual(a, b)
+
+    def test_split_and_refold_reproduces_unsplit_series_exactly(self):
+        # The projection fold: split at an arbitrary day, re-fold the tail seeded
+        # with the first half's final (CTL, ATL), and the two halves must reproduce
+        # the unsplit series bit-exactly — a demand only legitimate because storage
+        # is now full-precision (DESIGN_progress_timeline.md §4).
+        daily = {(date(2026, 1, 1) + timedelta(days=i)).isoformat(): float(30 + i)
+                 for i in range(0, 60, 2)}  # sparse, varying loads with gaps
+        full = compute_pmc(daily, "2026-01-01", "2026-03-01", 42, 7)
+        split_day = "2026-02-01"
+        head = compute_pmc(daily, "2026-01-01", split_day, 42, 7)
+        ctl_a, atl_a, _ = head[split_day]
+        tail_start = (date.fromisoformat(split_day) + timedelta(days=1)).isoformat()
+        tail = compute_pmc(daily, tail_start, "2026-03-01", 42, 7, seed=(ctl_a, atl_a))
+        for day, vals in tail.items():
+            self.assertEqual(vals, full[day], msg=day)
+
+    def test_outputs_are_full_precision_not_rounded(self):
+        # Storage keeps full precision now; display rounds (§4).
+        pmc = compute_pmc({"2026-01-01": 100.0}, "2026-01-01", "2026-01-02", 42, 7)
+        ctl = pmc["2026-01-02"][0]
+        self.assertNotAlmostEqual(ctl, round(ctl, 1), places=6)
+
 
 # ==============================================================================
 # Warm-up cutoff (§3.3a) + static still-warming-up flag (§3.3b)

@@ -151,6 +151,18 @@ from trainmate.cli.context import (
 )
 
 
+def _weeks_arg(raw: str) -> int:
+    """`--weeks N` must be a whole number >= 1 (DESIGN_progress_timeline.md §7.1) —
+    rejected at argparse, so a `0` can't silently fall through to the default."""
+    try:
+        n = int(raw)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"invalid int value: '{raw}'")
+    if n < 1:
+        raise argparse.ArgumentTypeError("must be >= 1")
+    return n
+
+
 def _canonical_option(action: argparse.Action) -> str:
     """The most explicit spelling of an option (argparse accepts any registered one)."""
     return max(action.option_strings, key=len)
@@ -404,9 +416,9 @@ def main() -> None:
         )
     )
     progress_parser.add_argument(
-        "--weeks", type=int, default=8, metavar="N",
-        help="Weeks of past weekly load to show (default: 8). The future half always "
-             "runs to plan end."
+        "--weeks", type=_weeks_arg, default=8, metavar="N",
+        help="Weeks of past weekly load to show (default: 8, must be >= 1). The "
+             "future half always runs to plan end."
     )
     progress_parser.add_argument(
         "--chart", nargs="?", const=True, default=False, metavar="PATH",

@@ -22,9 +22,14 @@ def date_covered(
 def planned_load(w: Dict[str, Any]) -> float:
     """Expected load of a planned workout as a single value (mirrors the actual
     side): the coach's planned TSS, or sRPE (RPE x 10 x hours) when no TSS was
-    assigned. Replaces the former `tss + rpe*hours` blend."""
+    assigned. Replaces the former `tss + rpe*hours` blend.
+
+    An explicit ``tss = 0`` means zero, not "unset" — it is a real planned load
+    and must not silently fall through to the sRPE estimate (that made the
+    timeline's weekly bars disagree with the adherence percentages beside them,
+    DESIGN_progress_timeline.md §3). Only a missing/None TSS triggers the fallback."""
     tss = w.get("tss")
-    if tss:
+    if tss is not None:
         return float(tss)
     rpe = w.get("rpe") or 0
     duration_min = w.get("duration_minutes") or 0

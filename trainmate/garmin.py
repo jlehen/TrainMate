@@ -601,19 +601,25 @@ def compute_pmc(
     daily_load: Dict[str, float],
     start: str, end: str,
     ctl_days: int, atl_days: int,
+    seed: Tuple[float, float] = (0.0, 0.0),
 ) -> Dict[str, Tuple[float, float, float]]:
     """CTL/ATL/TSB per calendar day via the classic Coggan discrete 1/τ EWMA.
 
     Walks EVERY calendar day in [start, end] (not just days with load), so rest days
-    and gaps decay the EWMAs with zero load. Both EWMAs seed at 0 at `start`.
+    and gaps decay the EWMAs with zero load. Both EWMAs seed from `seed` (the state
+    at end of `start - 1`; default (0.0, 0.0) reproduces the from-zero full-history
+    sweep). A non-zero seed is the progression fold's anchor — the last stored row's
+    (CTL, ATL) — so a fold from any day reproduces the unbroken series bit-exactly
+    (DESIGN_progress_timeline.md §4).
 
         ctl_d = ctl_{d-1} + (load_d - ctl_{d-1}) / ctl_days
         atl_d = atl_{d-1} + (load_d - atl_{d-1}) / atl_days
         tsb_d = ctl_{d-1} - atl_{d-1}   # yesterday's values — the form you woke up with
 
     The TSB off-by-one is deliberate and load-bearing (training_load.txt §2): today's
-    form must NOT include today's workout. Returns {ISO date -> (ctl, atl, tsb)},
-    rounded to 1 dp; internal state stays full-precision. Empty {} on a degenerate span.
+    form must NOT include today's workout. Returns {ISO date -> (ctl, atl, tsb)} at
+    full precision — rounding moves to display, so the seed stays exact
+    (DESIGN_progress_timeline.md §4). Empty {} on a degenerate span.
     """
     out: Dict[str, Tuple[float, float, float]] = {}
     if not start or not end:
@@ -621,14 +627,14 @@ def compute_pmc(
     cur, last = _to_date(start), _to_date(end)
     if cur > last:
         return out
-    ctl = atl = 0.0
+    ctl, atl = seed
     while cur <= last:
         ds = cur.isoformat()
         load = daily_load.get(ds, 0.0)
         tsb = ctl - atl                       # yesterday's (pre-update) balance
         ctl = ctl + (load - ctl) / ctl_days
         atl = atl + (load - atl) / atl_days
-        out[ds] = (round(ctl, 1), round(atl, 1), round(tsb, 1))
+        out[ds] = (ctl, atl, tsb)
         cur += timedelta(days=1)
     return out
 

@@ -10,9 +10,6 @@
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=Plus+Jakarta+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <!-- FontAwesome Icons -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <!-- uPlot (Progress tab PMC chart) -->
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/uplot@1.6.30/dist/uPlot.min.css">
-    <script src="https://cdn.jsdelivr.net/npm/uplot@1.6.30/dist/uPlot.iife.min.js"></script>
     <!-- Custom Stylesheet -->
     <link rel="stylesheet" href="style.css">
 </head>
@@ -419,25 +416,22 @@
         </div>
 
         <!-- ============ PROGRESS VIEW ============ -->
+        <!-- V1 frames the same PNG the Telegram bot sends (DESIGN_progress_timeline.md
+             §7.3): one chart renderer for all surfaces. The interactive uPlot tab is a
+             follow-on (§8.5). -->
         <div id="view-progress" class="main-view">
             <div class="card">
                 <h2><i class="fa-solid fa-chart-line"></i> Progress Timeline</h2>
                 <div class="filter-row">
-                    <button class="btn btn-secondary btn-sm progress-range-btn active" data-range="8w">8 weeks</button>
-                    <button class="btn btn-secondary btn-sm progress-range-btn" data-range="season">Season</button>
-                    <button class="btn btn-secondary btn-sm progress-range-btn" data-range="all">All</button>
+                    <button class="btn btn-secondary btn-sm progress-range-btn active" data-weeks="8">8 weeks</button>
+                    <button class="btn btn-secondary btn-sm progress-range-btn" data-weeks="26">26 weeks</button>
+                    <button class="btn btn-secondary btn-sm progress-range-btn" data-weeks="all">All</button>
                 </div>
-                <div id="progress-warnings"></div>
             </div>
 
             <div class="card">
-                <h3 class="subhead"><i class="fa-solid fa-heart-pulse"></i> Fitness / Fatigue / Form</h3>
-                <div id="progress-pmc-chart" class="progress-chart-container"></div>
-            </div>
-
-            <div class="card">
-                <h3 class="subhead"><i class="fa-solid fa-layer-group"></i> Weekly Load: Planned vs Actual</h3>
-                <div id="progress-weekly-chart"></div>
+                <img id="progress-image" class="progress-image" alt="Progress timeline chart">
+                <div id="progress-image-error" class="item-meta" style="display:none;"></div>
             </div>
         </div>
 

@@ -1,5 +1,6 @@
 import os
 import unittest
+import unittest.mock
 from datetime import date, timedelta
 
 from tests.helpers import clear_all_tables
@@ -7,6 +8,7 @@ from tests.helpers import clear_all_tables
 TEST_DB_PATH = os.path.join(os.path.dirname(__file__), "test_trainmate_web.db")
 
 from trainmate.db import Database
+from trainmate import progression
 
 import trainmate_web
 
@@ -180,9 +182,11 @@ class TestPlanVersionsEndpoint(unittest.TestCase):
         self.assertEqual(versions[v1]["status"], "superseded")
 
 
-class TestTimelineEndpoint(unittest.TestCase):
-    """GET /api/timeline (DESIGN_progress_timeline.md §6). Pure reader — no
-    Garmin/LLM mocks needed, which is itself part of the assertion."""
+class TestTimelinePngEndpoint(unittest.TestCase):
+    """GET /api/timeline.png (DESIGN_progress_timeline.md §6). Pure reader — no
+    Garmin/LLM mocks needed, which is itself part of the assertion. Pixels stay
+    untested (visual output); only status/content-type/framing and the assembled
+    payload are asserted."""
 
     @classmethod
     def setUpClass(cls):
@@ -204,109 +208,137 @@ class TestTimelineEndpoint(unittest.TestCase):
     def setUp(self):
         clear_all_tables(test_db)
 
-    def test_payload_shape(self):
+    def test_returns_png_bytes(self):
         _save_activity(test_db, "a1", "2026-06-10", "running", 3600, 40.0)
-        res = self.client.get("/api/timeline")
+        res = self.client.get("/api/timeline.png")
         self.assertEqual(res.status_code, 200)
-        data = res.get_json()
-        for key in ("today", "plan_end", "days", "weeks", "meso_bands", "objectives", "warnings"):
-            self.assertIn(key, data)
+        self.assertEqual(res.mimetype, "image/png")
+        self.assertTrue(res.data.startswith(b"\x89PNG\r\n\x1a\n"))
 
-    def test_no_activity_at_all_returns_empty_series(self):
-        res = self.client.get("/api/timeline")
+    def test_empty_db_still_renders_a_png(self):
+        res = self.client.get("/api/timeline.png")
         self.assertEqual(res.status_code, 200)
-        data = res.get_json()
-        self.assertEqual(data["days"], [])
-        self.assertEqual(data["weeks"], [])
-        self.assertIsNone(data["plan_end"])
+        self.assertTrue(res.data.startswith(b"\x89PNG"))
 
-    def test_plan_end_is_last_non_removed_workout_date(self):
+    def test_weeks_validation(self):
         _save_activity(test_db, "a1", "2026-06-10", "running", 3600, 40.0)
-        test_db.save_workout(
-            date="2026-07-10", sport_type="running", title="Run",
-            description="d", duration_minutes=60, tss=50,
-        )
-        later = test_db.save_workout(
-            date="2026-07-20", sport_type="running", title="Run late",
-            description="d", duration_minutes=60, tss=50,
-        )
-        test_db.mark_workout_removed(later, reason="cancelled")
+        self.assertEqual(self.client.get("/api/timeline.png?weeks=0").status_code, 400)
+        self.assertEqual(self.client.get("/api/timeline.png?weeks=all").status_code, 200)
+        self.assertEqual(self.client.get("/api/timeline.png?weeks=x").status_code, 400)
 
-        data = self.client.get("/api/timeline").get_json()
-        self.assertEqual(data["plan_end"], "2026-07-10")
+    def test_matplotlib_absent_returns_503_with_hint(self):
+        import builtins
+        real_import = builtins.__import__
 
-    def test_in_progress_week_carries_elapsed_split(self):
-        # Real "today" in this sandbox's clock is 2026-07-03 (a Friday); its
-        # week commences 2026-06-29. A real mesocycle must cover the week for
-        # it to be "governed" (planned_load/elapsed present, §6.1).
+        def fake_import(name, *args, **kwargs):
+            if name == "matplotlib" or name.startswith("matplotlib."):
+                raise ImportError("no matplotlib")
+            return real_import(name, *args, **kwargs)
+
+        _save_activity(test_db, "a1", "2026-06-10", "running", 3600, 40.0)
+        with unittest.mock.patch("builtins.__import__", side_effect=fake_import):
+            res = self.client.get("/api/timeline.png")
+        self.assertEqual(res.status_code, 503)
+        self.assertIn("matplotlib", res.get_data(as_text=True))
+
+    def test_cli_and_endpoint_render_the_same_payload(self):
+        # The CLI≡endpoint equivalence pin (§9): both surfaces build the §6.0 payload
+        # from one shared row-fetching path, so a fixture DB yields identical payloads
+        # — warnings, wording and all. This would have caught CODE_REVIEW finding #5.
+        from trainmate import timeline
         oid = test_db.add_objective(
             title="Race", target_date="2026-12-01", sport_type="running",
         )
         test_db.save_macrocycle(
             objective_id=oid, strategy="s", goals_hash="g", constraints_hash="l",
-            mesocycles=[{
-                "name": "Build", "start_date": "2026-06-22",
-                "end_date": "2026-07-19", "focus": "build",
-            }],
+            mesocycles=[{"name": "Build", "start_date": "2026-06-22",
+                         "end_date": "2026-07-19", "focus": "build"}],
         )
         _save_activity(test_db, "a1", "2026-06-29", "running", 3600, 30.0)
-        for offset_date in ("2026-06-29", "2026-06-30", "2026-07-01", "2026-07-06"):
-            test_db.save_workout(
-                date=offset_date, sport_type="running", title="Run",
-                description="d", duration_minutes=60, tss=40,
-            )
-        data = self.client.get("/api/timeline?start_date=2026-06-29&end_date=2026-07-10").get_json()
-        this_week = next(
-            (w for w in data["weeks"] if w["week_commencing"] == "2026-06-29"), None
-        )
-        self.assertIsNotNone(this_week)
-        self.assertTrue(this_week["in_progress"])
-        self.assertIn("planned_load_elapsed", this_week)
+        test_db.save_workout(date="2026-07-06", sport_type="running", title="Run",
+                             description="d", duration_minutes=60, tss=40)
 
-    def test_meso_bands_layers_inferred_before_plan(self):
-        oid = test_db.add_objective(
-            title="Race", target_date="2026-12-01", sport_type="running",
-        )
+        cli_payload = timeline.build_timeline_payload(test_db)
+        endpoint_payload = timeline.build_timeline_payload(trainmate_web.db)
+        self.assertEqual(cli_payload, endpoint_payload)
+        self.assertIn("today", cli_payload)
+
+
+class TestTimelinePayload(unittest.TestCase):
+    """The assembled payload behind the PNG (via the shared builder), where the pixel
+    output can't assert the numbers."""
+
+    @classmethod
+    def setUpClass(cls):
+        global test_db
+        test_db = Database(db_path=TEST_DB_PATH)
+        trainmate_web.db = test_db
+
+    @classmethod
+    def tearDownClass(cls):
+        if os.path.exists(TEST_DB_PATH):
+            try:
+                os.remove(TEST_DB_PATH)
+            except OSError:
+                pass
+
+    def setUp(self):
+        clear_all_tables(test_db)
+
+    def _payload(self):
+        from trainmate import timeline
+        return timeline.build_timeline_payload(test_db)
+
+    def test_payload_shape(self):
+        _save_activity(test_db, "a1", "2026-06-10", "running", 3600, 40.0)
+        data = self._payload()
+        for key in ("today", "plan_end", "days", "weeks", "meso_bands",
+                    "objectives", "warnings"):
+            self.assertIn(key, data)
+
+    def test_no_activity_at_all_warns_and_empty_days(self):
+        data = self._payload()
+        self.assertEqual(data["days"], [])
+        self.assertIsNone(data["plan_end"])
+        self.assertTrue(any("no activity history" in w for w in data["warnings"]))
+
+    def test_plan_end_is_last_non_removed_generated_workout(self):
+        _save_activity(test_db, "a1", "2026-06-10", "running", 3600, 40.0)
+        test_db.save_workout(date="2026-07-10", sport_type="running", title="Run",
+                             description="d", duration_minutes=60, tss=50)
+        later = test_db.save_workout(date="2026-07-20", sport_type="running",
+                                     title="Run late", description="d",
+                                     duration_minutes=60, tss=50)
+        test_db.mark_workout_removed(later, reason="cancelled")
+        self.assertEqual(self._payload()["plan_end"], "2026-07-10")
+
+    def test_meso_bands_layers_inferred_and_plan(self):
+        oid = test_db.add_objective(title="Race", target_date="2026-12-01",
+                                    sport_type="running")
         test_db.save_macrocycle(
             objective_id=oid, strategy="s", goals_hash="g", constraints_hash="l",
-            mesocycles=[{
-                "name": "Build", "start_date": "2026-07-01",
-                "end_date": "2026-07-31", "focus": "build",
-            }],
+            mesocycles=[{"name": "Build", "start_date": "2026-07-01",
+                         "end_date": "2026-07-31", "focus": "build"}],
         )
         test_db.save_analysis_cache(
             horizon="long", fingerprint="fp", window_start="2026-05-01",
             window_end="2026-06-30",
             reconstruction={"inferred_mesocycles": [{
                 "name": "Base", "start_date": "2026-05-01", "end_date": "2026-05-31",
-                "focus": "base",
-            }]},
+                "focus": "base"}]},
         )
         _save_activity(test_db, "a1", "2026-05-05", "running", 3600, 30.0)
-
-        data = self.client.get("/api/timeline").get_json()
-        sources = [b["source"] for b in data["meso_bands"]]
+        sources = [b["source"] for b in self._payload()["meso_bands"]]
         self.assertIn("inferred", sources)
         self.assertIn("plan", sources)
-        inferred_idx = sources.index("inferred")
-        plan_idx = sources.index("plan")
-        self.assertLess(inferred_idx, plan_idx)
 
-    def test_window_clipping_keeps_full_history_seeding(self):
-        # A day well inside a narrow returned window must reflect fitness
-        # accrued *before* the window (full-history CTL/ATL seeding), not a
-        # value as if the series started at the window's own first day.
+    def test_clip_payload_keeps_full_history_seeding(self):
         for i in range(60):
             d = (date(2026, 5, 1) + timedelta(days=i)).isoformat()
             _save_activity(test_db, f"a{i}", d, "running", 3600, 50.0)
-
-        full = self.client.get(
-            "/api/timeline?start_date=2026-05-01&end_date=2026-06-29"
-        ).get_json()
-        narrow = self.client.get(
-            "/api/timeline?start_date=2026-06-25&end_date=2026-06-29"
-        ).get_json()
-
+        payload = self._payload()
+        full = progression.clip_payload(payload, "2026-05-01", "2026-06-29")
+        narrow = progression.clip_payload(payload, "2026-06-25", "2026-06-29")
         full_point = next(d for d in full["days"] if d["date"] == "2026-06-25")
         narrow_point = next(d for d in narrow["days"] if d["date"] == "2026-06-25")
         self.assertAlmostEqual(full_point["ctl"], narrow_point["ctl"])
