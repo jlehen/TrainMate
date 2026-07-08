@@ -1,12 +1,37 @@
 # Design: Progress Timeline (past + projected training progression)
 
-**Status:** Rework specced (rev 6) · **Date:** 2026-07-08 · **Companion to:**
+**Status:** Rework specced (rev 7) · **Date:** 2026-07-08 · **Companion to:**
 ARCHITECTURE.md §12 (load model), `DESIGN_pmc_fitness_fatigue.md` (the
 **shipped** backward PMC core this feature consumes — and whose deferred
 Phase 2 projection this feature delivers, §4), `DESIGN_backward_evaluation.md`
 (the analysis-side view of the past; this doc is the *presentation*-side view
 of past **and future**)
 
+> **Rev 7 (2026-07-08) — implementation-review scope cuts.** Three decisions
+> from the rev-6 implementability review:
+> (1) **The v1 web tab shows the PNG.** The interactive uPlot tab is deferred
+> whole to a follow-on (§8.5). V1's Progress tab is an `<img>` on
+> `GET /api/timeline.png` (§6), drawn by the same renderer as the Telegram
+> photo — one chart drawing instead of rev 6's two "accepted-cost"
+> hand-maintained renderings. The renderer is extracted to
+> `trainmate/chart.py` (§7.2) so CLI and web share it, and the JSON endpoint
+> now ships *with* its first consumer (§8.5) instead of ahead of any.
+> (2) **Superseded-version *labels* are cut** (rev 6's §6.1 layer 2):
+> exhuming old plan versions via `macrocycles.created_at` to put a cosmetic
+> name on a past week was machinery out of proportion to the harm of that
+> label falling back to `~inferred`/`—` — the §3 standard this doc applies
+> elsewhere. **Governance is untouched**: whether a week shows planned
+> totals and an adherence percentage still follows the version-in-force
+> rule, which keeps the `created_at` pin (§6.1) — that half is load-bearing.
+> (3) **Branch-state inventory** (§10.1): the rev-4 snapshot on this branch
+> already implements parts of §10 in older form (public `planned_load`, the
+> photo transport, `tm progress` + menu entry, the `p`-alias removal,
+> matplotlib in requirements, `--chart`); the rollout now says per step what
+> is done, what is reworked, and what is new — so nobody hunts for a
+> `_planned_load` that is already public. Stale references fixed (rounding
+> at garmin.py:632; the pre-snapshot `p`-alias line), and the §6.1
+> governing-objective lookup is flagged as a **new** db helper.
+>
 > **Rev 6 (2026-07-08) — review decisions (all rev-5 review findings).**
 > The five critical holes, resolved:
 > (1) **The anchor is strictly before today.** A morning auto-ensure pull
@@ -89,8 +114,9 @@ glance.
 
 V1 ships on **all three front-ends**: `tm progress` (text, numbers-first),
 Telegram (same text for free via CLI parity, plus the full chart as a PNG
-photo), and a web **Progress** tab (the richest, interactive rendering). One
-computation (§5) feeds all three; only the rendering differs (§7).
+photo), and a web **Progress** tab that frames the **same PNG** (the
+interactive rendering is a follow-on, §8.5). One computation (§5) and one
+chart renderer (§7.2) feed all three; only the delivery differs (§7).
 
 ---
 
@@ -126,9 +152,9 @@ rule exists for exactly this. This feature is a pure read-side derivation.
 
 The canonical layout — two panels on a shared time axis (default window:
 8 weeks back → **max(today, plan end)**, plan end being the last generated
-workout date, §3). The web tab
-(§7.3) and the Telegram PNG (§7.2) render it as drawn; the CLI (§7.1) is a
-numbers-first projection of the same content:
+workout date, §3). The Telegram photo and the web tab (§7.3) show the same
+§7.2 PNG rendering of it; the CLI (§7.1) is a numbers-first projection of
+the same content:
 
 ```
   CTL/ATL/TSB ──────────────────────┬────────────────────────
@@ -348,7 +374,7 @@ and gains a hard consistency requirement instead:
   than owning a second copy of the recurrence.
 - **Stored values become full-precision** — the second (and last) change to
   the shipped core: `compute_pmc()` drops the 1-dp rounding of its outputs
-  (garmin.py:631); values are stored exact and rounded only at display —
+  (garmin.py:632); values are stored exact and rounded only at display —
   which every consumer already does (`:.1f` in status / show-metrics /
   prompt formatting), and which acute/chronic/ACWR storage already
   practices, so CTL/ATL/TSB rounding-at-storage was the odd one out. This
@@ -446,7 +472,7 @@ def weekly_aggregates(activities, workouts, today, meso_spans) -> list[dict]
 def assemble_timeline(activities, workouts, metrics_rows, macro_versions,
                       mesocycles, inferred_mesocycles, objectives, today,
                       ctl_days, atl_days, warmup_cutoff) -> dict
-    # The ENTIRE §6 payload — days, weeks, meso_bands, objectives, warnings
+    # The ENTIRE §6.0 payload — days, weeks, meso_bands, objectives, warnings
     # (exact strings included) — built here and ONLY here, from the helpers
     # above plus the §6.1 layered lookup. Callers do db reads and hand rows
     # in; neither the CLI handler nor the endpoint owns any assembly or
@@ -457,37 +483,58 @@ def assemble_timeline(activities, workouts, metrics_rows, macro_versions,
     # this stays row-in/row-out.
 ```
 
-## 6. Web API: `GET /api/timeline`
+## 6. Web API: `GET /api/timeline.png`
 
-Thin handler in `trainmate_web.py`: `db` reads (`get_completed_activities`,
-`get_workouts`, `get_metrics_cache` for the stored PMC rows (§4), the
-first-evidence dates behind `garmin.pmc_history_start` for the warm-up
-cutoff, macrocycle versions + mesocycles for the governing objective
-(§6.1), active objectives, `get_analysis_cache("long")` for the bootstrap
-reconstruction) + one call to `assemble_timeline` (§5) — the handler fetches
-rows and serializes the result; it assembles nothing itself, and the CLI
-handler is the same shape, so the two surfaces render one payload (§5).
+The v1 web surface serves the picture, not the data. Thin handler in
+`trainmate_web.py`: `db` reads (`get_completed_activities`, `get_workouts`,
+`get_metrics_cache` for the stored PMC rows (§4), the first-evidence dates
+behind `garmin.pmc_history_start` for the warm-up cutoff, macrocycle
+versions + mesocycles for labels and governance (§6.1), active objectives,
+`get_analysis_cache("long")` for the bootstrap reconstruction) + one call
+to `assemble_timeline` (§5) + one call to `chart.render_timeline_png`
+(§7.2), returned as `image/png`. The handler fetches rows and renders the
+result; it assembles nothing itself, and the CLI handler is the same shape,
+so the two surfaces render one payload (§5).
+
+A JSON endpoint (`GET /api/timeline`, serializing the §6.0 payload
+verbatim) is **deferred to the interactive-tab follow-on** (§8.5): with the
+v1 tab showing the PNG, a JSON API would ship with zero consumers. The
+rev-4 snapshot's JSON endpoint is removed in the rework (§10.1).
+
 Properties, consistent with the existing API's stance (§8 of
 ARCHITECTURE.md):
 
 - **Pure reader.** No `ensure_data`, no Garmin, no calendar, no LLM (reading
   the cached bootstrap reconstruction is a `db` read, not an analysis run).
   Data freshness is already surfaced via `sync_state` on the Dashboard.
-- **No caching.** Recomputed per request — a few hundred rows of arithmetic.
-  Deliberately *not* an `analysis_cache` slot: the projection must move the
-  instant `adapt`/`generate`/`swap`/`remove` rewrite future workouts, and a
+- **No caching.** Recomputed and re-rendered per request — a few hundred
+  rows of arithmetic plus one Agg figure. Deliberately *not* an
+  `analysis_cache` slot: the projection must move the instant
+  `adapt`/`generate`/`swap`/`remove` rewrite future workouts, and a
   fingerprint scheme would just re-derive "did anything change" at higher
   complexity than recomputing.
-- Query params `?start_date=&end_date=` (matching `/api/workouts` and
-  `/api/activities` naming) clip the **returned** window only (default:
-  today − 56 days → max(today, plan end), §2); the stored past series is
-  full-history by construction and the fold starts at the anchor (§4), so a
-  clipped window never changes any value inside it. Clipping semantics,
-  pinned: `days` clip by date; `weeks` and `meso_bands` are returned
-  **whole** whenever they overlap the window — a mid-week `start_date`
-  returns the straddling week entire, never resliced (reslicing would
-  change its totals and silently corrupt the adherence percentage) and
-  never silently dropped.
+- Query param `?weeks=N` re-windows the past half exactly like the CLI's
+  `--weeks` (default 8; must be ≥ 1, else 400 — the argparse rule of §7.1,
+  mirrored); `?weeks=all` extends to full history. The future half always
+  runs to plan end (§3).
+- **matplotlib absent** (it is optional-tier, §7.2) → HTTP 503 with the
+  same install hint the CLI prints; the tab shows it verbatim (§7.3).
+
+### 6.0 The timeline payload
+
+`assemble_timeline`'s output dict — the single internal contract every
+renderer consumes: the CLI formatter, the PNG renderer, and the future JSON
+endpoint (§8.5), which will serialize it verbatim. Window clipping (applied
+by `?weeks` today; by `?start_date=&end_date=`, matching `/api/workouts`
+naming, when the JSON endpoint ships) clips the **returned** window only
+(default: today − 56 days → max(today, plan end), §2); the stored past
+series is full-history by construction and the fold starts at the anchor
+(§4), so a clipped window never changes any value inside it. Clipping
+semantics, pinned: `days` clip by date; `weeks` and `meso_bands` are
+returned **whole** whenever they overlap the window — a mid-week window
+edge returns the straddling week entire, never resliced (reslicing would
+change its totals and silently corrupt the adherence percentage) and never
+silently dropped.
 
 ```jsonc
 {
@@ -518,8 +565,9 @@ ARCHITECTURE.md):
   "objectives": [   // ALL active AND completed objectives, unfiltered — a
                     // race three weeks ago still gets its flag (seeing the
                     // TSB you raced at is half the point of a PMC); renderers
-                    // clip to their window (the web tab re-windows
-                    // client-side, §7.3, so pre-filtering would drop flags)
+                    // clip to their window (the CLI and the PNG renderer clip
+                    // when drawing; the §8.5 interactive tab will re-window
+                    // client-side — pre-filtering would drop flags)
     {"id": 1, "title": "...", "target_date": "2026-09-30", "priority": 1}
   ],
   "warnings": [
@@ -533,32 +581,24 @@ ARCHITECTURE.md):
 
 ### 6.1 Mesocycle labels — layered lookup
 
-Weeks are labeled from three sources, most authoritative first; the same
-spans drive the CLI meso column and the chart band:
+Weeks are labeled from two sources, most authoritative first (rev 7 cut the
+third — see the removal note below); the same spans drive the CLI meso
+column and the chart band:
 
 1. **Active plan** — the macrocycle serving the *governing objective*: the
    active objective with the earliest `target_date` that has a plan (i.e.
    the objective the current workouts implement). Its mesocycles label the
    weeks they cover. With three active objectives this is the deliberate,
    documented choice; later objectives' plans don't exist yet anyway.
-   (Deliberately different from two neighboring rules: Phase 2's event
-   selection `ORDER BY priority DESC, target_date ASC` — the coach's
+   This lookup is a **new db helper** — nothing existing implements
+   "earliest active objective that has a plan"; it is written for this
+   feature. (Deliberately different from two neighboring rules: Phase 2's
+   event selection `ORDER BY priority DESC, target_date ASC` — the coach's
    event-day-TSB line (§8.4) may anchor a higher-priority *later* race —
    and `db.get_active_objective()`'s earliest-active-plan-or-not. Meso
    labels must follow whichever plan the current workouts implement; the
    divergence is by design, not a bug.)
-2. **Earlier and superseded plan versions** — for past weeks the current
-   version doesn't cover: versions are kept (ARCHITECTURE §11), and
-   `macrocycles.created_at` identifies which version was in force during a
-   given week — the latest version created before the week ended, across
-   **all objectives' macrocycles, completed objectives included** (the day
-   objective 1 completes, the weeks its plan governed must keep their
-   labels, not fall to `—` while their planned bars still render).
-   Timestamp-vs-date pin: `created_at` is a UTC ISO timestamp, the week end
-   is a date — a version is "created before the week ended" iff
-   `created_at[:10] <= week_sunday`. Consistent with the planned-load bars,
-   which likewise show "what the plan asked at the time".
-3. **Bootstrap reconstruction** — for weeks before any plan: `data
+2. **Bootstrap reconstruction** — for weeks the active plan doesn't cover: `data
    bootstrap`'s reverse-engineered blocks from `analysis_cache["long"]`,
    nested at `cache["reconstruction"]["inferred_mesocycles"]` (fields
    `name`/`start_date`/`end_date`/`focus_detected`, engine.py:1022 — rev 5
@@ -573,7 +613,19 @@ spans drive the CLI meso column and the chart band:
    descriptive. The dates are LLM-authored strings: blocks with unparseable
    dates are skipped (and counted into `warnings`), spans sorted, overlaps
    resolved by the trim rule — never compared raw.
-4. **No match** (bootstrap never run, or a genuine gap) → no label (`—`).
+3. **No match** (bootstrap never run, no plan coverage, or a genuine gap)
+   → no label (`—`).
+
+**Removed (rev 7): superseded-version labels.** Rev 6 had a second layer
+labeling past weeks from *earlier and superseded plan versions*, exhumed
+via `macrocycles.created_at`. Cut as machinery out of proportion to the
+harm — cross-version archaeology whose entire output was a cosmetic name on
+an old week (§3's own standard, cf. the rejected config fingerprints).
+Accepted consequence, stated honestly: weeks that only a superseded version
+(or a completed objective's plan) covered fall back to `~inferred` labels
+or `—`; their planned bars and adherence percentages are untouched, because
+governance below never depended on labels. The version-in-force rule
+survives *only* where it is load-bearing — governance.
 
 Week → block assignment: neither real nor inferred mesocycles are
 Monday-aligned, so a week belongs to the block covering the **majority of
@@ -582,15 +634,24 @@ week from its first majority). Labels longer than the CLI column (8 chars)
 are truncated with `…`.
 
 **Governed weeks — pinned independently of labels.** A week is *governed*
-iff it overlaps plan mesocycle coverage (`get_mesocycle_ranges()` of the
-version in force per layer 1–2). Governance — not the label — decides
-whether the planned total and adherence percentage render or show `—` (§3
-empty states). The two must not be conflated: the rev-4 snapshot inferred
-governance from the label vote, so a labeling nit silently deleted planned
-data (CODE_REVIEW finding #3). Corner pins: a governed week whose planned
-rows were all `removed` shows planned 0 with `—` for the percentage (never
-divide by zero); an ungoverned week with actual load stays the §3
-informational case.
+iff it overlaps the mesocycle coverage (`get_mesocycle_ranges()`) of the
+**version in force** that week: the latest macrocycle version created
+before the week ended, across all objectives' macrocycles, completed
+objectives included (versions are kept, ARCHITECTURE §11). Timestamp-vs-date
+pin: `created_at` is a UTC ISO timestamp, the week end is a date — a
+version is "created before the week ended" iff
+`created_at[:10] <= week_sunday`. This is the one place version history is
+still consulted (rev 7 cut its use for labels, above): governance — not the
+label — decides whether the planned total and adherence percentage render
+or show `—` (§3 empty states), and a week whose plan was later superseded
+still *had* a plan. The two must not be conflated: the rev-4 snapshot
+inferred governance from the label vote, so a labeling nit silently deleted
+planned data (CODE_REVIEW finding #3). Corner pins: a governed week whose
+planned rows were all `removed` shows planned 0 with `—` for the percentage
+(never divide by zero); an ungoverned week with actual load stays the §3
+informational case; a week governed only by a superseded version renders
+its percentage but (per the removal above) may carry an `~inferred` or `—`
+label.
 
 **Band trimming.** `meso_bands` are date spans, not per-week votes, so
 overlaps are possible where an inferred block runs into plan coverage (the
@@ -602,9 +663,10 @@ spans as given.
 ## 7. Front-ends — all three in v1
 
 CLI and Telegram are the surfaces the athlete actually checks daily; the web
-tab is the richest rendering but the least visited. All three consume the §5
-functions — CLI/bot directly (`progression.py` + `db` reads inside the CLI
-handler), the web via `/api/timeline` (§6). Rollout order follows usage:
+tab is the least visited and, in v1, frames the same PNG the bot sends. All
+three consume the §5 functions — CLI/bot directly (`progression.py` + `db`
+reads inside the CLI handler), the web via `/api/timeline.png` (§6). Rollout
+order follows usage:
 CLI first (§10), which also honours the existing convention that the web API
 *tracks* the CLI feature set (ARCHITECTURE §8), rather than inverting it.
 
@@ -724,9 +786,14 @@ No bot-native command; both paths ride the CLI-as-subprocess parity model
   renderer (§7.1) is the whole story. `MENU_COMMANDS` in `trainmate_bot.py`
   (hand-synced by design) gains a `progress` entry.
 - **Chart:** `/progress --chart` renders the full §2 two-panel picture to
-  PNG (matplotlib, `Agg` backend) and sends it as a photo. `--chart` is
-  additive: the text output still prints/sends — the photo is the picture,
-  the text is the numbers.
+  PNG and sends it as a photo. The drawing itself lives in
+  **`trainmate/chart.py`** — `render_timeline_png(payload) -> bytes`
+  (matplotlib, `Agg` backend, imported lazily inside the function), fed the
+  §6.0 payload — called by this path and by the web endpoint (§6), so the
+  §2 picture has exactly **one** implementation. (The rev-4 snapshot drew
+  it inside `cli/progress.py:_render_chart_png`; the rework extracts it,
+  §10.1.) `--chart` is additive: the text output still prints/sends — the
+  photo is the picture, the text is the numbers.
   - On a TTY (and any non-json frontend, incl. piped): writes
     `./progress.png` (or the `--chart PATH` argument), overwriting, and
     prints the path. `progress.png` joins `.gitignore`.
@@ -761,52 +828,43 @@ No bot-native command; both paths ride the CLI-as-subprocess parity model
     cosmetic, so switching is a one-line change if photo blur ever annoys.
   - This is deliberately a *transport*, not a feature: any future CLI
     command can send a photo the same way (e.g. the drift/zone charts, §8).
-- **matplotlib** joins `requirements.txt` in the optional tier (like
-  `python-telegram-bot`): imported lazily inside the `--chart` path; without
-  it, text mode works and `--chart` fails with an install hint. First import
-  builds the font cache (seconds, one-time) — well inside the bot's
-  `telegram_command_timeout` (180 s), noted here so a slow first `/progress
-  --chart` isn't mistaken for a hang.
+- **matplotlib** sits in `requirements.txt`'s optional tier (like
+  `python-telegram-bot`; already there since the snapshot, §10.1): imported
+  lazily inside `chart.py`; without it, text mode works, `--chart` fails
+  with an install hint, and the web endpoint answers 503 carrying the same
+  hint (§6). First import builds the font cache (seconds, one-time) — well
+  inside the bot's `telegram_command_timeout` (180 s), noted here so a slow
+  first `/progress --chart` isn't mistaken for a hang.
 
-### 7.3 Web: **Progress** tab
+### 7.3 Web: **Progress** tab — the PNG, framed
 
 Fifth top-level tab in `static/index.html` / `static/app.js`, loaded lazily
-via the existing `loadedTabs` mechanism.
+via the existing `loadedTabs` mechanism. V1 is deliberately minimal — the
+picture, not an app:
 
-- **Charting: uPlot** (~45 KB + its stylesheet, no build step), loaded from
-  CDN exactly as Font Awesome and Google Fonts already are — consistent with
-  existing practice; vendoring into `static/vendor/` is a trivial later
-  hardening step if offline use matters.
-- **Two panels, native uPlot cursor sync** on the shared time axis:
-  - *PMC panel:* three daily series; the actual→projected transition
-    rendered by splitting each series into a solid pre-today and dashed
-    post-today pair (six series; legend collapses each pair to one entry).
-    Today rule + objective flags + plan-end label via a small `draw` hook.
-  - *Load panel:* weekly paired bars. Honest note: paired/grouped bars are
-    **not** stock uPlot — they come from the `seriesBarsPlugin` demo plugin
-    (vendored alongside, it's a single file) or a custom paths builder.
-    Mesocycle band tint + labels (hatched for `inferred`, §6.1) via a `draw`
-    hook. This is the bulk of the web work; still far less than hand-rolled
-    SVG with tooltips/cursors/scales.
-  - Dates: `YYYY-MM-DD` strings are converted to epoch at **UTC midnight**
-    consistently on both axes — the classic local-vs-UTC off-by-one-day is
-    the main foot-gun with a time-series lib on date-only data.
-- Default window 8 weeks back → plan end, with quick-range buttons
-  (8w / season / all). No server round-trip needed for re-windowing beyond
-  the initial fetch of the full default range.
-- **Accepted cost:** the PNG (matplotlib, §7.2) and the tab (uPlot) are two
-  hand-maintained renderings of the §2 picture and will drift in detail.
-  §2 is the canonical layout both answer to; pixel parity is a non-goal.
+- The tab body is an `<img>` pointing at `GET /api/timeline.png` (§6), plus
+  quick-range buttons (8 w / 26 w / all) that set `?weeks=` and reload the
+  image. No chart library, no client-side chart state.
+- Failure states pass through, no special-casing: a 503 (matplotlib
+  missing, §6) shows the endpoint's install-hint body; the §3 empty states
+  and the §4 still-warming state are drawn *inside* the PNG by the renderer,
+  identical to what the bot photo shows.
+- The rev-4 snapshot's uPlot tab — the CDN include (`uplot@1.6.30`), the
+  `app.js` fetch/render code, the bar-plugin plan — is **removed in the
+  rework** (§10.1) and returns as the §8.5 follow-on.
+- The trade is explicit: rev 6 rejected a server-rendered PNG tab because
+  it "kills the hover-to-inspect interaction"; rev 7 accepts that loss
+  **for v1** to get one chart renderer instead of two hand-maintained
+  renderings that rev 6 itself admitted would drift ("accepted cost" — now
+  un-accepted). Hover returns with §8.5 when it is actually missed, rather
+  than being pre-paid on the least-visited surface.
 
-**Rejected alternatives (web):** hand-rolled SVG (tooltips/cursor/scales are
-real work; not worth it for a local app when a 45 KB lib exists); Chart.js
-(heavier, and its mixed-type support buys nothing once the two-panel split
-is chosen); rendering the web tab server-side to PNG (kills the
-hover-to-inspect interaction that makes adherence bars useful — PNG is the
-right shape for chat, §7.2, where there is no hover). Also rejected:
-reusing the §7.2 matplotlib PNG *as* the web tab (same hover objection) and
-a bot-native chart command bypassing the CLI (breaks the parity model that
-keeps the bot maintenance-free).
+**Rejected alternatives (web):** keeping the uPlot tab in v1 (the drift
+cost above); hand-rolled SVG (tooltips/cursor/scales are real work — moot
+in v1, which has no interactivity to build, and still rejected for §8.5
+when a 45 KB lib exists); Chart.js (heavier than uPlot, same verdict when
+§8.5 ships); a bot-native chart command bypassing the CLI (breaks the
+parity model that keeps the bot maintenance-free).
 
 ## 8. Follow-ons (designed-for, explicitly out of v1)
 
@@ -833,6 +891,20 @@ additive:
    stale-anchor decay, and honesty guards all come from §4. Phase 2's
    zero-fill-to-event behavior (with its assumes-rest annotation) is the one
    piece not covered here, since this feature stops at plan end (§4).
+5. **Interactive web Progress tab** — rev 6's §7.3 design, deferred whole
+   (rev 7): uPlot (~45 KB, no build step; the snapshot pinned
+   `uplot@1.6.30` — re-pin on revival, vendoring into `static/vendor/` if
+   offline use matters) with the vendored `seriesBarsPlugin` for paired
+   weekly bars, each PMC series split into a solid pre-today / dashed
+   post-today pair (legend collapses each pair), native cursor sync across
+   the two panels, meso band tint + labels (hatched for `inferred`) via
+   `draw` hooks, and `YYYY-MM-DD` → epoch at **UTC midnight** on both axes
+   (the local-vs-UTC off-by-one-day is the classic foot-gun with date-only
+   data). Ships together with `GET /api/timeline` (JSON), which serializes
+   the §6.0 payload verbatim under the pinned `?start_date=&end_date=`
+   clipping — the endpoint arrives with its first consumer. Trigger:
+   hover-to-inspect actually being missed on the PNG tab (§7.3), not
+   calendar time.
 
 *(Rev 1 listed Telegram `/chart` and a CLI sparkline as follow-ons; both
 were promoted into v1 — see §7.1–7.2 — because the CLI and the bot are the
@@ -869,10 +941,19 @@ the §7.2 photo transport for free where they need a chart in chat.)*
   generated-only rule (a manual workout beyond plan end leaves it unchanged
   and warns; no-generated-workouts fallback), the lapsed plan (plan_end <
   today → no fold, window ends today), §6.1 majority-overlap labeling over
-  fixture spans (incl. a completed objective's weeks keeping their plan
-  labels), governance decided by meso-range overlap rather than labels
-  (all-removed week → planned 0, `—` percentage), band trimming (payload
-  never contains overlapping spans), and the four empty states.
+  fixture spans, the rev-7 label fallback (weeks covered only by a
+  superseded version or a completed objective's plan fall to
+  `~inferred`/`—` labels while their planned totals and percentages still
+  render), governance decided by version-in-force meso-range overlap rather
+  than labels (all-removed week → planned 0, `—` percentage; the
+  `created_at[:10] <= week_sunday` timestamp pin), band trimming (payload
+  never contains overlapping spans), payload-shape assertions on
+  `assemble_timeline`'s dict (incl. `plan_end`, in-progress week fields,
+  `meso_bands` layering, nullable `ctl`/`atl`/`tsb` with the warm-up nulls
+  and the young-DB caveat in `warnings`, and the §6.0 clipping semantics —
+  a point *inside* the window must reflect load *before* the window; a
+  mid-week window edge returns the straddling week whole), and the four
+  empty states.
 - CLI renderer tests (`tests/test_cli_progress.py` or alongside existing CLI
   tests): the pure formatting helpers (§7.1) over fixture series — plan-end
   banner vs per-objective projection lines, past / in-progress / ungoverned
@@ -891,57 +972,102 @@ the §7.2 photo transport for free where they need a chart in chat.)*
   `None`, unknown-sentinel lines dropped) — same pattern as the existing
   `parse_prompt_request` tests. The matplotlib rendering itself stays untested (visual output),
   matching the front-end stance below.
-- Endpoint test alongside the existing web tests: payload shape (incl.
-  `plan_end`, in-progress week fields, `meso_bands` layering, nullable
-  `ctl`/`atl`/`tsb` with the warm-up nulls and the young-DB caveat in
-  `warnings`), window clipping vs the full-history stored series (a point
-  *inside* the window must reflect load *before* the window; a mid-week
-  `start_date` returns the straddling week whole), pure-reader
-  property (no Garmin/LLM mocks needed — that's the assertion), and the
+- Endpoint test alongside the existing web tests: `GET /api/timeline.png`
+  over a fixture DB returns 200, `image/png`, and a body starting with the
+  PNG magic bytes (pixels stay untested, matching the front-end stance
+  below); `?weeks` validation (`0` → 400, `all` accepted); matplotlib
+  absent (import patched out) → 503 carrying the install hint; pure-reader
+  property (no Garmin/LLM mocks needed — that's the assertion); and the
   CLI≡endpoint equivalence test: one fixture DB through the CLI handler's
   rows and the endpoint's rows produces the identical `assemble_timeline`
   payload — warnings, wording and all (the test that would have caught
-  CODE_REVIEW finding #5).
+  CODE_REVIEW finding #5; it survives the JSON→PNG switch because it
+  compares the payload both surfaces render, not the serialization).
 - Web front-end stays untested, per existing practice.
 
 ## 10. Rollout
+
+### 10.1 State of this branch — what the rev-4 snapshot already did
+
+The WIP snapshot (`60c6e6c`) implemented rev 4 across all three front-ends
+before this rework was specced. Reconcile against it rather than
+implementing §10.2 from scratch — several steps are already partly done.
+
+**Done in the snapshot, correct as-is (keep):**
+
+- `adherence.planned_load` is already public — only the `tss is not None`
+  fix (§3) remains there.
+- The photo transport, whole: `PHOTO_SENTINEL`/`emit_photo` in
+  `trainmate/prompt.py`; `parse_photo_request`, the `_drive()` photo branch
+  and the unknown-sentinel drop in `trainmate_bot.py`; the bot tests.
+- `tm progress` dispatcher entry + `prog` alias in `trainmate_cli.py`; the
+  `p` alias for `plan` is **already removed** (rev 6 cited its pre-snapshot
+  line 708 — stale; nothing left to do); the `MENU_COMMANDS` `progress`
+  entry in `trainmate_bot.py`.
+- matplotlib in `requirements.txt` (optional tier); `progress.png` in
+  `.gitignore`.
+
+**Exists in rev-4 form — reworked to this rev:**
+
+- `trainmate/progression.py`: delete the module-level `CTL_DAYS`/`ATL_DAYS`
+  and the from-zero full-history recursion; replace with
+  read-the-stored-rows + the anchored fold (§4), config τs, and
+  `assemble_timeline` (§5 — the snapshot has **no** such function; each
+  caller assembles its own payload, the CODE_REVIEW #5 divergence).
+- `trainmate/cli/progress.py`: the renderer gains the rev-6 pins
+  (elapsed-week rule, governance, degenerate-input guards, the
+  `visible_len` width budget); `_render_chart_png` moves out to
+  `trainmate/chart.py` (§7.2).
+- `trainmate_web.py`: the snapshot's JSON `/api/timeline` becomes
+  `GET /api/timeline.png` (§6); JSON is deferred to §8.5.
+- `static/`: the uPlot tab (CDN include, `app.js` chart code, styles) is
+  replaced by the `<img>` tab (§7.3).
+- `tests/test_progression.py`, `test_cli_progress.py`, `test_web.py`:
+  rewritten to the §9 list.
+
+**New — no snapshot counterpart:**
+
+- `compute_pmc`'s `seed` parameter + the unrounding (+ `tests/test_pmc.py`
+  updates) (§4).
+- `trainmate/chart.py` (§7.2; extraction, but the module is new).
+- The governing-objective db helper and the version-in-force governance
+  rule (§6.1).
+
+### 10.2 Steps
 
 Ordered by usage (CLI/bot before web), each step independently shippable:
 
 1. `garmin.compute_pmc` gains the optional `seed` parameter and drops its
    1-dp output rounding (full-precision storage, §4) (+ the
-   `tests/test_pmc.py` updates, §9); `trainmate/progression.py` +
-   `tests/test_progression.py` — reading stored rows + the anchored fold per
-   §4/§5 (the rev-4 snapshot's own `CTL_DAYS`/`ATL_DAYS` constants,
-   mean-seeding, and full-history recursion are deleted in the rework);
-   promote `adherence._planned_load` → `adherence.planned_load` (public,
-   incl. the `tss is not None` fix, §3).
-2. `tm progress` text mode (`trainmate/cli/progress.py` with auto-ensure,
-   dispatcher entry + `prog` alias, removal of the `p` alias for `plan`,
-   formatting-helper tests). This alone lights up Telegram text via parity —
-   plus the `MENU_COMMANDS` entry in `trainmate_bot.py`.
-3. Photo transport + chart: `PHOTO_SENTINEL`/`emit_photo` in
-   `trainmate/prompt.py`, the `_drive()` photo branch (+ unknown-sentinel
-   drop) + `parse_photo_request` in `trainmate_bot.py` (+ tests), `--chart`
-   matplotlib rendering, matplotlib in `requirements.txt` (optional tier),
-   `progress.png` in `.gitignore`.
-4. `GET /api/timeline` in `trainmate_web.py` + endpoint test.
-5. **Progress** tab (index.html, app.js, style.css; uPlot CDN include +
-   stylesheet; vendored `seriesBarsPlugin`).
-6. ARCHITECTURE.md: §2 module map (+`progression.py`, +`cli/progress.py`,
-   bot photo protocol bullet), §7 CLI command table (+`progress`), §8
-   endpoint table + front-end tab list (+Progress), §12 — **fold into the
-   existing PMC documentation**, don't duplicate it: the core (constants,
-   storage, warm-up rules) is already documented with the PMC feature; §12
-   gains only the projection layer (stored-series + anchored fold, pointer
-   to this doc), §14 test-file table (+`test_progression.py`, +CLI renderer
-   tests), §15 pointer to this doc.
+   `tests/test_pmc.py` updates, §9); rework `trainmate/progression.py` +
+   `tests/test_progression.py` per §10.1 (incl. `assemble_timeline`, §5);
+   the `tss is not None` fix in `adherence.planned_load` (§3).
+2. Rework `tm progress` text mode to this rev (`trainmate/cli/progress.py`
+   + formatting-helper tests, §9). Telegram text follows via parity; the
+   dispatcher/alias/menu work is already done (§10.1).
+3. Extract `trainmate/chart.py` from the snapshot's `_render_chart_png`
+   (§7.2); the transport around it is already done (§10.1).
+4. `GET /api/timeline.png` in `trainmate_web.py`, replacing the snapshot's
+   JSON endpoint, + endpoint test (§9).
+5. **Progress** tab: replace the snapshot's uPlot tab with the `<img>` +
+   range buttons (§7.3); drop the uPlot CDN include from `index.html`.
+6. ARCHITECTURE.md: §2 module map (+`progression.py`, +`chart.py`,
+   +`cli/progress.py`, bot photo protocol bullet), §7 CLI command table
+   (+`progress`), §8 endpoint table (+`/api/timeline.png`) + front-end tab
+   list (+Progress), §12 — **fold into the existing PMC documentation**,
+   don't duplicate it: the core (constants, storage, warm-up rules) is
+   already documented with the PMC feature; §12 gains only the projection
+   layer (stored-series + anchored fold, pointer to this doc), §14
+   test-file table (+`test_progression.py`, +CLI renderer tests), §15
+   pointer to this doc. (The snapshot's ARCHITECTURE edits are rev-4 —
+   redo them to this rev.)
 
 ## 11. Open questions
 
 - **Rest-day TSB display**: TSB uses day-*entering* form (§4, and so does
-  the payload field — documented in §6); whether the tooltip should also
-  show day-closing values is a presentation nit to settle in review.
+  the payload field — documented in §6.0); whether a tooltip should also
+  show day-closing values only arises with the interactive tab (§8.5) —
+  the v1 PNG has no hover, so there is nothing to settle yet.
 - **Multi-objective seasons** — live today, not hypothetical: three
   objectives are active (2026-09-30 → 2027-01-31) while the plan only
   extends through the first. The *governing objective* for meso labels is
