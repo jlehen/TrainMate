@@ -111,6 +111,8 @@ def daily_loads(
     activities: List[Dict[str, Any]],
     workouts: List[Dict[str, Any]],
     today: str,
+    *,
+    window_end: Optional[str] = None,
 ) -> List[DayPoint]:
     """Merged per-day load series (DESIGN_progress_timeline.md §3): past days are
     measured load (`garmin.activity_load` over `completed_activities`), future days
@@ -124,7 +126,7 @@ def daily_loads(
     start = _series_start(activities, workouts)
     if start is None:
         return []
-    end = _window_end(workouts, today)
+    end = window_end if window_end is not None else _window_end(workouts, today)
 
     acts_by_date = _group_by_date(activities)
     workouts_by_date = _group_by_date([w for w in workouts if not w.get("removed")])
@@ -135,12 +137,11 @@ def daily_loads(
     while d <= end_d:
         date_str = _date_str(d)
         day_acts = acts_by_date.get(date_str, [])
-        if date_str < today:
-            load = sum(activity_load(a) for a in day_acts)
-            source = "actual"
-        elif date_str == today and any(activity_load(a) > 0 for a in day_acts):
-            load = sum(activity_load(a) for a in day_acts)
-            source = "actual"
+        # Measured load computed once (activity_load is non-negative, so >0 ≡ the
+        # "any completed activity with load" test of the §3 today-rule).
+        actual = sum(activity_load(a) for a in day_acts) if day_acts else 0.0
+        if date_str < today or (date_str == today and actual > 0):
+            load, source = actual, "actual"
         else:
             load = sum(planned_load(w) for w in workouts_by_date.get(date_str, []))
             source = "planned"
@@ -334,14 +335,18 @@ def _week_governed(
     superseded still counts as governed — and so governance can't be silently deleted
     by a labelling nit (CODE_REVIEW finding #3). Timestamp-vs-date pin: `created_at`
     is a UTC ISO timestamp, the week end is a date, so a version counts iff
-    `created_at[:10] <= week_sunday`."""
+    `created_at[:10] <= week_sunday`. A version with no usable `created_at` fails
+    *closed* — excluded rather than treated as created-before-all-time, which would
+    mark pre-plan weeks as governed (`created_at` is NOT NULL today, so this only
+    guards a future migration)."""
     in_force: Dict[Any, Dict[str, Any]] = {}
     for mv in macro_versions:
-        created = mv.get("created_at") or ""
-        if created[:10] <= week_sun:
-            cur = in_force.get(mv["objective_id"])
-            if cur is None or created > (cur.get("created_at") or ""):
-                in_force[mv["objective_id"]] = mv
+        created = mv.get("created_at")
+        if not created or created[:10] > week_sun:
+            continue
+        cur = in_force.get(mv["objective_id"])
+        if cur is None or created > cur["created_at"]:
+            in_force[mv["objective_id"]] = mv
     for mv in in_force.values():
         for s, e in mv["ranges"]:
             if s <= week_sun and e >= week_mon:
@@ -355,6 +360,8 @@ def weekly_aggregates(
     today: str,
     meso_spans: List[Dict[str, Any]],
     macro_versions: List[Dict[str, Any]],
+    *,
+    window_end: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
     """Monday-commencing weekly planned-vs-actual load (§5/§6), one dict per week from
     the earliest activity/workout date through plan end (or today):
@@ -376,7 +383,7 @@ def weekly_aggregates(
     start = _series_start(activities, non_removed_workouts)
     if start is None:
         return []
-    end = _window_end(workouts, today)
+    end = window_end if window_end is not None else _window_end(workouts, today)
     week_start = _monday(_to_date(start))
     end_d = _to_date(end)
 
@@ -429,6 +436,32 @@ def weekly_aggregates(
     return weeks
 
 
+def plan_gap(
+    objectives: List[Dict[str, Any]], plan_end_date: Optional[str]
+) -> Optional[Tuple[Dict[str, Any], int]]:
+    """The next active objective the plan doesn't yet reach, and how many whole weeks
+    short of it the plan ends (§3), as `(objective, weeks_before)` — or None when there
+    is no plan or every active objective is already reached.
+
+    The single source of the plan-gap derivation: `assemble_timeline` words it into a
+    payload `warnings` string, the CLI renders it as a rich banner (§7.1). Computing it
+    once here keeps the two surfaces from diverging on *when* the gap fires or *by how
+    much* — the CODE_REVIEW #5 class of drift."""
+    if plan_end_date is None:
+        return None
+    active = sorted(
+        (o for o in objectives if o.get("status") == "active"),
+        key=lambda o: str(o["target_date"]),
+    )
+    next_obj = next((o for o in active if o["target_date"] > plan_end_date), None)
+    if next_obj is None:
+        return None
+    weeks_before = max(
+        0, round((_to_date(next_obj["target_date"]) - _to_date(plan_end_date)).days / 7)
+    )
+    return next_obj, weeks_before
+
+
 def assemble_timeline(
     activities: List[Dict[str, Any]],
     workouts: List[Dict[str, Any]],
@@ -470,14 +503,20 @@ def assemble_timeline(
         )
     bands = meso_bands(mesocycles, valid_inferred)
 
+    # One plan-end scan for the whole payload: `end` (payload `plan_end`, or None) and
+    # the merged-series window derived from it, threaded into both series builders so
+    # they don't each re-walk the workouts (mirrors `_window_end`'s rule).
     end = plan_end(workouts)
+    window_end = end if (end and end > today) else today
 
-    day_points = daily_loads(activities, workouts, today)
+    day_points = daily_loads(activities, workouts, today, window_end=window_end)
     days = fitness_series(
         day_points, metrics_rows, today, ctl_days, atl_days, warmup_cutoff
     )
 
-    weeks = weekly_aggregates(activities, workouts, today, bands, macro_versions)
+    weeks = weekly_aggregates(
+        activities, workouts, today, bands, macro_versions, window_end=window_end
+    )
 
     zero_count = zero_load_workout_count(workouts)
     if zero_count:
@@ -495,15 +534,9 @@ def assemble_timeline(
                 f"{len(beyond)} workout{_plural(len(beyond))} beyond plan end "
                 f"— not projected"
             )
-        active = sorted(
-            (o for o in objectives if o.get("status") == "active"),
-            key=lambda o: str(o["target_date"]),
-        )
-        next_obj = next((o for o in active if o["target_date"] > end), None)
-        if next_obj:
-            weeks_before = max(
-                0, round((_to_date(next_obj["target_date"]) - _to_date(end)).days / 7)
-            )
+        gap = plan_gap(objectives, end)
+        if gap:
+            next_obj, weeks_before = gap
             warnings.append(
                 f"plan generated through {end} ({weeks_before} wks before "
                 f"objective {next_obj['target_date']})"
@@ -551,3 +584,21 @@ def clip_payload(
             if b["start_date"] <= end_date and b["end_date"] >= start_date
         ],
     }
+
+
+def clip_payload_for_weeks(
+    payload: Dict[str, Any], weeks: Any, today: str
+) -> Dict[str, Any]:
+    """Window a payload to the last `weeks` of past plus the whole projected future
+    (§6.0/§7.1). `weeks` is a positive int (past edge = today − 7·weeks) or the string
+    ``'all'`` for full history; the future edge is plan end, clamped up to today when
+    the plan is absent or already lapsed, so the projection always shows whole. Shared
+    by the CLI `--chart` path and the web endpoint so their windows can't drift."""
+    if weeks == "all":
+        start_date = "0001-01-01"
+    else:
+        start_date = _date_str(_to_date(today) - timedelta(days=7 * int(weeks)))
+    end_date = payload["plan_end"] or today
+    if end_date < today:
+        end_date = today
+    return clip_payload(payload, start_date, end_date)

@@ -473,24 +473,18 @@ def get_timeline_png() -> Any:
     today = today_str()
     raw_weeks = request.args.get("weeks", "8")
     if raw_weeks == "all":
-        start_date = "0001-01-01"
+        weeks_arg: Any = "all"
     else:
         try:
-            weeks_n = int(raw_weeks)
+            weeks_arg = int(raw_weeks)
         except ValueError:
             return jsonify({"error": "weeks must be an integer or 'all'"}), 400
-        if weeks_n < 1:
+        if weeks_arg < 1:
             return jsonify({"error": "weeks must be >= 1"}), 400
-        start_date = (
-            datetime.strptime(today, "%Y-%m-%d").date() - timedelta(days=7 * weeks_n)
-        ).strftime("%Y-%m-%d")
 
     from trainmate import timeline
     payload = timeline.build_timeline_payload(db)
-    end_date = payload["plan_end"] or today
-    if end_date < today:
-        end_date = today
-    clipped = progression.clip_payload(payload, start_date, end_date)
+    clipped = progression.clip_payload_for_weeks(payload, weeks_arg, today)
 
     try:
         from trainmate import chart

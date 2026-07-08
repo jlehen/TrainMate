@@ -30,6 +30,13 @@ MESO_COL_WIDTH = 8
 WEEK_COL_WIDTH = 10
 
 
+def _to_date(date_str: str):
+    """'2026-07-31' -> date(2026, 7, 31). The one ISO-date parser for this module, so
+    the renderer doesn't sprinkle `datetime.strptime(...)` inline (mirrors
+    `progression._to_date`)."""
+    return datetime.strptime(date_str, "%Y-%m-%d").date()
+
+
 def _short_date(date_str: str) -> str:
     """'2026-07-31' -> '07-31'."""
     return date_str[5:]
@@ -37,7 +44,7 @@ def _short_date(date_str: str) -> str:
 
 def _weekday(date_str: str) -> str:
     """'2026-07-31' -> 'Wed'."""
-    return datetime.strptime(date_str, "%Y-%m-%d").strftime("%a")
+    return _to_date(date_str).strftime("%a")
 
 
 def sparkline(values: List[Optional[float]]) -> str:
@@ -131,25 +138,20 @@ def format_objective_projection_lines(
 
 
 def format_plan_gap_banner(
-    plan_end_date: str, next_objective: Optional[Dict[str, Any]]
+    plan_end_date: str, next_objective: Dict[str, Any], weeks_before: int
 ) -> List[str]:
     """The plan-end gap banner (§3): plan generated through X, N weeks before the next
-    objective it doesn't yet reach; names the fix (`workout generate --until-goal`)."""
-    line = f"⚠ plan generated through {_short_date(plan_end_date)}"
-    lines = []
-    if next_objective:
-        end_d = datetime.strptime(plan_end_date, "%Y-%m-%d").date()
-        target_d = datetime.strptime(next_objective["target_date"], "%Y-%m-%d").date()
-        weeks_before = max(0, round((target_d - end_d).days / 7))
-        line += f" — {weeks_before} wks before"
-        lines.append(yellow(line))
-        lines.append(
-            f"  \U0001F3C1 {next_objective['target_date']} {next_objective['title']}"
-        )
-        lines.append(f"  ({green('workout generate --until-goal')})")
-    else:
-        lines.append(yellow(line))
-    return lines
+    objective it doesn't yet reach; names the fix (`workout generate --until-goal`). The
+    gap itself (which objective, how many weeks) is computed once in
+    `progression.plan_gap` and passed in — this is presentation only (§7.1)."""
+    return [
+        yellow(
+            f"⚠ plan generated through {_short_date(plan_end_date)} "
+            f"— {weeks_before} wks before"
+        ),
+        f"  \U0001F3C1 {next_objective['target_date']} {next_objective['title']}",
+        f"  ({green('workout generate --until-goal')})",
+    ]
 
 
 def format_no_plan_banner(lapsed_date: Optional[str]) -> List[str]:
@@ -184,8 +186,7 @@ def _week_row(
     meso = pad_visible(truncate_label(week.get("meso_label")), MESO_COL_WIDTH)
     week_label = f"w/c {_short_date(week['week_commencing'])}"
     week_sunday = (
-        datetime.strptime(week["week_commencing"], "%Y-%m-%d").date()
-        + timedelta(days=6)
+        _to_date(week["week_commencing"]) + timedelta(days=6)
     ).strftime("%Y-%m-%d")
     partial = plan_end is not None and week["week_commencing"] <= plan_end < week_sunday
     if week.get("in_progress") or partial:
@@ -284,7 +285,7 @@ def render_progress(
     # Sparkline: one CTL sample per displayed past week (its last day <= today).
     ctl_samples: List[Optional[float]] = []
     for w in past_weeks:
-        w_start = datetime.strptime(w["week_commencing"], "%Y-%m-%d").date()
+        w_start = _to_date(w["week_commencing"])
         sample: Optional[float] = None
         for offset in range(6, -1, -1):
             d = (w_start + timedelta(days=offset)).strftime("%Y-%m-%d")
@@ -327,13 +328,10 @@ def render_progress(
         for o in reached:
             pt = by_date[o["target_date"]]
             lines += format_objective_projection_lines(o, pt["ctl"], pt["tsb"])
-        active = sorted(
-            (o for o in objectives if o.get("status") == "active"),
-            key=lambda o: str(o["target_date"]),
-        )
-        next_obj = next((o for o in active if o["target_date"] > plan_end), None)
-        if next_obj:
-            lines += format_plan_gap_banner(plan_end, next_obj)
+        gap = progression.plan_gap(objectives, plan_end)
+        if gap:
+            next_obj, weeks_before = gap
+            lines += format_plan_gap_banner(plan_end, next_obj, weeks_before)
 
     if tsb_shown:
         lines.append(dim(PMC_TSB_LAG_NOTE))
@@ -344,7 +342,7 @@ def render_progress(
     partial_note = None
     if plan_end is not None:
         # A plan ending on any day but Sunday leaves the final planned week partial.
-        if datetime.strptime(plan_end, "%Y-%m-%d").date().weekday() != 6:
+        if _to_date(plan_end).weekday() != 6:
             partial_note = f"plan ends {_short_date(plan_end)} ({_weekday(plan_end)})"
     lines += format_weekly_table(
         display_weeks, today, plan_end, has_inferred, partial_note
@@ -365,16 +363,11 @@ DEFAULT_CHART_PATH = "./progress.png"
 def _emit_chart(chart_arg: Any, payload: Dict[str, Any], caption: str) -> None:
     """Renders the §2 two-panel chart and delivers it per front-end (§7.2): a sentinel
     photo line under the bot's json frontend (temp file, bot-owned cleanup), else a
-    plain overwritten file path printed to stdout."""
-    frontend = os.environ.get("TRAINMATE_FRONTEND", "")
-    if frontend.lower() == "json":
-        import tempfile
-        tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".png")
-        path = tmp.name
-        tmp.close()
-    else:
-        path = chart_arg if isinstance(chart_arg, str) else DEFAULT_CHART_PATH
+    plain overwritten file path printed to stdout.
 
+    Rendering happens *before* any file is created, so a missing matplotlib fails with
+    an install hint and leaves nothing behind — no orphaned temp file for the bot to
+    clean up (it never learns of one, since no photo sentinel is emitted)."""
     try:
         png = chart.render_timeline_png(payload)
     except ImportError:
@@ -382,13 +375,18 @@ def _emit_chart(chart_arg: Any, payload: Dict[str, Any], caption: str) -> None:
             "matplotlib is not installed — run: venv/bin/pip install -r requirements.txt"
         ))
         return
-    with open(path, "wb") as f:
-        f.write(png)
 
-    if frontend.lower() == "json":
+    if os.environ.get("TRAINMATE_FRONTEND", "").lower() == "json":
+        import tempfile
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".png") as tmp:
+            tmp.write(png)
+            path = tmp.name
         from trainmate.prompt import emit_photo
         emit_photo(path, caption=caption)
     else:
+        path = chart_arg if isinstance(chart_arg, str) else DEFAULT_CHART_PATH
+        with open(path, "wb") as f:
+            f.write(png)
         print(f"Chart written to {path}")
 
 
@@ -414,13 +412,6 @@ def run_progress(args: argparse.Namespace) -> None:
 
     chart_arg = getattr(args, "chart", False)
     if chart_arg:
-        window_start = (
-            datetime.strptime(today, "%Y-%m-%d").date()
-            - timedelta(days=7 * weeks_window)
-        ).strftime("%Y-%m-%d")
-        window_end = payload["plan_end"] or today
-        if window_end < today:
-            window_end = today
-        clipped = progression.clip_payload(payload, window_start, window_end)
+        clipped = progression.clip_payload_for_weeks(payload, weeks_window, today)
         form_line = lines[0] if lines else ""
         _emit_chart(chart_arg, clipped, form_line)

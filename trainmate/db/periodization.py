@@ -132,19 +132,33 @@ class PeriodizationMixin:
         this is why it can't reuse `get_mesocycle_ranges` (active-only)."""
         with self._get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute(
-                "SELECT id, objective_id, created_at FROM macrocycles"
-            )
-            macros = [dict(row) for row in cursor.fetchall()]
-        out: List[Dict[str, Any]] = []
-        for m in macros:
-            mesos = self.get_mesocycles_for_macrocycle(m['id'])
-            out.append({
-                'objective_id': m['objective_id'],
-                'created_at': m['created_at'],
-                'ranges': [(x['start_date'], x['end_date']) for x in mesos],
-            })
-        return out
+            # One LEFT JOIN instead of a per-macrocycle mesocycle query (N+1); LEFT so a
+            # macrocycle with no mesocycles yet still surfaces (empty ranges), which the
+            # version-in-force rule relies on — it can still be the latest version and
+            # shadow an earlier one.
+            cursor.execute("""
+                SELECT mac.id, mac.objective_id, mac.created_at,
+                       m.start_date, m.end_date
+                FROM macrocycles mac
+                LEFT JOIN mesocycles m ON m.macrocycle_id = mac.id
+                ORDER BY mac.id ASC, m.start_date ASC
+            """)
+            rows = [dict(row) for row in cursor.fetchall()]
+        by_macro: "Dict[Any, Dict[str, Any]]" = {}
+        order: List[Any] = []
+        for r in rows:
+            entry = by_macro.get(r['id'])
+            if entry is None:
+                entry = {
+                    'objective_id': r['objective_id'],
+                    'created_at': r['created_at'],
+                    'ranges': [],
+                }
+                by_macro[r['id']] = entry
+                order.append(r['id'])
+            if r['start_date'] is not None and r['end_date'] is not None:
+                entry['ranges'].append((r['start_date'], r['end_date']))
+        return [by_macro[mid] for mid in order]
 
     def get_mesocycles_for_macrocycle(self, macrocycle_id: int) -> List[Mesocycle]:
         """Fetches all mesocycles in chronological order belonging to a macrocycle."""
