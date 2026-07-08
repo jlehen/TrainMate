@@ -3,6 +3,9 @@
 - When changing code, always update ARCHITECTURE.md if appropriate.
 - When adding a new feature, always reflect if this needs to be integrated
   in each command and data flow.
+- When storing values in the database, always lean toward storing exact or
+  very precise values, unless there are real savings into reducing the
+  precision. Only round the values on display.
 
 # VCS policy
 - Never commits without being explicitly asked by the user.
