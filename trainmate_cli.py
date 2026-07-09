@@ -404,7 +404,7 @@ def main() -> None:
     # progress command — the projected Performance Management Chart
     progress_parser = subparsers.add_parser(
         "progress",
-        aliases=["prog"],
+        aliases=["p"],
         parents=[pull_bypass_parser],
         help="Show the training progress timeline: measured load to date, projected forward",
         description=(
@@ -1340,7 +1340,7 @@ def main() -> None:
         _print_command_tree(parser)
     elif cmd in ("status", "s"):
         run_status(verbose=args.verbose, no_pull=args.no_pull, force_pull=args.force_pull)
-    elif cmd in ("progress", "prog"):
+    elif cmd in ("progress", "p"):
         run_progress(args)
     elif cmd in ("goal", "g"):
         if not args.subcommand:
