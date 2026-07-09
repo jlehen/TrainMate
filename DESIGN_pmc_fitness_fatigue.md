@@ -497,6 +497,15 @@ ones (`cli/data.py`). Same NULL → blank/`—` and warm-up omission as the stat
 line; the CSV emits empty cells (not `0`) for suppressed/NULL values so
 downstream parsing doesn't read a zero as data.
 
+### 6.2b `workout adapt` metrics trajectory
+
+The same three columns on the trajectory table (`cli/workouts.py`), which prints
+directly above the Decision Summary. The adapt prompt already reads per-day
+CTL/ATL/TSB (§5.1), so without them the athlete sees strictly less than the coach
+did and cannot check a decision that cites form against the numbers beside it.
+Same warm-up blanking and TSB-lag footnote as the status line; the §3.3(b)
+warm-up flag rides along to explain a column of `—`.
+
 ### 6.3 Telegram / web
 
 Nothing bespoke. The bot and web tab render what the shared status/summary code

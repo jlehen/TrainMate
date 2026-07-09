@@ -4,15 +4,16 @@ import sys
 from datetime import datetime, timedelta
 from typing import Optional
 import trainmate_cli as cli
-from trainmate.config import config
 from trainmate.adherence import analyze_adherence, date_covered
 from trainmate.util import (
     bold, dim, green, red, yellow, cyan, blue, magenta, gray,
-    color_acwr, color_tsb, visible_len, pad_visible, wrap_text, format_labeled_text,
+    color_acwr, pmc_cells, visible_len, pad_visible, wrap_text, format_labeled_text,
     format_labeled_block, render_table, is_narrow_client, default_wrap_width,
     today_str as _today_str, today_date as _today_date,
 )
-from trainmate.cli.common import fmt_date, ensure_recent_data, mark_adherence_range
+from trainmate.cli.common import (
+    fmt_date, ensure_recent_data, mark_adherence_range, pmc_warmup_cutoff,
+)
 
 
 def run_data_pull(args: argparse.Namespace) -> None:
@@ -270,11 +271,7 @@ def run_data_show_metrics(args: argparse.Namespace) -> None:
     ]
     rows = []
 
-    # PMC values inside the leading-edge warm-up window are artifacts, so they render as
-    # "—" here (never "0.0") just like NULLs (DESIGN_pmc_fitness_fatigue.md §6.2).
-    warmup_cutoff = cli.garmin.pmc_warmup_cutoff_for(
-        cli.garmin.pmc_history_start(dbh=cli.db), config.pmc_ctl_days
-    )
+    warmup_cutoff = pmc_warmup_cutoff()
 
     for m in metrics_history:
         base = cli.db.get_baseline(m['date'])
@@ -295,10 +292,9 @@ def run_data_show_metrics(args: argparse.Namespace) -> None:
         acute_str = f"{acute_val:.1f}" if acute_val is not None else "N/A"
         chronic_str = f"{chronic_val:.1f}" if chronic_val is not None else "N/A"
 
-        ctl_v, atl_v, tsb_v = cli.garmin.pmc_display_values(m, warmup_cutoff)
-        ctl_str = f"{ctl_v:.1f}" if ctl_v is not None else "—"
-        atl_str = f"{atl_v:.1f}" if atl_v is not None else "—"
-        tsb_str = color_tsb(tsb_v) if tsb_v is not None else "—"
+        ctl_str, atl_str, tsb_str = pmc_cells(
+            *cli.garmin.pmc_display_values(m, warmup_cutoff)
+        )
 
         hrv_base_str = "N/A"
         rhr_base_str = "N/A"
@@ -351,9 +347,7 @@ def _show_metrics_csv(metrics_history: list) -> None:
     ])
     # Suppressed (warm-up) or NULL PMC values are emitted as empty cells, never 0, so
     # downstream parsing can't read a zero as data (DESIGN_pmc_fitness_fatigue.md §6.2).
-    warmup_cutoff = cli.garmin.pmc_warmup_cutoff_for(
-        cli.garmin.pmc_history_start(dbh=cli.db), config.pmc_ctl_days
-    )
+    warmup_cutoff = pmc_warmup_cutoff()
     for m in metrics_history:
         base = cli.db.get_baseline(m['date'])
         hrv_base = None

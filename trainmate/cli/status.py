@@ -7,11 +7,11 @@ from trainmate.config import config
 from trainmate.adherence import analyze_adherence, date_covered
 from trainmate.util import (
     bold, dim, green, red, yellow, cyan, blue, magenta, gray,
-    color_acwr, color_tsb, color_ramp, visible_len, pad_visible, wrap_text,
-    format_labeled_text, format_labeled_block, PMC_TSB_LAG_NOTE,
+    color_acwr, color_ramp, pmc_cells, pmc_warming_note, visible_len, pad_visible,
+    wrap_text, format_labeled_text, format_labeled_block, PMC_TSB_LAG_NOTE,
     today_str as _today_str, today_date as _today_date,
 )
-from trainmate.cli.common import fmt_date, ensure_recent_data
+from trainmate.cli.common import fmt_date, ensure_recent_data, pmc_warmup_cutoff
 
 
 def _ago(iso_utc: str) -> str:
@@ -147,21 +147,15 @@ def run_status(
             f"(Acute: {acute:.1f}, Chronic: {chronic:.1f})"
         )
 
-        # Fitness/Fatigue/Form (CTL/ATL/TSB) + ramp. Never zero-fill: a NULL or warm-up
-        # field renders "—" (a printed "TSB 0.0" reads as a meaningful neutral balance,
-        # not as missing data), and the whole line is dropped when all three are absent
-        # (DESIGN_pmc_fitness_fatigue.md §6.1). TSB colors only its two risk ends
-        # (phase-blind); ramp comes from the full stored CTL series. All garmin helpers
-        # read cli.db (dbh=), the same database the metrics above came from.
+        # Fitness/Fatigue/Form (CTL/ATL/TSB) + ramp. The whole line is dropped when all
+        # three are absent (DESIGN_pmc_fitness_fatigue.md §6.1); ramp comes from the full
+        # stored CTL series. All garmin helpers read cli.db (dbh=), the same database the
+        # metrics above came from.
         history_start = cli.garmin.pmc_history_start(dbh=cli.db)
-        warmup_cutoff = cli.garmin.pmc_warmup_cutoff_for(
-            history_start, config.pmc_ctl_days
-        )
+        warmup_cutoff = pmc_warmup_cutoff(history_start)
         ctl_v, atl_v, tsb_v = cli.garmin.pmc_display_values(last_metrics, warmup_cutoff)
         if ctl_v is not None or atl_v is not None or tsb_v is not None:
-            ctl_s = f"{ctl_v:.1f}" if ctl_v is not None else "—"
-            atl_s = f"{atl_v:.1f}" if atl_v is not None else "—"
-            tsb_s = color_tsb(tsb_v) if tsb_v is not None else "—"
+            ctl_s, atl_s, tsb_s = pmc_cells(ctl_v, atl_v, tsb_v)
             ctl_by_date = {m['date']: m.get('ctl') for m in metrics}
             ramp_v = cli.garmin.pmc_ramp(
                 ctl_by_date, last_metrics['date'], warmup_cutoff=warmup_cutoff
@@ -176,12 +170,7 @@ def run_status(
         # values themselves are warm-up-suppressed above (the suppression is the reason).
         caveat = cli.garmin.pmc_data_caveat(history_start)
         if caveat:
-            ctl_days = config.pmc_ctl_days
-            print(dim(
-                f"  PMC still warming: CTL based on {caveat['n_days']} days of "
-                f"history (a {ctl_days}-day average needs ~{3 * ctl_days} days to "
-                f"settle); fitness/freshness may read low."
-            ))
+            print(dim("  " + pmc_warming_note(caveat['n_days'], config.pmc_ctl_days)))
         
         # Baselines
         if baseline:

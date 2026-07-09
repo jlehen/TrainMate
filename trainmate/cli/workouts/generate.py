@@ -11,11 +11,13 @@ from trainmate.modification_state import modification_status
 from trainmate.sports import canonical_sport
 from trainmate.util import (
     bold, dim, green, red, yellow, cyan, blue, magenta, gray,
-    color_acwr, visible_len, pad_visible, wrap_text, format_labeled_text,
-    format_labeled_block, render_table, today_str as _today_str,
-    today_date as _today_date,
+    color_acwr, pmc_cells, pmc_warming_note, visible_len, pad_visible, wrap_text,
+    format_labeled_text, format_labeled_block, render_table, PMC_TSB_LAG_NOTE,
+    today_str as _today_str, today_date as _today_date,
 )
-from trainmate.cli.common import fmt_date, ensure_recent_data, mark_adherence_from_results
+from trainmate.cli.common import (
+    fmt_date, ensure_recent_data, mark_adherence_from_results, pmc_warmup_cutoff,
+)
 
 from trainmate.cli.workouts._helpers import (_fmt_ts, _resolve_workout_date_range,
     _resolve_workout_end_date)
@@ -35,23 +37,34 @@ def run_workout_adapt(args: argparse.Namespace) -> None:
         date_obj = datetime.strptime(date_str, "%Y-%m-%d").date()
         start_date = (date_obj - timedelta(days=history_days - 1)).strftime("%Y-%m-%d")
         metrics_history = cli.db.get_metrics_cache(start_date=start_date, end_date=date_str)
-        
+
+        # The adapt prompt already reads per-day CTL/ATL/TSB (coach.formatting
+        # .format_metrics_history), so the table the athlete reads beside the decision
+        # shows the same triple, under the same warm-up blanking.
+        history_start = cli.garmin.pmc_history_start(dbh=cli.db)
+        warmup_cutoff = pmc_warmup_cutoff(history_start)
+
         print(bold(cyan(f"\n=== METRICS TRAJECTORY (PAST {history_days} DAYS) ===")))
-        headers = ["Date", "HRV (ms)", "RHR (bpm)", "Sleep", "ACWR"]
+        headers = ["Date", "HRV (ms)", "RHR (bpm)", "Sleep", "ACWR", "CTL", "ATL", "TSB"]
         rows = []
+        shown_tsb = False
         for m in metrics_history:
             base = cli.db.get_baseline(m['date'])
-            
+
             hrv_val = m['hrv']
             rhr_val = m['rhr']
             sleep_val = m['sleep_score']
             acwr_val = m['acwr']
-            
+
             hrv_str = f"{hrv_val or 'N/A'}"
             rhr_str = f"{rhr_val or 'N/A'}"
             sleep_str = f"{sleep_val or 'N/A'}"
             acwr_str = color_acwr(acwr_val) if acwr_val is not None else "N/A"
-            
+
+            ctl_v, atl_v, tsb_v = cli.garmin.pmc_display_values(m, warmup_cutoff)
+            ctl_str, atl_str, tsb_str = pmc_cells(ctl_v, atl_v, tsb_v)
+            shown_tsb = shown_tsb or tsb_v is not None
+
             if base:
                 if hrv_val is not None and base['hrv_baseline_mean'] is not None:
                     sd = base['hrv_baseline_std'] or 1.0
@@ -70,10 +83,19 @@ def run_workout_adapt(args: argparse.Namespace) -> None:
                         sleep_str = red(f"{sleep_val} (v)")
                     else:
                         sleep_str = green(str(sleep_val))
-            
-            rows.append([m['date'], hrv_str, rhr_str, sleep_str, acwr_str])
+
+            rows.append([
+                m['date'], hrv_str, rhr_str, sleep_str, acwr_str,
+                ctl_str, atl_str, tsb_str,
+            ])
         print(render_table(headers, rows))
-        print(gray("((v) suppressed/poor, (^) elevated compared to baseline)\n"))
+        print(gray("((v) suppressed/poor, (^) elevated compared to baseline)"))
+        if shown_tsb:
+            print(gray(PMC_TSB_LAG_NOTE))
+        caveat = cli.garmin.pmc_data_caveat(history_start)
+        if caveat:
+            print(gray(pmc_warming_note(caveat['n_days'], config.pmc_ctl_days)))
+        print()
     except Exception as e:
         print(yellow(f"Warning: Could not display metrics trajectory: {e}"))
 

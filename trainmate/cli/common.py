@@ -15,6 +15,17 @@ def fmt_date(date_str: str) -> str:
     return datetime.strptime(date_str, "%Y-%m-%d").strftime("%Y-%m-%d %a")
 
 
+def pmc_warmup_cutoff(history_start: Optional[str] = None) -> Optional[str]:
+    """The §3.3(a) leading-edge cutoff every CLI surface blanks PMC values against.
+
+    Pass `history_start` when the caller already fetched it (it needs a DB hit),
+    otherwise it is looked up here."""
+    import trainmate_cli as cli
+    if history_start is None:
+        history_start = cli.garmin.pmc_history_start(dbh=cli.db)
+    return cli.garmin.pmc_warmup_cutoff_for(history_start, config.pmc_ctl_days)
+
+
 def ensure_recent_data(
     end_date: Optional[str] = None, no_pull: bool = False, force_pull: bool = False
 ) -> None:

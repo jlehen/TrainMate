@@ -15,7 +15,9 @@ import trainmate.db
 import trainmate.garmin as garmin
 from trainmate.garmin import compute_pmc, pmc_warmup_cutoff_for, pmc_ramp
 from trainmate.coach.formatting import format_metrics_history
-from trainmate.util import color_tsb, color_ramp, PMC_TSB_LAG_NOTE
+from trainmate.util import (
+    color_tsb, color_ramp, pmc_cells, pmc_warming_note, PMC_TSB_LAG_NOTE,
+)
 
 
 TEST_DB_PATH = os.path.join(os.path.dirname(__file__), "test_trainmate_pmc.db")
@@ -339,7 +341,7 @@ class TestFormatMetricsHistory(unittest.TestCase):
 
 class TestDisplayValues(unittest.TestCase):
     """garmin.pmc_display_values — the one warm-up blanking rule the status line,
-    show-metrics table, and CSV all share."""
+    show-metrics table, CSV and the adapt trajectory all share."""
 
     def test_warmup_row_blanks_all_three(self):
         row = {"date": "2026-01-05", "ctl": 20.0, "atl": 55.0, "tsb": -30.0}
@@ -355,6 +357,37 @@ class TestDisplayValues(unittest.TestCase):
         self.assertEqual(
             garmin.pmc_display_values(row, None), (62.4, 71.7, None)
         )
+
+
+class TestDisplayCells(unittest.TestCase):
+    """util.pmc_cells — the shared "—, never 0.0" rendering of the triple."""
+
+    def test_missing_values_render_dash(self):
+        self.assertEqual(pmc_cells(None, None, None), ("—", "—", "—"))
+
+    def test_zero_is_data_and_still_prints(self):
+        # The dash is reserved for absent values; a genuine 0.0 must survive.
+        ctl_s, atl_s, tsb_s = pmc_cells(0.0, 0.0, 0.0)
+        self.assertEqual((ctl_s, atl_s), ("0.0", "0.0"))
+        self.assertIn("0.0", tsb_s)
+
+    def test_tsb_carries_its_risk_coloring(self):
+        self.assertEqual(pmc_cells(62.4, 71.7, -8.9), ("62.4", "71.7", color_tsb(-8.9)))
+        self.assertEqual(pmc_cells(62.4, 71.7, -40.0)[2], color_tsb(-40.0))
+
+    def test_partial_row_blanks_only_the_missing_field(self):
+        self.assertEqual(pmc_cells(62.4, None, None), ("62.4", "—", "—"))
+
+
+class TestWarmingNote(unittest.TestCase):
+    """util.pmc_warming_note — parameterized by τ_ctl, never a hardcoded 42."""
+
+    def test_note_reports_history_length(self):
+        self.assertIn("based on 10 days of history", pmc_warming_note(10, 42))
+
+    def test_settle_estimate_tracks_configured_tau(self):
+        self.assertIn("a 42-day average needs ~126 days", pmc_warming_note(10, 42))
+        self.assertIn("a 30-day average needs ~90 days", pmc_warming_note(10, 30))
 
 
 # ==============================================================================
