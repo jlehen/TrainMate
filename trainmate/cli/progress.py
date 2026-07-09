@@ -8,6 +8,8 @@ so a TTY and Telegram render identically; width is measured with `visible_len`
 (emoji are double-width), never `len`.
 """
 import argparse
+
+from trainmate.cli.argparse_ext import _weeks_arg
 import os
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
@@ -483,3 +485,36 @@ def run_progress(args: argparse.Namespace) -> None:
         )
         form_line = lines[0] if lines else ""
         _emit_chart(chart_arg, clipped, form_line)
+
+
+def add_progress_parser(subparsers, pull_bypass_parser):
+    # progress command — the projected Performance Management Chart
+    progress_parser = subparsers.add_parser(
+        "progress",
+        aliases=["p"],
+        parents=[pull_bypass_parser],
+        help="Show the training progress timeline: measured load to date, projected forward",
+        description=(
+            "Show a single continuous timeline of training load: past days measured "
+            "from completed activities, future days planned from the current plan, one "
+            "fitness/fatigue model (CTL/ATL/TSB) run across the seam. Projects to plan "
+            "end (or each objective the plan reaches) so you can see whether the plan "
+            "as written delivers peak fitness with positive form on race day."
+        )
+    )
+    progress_parser.add_argument(
+        "--weeks", type=_weeks_arg, default=8, metavar="N",
+        help="Weeks of weekly load to show either side of today (default: 8, must be "
+             ">= 1, or 'all' for the whole plan). The projection lines above the table "
+             "always run to plan end regardless."
+    )
+    progress_parser.add_argument(
+        "--explain", action="store_true",
+        help="Append the PMC footnotes (e.g. why TSB lags same-day CTL - ATL)."
+    )
+    progress_parser.add_argument(
+        "--chart", nargs="?", const=True, default=False, metavar="PATH",
+        help="Also render the two-panel chart (PMC + weekly load) to a PNG "
+             "(default: ./progress.png; requires matplotlib). Additive — the "
+             "text output above still prints."
+    )

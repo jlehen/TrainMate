@@ -541,3 +541,137 @@ def run_plan_feedback(args: argparse.Namespace) -> None:
         f"(Goal: '{next_goal['title']}')."
     ))
     print(_FEEDBACK_REGEN_NOTE)
+
+
+def add_plan_parser(subparsers, pull_bypass_parser, llm_debug_parser):
+    # plan command & subparsers
+    plan_parser = subparsers.add_parser(
+        "plan",
+        help="Manage and consult the periodized training plan (macrocycles & mesocycles)"
+    )
+    plan_subparsers = plan_parser.add_subparsers(
+        dest="subcommand", help="Plan sub-commands"
+    )
+    
+    # plan generate
+    p_gen = plan_subparsers.add_parser(
+        "generate", aliases=["g"],
+        parents=[pull_bypass_parser, llm_debug_parser],
+        help=(
+            "Generate or adapt the periodized training plan strategy "
+            "(macrocycles & mesocycles)"
+        )
+    )
+    p_gen.add_argument(
+        "-f", "--force", action="store_true",
+        help="Force regeneration of the macrocycle/mesocycle strategy"
+    )
+    p_gen.add_argument(
+        "-y", "--yes", "--auto", action="store_true", dest="auto",
+        help="Apply proposed plan updates automatically without prompting"
+    )
+    p_gen.add_argument(
+        "--goal", "--goal-id", type=int, dest="goal_id",
+        help="Target goal ID to generate the periodization plan for"
+    )
+    
+    # plan show
+    p_show = plan_subparsers.add_parser(
+        "show", aliases=["s"],
+        help="Show the active macrocycle and mesocycles periodization strategy"
+    )
+    p_show.add_argument(
+        "--goal", "--goal-id", type=int, dest="goal_id",
+        help="Target goal ID to show the periodization plan for"
+    )
+    p_show.add_argument(
+        "--version", type=int, dest="version", metavar="PLAN_ID",
+        help="Show a specific (e.g. superseded) plan version by ID instead of the active one"
+    )
+
+    # plan versions
+    p_versions = plan_subparsers.add_parser(
+        "versions", aliases=["v"],
+        help="List all plan versions (active + superseded) for a goal",
+        description=(
+            "List every periodization plan version kept for a goal — the active one and "
+            "any superseded by later regenerations — with their IDs and dates, so you can "
+            "inspect one ('plan show --version <ID>') or restore one "
+            "('plan rollback --version <ID>')."
+        )
+    )
+    p_versions.add_argument(
+        "--goal", "--goal-id", type=int, dest="goal_id",
+        help="Target goal ID whose plan versions to list (defaults to the next active goal)"
+    )
+
+    # plan rm
+    p_rm = plan_subparsers.add_parser(
+        "rm", aliases=["d"],
+        help="Remove/delete a specific periodization plan by Goal ID"
+    )
+    p_rm.add_argument(
+        "id", type=int,
+        help="Goal ID whose periodization plan should be removed"
+    )
+
+    # plan rollback
+    p_rollback = plan_subparsers.add_parser(
+        "rollback", aliases=["rb"],
+        help="Restore a superseded plan version and its workouts",
+        description=(
+            "Undo a plan regeneration: restore an earlier periodization plan version "
+            "and the workouts that were live under it. Defaults to the chronologically "
+            "previous version of the next active goal's plan; repeat to walk further "
+            "back, or target a specific version with --version. The current plan's "
+            "upcoming workouts are archived and the restored version's are re-pushed to "
+            "Google Calendar (the symmetric inverse of generation)."
+        )
+    )
+    p_rollback.add_argument(
+        "--goal", "--goal-id", type=int, dest="goal_id",
+        help="Target goal ID whose plan to roll back (defaults to the next active goal)"
+    )
+    p_rollback.add_argument(
+        "--version", type=int, dest="version", metavar="PLAN_ID",
+        help="Roll back to a specific plan version (macrocycle) ID instead of the previous one"
+    )
+    p_rollback.add_argument(
+        "-y", "--yes", action="store_true", help="Skip confirmation prompt"
+    )
+
+    # plan feedback
+    p_fb = plan_subparsers.add_parser(
+        "feedback",
+        aliases=["f"],
+        description="Add athlete feedback (either --macro or --meso is mandatory).",
+        help="Add athlete feedback (either --macro or --meso is mandatory)"
+    )
+    p_fb.add_argument(
+        "--macro", action="store_true",
+        help="Provide general feedback on the overall macrocycle strategy"
+    )
+    p_fb.add_argument(
+        "--meso", type=int,
+        help="Provide feedback on a specific mesocycle ID"
+    )
+    p_fb.add_argument(
+        "--goal", "--goal-id", type=int, dest="goal_id",
+        help=(
+            "Target goal ID whose plan the feedback should attach to "
+            "(default to the current active goal)"
+        )
+    )
+    p_fb.add_argument(
+        "--edit", action="store_true",
+        help="Open $EDITOR seeded with the current feedback (takes no text argument)"
+    )
+    p_fb.add_argument(
+        "text", nargs="?", default=None,
+        help="Feedback content string (omit when using --edit)"
+    )
+
+    # plan wipe
+    p_wipe = plan_subparsers.add_parser("wipe", help="Wipe all periodization plans")
+    p_wipe.add_argument("-y", "--yes", action="store_true", help="Skip confirmation prompt")
+    

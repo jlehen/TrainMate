@@ -648,3 +648,210 @@ def _render_analysis_report(result: dict, inspect_only: bool) -> None:
 
     except Exception as e:
         print(red(f"Error rendering workout analysis: {e}"))
+
+
+def add_data_parser(subparsers, pull_bypass_parser, llm_debug_parser, basic_date_parser, plan_date_parser, sport_type_parser):
+    # data command & subparsers
+    data_parser = subparsers.add_parser(
+        "data",
+        aliases=["d"],
+        help="Manage and sync athlete metrics and activities"
+    )
+    data_subparsers = data_parser.add_subparsers(
+        dest="subcommand", help="Data sub-commands"
+    )
+    
+    # data pull
+    d_pull = data_subparsers.add_parser(
+        "pull",
+        aliases=["p"],
+        help="Fetch Garmin activities/metrics and Google Calendar context",
+        description=(
+            "Fetch activities and daily metrics directly from Garmin Connect into the "
+            "local cache, advancing the sync watermark. With no range, pulls the last "
+            "2 days ending today (--days N for a different window, or --from/--until "
+            "for an explicit range). Pulls both metrics and activities unless "
+            "--metrics-only/--activities-only is given. Also syncs tagged daily-context "
+            "events (alcohol, sleep, stress, …) from Google Calendar into the local cache. "
+            "Past Calendar events in the pulled range are stamped with the adherence "
+            "verdict unless --no-mark is given."
+        )
+    )
+    d_pull.add_argument(
+        "--days", type=int, default=2, metavar="N",
+        help="Number of days to pull, ending today (default: 2)"
+    )
+    d_pull.add_argument(
+        "--no-mark", action="store_true", dest="no_mark",
+        help="Skip stamping past Calendar events with the adherence verdict"
+    )
+    d_pull.add_argument(
+        "--from", "--from-date", dest="from_date", metavar="YYYY-MM-DD",
+        help="Start date for an explicit range (overrides --days)"
+    )
+    d_pull.add_argument(
+        "--until", "--until-date", dest="until_date", metavar="YYYY-MM-DD",
+        help="End date for an explicit range (defaults to today)"
+    )
+    d_pull.add_argument(
+        "--sleep", type=float, dest="sleep", metavar="SECONDS",
+        help="Throttle: seconds to sleep between Garmin calls (default from config)"
+    )
+    pull_group = d_pull.add_mutually_exclusive_group()
+    pull_group.add_argument(
+        "--metrics-only", action="store_true", help="Pull daily metrics only"
+    )
+    pull_group.add_argument(
+        "--activities-only", action="store_true", help="Pull activities only"
+    )
+
+    # data bootstrap — cold-start backward reconstruction over the full backlog
+    d_boot = data_subparsers.add_parser(
+        "bootstrap", aliases=["b"],
+        parents=[pull_bypass_parser, basic_date_parser, llm_debug_parser],
+        help="Reconstruct macro/mesocycles from your full backlog (run once): "
+             "seeds coach learnings + a cached reconstruction fed to 'plan generate'",
+        description=(
+            "Cold-start: reverse-engineer past training cycles from completed workouts "
+            "and metrics. With no date filter, the window is auto-detected from the active "
+            "goal (since the previous goal, else 12 weeks back). Two outputs: (1) coach "
+            "learnings, delta-updated from the evidence; and (2) a cached reconstruction — "
+            "the inferred macro focus, mesocycle blocks, and physiological insights — which "
+            "'plan generate' replays read-only into its strategy prompt so the next plan "
+            "builds on your demonstrated training arc. Also establishes the reflect "
+            "watermark so later 'data reflect' runs only ingest newer evidence. Cached by "
+            "evidence fingerprint: an unchanged re-run reuses the cache unless --force; "
+            "--inspect-only renders the analysis without writing learnings or the cache."
+        )
+    )
+    # data reflect — incremental reflection over evidence since the last reflect
+    d_reflect = data_subparsers.add_parser(
+        "reflect", aliases=["r"],
+        parents=[pull_bypass_parser, basic_date_parser, llm_debug_parser],
+        help="Update coach learnings from how the athlete responded to training "
+             "since the last reflect (incremental; no reconstruction)",
+        description=(
+            "Incremental: analyze only evidence accrued since the last reflect watermark "
+            "(the day after the last reflected-through date). Its output is coach learnings "
+            "— delta-updated from the new evidence; unlike 'data bootstrap' it does not "
+            "feed a reconstruction to 'plan generate'. A date filter overrides the "
+            "watermark. Because overlapping history is never re-counted, repeated runs no "
+            "longer ratchet confidence to 'established'. Run 'data bootstrap' first to "
+            "establish a baseline. --inspect-only renders without writing; --force bypasses "
+            "the per-window cache."
+        )
+    )
+    for d_an in (d_boot, d_reflect):
+        d_an.add_argument(
+            "--context", dest="context",
+            help="Optional text context detailing subjective athlete notes (travel, illness, etc.)"
+        )
+        d_an.add_argument(
+            "-f", "--force", action="store_true",
+            help="Recompute even if the evidence is unchanged (bypass the analysis cache)"
+        )
+        d_an.add_argument(
+            "--inspect-only", action="store_true",
+            help="Read-only: show the analysis without writing coach learnings or the cache"
+        )
+        d_an.add_argument(
+            "--auto", action="store_true",
+            help="Unattended: skip interactive demotion prompts. Staleness demotions apply "
+                 "directly; contradiction demotions stay queued for the next interactive review."
+        )
+
+    # data backfill-tss
+    d_btss = data_subparsers.add_parser(
+        "backfill-tss",
+        help="Recompute TSS for all stored activities using the current "
+             "zone-based model (no Garmin calls needed)"
+    )
+    d_btss.add_argument(
+        "--from", "--from-date", dest="from_date", metavar="YYYY-MM-DD",
+        help="Only process activities on or after this date"
+    )
+    d_btss.add_argument(
+        "--until", "--until-date", dest="until_date", metavar="YYYY-MM-DD",
+        help="Only process activities on or before this date"
+    )
+    d_btss.add_argument(
+        "-v", "--verbose", action="store_true",
+        help="List activities with low HR-zone coverage that need an RPE"
+    )
+
+    # data show-metrics
+    d_sm = data_subparsers.add_parser(
+        "show-metrics", aliases=["sm"],
+        parents=[pull_bypass_parser, plan_date_parser],
+        help="Show athlete metrics over a date range",
+        description=(
+            "Show cached daily athlete metrics (RHR, HRV, sleep, stress) over a date "
+            "range. With no date filter, looks back 7 days ending today; -a/--all "
+            "shows every cached row. Freshens recent data from Garmin first unless "
+            "--no-pull or --all is given. Use --csv for machine-readable output."
+        )
+    )
+    d_sm.add_argument(
+        "--csv", action="store_true", dest="csv",
+        help="Output data as CSV for script consumption"
+    )
+    d_sm.add_argument(
+        "-a", "--all", action="store_true", dest="all",
+        help="Show all cached athlete metrics"
+    )
+
+    # data show-activities
+    d_sa = data_subparsers.add_parser(
+        "show-activities", aliases=["sa"],
+        parents=[pull_bypass_parser, plan_date_parser, sport_type_parser],
+        help="Show completed activities over a date range",
+        description=(
+            "Show cached completed activities over a date range. With no date filter, "
+            "looks back 7 days ending today; -a/--all shows every cached activity. "
+            "Filter with --type, freshen from Garmin unless --no-pull/--all, and use "
+            "--csv for machine-readable output."
+        )
+    )
+    d_sa.add_argument(
+         "--csv", action="store_true", dest="csv",
+         help="Output data as CSV for script consumption"
+     )
+    d_sa.add_argument(
+        "-a", "--all", action="store_true", dest="all",
+        help="Show all cached completed activities"
+    )
+
+    # data wipe
+    d_wipe = data_subparsers.add_parser(
+        "wipe",
+        help="Wipe locally cached Garmin data and/or daily context from the database",
+        description=(
+            "Delete locally cached data. With no scope flag, wipes everything (Garmin "
+            "metrics, baselines, activities, and ingested daily-context signals) and "
+            "resets the sync watermarks. --garmin or --calendar narrow the scope; "
+            "--from/--until/--days restrict it to a date window (the next 'data pull' "
+            "re-fetches what was removed)."
+        ),
+    )
+    d_wipe.add_argument(
+        "--garmin", action="store_true",
+        help="Wipe only Garmin evidence (metrics, baselines, activities, analysis cache)"
+    )
+    d_wipe.add_argument(
+        "--calendar", "--context", action="store_true", dest="calendar",
+        help="Wipe only ingested daily-context signals and reset the Calendar sync token"
+    )
+    d_wipe.add_argument(
+        "--days", type=int, metavar="N",
+        help="Restrict to the trailing N days (ending --until, default today)"
+    )
+    d_wipe.add_argument(
+        "--from", "--from-date", dest="from_date", metavar="YYYY-MM-DD",
+        help="Restrict to rows on or after this date"
+    )
+    d_wipe.add_argument(
+        "--until", "--until-date", dest="until_date", metavar="YYYY-MM-DD",
+        help="Restrict to rows on or before this date"
+    )
+    d_wipe.add_argument("-y", "--yes", action="store_true", help="Skip confirmation prompt")
+    

@@ -102,3 +102,58 @@ def run_goal_wipe(args: argparse.Namespace) -> None:
 
     cli.db.wipe_objectives()
     print(green("All training objectives wiped successfully."))
+
+
+def add_goal_parser(subparsers):
+    # goal command & subparsers
+    goal_parser = subparsers.add_parser(
+        "goal",
+        aliases=["g"],
+        help="Manage training objectives / goals of your training plan"
+    )
+    goal_subparsers = goal_parser.add_subparsers(dest="subcommand", help="Goal sub-commands")
+    
+    # goal add
+    g_add = goal_subparsers.add_parser(
+        "add", aliases=["a"], help="Add a new training objective/goal"
+    )
+    g_add.add_argument("--title", required=True, help="Goal title (e.g. Marathon)")
+    g_add.add_argument("--date", required=True, help="Target event date (YYYY-MM-DD)")
+    g_add.add_argument(
+        "--sport", required=True, nargs="+",
+        choices=["running", "road_biking", "hiking", "strength_training", "yoga", "ski_touring"],
+        help="Sport types (one or more)"
+    )
+    g_add.add_argument("--desc", default="", help="Description")
+    g_add.add_argument("--priority", type=int, default=1, help="Goal priority (1 = highest)")
+
+    # goal edit
+    g_edit = goal_subparsers.add_parser(
+        "edit", aliases=["e"], help="Edit an existing goal/objective"
+    )
+    g_edit.add_argument("id", type=int, help="Goal ID to edit")
+    g_edit.add_argument("--title", help="New goal title")
+    g_edit.add_argument("--date", help="New target event date (YYYY-MM-DD)")
+    g_edit.add_argument(
+        "--sport", nargs="+",
+        choices=["running", "road_biking", "hiking", "strength_training", "yoga", "ski_touring"],
+        help="New sport types (one or more)"
+    )
+    g_edit.add_argument("--desc", help="New description")
+    g_edit.add_argument("--priority", type=int, help="New priority (1 = highest)")
+    g_edit.add_argument(
+        "--status", choices=["active", "completed", "archived"],
+        help="New status ('active', 'completed', 'archived')"
+    )
+    
+    # goal rm
+    g_rm = goal_subparsers.add_parser("rm", aliases=["r"], help="Remove a goal by ID")
+    g_rm.add_argument("id", type=int, help="Goal ID to remove")
+    
+    # goal list
+    goal_subparsers.add_parser("list", aliases=["l"], help="Show all training objectives")
+
+    # goal wipe
+    g_wipe = goal_subparsers.add_parser("wipe", help="Wipe all training objectives")
+    g_wipe.add_argument("-y", "--yes", action="store_true", help="Skip confirmation prompt")
+    

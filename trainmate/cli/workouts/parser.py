@@ -1,0 +1,260 @@
+"""Argparse wiring for the `workout` command group."""
+import argparse
+import sys
+from datetime import datetime, timedelta
+from typing import Optional
+import trainmate_cli as cli
+from trainmate.config import config
+from trainmate.adherence import analyze_adherence, date_covered
+from trainmate.calendar_state import calendar_status
+from trainmate.modification_state import modification_status
+from trainmate.sports import canonical_sport
+from trainmate.util import (
+    bold, dim, green, red, yellow, cyan, blue, magenta, gray,
+    color_acwr, visible_len, pad_visible, wrap_text, format_labeled_text,
+    format_labeled_block, render_table, today_str as _today_str,
+    today_date as _today_date,
+)
+from trainmate.cli.common import fmt_date, ensure_recent_data, mark_adherence_from_results
+
+
+
+def add_workout_parser(subparsers, pull_bypass_parser, llm_debug_parser, plan_date_parser, sport_type_parser):
+    # workout command & subparsers
+    workout_parser = subparsers.add_parser(
+        "workout",
+        aliases=["w"],
+        help="Manage workouts (microcycles)"
+    )
+    workout_subparsers = workout_parser.add_subparsers(
+        dest="subcommand", help="Workout sub-commands"
+    )
+    
+    # workout list
+    w_list = workout_subparsers.add_parser(
+        "list", aliases=["l"],
+        parents=[plan_date_parser, sport_type_parser],
+        help="Show all planned workouts",
+        description=(
+            "List planned workouts chronologically. With no date filter, shows today "
+            "through the next 7 days; with only --type, shows today onward. Reads the "
+            "local database only (no Garmin pull)."
+        )
+    )
+    w_list.add_argument(
+        "--removed", action="store_true",
+        help="Include soft-removed workouts (e.g. to find their ID for restoring)"
+    )
+    
+    # workout compare
+    w_cmp = workout_subparsers.add_parser(
+        "compare", aliases=["c"],
+        parents=[pull_bypass_parser, plan_date_parser, sport_type_parser],
+        help="Compare planned workouts against completed activities",
+        description=(
+            "Compare planned workouts against completed Garmin activities, flagging "
+            "missed sessions, rest-day violations, and unplanned high-load efforts. "
+            "With no date filter, looks back 14 days; here --days/--weeks look "
+            "backward (not forward) and the end date is always capped at today. "
+            "Freshens Garmin data for the range first unless --no-pull is given. "
+            "Each past event's Calendar entry is stamped with the adherence verdict "
+            "(a [Done]/[Missed]/[Partial]/... title tag and an 'Adherence' description "
+            "header) unless --no-mark is given."
+        )
+    )
+    w_cmp.add_argument(
+        "--no-mark", action="store_true", dest="no_mark",
+        help=(
+            "Skip writing the adherence verdict back to each past workout's Google "
+            "Calendar event (title tag + description header)."
+        )
+    )
+
+    # workout generate
+    p_w_gen = workout_subparsers.add_parser(
+        "generate", aliases=["g"],
+        parents=[pull_bypass_parser, llm_debug_parser],
+        help="Generate workouts (microcycles) based on the active strategy",
+        description=(
+            "Generate workouts (microcycles) from today, driven by the active "
+            "periodization strategy. With no horizon flag, generates "
+            "config.workout_generation_span_days days ahead (28 by default). The new plan "
+            "is pushed to Google Calendar straight away (the previous plan's upcoming "
+            f"workouts are archived first); use '{green('plan rollback')}' to undo a "
+            "regeneration."
+        )
+    )
+    p_w_gen.add_argument(
+        "--goal", "--goal-id", type=int, dest="goal_id",
+        help="Target goal ID to generate workouts for"
+    )
+    p_w_gen_horizon = p_w_gen.add_mutually_exclusive_group()
+    p_w_gen_horizon.add_argument(
+        "--days", type=int, dest="horizon_days", metavar="N",
+        help="Generate workouts for N days from today"
+    )
+    p_w_gen_horizon.add_argument(
+        "--weeks", type=float, dest="horizon_weeks", metavar="N",
+        help="Generate workouts for N weeks from today"
+    )
+    p_w_gen_horizon.add_argument(
+        "--until", dest="horizon_until", metavar="DATE",
+        help="Generate workouts until DATE (YYYY-MM-DD)"
+    )
+    p_w_gen_horizon.add_argument(
+        "--until-goal", type=int, nargs="?", const=-1, dest="horizon_goal_id", metavar="ID",
+        help="Generate workouts until the target date of a goal (uses current goal if ID omitted)"
+    )
+    p_w_gen_horizon.add_argument(
+        "--until-mesocycle", type=int, dest="horizon_meso_id", metavar="ID",
+        help="Generate workouts until the end date of a mesocycle"
+    )
+    
+    # workout add
+    w_add = workout_subparsers.add_parser(
+        "add",
+        help="Manually schedule a workout on a date (replaces any same-sport session)",
+        description=(
+            "Manually add a workout on a specific date — driven by you rather than the "
+            "coach. If a workout of the same sport already exists that day it is "
+            "replaced (use --replace-day to instead replace every session that day "
+            "regardless of sport), and each replaced session's description, duration, "
+            "TSS and RPE are recorded on the new workout (and its Calendar event) so the "
+            "change stays traceable. Saved and synced to Google Calendar immediately. To "
+            f"have the coach re-balance surrounding load afterward, run '{green('workout adapt')}'."
+        )
+    )
+    w_add.add_argument("date", help="Workout date (YYYY-MM-DD)")
+    w_add.add_argument("sport_type", help="Sport type (e.g. running, road_biking)")
+    w_add.add_argument("--title", required=True, help="Workout title")
+    w_add.add_argument(
+        "--description", "--desc", dest="description", help="Workout description / details"
+    )
+    w_add.add_argument(
+        "--duration", type=int, dest="duration", metavar="MIN",
+        help="Planned duration in minutes"
+    )
+    w_add.add_argument("--rpe", type=int, help="Target RPE (1-10)")
+    w_add.add_argument("--tss", type=int, help="Target training stress score")
+    w_add.add_argument(
+        "--reason",
+        help="Why you're adding/replacing this session (recorded and shown to the coach)"
+    )
+    w_add.add_argument(
+        "--replace-day", dest="replace_day", action="store_true",
+        help="Replace every session that day, not just the same sport"
+    )
+
+    # workout rm
+    w_rm = workout_subparsers.add_parser(
+        "rm", aliases=["r"], help="Remove a workout by ID"
+    )
+    w_rm.add_argument("id", type=int, help="Workout ID to remove")
+    w_rm.add_argument(
+        "--reason", required=True,
+        help="Why the workout is being removed (shown to the coach as a deliberate "
+             "cancellation)"
+    )
+
+    # workout restore
+    w_restore = workout_subparsers.add_parser(
+        "restore", aliases=["res"], help="Restore a soft-removed workout by ID"
+    )
+    w_restore.add_argument("id", type=int, help="Workout ID to restore")
+    
+    # workout adapt
+    w_adapt = workout_subparsers.add_parser(
+        "adapt", aliases=["a"],
+        parents=[pull_bypass_parser, llm_debug_parser],
+        help="Run the daily Garmin check for today (syncs adapted workouts to Calendar)",
+        description=(
+            "Run the daily adaptation check: read recent recovery metrics and let the "
+            "coach adjust upcoming workouts. Defaults to today (UTC); use --date for "
+            "another day. Proposed changes are confirmed interactively unless -y/--auto "
+            "is given, then synced to Google Calendar."
+        )
+    )
+    w_adapt.add_argument("--date", help="Date in YYYY-MM-DD format (defaults to UTC today)")
+    w_adapt.add_argument(
+        "--lookback", type=int, metavar="DAYS",
+        help="Days of recovery-metrics trajectory to display (default: config metrics_lookback_days)"
+    )
+    w_adapt.add_argument(
+        "-m", "--message", dest="message",
+        help=(
+            "Ad-hoc, one-off signal to the coach for THIS adaptation run only (e.g. "
+            "'knee is sore, keep impact low', 'no bike access Thursday'). Advisory: it "
+            "won't override clear fatigue signals. The note itself isn't stored, but if "
+            "it drives a session change its cause is recorded in that session's reason so "
+            "a later run understands the tactical change; it stays a one-off and never "
+            "becomes durable block evidence. For persistent context (alcohol, sleep, "
+            "stress) use 'context add' instead."
+        )
+    )
+    w_adapt.add_argument(
+        "-y", "--yes", "--auto", action="store_true", dest="auto",
+        help="Apply proposed adaptations automatically without prompting"
+    )
+    
+    # workout push
+    w_push = workout_subparsers.add_parser(
+        "push", aliases=["p"],
+        parents=[plan_date_parser, sport_type_parser],
+        help="Commit local planned workouts to Google Calendar",
+        description=(
+            "Push planned workouts to Google Calendar. With no date filter, pushes "
+            "from today onward. By default only new or modified (unsynced) workouts "
+            "are sent; use -f/--force to re-push already-synced workouts, overwriting "
+            "their calendar entries."
+        )
+    )
+    w_push.add_argument(
+        "-f", "--force", action="store_true",
+        help="Re-push already-synced workouts, overwriting existing calendar entries"
+    )
+
+    # workout swap
+    w_swap = workout_subparsers.add_parser(
+        "swap", aliases=["s"],
+        parents=[llm_debug_parser],
+        help="Swap workouts between two dates (or two IDs), with recovery checks",
+        description=(
+            "Swap two workouts, given either two dates (date1 date2) or two IDs "
+            "(--id1/--id2). Runs recovery checks (consecutive hard days, weekly load "
+            "spikes, mesocycle crossings) and prompts on warnings unless -f/--force. "
+            "The swap is synced to Google Calendar unless --no-sync is given."
+        )
+    )
+    w_swap.add_argument(
+        "date1", nargs="?", help="First date to swap (YYYY-MM-DD)"
+    )
+    w_swap.add_argument(
+        "date2", nargs="?", help="Second date to swap (YYYY-MM-DD)"
+    )
+    w_swap.add_argument(
+        "--id1", type=int, help="First workout ID (use together with --id2)"
+    )
+    w_swap.add_argument(
+        "--id2", type=int, help="Second workout ID (use together with --id1)"
+    )
+    w_swap.add_argument(
+        "--no-sync", action="store_true", dest="no_sync",
+        help="Do not sync the swapped workouts to Google Calendar"
+    )
+    w_swap.add_argument(
+        "-f", "--force", action="store_true", dest="force",
+        help="Apply the swap without prompting, even if warnings are raised"
+    )
+    w_swap.add_argument(
+        "--reason", required=True,
+        help="Why the workouts are being swapped (recorded and shown to the coach)"
+    )
+
+
+
+    # workout wipe
+    w_wipe = workout_subparsers.add_parser(
+        "wipe",
+        help="Wipe all workouts from the database and Google Calendar"
+    )
+    w_wipe.add_argument("-y", "--yes", action="store_true", help="Skip confirmation prompt")

@@ -256,3 +256,110 @@ def run_constraint_wipe(args: argparse.Namespace) -> None:
             return
     cli.db.wipe_constraints()
     print(green("All constraints wiped successfully."))
+
+
+def add_constraint_parser(subparsers):
+    # constraint command & subparsers — the single directive object
+    # (DESIGN_constraints.md). Everything the athlete asks the coach to work around, at
+    # any horizon; supersedes `lifeevent`.
+    constraint_parser = subparsers.add_parser(
+        "constraint",
+        aliases=["cons"],
+        help="Author/list directives the coach works around (availability, caps, "
+             "preferences, disruptions)",
+        description=(
+            "Manage constraints — anything you ask the coach to work around, at any "
+            "horizon ('no run Thursday', 'only 45 min today', '3-week injury layoff'). "
+            "A blanket 'hard' constraint (no --sport) deterministically forces rest in "
+            "generate/adapt; a 'hard' constraint scoped to a sport, and every 'soft' one, "
+            "is advisory — the coach honors it by judgement. Whether a constraint reshapes "
+            "the plan is derived from its magnitude and human-confirmed, not picked up front."
+        ),
+    )
+    constraint_subparsers = constraint_parser.add_subparsers(
+        dest="subcommand", help="Constraint sub-commands"
+    )
+
+    def _add_binding_flags(p, default):
+        grp = p.add_mutually_exclusive_group()
+        grp.add_argument("--hard", dest="binding", action="store_const", const="hard",
+                         help="No training those dates (enforced); with --sport, that "
+                              "sport is unavailable (advisory)")
+        grp.add_argument("--soft", dest="binding", action="store_const", const="soft",
+                         help="Advisory preference/capacity hint (default)")
+        p.set_defaults(binding=default)
+
+    def _add_replan_flags(p):
+        grp = p.add_mutually_exclusive_group()
+        grp.add_argument("--replan", dest="replan", action="store_const", const=True,
+                         help="Escalate to plan-shaping and regenerate around it")
+        grp.add_argument("--no-replan", dest="replan", action="store_const", const=False,
+                         help="Keep out of the plan (honored by daily adapt only)")
+        p.set_defaults(replan=None)
+
+    # constraint add
+    cons_add = constraint_subparsers.add_parser(
+        "add", aliases=["a"], help="Author a directive over a day or range"
+    )
+    cons_add.add_argument("title", nargs="?", help="The directive, stated short "
+                          "(e.g. 'no run Thursday'); prompted if omitted")
+    cons_add.add_argument("--title", dest="title_opt", help=argparse.SUPPRESS)
+    cons_add.add_argument("--start", help="Start date (YYYY-MM-DD; default: today)")
+    cons_add.add_argument("--end", help="End date (YYYY-MM-DD; default: --start)")
+    cons_add.add_argument("--sport", help="Scope to one sport (default: all sports)")
+    cons_add.add_argument("--type", help="Optional opaque label (e.g. trip, injury)")
+    cons_add.add_argument("--desc", "--description", dest="desc",
+                          help="Optional richer context for the coach")
+    _add_binding_flags(cons_add, default="soft")
+    _add_replan_flags(cons_add)
+
+    # constraint edit
+    cons_edit = constraint_subparsers.add_parser(
+        "edit", aliases=["e"], help="Adjust scope / bindingness / text / replan"
+    )
+    cons_edit.add_argument("id", type=int, help="Constraint ID to edit")
+    cons_edit.add_argument("--title", help="New directive title")
+    cons_edit.add_argument("--start", help="New start date (YYYY-MM-DD)")
+    cons_edit.add_argument("--end", help="New end date (YYYY-MM-DD)")
+    cons_edit.add_argument("--sport", help="New sport scope ('' to clear)")
+    cons_edit.add_argument("--type", help="New opaque label ('' to clear)")
+    cons_edit.add_argument("--desc", "--description", dest="desc",
+                           help="New richer context ('' to clear)")
+    _add_binding_flags(cons_edit, default=None)
+    _add_replan_flags(cons_edit)
+
+    # constraint list
+    cons_list = constraint_subparsers.add_parser(
+        "list", aliases=["l"], help="List active/upcoming directives"
+    )
+    cons_list.add_argument("-v", "--verbose", action="store_true",
+                           help="Show details for each directive")
+    cons_list.add_argument("--all", action="store_true",
+                           help="Include past (expired) directives too")
+    cons_list.add_argument("--sport", help="Filter to directives affecting this sport")
+    cons_list.add_argument("--type", help="Filter to this opaque type label")
+    cons_list.add_argument(
+        "--from", "--from-date", dest="from_date", metavar="YYYY-MM-DD",
+        help="Override the default lower bound (config.metrics_lookback_days back)"
+    )
+    cons_list.add_argument(
+        "--until", "--until-date", dest="until_date", metavar="YYYY-MM-DD",
+        help="Bound the upper end too (default: open-ended/upcoming)"
+    )
+
+    # constraint show
+    cons_show = constraint_subparsers.add_parser(
+        "show", aliases=["s"], help="Show one directive in detail (incl. plan-shaping)"
+    )
+    cons_show.add_argument("id", type=int, help="Constraint ID to display")
+
+    # constraint rm
+    cons_rm = constraint_subparsers.add_parser(
+        "rm", aliases=["r"], help="Remove a directive by ID"
+    )
+    cons_rm.add_argument("id", type=int, help="Constraint ID to remove")
+
+    # constraint wipe
+    cons_wipe = constraint_subparsers.add_parser("wipe", help="Wipe all constraints")
+    cons_wipe.add_argument("-y", "--yes", action="store_true",
+                           help="Skip confirmation prompt")

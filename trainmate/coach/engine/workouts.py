@@ -1,0 +1,423 @@
+import json
+import hashlib
+from typing import Any, List, Optional, Dict
+from trainmate.config import config
+from trainmate.openrouter import openrouter_client
+from trainmate.types import Objective, Constraint, Workout, CompletedActivity
+from trainmate.util import today_date as _today_date, cyan
+from trainmate.coach.formatting import (
+    format_metrics_history, format_completed_activities, format_baseline,
+    format_planned_workouts, format_planned_workouts_detailed,
+    format_removed_workouts, format_daily_context,
+)
+import trainmate.coach.engine as _eng
+from trainmate.coach.engine import MIN_PLAN_WEEKS, MAX_PLAN_WEEKS, LEARNING_UPDATES_FIELD
+
+
+class WorkoutLogicMixin:
+    """Part of :class:`CoachEngine` — see coach/engine/__init__.py."""
+
+    def _workout_generate_logic(
+        self, objectives: List[Objective], constraints: List[Constraint],
+        today_str: str, guidelines: str, profile: Optional[Dict[str, Any]],
+        strategy: str, meso_text: str, learnings: str,
+        num_days: int = 28,
+        start_str: Optional[str] = None,
+        metrics: Optional[List[Dict[str, Any]]] = None,
+        completed_activities: Optional[List[CompletedActivity]] = None,
+        baseline: Optional[Dict[str, Any]] = None,
+        pmc_warmup_cutoff: Optional[str] = None,
+        pmc_context: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """Queries LLM to generate workouts for a given number of days based on active strategy.
+
+        `start_str` is the first day to schedule (defaults to today). It differs from today
+        only when today's session is already completed and must be preserved — generation
+        then begins tomorrow so the finished workout isn't overwritten.
+        """
+        start_str = start_str or today_str
+        starting_phrase = "today" if start_str == today_str else start_str
+        weeks = num_days / 7
+        if weeks == int(weeks):
+            duration_desc = f"{int(weeks)} week{'s' if weeks != 1 else ''} ({num_days} days)"
+        else:
+            duration_desc = f"{num_days} day{'s' if num_days != 1 else ''}"
+        custom_task = (
+            f"TASK:\nGenerate a training schedule for the next {duration_desc} starting from {starting_phrase}.\n"
+            "Ensure the weekly schedules/microcycles are designed specifically to match the focus, target\n"
+            "volume, and intensity of the active mesocycle block(s) the athlete is in during this period, and\n"
+            "incorporate any deload weeks or exceptions for the athlete's active constraints in accordance\n"
+            "with the science guidelines.\n"
+            "\n"
+            "You MUST respond with a JSON object containing:\n"
+            "{\n"
+            '  "reasoning": "Explain the microcycle design, detailing how workouts align with the active\n'
+            '    mesocycle focus.",\n'
+            # Workout generation is read-only w.r.t. coach learnings (see
+            # DESIGN_backward_evaluation.md §11): it consumes the rendered learnings in the
+            # system prompt but authors none. Tactical/recent observations are better
+            # captured by `adapt`, durable ones by `analyze`. Hence no learning_updates here.
+            '  "workouts": [\n'
+            "    {\n"
+            '      "date": "YYYY-MM-DD",\n'
+            '      "sport_type": "running" | "road_biking" | "hiking" | "strength_training" | "yoga" |\n'
+            '        "ski_touring" | "rest",\n'
+            '      "title": "Workout Title (e.g., Tempo Run, Long Ride, Rest Day)",\n'
+            '      "description": "Start with the title on its own line in brackets followed by a\n'
+            '        newline, e.g. \"[Tempo Run]\\n\", then a detailed description of intensity,\n'
+            '        duration, heart rate zones, and goals.",\n'
+            "      \"duration_minutes\": 60, (Estimated workout duration in minutes, integer. Use 0 for rest days)\n"
+            "      \"rpe\": 6, (Expected Rate of Perceived Exertion, integer 1-10. Use 0 for rest days)\n"
+            "      \"tss\": 45.0 (Expected Training Stress Score, float/integer. Use 0 for rest days)\n"
+            "    }\n"
+            "  ]\n"
+            "}\n"
+        )
+        system_prompt = self._build_system_prompt(
+            objectives=objectives,
+            constraints=constraints,
+            guidelines=guidelines,
+            strategy=strategy,
+            meso_text=meso_text,
+            learnings=learnings,
+            profile=profile,
+            custom_task=custom_task
+        )
+        user_content = (
+            f"Today's date is {today_str}. "
+            f"Please generate the microcycles (workouts) for the next {duration_desc} "
+            f"starting from {starting_phrase}."
+        )
+        if start_str != today_str:
+            user_content += (
+                f" Today's ({today_str}) session is already completed and must NOT be "
+                f"regenerated — the first workout you schedule must be dated {start_str}."
+            )
+
+        history_text_parts = []
+        if metrics:
+            metrics_text = format_metrics_history(metrics, pmc_warmup_cutoff)
+            # The single CTL ramp line + warm-up flag ride beside the per-day block (not
+            # repeated per day), so the prompt that sets next week's load sees the fitness
+            # trajectory (§5.2).
+            if pmc_context:
+                metrics_text += "\n" + pmc_context
+            history_text_parts.append(
+                f"Athlete's Metrics History (Past 15 Days):\n{metrics_text}"
+            )
+        if baseline:
+            baseline_str = format_baseline(baseline)
+            history_text_parts.append(
+                f"Baseline Reference:\n{baseline_str}"
+            )
+        if completed_activities:
+            completed_text = format_completed_activities(completed_activities)
+            history_text_parts.append(
+                f"Actual Completed Garmin Activities in Window:\n{completed_text}"
+            )
+
+        if history_text_parts:
+            user_content += "\n\n" + "\n\n".join(history_text_parts)
+
+        print(cyan("Querying OpenRouter to generate training workouts (microcycles)..."))
+        plan_data = _eng.openrouter_client.complete(
+            system_prompt, user_content, label="workout_generate"
+        )
+        return plan_data
+
+    def _workout_adapt_logic(
+        self, target_date_str: str, history_days: int, start_date_str: str,
+        metrics: List[Dict[str, Any]], completed_activities: List[CompletedActivity],
+        planned_workouts: List[Workout], baseline_str: str,
+        meso_end_date_str: str, objectives: List[Objective], constraints: List[Constraint],
+        guidelines: str, profile: Optional[Dict[str, Any]], strategy: str,
+        meso_text: str, learnings: str, discrepancies: List[str],
+        informational: Optional[List[CompletedActivity]] = None,
+        removed_workouts: Optional[List[Workout]] = None,
+        daily_context: Optional[List[Dict[str, Any]]] = None,
+        completed_keys: Optional[set] = None,
+        athlete_message: Optional[str] = None,
+        pmc_warmup_cutoff: Optional[str] = None,
+        pmc_context: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """Queries LLM to evaluate metrics/activities and adapt workouts if needed.
+
+        `athlete_message` is an optional free-text note for THIS adaptation only; when
+        present it is surfaced as a clearly-bounded section of the user content and the
+        model is told to weigh it as today's intent without treating it as a durable
+        signal about the block.
+        """
+        # has_message gates BOTH the note-handling instructions here and the note DATA
+        # section further down; they must move together, or the model gets told about a
+        # section that isn't present. Computed once and reused in both places.
+        has_message = bool(athlete_message and athlete_message.strip())
+        # Shared change_reason wording, with the note-footprint clause spliced in only when
+        # a note could actually have driven the change.
+        change_reason_field = (
+            '      "change_reason": "One short sentence on why THIS specific session\n'
+            '        changed, e.g. \"Cut to easy Z2 to shed intensity.\"'
+            + (
+                ' If an external\n'
+                '        constraint from the athlete\'s note drove the change rather than\n'
+                '        the metrics, name that cause here so a future run without the note\n'
+                '        understands it, e.g. \"Rest — athlete away, no training access this\n'
+                '        day.\"' if has_message else ''
+            )
+            + ' Keep it to a single sentence; do not restate the overall reason.",\n'
+        )
+        custom_task = f"""
+TASK:
+Analyze the athlete's actual workout adherence and physiological metrics trajectory
+over the past {history_days} days.
+Review the list of completed activities compared to planned workouts and any
+calculated discrepancies (misses, workload/duration differences, rest violations).
+Activities listed as informational fell on dates no plan governed (e.g. before the
+plan began) — count their load when judging fatigue, but do NOT treat them as
+adherence failures or unplanned deviations.
+Also inspect the rolling baseline reference and the daily metrics sequence to see
+if the athlete shows signs of accumulated fatigue.
+
+Based on this, determine if we need to adapt the training plan for the remainder of
+the active mesocycle block (from {target_date_str} to {meso_end_date_str}).
+- If they are showing high fatigue or injury risk (e.g. elevated RHR, depressed HRV,
+  poor sleep, or ACWR > 1.3), replace hard workouts with recovery or rest.
+- If they have missed key workouts, adjust the remaining workouts to safely build back
+  volume without spiking the acute load too fast.
+- If they are fully recovered and on track, keep the plan as scheduled or make minor
+  optimal adjustments.
+
+ATTRIBUTING A DEPRESSED MORNING — TRAINING FATIGUE vs LIFESTYLE NOISE:
+When recovery looks bad, separate WHY it is depressed from WHAT to do today — they are
+different decisions. If an externally-logged daily-context signal (e.g. alcohol, a bad
+night, high stress — recovery lags, so look at the signal the DAY BEFORE the depressed
+morning) explains the dip, treat that suppression as transient lifestyle noise, NOT
+accumulated training fatigue.
+- Today's readiness still counts: a suppressed body trains a hard session poorly and
+  with more risk regardless of cause, so easing today, or better RESCHEDULING the hard
+  session a day or two later (preserving the planned work rather than deleting it), is
+  a reasonable call. Use your judgement on acute readiness.
+- But do NOT read a lifestyle-suppressed morning as evidence the BLOCK is too hard:
+  don't permanently cut the mesocycle's planned volume/intensity on its account, and
+  don't treat it as accumulated training fatigue. Reserve genuine load REDUCTIONS for
+  fatigue the TRAINING actually caused (a depressed morning following genuinely hard
+  days, with no lifestyle signal to explain it).
+When a hard day AND a lifestyle signal coincide, both may contribute — weigh them
+rather than blaming training alone.
+
+Some sessions may be listed as deliberately removed by the athlete. These are
+intentional plan edits, NOT adherence failures — do not treat them as missed workouts.
+You may, however, consider them when judging the athlete's intent and remaining load.
+
+Planned sessions tagged "[COMPLETED — locked history, not adaptable]" have already
+been performed (a matching activity was recorded), including any session the athlete
+trained earlier on the evaluation date. They are history: do NOT adapt them, and never
+restate a finished session to match what was actually done. Adapt only sessions still
+ahead of the athlete.
+
+Sessions tagged "[athlete-added]" were scheduled by the athlete themselves, not
+generated by you — treat them as deliberate intent. Preserve them as planned unless
+fatigue or injury risk clearly warrants easing, and prefer rescheduling a day or two
+over deleting them. If you must reduce one, say why in the reason.
+
+DO NOT COMPOUND A PRIOR ADAPTATION:
+Sessions tagged "[ALREADY EASED by a prior adaptation ...]" are NOT the original plan —
+their current numbers are the reduced form a previous adaptation already produced.
+Recovery metrics LAG, so the morning after an easing often still looks depressed from
+the very fatigue you already acted on; reading that as "still too hard" and cutting
+again would spiral the load down without ever letting it rebound. Default to HOLDING the
+already-eased form. Only cut it further if the metrics have clearly WORSENED since it was
+eased, or a genuinely NEW signal (a hard completed session, a fresh constraint/context event)
+warrants it — and the more recently and more times it was already eased (see the tag),
+the higher your bar for touching it again. Restoring load toward the original as the
+athlete recovers is encouraged; deepening an already-fresh cut is not.
+"""
+
+        if has_message:
+            custom_task += """
+ATHLETE'S NOTE FOR TODAY:
+The user content includes a section titled "ATHLETE'S NOTE FOR THIS ADAPTATION": a
+free-text note the athlete attached to THIS run — extra intent or constraints the
+metrics can't show (e.g. a niggle to protect, no access to a sport/venue on a given day,
+or how they feel). Weigh it as today's intent alongside the data: honour stated
+constraints, and let it tip a judgement call. It is advisory, not an override — do NOT
+schedule clearly unsafe load just because the athlete asks (if recovery signals warrant
+easing, ease and say why). Treat it as a one-off for this adaptation only: do NOT read it
+as durable evidence about the block, and do NOT permanently re-shape the mesocycle on its
+account. When the note drives a session change, name that external cause in the session's
+"change_reason" (see the schema) so a later run without the note won't blindly undo it.
+This footprint is the tactical session note only; it is still NOT durable block evidence
+and must not reshape the mesocycle.
+
+EXTRACTING A DURABLE CONSTRAINT FROM THE NOTE:
+Separately from adapting today's sessions, decide whether the note ALSO states something
+the coach must work around beyond today: unavailability, a time/intensity cap, an injury
+layoff, a venue/equipment limit, or a stated preference with a date or date range (e.g.
+"no run Thursday", "only 45 min today", "broke my ankle, out 6 weeks"). If so, return it in
+"new_constraints" below — one entry per distinct directive, exactly as if the athlete had
+run `constraint add`. A note that is only about how they feel right now ("felt flat, ease
+today") is NOT durable — leave "new_constraints" empty for it. When unsure, leave it out: a
+durable-looking note mis-filed as a constraint is worse than a missed one. This is
+extraction only — never invent a plan-shaping escalation, and never omit "start_date"/
+"end_date" (default both to today when the note doesn't say). The app, not you, decides
+bindingness and whether this becomes plan-shaping; do not guess at either.
+"""
+
+        custom_task += """
+This daily adaptation is READ-ONLY with respect to the coach's durable observations:
+use the COACH LEARNINGS as context, but do NOT emit any learning updates here — durable,
+evidence-backed observations are authored only by the weekly history analysis
+(`data bootstrap` / `data reflect`).
+"""
+
+        # Each entry is one top-level member of the response object, without its trailing
+        # comma — the ",\n".join below places the separators, so no code hand-writes a
+        # comma and the has_message branch can't desync the punctuation.
+        schema_members = [
+            '  "change_needed": true | false',
+            (
+                '  "reason": "Overall rationale for the whole adaptation: the readiness/load\n'
+                '    picture and the strategy applied across the block. This is the batch-level\n'
+                '    summary, shared by every adapted workout below — do NOT repeat it per\n'
+                '    workout; keep per-workout notes in "change_reason"."'
+            ),
+            (
+                '  "adapted_workouts": [\n'
+                "    // Include ONLY sessions you are actually changing. Omit any session that\n"
+                "    // stays exactly as planned — it is preserved automatically, so re-listing\n"
+                "    // an unchanged session (even verbatim) is wrong and counts as a spurious\n"
+                "    // adaptation. EXCEPTION: if you change one session on a date that holds\n"
+                "    // ANOTHER session of a different sport you are keeping, include BOTH that\n"
+                "    // day so the kept one is not dropped.\n"
+                "    {\n"
+                '      "date": "YYYY-MM-DD",\n'
+                '      "sport_type": "running" | "road_biking" | "hiking" | "strength_training" |\n'
+                '        "yoga" | "ski_touring" | "rest",\n'
+                '      "title": "Adapted Workout Title",\n'
+                + change_reason_field +
+                '      "description": "Start with the title on its own line in brackets followed by a\n'
+                '        newline, e.g. \"[Tempo Run]\\n\", then an adapted description of intensity,\n'
+                '        duration, heart rate zones, and goals.",\n'
+                '      "duration_minutes": 45,\n'
+                '      "rpe": 5,\n'
+                '      "tss": 30.0\n'
+                "    }\n"
+                "  ]"
+            ),
+        ]
+        if has_message:
+            schema_members.append(
+                '  "new_constraints": [\n'
+                "    // Optional. Directives extracted from the athlete's note this run (see\n"
+                "    // EXTRACTING A DURABLE CONSTRAINT above). Every entry is created exactly as\n"
+                "    // if the athlete had run `constraint add`. Omit entirely, or leave empty, if\n"
+                "    // the note was only a one-off nudge about today.\n"
+                "    {\n"
+                '      "title": "the directive, stated short (required)",\n'
+                '      "start_date": "YYYY-MM-DD (required; default today)",\n'
+                '      "end_date": "YYYY-MM-DD (required; == start for a single day)",\n'
+                '      "sport": "one sport this scopes to, or null/omit for all",\n'
+                '      "type": "optional opaque label (trip, injury, …) or null/omit",\n'
+                '      "description": "optional richer context or null/omit"\n'
+                "    }\n"
+                "  ]"
+            )
+        custom_task += (
+            "You MUST respond with a JSON object containing:\n{\n"
+            + ",\n".join(schema_members)
+            + "\n}\n"
+        )
+        system_prompt = self._build_system_prompt(
+            objectives=objectives,
+            constraints=constraints,
+            guidelines=guidelines,
+            strategy=strategy,
+            meso_text=meso_text,
+            learnings=learnings,
+            profile=profile,
+            custom_task=custom_task
+        )
+
+        metrics_text = format_metrics_history(metrics, pmc_warmup_cutoff)
+        # Single ramp line + warm-up flag beside the per-day block, so adapt sees the
+        # fatigue trajectory (§5.2).
+        if pmc_context:
+            metrics_text += "\n" + pmc_context
+        context_text = (
+            format_daily_context(daily_context) if daily_context
+            else "No external daily-context signals logged in this window."
+        )
+        discrepancy_text = (
+            "\n".join(discrepancies) if discrepancies
+            else "No discrepancies detected (athlete fully on track)."
+        )
+        planned_text = format_planned_workouts_detailed(
+            planned_workouts, completed_keys, eval_date=target_date_str
+        )
+        completed_text = format_completed_activities(completed_activities)
+
+        removed_section = ""
+        if removed_workouts:
+            removed_section = (
+                "\nWorkouts Removed by Athlete (deliberately cancelled — not misses):\n"
+                + format_removed_workouts(removed_workouts) + "\n"
+            )
+
+        informational_section = ""
+        if informational:
+            informational_section = (
+                "\nActivities Outside Any Plan (informational — load counts, "
+                "but not adherence failures):\n" + format_completed_activities(informational) + "\n"
+            )
+
+        # Ephemeral, this-run-only note from the athlete (see custom_task guidance). Same
+        # has_message gate as the instructions above, so the two never disagree. Omitted
+        # entirely when absent so a message-less run is byte-for-byte the prior behaviour.
+        message_section = ""
+        if has_message:
+            message_section = (
+                "\nATHLETE'S NOTE FOR THIS ADAPTATION (free-text intent/constraints for "
+                "today only — advisory, not an override; do not treat as durable evidence "
+                f"about the block):\n{athlete_message.strip()}\n"
+            )
+
+        user_content = f"""
+Evaluation Date: {target_date_str}
+Adaptation Range: {target_date_str} to {meso_end_date_str}
+{message_section}
+
+Athlete's Metrics History (Past {history_days} Days):
+{metrics_text}
+
+Externally-Logged Daily Context (alcohol, poor sleep, stress, etc.):
+{context_text}
+
+Baseline Reference:
+{baseline_str}
+
+Planned Workouts (recent window for adherence + already-scheduled sessions through
+the adaptation range). This is the full forward plan for CONTEXT — most of it will
+usually be fine and should be left untouched; return a session in "adapted_workouts"
+only if you are genuinely changing it (the schema's "adapted_workouts" comment covers
+omitting unchanged sessions and why re-listing one is a spurious adaptation).
+When you DO change a session, modify it in place: preserve its date and sport_type
+unless deliberately swapping the sport. Only invent a brand-new session for a date that
+currently has none.
+Each session below includes its full description so you can reuse its specifics —
+interval structure, heart-rate zones, rest/recovery durations — when you carry a changed
+session over largely as-is. Adapt as boldly as the athlete's state warrants, but only
+where their state actually warrants it; the descriptions are here only so detail you are
+keeping isn't lost for lack of being restated:
+{planned_text}
+{removed_section}
+Actual Completed Garmin Activities in Window:
+{completed_text}
+
+Adherence Discrepancies & Violations:
+{discrepancy_text}
+{informational_section}"""
+        print(cyan(f"Querying OpenRouter to evaluate adaptation for the remainder of the mesocycle "
+              f"({target_date_str} -> {meso_end_date_str})..."))
+        decision = _eng.openrouter_client.complete(
+            system_prompt, user_content, label="workout_adapt"
+        )
+        return decision

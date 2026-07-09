@@ -283,3 +283,22 @@ def run_status(
                 print(format_labeled_block("  Details:", c['description']))
 
     print(bold(cyan("\n================================")))
+
+
+def add_status_parser(subparsers, pull_bypass_parser):
+    # status command
+    status_parser = subparsers.add_parser(
+        "status",
+        aliases=["s"],
+        parents=[pull_bypass_parser],
+        help="Show current athlete status, active goals, recent metrics, and memories",
+        description=(
+            "Show current athlete status: the next active goal and its plan, recent "
+            "Garmin metrics, and coach learnings. By default freshens the recent "
+            "metrics window from Garmin first; pass --no-pull to read only the cache."
+        )
+    )
+    status_parser.add_argument(
+        "-v", "--verbose", action="store_true",
+        help="Show all training objectives/goals and life events"
+    )
