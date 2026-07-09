@@ -100,6 +100,15 @@ class Config:
         return self.get("coach", {}).get("metrics_lookback_days", 15)
 
     @property
+    def adapt_terminal_window_days(self) -> int:
+        """Gets how close to a block's end counts as its terminal window, defaulting to 3.
+
+        See DESIGN_block_boundary.md §3/§4 — inside this window an adaptation has no runway
+        to rebound, and the next block is out of reach.
+        """
+        return self.get("coach", {}).get("adapt_terminal_window_days", 3)
+
+    @property
     def goals_lookback_days(self) -> int:
         """Gets the number of days into the past to look for preceding goals, defaulting to 90."""
         return self.get("coach", {}).get("goals_lookback_days", 90)

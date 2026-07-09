@@ -2,7 +2,7 @@ import os
 import re
 import sys
 import textwrap
-from datetime import date
+from datetime import date, datetime
 from typing import Optional, Tuple
 
 # ANSI escape codes for terminal coloring
@@ -38,6 +38,12 @@ def today_date() -> date:
 def today_str() -> str:
     """Returns today's local calendar date as a YYYY-MM-DD string."""
     return today_date().strftime("%Y-%m-%d")
+
+
+def days_between(start: str, end: str) -> int:
+    """Returns whole days from `start` to `end` (both YYYY-MM-DD), negative if end precedes it."""
+    fmt = "%Y-%m-%d"
+    return (datetime.strptime(end, fmt).date() - datetime.strptime(start, fmt).date()).days
 
 
 def is_color_enabled() -> bool:

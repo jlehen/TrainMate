@@ -253,7 +253,9 @@ Module-level function in `formatting.py`. Concatenates all `*.txt` files from
   w.r.t. learnings. Label `workout_generation`.
 - **`_workout_adapt_logic(...)`** — LLM call →
   `{change_needed, reason, adapted_workouts[]}`. **Read-only** w.r.t. learnings.
-  Label `workout_adaptation`.
+  Within `config.adapt_terminal_window_days` of the block's end it appends a
+  `THIS BLOCK IS ENDING` section biasing the model toward holding load, since a cut
+  there cannot rebound (DESIGN_block_boundary.md §3). Label `workout_adaptation`.
 - **`_classify_adapt_message(message, today)`** — LLM call classifying a `workout adapt
   --message` note as a durable `constraint` (→ a row is created, honored this run and
   future) or an `ephemeral` nudge (→ one-run hint folded into change_reason). Extract-only;
@@ -1520,6 +1522,15 @@ Integration / manual test scripts (not part of the test suite):
 *Why* the current design looks the way it does, and what it replaced. The
 reference sections above describe only the current state; this section explains
 the non-obvious choices. The `DESIGN_*.md` files hold the full deep-dives.
+
+### The mesocycle boundary is a firewall, not a range to widen
+`workout adapt` adapts forward only to the end of the block containing the evaluation
+date, so its runway shrinks to nothing as that block ends. Widening the range into the
+next block would let a daily, lag-prone recovery signal rewrite periodization that
+`plan`/`workout generate` own. Instead both sides are made aware of the boundary: the
+prompt gains a terminal-window section, and the CLI points at
+`workout generate --until-mesocycle <id>`, which already re-reads the same recent-metrics
+window. See DESIGN_block_boundary.md.
 
 ### Workout state: derived axes, not a stored `status` enum
 A single `status` string once conflated *modified*, *calendar*, and *removed*.

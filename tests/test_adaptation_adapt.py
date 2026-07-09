@@ -1,5 +1,7 @@
+import io
 import os
 import unittest
+from contextlib import redirect_stdout
 from datetime import date
 from unittest.mock import Mock, patch
 
@@ -17,6 +19,10 @@ trainmate.db.db = test_db
 trainmate.coach.service.db = test_db
 
 from trainmate.coach import coach_service
+
+# trainmate_cli re-exports names from trainmate.cli.workouts, so it must be imported first.
+import trainmate_cli  # noqa: F401
+from trainmate.cli.workouts import generate as workouts_cli
 
 
 class TestAdaptationAdapt(unittest.TestCase):
@@ -197,6 +203,96 @@ class TestAdaptationAdapt(unittest.TestCase):
                 "ATHLETE'S NOTE FOR THIS ADAPTATION",
                 mock_client.complete.call_args[0][1],
             )
+
+    def _save_two_block_plan(self):
+        """Saves a plan whose first block ends 2026-06-30 and whose second opens 2026-07-01."""
+        obj_id = test_db.add_objective(
+            title="Zurich Marathon", target_date="2026-10-15",
+            sport_type="running", priority=1,
+        )
+        test_db.save_macrocycle(
+            objective_id=obj_id,
+            strategy="Build aerobic base, then sharpen.",
+            goals_hash="hash1",
+            constraints_hash="hash2",
+            mesocycles=[
+                {"name": "Base Building", "start_date": "2026-06-01",
+                 "end_date": "2026-06-30", "focus": "Zone 2 runs"},
+                {"name": "Peak & Taper", "start_date": "2026-07-01",
+                 "end_date": "2026-07-21", "focus": "Race pace"},
+            ],
+        )
+
+    @patch("trainmate.coach.engine.openrouter_client")
+    def test_adapt_terminal_window_section_in_prompt(self, mock_client):
+        """Near the block's end the prompt warns the model that an easing cannot rebound and
+        the next block is out of reach; mid-block that section is absent entirely
+        (DESIGN_block_boundary.md §3)."""
+        self._save_two_block_plan()
+        with patch.dict(trainmate.coach.config.data, {
+            "user_profile": {"lthr": 165, "max_hr": 185},
+            "coach": {
+                "metrics_lookback_days": 3,
+                "minor_activity_load_threshold": 10.0,
+            }
+        }):
+            mock_client.complete.return_value = {
+                "change_needed": False,
+                "reason": "On track.",
+                "adapted_workouts": [],
+            }
+            test_db.save_metric_cache("2026-06-28", 56, 42, 60, 35, 14.0, 8.0, 1.75)
+            test_db.save_baseline("2026-06-28", 50.0, 2.0, 60.0, 5.0, 80.0, 5.0)
+
+            # Two days before the block ends -> inside the default 3-day terminal window.
+            coach_service.workout_adapt("2026-06-28")
+            system_prompt = mock_client.complete.call_args[0][0]
+            self.assertIn("THIS BLOCK IS ENDING", system_prompt)
+            self.assertIn("ends in 2 day(s), on 2026-06-30", system_prompt)
+
+            # Mid-block -> the section is omitted (prompt unchanged for the common case).
+            mock_client.complete.reset_mock()
+            mock_client.complete.return_value = {
+                "change_needed": False,
+                "reason": "On track.",
+                "adapted_workouts": [],
+            }
+            coach_service.workout_adapt("2026-06-10")
+            self.assertNotIn("THIS BLOCK IS ENDING", mock_client.complete.call_args[0][0])
+
+    def test_block_boundary_hint_names_next_mesocycle(self):
+        """Inside the terminal window the CLI names the ending block and the exact generate
+        command for the next one; mid-block it stays silent (DESIGN_block_boundary.md §4)."""
+        self._save_two_block_plan()
+        next_meso = test_db.get_next_mesocycle("2026-06-30")
+        self.assertEqual(next_meso["name"], "Peak & Taper")
+
+        def hint_output(date_str: str) -> str:
+            buf = io.StringIO()
+            with patch("trainmate.cli.workouts.generate.cli") as mock_cli, redirect_stdout(buf):
+                mock_cli.db = test_db
+                workouts_cli._print_block_boundary_hint(date_str)
+            return buf.getvalue()
+
+        # One day before the block ends -> hint fires, even with no adaptation proposed.
+        out = hint_output("2026-06-29")
+        self.assertIn("Base Building", out)
+        self.assertIn("in 1 day(s), on 2026-06-30", out)
+        self.assertIn("Peak & Taper", out)
+        self.assertIn(f"workout generate --until-mesocycle {next_meso['id']}", out)
+
+        # Mid-block -> nothing printed.
+        self.assertEqual(hint_output("2026-06-10"), "")
+
+    def test_block_boundary_hint_silent_without_next_block(self):
+        """The final block of a plan has nothing to regenerate, so the hint stays silent."""
+        self._save_two_block_plan()
+        buf = io.StringIO()
+        with patch("trainmate.cli.workouts.generate.cli") as mock_cli, redirect_stdout(buf):
+            mock_cli.db = test_db
+            # 2026-07-20 is one day before the LAST block ends; get_next_mesocycle -> None.
+            workouts_cli._print_block_boundary_hint("2026-07-20")
+        self.assertEqual(buf.getvalue(), "")
 
     @patch("trainmate.coach.engine.openrouter_client")
     def test_adapt_drops_already_completed_session(self, mock_client):

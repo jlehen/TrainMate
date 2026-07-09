@@ -4,7 +4,7 @@ from typing import Any, List, Optional, Dict
 from trainmate.config import config
 from trainmate.openrouter import openrouter_client
 from trainmate.types import Objective, Constraint, Workout, CompletedActivity
-from trainmate.util import today_date as _today_date, cyan
+from trainmate.util import today_date as _today_date, cyan, days_between
 from trainmate.coach.formatting import (
     format_metrics_history, format_completed_activities, format_baseline,
     format_planned_workouts, format_planned_workouts_detailed,
@@ -12,6 +12,30 @@ from trainmate.coach.formatting import (
 )
 import trainmate.coach.engine as _eng
 from trainmate.coach.engine import MIN_PLAN_WEEKS, MAX_PLAN_WEEKS, LEARNING_UPDATES_FIELD
+
+
+def _terminal_window_task(days_left: int, meso_end_date_str: str) -> str:
+    """Renders the adapt-prompt section used when the block is about to end.
+
+    An easing proposed here cannot rebound inside the block and the next block is out of
+    reach, so the model is biased toward holding load (DESIGN_block_boundary.md §3).
+    """
+    ending = (
+        "ends today" if days_left == 0
+        else f"ends in {days_left} day(s), on {meso_end_date_str}"
+    )
+    return f"""
+THIS BLOCK IS ENDING:
+The block you are adapting {ending}.
+That bounds what any adaptation can achieve here. An easing applied now has no runway to
+rebound within the block — no later sessions remain in which to restore the load you shed.
+And the sessions after {meso_end_date_str} belong to the next block, which is outside your
+reach: you can neither adapt it nor pre-empt it.
+So hold the planned load unless the signal is one you would act on even if this were the
+block's very last session. Prefer preserving or rescheduling a session over cutting it. Do
+not deepen a cut in order to "carry" the athlete into the next block — that block is planned
+separately, against the athlete's metrics as they stand when it is generated.
+"""
 
 
 class WorkoutLogicMixin:
@@ -231,6 +255,12 @@ warrants it — and the more recently and more times it was already eased (see t
 the higher your bar for touching it again. Restoring load toward the original as the
 athlete recovers is encouraged; deepening an already-fresh cut is not.
 """
+
+        # Inside the block's terminal window a cut cannot rebound before the block ends
+        # (DESIGN_block_boundary.md §3). Outside it the prompt is unchanged.
+        days_left = days_between(target_date_str, meso_end_date_str)
+        if 0 <= days_left <= config.adapt_terminal_window_days:
+            custom_task += _terminal_window_task(days_left, meso_end_date_str)
 
         if has_message:
             custom_task += """

@@ -13,7 +13,7 @@ from trainmate.util import (
     bold, dim, green, red, yellow, cyan, blue, magenta, gray,
     color_acwr, pmc_cells, pmc_warming_note, visible_len, pad_visible, wrap_text,
     format_labeled_text, format_labeled_block, render_table, PMC_TSB_LAG_NOTE,
-    today_str as _today_str, today_date as _today_date,
+    today_str as _today_str, today_date as _today_date, days_between,
 )
 from trainmate.cli.common import (
     fmt_date, ensure_recent_data, mark_adherence_from_results, pmc_warmup_cutoff,
@@ -21,6 +21,33 @@ from trainmate.cli.common import (
 
 from trainmate.cli.workouts._helpers import (_fmt_ts, _resolve_workout_date_range,
     _resolve_workout_end_date)
+
+
+def _print_block_boundary_hint(date_str: str) -> None:
+    """Points at `workout generate` when the current block is about to end.
+
+    Adapt cannot reach the next block, whose sessions may have been planned long ago against
+    stale metrics. Prints on every run in the terminal window, not only when adaptations are
+    proposed (DESIGN_block_boundary.md §4).
+    """
+    meso = cli.db.get_active_mesocycle(date_str)
+    if not meso:
+        return
+    days_left = days_between(date_str, meso['end_date'])
+    if not 0 <= days_left <= config.adapt_terminal_window_days:
+        return
+    next_meso = cli.db.get_next_mesocycle(meso['end_date'])
+    if not next_meso:
+        return
+
+    when = "today" if days_left == 0 else f"in {days_left} day(s), on {meso['end_date']}"
+    print(yellow(f"This block ({meso['name']}) ends {when}."))
+    print(gray(wrap_text(
+        f"Sessions in the next block ({next_meso['name']}) are outside this adaptation's "
+        f"reach. To re-plan them against current metrics:"
+    )))
+    print(gray(f"    workout generate --until-mesocycle {next_meso['id']}"))
+    print()
 
 
 def run_workout_adapt(args: argparse.Namespace) -> None:
@@ -98,6 +125,8 @@ def run_workout_adapt(args: argparse.Namespace) -> None:
         print()
     except Exception as e:
         print(yellow(f"Warning: Could not display metrics trajectory: {e}"))
+
+    _print_block_boundary_hint(date_str)
 
     print(f"Evaluating daily Garmin metrics adaptation for {date_str}...")
     try:
