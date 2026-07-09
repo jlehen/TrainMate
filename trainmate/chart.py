@@ -71,7 +71,10 @@ def render_timeline_png(payload: Dict[str, Any]) -> bytes:
         _draw_objective_flags(ax_top, mdates, objectives, days)
         # Plan-end marker — only when the plan reaches today or beyond (a forward
         # projection to bound); a lapsed plan shows no marker, matching the CLI (§3).
-        if plan_end and _dt(plan_end) >= today_dt:
+        # Suppressed when an objective already marks that date — the common case,
+        # and two rotated labels at one x overprint (§7.2).
+        on_objective = any(o.get("target_date") == plan_end for o in objectives)
+        if plan_end and _dt(plan_end) >= today_dt and not on_objective:
             _vline_label(ax_top, mdates.date2num(_dt(plan_end)),
                          f"plan ends {plan_end[5:]}", "gray", "--")
         ax_top.legend(loc="upper left")
@@ -92,7 +95,8 @@ def render_timeline_png(payload: Dict[str, Any]) -> bytes:
     _draw_weekly_bars(ax_bottom, mdates, weeks)
     _draw_meso_bands(ax_bottom, mdates, meso_bands)
     if weeks:
-        ax_bottom.legend(loc="upper left")
+        # Anchored below the meso label strip, which owns the top of this axis.
+        ax_bottom.legend(loc="upper left", bbox_to_anchor=(0, BAND_LABEL_FLOOR))
     ax_bottom.set_title("Weekly Load: Planned vs Actual")
     ax_bottom.grid(True, alpha=0.3)
 
@@ -158,14 +162,49 @@ def _draw_weekly_bars(ax, mdates, weeks: List[Dict[str, Any]]) -> None:
            label="planned", color="tab:orange", alpha=0.6)
     ax.bar([xi + bar_w / 2 for xi in x], actual, width=bar_w,
            label="actual", color="tab:blue", alpha=0.8)
+    # Headroom for the meso label strip and the legend above the bars (§7.2).
+    peak = max(planned + actual, default=0)
+    if peak > 0:
+        ax.set_ylim(top=peak * 1.5)
     ax.xaxis_date()
+
+
+BAND_FONTSIZE = 7
+_MIN_BAND_LABEL_CHARS = 6  # below this a label is unreadable; draw the tint only
+BAND_LABEL_TOP = 0.99      # axes fraction; the two staggered rows hang below it
+BAND_LABEL_FLOOR = 0.84    # everything above this belongs to the labels
+
+
+def _fit_label(text: str, max_chars: int) -> str:
+    """`text` cut to `max_chars` with an ellipsis; '' means 'too narrow, draw no
+    label' — a verdict the caller must honour rather than smear it over its
+    neighbours (§7.2 label collision rules)."""
+    if max_chars < _MIN_BAND_LABEL_CHARS:
+        return ""
+    if len(text) <= max_chars:
+        return text
+    return text[: max_chars - 1] + "…"
+
+
+def _band_label_capacity(ax, span_fraction: float) -> int:
+    """How many `BAND_FONTSIZE` characters fit across `span_fraction` of the axis.
+    Estimated, not measured — an exact answer needs a renderer, and `tight_layout`
+    moves the axes afterwards anyway (§7.2)."""
+    fig = ax.figure
+    axes_px = fig.get_figwidth() * fig.dpi * 0.85  # 0.85 discounts the axis margins
+    char_px = BAND_FONTSIZE * fig.dpi / 72.0 * 0.6  # 0.6em ≈ mean proportional glyph
+    return int(span_fraction * axes_px / char_px)
 
 
 def _draw_meso_bands(ax, mdates, meso_bands: List[Dict[str, Any]]) -> None:
     """Mesocycle bands as tinted spans *with* their labels centred in each span (§6.1).
     Inferred (descriptive) bands render lighter; their labels already carry the `~`
-    prefix from the payload."""
+    prefix from the payload. Labels are fitted to their span and staggered across two
+    rows, else neighbouring names overprint (§7.2)."""
     trans = ax.get_xaxis_transform()  # x in data coords, y as an axes fraction
+    x_lo, x_hi = ax.get_xlim()
+    x_range = (x_hi - x_lo) or 1.0
+    row = 0
     for span in meso_bands:
         try:
             start = _dt(span["start_date"])
@@ -175,6 +214,15 @@ def _draw_meso_bands(ax, mdates, meso_bands: List[Dict[str, Any]]) -> None:
         # Inferred (descriptive) bands render lighter than plan bands (§6.1).
         alpha = 0.05 if span.get("source") == "inferred" else 0.12
         ax.axvspan(start, end, color="tab:purple", alpha=alpha)
-        mid = (mdates.date2num(start) + mdates.date2num(end)) / 2
-        ax.text(mid, 0.92, span["label"], transform=trans, ha="center", va="top",
-                fontsize=7, color="tab:purple", clip_on=True)
+
+        lo, hi = mdates.date2num(start), mdates.date2num(end)
+        label = _fit_label(
+            span["label"], _band_label_capacity(ax, (hi - lo) / x_range)
+        )
+        if not label:
+            continue
+        # Stagger: two adjacent labels that each just fit still can't touch (§7.2).
+        ax.text((lo + hi) / 2, BAND_LABEL_TOP - 0.07 * (row % 2), label,
+                transform=trans, ha="center", va="top", fontsize=BAND_FONTSIZE,
+                color="tab:purple", clip_on=True)
+        row += 1

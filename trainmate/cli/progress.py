@@ -25,9 +25,13 @@ from trainmate.cli.common import ensure_recent_data
 # tests) — same reason `cli/common.py` defers the same import.
 
 SPARK_CHARS = "▁▂▃▄▅▆▇█"  # ▁..█
-BAR_WIDTH = 9
-MESO_COL_WIDTH = 8
-WEEK_COL_WIDTH = 10
+BAR_WIDTH = 12
+WEEK_COL_WIDTH = 11
+NUM_COL_WIDTH = 4
+TABLE_WIDTH = 48  # the bot's column budget; the band rule may use all of it
+BAND_LABEL_WIDTH = TABLE_WIDTH - 5  # '── ' + label + ' ' + at least one closing '─'
+
+_NO_BAND = object()  # sentinel: no band emitted yet (a real meso_label may be None)
 
 
 def _to_date(date_str: str):
@@ -68,27 +72,49 @@ def sparkline(values: List[Optional[float]]) -> str:
     return "".join(chars)
 
 
-def render_bar(value: float, scale_max: float, width: int = BAR_WIDTH) -> str:
-    """Absolute-load bar on a shared scale (§7.1): `scale_max` is the maximum weekly
-    load among the displayed rows (planned or actual); `value` is this row's own
-    actual load on that scale. Not actual/planned — adherence is the pct column — so
-    it works unchanged for ungoverned weeks. A zero scale_max renders empty (no
-    division by the zero max)."""
-    if scale_max <= 0:
-        filled = 0
-    else:
-        filled = max(0, min(width, round(width * value / scale_max)))
-    return "▓" * filled + "░" * (width - filled)
+def _cells(value: Optional[float], scale_max: float, width: int) -> int:
+    """`value` as a whole number of bar cells on the shared scale, clamped to the bar.
+    A zero scale_max yields 0 (no division by the zero max)."""
+    if scale_max <= 0 or not value:
+        return 0
+    return max(0, min(width, round(width * value / scale_max)))
 
 
-def truncate_label(label: Optional[str], width: int = MESO_COL_WIDTH) -> str:
-    """Truncates a mesocycle label to the CLI column width with a trailing ellipsis;
-    '—' when there is no label at all (§6.1 'no match')."""
-    if not label:
-        return "—"
+def render_bar(
+    actual: float, plan: Optional[float], scale_max: float, is_future: bool,
+    width: int = BAR_WIDTH,
+) -> str:
+    """Bullet bar on the shared absolute-load scale `scale_max` (§7.1): past weeks
+    fill `▓` to actual and tick `│` at plan, future weeks ghost-fill `▒` to plan."""
+    if is_future:
+        n = _cells(plan, scale_max, width)
+        return "▒" * n + "░" * (width - n)
+
+    n = _cells(actual, scale_max, width)
+    bar = ["▓"] * n + ["░"] * (width - n)
+    if plan:
+        # First cell *beyond* plan: filled-up-to-the-tick reads as on-plan (§7.1).
+        p = _cells(plan, scale_max, width)
+        if p < width:
+            bar[p] = "│"
+    return "".join(bar)
+
+
+def truncate_label(label: str, width: int = BAND_LABEL_WIDTH) -> str:
+    """Truncates a mesocycle label to `width` with a trailing ellipsis."""
     if len(label) <= width:
         return label
     return label[: width - 1] + "…"
+
+
+def band_header(label: Optional[str], width: int = TABLE_WIDTH) -> str:
+    """A mesocycle band rule spanning the table — `── Base Consolidation ─────────`
+    (§7.1). Weeks the plan never governed band under 'unplanned' (§6.1 'no match')."""
+    text = truncate_label(label) if label else "unplanned"
+    prefix = f"── {text} "
+    # At least one closing dash, so the table's right edge stays straight (§7.1);
+    # BAND_LABEL_WIDTH reserves the room.
+    return prefix + "─" * max(1, width - visible_len(prefix))
 
 
 def format_form_line(
@@ -183,7 +209,6 @@ def _week_plan_denom(week: Dict[str, Any]) -> Optional[float]:
 def _week_row(
     week: Dict[str, Any], scale_max: float, today: str, plan_end: Optional[str]
 ) -> str:
-    meso = pad_visible(truncate_label(week.get("meso_label")), MESO_COL_WIDTH)
     week_label = f"w/c {_short_date(week['week_commencing'])}"
     week_sunday = (
         _to_date(week["week_commencing"]) + timedelta(days=6)
@@ -194,29 +219,35 @@ def _week_row(
     week_col = pad_visible(week_label, WEEK_COL_WIDTH)
 
     denom = _week_plan_denom(week)
-    plan_col = pad_visible("—" if denom is None else f"{denom:.0f}", 4, align_left=False)
+    plan_col = pad_visible(
+        "—" if denom is None else f"{denom:.0f}", NUM_COL_WIDTH, align_left=False
+    )
 
     is_future = week["week_commencing"] > today and not week.get("in_progress")
+    bar = render_bar(week["actual_load"], denom, scale_max, is_future)
     if is_future:
-        return f"{meso} {week_col} {plan_col}  (planned)"
+        # No actual and no adherence yet — leave the columns off rather than filling
+        # them with em-dashes the eye has to skip.
+        return f"{week_col} {plan_col}  {bar}"
 
-    bar = render_bar(week["actual_load"], scale_max)
-    actual_col = pad_visible(f"{week['actual_load']:.0f}", 4, align_left=False)
+    actual_col = pad_visible(
+        f"{week['actual_load']:.0f}", NUM_COL_WIDTH, align_left=False
+    )
     if denom:
         pct = f"{round(week['actual_load'] / denom * 100)}%"
     else:
         pct = "—"
-    pct_col = pad_visible(pct, 4, align_left=False)
-    return f"{meso} {week_col} {plan_col}  {bar} {actual_col} {pct_col}"
+    pct_col = pad_visible(pct, NUM_COL_WIDTH, align_left=False)
+    return f"{week_col} {plan_col}  {bar} {actual_col} {pct_col}"
 
 
 def table_rows(
     weeks: List[Dict[str, Any]], today: str, plan_end: Optional[str]
 ) -> List[str]:
-    """The fixed-width WEEKLY LOAD table rows only (header + one per week) — the part
-    held to the 48-column budget (§7.1). Legend/warning lines are ordinary prose and
-    wrap at the normal CLI width instead. Bar scale is the max weekly load among the
-    displayed rows (planned-full or actual), so it doesn't jump when future weeks
+    """The fixed-width WEEKLY LOAD table rows only (header, band rules, one row per
+    week) — the part held to the 48-column budget (§7.1). Legend/warning lines are
+    ordinary prose and wrap at the normal CLI width instead. Bar scale is the max
+    weekly load among the displayed rows, so it doesn't jump when future weeks
     arrive."""
     if not weeks:
         return []
@@ -225,19 +256,34 @@ def table_rows(
     ] + [w["actual_load"] for w in weeks]
     scale_max = max(scale_candidates) if scale_candidates else 0.0
 
-    header = pad_visible("WEEKLY LOAD", MESO_COL_WIDTH + 1 + WEEK_COL_WIDTH)
-    lines = [bold(header + " plan  actual")]
+    header = (
+        f"{pad_visible('WEEKLY LOAD', WEEK_COL_WIDTH)} "
+        f"{pad_visible('plan', NUM_COL_WIDTH, align_left=False)}  "
+        f"{pad_visible('▓done ▒plan', BAR_WIDTH)} "
+        f"{pad_visible('done', NUM_COL_WIDTH, align_left=False)} "
+        f"{pad_visible('adh', NUM_COL_WIDTH, align_left=False)}"
+    )
+    lines = [bold(header)]
+
+    # A band rule wherever the mesocycle changes, so each label is written once, in
+    # full, instead of truncated onto every row.
+    current_label: Any = _NO_BAND
     for week in weeks:
+        label = week.get("meso_label")
+        if label != current_label:
+            lines.append(gray(band_header(label)))
+            current_label = label
         lines.append(_week_row(week, scale_max, today, plan_end))
     return lines
 
 
 def format_weekly_table(
     weeks: List[Dict[str, Any]], today: str, plan_end: Optional[str],
-    has_inferred: bool, partial_note: Optional[str],
+    has_inferred: bool, partial_note: Optional[str], hidden_future: int = 0,
 ) -> List[str]:
     """The WEEKLY LOAD table (§7.1): fixed-width rows plus a legend footer. `weeks`
-    must already be windowed by the caller."""
+    must already be windowed by the caller; `hidden_future` is how many planned weeks
+    that window dropped, named in the legend so the truncation is never silent."""
     lines = table_rows(weeks, today, plan_end)
     if not lines:
         return []
@@ -247,17 +293,20 @@ def format_weekly_table(
     legend_parts.append("* in progress")
     if partial_note:
         legend_parts.append(partial_note)
+    if hidden_future:
+        legend_parts.append(f"+{hidden_future} more (--weeks all)")
     lines.append(gray(" · ".join(legend_parts)))
     return lines
 
 
 def render_progress(
-    payload: Dict[str, Any], weeks_window: int
+    payload: Dict[str, Any], weeks_window: Any, explain: bool = False
 ) -> List[str]:
     """The complete `tm progress` text output (§7.1) as a list of lines, built purely
     from the `assemble_timeline` payload — no DB, unit-testable. Width-agnostic here;
     `run_progress` wraps prose lines through `wrap_text` and the table is already
-    fixed-width."""
+    fixed-width. `weeks_window` is a positive int or `'all'` and windows *both*
+    halves (§7.1); `explain` adds the PMC footnotes."""
     today = payload["today"]
     plan_end = payload["plan_end"]
     days = payload["days"]
@@ -266,9 +315,18 @@ def render_progress(
     warnings = payload["warnings"]
     by_date = {p["date"]: p for p in days}
 
-    # Displayed weeks: the last `weeks_window` past/current weeks + all future weeks.
-    past_weeks = [w for w in weeks if w["week_commencing"] <= today][-weeks_window:]
-    future_weeks = [w for w in weeks if w["week_commencing"] > today]
+    # Displayed weeks: the last `weeks_window` past/current weeks + the next
+    # `weeks_window` projected ones (all of both under `--weeks all`).
+    past_all = [w for w in weeks if w["week_commencing"] <= today]
+    future_all = [w for w in weeks if w["week_commencing"] > today]
+    if weeks_window == "all":
+        past_weeks, future_weeks = past_all, future_all
+        spark_weeks = len(past_weeks)
+    else:
+        past_weeks = past_all[-weeks_window:]
+        future_weeks = future_all[:weeks_window]
+        spark_weeks = weeks_window
+    hidden_future = len(future_all) - len(future_weeks)
     display_weeks = past_weeks + future_weeks
 
     lines: List[str] = []
@@ -314,7 +372,7 @@ def render_progress(
                 plan_end, end_pt["ctl"], end_pt["tsb"]
             )
 
-    lines.append(format_sparkline_line(ctl_samples, weeks_window, plan_end_proj))
+    lines.append(format_sparkline_line(ctl_samples, spark_weeks, plan_end_proj))
 
     if plan_end is None:
         lines += format_no_plan_banner(None)
@@ -333,7 +391,9 @@ def render_progress(
             next_obj, weeks_before = gap
             lines += format_plan_gap_banner(plan_end, next_obj, weeks_before)
 
-    if tsb_shown:
+    # The lag note is a standing caveat, not news: printing it on every invocation
+    # trained the eye to skip it. Behind `--explain` (§7.1).
+    if tsb_shown and explain:
         lines.append(dim(PMC_TSB_LAG_NOTE))
 
     lines.append("")
@@ -345,7 +405,7 @@ def render_progress(
         if _to_date(plan_end).weekday() != 6:
             partial_note = f"plan ends {_short_date(plan_end)} ({_weekday(plan_end)})"
     lines += format_weekly_table(
-        display_weeks, today, plan_end, has_inferred, partial_note
+        display_weeks, today, plan_end, has_inferred, partial_note, hidden_future
     )
 
     # Footer warnings — everything except the plan-gap (rendered richly above).
@@ -405,7 +465,7 @@ def run_progress(args: argparse.Namespace) -> None:
 
     payload = timeline.build_timeline_payload(cli.db)
 
-    lines = render_progress(payload, weeks_window)
+    lines = render_progress(payload, weeks_window, getattr(args, "explain", False))
     for line in lines:
         # Table rows are already fixed-width; prose (banners, footnotes) wraps.
         print(wrap_text(line) if visible_len(line) > 48 else line)

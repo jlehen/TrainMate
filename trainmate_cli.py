@@ -151,9 +151,12 @@ from trainmate.cli.context import (
 )
 
 
-def _weeks_arg(raw: str) -> int:
-    """`--weeks N` must be a whole number >= 1 (DESIGN_progress_timeline.md §7.1) —
-    rejected at argparse, so a `0` can't silently fall through to the default."""
+def _weeks_arg(raw: str):
+    """`--weeks N` must be a whole number >= 1, or the literal `all`
+    (DESIGN_progress_timeline.md §7.1) — rejected at argparse, so a `0` can't silently
+    fall through to the default. `all` matches the web endpoint's `?weeks=all`."""
+    if raw == "all":
+        return "all"
     try:
         n = int(raw)
     except ValueError:
@@ -417,8 +420,13 @@ def main() -> None:
     )
     progress_parser.add_argument(
         "--weeks", type=_weeks_arg, default=8, metavar="N",
-        help="Weeks of past weekly load to show (default: 8, must be >= 1). The "
-             "future half always runs to plan end."
+        help="Weeks of weekly load to show either side of today (default: 8, must be "
+             ">= 1, or 'all' for the whole plan). The projection lines above the table "
+             "always run to plan end regardless."
+    )
+    progress_parser.add_argument(
+        "--explain", action="store_true",
+        help="Append the PMC footnotes (e.g. why TSB lags same-day CTL - ATL)."
     )
     progress_parser.add_argument(
         "--chart", nargs="?", const=True, default=False, metavar="PATH",

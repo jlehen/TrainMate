@@ -1,11 +1,35 @@
 # Design: Progress Timeline (past + projected training progression)
 
-**Status:** Rework specced (rev 7) · **Date:** 2026-07-08 · **Companion to:**
-ARCHITECTURE.md §12 (load model), `DESIGN_pmc_fitness_fatigue.md` (the
-**shipped** backward PMC core this feature consumes — and whose deferred
-Phase 2 projection this feature delivers, §4), `DESIGN_backward_evaluation.md`
-(the analysis-side view of the past; this doc is the *presentation*-side view
-of past **and future**)
+**Status:** Shipped; presentation reworked (rev 8) · **Date:** 2026-07-09 ·
+**Companion to:** ARCHITECTURE.md §12 (load model),
+`DESIGN_pmc_fitness_fatigue.md` (the **shipped** backward PMC core this feature
+consumes — and whose deferred Phase 2 projection this feature delivers, §4),
+`DESIGN_backward_evaluation.md` (the analysis-side view of the past; this doc is
+the *presentation*-side view of past **and future**)
+
+> **Rev 8 (2026-07-09) — the renderer pass.** The rev-7 payload survived first
+> contact with real data; its two *renderers* did not. Nothing in §3–§6 changes;
+> §7.1 and §7.2 do. Five fixes, all presentation:
+> (1) **The per-row meso column is replaced by a band rule** (§7.1). At 8
+> columns it truncated every real mesocycle name to mush — `Specifi…` on five
+> consecutive rows — while costing a sixth of the width budget. The label is now
+> written once, in full, on a rule spanning the table above its weeks.
+> (2) **Bars became bullet bars** (§7.1). The old bar drew absolute actual load
+> and *not* plan-vs-actual, which is the one comparison the table exists for;
+> adherence lived only in the pct column. A `│` tick now marks plan on the same
+> scale, so overshoot and shortfall read at a glance.
+> (3) **Future weeks draw a ghost bar** (`▒` to planned) instead of the literal
+> text `(planned)`. This also closes a real defect: future weeks fed `scale_max`
+> but drew nothing, so a big September week silently squashed June's bars.
+> (4) **The projected half is windowed by `--weeks` too**, with `--weeks all`
+> for the whole plan and a legend note naming what was dropped. A 12-row
+> `(planned)` tail buried the four rows carrying measured data.
+> (5) **`PMC_TSB_LAG_NOTE` moves behind `--explain`** (§7.1). A two-line caveat
+> printed on every invocation is a caveat nobody reads.
+> Chart-side (§7.2), the same pass fixed two drawing bugs the rev-7 label work
+> introduced: meso labels centred at full length in narrow spans overprinted
+> each other, and a plan generated *to* an objective drew two rotated labels on
+> the same x.
 
 > **Rev 7 (2026-07-08) — implementation-review scope cuts.** Three decisions
 > from the rev-6 implementability review:
@@ -698,12 +722,15 @@ CTL 8w ▁▂▂▃▃▅▅▆   plan end 07-31: CTL 61 TSB +1
   🏁 2026-09-30 Trail marathon
   (workout generate --until-goal)
 
-WEEKLY LOAD          plan  actual
-~Base     w/c 05-25    —   ▓▓▓▓▓▓▓░░  262    —
-Build 2   w/c 06-22   320  ▓▓▓▓▓░░░░  214   67%
-Build 3   w/c 06-29*  150  ▓▓▓░░░░░░  138   92%
-Build 3   w/c 07-06   360  (planned)
-~ inferred · * in progress (plan = Mon–Fri)
+WEEKLY LOAD plan  ▓done ▒plan  done  adh
+── ~Base Accumulation ─────────────────────────
+w/c 05-25      —  ▓▓▓▓▓▓▓░░░░░  262    —
+── Build 2 ───────────────────────────────────
+w/c 06-22    320  ▓▓▓▓▓│░░░░░░  214   67%
+── Build 3 ───────────────────────────────────
+w/c 06-29*   150  ▓▓▓│░░░░░░░░  138   92%
+w/c 07-06    360  ▒▒▒▒▒▒▒▒▒▒░░
+~ inferred · * in progress · +4 more (--weeks all)
 ⚠ 2 planned workouts lack TSS/RPE — count as 0
 ```
 
@@ -736,17 +763,38 @@ objective line, wrapped inside the same width budget:
   week's **last day**, min–max scaled over those weeks. Range-stretching can
   make a small climb look steep, accepted: the real numbers sit on the same
   line (numbers-first — the sparkline is garnish).
-- **Bar semantics — absolute load, one shared scale.** A full 9-cell bar is
-  the **maximum weekly load among the displayed rows** (planned or actual,
-  future weeks' planned included so the scale doesn't jump when they arrive);
-  each past/in-progress row's bar shows its **actual** load on that scale
-  (`▓` filled, `░` remainder, rounded to nearest cell). The bar is *not*
-  actual÷planned — adherence is already the pct column — so it works
-  unchanged for ungoverned weeks (no plan, still a bar) and makes the
-  periodization wave readable down the column, matching the web panel's
-  absolute-scale bars (§7.3). Future weeks stay number-only (`(planned)`),
-  per the mock. In the mock above the scale anchor is the 360-planned week:
-  262→7 cells, 214→5, 138→3.
+- **Bar semantics — a bullet bar on one shared absolute scale.** A full
+  12-cell bar is the **maximum weekly load among the displayed rows** (planned
+  or actual, future weeks' planned included so the scale doesn't jump when
+  they arrive). Past/in-progress rows fill `▓` to **actual** load and mark
+  **planned** load with a `│` tick on that same scale; future rows ghost-fill
+  `▒` to planned. Rationale for the tick (rev 8): the scale must stay absolute
+  so the periodization wave reads down the column and ungoverned weeks still
+  draw, matching the web panel (§7.3) — but a bar that encodes only absolute
+  actual load says nothing about the plan-vs-actual comparison the table is
+  *for*, and pushing that comparison entirely into the pct column wasted the
+  one graphical channel on the row. A tick keeps both.
+  - **Every displayed row draws.** Rev 7's future rows printed `(planned)` and
+    no bar while still contributing their planned load to `scale_max` — a real
+    defect: a heavy week three months out compressed every measured bar to
+    nothing. Ghost-filling them makes the series continuous across the seam
+    *and* makes the scale honest, one change for both.
+  - **Degenerate ticks.** An ungoverned week (`plan` None or 0) draws no tick.
+    A plan at or beyond full scale drops its tick rather than overflow the
+    bar. The tick sits on the first cell *beyond* plan, so a bar filled up to
+    the tick reads as on-plan and a tick inside the fill reads as overshoot.
+  - In the mock above the scale anchor is the 360-planned week: 262→9 cells,
+    214→7, 138→5.
+- **Mesocycle band rules, not a meso column** (rev 8). Real mesocycle names run
+  40–58 characters (`Specific Build II - Peak Specific Load & Fatigue
+  Resistance`); the rev-7 8-column field rendered them as `Specifi…` on five
+  consecutive rows — ten columns of width buying no information, while §6.1's
+  band-inference machinery existed largely to produce that field. The label is
+  now written **once per contiguous run of weeks**, in full where it fits, on a
+  `── Label ─────` rule spanning the table. Runs are contiguous: a mesocycle
+  that recurs after another opens a fresh rule. Weeks the plan never governed
+  band under `unplanned`. `~` still prefixes inferred labels (§6.1), so the
+  `~ inferred` legend still earns its place.
 - **Degenerate inputs, pinned** (no machinery — each is a one-line guard):
   all displayed weeks at zero load → bars render empty, no division by the
   zero max; sparkline cells with no CTL (warm-up edge inside the window, or
@@ -755,9 +803,11 @@ objective line, wrapped inside the same width budget:
   rev-4 snapshot's `or 8` silently swallowed 0).
 - **Width-aware** via the existing `TRAINMATE_WRAP_WIDTH` mechanism
   (`util.default_wrap_width`). Budget: the bot's `telegram_wrap_width`
-  default is **48** — column layout above is meso 8 (truncated per §6.1) +
-  week 10 + plan 4 + bar 9 + actual 4 + pct 4 + separators ≤ 48, asserted by
-  a renderer test (§9). The table (bar included) is **fixed-width**: it is
+  default is **48** — column layout above is week 11 + plan 4 + bar 12 +
+  actual 4 + pct 4 + separators = 40, asserted by a renderer test (§9). The
+  band rule may spend the full 48 (its label is cut to
+  `TABLE_WIDTH - 5`, always leaving one closing `─` so the right edge stays
+  straight). The table (bar included) is **fixed-width**: it is
   laid out once for the 48-column budget and does not widen on a wider
   terminal — CLI and Telegram render identically (what you see on a TTY is
   what the bot sends), and the width test stays a single assertion. Wider
@@ -768,12 +818,23 @@ objective line, wrapped inside the same width budget:
   through the existing `wrap_text`, and width is measured with
   `visible_len` — `⚠`/`🏁` are double-width in most terminals — never
   `len`.
-- Past weeks: planned vs actual bar + percentage; `—` planned/percentage for
-  ungoverned weeks (§3 empty states); future weeks: planned number only;
-  current week per the §3 in-progress rule. Objective lines only for
-  objectives inside the window (§11).
-- `--weeks N` re-windows the past half (default 8); the future half always
-  runs to plan end — that's the point of the feature.
+- Past weeks: bullet bar + percentage; `—` planned/percentage for ungoverned
+  weeks (§3 empty states); future weeks: planned number + ghost bar, the
+  `done`/`adh` columns omitted rather than filled with em-dashes; current week
+  per the §3 in-progress rule. Objective lines only for objectives inside the
+  window (§11).
+- `--weeks N` windows **both halves** (default 8: 8 past, 8 projected);
+  `--weeks all` shows the whole plan, matching the web endpoint's `?weeks=all`.
+  Rev 7 ran the future half to plan end unconditionally, which on a 6-month
+  plan meant twelve `(planned)` rows under four rows of measured data — the
+  projection is the point of the feature, but the *table* is not where it
+  earns its keep (the FORM/projection lines above it are, and they still run
+  to plan end regardless of `--weeks`). Whatever the window drops is named in
+  the legend (`+4 more (--weeks all)`) — never a silent truncation.
+- **`--explain`** appends the PMC footnotes (`PMC_TSB_LAG_NOTE`: why TSB won't
+  equal the shown same-day CTL − ATL). Rev 7 printed it on every invocation
+  where TSB was shown; a standing caveat that appears every time is one the eye
+  learns to skip, and it cost two of the ~20 lines the command has.
 - Rendering split as pure formatting helpers (fed by §5 outputs) so they are
   unit-testable without a DB, per `coach/formatting.py` precedent.
 
@@ -828,6 +889,23 @@ No bot-native command; both paths ride the CLI-as-subprocess parity model
     cosmetic, so switching is a one-line change if photo blur ever annoys.
   - This is deliberately a *transport*, not a feature: any future CLI
     command can send a photo the same way (e.g. the drift/zone charts, §8).
+  - **Label collision rules (rev 8).** Drawing the labels this section specced
+    is not the same as drawing them legibly; two bugs shipped with the first
+    attempt, and both are properties of *real* data that no mock exposes:
+    - *Meso band labels.* A 3-week band is a few dozen pixels wide; a real
+      mesocycle name is ~50 characters. Centring the full name in each span
+      overprinted every neighbour into a purple smear. Each label is now cut to
+      what its own span can hold (`_fit_label` / `_band_label_capacity` — an
+      estimate, since an exact answer needs a renderer and `tight_layout` moves
+      the axes afterwards), dropped entirely below `_MIN_BAND_LABEL_CHARS` (the
+      tint still draws), and consecutive labels alternate between two heights so
+      two that each just fit still cannot touch. `_draw_weekly_bars` reserves
+      headroom (`ylim` top = peak × 1.5) for that strip, and the bottom legend
+      anchors below it.
+    - *Coincident vertical markers.* The plan-end marker is suppressed when an
+      objective already marks that date. A plan generated **to** an objective is
+      the common case, not an edge case — `workout generate --until-goal` makes
+      it the default — and two rotated labels on one `x` are unreadable.
 - **matplotlib** sits in `requirements.txt`'s optional tier (like
   `python-telegram-bot`; already there since the snapshot, §10.1): imported
   lazily inside `chart.py`; without it, text mode works, `--chart` fails
