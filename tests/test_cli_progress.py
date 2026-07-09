@@ -61,10 +61,18 @@ class TestRenderBar(unittest.TestCase):
         self.assertEqual(bar[tick - 1], "▓")
         self.assertEqual(bar[tick + 1], "▓")
 
-    def test_plan_at_full_scale_drops_the_tick_rather_than_overflowing(self):
-        bar = render_bar(100, 100.0, 100, False)
-        self.assertNotIn("│", bar)
+    def test_the_week_that_sets_the_scale_still_gets_its_tick(self):
+        # plan == scale_max maps to p == BAR_WIDTH; clamped into the bar rather than
+        # dropped, because that is the peak week whose tick matters most.
+        bar = render_bar(80, 100.0, 100, False)
+        self.assertIn("│", bar)
+        self.assertEqual(bar.index("│"), BAR_WIDTH - 1)
         self.assertEqual(len(bar), BAR_WIDTH)
+
+    def test_a_fully_met_peak_week_reads_as_on_plan(self):
+        bar = render_bar(100, 100.0, 100, False)
+        self.assertEqual(len(bar), BAR_WIDTH)
+        self.assertEqual(bar, "▓" * (BAR_WIDTH - 1) + "│")
 
     def test_future_week_ghost_fills_to_plan(self):
         bar = render_bar(0.0, 50.0, 100, True)
@@ -75,7 +83,8 @@ class TestRenderBar(unittest.TestCase):
     def test_every_variant_is_exactly_bar_width(self):
         for args in [(10, None, 0, False), (100, 100.0, 100, False),
                      (25, 50.0, 100, False), (0.0, 50.0, 100, True),
-                     (0.0, None, 100, True)]:
+                     (0.0, None, 100, True), (0.0, 100.0, 100, False),
+                     (100, 1.0, 100, False), (100.0, 100.0, 100, True)]:
             self.assertEqual(visible_len(render_bar(*args)), BAR_WIDTH, msg=repr(args))
 
 
@@ -251,9 +260,9 @@ class TestWeeklyTableWidth(unittest.TestCase):
         bands = [r for r in table_rows(weeks, "2026-06-30", None) if r.startswith("──")]
         self.assertEqual(len(bands), 3)
 
-    def test_hidden_future_weeks_are_named_in_the_legend(self):
+    def test_hidden_weeks_are_named_in_the_legend(self):
         lines = format_weekly_table(
-            self._weeks(), "2026-06-30", None, False, None, hidden_future=12,
+            self._weeks(), "2026-06-30", None, False, None, hidden_weeks=12,
         )
         self.assertIn("+12 more (--weeks all)", lines[-1])
 
@@ -378,12 +387,19 @@ class TestRenderProgress(unittest.TestCase):
         return _payload(days, weeks=weeks, plan_end="2026-08-02")
 
     def test_future_weeks_are_windowed_like_the_past(self):
-        # 4 future weeks, window of 2 -> 2 shown, 2 named as hidden.
+        # 5 past + 4 future, window of 2 -> 2 + 2 shown; 3 past + 2 future hidden.
         text = "\n".join(render_progress(self._windowed_payload(), 2))
         self.assertIn("w/c 07-06", text)
         self.assertIn("w/c 07-13", text)
         self.assertNotIn("w/c 07-20", text)
-        self.assertIn("+2 more (--weeks all)", text)
+        self.assertNotIn("w/c 06-01", text)
+        self.assertIn("+5 more (--weeks all)", text)
+
+    def test_hidden_past_weeks_are_counted_too_not_just_future(self):
+        # 5 past + 4 future, window of 4 -> 1 past hidden, 0 future hidden. A legend
+        # that counted only the future side would print no note at all here.
+        text = "\n".join(render_progress(self._windowed_payload(), 4))
+        self.assertIn("+1 more (--weeks all)", text)
 
     def test_weeks_all_shows_everything_and_hides_no_legend_note(self):
         text = "\n".join(render_progress(self._windowed_payload(), "all"))
@@ -394,6 +410,16 @@ class TestRenderProgress(unittest.TestCase):
     def test_weeks_all_sizes_the_sparkline_to_the_history_shown(self):
         text = "\n".join(render_progress(self._windowed_payload(), "all"))
         self.assertIn("CTL 5w", text)  # 5 past weeks, not the literal 'all'
+
+    def test_sparkline_label_counts_cells_drawn_not_the_window_asked_for(self):
+        # Young DB: 5 weeks of history under a --weeks 8 request must not say '8w'.
+        text = "\n".join(render_progress(self._windowed_payload(), 8))
+        self.assertIn("CTL 5w", text)
+        self.assertNotIn("CTL 8w", text)
+
+    def test_sparkline_label_matches_the_window_when_history_is_long_enough(self):
+        text = "\n".join(render_progress(self._windowed_payload(), 3))
+        self.assertIn("CTL 3w", text)
 
     def test_every_line_within_48_columns(self):
         os.environ["TRAINMATE_WRAP_WIDTH"] = "48"

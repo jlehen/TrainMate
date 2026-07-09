@@ -587,13 +587,19 @@ def clip_payload(
 
 
 def clip_payload_for_weeks(
-    payload: Dict[str, Any], weeks: Any, today: str
+    payload: Dict[str, Any], weeks: Any, today: str, *, cap_future: bool = False
 ) -> Dict[str, Any]:
-    """Window a payload to the last `weeks` of past plus the whole projected future
-    (§6.0/§7.1). `weeks` is a positive int (past edge = today − 7·weeks) or the string
-    ``'all'`` for full history; the future edge is plan end, clamped up to today when
-    the plan is absent or already lapsed, so the projection always shows whole. Shared
-    by the CLI `--chart` path and the web endpoint so their windows can't drift."""
+    """Window a payload to the last `weeks` of past (§6.0/§7.1). `weeks` is a positive
+    int (past edge = today − 7·weeks) or the string ``'all'`` for full history; the
+    future edge is plan end, clamped up to today when the plan is absent or already
+    lapsed. Shared by the CLI `--chart` path and the web endpoint so their windows
+    can't drift.
+
+    `cap_future` also cuts the projection to the next `weeks` whole weeks. The CLI
+    passes it so `--chart` frames the same span its text table does — a PNG showing
+    twenty projected weeks under a legend reading `+12 more` contradicts itself. The
+    web endpoint leaves it off: an `<img>` has no accompanying table to agree with,
+    and the whole projection is what that panel is for (§7.3)."""
     if weeks == "all":
         start_date = "0001-01-01"
     else:
@@ -601,4 +607,9 @@ def clip_payload_for_weeks(
     end_date = payload["plan_end"] or today
     if end_date < today:
         end_date = today
+    if cap_future and weeks != "all":
+        # Sunday of the Nth whole week after the one containing today — the last week
+        # `render_progress` puts in the table.
+        last_shown = _monday(_to_date(today)) + timedelta(days=7 * int(weeks) + 6)
+        end_date = min(end_date, _date_str(last_shown))
     return clip_payload(payload, start_date, end_date)

@@ -72,9 +72,12 @@ def render_timeline_png(payload: Dict[str, Any]) -> bytes:
         # Plan-end marker — only when the plan reaches today or beyond (a forward
         # projection to bound); a lapsed plan shows no marker, matching the CLI (§3).
         # Suppressed when an objective already marks that date — the common case,
-        # and two rotated labels at one x overprint (§7.2).
+        # and two rotated labels at one x overprint (§7.2). Also suppressed past the
+        # drawn window: `--chart` may cap the projection short of plan end (§7.1) and
+        # an out-of-window axvline drags the x-axis out with it.
         on_objective = any(o.get("target_date") == plan_end for o in objectives)
-        if plan_end and _dt(plan_end) >= today_dt and not on_objective:
+        in_window = bool(days) and plan_end is not None and plan_end <= days[-1]["date"]
+        if plan_end and _dt(plan_end) >= today_dt and in_window and not on_objective:
             _vline_label(ax_top, mdates.date2num(_dt(plan_end)),
                          f"plan ends {plan_end[5:]}", "gray", "--")
         ax_top.legend(loc="upper left")
@@ -93,7 +96,7 @@ def render_timeline_png(payload: Dict[str, Any]) -> bytes:
     ax_top.set_title("Fitness / Fatigue / Form")
 
     _draw_weekly_bars(ax_bottom, mdates, weeks)
-    _draw_meso_bands(ax_bottom, mdates, meso_bands)
+    _draw_meso_spans(ax_bottom, meso_bands)
     if weeks:
         # Anchored below the meso label strip, which owns the top of this axis.
         ax_bottom.legend(loc="upper left", bbox_to_anchor=(0, BAND_LABEL_FLOOR))
@@ -110,6 +113,13 @@ def render_timeline_png(payload: Dict[str, Any]) -> bytes:
             0.01, reserve / 2, "\n".join("• " + w for w in warnings),
             fontsize=6, va="center", ha="left", color="darkgoldenrod",
         )
+
+    # Band labels go on last, against final geometry: `axvspan` feeds the x-autoscaler
+    # and `tight_layout` resizes the axes, so a label fitted any earlier is fitted to
+    # an axis that no longer exists (§7.2).
+    fig.canvas.draw()
+    _draw_meso_band_labels(ax_bottom, mdates, meso_bands)
+
     buf = io.BytesIO()
     fig.savefig(buf, format="png")
     plt.close(fig)
@@ -186,39 +196,51 @@ def _fit_label(text: str, max_chars: int) -> str:
     return text[: max_chars - 1] + "…"
 
 
-def _band_label_capacity(ax, span_fraction: float) -> int:
-    """How many `BAND_FONTSIZE` characters fit across `span_fraction` of the axis.
-    Estimated, not measured — an exact answer needs a renderer, and `tight_layout`
-    moves the axes afterwards anyway (§7.2)."""
+def _chars_per_axis(ax) -> float:
+    """How many `BAND_FONTSIZE` characters fit across the *whole* drawn axis. Measured
+    from the laid-out axes box, so the caller must have drawn the figure first."""
     fig = ax.figure
-    axes_px = fig.get_figwidth() * fig.dpi * 0.85  # 0.85 discounts the axis margins
+    axes_px = ax.get_window_extent().width
     char_px = BAND_FONTSIZE * fig.dpi / 72.0 * 0.6  # 0.6em ≈ mean proportional glyph
-    return int(span_fraction * axes_px / char_px)
+    return axes_px / char_px
 
 
-def _draw_meso_bands(ax, mdates, meso_bands: List[Dict[str, Any]]) -> None:
-    """Mesocycle bands as tinted spans *with* their labels centred in each span (§6.1).
-    Inferred (descriptive) bands render lighter; their labels already carry the `~`
-    prefix from the payload. Labels are fitted to their span and staggered across two
-    rows, else neighbouring names overprint (§7.2)."""
+def _span_dates(span: Dict[str, Any]):
+    """`(start, end)` datetimes, or None when the span's dates are unusable."""
+    try:
+        return _dt(span["start_date"]), _dt(span["end_date"])
+    except (ValueError, TypeError, KeyError):
+        return None
+
+
+def _draw_meso_spans(ax, meso_bands: List[Dict[str, Any]]) -> None:
+    """The tinted mesocycle spans (§6.1); inferred (descriptive) bands render lighter.
+    Labels are a separate, later pass — `axvspan` moves the x-limits these spans are
+    then measured against (§7.2)."""
+    for span in meso_bands:
+        dates = _span_dates(span)
+        if dates is None:
+            continue
+        alpha = 0.05 if span.get("source") == "inferred" else 0.12
+        ax.axvspan(dates[0], dates[1], color="tab:purple", alpha=alpha)
+
+
+def _draw_meso_band_labels(ax, mdates, meso_bands: List[Dict[str, Any]]) -> None:
+    """Each span's name, centred over it (§6.1). Labels already carry the payload's `~`
+    inferred prefix. Fitted to their own span and staggered across two rows, else
+    neighbouring names overprint (§7.2). Call only on a drawn figure."""
     trans = ax.get_xaxis_transform()  # x in data coords, y as an axes fraction
     x_lo, x_hi = ax.get_xlim()
     x_range = (x_hi - x_lo) or 1.0
+    chars_per_axis = _chars_per_axis(ax)
     row = 0
     for span in meso_bands:
-        try:
-            start = _dt(span["start_date"])
-            end = _dt(span["end_date"])
-        except (ValueError, TypeError, KeyError):
+        dates = _span_dates(span)
+        if dates is None:
             continue
-        # Inferred (descriptive) bands render lighter than plan bands (§6.1).
-        alpha = 0.05 if span.get("source") == "inferred" else 0.12
-        ax.axvspan(start, end, color="tab:purple", alpha=alpha)
-
-        lo, hi = mdates.date2num(start), mdates.date2num(end)
-        label = _fit_label(
-            span["label"], _band_label_capacity(ax, (hi - lo) / x_range)
-        )
+        lo, hi = mdates.date2num(dates[0]), mdates.date2num(dates[1])
+        capacity = int((hi - lo) / x_range * chars_per_axis)
+        label = _fit_label(span["label"], capacity)
         if not label:
             continue
         # Stagger: two adjacent labels that each just fit still can't touch (§7.2).

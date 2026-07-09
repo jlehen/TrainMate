@@ -400,5 +400,42 @@ class TestClipPayload(unittest.TestCase):
         self.assertEqual(len(clipped["meso_bands"]), 1)
 
 
+class TestClipPayloadForWeeks(unittest.TestCase):
+    """`cap_future` is what keeps `tm progress --chart` framing the same span its
+    text table does (DESIGN_progress_timeline.md §7.1)."""
+
+    def _payload(self, plan_end):
+        days = [{"date": _d(offset), "load": 0.0, "source": "planned",
+                 "ctl": 1.0, "atl": 1.0, "tsb": 0.0}
+                for offset in range(-40, 90)]
+        return {"today": TODAY, "plan_end": plan_end, "days": days, "weeks": [],
+                "objectives": [], "warnings": [], "meso_bands": []}
+
+    def test_default_keeps_the_whole_projection(self):
+        payload = self._payload(plan_end=_d(80))
+        clipped = progression.clip_payload_for_weeks(payload, 2, TODAY)
+        self.assertEqual(clipped["days"][-1]["date"], _d(80))
+
+    def test_cap_future_cuts_the_projection_to_the_window(self):
+        payload = self._payload(plan_end=_d(80))
+        clipped = progression.clip_payload_for_weeks(
+            payload, 2, TODAY, cap_future=True)
+        # Sunday of the 2nd whole week after the one containing today.
+        self.assertLess(clipped["days"][-1]["date"], _d(80))
+        self.assertGreater(clipped["days"][-1]["date"], TODAY)
+
+    def test_cap_future_never_extends_a_short_plan(self):
+        payload = self._payload(plan_end=_d(3))
+        clipped = progression.clip_payload_for_weeks(
+            payload, 8, TODAY, cap_future=True)
+        self.assertEqual(clipped["days"][-1]["date"], _d(3))
+
+    def test_cap_future_is_a_no_op_under_weeks_all(self):
+        payload = self._payload(plan_end=_d(80))
+        capped = progression.clip_payload_for_weeks(
+            payload, "all", TODAY, cap_future=True)
+        self.assertEqual(capped["days"][-1]["date"], _d(80))
+
+
 if __name__ == "__main__":
     unittest.main()

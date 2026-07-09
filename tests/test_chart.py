@@ -1,27 +1,19 @@
 """Pure-helper tests for the timeline chart (trainmate/chart.py).
 
-The rendering itself is exercised through `GET /api/timeline.png` in test_web.py;
-here we pin the label-fitting rules that keep mesocycle names from overprinting
-each other (DESIGN_progress_timeline.md §6.1/§7.2).
+Full rendering is exercised through `GET /api/timeline.png` in test_web.py; here we
+pin the label-fitting rules that keep mesocycle names from overprinting each other
+(DESIGN_progress_timeline.md §6.1/§7.2).
 """
 import unittest
 
-from trainmate.chart import (
-    _fit_label, _band_label_capacity, _MIN_BAND_LABEL_CHARS,
+import matplotlib
+matplotlib.use("Agg")
+
+from trainmate.chart import (  # noqa: E402  (must follow the backend selection)
+    _fit_label, _chars_per_axis, _span_dates, _MIN_BAND_LABEL_CHARS,
 )
 
 LONG_LABEL = "Specific Build II - Peak Specific Load & Fatigue Resistance"
-
-
-class _FakeFig:
-    dpi = 150
-
-    def get_figwidth(self):
-        return 10.0
-
-
-class _FakeAx:
-    figure = _FakeFig()
 
 
 class TestFitLabel(unittest.TestCase):
@@ -46,23 +38,113 @@ class TestFitLabel(unittest.TestCase):
         self.assertEqual(_fit_label(LONG_LABEL, -5), "")
 
 
-class TestBandLabelCapacity(unittest.TestCase):
-    def test_capacity_scales_with_the_span(self):
-        ax = _FakeAx()
-        full = _band_label_capacity(ax, 1.0)
-        half = _band_label_capacity(ax, 0.5)
-        self.assertGreater(full, 0)
-        self.assertAlmostEqual(half, full // 2, delta=1)
+class TestSpanDates(unittest.TestCase):
+    def test_valid_span_parses(self):
+        start, end = _span_dates({"start_date": "2026-05-01", "end_date": "2026-06-01"})
+        self.assertEqual(start.month, 5)
+        self.assertEqual(end.month, 6)
 
-    def test_a_hairline_span_yields_no_room(self):
-        self.assertLess(_band_label_capacity(_FakeAx(), 0.001), _MIN_BAND_LABEL_CHARS)
+    def test_unusable_spans_are_reported_as_none(self):
+        for bad in [{}, {"start_date": "nope", "end_date": "2026-06-01"},
+                    {"start_date": None, "end_date": None}]:
+            self.assertIsNone(_span_dates(bad), msg=repr(bad))
+
+
+class TestCharsPerAxis(unittest.TestCase):
+    def _ax(self, figwidth=10.0, dpi=150):
+        import matplotlib.pyplot as plt
+        fig, ax = plt.subplots(figsize=(figwidth, 4), dpi=dpi)
+        fig.canvas.draw()  # geometry must be final before measuring
+        self.addCleanup(plt.close, fig)
+        return ax
+
+    def test_measures_a_positive_character_budget(self):
+        self.assertGreater(_chars_per_axis(self._ax()), 0)
+
+    def test_a_wider_figure_holds_more_characters(self):
+        self.assertGreater(_chars_per_axis(self._ax(figwidth=20.0)),
+                           _chars_per_axis(self._ax(figwidth=10.0)))
+
+    def test_measures_the_axes_box_not_the_whole_figure(self):
+        # The axes are inset by margins, so the budget must be short of the naive
+        # full-figure estimate (10in * 150dpi / 8.75px-per-char ≈ 171).
+        self.assertLess(_chars_per_axis(self._ax()), 171)
 
     def test_a_three_week_band_on_a_five_month_axis_cannot_hold_a_full_name(self):
-        # The regression this guards: ~21/150 days of axis, a ~58-char name, and the
-        # old code centred all 58 characters regardless.
-        capacity = _band_label_capacity(_FakeAx(), 21 / 150)
+        # The regression this guards: the old code centred all 58 characters of a
+        # mesocycle name in a span a few dozen pixels wide.
+        capacity = int(21 / 150 * _chars_per_axis(self._ax()))
         self.assertLess(capacity, len(LONG_LABEL))
         self.assertLessEqual(len(_fit_label(LONG_LABEL, capacity)), capacity)
+
+
+class TestBandLabelsUseFinalGeometry(unittest.TestCase):
+    def test_axvspan_moves_the_xlim_the_labels_are_measured_against(self):
+        # Why `_draw_meso_band_labels` is a separate pass run after the spans: an
+        # axvspan reaching past the bars expands the x-autoscale, so an x-range read
+        # before the spans are drawn is not the range the figure is saved with.
+        import matplotlib.pyplot as plt
+        import matplotlib.dates as mdates
+        from datetime import datetime
+
+        fig, ax = plt.subplots()
+        self.addCleanup(plt.close, fig)
+        ax.bar([mdates.date2num(datetime(2026, 6, 1))], [100], width=2.5)
+        before = ax.get_xlim()
+        ax.axvspan(datetime(2026, 1, 1), datetime(2026, 12, 31), alpha=0.1)
+        after = ax.get_xlim()
+        self.assertGreater(after[1] - after[0], before[1] - before[0])
+
+
+class TestPlanEndMarkerStaysInsideTheWindow(unittest.TestCase):
+    """`--chart` may cap the projection short of plan end (§7.1); an axvline drawn
+    past the last day drags the x-axis out with it, leaving a wide empty margin."""
+
+    def _payload(self, plan_end, objectives=()):
+        days = [
+            {"date": f"2026-06-{d:02d}", "load": 10.0, "source": "actual",
+             "ctl": 40.0, "atl": 30.0, "tsb": 10.0}
+            for d in range(1, 21)
+        ]
+        return {"today": "2026-06-10", "plan_end": plan_end, "days": days,
+                "weeks": [], "objectives": list(objectives), "warnings": [],
+                "meso_bands": []}
+
+    def _top_axis_right_edge(self, payload):
+        import matplotlib.pyplot as plt
+        import matplotlib.dates as mdates
+        from trainmate import chart
+
+        captured = []
+        original = plt.subplots
+
+        def spy(*args, **kwargs):
+            fig, axes = original(*args, **kwargs)
+            captured.append(axes)
+            return fig, axes
+
+        plt.subplots = spy
+        try:
+            chart.render_timeline_png(payload)
+        finally:
+            plt.subplots = original
+        top = captured[0][0]
+        return mdates.num2date(top.get_xlim()[1]).date().isoformat()
+
+    def test_plan_end_past_the_window_does_not_stretch_the_axis(self):
+        edge = self._top_axis_right_edge(self._payload(plan_end="2026-09-30"))
+        self.assertLess(edge, "2026-07-15")
+
+    def test_plan_end_inside_the_window_is_still_marked(self):
+        payload = self._payload(plan_end="2026-06-18")
+        edge = self._top_axis_right_edge(payload)
+        self.assertLess(edge, "2026-07-15")  # in-window: no stretch either way
+
+    def test_an_objective_on_plan_end_suppresses_the_duplicate_marker(self):
+        # Both would be rotated labels on the same x. The objective wins.
+        objectives = [{"target_date": "2026-06-18", "title": "Race"}]
+        payload = self._payload(plan_end="2026-06-18", objectives=objectives)
+        self.assertLess(self._top_axis_right_edge(payload), "2026-07-15")
 
 
 if __name__ == "__main__":

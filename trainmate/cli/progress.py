@@ -93,10 +93,11 @@ def render_bar(
     n = _cells(actual, scale_max, width)
     bar = ["▓"] * n + ["░"] * (width - n)
     if plan:
-        # First cell *beyond* plan: filled-up-to-the-tick reads as on-plan (§7.1).
-        p = _cells(plan, scale_max, width)
-        if p < width:
-            bar[p] = "│"
+        # First cell *beyond* plan: filled-up-to-the-tick reads as on-plan. Clamped
+        # into the bar, because the week whose plan *is* scale_max maps to p == width
+        # and is precisely the week whose tick matters most (§7.1).
+        p = min(_cells(plan, scale_max, width), width - 1)
+        bar[p] = "│"
     return "".join(bar)
 
 
@@ -135,14 +136,15 @@ def format_form_line(
 
 
 def format_sparkline_line(
-    ctl_samples: List[Optional[float]], weeks_window: int,
+    ctl_samples: List[Optional[float]], weeks_shown: int,
     plan_end_proj: Optional[str] = None,
 ) -> str:
     """'CTL 8w ▁▂▂▃▃▅▅▆   plan end 07-31: CTL 61 TSB +1' — the CTL trend, one cell per
     displayed week, with the plan-end projection appended when the plan reaches no
-    objective (else the per-objective lines carry it)."""
+    objective (else the per-objective lines carry it). `weeks_shown` counts the cells
+    drawn, which on a short history is fewer than `--weeks` asked for (§7.1)."""
     spark = sparkline(ctl_samples)
-    line = f"CTL {weeks_window}w {spark}"
+    line = f"CTL {weeks_shown}w {spark}"
     if plan_end_proj:
         line += f"   {plan_end_proj}"
     return line
@@ -279,11 +281,12 @@ def table_rows(
 
 def format_weekly_table(
     weeks: List[Dict[str, Any]], today: str, plan_end: Optional[str],
-    has_inferred: bool, partial_note: Optional[str], hidden_future: int = 0,
+    has_inferred: bool, partial_note: Optional[str], hidden_weeks: int = 0,
 ) -> List[str]:
     """The WEEKLY LOAD table (§7.1): fixed-width rows plus a legend footer. `weeks`
-    must already be windowed by the caller; `hidden_future` is how many planned weeks
-    that window dropped, named in the legend so the truncation is never silent."""
+    must already be windowed by the caller; `hidden_weeks` counts every week that
+    window dropped — past *and* projected — named in the legend so the truncation is
+    never silent."""
     lines = table_rows(weeks, today, plan_end)
     if not lines:
         return []
@@ -293,8 +296,8 @@ def format_weekly_table(
     legend_parts.append("* in progress")
     if partial_note:
         legend_parts.append(partial_note)
-    if hidden_future:
-        legend_parts.append(f"+{hidden_future} more (--weeks all)")
+    if hidden_weeks:
+        legend_parts.append(f"+{hidden_weeks} more (--weeks all)")
     lines.append(gray(" · ".join(legend_parts)))
     return lines
 
@@ -321,12 +324,13 @@ def render_progress(
     future_all = [w for w in weeks if w["week_commencing"] > today]
     if weeks_window == "all":
         past_weeks, future_weeks = past_all, future_all
-        spark_weeks = len(past_weeks)
     else:
         past_weeks = past_all[-weeks_window:]
         future_weeks = future_all[:weeks_window]
-        spark_weeks = weeks_window
-    hidden_future = len(future_all) - len(future_weeks)
+    # Both sides: a default run over a long history hides far more past than future.
+    hidden_weeks = (len(past_all) - len(past_weeks)) + (
+        len(future_all) - len(future_weeks)
+    )
     display_weeks = past_weeks + future_weeks
 
     lines: List[str] = []
@@ -372,7 +376,9 @@ def render_progress(
                 plan_end, end_pt["ctl"], end_pt["tsb"]
             )
 
-    lines.append(format_sparkline_line(ctl_samples, spark_weeks, plan_end_proj))
+    # Label the cells actually drawn, not the window asked for: on a young DB
+    # `--weeks 8` over one week of history used to render 'CTL 8w ▁' (§7.1).
+    lines.append(format_sparkline_line(ctl_samples, len(past_weeks), plan_end_proj))
 
     if plan_end is None:
         lines += format_no_plan_banner(None)
@@ -405,7 +411,7 @@ def render_progress(
         if _to_date(plan_end).weekday() != 6:
             partial_note = f"plan ends {_short_date(plan_end)} ({_weekday(plan_end)})"
     lines += format_weekly_table(
-        display_weeks, today, plan_end, has_inferred, partial_note, hidden_future
+        display_weeks, today, plan_end, has_inferred, partial_note, hidden_weeks
     )
 
     # Footer warnings — everything except the plan-gap (rendered richly above).
@@ -472,6 +478,8 @@ def run_progress(args: argparse.Namespace) -> None:
 
     chart_arg = getattr(args, "chart", False)
     if chart_arg:
-        clipped = progression.clip_payload_for_weeks(payload, weeks_window, today)
+        clipped = progression.clip_payload_for_weeks(
+            payload, weeks_window, today, cap_future=True
+        )
         form_line = lines[0] if lines else ""
         _emit_chart(chart_arg, clipped, form_line)

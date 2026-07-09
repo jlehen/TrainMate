@@ -26,6 +26,8 @@ the *presentation*-side view of past **and future**)
 > `(planned)` tail buried the four rows carrying measured data.
 > (5) **`PMC_TSB_LAG_NOTE` moves behind `--explain`** (§7.1). A two-line caveat
 > printed on every invocation is a caveat nobody reads.
+> (6) **The `CTL Nw` sparkline label counts cells drawn**, not the window asked
+> for — rev 7 rendered `CTL 8w ▁` on a one-week-old DB (§7.1).
 > Chart-side (§7.2), the same pass fixed two drawing bugs the rev-7 label work
 > introduced: meso labels centred at full length in narrow spans overprinted
 > each other, and a plan generated *to* an objective drew two rotated labels on
@@ -762,7 +764,10 @@ objective line, wrapped inside the same width budget:
   cell per displayed week (default 8, follows `--weeks`), sampling CTL on the
   week's **last day**, min–max scaled over those weeks. Range-stretching can
   make a small climb look steep, accepted: the real numbers sit on the same
-  line (numbers-first — the sparkline is garnish).
+  line (numbers-first — the sparkline is garnish). The `Nw` label counts the
+  **cells drawn**, not the window requested — rev 7 printed `CTL 8w ▁` on a DB
+  with one week of history, which is precisely the young-DB state where a
+  reader is least able to spot the lie.
 - **Bar semantics — a bullet bar on one shared absolute scale.** A full
   12-cell bar is the **maximum weekly load among the displayed rows** (planned
   or actual, future weeks' planned included so the scale doesn't jump when
@@ -780,9 +785,12 @@ objective line, wrapped inside the same width budget:
     nothing. Ghost-filling them makes the series continuous across the seam
     *and* makes the scale honest, one change for both.
   - **Degenerate ticks.** An ungoverned week (`plan` None or 0) draws no tick.
-    A plan at or beyond full scale drops its tick rather than overflow the
-    bar. The tick sits on the first cell *beyond* plan, so a bar filled up to
-    the tick reads as on-plan and a tick inside the fill reads as overshoot.
+    The tick sits on the first cell *beyond* plan, so a bar filled up to the
+    tick reads as on-plan and a tick inside the fill reads as overshoot — but
+    it is **clamped into the bar**: the week whose planned load *is* `scale_max`
+    maps to cell `width`, and that is precisely the peak week whose tick a
+    reader most wants. Dropping it there (as the first rev-8 draft did) loses
+    the marker on exactly one row, which reads as a rendering bug.
   - In the mock above the scale anchor is the 360-planned week: 262→9 cells,
     214→7, 138→5.
 - **Mesocycle band rules, not a meso column** (rev 8). Real mesocycle names run
@@ -830,7 +838,17 @@ objective line, wrapped inside the same width budget:
   projection is the point of the feature, but the *table* is not where it
   earns its keep (the FORM/projection lines above it are, and they still run
   to plan end regardless of `--weeks`). Whatever the window drops is named in
-  the legend (`+4 more (--weeks all)`) — never a silent truncation.
+  the legend (`+4 more (--weeks all)`) — never a silent truncation, and the
+  count covers **both** sides: a default run over a long history hides far more
+  past weeks than projected ones.
+- **`--chart` frames the same span the table does.** `clip_payload_for_weeks`
+  takes `cap_future=True` from the CLI, so a PNG showing twenty projected weeks
+  can't sit under a legend reading `+12 more`. The web endpoint (§6) leaves it
+  off: an `<img>` has no accompanying table to agree with, and the whole
+  projection is what that panel is for (§7.3). One consequence, guarded by a
+  test: the chart's plan-end marker must be suppressed when the cap puts plan
+  end outside the drawn window, because an `axvline` past the last day drags
+  the x-axis out to meet it.
 - **`--explain`** appends the PMC footnotes (`PMC_TSB_LAG_NOTE`: why TSB won't
   equal the shown same-day CTL − ATL). Rev 7 printed it on every invocation
   where TSB was shown; a standing caveat that appears every time is one the eye
@@ -895,13 +913,19 @@ No bot-native command; both paths ride the CLI-as-subprocess parity model
     - *Meso band labels.* A 3-week band is a few dozen pixels wide; a real
       mesocycle name is ~50 characters. Centring the full name in each span
       overprinted every neighbour into a purple smear. Each label is now cut to
-      what its own span can hold (`_fit_label` / `_band_label_capacity` — an
-      estimate, since an exact answer needs a renderer and `tight_layout` moves
-      the axes afterwards), dropped entirely below `_MIN_BAND_LABEL_CHARS` (the
-      tint still draws), and consecutive labels alternate between two heights so
-      two that each just fit still cannot touch. `_draw_weekly_bars` reserves
-      headroom (`ylim` top = peak × 1.5) for that strip, and the bottom legend
-      anchors below it.
+      what its own span can hold (`_fit_label` / `_chars_per_axis`), dropped
+      entirely below `_MIN_BAND_LABEL_CHARS` (the tint still draws), and
+      consecutive labels alternate between two heights so two that each just fit
+      still cannot touch. `_draw_weekly_bars` reserves headroom (`ylim` top =
+      peak × 1.5) for that strip, and the bottom legend anchors below it.
+    - *Measure last.* Fitting is a **separate pass** (`_draw_meso_spans` then,
+      after `fig.canvas.draw()`, `_draw_meso_band_labels`) because both inputs
+      move: `axvspan` feeds the x-autoscaler, so a band reaching past the bars
+      widens the very x-range the fit divides by, and `tight_layout` then
+      resizes the axes box. Measuring before either runs fits labels to an axis
+      that no longer exists — they come out oversized and collide, which is the
+      failure the machinery exists to prevent. With the figure drawn, capacity
+      is read from the real axes extent rather than a fudge factor.
     - *Coincident vertical markers.* The plan-end marker is suppressed when an
       objective already marks that date. A plan generated **to** an objective is
       the common case, not an edge case — `workout generate --until-goal` makes
