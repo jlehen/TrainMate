@@ -1358,7 +1358,9 @@ stored per day on `athlete_metrics_cache` (`ctl`/`atl`/`tsb`) by every
 configuration). Leading-edge warm-up blanking (`pmc_warmup_cutoff_for`),
 the young-DB caveat (`pmc_data_caveat`), and the ramp rate (`pmc_ramp`)
 gate/derive display values. Consumers: coach prompts, `tm status`,
-`tm data show-metrics`.
+`tm data show-metrics`, and the `workout adapt` metrics-trajectory table — the
+last three render the triple through the shared `util.pmc_cells`, and derive the
+one warm-up cutoff through `cli/common.py:pmc_warmup_cutoff`.
 
 **Projection layer** (`trainmate/progression.py`, DESIGN_progress_timeline.md):
 this is PMC Phase 2, generalized to the full daily series. Past days read the

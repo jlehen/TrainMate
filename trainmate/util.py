@@ -3,7 +3,7 @@ import re
 import sys
 import textwrap
 from datetime import date
-from typing import Optional
+from typing import Optional, Tuple
 
 # ANSI escape codes for terminal coloring
 ANSI_ESCAPE = re.compile(r'(?:\033|\x1b)\[[0-9;]*m')
@@ -140,6 +140,31 @@ def color_ramp(ramp: float) -> str:
     if 5 <= ramp < 8:
         return yellow(s)
     return s
+
+
+def pmc_cells(
+    ctl: Optional[float], atl: Optional[float], tsb: Optional[float]
+) -> Tuple[str, str, str]:
+    """The CTL/ATL/TSB triple as display strings, shared by every user surface that
+    renders it (tm status, data show-metrics, the workout-adapt trajectory).
+
+    Feed it the output of garmin.pmc_display_values(), which already blanks warm-up rows.
+    A missing value renders "—" and never "0.0": a printed "TSB 0.0" reads as a real
+    neutral balance rather than as absent data (DESIGN_pmc_fitness_fatigue.md §6.1)."""
+    return (
+        f"{ctl:.1f}" if ctl is not None else "—",
+        f"{atl:.1f}" if atl is not None else "—",
+        color_tsb(tsb) if tsb is not None else "—",
+    )
+
+
+def pmc_warming_note(n_days: int, ctl_days: int) -> str:
+    """The §3.3(b) "PMC still warming" caveat, parameterized by τ_ctl so it never
+    hardcodes a 42 that a non-default config would make a lie."""
+    return (
+        f"PMC still warming: CTL based on {n_days} days of history (a {ctl_days}-day "
+        f"average needs ~{3 * ctl_days} days to settle); fitness/freshness may read low."
+    )
 
 
 def visible_len(s: str) -> int:
