@@ -6,8 +6,11 @@
 - When storing values in the database, always lean toward storing exact or
   very precise values, unless there are real savings into reducing the
   precision. Only round the values on display.
+- Avoid duplication. Do not duplicate function with business logic, instead
+  re-use the existing code if this doesn't add too much complexity.
 
-# VCS policy
+# Git policy
+- Never push without asking before.
 - Never commits without being explicitly asked by the user.
 - User review: summarize the changes that were made.
 - Commit message format:
