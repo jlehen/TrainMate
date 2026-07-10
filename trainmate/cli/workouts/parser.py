@@ -45,6 +45,11 @@ def add_workout_parser(subparsers, pull_bypass_parser, llm_debug_parser, plan_da
         "--removed", action="store_true",
         help="Include soft-removed workouts (e.g. to find their ID for restoring)"
     )
+    w_list.add_argument(
+        "--verbose", "-v", action="store_true",
+        help="Show full detail per workout (description, lifecycle, adapt notes) "
+             "instead of one line each"
+    )
     
     # workout compare
     w_cmp = workout_subparsers.add_parser(

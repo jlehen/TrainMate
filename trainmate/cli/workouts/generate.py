@@ -397,6 +397,9 @@ def run_workout_list(args: argparse.Namespace) -> None:
             f"ID: {w['id']} | {cyan(fmt_date(w['date']))} | {magenta(w['sport_type'].upper())} | "
             f"{bold(w['title'])}{mod_marker}{sync_marker}{rem_marker}{src_marker}{duration_str}{tss_str}{rpe_str}"
         )
+        # Default listing is one line per workout; -v adds the full per-workout detail.
+        if not getattr(args, "verbose", False):
+            continue
         # Lifecycle timestamps: when the session first entered the plan and, if ever
         # eased, when the most recent `workout adapt` run touched it. Both NULL on
         # rows predating these columns, so the line is omitted when neither is known.
