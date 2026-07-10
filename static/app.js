@@ -296,10 +296,13 @@ function renderStrategyInputs(macrocycle) {
 
     const eventItems = events.length
         ? events.map(e => {
-            // New snapshots carry constraint fields; legacy ones carry the old
-            // event_type/impact_description — read whichever is present.
+            // Snapshots are historical: tolerate the current `rest` flag, the pre-rev-6
+            // binding/sport/type, and the original event_type/impact_description.
             const label = e.type || e.event_type || "";
-            const tags = [label, e.binding, e.sport ? `[${e.sport}]` : ""]
+            const enforcement = "rest" in e
+                ? (e.rest ? "no training" : "advisory")
+                : (e.binding || "");
+            const tags = [label, enforcement, e.sport ? `[${e.sport}]` : ""]
                 .filter(Boolean).map(escapeHtml).join(" ");
             const detail = e.description || e.impact_description;
             return `<li>`
@@ -521,9 +524,9 @@ window.deleteObjective = async function(id) {
 };
 
 // --- CONSTRAINTS (DESIGN_constraints.md — supersedes life events) ---
-// This form still speaks the old event_type/impact_description vocabulary in the UI;
-// it's translated to the constraint shape (type/binding/sport/description) at the
-// API boundary below.
+// A constraint is advisory prose the coach works around; the one toggle is `rest`, a
+// deterministic full no-training window (rev 6). The `type`/`binding`/`sport` fields are
+// gone.
 
 async function fetchEvents() {
     try {
@@ -541,7 +544,7 @@ async function fetchEvents() {
             item.className = "list-item";
             item.innerHTML = `
                 <div class="item-info">
-                    <span class="item-title">${escapeHtml(e.title)} (${escapeHtml(e.type || e.binding)})</span>
+                    <span class="item-title">${escapeHtml(e.title)} (${e.rest ? "no training" : "advisory"})</span>
                     <span class="item-meta">${e.start_date} to ${e.end_date}${e.description ? " · " + escapeHtml(e.description) : ""}</span>
                 </div>
                 <div class="item-actions">
@@ -559,16 +562,15 @@ window.editEvent = function(id) {
     if (!ev) return;
     openModal("Edit Constraint", [
         { id: "title", label: "Title", value: ev.title, required: true },
-        { id: "type", label: "Type", type: "select", value: ev.type, options: [
-            { value: "vacation", label: "Vacation" },
-            { value: "business_trip", label: "Business Trip" },
-            { value: "party", label: "Party/Social" },
-            { value: "other", label: "Other" },
+        { id: "rest", label: "Enforcement", type: "select", value: ev.rest ? "1" : "0", options: [
+            { value: "0", label: "Advisory (coach works around it)" },
+            { value: "1", label: "No training (deterministic rest)" },
         ]},
         { id: "start_date", label: "Start", type: "date", value: ev.start_date, required: true },
         { id: "end_date", label: "End", type: "date", value: ev.end_date, required: true },
-        { id: "description", label: "Impact on training", type: "textarea", value: ev.description || "" },
+        { id: "description", label: "Details for the coach", type: "textarea", value: ev.description || "" },
     ], async (vals) => {
+        vals.rest = vals.rest === "1" ? 1 : 0;
         const res = await fetch(`${API_BASE}/api/constraints/${id}`, {
             method: "PUT", headers: { "Content-Type": "application/json" },
             body: JSON.stringify(vals),
@@ -1269,15 +1271,13 @@ document.getElementById("form-add-event").addEventListener("submit", async (e) =
     const title = document.getElementById("event-title").value;
     const start_date = document.getElementById("event-start").value;
     const end_date = document.getElementById("event-end").value;
-    const type = document.getElementById("event-type").value;
+    const rest = document.getElementById("event-rest").checked ? 1 : 0;
     const description = document.getElementById("event-desc").value;
     logConsole(`Logging constraint: ${title}...`, "system");
     try {
-        // Default binding 'soft' — this form has no bindingness selector; a deliberate
-        // 'hard' block is authored via `constraint add --hard` or `constraint edit`.
         const res = await fetch(`${API_BASE}/api/constraints`, {
             method: "POST", headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ title, start_date, end_date, type, description, binding: "soft" }),
+            body: JSON.stringify({ title, start_date, end_date, rest, description }),
         });
         if (res.ok) { logConsole(`Logged constraint '${title}'!`); document.getElementById("form-add-event").reset(); fetchEvents(); }
         else { const data = await res.json(); logConsole(`Log event failed: ${data.error}`, "error"); }

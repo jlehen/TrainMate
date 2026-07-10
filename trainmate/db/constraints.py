@@ -8,15 +8,14 @@ class ConstraintsMixin:
 
     A constraint is anything the athlete asks the coach to work around, at any
     horizon. Deterministic code reads `start_date`/`end_date` (window queries),
-    `binding` (hard-rest pre-pass), `sport` (per-sport substitution) and `replan`
-    (plan snapshot/hash); `title`/`type`/`description` are prose for display and the
-    LLM. `type` is an opaque user-vocabulary label — never branched on.
+    `rest` (the one enforced edge — a full no-training window, §6) and `replan`
+    (plan snapshot/hash); `title`/`description` are advisory prose for display and
+    the LLM.
     """
 
     def add_constraint(
         self, title: str, start_date: str, end_date: str,
-        binding: str = "soft", sport: Optional[str] = None,
-        type: Optional[str] = None, description: Optional[str] = None,
+        rest: int = 0, description: Optional[str] = None,
         replan: int = 0, source: str = "manual"
     ) -> int:
         """Adds a new constraint and returns its ID."""
@@ -25,10 +24,10 @@ class ConstraintsMixin:
             cursor = conn.cursor()
             cursor.execute("""
                 INSERT INTO constraints
-                    (start_date, end_date, binding, sport, type, title,
+                    (start_date, end_date, rest, title,
                      description, replan, source, created)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, (start_date, end_date, binding, sport, type, title,
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """, (start_date, end_date, int(rest), title,
                   description, int(replan), source, created))
             conn.commit()
             return int(cursor.lastrowid)
@@ -91,23 +90,3 @@ class ConstraintsMixin:
                 "DELETE FROM constraints WHERE id = ?", (constraint_id,)
             )
             conn.commit()
-
-    def list_constraint_types(self) -> List[dict]:
-        """Distinct `type` labels in use with a row count, most-recently-seen first.
-
-        Surfaced by `constraint add`'s interactive prompt to discourage vocabulary
-        drift ('trip' vs 'travel'), mirroring `context list-metrics`."""
-        with self._get_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute(
-                """
-                SELECT type,
-                       COUNT(*)  AS count,
-                       MAX(start_date) AS last_date
-                FROM constraints
-                WHERE type IS NOT NULL AND type != ''
-                GROUP BY type
-                ORDER BY last_date DESC, type ASC
-                """
-            )
-            return [dict(row) for row in cursor.fetchall()]

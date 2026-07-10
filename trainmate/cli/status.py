@@ -259,13 +259,11 @@ def run_status(
         if not constraints:
             print("- None")
         for c in constraints:
-            ctype = c.get('type')
-            type_str = f" ({magenta(ctype)})" if ctype else ""
-            sport_str = f" [{c['sport']}]" if c.get('sport') else ""
+            kind = "no training" if c.get('rest') else "advisory"
             print(
-                f"- ID: {c['id']} | {yellow(c['title'])}{type_str}: "
+                f"- ID: {c['id']} | {yellow(c['title'])}: "
                 f"{cyan(c['start_date'])} to {cyan(c['end_date'])} "
-                f"| {c.get('binding', 'soft')}{sport_str}"
+                f"| {kind}"
                 + (" | plan-shaping" if c.get('replan') else "")
             )
             if c.get('description'):

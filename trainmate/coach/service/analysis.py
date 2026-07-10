@@ -242,7 +242,6 @@ class DataAnalysisMixin:
                 continue  # missing dates or no overlap with this week
             out.append({
                 "title": c.get('title'),
-                "type": c.get('type'),
                 "impact": c.get('description') or "",
                 "coverage": "full" if (start <= ws and end >= we) else "partial",
             })

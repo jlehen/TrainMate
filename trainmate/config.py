@@ -136,11 +136,13 @@ class Config:
         return float(self.get("coach", {}).get("threshold_replan_pct", 5.0))
 
     @property
-    def replan_hard_span_days(self) -> int:
-        """Hard-window floor for the §7 replan proposal: a `hard` constraint spanning at
+    def replan_rest_span_days(self) -> int:
+        """Rest-window floor for the §7 replan proposal: a `rest` constraint spanning at
         least this many days is intrinsically plan-shaping regardless of displaced load
-        (default 3)."""
-        return int(self.get("coach", {}).get("replan_hard_span_days", 3))
+        (default 3). Falls back to the pre-rev-6 name `replan_hard_span_days`."""
+        coach = self.get("coach", {})
+        return int(coach.get("replan_rest_span_days",
+                             coach.get("replan_hard_span_days", 3)))
 
     @property
     def learning_confidence_thresholds(self) -> dict[str, int]:

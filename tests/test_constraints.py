@@ -1,6 +1,7 @@
 """Tests for the unified `constraint` directive object (DESIGN_constraints.md):
-DB windowing, the deterministic hard-rest pre-pass shared by generate/adapt, the §7
-plan-magnitude heuristic, and §8 message classification into a constraint row.
+DB windowing, the deterministic rest-window pre-pass shared by generate/adapt, the §7
+plan-magnitude heuristic, §8 message classification into a constraint row, and the rev-6
+schema migration that collapsed hard/soft × sport × type to a single `rest` flag.
 """
 import os
 import unittest
@@ -54,73 +55,65 @@ class TestConstraintDB(unittest.TestCase):
         # No bound: all rows, oldest first.
         self.assertEqual([c["id"] for c in test_db.get_constraints()], [a, b])
 
-    def test_list_constraint_types(self):
-        test_db.add_constraint(title="x", start_date="2026-07-01", end_date="2026-07-01",
-                               type="trip")
-        test_db.add_constraint(title="y", start_date="2026-07-02", end_date="2026-07-02",
-                               type="trip")
-        test_db.add_constraint(title="z", start_date="2026-07-03", end_date="2026-07-03")
-        types = {t["type"]: t["count"] for t in test_db.list_constraint_types()}
-        self.assertEqual(types, {"trip": 2})  # NULL type excluded
+    def test_add_defaults_to_advisory(self):
+        cid = test_db.add_constraint(title="x", start_date="2026-07-01", end_date="2026-07-01")
+        self.assertEqual(test_db.get_constraint(cid)["rest"], 0)
+
+    def test_add_rest_flag_persists(self):
+        cid = test_db.add_constraint(title="surgery", start_date="2026-07-01",
+                                     end_date="2026-07-03", rest=1)
+        self.assertEqual(test_db.get_constraint(cid)["rest"], 1)
 
 
-class TestHardConstraintPrePass(unittest.TestCase):
-    def _c(self, binding, sport=None, start="2026-07-02", end="2026-07-02", title="c"):
-        return {"binding": binding, "sport": sport, "start_date": start,
-                "end_date": end, "title": title}
+class TestRestWindowPrePass(unittest.TestCase):
+    def _c(self, rest=0, start="2026-07-02", end="2026-07-02", title="c"):
+        return {"rest": rest, "start_date": start, "end_date": end, "title": title}
 
-    def test_generate_hard_no_sport_forces_rest(self):
+    def test_generate_rest_forces_rest(self):
         workouts = [
             {"date": "2026-07-02", "sport_type": "running", "title": "Tempo",
              "duration_minutes": 60, "rpe": 7, "tss": 80},
             {"date": "2026-07-03", "sport_type": "running", "title": "Easy",
              "duration_minutes": 40, "rpe": 3, "tss": 30},
         ]
-        out = coach_service._enforce_hard_constraints_generate(
-            workouts, [self._c("hard")]
+        out = coach_service._enforce_rest_windows_generate(
+            workouts, [self._c(rest=1)]
         )
         by_date = {w["date"]: w for w in out}
         self.assertEqual(by_date["2026-07-02"]["sport_type"], "rest")
         # Other dates untouched.
         self.assertEqual(by_date["2026-07-03"]["sport_type"], "running")
 
-    def test_generate_hard_sport_is_advisory_not_enforced(self):
-        """A `hard` constraint scoped to a sport is advisory — rendered into the prompt
-        as a hard instruction, but left to the LLM to honor (§5/§6 rev3 narrowing). Only
-        a blanket `hard` (no-sport) window is deterministically enforced."""
+    def test_generate_advisory_is_untouched(self):
+        """An advisory constraint (rest=0) — which is every non-rest directive, including
+        the old hard+sport case — is left entirely to the LLM; the pre-pass never rewrites
+        the generated list for it (§5/§6)."""
         workouts = [
             {"date": "2026-07-02", "sport_type": "running", "title": "Run"},
             {"date": "2026-07-02", "sport_type": "strength_training", "title": "Lift"},
         ]
-        out = coach_service._enforce_hard_constraints_generate(
-            workouts, [self._c("hard", sport="running")]
+        out = coach_service._enforce_rest_windows_generate(
+            workouts, [self._c(rest=0)]
         )
         self.assertEqual(out, workouts)
 
-    def test_generate_soft_is_untouched(self):
-        workouts = [{"date": "2026-07-02", "sport_type": "running", "title": "Run"}]
-        out = coach_service._enforce_hard_constraints_generate(
-            workouts, [self._c("soft")]
-        )
-        self.assertEqual(out, workouts)
-
-    def test_adapt_hard_no_sport_eases_planned_session_to_rest(self):
+    def test_adapt_rest_eases_planned_session_to_rest(self):
         planned = [{"date": "2026-07-02", "sport_type": "running", "title": "Tempo"}]
-        # LLM proposed nothing; the pre-pass must still add a rest for the hard date.
-        out = coach_service._enforce_hard_constraints_adapt(
-            [], planned, [self._c("hard")], completed_keys=set(), from_date="2026-07-02"
+        # LLM proposed nothing; the pre-pass must still add a rest for the rest date.
+        out = coach_service._enforce_rest_windows_adapt(
+            [], planned, [self._c(rest=1)], completed_keys=set(), from_date="2026-07-02"
         )
         self.assertEqual(len(out), 1)
         self.assertEqual(out[0]["sport_type"], "rest")
         self.assertIn("change_reason", out[0])
 
-    def test_adapt_hard_sport_is_advisory_not_enforced(self):
-        """A `hard` constraint scoped to a sport does not touch the LLM's proposal —
-        only a blanket hard (no-sport) window is eased to rest deterministically (§5)."""
+    def test_adapt_advisory_is_untouched(self):
+        """An advisory constraint does not touch the LLM's proposal — only a `rest`
+        window is eased to rest deterministically (§5)."""
         planned = [{"date": "2026-07-02", "sport_type": "running", "title": "Tempo"}]
         proposed = [{"date": "2026-07-02", "sport_type": "running", "title": "Easy Run"}]
-        out = coach_service._enforce_hard_constraints_adapt(
-            proposed, planned, [self._c("hard", sport="running")],
+        out = coach_service._enforce_rest_windows_adapt(
+            proposed, planned, [self._c(rest=0)],
             completed_keys=set(), from_date="2026-07-02"
         )
         self.assertEqual(out, proposed)
@@ -132,8 +125,8 @@ class TestHardConstraintPrePass(unittest.TestCase):
             {"date": "2026-07-02", "sport_type": "running", "title": "Done"},   # completed
         ]
         completed = {("2026-07-02", canonical_sport("running"))}
-        out = coach_service._enforce_hard_constraints_adapt(
-            [], planned, [self._c("hard", start="2026-07-01", end="2026-07-05")],
+        out = coach_service._enforce_rest_windows_adapt(
+            [], planned, [self._c(rest=1, start="2026-07-01", end="2026-07-05")],
             completed_keys=completed, from_date="2026-07-02"
         )
         self.assertEqual(out, [])  # nothing to ease
@@ -141,7 +134,7 @@ class TestHardConstraintPrePass(unittest.TestCase):
 
 class TestConstraintPlanImpact(unittest.TestCase):
     """The concrete §7 magnitude heuristic: relative displaced-load trigger (vs the
-    plan's trailing weekly planned load) OR a hard-window floor — either firing proposes
+    plan's trailing weekly planned load) OR a rest-window floor — either firing proposes
     a replan. No per-session "importance" term (see DESIGN_constraints.md §7/§11)."""
 
     @classmethod
@@ -154,7 +147,7 @@ class TestConstraintPlanImpact(unittest.TestCase):
     def setUp(self):
         clear_all_tables(test_db)
 
-    def test_displaced_load_trigger_fires_even_when_soft(self):
+    def test_displaced_load_trigger_fires_even_when_advisory(self):
         # Trailing week (2026-07-25..2026-07-31, the 7 days before the constraint
         # starts) carries 200 TSS of planned load.
         test_db.save_workout(date="2026-07-28", sport_type="running",
@@ -163,7 +156,7 @@ class TestConstraintPlanImpact(unittest.TestCase):
         # over the default 50% threshold.
         test_db.save_workout(date="2026-08-02", sport_type="running",
                              title="Tempo", description="", tss=120)
-        c = {"binding": "soft", "sport": None, "start_date": "2026-08-01",
+        c = {"rest": 0, "start_date": "2026-08-01",
              "end_date": "2026-08-03", "title": "big trip"}
         impact = coach_service.constraint_plan_impact(c)
         self.assertGreaterEqual(impact["displaced_pct"], 50)
@@ -174,30 +167,30 @@ class TestConstraintPlanImpact(unittest.TestCase):
                              title="Long Run", description="", tss=200)
         test_db.save_workout(date="2026-08-01", sport_type="running",
                              title="Easy", description="", tss=20)  # 10% of the trailing week
-        c = {"binding": "soft", "sport": None, "start_date": "2026-08-01",
+        c = {"rest": 0, "start_date": "2026-08-01",
              "end_date": "2026-08-01", "title": "no run"}
         impact = coach_service.constraint_plan_impact(c)
         self.assertLess(impact["displaced_pct"], 50)
         self.assertFalse(coach_service.constraint_is_plan_shaping(c, impact))
 
-    def test_hard_window_floor_fires_regardless_of_load(self):
-        # No workouts at all — zero displaced load — but a 3-day hard window still
-        # trips the independent hard-window floor (default replan_hard_span_days=3).
-        c = {"binding": "hard", "sport": None, "start_date": "2026-08-01",
+    def test_rest_window_floor_fires_regardless_of_load(self):
+        # No workouts at all — zero displaced load — but a 3-day rest window still
+        # trips the independent rest-window floor (default replan_rest_span_days=3).
+        c = {"rest": 1, "start_date": "2026-08-01",
              "end_date": "2026-08-03", "title": "injury"}
         impact = coach_service.constraint_plan_impact(c)
         self.assertEqual(impact["displaced_pct"], 0.0)
         self.assertEqual(impact["days"], 3)
         self.assertTrue(coach_service.constraint_is_plan_shaping(c, impact))
 
-    def test_short_hard_window_below_floor_is_not_plan_shaping(self):
-        c = {"binding": "hard", "sport": None, "start_date": "2026-08-01",
+    def test_short_rest_window_below_floor_is_not_plan_shaping(self):
+        c = {"rest": 1, "start_date": "2026-08-01",
              "end_date": "2026-08-01", "title": "no run"}
         impact = coach_service.constraint_plan_impact(c)
         self.assertFalse(coach_service.constraint_is_plan_shaping(c, impact))
 
-    def test_single_soft_day_with_no_history_is_not_plan_shaping(self):
-        c = {"binding": "soft", "sport": None, "start_date": "2026-08-01",
+    def test_single_advisory_day_with_no_history_is_not_plan_shaping(self):
+        c = {"rest": 0, "start_date": "2026-08-01",
              "end_date": "2026-08-01", "title": "no run"}
         impact = coach_service.constraint_plan_impact(c)
         self.assertFalse(coach_service.constraint_is_plan_shaping(c, impact))
@@ -229,8 +222,7 @@ class TestMessageCapture(unittest.TestCase):
             "adapted_workouts": [],
             "new_constraints": [{
                 "title": "can't train Thursday", "start_date": "2026-07-09",
-                "end_date": "2026-07-09", "sport": None, "type": None,
-                "description": None,
+                "end_date": "2026-07-09", "description": None,
             }],
         }
         test_db.save_metric_cache("2026-07-02", 56, 42, 60, 35, 14.0, 8.0, 1.0)
@@ -260,19 +252,20 @@ class TestMessageCapture(unittest.TestCase):
         _reason, _proposed, new_constraints = coach_service.workout_adapt("2026-07-02")
         self.assertEqual(new_constraints, [])
 
-    def test_capture_creates_row_and_always_forces_soft(self):
-        """Trust boundary (§8): the LLM can never mark an extracted constraint `hard` —
-        capture_message_constraint ignores any `binding` the candidate might carry."""
+    def test_capture_creates_row_and_always_advisory(self):
+        """Trust boundary (§8): the LLM can never mark an extracted constraint as a
+        deterministic rest window — capture_message_constraint ignores any `rest` the
+        candidate might carry and always writes rest=0."""
         candidate = {
             "title": "can't train Thursday", "start_date": "2026-07-09",
-            "end_date": "2026-07-09", "binding": "hard",  # must be ignored
+            "end_date": "2026-07-09", "rest": 1,  # must be ignored
         }
         cid = coach_service.capture_message_constraint(candidate, "2026-07-02")
         self.assertIsNotNone(cid)
         rows = test_db.get_constraints()
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0]["source"], "message")
-        self.assertEqual(rows[0]["binding"], "soft")
+        self.assertEqual(rows[0]["rest"], 0)
         self.assertEqual(rows[0]["replan"], 0)  # auto-capture never escalates
 
     def test_capture_defaults_dates_to_default_date(self):
@@ -286,6 +279,79 @@ class TestMessageCapture(unittest.TestCase):
         cid = coach_service.capture_message_constraint({"title": "  "}, "2026-07-02")
         self.assertIsNone(cid)
         self.assertEqual(test_db.get_constraints(), [])
+
+
+class TestConstraintMigration(unittest.TestCase):
+    """The rev-6 schema migration (db/base.py): a pre-rev-6 constraints table
+    (binding/sport/type, no `rest`) is upgraded in place — `hard` + no sport becomes
+    rest=1, every other row becomes advisory (rest=0), and the three legacy columns are
+    dropped. Idempotent DDL, so it runs automatically in _init_db."""
+
+    @classmethod
+    def setUpClass(cls):
+        global test_db
+        test_db = Database(db_path=TEST_DB_PATH)
+        trainmate.db.db = test_db
+        trainmate.coach.service.db = test_db
+
+    def setUp(self):
+        clear_all_tables(test_db)
+
+    def _install_legacy_table(self, rows):
+        with test_db._get_connection() as conn:
+            cur = conn.cursor()
+            cur.execute("DROP TABLE IF EXISTS constraints")
+            cur.execute("""
+                CREATE TABLE constraints (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    start_date TEXT NOT NULL, end_date TEXT NOT NULL,
+                    binding TEXT NOT NULL, sport TEXT, type TEXT,
+                    title TEXT NOT NULL, description TEXT,
+                    replan INTEGER NOT NULL DEFAULT 0, source TEXT, created TEXT
+                )
+            """)
+            for r in rows:
+                cur.execute(
+                    "INSERT INTO constraints "
+                    "(start_date, end_date, binding, sport, type, title, replan) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    r
+                )
+            conn.commit()
+
+    def test_migration_maps_binding_sport_to_rest_and_drops_columns(self):
+        # (start, end, binding, sport, type, title, replan)
+        self._install_legacy_table([
+            ("2026-08-01", "2026-08-03", "hard", None, "injury", "broke ankle", 1),
+            ("2026-08-05", "2026-08-05", "hard", "running", "trip", "no run today", 0),
+            ("2026-08-06", "2026-08-06", "soft", None, None, "easy week", 0),
+        ])
+        # Re-run init (idempotent) to apply the rev-6 migration on the legacy table.
+        test_db._init_db()
+
+        rows = {r["title"]: r for r in test_db.get_constraints()}
+        self.assertEqual(rows["broke ankle"]["rest"], 1)     # hard + no sport -> rest
+        self.assertEqual(rows["no run today"]["rest"], 0)    # hard + sport   -> advisory
+        self.assertEqual(rows["easy week"]["rest"], 0)       # soft           -> advisory
+        # Other fields survive untouched.
+        self.assertEqual(rows["broke ankle"]["replan"], 1)
+
+        with test_db._get_connection() as conn:
+            cols = [r["name"] for r in
+                    conn.execute("PRAGMA table_info(constraints)").fetchall()]
+        self.assertIn("rest", cols)
+        for gone in ("binding", "sport", "type"):
+            self.assertNotIn(gone, cols)
+
+    def test_migration_is_idempotent(self):
+        self._install_legacy_table([
+            ("2026-08-01", "2026-08-03", "hard", None, None, "layoff", 0),
+        ])
+        test_db._init_db()
+        test_db._init_db()  # second pass must be a no-op, not an error
+        rows = test_db.get_constraints()
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["rest"], 1)
 
 
 if __name__ == "__main__":

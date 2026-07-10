@@ -102,11 +102,11 @@ class TestCliGoals(unittest.TestCase):
         self.assertEqual(exit_code, 0)
         self.assertIn("=== ATHLETE CONSTRAINTS ===", stdout)
 
-        # Quick capture: positional title, flag-free (no prompts), soft by default.
+        # Quick capture: positional title, flag-free (no prompts), advisory by default.
         exit_code, stdout, stderr = self.run_cli([
             "constraint", "add", "Ibiza Vacation",
             "--start", "2026-07-01", "--end", "2026-07-08",
-            "--type", "vacation", "--desc", "50% intensity",
+            "--desc", "50% intensity",
         ])
         self.assertEqual(exit_code, 0)
         self.assertIn("Added constraint [1]: Ibiza Vacation", stdout)
@@ -114,7 +114,7 @@ class TestCliGoals(unittest.TestCase):
         exit_code, stdout, stderr = self.run_cli(["cons", "list", "--all"])
         self.assertEqual(exit_code, 0)
         self.assertIn("Ibiza Vacation", stdout)
-        self.assertIn("vacation", stdout)
+        self.assertIn("advisory", stdout)
         self.assertIn("ID: 1", stdout)
         self.assertNotIn("Details:", stdout)
 
@@ -186,7 +186,7 @@ class TestCliGoals(unittest.TestCase):
         self.run_cli([
             "constraint", "add", "Summer Vacation",
             "--start", "2026-08-01", "--end", "2026-08-15",
-            "--type", "vacation", "--desc", "No workouts",
+            "--desc", "No workouts",
         ])
 
         constraints = test_db.get_constraints()
@@ -196,7 +196,7 @@ class TestCliGoals(unittest.TestCase):
             "constraint", "edit", str(c_id),
             "--title", "Summer Vacation Adapted",
             "--start", "2026-08-02", "--end", "2026-08-16",
-            "--type", "trip", "--desc", "Light running only", "--hard",
+            "--desc", "Light running only", "--rest",
         ])
         self.assertEqual(exit_code, 0)
         self.assertIn(f"Constraint [{c_id}] updated.", stdout)
@@ -205,8 +205,7 @@ class TestCliGoals(unittest.TestCase):
         self.assertEqual(edited["title"], "Summer Vacation Adapted")
         self.assertEqual(edited["start_date"], "2026-08-02")
         self.assertEqual(edited["end_date"], "2026-08-16")
-        self.assertEqual(edited["type"], "trip")
-        self.assertEqual(edited["binding"], "hard")
+        self.assertEqual(edited["rest"], 1)
         self.assertEqual(edited["description"], "Light running only")
 
         exit_code, stdout, stderr = self.run_cli(

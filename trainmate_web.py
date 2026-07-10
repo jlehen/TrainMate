@@ -156,17 +156,11 @@ def manage_constraints() -> Any:
         if not title or not start or not end:
             return jsonify({"error": "Missing title, start_date, or end_date"}), 400
 
-        binding = data.get("binding") or "soft"
-        if binding not in ("hard", "soft"):
-            return jsonify({"error": "binding must be 'hard' or 'soft'"}), 400
-
         constraint_id = db.add_constraint(
             title=title,
             start_date=start,
             end_date=end,
-            binding=binding,
-            sport=data.get("sport"),
-            type=data.get("type"),
+            rest=int(bool(data.get("rest", False))),
             description=data.get("description"),
             replan=int(bool(data.get("replan", False))),
             source="manual",

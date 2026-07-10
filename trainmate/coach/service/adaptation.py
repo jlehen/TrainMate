@@ -226,10 +226,10 @@ class AdaptationMixin:
         # counts as a change and is kept.
         adapted = [w for w in adapted if self._adapt_is_change(w)]
 
-        # Deterministic hard-constraint pre-pass (§6): force rest onto any future,
-        # not-yet-completed planned session that falls under a hard constraint, so the
+        # Deterministic rest-window pre-pass (§6): force rest onto any future,
+        # not-yet-completed planned session that falls under a `rest` constraint, so the
         # guarantee holds regardless of what the model proposed.
-        adapted = self._enforce_hard_constraints_adapt(
+        adapted = self._enforce_rest_windows_adapt(
             adapted, planned_workouts, constraints, completed_keys, target_date_str
         )
 

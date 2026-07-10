@@ -80,7 +80,7 @@ class TestCliStatus(unittest.TestCase):
 
         test_db.add_constraint(
             title="Ibiza Trip", start_date="2026-07-01", end_date="2026-08-08",
-            binding="soft", type="vacation", description="Rest weeks",
+            description="Rest weeks",
         )
 
         goals = test_db.get_objectives()
@@ -97,7 +97,7 @@ class TestCliStatus(unittest.TestCase):
         )
         self.assertIn("Active Constraints:", stdout_v)
         self.assertIn(
-            f"- ID: {e_id} | Ibiza Trip (vacation): 2026-07-01 to 2026-08-08",
+            f"- ID: {e_id} | Ibiza Trip: 2026-07-01 to 2026-08-08 | advisory",
             stdout_v,
         )
         self.assertIn("  Details:\n    Rest weeks", stdout_v)

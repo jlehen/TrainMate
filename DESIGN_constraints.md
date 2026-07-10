@@ -1,8 +1,30 @@
 # Design: Unified Directives (`constraint` command)
 
-**Status:** Draft (rev 5) · **Date:** 2026-07-02 · **Supersedes:** the `lifeevent`
+**Status:** Draft (rev 6) · **Date:** 2026-07-10 · **Supersedes:** the `lifeevent`
 command · **Companion to:** `DESIGN_context_authoring.md`,
 `DESIGN_backward_evaluation.md`
+
+*Rev 6 (2026-07-10, after use): the authoring surface is collapsed to a single
+deterministic flag. `binding` (`hard`/`soft`), `sport`, and `type` are removed;
+a constraint is now **advisory prose the coach works around**, plus one boolean
+**`rest`** — a full no-training window whose dates skip the LLM and are forced to
+rest. This is the one edge rev 5 already carved out (`hard` + no sport); everything
+else it modelled had leaked at the seams. The `binding` axis only ever *did*
+anything in one of its four `hard`/`soft` × sport/no-sport quadrants (blanket
+`hard`); `sport`'s only mechanical role was to **disable** that deterministic path
+(`hard` + sport was advisory — the code delegated the substitution to the LLM
+already, §6); and `type` was an opaque label **no code ever branched on** (§5,
+Non-Goals). All three read as prohibitions in the help and pushed classification
+back onto the author — the exact friction §1 set out to remove. So: which sport,
+"only 45 min", injury nuance are now prose the LLM interprets; `--rest` is the only
+structured knob. Schema drops `binding`/`sport`/`type`, adds `rest`; the migration
+is pure idempotent DDL (`hard` + no sport → `rest = 1`, everything else advisory)
+that runs in `_init_db`, with a one-off `constraints_hash` backfill script
+(`scripts/migrate_constraints_drop_binding.py`) so existing plans aren't spuriously
+invalidated (§7). The §7 hard-window floor becomes a rest-window floor
+(`replan_rest_span_days`); message extraction (§8) drops the `sport`/`type` fields
+and can only ever create advisory (`rest = 0`) rows. Sections below still read in
+the old vocabulary where not corrected inline; this preamble governs on conflict.*
 
 *Rev 5 (2026-07-02, after implementation): migration bindingness corrected to
 **`soft`**, reversing the rev 4 decision. A life event was never code-enforced

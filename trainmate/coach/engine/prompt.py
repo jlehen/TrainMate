@@ -101,19 +101,18 @@ class PromptBuildMixin:
     @staticmethod
     def _render_constraints(constraints: List[Constraint]) -> str:
         """Renders active directives for the prompt, one per line (DESIGN_constraints.md
-        §6): `title | dates | binding | sport | type | description`. A blanket `hard`
-        (no sport) directive is already enforced deterministically before the LLM runs
-        (hard-rest pre-pass), so it appears here only as context; a `hard` directive
-        scoped to one sport is advisory — the LLM is trusted to honor it and choose any
-        substitute itself. `soft` ones are preferences the coach honors via judgement."""
+        §6): `title | dates | [enforcement] | description`. A `rest` directive is already
+        enforced deterministically before the LLM runs (the rest pre-pass forces those
+        dates to rest), so it appears here only as context; every other directive is
+        advisory prose the coach honors via judgement — the title says what to work
+        around, and the LLM is trusted to honor it and choose any substitute itself."""
         lines = ""
         for c in constraints:
-            sport = c.get('sport') or 'all sports'
-            ctype = c.get('type') or '—'
             desc = c.get('description') or ''
+            enforcement = "no training (rest enforced)" if c.get('rest') else "advisory"
             lines += (
                 f"- Constraint: {c['title']} | Dates: {c['start_date']} to {c['end_date']} | "
-                f"Binding: {c.get('binding', 'soft')} | Sport: {sport} | Type: {ctype}"
+                f"{enforcement}"
                 + (f" | Details: {desc}" if desc else "") + "\n"
             )
         return lines
@@ -217,9 +216,7 @@ ACTIVE CONSTRAINTS (athlete-declared directives to work around):
                 'title': c.get('title'),
                 'start_date': c.get('start_date'),
                 'end_date': c.get('end_date'),
-                'binding': c.get('binding'),
-                'sport': c.get('sport'),
-                'type': c.get('type'),
+                'rest': int(c.get('rest') or 0),
                 'description': c.get('description'),
             })
         cleaned.sort(key=lambda x: (str(x['start_date']), x['id'] or 0))
@@ -309,7 +306,7 @@ ACTIVE CONSTRAINTS (athlete-declared directives to work around):
         )
         evt_digest = sorted(
             (c.get('id'), c.get('start_date'), c.get('end_date'),
-             c.get('binding'), c.get('sport'), c.get('type'),
+             int(c.get('rest') or 0),
              c.get('title'), c.get('description'))
             for c in (constraints or [])
         )

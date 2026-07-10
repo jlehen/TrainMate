@@ -59,19 +59,18 @@ class BaseDB:
             cursor.execute("DROP TABLE IF EXISTS life_events")
 
             # Unified directives — everything the athlete asks the coach to work around, at
-            # any horizon (DESIGN_constraints.md §5). Supersedes `lifeevents`. `type` is an
-            # opaque user-vocabulary label (never branched on); `binding` ('hard'|'soft') and
-            # `sport` (NULL = all) let the deterministic edges skip the LLM; `replan` marks a
-            # directive currently escalated to plan-shaping (§7); `source` records how the row
-            # was authored ('manual'|'message'|'lifeevent').
+            # any horizon (DESIGN_constraints.md §5). Supersedes `lifeevents`. A constraint is
+            # advisory prose the coach reads (title/description) unless `rest = 1`, the single
+            # deterministic edge: a full no-training window whose dates skip the LLM and are
+            # forced to rest (rev 6 — replaces the old hard/soft × sport matrix and the opaque
+            # `type` label). `replan` marks a directive escalated to plan-shaping (§7);
+            # `source` records how the row was authored ('manual'|'message'|'lifeevent').
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS constraints (
                     id          INTEGER PRIMARY KEY AUTOINCREMENT,
                     start_date  TEXT NOT NULL,
                     end_date    TEXT NOT NULL,
-                    binding     TEXT NOT NULL,
-                    sport       TEXT,
-                    type        TEXT,
+                    rest        INTEGER NOT NULL DEFAULT 0,
                     title       TEXT NOT NULL,
                     description TEXT,
                     replan      INTEGER NOT NULL DEFAULT 0,
@@ -82,6 +81,32 @@ class BaseDB:
             cursor.execute(
                 "CREATE INDEX IF NOT EXISTS idx_constraints_start ON constraints(start_date)"
             )
+
+            # Simplify the constraint model to one deterministic `rest` flag (rev 6). The
+            # hard/soft × sport enforcement matrix and the never-branched-on `type` label are
+            # removed: the only combination that ever forced rest — `hard` with no sport —
+            # becomes rest=1; every other row becomes advisory prose (rest=0), which is how
+            # hard+sport and every soft row already behaved. Dropping binding/sport/type is
+            # pure DDL, guarded by column presence, so it is idempotent and lives here. It does
+            # change the constraints_hash of any plan-shaping (replan=1) constraint, so run
+            # scripts/migrate_constraints_drop_binding.py once to backfill that hash and avoid a
+            # one-time spurious "inputs changed" regen prompt (§7).
+            cursor.execute("PRAGMA table_info(constraints)")
+            ccols = [row['name'] for row in cursor.fetchall()]
+            if 'rest' not in ccols:
+                cursor.execute(
+                    "ALTER TABLE constraints ADD COLUMN rest INTEGER NOT NULL DEFAULT 0"
+                )
+                cursor.execute(
+                    "UPDATE constraints SET rest = 1 "
+                    "WHERE binding = 'hard' AND sport IS NULL"
+                )
+            if 'binding' in ccols:
+                cursor.execute("ALTER TABLE constraints DROP COLUMN binding")
+            if 'sport' in ccols:
+                cursor.execute("ALTER TABLE constraints DROP COLUMN sport")
+            if 'type' in ccols:
+                cursor.execute("ALTER TABLE constraints DROP COLUMN type")
 
             # Workouts table
             cursor.execute("""

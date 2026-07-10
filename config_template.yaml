@@ -95,8 +95,8 @@ coach:
   # replan when a constraint's overlapping planned load is at least this percentage
   # of the plan's trailing weekly planned load...
   #replan_displaced_load_pct: 50
-  # ...OR, independently, when a `hard` constraint spans at least this many days.
-  #replan_hard_span_days: 3
+  # ...OR, independently, when a `rest` constraint spans at least this many days.
+  #replan_rest_span_days: 3
   # Relative drift (percent) a physiological threshold (max_hr/lthr/ftp) may move
   # from the value the active plan was generated with before the plan is flagged
   # stale. Small retest corrections flow into workout targets without invalidating

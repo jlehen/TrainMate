@@ -559,7 +559,6 @@ class TestWeekLifeEvents(unittest.TestCase):
         )
         titles = {e["title"]: e["coverage"] for e in out}
         self.assertEqual(titles, {"Flu": "full", "Trip": "partial"})  # "Later" excluded
-        self.assertEqual(out[0]["type"], "illness")
         self.assertEqual(out[0]["impact"], "bed-bound")
 
     def test_multiweek_event_buckets_into_each_week(self):
@@ -610,7 +609,7 @@ class TestRicherEvidenceIntegration(unittest.TestCase):
         )
         test_db.add_constraint(
             title="Work crunch", start_date="2026-06-01", end_date="2026-06-07",
-            binding="soft", type="stress", description="long hours, poor sleep",
+            description="long hours, poor sleep",
         )
 
     @patch("trainmate.coach.engine.openrouter_client")

@@ -62,8 +62,7 @@ class TestPeriodization(unittest.TestCase):
 
         c = {
             "id": 1, "title": "Spain Trip", "start_date": "2026-07-01",
-            "end_date": "2026-07-08", "binding": "soft", "sport": None,
-            "type": "vacation", "description": "easy",
+            "end_date": "2026-07-08", "rest": 0, "description": "easy",
         }
         self.assertNotEqual(hash2, coach_service._get_constraints_hash([c]))
 
@@ -187,7 +186,6 @@ class TestPeriodization(unittest.TestCase):
         # A plan-shaping constraint triggers hash mismatch → replanning
         test_db.add_constraint(
             title="Business Trip", start_date="2026-06-10", end_date="2026-06-12",
-            binding="soft", type="business_trip",
             description="limited training time", replan=1,
         )
 
@@ -287,11 +285,11 @@ class TestPeriodization(unittest.TestCase):
         # is excluded because only plan-shaping constraints fingerprint/snapshot the plan.
         test_db.add_constraint(
             title="Work trip", start_date="2026-08-01", end_date="2026-08-10",
-            binding="soft", type="travel", description="limited training time", replan=1,
+            description="limited training time", replan=1,
         )
         test_db.add_constraint(
             title="no run Thursday", start_date="2026-08-06", end_date="2026-08-06",
-            binding="soft", replan=0,
+            replan=0,
         )
 
         mock_client.complete.return_value = {

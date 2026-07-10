@@ -14,18 +14,15 @@ class Constraint(TypedDict):
     """A single directive — anything the athlete asks the coach to work around, at
     any horizon (DESIGN_constraints.md §5).
 
-    `binding` ('hard'|'soft'), `sport` (None = all sports) and `replan` (1 = escalated
-    to plan-shaping) are read by deterministic code; `type` is an opaque
-    user-vocabulary label (never branched on), `title`/`description` are prose for
-    display and the LLM. `source` records authoring channel ('manual'|'message'|
-    'lifeevent').
+    `rest` (1 = a deterministic full no-training window, the one enforced edge) and
+    `replan` (1 = escalated to plan-shaping) are read by deterministic code;
+    `title`/`description` are advisory prose for display and the LLM. `source` records
+    authoring channel ('manual'|'message'|'lifeevent').
     """
     id: Optional[int]
     start_date: str
     end_date: str
-    binding: str
-    sport: Optional[str]
-    type: Optional[str]
+    rest: int
     title: str
     description: Optional[str]
     replan: int

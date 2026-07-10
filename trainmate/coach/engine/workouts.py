@@ -288,8 +288,9 @@ run `constraint add`. A note that is only about how they feel right now ("felt f
 today") is NOT durable — leave "new_constraints" empty for it. When unsure, leave it out: a
 durable-looking note mis-filed as a constraint is worse than a missed one. This is
 extraction only — never invent a plan-shaping escalation, and never omit "start_date"/
-"end_date" (default both to today when the note doesn't say). The app, not you, decides
-bindingness and whether this becomes plan-shaping; do not guess at either.
+"end_date" (default both to today when the note doesn't say). Extracted constraints are
+always advisory (the deterministic-rest and plan-shaping escalations are deliberate human
+actions); the app, not you, decides those — do not guess at either.
 """
 
         custom_task += """
@@ -345,8 +346,6 @@ evidence-backed observations are authored only by the weekly history analysis
                 '      "title": "the directive, stated short (required)",\n'
                 '      "start_date": "YYYY-MM-DD (required; default today)",\n'
                 '      "end_date": "YYYY-MM-DD (required; == start for a single day)",\n'
-                '      "sport": "one sport this scopes to, or null/omit for all",\n'
-                '      "type": "optional opaque label (trip, injury, …) or null/omit",\n'
                 '      "description": "optional richer context or null/omit"\n'
                 "    }\n"
                 "  ]"

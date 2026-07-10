@@ -37,15 +37,12 @@ class PlanningMixin:
         start, end = constraint['start_date'], constraint['end_date']
         window_start = max(start, _svc._today_str())
         rest = canonical_sport('rest')
-        cs = canonical_sport(constraint['sport']) if constraint.get('sport') else None
 
         def _load(w_start: str, w_end: str) -> float:
             sessions = [
                 w for w in self._db.get_workouts(start_date=w_start, end_date=w_end)
                 if canonical_sport(w.get('sport_type', '')) != rest
             ]
-            if cs:
-                sessions = [w for w in sessions if canonical_sport(w['sport_type']) == cs]
             return sum(planned_load(w) for w in sessions)
 
         displaced_load = _load(window_start, end)
@@ -72,11 +69,11 @@ class PlanningMixin:
     ) -> Optional[int]:
         """Creates one durable constraint from a `new_constraints` candidate the CLI has
         already confirmed with the athlete (DESIGN_constraints.md §8 two-confirmation
-        flow, step 1). Always `source='message'`, always `binding='soft'` — the LLM can
-        never mark an extracted constraint `hard` (trust boundary §8); a genuine hard
-        escalation is a deliberate human action (`constraint edit <id> --hard`). Never
-        sets `replan=1` either — a large capture only *surfaces a suggestion* to escalate,
-        which the human acts on separately."""
+        flow, step 1). Always `source='message'`, always advisory (`rest=0`) — the LLM can
+        never mark an extracted constraint as a deterministic rest window (trust boundary
+        §8); a genuine rest escalation is a deliberate human action (`constraint edit <id>
+        --rest`). Never sets `replan=1` either — a large capture only *surfaces a
+        suggestion* to escalate, which the human acts on separately."""
         title = (candidate.get('title') or '').strip()
         if not title:
             return None
@@ -85,8 +82,7 @@ class PlanningMixin:
         if end < start:
             end = start
         cid = self._db.add_constraint(
-            title=title, start_date=start, end_date=end, binding='soft',
-            sport=candidate.get('sport'), type=candidate.get('type'),
+            title=title, start_date=start, end_date=end, rest=0,
             description=candidate.get('description'), replan=0, source='message',
         )
         constraint = self._db.get_constraint(cid)
@@ -110,15 +106,15 @@ class PlanningMixin:
         1. Displaced-load trigger (relative): the constraint's overlapping planned load
            is >= config.replan_displaced_load_pct of the plan's trailing weekly planned
            load (default 50 — wipes out at least half a typical week).
-        2. Hard-window floor: the constraint is `hard` and spans >= config.
-           replan_hard_span_days days (default 3), regardless of load overlap (it may
+        2. Rest-window floor: the constraint is a `rest` window spanning >= config.
+           replan_rest_span_days days (default 3), regardless of load overlap (it may
            land in a light taper week yet still reshape everything after it).
         """
         if impact['displaced_pct'] >= config.replan_displaced_load_pct:
             return True
         if (
-            constraint.get('binding') == 'hard'
-            and impact['days'] >= config.replan_hard_span_days
+            constraint.get('rest')
+            and impact['days'] >= config.replan_rest_span_days
         ):
             return True
         return False

@@ -15,7 +15,7 @@ from typing import Optional
 import trainmate_cli as cli
 from trainmate.config import config
 from trainmate.util import (
-    bold, dim, green, red, yellow, cyan, magenta, gray, format_labeled_block,
+    bold, dim, green, red, yellow, cyan, gray, format_labeled_block,
     today_str as _today_str,
 )
 from trainmate.cli.common import fmt_date
@@ -29,20 +29,6 @@ def _prompt_title(existing: Optional[str]) -> Optional[str]:
         "Constraint (the directive, stated short — e.g. 'no run Thursday')"
     ).strip()
     return title or None
-
-
-def _prompt_type(existing: Optional[str]) -> Optional[str]:
-    """Returns the opaque `type` label. When omitted, offers the labels already in use
-    (same distinct-values pattern as `context list-metrics`) to discourage vocabulary
-    drift, but never requires one."""
-    if existing is not None:
-        return existing or None
-    in_use = [t['type'] for t in cli.db.list_constraint_types()]
-    hint = f" [in use: {', '.join(in_use)}]" if in_use else ""
-    label = cli.prompt.ask_text(
-        f"Type (optional opaque label, e.g. trip, injury{hint})", default=""
-    ).strip()
-    return label or None
 
 
 def _resolve_dates(args: argparse.Namespace) -> tuple:
@@ -107,35 +93,29 @@ def _run_replan_flow(title: str) -> None:
 
 def run_constraint_add(args: argparse.Namespace) -> None:
     """Authors a directive over a day or range (DESIGN_constraints.md §4)."""
-    # Quick capture stays flag- and prompt-free: `cons a "no run Thursday"`. Only the
-    # guided path (bare `cons a`, where the title itself had to be prompted) walks the
-    # optional type prompt.
-    title_provided = bool(args.title)
+    # Quick capture stays flag- and prompt-free: `cons a "no run Thursday"`.
     title = _prompt_title(args.title)
     if not title:
         print(red("A constraint needs a title (the directive itself)."))
         sys.exit(1)
-    ctype = args.type if args.type is not None else (
-        _prompt_type(None) if not title_provided else None
-    )
     start, end = _resolve_dates(args)
 
     cid = cli.db.add_constraint(
         title=title, start_date=start, end_date=end,
-        binding=args.binding, sport=args.sport, type=ctype,
+        rest=1 if args.rest else 0,
         description=args.desc, replan=1 if args.replan is True else 0,
         source='manual',
     )
     span = start if start == end else f"{start}..{end}"
+    kind = "no training" if args.rest else "advisory"
     print(green(
-        f"Added constraint [{cid}]: {bold(title)} ({args.binding}) over {cyan(span)}"
-        + (f" [{args.sport}]" if args.sport else "")
+        f"Added constraint [{cid}]: {bold(title)} ({kind}) over {cyan(span)}"
     ))
     _maybe_replan(cid, title, args.replan)
 
 
 def run_constraint_edit(args: argparse.Namespace) -> None:
-    """Adjusts scope / bindingness / text / replan of an existing directive."""
+    """Adjusts scope / rest / text / replan of an existing directive."""
     constraint = cli.db.get_constraint(args.id)
     if not constraint:
         print(red(f"Constraint with ID {args.id} not found."))
@@ -148,12 +128,8 @@ def run_constraint_edit(args: argparse.Namespace) -> None:
         kwargs['start_date'] = args.start
     if args.end is not None:
         kwargs['end_date'] = args.end
-    if args.binding is not None:
-        kwargs['binding'] = args.binding
-    if args.sport is not None:
-        kwargs['sport'] = args.sport or None
-    if args.type is not None:
-        kwargs['type'] = args.type or None
+    if args.rest is not None:
+        kwargs['rest'] = 1 if args.rest else 0
     if args.desc is not None:
         kwargs['description'] = args.desc or None
 
@@ -171,14 +147,11 @@ def run_constraint_edit(args: argparse.Namespace) -> None:
 
 def _constraint_line(c: dict) -> str:
     """One-line rendering of a constraint for `list`."""
-    ctype = c.get('type')
-    type_str = f" ({magenta(ctype)})" if ctype else ""
-    sport_str = f" [{c['sport']}]" if c.get('sport') else ""
-    tags = c.get('binding', 'soft') + sport_str + (
+    tags = ("no training" if c.get('rest') else "advisory") + (
         " · plan-shaping" if c.get('replan') else ""
     )
     return (
-        f"ID: {c['id']} | {yellow(c['title'])}{type_str}: "
+        f"ID: {c['id']} | {yellow(c['title'])}: "
         f"{cyan(c['start_date'])} to {cyan(c['end_date'])} | {tags}"
     )
 
@@ -199,15 +172,6 @@ def run_constraint_list(args: argparse.Namespace) -> None:
         ).strftime("%Y-%m-%d")
     end = args.until_date
     constraints = cli.db.get_constraints(start, end)
-    if args.sport:
-        from trainmate.sports import canonical_sport
-        cs = canonical_sport(args.sport)
-        constraints = [
-            c for c in constraints
-            if c.get('sport') is None or canonical_sport(c['sport']) == cs
-        ]
-    if args.type:
-        constraints = [c for c in constraints if c.get('type') == args.type]
 
     print(bold(cyan("=== ATHLETE CONSTRAINTS ===")))
     if not constraints:
@@ -269,25 +233,34 @@ def add_constraint_parser(subparsers):
              "preferences, disruptions)",
         description=(
             "Manage constraints — anything you ask the coach to work around, at any "
-            "horizon ('no run Thursday', 'only 45 min today', '3-week injury layoff'). "
-            "A blanket 'hard' constraint (no --sport) deterministically forces rest in "
-            "generate/adapt; a 'hard' constraint scoped to a sport, and every 'soft' one, "
-            "is advisory — the coach honors it by judgement. Whether a constraint reshapes "
-            "the plan is derived from its magnitude and human-confirmed, not picked up front."
+            "horizon ('no run Thursday', 'only 45 min today', 'easy ride with a friend "
+            "Saturday', 'knee flare, no running ~2 weeks'). A constraint is advisory prose "
+            "the coach honors by judgement — say what you mean in the title and the LLM "
+            "works around it. The one exception is --rest, which deterministically forces a "
+            "full no-training window (surgery, no-gym travel), placing an explicit rest day "
+            "without asking the LLM. Whether a constraint reshapes the plan is derived from "
+            "its magnitude and human-confirmed, not picked up front."
         ),
     )
     constraint_subparsers = constraint_parser.add_subparsers(
         dest="subcommand", help="Constraint sub-commands"
     )
 
-    def _add_binding_flags(p, default):
-        grp = p.add_mutually_exclusive_group()
-        grp.add_argument("--hard", dest="binding", action="store_const", const="hard",
-                         help="No training those dates (enforced); with --sport, that "
-                              "sport is unavailable (advisory)")
-        grp.add_argument("--soft", dest="binding", action="store_const", const="soft",
-                         help="Advisory preference/capacity hint (default)")
-        p.set_defaults(binding=default)
+    def _add_rest_flag(p, edit=False):
+        # --rest is the single deterministic edge: a full no-training window. On `edit`,
+        # the pair lets you toggle a constraint back to advisory (--no-rest); on `add`,
+        # absence just means advisory (the default), so only --rest is offered.
+        if edit:
+            grp = p.add_mutually_exclusive_group()
+            grp.add_argument("--rest", dest="rest", action="store_const", const=True,
+                             help="Force a full no-training window (deterministic rest)")
+            grp.add_argument("--no-rest", dest="rest", action="store_const", const=False,
+                             help="Make it advisory instead (clear the rest flag)")
+            p.set_defaults(rest=None)
+        else:
+            p.add_argument("--rest", action="store_true",
+                           help="Force a full no-training window (deterministic rest, no "
+                                "LLM); omit for an advisory constraint the coach works around")
 
     def _add_replan_flags(p):
         grp = p.add_mutually_exclusive_group()
@@ -306,26 +279,22 @@ def add_constraint_parser(subparsers):
     cons_add.add_argument("--title", dest="title_opt", help=argparse.SUPPRESS)
     cons_add.add_argument("--start", help="Start date (YYYY-MM-DD; default: today)")
     cons_add.add_argument("--end", help="End date (YYYY-MM-DD; default: --start)")
-    cons_add.add_argument("--sport", help="Scope to one sport (default: all sports)")
-    cons_add.add_argument("--type", help="Optional opaque label (e.g. trip, injury)")
     cons_add.add_argument("--desc", "--description", dest="desc",
                           help="Optional richer context for the coach")
-    _add_binding_flags(cons_add, default="soft")
+    _add_rest_flag(cons_add)
     _add_replan_flags(cons_add)
 
     # constraint edit
     cons_edit = constraint_subparsers.add_parser(
-        "edit", aliases=["e"], help="Adjust scope / bindingness / text / replan"
+        "edit", aliases=["e"], help="Adjust scope / rest / text / replan"
     )
     cons_edit.add_argument("id", type=int, help="Constraint ID to edit")
     cons_edit.add_argument("--title", help="New directive title")
     cons_edit.add_argument("--start", help="New start date (YYYY-MM-DD)")
     cons_edit.add_argument("--end", help="New end date (YYYY-MM-DD)")
-    cons_edit.add_argument("--sport", help="New sport scope ('' to clear)")
-    cons_edit.add_argument("--type", help="New opaque label ('' to clear)")
     cons_edit.add_argument("--desc", "--description", dest="desc",
                            help="New richer context ('' to clear)")
-    _add_binding_flags(cons_edit, default=None)
+    _add_rest_flag(cons_edit, edit=True)
     _add_replan_flags(cons_edit)
 
     # constraint list
@@ -336,8 +305,6 @@ def add_constraint_parser(subparsers):
                            help="Show details for each directive")
     cons_list.add_argument("--all", action="store_true",
                            help="Include past (expired) directives too")
-    cons_list.add_argument("--sport", help="Filter to directives affecting this sport")
-    cons_list.add_argument("--type", help="Filter to this opaque type label")
     cons_list.add_argument(
         "--from", "--from-date", dest="from_date", metavar="YYYY-MM-DD",
         help="Override the default lower bound (config.metrics_lookback_days back)"

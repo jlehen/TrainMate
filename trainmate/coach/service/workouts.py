@@ -52,7 +52,7 @@ class WorkoutGenMixin:
 
     @staticmethod
     def _rest_workout(date: str, cause: str) -> Dict[str, Any]:
-        """A deterministic rest session the hard-constraint pre-pass places on a date the
+        """A deterministic rest session the rest-window pre-pass places on a date the
         athlete has barred from training (DESIGN_constraints.md §6). The title/description
         are tagged "(forced constraint)" so it reads unmistakably as a code-enforced
         override rather than an ordinary planned/adapted rest day. The change_reason names
@@ -74,26 +74,25 @@ class WorkoutGenMixin:
     def _hard_rest_windows(
         cls, constraints: List[Constraint]
     ) -> List[Tuple[str, str, str]]:
-        """The `hard` + no-sport windows — the only edge that skips the LLM (§5): a
-        `hard` constraint scoped to one sport is advisory (rendered into the prompt as a
-        hard instruction; the LLM picks any substitute itself), so it is deliberately
-        excluded here. Returns [(start, end, title)]."""
+        """The `rest` windows — the only edge that skips the LLM (§5): a full no-training
+        window whose dates are forced to rest. Every other constraint is advisory prose
+        the LLM honors itself, so it is deliberately excluded here. Returns
+        [(start, end, title)]."""
         return [
             (c['start_date'], c['end_date'], c['title'])
             for c in constraints
-            if c.get('binding') == 'hard' and not c.get('sport')
+            if c.get('rest')
         ]
 
     @classmethod
-    def _enforce_hard_constraints_generate(
+    def _enforce_rest_windows_generate(
         cls, workouts: List[Dict[str, Any]], constraints: List[Constraint]
     ) -> List[Dict[str, Any]]:
-        """Forces hard, no-sport constraints onto a freshly generated workout list (§6): a
-        blanket hard window replaces its dates with a single rest, deterministically,
-        bypassing the LLM for that date entirely. A hard constraint scoped to a sport is
-        advisory only — left to the model via the prompt block, not enforced here (§5).
-        Operates only on dates the model actually scheduled, so it never invents days
-        beyond the generated span."""
+        """Forces `rest` constraints onto a freshly generated workout list (§6): a rest
+        window replaces its dates with a single rest, deterministically, bypassing the LLM
+        for that date entirely. Every other constraint is advisory only — left to the model
+        via the prompt block, not enforced here (§5). Operates only on dates the model
+        actually scheduled, so it never invents days beyond the generated span."""
         full_rest = cls._hard_rest_windows(constraints)
         if not full_rest:
             return workouts
@@ -111,14 +110,13 @@ class WorkoutGenMixin:
         return out
 
     @classmethod
-    def _enforce_hard_constraints_adapt(
+    def _enforce_rest_windows_adapt(
         cls, adapted: List[Dict[str, Any]], planned_workouts: List[Workout],
         constraints: List[Constraint], completed_keys: Optional[set], from_date: str
     ) -> List[Dict[str, Any]]:
-        """Eases planned sessions to rest on hard, no-sport constraint dates (§6). A hard
-        constraint scoped to a sport is advisory only (§5) — left to the model, not
-        enforced here. Only touches sessions on or after `from_date` that aren't already
-        rest or completed."""
+        """Eases planned sessions to rest on `rest` constraint dates (§6). Every other
+        constraint is advisory only (§5) — left to the model, not enforced here. Only
+        touches sessions on or after `from_date` that aren't already rest or completed."""
         full_rest = cls._hard_rest_windows(constraints)
         if not full_rest:
             return adapted
@@ -254,12 +252,11 @@ class WorkoutGenMixin:
         if gen_start_str != today_str:
             workouts = [w for w in workouts if w.get('date', '') >= gen_start_str]
 
-        # Deterministic hard-constraint pre-pass (DESIGN_constraints.md §6): a `hard`
-        # constraint with no sport forces its dates to rest regardless of what the LLM
-        # produced; a `hard` constraint scoped to a sport drops that sport on its dates
-        # (other sports flow normally). Applied after generation so the guarantee holds
-        # even if the model ignores the constraint block it was shown.
-        workouts = self._enforce_hard_constraints_generate(workouts, constraints)
+        # Deterministic rest-window pre-pass (DESIGN_constraints.md §6): a `rest`
+        # constraint forces its dates to rest regardless of what the LLM produced. Every
+        # other constraint is advisory and left to the model. Applied after generation so
+        # the guarantee holds even if the model ignores the constraint block it was shown.
+        workouts = self._enforce_rest_windows_generate(workouts, constraints)
 
         # Archive (don't delete) future workouts from the previous plan so they can be
         # resurrected by `plan rollback`, and tear down their Calendar events first so the

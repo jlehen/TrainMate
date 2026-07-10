@@ -131,15 +131,19 @@ def _print_considered_inputs(macrocycle: dict) -> None:
     print(bold("Constraints considered:"))
     if events:
         for e in events:
-            # New snapshots carry constraint fields; legacy ones carry the old
-            # event_type/impact_description — read whichever is present.
+            # Snapshots are historical JSON, so tolerate three shapes: the current one
+            # (a `rest` flag), the pre-rev-6 constraint (binding/sport/type), and the
+            # original lifeevent (event_type/impact_description). Read whichever is present.
+            if 'rest' in e:
+                enforcement = "no training" if e.get('rest') else "advisory"
+            else:
+                enforcement = e.get('binding') or ''
             label = e.get('type') or e.get('event_type') or ''
-            binding = e.get('binding')
             sport = e.get('sport')
             tags = " ".join(
                 t for t in (
                     label,
-                    binding,
+                    enforcement,
                     (f"[{sport}]" if sport else ""),
                 ) if t
             )

@@ -139,7 +139,7 @@
                 <div class="card accordion-card">
                     <div class="tabs-header">
                         <button class="tab-btn active" onclick="switchTab('tab-goals')"><i class="fa-solid fa-trophy"></i> Objectives</button>
-                        <button class="tab-btn" onclick="switchTab('tab-events')"><i class="fa-solid fa-plane-departure"></i> Life Events</button>
+                        <button class="tab-btn" onclick="switchTab('tab-events')"><i class="fa-solid fa-plane-departure"></i> Constraints</button>
                     </div>
 
                     <!-- GOALS TAB -->
@@ -174,16 +174,9 @@
                     <div id="tab-events" class="tab-content">
                         <div class="list-container" id="events-list"></div>
                         <form id="form-add-event" class="add-form">
-                            <h3>Log Life Event</h3>
+                            <h3>Log Constraint</h3>
                             <div class="form-row">
-                                <input type="text" id="event-title" placeholder="e.g. Summer Vacation" required>
-                                <select id="event-type" required>
-                                    <option value="" disabled selected>Type</option>
-                                    <option value="vacation">Vacation</option>
-                                    <option value="business_trip">Business Trip</option>
-                                    <option value="party">Big Party/Social</option>
-                                    <option value="other">Other</option>
-                                </select>
+                                <input type="text" id="event-title" placeholder="e.g. no run Thursday, ride with a friend Sat" required>
                             </div>
                             <div class="form-row">
                                 <div class="date-input-group">
@@ -195,8 +188,9 @@
                                     <input type="date" id="event-end" required>
                                 </div>
                             </div>
-                            <input type="text" id="event-desc" placeholder="Impact on training (optional)">
-                            <button type="submit" class="btn btn-warning btn-sm"><i class="fa-solid fa-calendar-plus"></i> Log Event</button>
+                            <input type="text" id="event-desc" placeholder="Details for the coach (optional)">
+                            <label class="checkbox-row"><input type="checkbox" id="event-rest"> No training (deterministic rest window)</label>
+                            <button type="submit" class="btn btn-warning btn-sm"><i class="fa-solid fa-calendar-plus"></i> Log Constraint</button>
                         </form>
                     </div>
                 </div>

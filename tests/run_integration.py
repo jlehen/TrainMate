@@ -26,8 +26,6 @@ def main() -> None:
         title="Ibiza Vacation",
         start_date="2026-07-01",
         end_date="2026-07-08",
-        binding="soft",
-        type="vacation",
         description="Reduce volume by 50%",
         replan=1,
     )

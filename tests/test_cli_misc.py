@@ -90,7 +90,7 @@ class TestCliMisc(unittest.TestCase):
         def seed_constraint():
             test_db.add_constraint(
                 title="Wipe Constraint", start_date="2026-07-01",
-                end_date="2026-07-02", binding="soft",
+                end_date="2026-07-02",
             )
         def count_constraint(_):
             return len(test_db.get_constraints())
