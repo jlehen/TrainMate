@@ -1,5 +1,6 @@
 """Shared resolvers/formatters for the workout CLI handlers."""
 import argparse
+import re
 import sys
 from datetime import datetime, timedelta
 from typing import Optional
@@ -177,26 +178,48 @@ def _resolve_workout_date_range(
     end_date = _resolve_workout_end_date(horizon_args, next_goal)
 
     return start_date, end_date
+def _classify_swap_target(value: str) -> str | None:
+    """Classifies a swap positional as 'date' (YYYY-MM-DD) or 'id' (bare integer)."""
+    if re.fullmatch(r"\d{4}-\d{2}-\d{2}", value):
+        return "date"
+    if value.isdigit():
+        return "id"
+    return None
+
+
 def _resolve_swap_ops(args: argparse.Namespace) -> list | None:
     """Turns CLI args into swap operations, or returns None on a usage/lookup error."""
-    using_ids = args.id1 is not None or args.id2 is not None
-    using_dates = bool(args.date1 or args.date2)
-
-    if using_ids and using_dates:
-        print(red("Provide either two dates or --id1/--id2, not both."))
+    if not args.target1 or not args.target2:
+        print(
+            red("Specify two dates (e.g. ")
+            + bold(green("'workout swap 2026-06-09 2026-06-11'"))
+            + red(") or two workout IDs (e.g. ")
+            + bold(green("'workout swap 5 8'"))
+            + red(").")
+        )
         return None
 
-    if using_ids:
-        if args.id1 is None or args.id2 is None:
-            print(red("Both --id1 and --id2 are required for an ID-based swap."))
+    kind1 = _classify_swap_target(args.target1)
+    kind2 = _classify_swap_target(args.target2)
+    for target, kind in ((args.target1, kind1), (args.target2, kind2)):
+        if kind is None:
+            print(red(
+                f"'{target}' is neither a date (YYYY-MM-DD) nor a workout ID."
+            ))
             return None
-        w1 = cli.db.get_workout_by_id(args.id1)
-        w2 = cli.db.get_workout_by_id(args.id2)
+    if kind1 != kind2:
+        print(red("Swap two dates or two workout IDs, not one of each."))
+        return None
+
+    if kind1 == "id":
+        id1, id2 = int(args.target1), int(args.target2)
+        w1 = cli.db.get_workout_by_id(id1)
+        w2 = cli.db.get_workout_by_id(id2)
         if not w1:
-            print(red(f"Workout with ID {args.id1} not found."))
+            print(red(f"Workout with ID {id1} not found."))
             return None
         if not w2:
-            print(red(f"Workout with ID {args.id2} not found."))
+            print(red(f"Workout with ID {id2} not found."))
             return None
         if w1['date'] == w2['date']:
             print(yellow("Both workouts are already on the same date; nothing to swap."))
@@ -218,39 +241,32 @@ def _resolve_swap_ops(args: argparse.Namespace) -> list | None:
             {'id': w2['id'], 'new_date': w1['date']},
         ]
 
-    if args.date1 and args.date2:
-        for d in (args.date1, args.date2):
-            try:
-                datetime.strptime(d, "%Y-%m-%d")
-            except ValueError:
-                print(red(f"Invalid date format: '{d}'. Use YYYY-MM-DD."))
-                return None
-        if args.date1 == args.date2:
-            print(yellow("The two dates are identical; nothing to swap."))
+    date1, date2 = args.target1, args.target2
+    for d in (date1, date2):
+        try:
+            datetime.strptime(d, "%Y-%m-%d")
+        except ValueError:
+            print(red(f"Invalid date format: '{d}'. Use YYYY-MM-DD."))
             return None
-        today = _today_str()
-        for d in (args.date1, args.date2):
-            if d < today:
-                print(red(f"Cannot swap {d}: it is in the past."))
-                return None
-        on_1 = cli.db.get_workouts(start_date=args.date1, end_date=args.date1)
-        on_2 = cli.db.get_workouts(start_date=args.date2, end_date=args.date2)
-        if not on_1 and not on_2:
-            print(yellow(
-                f"No workouts on either {args.date1} or {args.date2}; nothing to swap."
-            ))
+    if date1 == date2:
+        print(yellow("The two dates are identical; nothing to swap."))
+        return None
+    today = _today_str()
+    for d in (date1, date2):
+        if d < today:
+            print(red(f"Cannot swap {d}: it is in the past."))
             return None
-        desc_1 = ", ".join(w['title'] for w in on_1) or "(rest)"
-        desc_2 = ", ".join(w['title'] for w in on_2) or "(rest)"
-        print(f"Swapping {args.date1} [{desc_1}] <-> {args.date2} [{desc_2}]")
-        return (
-            [{'id': w['id'], 'new_date': args.date2} for w in on_1]
-            + [{'id': w['id'], 'new_date': args.date1} for w in on_2]
-        )
-
-    print(
-        red("Specify two dates (e.g. ")
-        + bold(green("'workout swap 2026-06-09 2026-06-11'"))
-        + red(") or --id1 and --id2.")
+    on_1 = cli.db.get_workouts(start_date=date1, end_date=date1)
+    on_2 = cli.db.get_workouts(start_date=date2, end_date=date2)
+    if not on_1 and not on_2:
+        print(yellow(
+            f"No workouts on either {date1} or {date2}; nothing to swap."
+        ))
+        return None
+    desc_1 = ", ".join(w['title'] for w in on_1) or "(rest)"
+    desc_2 = ", ".join(w['title'] for w in on_2) or "(rest)"
+    print(f"Swapping {date1} [{desc_1}] <-> {date2} [{desc_2}]")
+    return (
+        [{'id': w['id'], 'new_date': date2} for w in on_1]
+        + [{'id': w['id'], 'new_date': date1} for w in on_2]
     )
-    return None

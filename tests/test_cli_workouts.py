@@ -209,7 +209,7 @@ class TestCliWorkouts(unittest.TestCase):
             description="easy", rpe=4, tss=30,
         )
         exit_code, stdout, stderr = self.run_cli(
-            ["workout", "swap", "--id1", str(a), "--id2", str(b), "--no-sync",
+            ["workout", "swap", str(a), str(b), "--no-sync",
              "--reason", "Travelling"]
         )
         self.assertEqual(exit_code, 0)
@@ -270,6 +270,20 @@ class TestCliWorkouts(unittest.TestCase):
         )
         self.assertEqual(exit_code, 0)
         self.assertIn("Specify two dates", stdout)
+
+    def test_workout_swap_mixed_date_and_id_rejected(self):
+        exit_code, stdout, stderr = self.run_cli(
+            ["workout", "swap", "2026-06-10", "7", "--reason", "Travelling"]
+        )
+        self.assertEqual(exit_code, 0)
+        self.assertIn("not one of each", stdout)
+
+    def test_workout_swap_invalid_target_rejected(self):
+        exit_code, stdout, stderr = self.run_cli(
+            ["workout", "swap", "tomorrow", "friday", "--reason", "Travelling"]
+        )
+        self.assertEqual(exit_code, 0)
+        self.assertIn("neither a date", stdout)
 
     @patch("trainmate_cli.calendar_syncer")
     def test_workout_rm_synced(self, mock_calendar):

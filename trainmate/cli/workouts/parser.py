@@ -217,25 +217,22 @@ def add_workout_parser(subparsers, pull_bypass_parser, llm_debug_parser, plan_da
     w_swap = workout_subparsers.add_parser(
         "swap", aliases=["s"],
         parents=[llm_debug_parser],
-        help="Swap workouts between two dates (or two IDs), with recovery checks",
+        help="Swap two workouts, given either two dates or two workout IDs",
         description=(
-            "Swap two workouts, given either two dates (date1 date2) or two IDs "
-            "(--id1/--id2). Runs recovery checks (consecutive hard days, weekly load "
-            "spikes, mesocycle crossings) and prompts on warnings unless -f/--force. "
+            "Swap two workouts, given either two dates (YYYY-MM-DD) or two workout "
+            "IDs. Both targets must be the same kind - two dates or two IDs, not a "
+            "mix. Runs recovery checks (consecutive hard days, weekly load spikes, "
+            "mesocycle crossings) and prompts on warnings unless -f/--force. "
             "The swap is synced to Google Calendar unless --no-sync is given."
         )
     )
     w_swap.add_argument(
-        "date1", nargs="?", help="First date to swap (YYYY-MM-DD)"
+        "target1", nargs="?",
+        help="First workout to swap: a date (YYYY-MM-DD) or a workout ID"
     )
     w_swap.add_argument(
-        "date2", nargs="?", help="Second date to swap (YYYY-MM-DD)"
-    )
-    w_swap.add_argument(
-        "--id1", type=int, help="First workout ID (use together with --id2)"
-    )
-    w_swap.add_argument(
-        "--id2", type=int, help="Second workout ID (use together with --id1)"
+        "target2", nargs="?",
+        help="Second workout to swap: a date (YYYY-MM-DD) or a workout ID"
     )
     w_swap.add_argument(
         "--no-sync", action="store_true", dest="no_sync",
