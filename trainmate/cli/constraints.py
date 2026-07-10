@@ -363,3 +363,5 @@ def add_constraint_parser(subparsers):
     cons_wipe = constraint_subparsers.add_parser("wipe", help="Wipe all constraints")
     cons_wipe.add_argument("-y", "--yes", action="store_true",
                            help="Skip confirmation prompt")
+
+    return constraint_parser

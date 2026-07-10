@@ -675,3 +675,5 @@ def add_plan_parser(subparsers, pull_bypass_parser, llm_debug_parser):
     p_wipe = plan_subparsers.add_parser("wipe", help="Wipe all periodization plans")
     p_wipe.add_argument("-y", "--yes", action="store_true", help="Skip confirmation prompt")
     
+
+    return plan_parser

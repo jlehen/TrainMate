@@ -172,13 +172,13 @@ def main() -> None:
 
     add_status_parser(subparsers, pull_bypass_parser)
     add_progress_parser(subparsers, pull_bypass_parser)
-    add_goal_parser(subparsers)
-    add_constraint_parser(subparsers)
-    add_context_parser(subparsers)
-    add_learnings_parser(subparsers)
-    add_plan_parser(subparsers, pull_bypass_parser, llm_debug_parser)
-    add_workout_parser(subparsers, pull_bypass_parser, llm_debug_parser, plan_date_parser, sport_type_parser)
-    add_data_parser(subparsers, pull_bypass_parser, llm_debug_parser, basic_date_parser, plan_date_parser, sport_type_parser)
+    goal_parser = add_goal_parser(subparsers)
+    constraint_parser = add_constraint_parser(subparsers)
+    context_parser = add_context_parser(subparsers)
+    learnings_parser = add_learnings_parser(subparsers)
+    plan_parser = add_plan_parser(subparsers, pull_bypass_parser, llm_debug_parser)
+    workout_parser = add_workout_parser(subparsers, pull_bypass_parser, llm_debug_parser, plan_date_parser, sport_type_parser)
+    data_parser = add_data_parser(subparsers, pull_bypass_parser, llm_debug_parser, basic_date_parser, plan_date_parser, sport_type_parser)
     # Parse the arguments. Network-appliance-style dashless options
     # (e.g. `workout adapt message "..." no-pull`) are first rewritten back into
     # `--flag` form against the parser tree, so both syntaxes share one definition.

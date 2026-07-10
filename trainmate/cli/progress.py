@@ -518,3 +518,5 @@ def add_progress_parser(subparsers, pull_bypass_parser):
              "(default: ./progress.png; requires matplotlib). Additive — the "
              "text output above still prints."
     )
+
+    return progress_parser

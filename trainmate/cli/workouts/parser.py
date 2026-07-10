@@ -258,3 +258,5 @@ def add_workout_parser(subparsers, pull_bypass_parser, llm_debug_parser, plan_da
         help="Wipe all workouts from the database and Google Calendar"
     )
     w_wipe.add_argument("-y", "--yes", action="store_true", help="Skip confirmation prompt")
+
+    return workout_parser

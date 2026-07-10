@@ -291,3 +291,5 @@ def add_status_parser(subparsers, pull_bypass_parser):
         "-v", "--verbose", action="store_true",
         help="Show all training objectives/goals and life events"
     )
+
+    return status_parser

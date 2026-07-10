@@ -229,3 +229,5 @@ def add_learnings_parser(subparsers):
     # learnings wipe
     ln_wipe = learnings_subparsers.add_parser("wipe", help="Wipe all coach learnings")
     ln_wipe.add_argument("-y", "--yes", action="store_true", help="Skip confirmation prompt")
+
+    return learnings_parser

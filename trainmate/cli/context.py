@@ -263,3 +263,5 @@ def add_context_parser(subparsers):
         "list-metrics", aliases=["lm"],
         help="Show distinct metrics in use with counts and date span"
     )
+
+    return context_parser

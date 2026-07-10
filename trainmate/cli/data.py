@@ -849,3 +849,5 @@ def add_data_parser(subparsers, pull_bypass_parser, llm_debug_parser, basic_date
     )
     d_wipe.add_argument("-y", "--yes", action="store_true", help="Skip confirmation prompt")
     
+
+    return data_parser
