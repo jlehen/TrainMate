@@ -84,8 +84,13 @@ from trainmate.cli.workouts import add_workout_parser
 from trainmate.cli.data import add_data_parser
 
 
-def main() -> None:
-    """Entry point for the TrainMate Command Line Interface."""
+def build_parser():
+    """Construct the argparse tree and return ``(parser, named_subparsers)``.
+
+    ``named_subparsers`` maps a top-level command to its sub-parser so the
+    dispatcher can print per-group help. Split out from ``main`` so the REPL can
+    build the tree once and reuse it across many lines of input.
+    """
     parser = WrapAwareArgumentParser(
         description="TrainMate - Local Training Coach CLI",
     )
@@ -179,11 +184,26 @@ def main() -> None:
     plan_parser = add_plan_parser(subparsers, pull_bypass_parser, llm_debug_parser)
     workout_parser = add_workout_parser(subparsers, pull_bypass_parser, llm_debug_parser, plan_date_parser, sport_type_parser)
     data_parser = add_data_parser(subparsers, pull_bypass_parser, llm_debug_parser, basic_date_parser, plan_date_parser, sport_type_parser)
+
+    named_subparsers = {
+        "goal": goal_parser,
+        "constraint": constraint_parser,
+        "context": context_parser,
+        "learnings": learnings_parser,
+        "plan": plan_parser,
+        "workout": workout_parser,
+        "data": data_parser,
+    }
+    return parser, named_subparsers
+
+
+def run_once(argv, parser, named_subparsers) -> None:
+    """Parse one command line and dispatch it. Shared by ``main`` and the REPL."""
     # Parse the arguments. Network-appliance-style dashless options
     # (e.g. `workout adapt message "..." no-pull`) are first rewritten back into
     # `--flag` form against the parser tree, so both syntaxes share one definition.
-    args = parser.parse_args(translate_dashless_argv(parser, sys.argv[1:]))
-    
+    args = parser.parse_args(translate_dashless_argv(parser, argv))
+
     if getattr(args, "llm_model", None):
         from trainmate.openrouter import openrouter_client
         openrouter_client.model = args.llm_model
@@ -195,7 +215,15 @@ def main() -> None:
     if not args.command:
         parser.print_help()
         sys.exit(1)
-        
+
+    goal_parser = named_subparsers["goal"]
+    constraint_parser = named_subparsers["constraint"]
+    context_parser = named_subparsers["context"]
+    learnings_parser = named_subparsers["learnings"]
+    plan_parser = named_subparsers["plan"]
+    workout_parser = named_subparsers["workout"]
+    data_parser = named_subparsers["data"]
+
     cmd = args.command.lower()
 
     if cmd == "help":
@@ -341,6 +369,67 @@ def main() -> None:
         print(f"Unknown command: '{cmd}'")
         parser.print_help()
         sys.exit(1)
+
+
+def _repl(parser, named_subparsers) -> None:
+    """Read commands interactively until EOF/exit, dispatching each like a shell.
+
+    Reached when ``./tm`` is launched with no arguments. Importing ``readline``
+    gives line editing and an in-session history for free.
+    """
+    import shlex
+    try:
+        import readline  # noqa: F401 -- registering it enables editing/history
+    except ImportError:
+        pass
+
+    print(bold("TrainMate interactive shell") +
+          dim(" — type a command, 'help' for the list, 'exit' or Ctrl-D to quit."))
+    while True:
+        try:
+            line = input(cyan("tm> "))
+        except EOFError:  # Ctrl-D
+            print()
+            break
+        except KeyboardInterrupt:  # Ctrl-C at the prompt: abandon the line, stay in
+            print()
+            continue
+
+        line = line.strip()
+        if not line:
+            continue
+        if line.lower() in ("exit", "quit", "q"):
+            break
+
+        try:
+            argv = shlex.split(line)
+        except ValueError as exc:  # e.g. an unbalanced quote
+            print(red(f"Parse error: {exc}"))
+            continue
+
+        try:
+            run_once(argv, parser, named_subparsers)
+        except SystemExit:
+            # argparse errors, `-h`, and missing-subcommand paths call sys.exit;
+            # swallow it so a bad line doesn't tear down the whole shell.
+            pass
+        except PromptCancelled:
+            print("Cancelled.")
+        except KeyboardInterrupt:  # Ctrl-C mid-command: cancel it, keep the shell
+            print()
+        except Exception as exc:  # a handler blew up; report and keep going
+            print(red(f"Error: {exc}"))
+
+
+def main(argv=None) -> None:
+    """Entry point. With no arguments, drop into the interactive shell."""
+    if argv is None:
+        argv = sys.argv[1:]
+    parser, named_subparsers = build_parser()
+    if not argv:
+        _repl(parser, named_subparsers)
+        return
+    run_once(argv, parser, named_subparsers)
 
 
 if __name__ == "__main__":
