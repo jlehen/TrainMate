@@ -53,6 +53,9 @@ def _print_block_boundary_hint(date_str: str) -> None:
 def run_workout_adapt(args: argparse.Namespace) -> None:
     # Executes the daily workout Garmin adaptation checks command.
     date_str = args.date or _today_str()
+    if not args.date:
+        # Name the defaulted target so a bare `adapt` isn't silent (DESIGN_cli_noargs.md §b).
+        print(dim(f"No date given — adapting today ({date_str})."))
 
     ensure_recent_data(
         date_str, no_pull=args.no_pull, force_pull=getattr(args, 'force_pull', False)

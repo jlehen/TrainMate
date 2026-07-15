@@ -10,7 +10,7 @@ import sys
 import tempfile
 from typing import Optional
 
-from trainmate.util import bold, red, yellow, default_wrap_width, format_labeled_block
+from trainmate.util import bold, dim, red, yellow, default_wrap_width, format_labeled_block
 
 
 class WrapAwareHelpFormatter(argparse.RawDescriptionHelpFormatter):
@@ -102,6 +102,14 @@ class WrapAwareArgumentParser(argparse.ArgumentParser):
         kwargs.setdefault("formatter_class", WrapAwareHelpFormatter)
         super().__init__(*args, **kwargs)
         self.register("action", "parsers", _DescFromHelpSubParsersAction)
+
+    def error(self, message):
+        # A missing-required-argument error leads with the one missing line, not the
+        # full usage block that argparse buries it under (DESIGN_cli_noargs.md §a).
+        if message.startswith("the following arguments are required"):
+            self.exit(2, red(f"{self.prog}: error: {message}\n")
+                      + dim(f"Run '{self.prog} -h' for usage.\n"))
+        super().error(message)
 
 def _edit_text_in_editor(initial: str) -> Optional[str]:
     """Opens $EDITOR (falling back to vi) seeded with `initial`, returns the saved text.

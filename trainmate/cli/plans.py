@@ -45,6 +45,12 @@ def run_plan_generate(args: argparse.Namespace) -> None:
             else:
                 objectives.sort(key=lambda x: str(x['target_date']))
                 next_goal = objectives[0]
+                # Name the defaulted goal so a bare `plan generate` isn't silent
+                # about which objective it planned for (DESIGN_cli_noargs.md §b).
+                print(dim(
+                    f"No goal given — planning for your next goal: "
+                    f"{next_goal.get('title', '')} on {fmt_date(next_goal['target_date'])}."
+                ))
 
             if next_goal:
                 macro = cli.db.get_macrocycle_for_objective(next_goal['id'])
