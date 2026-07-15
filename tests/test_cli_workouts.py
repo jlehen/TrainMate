@@ -514,9 +514,14 @@ class TestCliWorkouts(unittest.TestCase):
         self.assertEqual(exit_code, 0)
         self.assertIn("[ADAPTED]", stdout)
         self.assertNotIn("[ADAPTED ×", stdout)
-        # Lifecycle line: creation stamp always shown, last-adapted stamp when eased.
-        self.assertIn("Planned:", stdout)
-        self.assertIn("Last adapted: 2026-06-17 08:00", stdout)
+        # The lifecycle line is verbose-only; the default listing is one line per workout.
+        self.assertNotIn("Planned:", stdout)
+
+        # Lifecycle line under -v: creation stamp always shown, last-adapted stamp when eased.
+        exit_code, stdout_v, _ = self.run_cli(["workout", "list", "-v"])
+        self.assertEqual(exit_code, 0)
+        self.assertIn("Planned:", stdout_v)
+        self.assertIn("Last adapted: 2026-06-17 08:00", stdout_v)
 
         # Second easing of the same slot bumps the count.
         test_db.save_workout(

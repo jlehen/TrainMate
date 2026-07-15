@@ -14,6 +14,27 @@ trainmate.db.db = test_db
 garmin.db = test_db
 
 
+def _bind_test_db(tc):
+    """(Re)bind the shared db singletons to this module's test_db for one test, then
+    restore the prior bindings on cleanup.
+
+    The garmin functions resolve the db live through ``garmin.db`` (``_g.db``) and
+    ``trainmate.db.db``. Other test modules clobber those globals — ``test_progression``
+    assigns ``garmin.db`` at import, ``test_modification_state`` rebinds
+    ``trainmate.db.db`` in its setUp — so the once-at-import assignment above isn't
+    enough; bind per-test and restore so we neither read a stale db nor clobber theirs.
+    """
+    prev_db, prev_gdb = trainmate.db.db, garmin.db
+    trainmate.db.db = test_db
+    garmin.db = test_db
+
+    def _restore():
+        trainmate.db.db = prev_db
+        garmin.db = prev_gdb
+
+    tc.addCleanup(_restore)
+
+
 def _d(offset: int) -> str:
     """A YYYY-MM-DD string `offset` days from today (local)."""
     return (date.today() + timedelta(days=offset)).isoformat()
@@ -182,6 +203,7 @@ class TestZoneParsing(unittest.TestCase):
 
 class TestRecomputeDerived(unittest.TestCase):
     def setUp(self):
+        _bind_test_db(self)
         clear_all_tables(test_db)
 
     def test_recompute_fills_workload_and_baseline(self):
@@ -208,6 +230,7 @@ class TestRecomputeDerived(unittest.TestCase):
 
 class TestBackfillTss(unittest.TestCase):
     def setUp(self):
+        _bind_test_db(self)
         clear_all_tables(test_db)
 
     def test_backfill_rewrites_tss_from_zones(self):
@@ -290,6 +313,7 @@ def _summary(activity_id, day, type_key="indoor_cycling"):
 
 class TestIngestReconcilesDeletions(unittest.TestCase):
     def setUp(self):
+        _bind_test_db(self)
         clear_all_tables(test_db)
 
     def _seed(self, activity_id, day, type_key="indoor_cycling"):
@@ -341,6 +365,7 @@ class TestIngestReconcilesDeletions(unittest.TestCase):
 
 class TestEnsureData(unittest.TestCase):
     def setUp(self):
+        _bind_test_db(self)
         clear_all_tables(test_db)
         garmin.reset_memo()
         # Credentials come from config.yaml only; inject test creds into config.data.
@@ -430,6 +455,7 @@ class TestEnsureData(unittest.TestCase):
 
 class TestWatermarkForwardOnly(unittest.TestCase):
     def setUp(self):
+        _bind_test_db(self)
         clear_all_tables(test_db)
 
     def test_through_date_never_regresses(self):
