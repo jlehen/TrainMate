@@ -53,11 +53,18 @@ class TestCliMisc(unittest.TestCase):
 
         exit_code, stdout, stderr = self.run_cli(["workout", "--help"])
         self.assertEqual(exit_code, 0)
-        self.assertIn("push", stdout)
+        self.assertIn("swap", stdout)          # everyday command is listed
+        self.assertNotIn("push", stdout)       # advanced command is hidden from -h
 
         exit_code, stdout, stderr = self.run_cli(["data", "--help"])
         self.assertEqual(exit_code, 0)
         self.assertIn("pull", stdout)
+
+    def test_advanced_command_hidden_but_runnable(self):
+        # `workout push` is hidden from listings yet still parses and describes itself.
+        exit_code, stdout, stderr = self.run_cli(["workout", "push", "--help"])
+        self.assertEqual(exit_code, 0)
+        self.assertIn("Google Calendar", stdout)
 
     def test_help_command_shows_full_command_tree(self):
         exit_code, stdout, stderr = self.run_cli(["help"])
@@ -69,7 +76,17 @@ class TestCliMisc(unittest.TestCase):
         # and their sub-commands, which plain --help doesn't show recursively
         self.assertIn("add", stdout)
         self.assertIn("pull", stdout)
+        # advanced maintenance commands stay out of the everyday tree...
+        self.assertNotIn("push", stdout)
+        self.assertNotIn("backfill-tss", stdout)
+
+    def test_help_all_reveals_advanced_commands(self):
+        exit_code, stdout, stderr = self.run_cli(["help", "--all"])
+        self.assertEqual(exit_code, 0)
+        # ...and only surface under `help --all`, tagged as maintenance.
         self.assertIn("push", stdout)
+        self.assertIn("backfill-tss", stdout)
+        self.assertIn("maintenance", stdout)
 
     def test_invalid_command(self):
         exit_code, stdout, stderr = self.run_cli(["invalidcmd"])

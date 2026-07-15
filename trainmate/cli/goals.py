@@ -154,7 +154,8 @@ def add_goal_parser(subparsers):
     goal_subparsers.add_parser("list", aliases=["l"], help="Show all training objectives")
 
     # goal wipe
-    g_wipe = goal_subparsers.add_parser("wipe", help="Wipe all training objectives")
+    g_wipe = goal_subparsers.add_parser(
+        "wipe", advanced=True, help="Wipe all training objectives")
     g_wipe.add_argument("-y", "--yes", action="store_true", help="Skip confirmation prompt")
     
 

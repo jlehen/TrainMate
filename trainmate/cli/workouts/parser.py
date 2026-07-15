@@ -203,7 +203,7 @@ def add_workout_parser(subparsers, pull_bypass_parser, llm_debug_parser, plan_da
     
     # workout push
     w_push = workout_subparsers.add_parser(
-        "push", aliases=["p"],
+        "push", aliases=["p"], advanced=True,
         parents=[plan_date_parser, sport_type_parser],
         help="Commit local planned workouts to Google Calendar",
         description=(
@@ -256,7 +256,7 @@ def add_workout_parser(subparsers, pull_bypass_parser, llm_debug_parser, plan_da
 
     # workout wipe
     w_wipe = workout_subparsers.add_parser(
-        "wipe",
+        "wipe", advanced=True,
         help="Wipe all workouts from the database and Google Calendar"
     )
     w_wipe.add_argument("-y", "--yes", action="store_true", help="Skip confirmation prompt")

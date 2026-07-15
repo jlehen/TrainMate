@@ -52,17 +52,40 @@ class WrapAwareHelpFormatter(argparse.RawDescriptionHelpFormatter):
         return super()._format_action(action)
 
 class _DescFromHelpSubParsersAction(argparse._SubParsersAction):
-    """Default each sub-command's ``description`` from its ``help``.
+    """Mirror help into description, and hide ``advanced=True`` sub-commands.
 
-    ``add_parser(help=...)`` only feeds the *parent* listing, so a leaf sub-parser
-    has no ``description`` and ``<cmd> -h`` prints usage+options but never says what
-    the command does. Mirror help into description so both read the same summary.
+    Two behaviours:
+
+    * ``add_parser(help=...)`` only feeds the *parent* listing, so a leaf sub-parser
+      has no ``description`` and ``<cmd> -h`` prints usage+options but never says what
+      the command does. Mirror help into description so both read the same summary.
+    * ``add_parser(..., advanced=True)`` registers a maintenance/bootstrap command
+      that still parses, dispatches, and answers ``<cmd> -h`` — but is kept out of
+      the default ``-h`` listing and the ``help`` tree so the everyday surface stays
+      uncluttered. It surfaces only under ``help --all`` (via ``advanced_choices``).
     """
 
-    def add_parser(self, name, **kwargs):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._visible_names: list = []
+        self.advanced_choices: list = []  # (name, help) for hidden sub-commands
+
+    def add_parser(self, name, advanced=False, aliases=(), **kwargs):
         if "help" in kwargs:
             kwargs.setdefault("description", kwargs["help"])
-        return super().add_parser(name, **kwargs)
+        if advanced:
+            # Omit ``help`` so argparse builds no listing entry for this command
+            # (leaving it out of both ``-h`` and the ``help`` tree), but keep the
+            # description so ``<cmd> <name> -h`` still explains itself.
+            self.advanced_choices.append((name, kwargs.get("help", "")))
+            kwargs.pop("help", None)
+            return super().add_parser(name, aliases=aliases, **kwargs)
+        self._visible_names.append(name)
+        self._visible_names.extend(aliases)
+        # Pin the usage-line ``{...}`` to the visible names only; without this argparse
+        # rebuilds it from *all* choices, re-exposing the hidden commands there.
+        self.metavar = "{" + ",".join(self._visible_names) + "}"
+        return super().add_parser(name, aliases=aliases, **kwargs)
 
 
 class WrapAwareArgumentParser(argparse.ArgumentParser):
@@ -151,12 +174,17 @@ def _subparser_choices(parser: argparse.ArgumentParser) -> dict:
             return action.choices
     return {}
 
-def _print_command_tree(parser: argparse.ArgumentParser, indent: int = 0) -> None:
+def _print_command_tree(
+    parser: argparse.ArgumentParser, indent: int = 0, include_advanced: bool = False
+) -> None:
     """Recursively prints every command/sub-command with its one-line help.
 
     argparse's own --help only renders one level (a command's immediate
     sub-commands); the 'help' command walks the whole sub-parser tree so the
     entire surface area is visible without drilling into each command.
+
+    ``include_advanced`` (``help --all``) also lists the hidden maintenance
+    commands, dimmed and tagged, right under their visible siblings.
     """
     for action in parser._actions:
         if not isinstance(action, argparse._SubParsersAction):
@@ -164,9 +192,15 @@ def _print_command_tree(parser: argparse.ArgumentParser, indent: int = 0) -> Non
         for choice_action in action._choices_actions:
             label = "  " * indent + bold(choice_action.metavar)
             print(format_labeled_block(label, choice_action.help or ""))
-            _print_command_tree(action.choices[choice_action.dest], indent + 1)
+            _print_command_tree(
+                action.choices[choice_action.dest], indent + 1, include_advanced
+            )
             if indent == 0:
                 print()
+        if include_advanced:
+            for name, help_text in getattr(action, "advanced_choices", []):
+                label = "  " * indent + yellow(name)
+                print(format_labeled_block(label, yellow((help_text or "") + "  [maintenance]")))
 
 def translate_dashless_argv(parser: argparse.ArgumentParser, tokens: list) -> list:
     """Rewrite network-appliance-style dashless options back into ``--flag`` form.

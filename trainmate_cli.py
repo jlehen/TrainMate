@@ -104,8 +104,12 @@ def build_parser():
     # help command — prints every command and sub-command in one place. Registered
     # as a real sub-command (rather than just argparse's own --help) so it can
     # recurse through the whole sub-parser tree; see _print_command_tree.
-    subparsers.add_parser(
+    help_parser = subparsers.add_parser(
         "help", help="Show every command and sub-command in one place"
+    )
+    help_parser.add_argument(
+        "--all", action="store_true", dest="show_all",
+        help="Also list hidden maintenance commands (wipe, bootstrap, …)"
     )
 
     # Common parser for commands that support bypassing or forcing the auto-pull.
@@ -229,7 +233,7 @@ def run_once(argv, parser, named_subparsers) -> None:
     if cmd == "help":
         print(bold(parser.description))
         print()
-        _print_command_tree(parser)
+        _print_command_tree(parser, include_advanced=getattr(args, "show_all", False))
     elif cmd in ("status", "s"):
         run_status(verbose=args.verbose, no_pull=args.no_pull, force_pull=args.force_pull)
     elif cmd in ("progress", "p"):

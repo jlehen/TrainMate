@@ -701,7 +701,7 @@ def add_data_parser(subparsers, pull_bypass_parser, llm_debug_parser, basic_date
 
     # data bootstrap — cold-start backward reconstruction over the full backlog
     d_boot = data_subparsers.add_parser(
-        "bootstrap", aliases=["b"],
+        "bootstrap", aliases=["b"], advanced=True,
         parents=[pull_bypass_parser, basic_date_parser, llm_debug_parser],
         help="Reconstruct macro/mesocycles from your full backlog (run once): "
              "seeds coach learnings + a cached reconstruction fed to 'plan generate'",
@@ -756,7 +756,7 @@ def add_data_parser(subparsers, pull_bypass_parser, llm_debug_parser, basic_date
 
     # data backfill-tss
     d_btss = data_subparsers.add_parser(
-        "backfill-tss",
+        "backfill-tss", advanced=True,
         help="Recompute TSS for all stored activities using the current "
              "zone-based model (no Garmin calls needed)"
     )
@@ -817,7 +817,7 @@ def add_data_parser(subparsers, pull_bypass_parser, llm_debug_parser, basic_date
 
     # data wipe
     d_wipe = data_subparsers.add_parser(
-        "wipe",
+        "wipe", advanced=True,
         help="Wipe locally cached Garmin data and/or daily context from the database",
         description=(
             "Delete locally cached data. With no scope flag, wipes everything (Garmin "

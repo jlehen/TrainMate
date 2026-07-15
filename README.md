@@ -172,13 +172,16 @@ python trainmate_cli.py data pull
 python trainmate_cli.py workout adapt
 ```
 
-Sync to your Google Calendar:
-```bash
-python trainmate_cli.py workout push
-```
+Your workouts sync to Google Calendar automatically as part of `plan generate`,
+`workout generate`, and the daily `workout adapt` — there's no separate sync step.
+(To force a manual re-push after a Calendar mishap, the maintenance command
+`workout push` is still there; see below.)
 
-See `python trainmate_cli.py --help` for all available commands, or
+See `python trainmate_cli.py --help` for the everyday commands, or
 `python trainmate_cli.py help` to see every command and its sub-commands at once.
+Rarely-used maintenance commands — `wipe`, `workout push`, `data backfill-tss`,
+`data bootstrap` — are kept out of the default listings to reduce clutter;
+`python trainmate_cli.py help --all` reveals them.
 
 ### Steering the plan: which channel, and how a regen behaves
 

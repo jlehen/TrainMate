@@ -327,7 +327,8 @@ def add_constraint_parser(subparsers):
     cons_rm.add_argument("id", type=int, help="Constraint ID to remove")
 
     # constraint wipe
-    cons_wipe = constraint_subparsers.add_parser("wipe", help="Wipe all constraints")
+    cons_wipe = constraint_subparsers.add_parser(
+        "wipe", advanced=True, help="Wipe all constraints")
     cons_wipe.add_argument("-y", "--yes", action="store_true",
                            help="Skip confirmation prompt")
 
