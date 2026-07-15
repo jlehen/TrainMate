@@ -282,19 +282,12 @@ class WorkoutGenMixin:
                 source='generated',
                 macrocycle_id=macrocycle['id']
             )
-            saved_workouts.append({
-                'id': wid,
-                'date': w['date'],
-                'sport_type': w['sport_type'],
-                'title': w['title'],
-                'description': w['description'],
-                'original_description': w['description'],
-                'modification_reason': None,
-                'google_event_id': None,
-                'duration_minutes': w.get('duration_minutes'),
-                'rpe': w.get('rpe'),
-                'tss': w.get('tss')
-            })
+            # Sync from the persisted row, not a hand-built dict: the row's
+            # calendar_signature is what freshness is later derived against, so any field
+            # the dict omitted (e.g. source='generated') would make the push-time hash
+            # disagree and read STALE forever. Re-fetching also lets the eager event carry
+            # the same lifecycle footer a later re-push would (created_at, original load).
+            saved_workouts.append(self._db.get_workout_by_id(wid))
 
         print(green(f"Generated {len(workouts)} workouts."))
         # Eager sync: push the new plan to Google Calendar straight away so the calendar
