@@ -51,17 +51,34 @@ class WrapAwareHelpFormatter(argparse.RawDescriptionHelpFormatter):
                 self._max_help_position = saved
         return super()._format_action(action)
 
+class _DescFromHelpSubParsersAction(argparse._SubParsersAction):
+    """Default each sub-command's ``description`` from its ``help``.
+
+    ``add_parser(help=...)`` only feeds the *parent* listing, so a leaf sub-parser
+    has no ``description`` and ``<cmd> -h`` prints usage+options but never says what
+    the command does. Mirror help into description so both read the same summary.
+    """
+
+    def add_parser(self, name, **kwargs):
+        if "help" in kwargs:
+            kwargs.setdefault("description", kwargs["help"])
+        return super().add_parser(name, **kwargs)
+
+
 class WrapAwareArgumentParser(argparse.ArgumentParser):
     """ArgumentParser that defaults to :class:`WrapAwareHelpFormatter`.
 
     Used for the root parser so every sub-parser created via ``add_subparsers`` /
     ``add_parser`` inherits the same formatter (argparse propagates the parser
     class but not ``formatter_class``), making all help — top-level and nested —
-    wrap to the active client width."""
+    wrap to the active client width. Also registers a sub-parsers action that
+    defaults each sub-command's description from its help, so every ``<cmd> -h``
+    states what the command does; the registration propagates to nested levels."""
 
     def __init__(self, *args, **kwargs):
         kwargs.setdefault("formatter_class", WrapAwareHelpFormatter)
         super().__init__(*args, **kwargs)
+        self.register("action", "parsers", _DescFromHelpSubParsersAction)
 
 def _edit_text_in_editor(initial: str) -> Optional[str]:
     """Opens $EDITOR (falling back to vi) seeded with `initial`, returns the saved text.
