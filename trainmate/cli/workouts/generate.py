@@ -7,6 +7,7 @@ import trainmate_cli as cli
 from trainmate.config import config
 from trainmate.adherence import analyze_adherence, date_covered
 from trainmate.calendar_state import calendar_status
+from trainmate.google_calendar import event_url
 from trainmate.modification_state import modification_status
 from trainmate.sports import canonical_sport
 from trainmate.util import (
@@ -344,6 +345,11 @@ def run_workout_list(args: argparse.Namespace) -> None:
             f"ID: {w['id']} | {cyan(fmt_date(w['date']))} | {magenta(w['sport_type'].upper())} | "
             f"{bold(w['title'])}{mod_marker}{sync_marker}{rem_marker}{src_marker}{duration_str}{tss_str}{rpe_str}"
         )
+        # -l surfaces the Calendar event link (rebuilt from the stored event id) so it can
+        # be opened without the sync commands having to print the URL every push.
+        if getattr(args, "link", False):
+            url = event_url(w.get('google_event_id'), config.google_calendar_id)
+            print(gray(f"  Calendar: {url}") if url else gray("  Calendar: (not synced)"))
         # Default listing is one line per workout; -v adds the full per-workout detail.
         if not getattr(args, "verbose", False):
             continue

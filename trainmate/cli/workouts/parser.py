@@ -50,6 +50,10 @@ def add_workout_parser(subparsers, pull_bypass_parser, llm_debug_parser, plan_da
         help="Show full detail per workout (description, lifecycle, adapt notes) "
              "instead of one line each"
     )
+    w_list.add_argument(
+        "--link", "-l", action="store_true",
+        help="Show each synced workout's Google Calendar event link"
+    )
     
     # workout compare
     w_cmp = workout_subparsers.add_parser(

@@ -1,3 +1,4 @@
+import base64
 import json
 from datetime import datetime, timedelta, timezone
 from typing import Any, List, Optional
@@ -13,6 +14,14 @@ from trainmate.util import yellow, dim
 # Events fetched per Calendar API page during a context sync (the response is paged
 # through with pageToken regardless, so this only tunes round-trips vs payload size).
 CALENDAR_SYNC_PAGE_SIZE = 250
+
+
+def event_url(event_id: Optional[str], calendar_id: Optional[str]) -> Optional[str]:
+    """Rebuild an event's Google Calendar htmlLink from its stored id (eid = base64 of "<id> <cal>")."""
+    if not event_id or not calendar_id:
+        return None
+    eid = base64.b64encode(f"{event_id} {calendar_id}".encode()).decode().rstrip("=")
+    return f"https://www.google.com/calendar/event?eid={eid}"
 
 
 class CalendarSyncer:
@@ -248,8 +257,7 @@ class CalendarSyncer:
                     body=event_body
                 ).execute()
                 print(
-                    f"Updated existing calendar event for {date_str} ({sport_type}): "
-                    f"{updated_event.get('htmlLink')}"
+                    f"Updated existing calendar event for {date_str} ({sport_type})."
                 )
                 
                 # Record the push: store the event handle + the signature of what we
@@ -281,8 +289,7 @@ class CalendarSyncer:
             ).execute()
             new_event_id = created_event.get('id')
             print(
-                f"Created new calendar event for {date_str} ({sport_type}): "
-                f"{created_event.get('htmlLink')}"
+                f"Created new calendar event for {date_str} ({sport_type})."
             )
             
             # Record the push: store the new event handle + the signature of what we
