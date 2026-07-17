@@ -12,6 +12,7 @@
 # Git policy
 - Never push without asking before.
 - Never commits without being explicitly asked by the user.
+- Never open a pull request.
 - User review: summarize the changes that were made.
 - Commit message format:
 
