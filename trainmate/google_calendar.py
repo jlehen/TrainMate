@@ -256,10 +256,7 @@ class CalendarSyncer:
                     eventId=google_event_id,
                     body=event_body
                 ).execute()
-                print(
-                    f"Updated existing calendar event for {date_str} ({sport_type})."
-                )
-                
+
                 # Record the push: store the event handle + the signature of what we
                 # just pushed, so the row derives as `synced` until edited again.
                 if workout.get('id') is not None:
