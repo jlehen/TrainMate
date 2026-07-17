@@ -182,7 +182,7 @@ def add_workout_parser(subparsers, pull_bypass_parser, llm_debug_parser, plan_da
     w_adapt.add_argument("--date", help="Date in YYYY-MM-DD format (defaults to UTC today)")
     w_adapt.add_argument(
         "--lookback", type=int, metavar="DAYS",
-        help="Days of recovery-metrics trajectory to display (default: config metrics_lookback_days)"
+        help="Days of recovery-metrics trajectory to summarize (default: config metrics_lookback_days)"
     )
     w_adapt.add_argument(
         "-m", "--message", dest="message",

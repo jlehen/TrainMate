@@ -106,43 +106,22 @@ class TestCliWorkouts(unittest.TestCase):
                 acwr=1.12, ctl=62.4, atl=71.7, tsb=-8.9,
             )
 
-    # `garmin` stays REAL here: the point is to exercise the actual warm-up blanking.
     @patch("trainmate.cli.workouts.generate.ensure_recent_data")
     @patch("trainmate_cli.coach_service")
-    def test_adapt_trajectory_shows_pmc_triple(self, mock_coach, _mock_ensure):
-        # Past the warm-up cutoff the trajectory prints the same CTL/ATL/TSB the adapt
-        # prompt reads, plus the lag footnote that explains why TSB != CTL - ATL.
+    def test_adapt_reports_metric_day_count_not_values(self, mock_coach, _mock_ensure):
+        # The coach still reads the full trajectory; the CLI only tells the athlete how
+        # many days fed the decision and never prints the raw per-day numbers.
         mock_coach.workout_adapt.return_value = ("Metrics are green", [], [])
         self._seed_pmc_metrics(90)
 
         exit_code, stdout, stderr = self.run_cli(["workout", "adapt", "--lookback", "3"])
 
         self.assertEqual(exit_code, 0)
-        self.assertNotIn("Could not display metrics trajectory", stdout)
-        for header in ("CTL", "ATL", "TSB"):
-            self.assertIn(header, stdout)
+        self.assertNotIn("Could not load metrics trajectory", stdout)
+        self.assertIn("Using 3 days of recovery metrics", stdout)
+        # No raw HRV/RHR/PMC values leak into the terse summary.
         for value in ("62.4", "71.7", "-8.9"):
-            self.assertIn(value, stdout)
-        self.assertIn("TSB is CTL(yesterday) - ATL(yesterday)", stdout)
-
-    @patch("trainmate.cli.workouts.generate.ensure_recent_data")
-    @patch("trainmate_cli.coach_service")
-    def test_adapt_trajectory_blanks_pmc_during_warmup(self, mock_coach, _mock_ensure):
-        # A DB younger than tau_ctl holds only leading-edge artifacts, so the columns
-        # blank to "—" and the table says why instead of printing numbers to trust.
-        mock_coach.workout_adapt.return_value = ("Metrics are green", [], [])
-        self._seed_pmc_metrics(5)
-
-        exit_code, stdout, stderr = self.run_cli(["workout", "adapt", "--lookback", "3"])
-
-        self.assertEqual(exit_code, 0)
-        self.assertNotIn("Could not display metrics trajectory", stdout)
-        self.assertNotIn("62.4", stdout)
-        self.assertNotIn("-8.9", stdout)
-        self.assertIn("—", stdout)
-        self.assertIn("PMC still warming", stdout)
-        # No TSB was shown, so its lag footnote has nothing to explain.
-        self.assertNotIn("TSB is CTL(yesterday)", stdout)
+            self.assertNotIn(value, stdout)
 
     @patch("trainmate_cli.calendar_syncer")
     def test_workout_push_command(self, mock_calendar):
