@@ -112,6 +112,12 @@ def build_parser():
         help="Also list hidden maintenance commands (wipe, bootstrap, …)"
     )
 
+    # shell command — drop into the interactive REPL. See _repl.
+    subparsers.add_parser(
+        "shell", aliases=["sh"],
+        help="Start an interactive shell, dispatching each line like a command"
+    )
+
     # Common parser for commands that support bypassing or forcing the auto-pull.
     # --no-pull and --force-pull are opposite ends of the same throttle, so they're
     # mutually exclusive.
@@ -234,6 +240,8 @@ def run_once(argv, parser, named_subparsers) -> None:
         print(bold(parser.description))
         print()
         _print_command_tree(parser, include_advanced=getattr(args, "show_all", False))
+    elif cmd in ("shell", "sh"):
+        _repl(parser, named_subparsers)
     elif cmd in ("status", "s"):
         run_status(verbose=args.verbose, no_pull=args.no_pull, force_pull=args.force_pull)
     elif cmd in ("progress", "pr"):
@@ -378,8 +386,8 @@ def run_once(argv, parser, named_subparsers) -> None:
 def _repl(parser, named_subparsers) -> None:
     """Read commands interactively until EOF/exit, dispatching each like a shell.
 
-    Reached when ``./tm`` is launched with no arguments. Importing ``readline``
-    gives line editing and an in-session history for free.
+    Reached via the ``shell``/``sh`` command. Importing ``readline`` gives line
+    editing and an in-session history for free.
     """
     import shlex
     try:
@@ -426,13 +434,10 @@ def _repl(parser, named_subparsers) -> None:
 
 
 def main(argv=None) -> None:
-    """Entry point. With no arguments, drop into the interactive shell."""
+    """Entry point. With no arguments, print help; use `shell` for the REPL."""
     if argv is None:
         argv = sys.argv[1:]
     parser, named_subparsers = build_parser()
-    if not argv:
-        _repl(parser, named_subparsers)
-        return
     run_once(argv, parser, named_subparsers)
 
 
