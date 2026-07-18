@@ -88,6 +88,36 @@ class TestCliMisc(unittest.TestCase):
         self.assertIn("backfill-tss", stdout)
         self.assertIn("maintenance", stdout)
 
+    def test_plan_rm_hidden_from_plan_help(self):
+        # `plan rm` is a maintenance command: kept out of the everyday `plan --help`.
+        exit_code, stdout, stderr = self.run_cli(["plan", "--help"])
+        self.assertEqual(exit_code, 0)
+        self.assertIn("generate", stdout)          # everyday command still listed
+        self.assertNotIn("Remove/delete", stdout)  # hidden rm help text absent
+        # ...yet it still parses and describes itself.
+        exit_code, stdout, stderr = self.run_cli(["plan", "rm", "--help"])
+        self.assertEqual(exit_code, 0)
+        self.assertIn("Goal ID", stdout)
+
+    def test_helpall_flag_reveals_advanced_at_root(self):
+        # The top-level `--helpall` flag is the discoverable equivalent of `help --all`.
+        exit_code, stdout, stderr = self.run_cli(["--helpall"])
+        self.assertEqual(exit_code, 0)
+        self.assertIn("push", stdout)
+        self.assertIn("maintenance", stdout)
+
+    def test_helpall_flag_exists_on_subcommands(self):
+        # `--helpall` works at every level: `plan --helpall` reveals the hidden plan
+        # maintenance commands scoped to that sub-tree.
+        exit_code, stdout, stderr = self.run_cli(["plan", "--helpall"])
+        self.assertEqual(exit_code, 0)
+        self.assertIn("Remove/delete", stdout)  # the hidden `plan rm`...
+        self.assertIn("maintenance", stdout)    # ...tagged as maintenance
+        # On a leaf with no sub-commands it degrades to that command's own -h.
+        exit_code, stdout, stderr = self.run_cli(["plan", "rm", "--helpall"])
+        self.assertEqual(exit_code, 0)
+        self.assertIn("Goal ID", stdout)
+
     def test_invalid_command(self):
         exit_code, stdout, stderr = self.run_cli(["invalidcmd"])
         self.assertEqual(exit_code, 2)

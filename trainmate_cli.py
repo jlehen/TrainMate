@@ -40,7 +40,7 @@ from trainmate.util import (
 
 from trainmate.cli.argparse_ext import (
     WrapAwareArgumentParser, _edit_text_in_editor,
-    _print_command_tree, translate_dashless_argv,
+    _print_command_tree, translate_dashless_argv, _HelpAllAction,
 )
 
 from trainmate.cli.common import fmt_date, ensure_recent_data
@@ -98,7 +98,11 @@ def build_parser():
         "--llm-model", dest="llm_model",
         help="Override the OpenRouter model identifier"
     )
-    
+    parser.add_argument(
+        "--helpall", action=_HelpAllAction,
+        help="Show every command including hidden maintenance ones (same as 'help --all')"
+    )
+
     subparsers = parser.add_subparsers(dest="command", help="Available commands")
 
     # help command — prints every command and sub-command in one place. Registered

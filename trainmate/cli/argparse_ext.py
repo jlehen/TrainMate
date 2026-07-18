@@ -79,13 +79,23 @@ class _DescFromHelpSubParsersAction(argparse._SubParsersAction):
             # description so ``<cmd> <name> -h`` still explains itself.
             self.advanced_choices.append((name, kwargs.get("help", "")))
             kwargs.pop("help", None)
-            return super().add_parser(name, aliases=aliases, **kwargs)
+            return self._with_helpall(super().add_parser(name, aliases=aliases, **kwargs))
         self._visible_names.append(name)
         self._visible_names.extend(aliases)
         # Pin the usage-line ``{...}`` to the visible names only; without this argparse
         # rebuilds it from *all* choices, re-exposing the hidden commands there.
         self.metavar = "{" + ",".join(self._visible_names) + "}"
-        return super().add_parser(name, aliases=aliases, **kwargs)
+        return self._with_helpall(super().add_parser(name, aliases=aliases, **kwargs))
+
+    @staticmethod
+    def _with_helpall(parser):
+        """Give every sub-command its own ``--helpall`` (see :class:`_HelpAllAction`),
+        so the full-including-hidden listing is reachable at any level, not just root."""
+        parser.add_argument(
+            "--helpall", action=_HelpAllAction,
+            help="Show this command's full sub-tree, hidden maintenance commands included"
+        )
+        return parser
 
 
 class WrapAwareArgumentParser(argparse.ArgumentParser):
@@ -209,6 +219,35 @@ def _print_command_tree(
             for name, help_text in getattr(action, "advanced_choices", []):
                 label = "  " * indent + yellow(name)
                 print(format_labeled_block(label, yellow((help_text or "") + "  [maintenance]")))
+
+
+class _HelpAllAction(argparse.Action):
+    """A ``--helpall`` flag, on every command level, mirroring ``help --all``.
+
+    ``help --all`` is the only way to see the hidden maintenance commands, but
+    it's easy to miss; a real flag lands in each command's ``-h`` so it's
+    discoverable everywhere. Prints the current command's full sub-tree (hidden
+    included) and exits like ``-h``; on a leaf with no sub-commands it just falls
+    back to that command's own ``-h``.
+    """
+
+    def __init__(self, option_strings, dest=argparse.SUPPRESS,
+                 default=argparse.SUPPRESS, help=None):
+        super().__init__(option_strings=option_strings, dest=dest,
+                         default=default, nargs=0, help=help)
+
+    def __call__(self, parser, namespace, values, option_string=None):
+        has_subcommands = any(
+            isinstance(a, argparse._SubParsersAction) for a in parser._actions
+        )
+        if not has_subcommands:
+            parser.print_help()
+            parser.exit()
+        print(bold(parser.description))
+        print()
+        _print_command_tree(parser, include_advanced=True)
+        parser.exit()
+
 
 def translate_dashless_argv(parser: argparse.ArgumentParser, tokens: list) -> list:
     """Rewrite network-appliance-style dashless options back into ``--flag`` form.

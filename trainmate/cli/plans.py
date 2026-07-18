@@ -619,7 +619,7 @@ def add_plan_parser(subparsers, pull_bypass_parser, llm_debug_parser):
 
     # plan rm
     p_rm = plan_subparsers.add_parser(
-        "rm", aliases=["d"],
+        "rm", aliases=["d"], advanced=True,
         help="Remove/delete a specific periodization plan by Goal ID"
     )
     p_rm.add_argument(
