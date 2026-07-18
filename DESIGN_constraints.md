@@ -200,12 +200,15 @@ constraint add [--start YYYY-MM-DD] [--end YYYY-MM-DD] [--sport SPORT]
 - `--replan` / `--no-replan` pre-answer the plan-shaping proposal (§7); omitted =
   let the magnitude heuristic decide whether to *ask*. Independent of
   `--hard`/`--soft` (§5, §7).
-- `constraint list` defaults to directives **active within the last
-  `config.metrics_lookback_days` days** (15 by default) plus everything
-  upcoming (open-ended into the future) — mirroring `context list`'s default
-  window and override mechanism (`DESIGN_context_authoring.md` §3): a
-  `--from`/`--until` flag pair overrides the lower bound, and the same config
-  knob governs both commands.
+- `constraint list` defaults to directives **from the start of the current
+  mesocycle** (`get_active_mesocycle(today)['start_date']` — the training block
+  being planned) plus everything upcoming (open-ended into the future). This
+  anchors the list on the block the coach is actively reasoning over rather than
+  a rolling calendar window. `--all`/`-a` drops the lower bound (past directives
+  included); `--from`/`--until` override the bounds explicitly. When no active
+  mesocycle exists to anchor on (no plan yet), the lower bound is dropped and
+  **every** constraint is shown — a fresh user has only a handful, and there is
+  no block to scope to.
 
 ### Disambiguation: `context` alias `c` → `ctx`
 

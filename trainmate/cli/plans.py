@@ -592,7 +592,8 @@ def add_plan_parser(subparsers, pull_bypass_parser, llm_debug_parser):
     )
     p_show.add_argument(
         "--goal", "--goal-id", type=int, dest="goal_id",
-        help="Target goal ID to show the periodization plan for"
+        help="Target goal ID to show the periodization plan for (defaults to the next "
+             "active goal)"
     )
     p_show.add_argument(
         "--version", type=int, dest="version", metavar="PLAN_ID",

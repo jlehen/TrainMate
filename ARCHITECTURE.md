@@ -933,7 +933,7 @@ DESIGN_progress_timeline.md §7.1) — its subcommand aliases below (`g`, `s`,
 | `constraint` | `add`        | `cons a` | Author a directive (positional `TITLE`, `--start`, `--end`, `--sport`, `--hard`/`--soft`, `--type`, `--desc`, `--replan`/`--no-replan`; prompts for omitted mandatory fields) |
 | `constraint` | `edit`       | `cons e` | Adjust scope / bindingness / text / replan by ID                        |
 | `constraint` | `rm`         | `cons r` | Remove a directive by ID                                                |
-| `constraint` | `list`       | `cons l` | List active/upcoming directives (`--all`, `-v`, `--sport`, `--type`, `--from`, `--until`; default window `metrics_lookback_days`) |
+| `constraint` | `list`       | `cons l` | List directives from the current mesocycle onward (`-a`/`--all`, `-v`, `--from`, `--until`; default anchor: active mesocycle start, else show all) |
 | `constraint` | `show`       | `cons s` | Show a directive in detail (incl. plan-shaping status)                  |
 | `constraint` | `wipe`       | —        | Delete all constraints                                                  |
 | `context`    | `add`        | `ctx a`  | Author daily-context signal(s) (`text` or `-l/--label`, `-m METRIC`, `--value N`, `--from`, `--until`; one tagged all-day event per day, prompts if omitted) |
