@@ -221,6 +221,54 @@ def _print_command_tree(
                 print(format_labeled_block(label, yellow((help_text or "") + "  [maintenance]")))
 
 
+def _reorder_subparsers_action(action: argparse._SubParsersAction, order: list) -> None:
+    """Reorder one sub-parsers action's display to match ``order`` (canonical names).
+
+    Sorts the help listing (``_choices_actions``, shared by ``-h`` and the ``help``
+    tree) and rebuilds the usage metavar (``_visible_names``) so aliases stay grouped
+    with their command. Names not in ``order`` sort stably to the end.
+    """
+    rank = {name: i for i, name in enumerate(order)}
+    end = len(order)
+    action._choices_actions.sort(key=lambda ca: rank.get(ca.dest, end))
+    visible = getattr(action, "_visible_names", None)
+    if not visible:
+        return
+    reordered: list = []
+    for ca in action._choices_actions:
+        canonical_parser = action.choices[ca.dest]
+        # An alias shares its command's parser object; keep the group in original order.
+        for name in visible:
+            if action.choices.get(name) is canonical_parser and name not in reordered:
+                reordered.append(name)
+    for name in visible:  # safety: retain any name not tied to a listed command
+        if name not in reordered:
+            reordered.append(name)
+    action._visible_names = reordered
+    action.metavar = "{" + ",".join(reordered) + "}"
+
+
+def sort_command_tree(parser: argparse.ArgumentParser, order_map: dict, path: str = "") -> None:
+    """Reorder the whole parser tree's help by usefulness (DESIGN_cli_noargs.md §c).
+
+    ``order_map`` maps a level's key — ``""`` for the top level, else the parent
+    command's canonical name — to that level's sub-commands most-useful first.
+    """
+    for action in parser._actions:
+        if not isinstance(action, argparse._SubParsersAction):
+            continue
+        order = order_map.get(path)
+        if order:
+            _reorder_subparsers_action(action, order)
+        seen: set = set()
+        for ca in action._choices_actions:
+            child = action.choices[ca.dest]
+            if id(child) in seen:
+                continue
+            seen.add(id(child))
+            sort_command_tree(child, order_map, ca.dest)
+
+
 class _HelpAllAction(argparse.Action):
     """A ``--helpall`` flag, on every command level, mirroring ``help --all``.
 

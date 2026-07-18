@@ -41,7 +41,23 @@ from trainmate.util import (
 from trainmate.cli.argparse_ext import (
     WrapAwareArgumentParser, _edit_text_in_editor,
     _print_command_tree, translate_dashless_argv, _HelpAllAction,
+    sort_command_tree,
 )
+
+# Help lists commands by usefulness, not argparse registration order
+# (DESIGN_cli_noargs.md §c). One list per level, keyed by the parent's canonical
+# name ("" = top level), each level's visible sub-commands most-useful first.
+COMMAND_ORDER = {
+    "": ["status", "workout", "progress", "plan", "goal",
+         "constraint", "context", "learnings", "data", "shell", "help"],
+    "goal": ["list", "add", "edit", "rm"],
+    "constraint": ["list", "show", "add", "edit", "rm"],
+    "context": ["list", "list-metrics", "add", "rm"],
+    "learnings": ["list", "show", "edit", "demote", "keep", "rm"],
+    "plan": ["show", "generate", "feedback", "versions", "rollback"],
+    "workout": ["list", "adapt", "compare", "generate", "swap", "add", "restore", "rm"],
+    "data": ["pull", "reflect", "show-metrics", "show-activities"],
+}
 
 from trainmate.cli.common import fmt_date, ensure_recent_data
 from trainmate.cli.status import run_status
@@ -208,6 +224,7 @@ def build_parser():
         "workout": workout_parser,
         "data": data_parser,
     }
+    sort_command_tree(parser, COMMAND_ORDER)
     return parser, named_subparsers
 
 
