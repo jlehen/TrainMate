@@ -557,6 +557,7 @@ def add_plan_parser(subparsers, pull_bypass_parser, llm_debug_parser):
     # plan command & subparsers
     plan_parser = subparsers.add_parser(
         "plan",
+        aliases=["pl"],
         help="Manage and consult the periodized training plan (macrocycles & mesocycles)"
     )
     plan_subparsers = plan_parser.add_subparsers(

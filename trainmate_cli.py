@@ -236,7 +236,7 @@ def run_once(argv, parser, named_subparsers) -> None:
         _print_command_tree(parser, include_advanced=getattr(args, "show_all", False))
     elif cmd in ("status", "s"):
         run_status(verbose=args.verbose, no_pull=args.no_pull, force_pull=args.force_pull)
-    elif cmd in ("progress", "p"):
+    elif cmd in ("progress", "pr"):
         run_progress(args)
     elif cmd in ("goal", "g"):
         if not args.subcommand:
@@ -350,7 +350,7 @@ def run_once(argv, parser, named_subparsers) -> None:
             run_data_show_activities(args)
         elif sub == "wipe":
             run_data_wipe(args)
-    elif cmd == "plan":
+    elif cmd in ("plan", "pl"):
         if not args.subcommand:
             plan_parser.print_help()
             sys.exit(1)

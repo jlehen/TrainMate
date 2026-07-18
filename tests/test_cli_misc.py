@@ -219,3 +219,28 @@ class TestCliMisc(unittest.TestCase):
             self.assertEqual(openrouter_client.model, "google/gemini-2.5-pro")
         finally:
             openrouter_client.model = original_model
+
+    @patch("trainmate_cli.garmin")
+    @patch("trainmate.timeline.build_timeline_payload")
+    def test_progress_alias(self, mock_build, mock_garmin):
+        mock_build.return_value = {
+            "today": "2026-07-18",
+            "plan_end": "2026-08-31",
+            "days": [
+                {
+                    "date": "2026-07-18",
+                    "ctl": 10.0,
+                    "atl": 10.0,
+                    "tsb": 0.0,
+                    "load": 0.0,
+                    "source": "actual"
+                }
+            ],
+            "weeks": [],
+            "objectives": [],
+            "warnings": [],
+            "meso_bands": [],
+        }
+        exit_code, stdout, stderr = self.run_cli(["pr", "--no-pull"])
+        self.assertEqual(exit_code, 0)
+        self.assertIn("CTL 10", stdout)

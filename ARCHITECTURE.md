@@ -915,11 +915,11 @@ patchable singletons; the handler functions, named
 (one module per command family: `status`, `progress`, `goals`, `constraints`,
 `context`, `learnings`, `plans`, `workouts`, `data`). `help` is the one
 exception — it just introspects the parser tree (`_print_command_tree` in
-`trainmate_cli.py`), so it has no handler of its own. `plan` has **no
-top-level alias** (the former `p` was removed when `progress`/`prog` was
-added, so the two command names can't be confused mid-typing,
-DESIGN_progress_timeline.md §7.1) — its subcommand aliases below (`g`, `s`,
-…) only abbreviate after the full word, e.g. `plan g`.
+`trainmate_cli.py`), so it has no handler of its own. `plan` has a
+top-level alias (`pl`) and `progress` has a top-level alias (`pr`) (the former
+`p` was removed, and `progress`'s alias was changed from `p` to `pr` to prevent
+mid-typing confusion, DESIGN_progress_timeline.md §7.1). Its subcommand aliases
+below (`g`, `s`, …) can abbreviate after the top-level alias, e.g. `pl g` or `pl s`.
 
 | Command      | Subcommand   | Alias    | Description                                                              |
 |--------------|--------------|----------|--------------------------------------------------------------------------|
@@ -947,14 +947,14 @@ DESIGN_progress_timeline.md §7.1) — its subcommand aliases below (`g`, `s`,
 | `learnings`  | `demote`     | —        | Accept a pending confidence downgrade by ID                            |
 | `learnings`  | `keep`       | —        | Dismiss + affirm a pending downgrade by ID                             |
 | `learnings`  | `wipe`       | —        | Delete all coach learnings                                             |
-| `plan`       | `generate`   | `g`      | Generate/reuse macrocycle+mesocycles (`-f` to force, `--goal ID`)        |
-| `plan`       | `show`       | `s`      | Show active periodization plan (`--version PLAN_ID` for a superseded one) |
-| `plan`       | `versions`   | `v`      | List a goal's kept plan versions — active + superseded — with IDs and dates (`--goal ID`) |
-| `plan`       | `rollback`   | `rb`     | Restore a superseded plan version + its workouts (`--goal ID`, `--version PLAN_ID`, `-y`); defaults to the chronologically previous version. The inverse of eager generation (DESIGN_plan_rollback.md) |
-| `plan`       | `rm`         | `d`      | Delete plan for a goal ID                                                |
-| `plan`       | `feedback`   | `f`      | Add feedback (`--macro` or `--meso ID`, `--goal ID`, text; `--edit` opens `$EDITOR` seeded with current feedback) |
+| `plan`       | `generate`   | `pl g`   | Generate/reuse macrocycle+mesocycles (`-f` to force, `--goal ID`)        |
+| `plan`       | `show`       | `pl s`   | Show active periodization plan (`--version PLAN_ID` for a superseded one) |
+| `plan`       | `versions`   | `pl v`   | List a goal's kept plan versions — active + superseded — with IDs and dates (`--goal ID`) |
+| `plan`       | `rollback`   | `pl rb`  | Restore a superseded plan version + its workouts (`--goal ID`, `--version PLAN_ID`, `-y`); defaults to the chronologically previous version. The inverse of eager generation (DESIGN_plan_rollback.md) |
+| `plan`       | `rm`         | `pl d`   | Delete plan for a goal ID                                                |
+| `plan`       | `feedback`   | `pl f`   | Add feedback (`--macro` or `--meso ID`, `--goal ID`, text; `--edit` opens `$EDITOR` seeded with current feedback) |
 | `plan`       | `wipe`       | —        | Delete all plans                                                         |
-| `progress`   | —            | `prog`   | Show the progress timeline: measured load to date, plan-projected forward (CTL/ATL/TSB), weekly planned-vs-actual bars (`--weeks N`, `--chart [PATH]` for a PNG; DESIGN_progress_timeline.md) |
+| `progress`   | —            | `pr`     | Show the progress timeline: measured load to date, plan-projected forward (CTL/ATL/TSB), weekly planned-vs-actual bars (`--weeks N`, `--chart [PATH]` for a PNG; DESIGN_progress_timeline.md) |
 | `workout`    | `list`       | `w l`    | Show planned workouts. Defaults to today for 7 days. Flags: `--type TYPE`, `--days N`, `--weeks N`, `--from DATE`, `--until DATE`, `--from-mesocycle`, `--until-mesocycle [ID]`, `--mesocycle [ID]`, `--goal [ID]`, `--removed`. |
 | `workout`    | `compare`    | `w c`    | Compare planned vs completed (`analyze_adherence()`): prints PLANNED/ACTUAL per day, flags misses (red), rest violations (red), unplanned high-load (yellow), then a discrepancy summary. Same date flags as `workout list`; default 14-day lookback; `--days`/`--weeks` look *back*; end capped at today. |
 | `workout`    | `generate`   | `w g`    | Generate workouts from active strategy. No horizon flag → `config.workout_generation_span_days` ahead (28 default). Flags: `--goal ID`, `--days N`, `--weeks N`, `--until DATE`, `--until-goal [ID]`, `--until-mesocycle ID`. Eager: archives the previous plan's future workouts and pushes the new ones to Calendar immediately. |

@@ -126,6 +126,18 @@ class TestCliPlans(unittest.TestCase):
         self.assertIn("removed successfully", stdout)
         mock_coach.plan_rm.assert_called_once_with(obj_to_rm)
 
+    @patch("trainmate_cli.coach_service")
+    def test_plan_alias(self, mock_coach):
+        mock_coach.plan_generate.return_value = (
+            "Mock Strategy",
+            [{"name": "Meso 1", "start_date": "2026-01-01", "end_date": "2026-01-28", "focus": "Base"}],
+            False
+        )
+        exit_code, stdout, stderr = self.run_cli(["pl", "generate"])
+        self.assertEqual(exit_code, 0)
+        self.assertIn("Plan discarded", stdout)
+        mock_coach.plan_generate.assert_called_once_with(force=False, auto_apply=False)
+
     @patch("trainmate_cli.garmin")
     def test_plan_show_never_pulls(self, mock_garmin):
         # `plan show` is a pure read: it must never prompt or trigger a Garmin pull,

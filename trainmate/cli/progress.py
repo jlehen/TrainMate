@@ -491,7 +491,7 @@ def add_progress_parser(subparsers, pull_bypass_parser):
     # progress command — the projected Performance Management Chart
     progress_parser = subparsers.add_parser(
         "progress",
-        aliases=["p"],
+        aliases=["pr"],
         parents=[pull_bypass_parser],
         help="Show the training progress timeline: measured load to date, projected forward",
         description=(
