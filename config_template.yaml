@@ -97,10 +97,10 @@ coach:
   #replan_displaced_load_pct: 50
   # ...OR, independently, when a `rest` constraint spans at least this many days.
   #replan_rest_span_days: 3
-  # Relative drift (percent) a physiological threshold (max_hr/lthr/ftp) may move
-  # from the value the active plan was generated with before the plan is flagged
-  # stale. Small retest corrections flow into workout targets without invalidating
-  # the periodization strategy.
+  # Relative drift (percent) an effective threshold anchor (max_hr, or a logbook
+  # anchor like ftp/lthr) may move from the value the active plan was generated with
+  # before the plan is flagged stale. Small retest corrections flow into workout
+  # targets without invalidating the periodization strategy.
   #threshold_replan_pct: 5
   # Thresholds to compute high intensity workouts.
   #high_intensity_rpe_threshold: 8
@@ -131,8 +131,11 @@ user_profile:
   name: "Athlete"
   birth_year: 1980
   max_hr: 185
-  lthr: 165
-  ftp: 220
+  # Trainable thresholds (FTP, LTHR, threshold pace, CSS, e1RM, …) are NOT set here —
+  # they live in the dated benchmark logbook (the only home for measured quantities).
+  # Record one with e.g.  `tm benchmark record --sport cycling --ftp 220`
+  # or  `tm benchmark record --sport running --lthr 165`. With none on record the coach
+  # prescribes by RPE/HR feel and schedules a benchmark to establish them.
   weekly_target_hours: 6.0
   sport_preferences:
     - "running"

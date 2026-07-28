@@ -198,6 +198,10 @@ def format_planned_workouts_detailed(
             header += " [COMPLETED — locked history, not adaptable]"
         if w.get('source') == 'manual':
             header += " [athlete-added]"
+        # A benchmark (fitness test) must be rescheduled intact, never softened — see the
+        # adapt prompt's PROTECTING A BENCHMARK rule (DESIGN_benchmark_workouts.md §4.2).
+        if w.get('benchmark_type'):
+            header += f" [BENCHMARK: {w['benchmark_type']} — reschedule intact, do not dilute]"
         header += _adapt_recency_tag(w, eval_date)
         mod_reason = w.get('modification_reason')
         if mod_reason:

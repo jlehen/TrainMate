@@ -5,6 +5,7 @@ from trainmate.config import config
 from trainmate.openrouter import openrouter_client
 from trainmate.types import Objective, Constraint, Workout, CompletedActivity
 from trainmate.util import today_date as _today_date, cyan
+from trainmate.benchmarks import ANCHOR_KINDS, format_value
 from trainmate.coach.formatting import (
     format_metrics_history, format_completed_activities, format_baseline,
     format_planned_workouts, format_planned_workouts_detailed,
@@ -17,11 +18,13 @@ from trainmate.coach.engine import MIN_PLAN_WEEKS, MAX_PLAN_WEEKS, LEARNING_UPDA
 class PromptBuildMixin:
     """Part of :class:`CoachEngine` — see coach/engine/__init__.py."""
 
-    # Physiological thresholds live in user_profile but are excluded from the config
-    # fingerprint: they anchor per-workout zone targets (recomputed from live config at
-    # every workout generation), not the phase structure. They are instead snapshotted
-    # on the macrocycle and only flag the plan stale past a relative drift tolerance
-    # (`coach.threshold_replan_pct`) — see service.config_changed().
+    # Threshold anchors are excluded from the config fingerprint: they anchor per-workout
+    # zone targets (recomputed from live values at every generation), not the phase
+    # structure. They are snapshotted on the macrocycle and only flag the plan stale past a
+    # relative drift tolerance (`coach.threshold_replan_pct`) — see service.config_changed()
+    # / service.effective_thresholds(). Post-DESIGN_benchmark_workouts §3.4 only `max_hr`
+    # still lives in config (lthr/ftp moved to the benchmark logbook); the other two names
+    # are kept here so any legacy config that still carries them is excluded from the hash.
     PROFILE_THRESHOLD_FIELDS = ('max_hr', 'lthr', 'ftp')
 
     def _format_athlete_profile(self, profile: Optional[Dict[str, Any]]) -> str:
@@ -36,12 +39,13 @@ class PromptBuildMixin:
             current_year = _today_date().year
             age = current_year - profile['birth_year']
             lines.append(f"- Birth Year: {profile['birth_year']} (Age: {age})")
-        if "max_hr" in profile:
-            lines.append(f"- Max Heart Rate: {profile['max_hr']} bpm")
-        if "lthr" in profile:
-            lines.append(f"- Lactate Threshold HR (LTHR): {profile['lthr']} bpm")
-        if "ftp" in profile:
-            lines.append(f"- Functional Threshold Power (FTP): {profile['ftp']} W")
+        # Render whatever threshold anchors the (effective) profile carries, generically
+        # with each kind's unit — no kind is privileged (DESIGN_benchmark_workouts.md §3.5),
+        # so a first swim/strength test shows up here with zero further code. Ordered by the
+        # vocabulary so output is stable. max_hr comes from config, the rest from the logbook.
+        for kind, anchor in ANCHOR_KINDS.items():
+            if profile.get(kind) is not None:
+                lines.append(f"- {anchor.label}: {format_value(kind, profile[kind])}")
         if "weekly_target_hours" in profile:
             lines.append(f"- Weekly Target Hours: {profile['weekly_target_hours']} hours")
         if "sport_preferences" in profile:
@@ -246,15 +250,6 @@ ACTIVE CONSTRAINTS (athlete-declared directives to work around):
         return {
             k: v for k, v in config.user_profile.items()
             if k not in self.PROFILE_THRESHOLD_FIELDS
-        }
-
-    def _get_config_thresholds(self) -> Dict[str, float]:
-        """The current physiological thresholds, normalized for the macrocycle
-        snapshot and the drift comparison in service.config_changed()."""
-        profile = config.user_profile
-        return {
-            k: float(profile[k]) for k in self.PROFILE_THRESHOLD_FIELDS
-            if profile.get(k) is not None
         }
 
     def _get_config_hash(self) -> str:

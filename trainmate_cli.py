@@ -49,9 +49,10 @@ from trainmate.cli.argparse_ext import (
 # name ("" = top level), each level's visible sub-commands most-useful first.
 COMMAND_ORDER = {
     "": ["status", "workout", "progress", "plan", "goal",
-         "constraint", "context", "learnings", "data", "shell", "help"],
+         "constraint", "benchmark", "context", "learnings", "data", "shell", "help"],
     "goal": ["list", "add", "edit", "rm"],
     "constraint": ["list", "show", "add", "edit", "rm"],
+    "benchmark": ["list", "record", "rm"],
     "context": ["list", "list-metrics", "add", "rm"],
     "learnings": ["list", "show", "edit", "demote", "keep", "rm"],
     "plan": ["show", "generate", "feedback", "versions", "rollback"],
@@ -68,6 +69,9 @@ from trainmate.cli.goals import (
 from trainmate.cli.constraints import (
     run_constraint_add, run_constraint_edit, run_constraint_list,
     run_constraint_show, run_constraint_rm, run_constraint_wipe,
+)
+from trainmate.cli.benchmarks import (
+    run_benchmark_record, run_benchmark_list, run_benchmark_rm, run_benchmark_wipe,
 )
 from trainmate.cli.learnings import (
     run_learning_list, run_learning_show, run_learning_edit, run_learning_rm,
@@ -93,6 +97,7 @@ from trainmate.cli.status import add_status_parser
 from trainmate.cli.progress import add_progress_parser
 from trainmate.cli.goals import add_goal_parser
 from trainmate.cli.constraints import add_constraint_parser
+from trainmate.cli.benchmarks import add_benchmark_parser
 from trainmate.cli.context import add_context_parser
 from trainmate.cli.learnings import add_learnings_parser
 from trainmate.cli.plans import add_plan_parser
@@ -209,6 +214,7 @@ def build_parser():
     add_progress_parser(subparsers, pull_bypass_parser)
     goal_parser = add_goal_parser(subparsers)
     constraint_parser = add_constraint_parser(subparsers)
+    benchmark_parser = add_benchmark_parser(subparsers)
     context_parser = add_context_parser(subparsers)
     learnings_parser = add_learnings_parser(subparsers)
     plan_parser = add_plan_parser(subparsers, pull_bypass_parser, llm_debug_parser)
@@ -218,6 +224,7 @@ def build_parser():
     named_subparsers = {
         "goal": goal_parser,
         "constraint": constraint_parser,
+        "benchmark": benchmark_parser,
         "context": context_parser,
         "learnings": learnings_parser,
         "plan": plan_parser,
@@ -249,6 +256,7 @@ def run_once(argv, parser, named_subparsers) -> None:
 
     goal_parser = named_subparsers["goal"]
     constraint_parser = named_subparsers["constraint"]
+    benchmark_parser = named_subparsers["benchmark"]
     context_parser = named_subparsers["context"]
     learnings_parser = named_subparsers["learnings"]
     plan_parser = named_subparsers["plan"]
@@ -303,6 +311,19 @@ def run_once(argv, parser, named_subparsers) -> None:
             run_constraint_show(args)
         elif sub == "wipe":
             run_constraint_wipe(args)
+    elif cmd in ("benchmark", "bench"):
+        if not args.subcommand:
+            benchmark_parser.print_help()
+            sys.exit(1)
+        sub = args.subcommand.lower()
+        if sub in ("record", "rec"):
+            run_benchmark_record(args)
+        elif sub in ("list", "l"):
+            run_benchmark_list(args)
+        elif sub in ("rm", "r"):
+            run_benchmark_rm(args)
+        elif sub == "wipe":
+            run_benchmark_wipe(args)
     elif cmd in ("context", "ctx"):
         if not args.subcommand:
             context_parser.print_help()

@@ -650,9 +650,14 @@ class TestPeriodization(unittest.TestCase):
             trainmate.coach.config.data["coach"] = original_coach
 
     def test_config_changed_threshold_tolerance(self):
+        # FTP now lives in the benchmark logbook, not config (DESIGN_benchmark_workouts
+        # §3.4); drift is driven by recording newer results (latest row wins).
         original_profile = dict(trainmate.coach.config.data["user_profile"])
         try:
-            trainmate.coach.config.data["user_profile"]["ftp"] = 220
+            test_db.add_benchmark_result(
+                date="2026-06-01", sport_type="road_biking",
+                anchor_kind="ftp", value=220, unit="W",
+            )
             macro = {
                 "config_hash": coach_service._get_config_hash(),
                 "config_snapshot": coach_service._get_config_snapshot(),
@@ -660,17 +665,34 @@ class TestPeriodization(unittest.TestCase):
             self.assertIsNone(coach_service.config_changed(macro))
 
             # Within the default 5% band: still current.
-            trainmate.coach.config.data["user_profile"]["ftp"] = 228
+            test_db.add_benchmark_result(
+                date="2026-06-15", sport_type="road_biking",
+                anchor_kind="ftp", value=228, unit="W",
+            )
             self.assertIsNone(coach_service.config_changed(macro))
 
             # Past the band: stale, with the threshold named in the reason.
-            trainmate.coach.config.data["user_profile"]["ftp"] = 250
+            test_db.add_benchmark_result(
+                date="2026-07-01", sport_type="road_biking",
+                anchor_kind="ftp", value=250, unit="W",
+            )
             reason = coach_service.config_changed(macro)
             self.assertIsNotNone(reason)
             self.assertIn("ftp", reason)
 
+            # A newly recorded kind absent from the old snapshot is skipped (§3.5), not
+            # read as instant drift — restore ftp to baseline first so it isn't the cause.
+            test_db.add_benchmark_result(
+                date="2026-07-02", sport_type="road_biking",
+                anchor_kind="ftp", value=220, unit="W",
+            )
+            test_db.add_benchmark_result(
+                date="2026-07-03", sport_type="swimming",
+                anchor_kind="css", value=95, unit="sec/100m",
+            )
+            self.assertIsNone(coach_service.config_changed(macro))
+
             # Non-threshold profile edits still trip the fingerprint.
-            trainmate.coach.config.data["user_profile"]["ftp"] = 220
             trainmate.coach.config.data["user_profile"]["weekly_target_hours"] = 20.0
             self.assertEqual(
                 coach_service.config_changed(macro), "athlete profile changed"
@@ -678,7 +700,6 @@ class TestPeriodization(unittest.TestCase):
 
             # Legacy macrocycle without a snapshot: fingerprint alone decides.
             trainmate.coach.config.data["user_profile"] = dict(original_profile)
-            trainmate.coach.config.data["user_profile"]["ftp"] = 250
             legacy = {"config_hash": coach_service._get_config_hash(),
                       "config_snapshot": None}
             self.assertIsNone(coach_service.config_changed(legacy))
@@ -824,22 +845,14 @@ class TestPeriodization(unittest.TestCase):
         self.assertIsNone(test_db.get_macrocycle_for_objective(obj1_id))
         self.assertIsNotNone(test_db.get_macrocycle_for_objective(obj2_id))
 
-    def test_config_user_profile_validation(self):
-        with patch.dict(trainmate.coach.config.data, {"user_profile": {"lthr": 170, "ftp": 220}}):
-            profile = trainmate.coach.config.user_profile
-            self.assertEqual(profile["lthr"], 170)
-            self.assertEqual(profile["ftp"], 220)
-
-        with patch.dict(trainmate.coach.config.data, {"user_profile": {"lthr": 170}}):
-            self.assertEqual(trainmate.coach.config.user_profile["lthr"], 170)
-
-        with patch.dict(trainmate.coach.config.data, {"user_profile": {"ftp": 220}}):
-            self.assertEqual(trainmate.coach.config.user_profile["ftp"], 220)
-
+    def test_config_user_profile_no_threshold_requirement(self):
+        # Thresholds moved to the benchmark logbook (DESIGN_benchmark_workouts §3.4), so
+        # user_profile no longer requires 'lthr'/'ftp' — a threshold-less profile is a
+        # valid cold start (the coach nudges, never refuses).
         with patch.dict(trainmate.coach.config.data, {"user_profile": {"name": "Test Athlete"}}):
-            with self.assertRaises(ValueError) as ctx:
-                _ = trainmate.coach.config.user_profile
-            self.assertIn("must contain at least 'lthr' or 'ftp'", str(ctx.exception))
+            profile = trainmate.coach.config.user_profile
+            self.assertEqual(profile["name"], "Test Athlete")
+            self.assertNotIn("ftp", profile)
 
     @patch("trainmate.coach.service._today_str")
     @patch("trainmate.coach.engine.openrouter_client")

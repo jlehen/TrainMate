@@ -63,6 +63,7 @@ class Workout(TypedDict):
     removed: Optional[bool]
     removed_reason: Optional[str]
     source: Optional[str]  # origin, fixed at creation: 'generated'|'manual' (None = legacy)
+    benchmark_type: Optional[str]  # set <=> a fitness test; creation-time intent (DESIGN_benchmark_workouts.md §3.1)
 
 class CompletedActivity(TypedDict):
     """Represents a completed Garmin activity synced from Sheets."""

@@ -335,6 +335,10 @@ def run_workout_list(args: argparse.Namespace) -> None:
         src_marker = ""
         if w.get('source') == 'manual':
             src_marker = bold(magenta(" [MANUAL]"))
+        # Benchmark identity is a stored column, orthogonal to the modification/sync/removed
+        # axes (a benchmark can also be swapped), so it gets its own marker straight off the
+        # column (DESIGN_benchmark_workouts.md §3.1/§6).
+        bench_marker = bold(blue(" [BENCHMARK]")) if w.get('benchmark_type') else ""
         duration = w.get('duration_minutes')
         tss = w.get('tss')
         rpe = w.get('rpe')
@@ -343,7 +347,7 @@ def run_workout_list(args: argparse.Namespace) -> None:
         rpe_str = f" | RPE {rpe}" if rpe is not None else ""
         print(
             f"ID: {w['id']} | {cyan(fmt_date(w['date']))} | {magenta(w['sport_type'].upper())} | "
-            f"{bold(w['title'])}{mod_marker}{sync_marker}{rem_marker}{src_marker}{duration_str}{tss_str}{rpe_str}"
+            f"{bold(w['title'])}{bench_marker}{mod_marker}{sync_marker}{rem_marker}{src_marker}{duration_str}{tss_str}{rpe_str}"
         )
         # -l surfaces the Calendar event link (rebuilt from the stored event id) so it can
         # be opened without the sync commands having to print the URL every push.

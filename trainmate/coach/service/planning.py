@@ -281,7 +281,7 @@ class PlanningMixin:
             print(cyan("Goals or plan-shaping constraints have changed, or force generation "
                   "requested. Determining new overall periodization strategy..."))
             guidelines = self._load_science_guidelines()
-            profile = config.user_profile
+            profile = self._effective_profile()
             history_summary = self._get_recent_history_summary(today_str)
             # Planned-vs-actual review of the prior plan (+ cached reconstruction) fed as
             # read-only context (Option A). `prev_macro` here is the existing plan being

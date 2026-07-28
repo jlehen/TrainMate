@@ -149,6 +149,74 @@ class WorkoutGenMixin:
             cleaned.append(cls._rest_workout(day, f"constraint '{title}'"))
         return cleaned
 
+    @staticmethod
+    def _drop_benchmark_collisions(
+        workouts: List[Dict[str, Any]]
+    ) -> List[Dict[str, Any]]:
+        """Same-day collision rule (§4.1): save_workout keys on (date, sport), so a second
+        same-sport session on a benchmark's date would silently overwrite the test. On a
+        date holding a benchmark of sport X, drop any OTHER proposed sport-X session and
+        warn. The benchmark is identified by its flag — no guessing."""
+        # date -> {canonical sport with a benchmark that day}
+        bench_sports: Dict[str, set] = {}
+        for w in workouts:
+            if w.get('benchmark_type'):
+                bench_sports.setdefault(w.get('date', ''), set()).add(
+                    canonical_sport(w.get('sport_type', ''))
+                )
+        if not bench_sports:
+            return workouts
+        out: List[Dict[str, Any]] = []
+        for w in workouts:
+            day = w.get('date', '')
+            sport = canonical_sport(w.get('sport_type', ''))
+            if (not w.get('benchmark_type')
+                    and sport in bench_sports.get(day, set())):
+                print(yellow(
+                    f"Dropping {w.get('sport_type', '')} session on {day}: it collides "
+                    f"with a scheduled benchmark of the same sport."
+                ))
+                continue
+            out.append(w)
+        return out
+
+    def _warn_missing_boundary_benchmarks(
+        self, workouts: List[Dict[str, Any]], constraints: List[Constraint],
+        macrocycle_id: int, gen_start: str
+    ) -> None:
+        """Boundary-week post-check (§4.1): warn — don't auto-insert — when a covered
+        mesocycle-boundary week ended up with no benchmark. Same spirit as the rest-window
+        pass, but a surfaced warning the athlete can act on (regenerate), not a silent fix.
+        Stays quiet when the boundary week sits under a `rest` constraint — rest wins."""
+        if not workouts:
+            return
+        mesocycles = self._db.get_mesocycles_for_macrocycle(macrocycle_id)
+        if not mesocycles:
+            return
+        dated = [w for w in workouts if w.get('date')]
+        span_end = max(w['date'] for w in dated)
+        rest_windows = self._hard_rest_windows(constraints)
+        for m in mesocycles:
+            end = m.get('end_date', '')
+            # Only boundary weeks whose end falls inside the generated span.
+            if not (gen_start <= end <= span_end):
+                continue
+            end_obj = datetime.strptime(end, "%Y-%m-%d").date()
+            win_start = (end_obj - timedelta(days=6)).strftime("%Y-%m-%d")
+            # Rest wins: a full-rest window overlapping the boundary week silences the check.
+            if any(s <= end and e >= win_start for (s, e, _t) in rest_windows):
+                continue
+            has_benchmark = any(
+                w.get('benchmark_type') and win_start <= w['date'] <= end
+                for w in dated
+            )
+            if not has_benchmark:
+                print(yellow(
+                    f"No benchmark scheduled in the boundary week of '{m.get('name', '')}' "
+                    f"({win_start} to {end}). Consider regenerating — a block-boundary "
+                    f"fitness test keeps your zones calibrated."
+                ))
+
     def workout_generate(
         self, objective_id: Optional[int] = None, end_date: Optional[str] = None
     ) -> Tuple[str, List[Workout]]:
@@ -210,7 +278,8 @@ class WorkoutGenMixin:
 
         constraints = self._db.get_constraints(gen_start_str)
         guidelines = self._load_science_guidelines()
-        profile = config.user_profile
+        profile = self._effective_profile()
+        self._maybe_nudge_no_threshold()
 
         # We need all objectives for _get_active_strategy_and_meso_text context
         objectives = self._db.get_objectives(status='active')
@@ -252,11 +321,23 @@ class WorkoutGenMixin:
         if gen_start_str != today_str:
             workouts = [w for w in workouts if w.get('date', '') >= gen_start_str]
 
+        # Same-day collision guard (§4.1): drop any non-benchmark session that shares a
+        # date+sport with a scheduled benchmark, before the (date, sport)-keyed save can
+        # let it overwrite the test.
+        workouts = self._drop_benchmark_collisions(workouts)
+
         # Deterministic rest-window pre-pass (DESIGN_constraints.md §6): a `rest`
         # constraint forces its dates to rest regardless of what the LLM produced. Every
         # other constraint is advisory and left to the model. Applied after generation so
         # the guarantee holds even if the model ignores the constraint block it was shown.
         workouts = self._enforce_rest_windows_generate(workouts, constraints)
+
+        # Boundary-week benchmark post-check (§4.1): warn (don't auto-insert) if a covered
+        # block boundary lacks a fitness test. Runs after the rest pass so a rest-covered
+        # boundary week is already silenced.
+        self._warn_missing_boundary_benchmarks(
+            workouts, constraints, macrocycle['id'], gen_start_str
+        )
 
         # Archive (don't delete) future workouts from the previous plan so they can be
         # resurrected by `plan rollback`, and tear down their Calendar events first so the
@@ -280,6 +361,7 @@ class WorkoutGenMixin:
                 rpe=w.get('rpe'),
                 tss=w.get('tss'),
                 source='generated',
+                benchmark_type=w.get('benchmark_type'),
                 macrocycle_id=macrocycle['id']
             )
             # Sync from the persisted row, not a hand-built dict: the row's

@@ -17,7 +17,8 @@ class WorkoutsMixin:
         original_tss: Optional[int] = None, original_rpe: Optional[int] = None,
         removed: bool = False, removed_reason: Optional[str] = None,
         source: Optional[str] = None, adaptation_summary: Optional[str] = None,
-        macrocycle_id: Optional[int] = None, adapted_at: Optional[str] = None
+        macrocycle_id: Optional[int] = None, adapted_at: Optional[str] = None,
+        benchmark_type: Optional[str] = None
     ) -> int:
         """Saves a workout, updating it if one already exists that day for the same
         sport. Existence is alias-aware (see trainmate.sports), so adapting/regenerating
@@ -87,6 +88,7 @@ class WorkoutsMixin:
                         original_rpe = COALESCE(original_rpe, ?, rpe),
                         removed = ?, removed_reason = ?,
                         source = COALESCE(?, source),
+                        benchmark_type = COALESCE(?, benchmark_type),
                         adapted_at = COALESCE(?, adapted_at),
                         adaptation_count = COALESCE(adaptation_count, 0)
                             + CASE WHEN ? IS NOT NULL THEN 1 ELSE 0 END
@@ -97,6 +99,7 @@ class WorkoutsMixin:
                       duration_minutes, rpe, tss,
                       original_duration_minutes, original_tss, original_rpe,
                       int(removed), removed_reason, source,
+                      benchmark_type,
                       adapted_at, adapted_at,
                       workout_id))
             else:
@@ -107,8 +110,8 @@ class WorkoutsMixin:
                         google_event_id, duration_minutes, rpe, tss,
                         original_duration_minutes, original_rpe, original_tss,
                         removed, removed_reason, source, macrocycle_id,
-                        created_at, adapted_at, adaptation_count
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        created_at, adapted_at, adaptation_count, benchmark_type
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (date, sport_type, title, description,
                       original_description or description,
                       original_date or date,
@@ -121,7 +124,7 @@ class WorkoutsMixin:
                       original_tss if original_tss is not None else tss,
                       int(removed), removed_reason, source, macrocycle_id,
                       datetime.now(timezone.utc).isoformat(),
-                      adapted_at, 1 if adapted_at else 0))
+                      adapted_at, 1 if adapted_at else 0, benchmark_type))
                 workout_id = cursor.lastrowid
             conn.commit()
             return int(workout_id)

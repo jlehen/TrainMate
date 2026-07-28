@@ -85,14 +85,15 @@ class Config:
 
     @property
     def user_profile(self) -> dict[str, Any]:
-        """Gets the user profile information dict."""
-        profile = self.get("user_profile", {})
-        if profile:
-            if "lthr" not in profile and "ftp" not in profile:
-                raise ValueError(
-                    "Configuration error: user_profile must contain at least 'lthr' or 'ftp'."
-                )
-        return profile
+        """Gets the user profile information dict.
+
+        Trainable thresholds (`ftp`/`lthr`) no longer live here — they moved to the
+        benchmark logbook (DESIGN_benchmark_workouts.md §3.4), which is the only home for
+        measured, trainable quantities. A fresh install therefore has no threshold on
+        record and the app nudges rather than refuses (§3.4 cold start); config keeps only
+        quasi-fixed physiology (`max_hr`) and life logistics.
+        """
+        return self.get("user_profile", {})
 
     @property
     def metrics_lookback_days(self) -> int:

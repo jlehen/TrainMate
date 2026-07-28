@@ -283,6 +283,44 @@ class BaseDB:
                 cursor.execute("ALTER TABLE workouts ADD COLUMN marked_signature TEXT")
             except sqlite3.OperationalError:
                 pass
+            # Benchmark identity: a session whose PURPOSE is measurement, not stimulus
+            # (DESIGN_benchmark_workouts.md §3.1). Holds an anchor-kind slug
+            # (ftp_20min | run_5k_tt | e1rm | …) when the session is a fitness test, NULL
+            # otherwise. Creation-time intent like `source` (fixed when the session is
+            # created), NOT a derived kind-column — so it is a stored column, threaded
+            # through every save path and the model's generate/adapt output contracts so
+            # protecting a test never strips its identity.
+            try:
+                cursor.execute("ALTER TABLE workouts ADD COLUMN benchmark_type TEXT")
+            except sqlite3.OperationalError:
+                pass
+
+            # Benchmark results logbook (DESIGN_benchmark_workouts.md §3.2): a dated log of
+            # fitness-test outcomes, one row per measurement. With config's `ftp`/`lthr`
+            # removed (§3.4), this is the ONLY home for the athlete's trainable thresholds —
+            # the effective-threshold accessor reads the latest row per anchor_kind (newest
+            # by date, id as tiebreak) and feeds it to the coaching prompt and the plan
+            # staleness check. `workout_id` optionally links a result to the planned
+            # benchmark it satisfied. `source` records how the value arrived
+            # (test|manual|modeled — the last anticipates Phase-3 passive estimation).
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS benchmark_results (
+                    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                    date        TEXT NOT NULL,
+                    sport_type  TEXT NOT NULL,
+                    anchor_kind TEXT NOT NULL, -- ftp|lthr|threshold_pace|css|e1rm|mas
+                    value       REAL NOT NULL,
+                    unit        TEXT NOT NULL, -- W|bpm|min/km|sec/100m|kg|km/h
+                    source      TEXT NOT NULL DEFAULT 'test', -- test|manual|modeled
+                    workout_id  INTEGER,       -- nullable link to the planned benchmark
+                    note        TEXT,
+                    created     TEXT
+                )
+            """)
+            cursor.execute(
+                "CREATE INDEX IF NOT EXISTS idx_benchmark_results_kind "
+                "ON benchmark_results(anchor_kind, date)"
+            )
 
             # Completed activities table
             cursor.execute("""

@@ -84,7 +84,7 @@ classes themselves.
   singletons/helpers handlers reference via `import trainmate_cli as cli`, and a
   `__main__` alias. No business logic.
 - **`trainmate/cli/`** — per-command-family handler modules (`run_*()`): `status`,
-  `progress`, `goals`, `constraints`, `context`, `learnings`,
+  `progress`, `goals`, `constraints`, `benchmarks`, `context`, `learnings`,
   `plans`, `workouts`, `data`, plus shared `common`.
 - **`trainmate_web.py`** — Flask REST API; thin handler functions calling `db`,
   `coach_service`, `calendar_syncer` (pure reader — never pulls).
@@ -231,8 +231,10 @@ Module-level function in `formatting.py`. Concatenates all `*.txt` files from
 - **`_build_system_prompt(...)`** — assembles the main LLM system prompt
   (guidelines, strategy, goals, constraints, athlete profile). `_render_constraints`
   renders the active directives block (`title | dates | binding | sport | type | description`).
-- **`_format_athlete_profile(profile)`** — formats `config.user_profile` into a
-  readable prompt segment.
+- **`_format_athlete_profile(profile)`** — formats the (effective) profile into a
+  readable prompt segment. Threshold anchors render generically from
+  `trainmate.benchmarks.ANCHOR_KINDS` (label + unit), so a new anchor kind shows up with
+  no prompt-code change (`DESIGN_benchmark_workouts.md` §3.5).
 - **`_clean_goals(objectives)` / `_clean_constraints(constraints)`** — the
   planning-relevant fields, normalized and stably ordered. Single source of truth
   shared by the hash functions and the snapshots persisted on the macrocycle.
@@ -240,11 +242,13 @@ Module-level function in `formatting.py`. Concatenates all `*.txt` files from
 - **`_get_goals_hash(objectives)`** — SHA-256 of the `_clean_goals` list.
 - **`_get_constraints_hash(constraints)`** — SHA-256 of the `_clean_constraints` list.
 - **`_get_config_hash()`** — SHA-256 of `_clean_profile()`: the `user_profile` block
-  minus the physiological thresholds (`max_hr`/`lthr`/`ftp`). Thresholds are instead
-  snapshotted raw on the macrocycle (`_get_config_thresholds()`) and only flag the
-  plan stale past `coach.threshold_replan_pct` relative drift (default 5%) — see
-  `CoachService.config_changed()`. Prompt-context knobs (`metrics_lookback_days`)
-  are not fingerprinted at all.
+  minus the threshold anchors (`max_hr`/`lthr`/`ftp`). Thresholds are instead snapshotted
+  raw on the macrocycle (via `CoachService.effective_thresholds()`) and only flag the plan
+  stale past `coach.threshold_replan_pct` relative drift (default 5%) — see
+  `CoachService.config_changed()`. Trainable thresholds now live in the `benchmark_results`
+  logbook, not config (`DESIGN_benchmark_workouts.md` §3.4); the service overlays them onto
+  the profile for prompts and the drift snapshot. Prompt-context knobs
+  (`metrics_lookback_days`) are not fingerprinted at all.
 - **`_plan_generate_strategy(...)`** — LLM call → `{strategy, mesocycles}`. Label
   `periodization_plan`.
 - **`_workout_generate_logic(...)`** — LLM call → `{reasoning, workouts[]}`. Accepts
@@ -417,14 +421,21 @@ called by the UIs.
   workouts. Archives the current plan's future workouts (deleting their events), flips
   the active macrocycle, resurrects the target version's archived workouts, and re-pushes
   them — the symmetric inverse of eager generation (DESIGN_plan_rollback.md).
-- **`_get_config_hash()` / `_get_config_snapshot()`** — delegate to
-  `CoachEngine._get_config_hash()` / `_get_config_thresholds()` (as JSON).
+- **`effective_thresholds()`** — the linchpin accessor (`DESIGN_benchmark_workouts.md`
+  §3.3): the athlete's current threshold anchors, `max_hr` from config overlaid with the
+  latest logbook row per kind (`db.latest_thresholds()`). `_effective_profile()` merges
+  these onto `config.user_profile`, and every engine prompt call (generate/adapt/plan/
+  analysis) passes that merged profile so zones are prescribed from live values.
+- **`_get_config_hash()`** — delegates to `CoachEngine._get_config_hash()`.
+  **`_get_config_snapshot()`** — `effective_thresholds()` as JSON, snapshotted on the
+  macrocycle.
 - **`config_changed(macro)`** — the single staleness judgment used by the CLI
   (`plan generate`, `workout generate`, `status`) and the `plan_generate` reuse
   check. Returns a human-readable reason when the plan-shaping profile fingerprint
-  mismatches or a physiological threshold drifted more than
-  `coach.threshold_replan_pct` from the macrocycle's `config_snapshot`, else None.
-  Macrocycles without a snapshot (legacy) judge on the fingerprint alone.
+  mismatches or an effective threshold anchor drifted more than
+  `coach.threshold_replan_pct` from the macrocycle's `config_snapshot`, else None. A kind
+  absent from the old snapshot (newly recorded) is skipped; a kind that disappears counts
+  as drift (§3.5). Macrocycles without a snapshot (legacy) judge on the fingerprint alone.
 - **`_get_coach_system_prompt(objectives, constraints, ...)`** — builds the system
   prompt without making an LLM call (used by tests).
 
@@ -600,6 +611,7 @@ below for the rules and [§15](#15-design-rationale--history) for why.
 | `created_at`           | TEXT       | UTC ISO; set once on INSERT — when the session entered the plan. Distinct from `date`/`original_date`. NULL on legacy rows. |
 | `adapted_at`           | TEXT       | UTC ISO of the most recent `workout adapt` run that eased this row. NULL ⟺ never adapted. Stored (not derivable) so adaptation can avoid compounding cuts. |
 | `adaptation_count`     | INTEGER    | Distinct adapt runs that eased this row (default 0). Bumped only with `adapted_at`; a fresh INSERT resets it. |
+| `benchmark_type`       | TEXT       | Benchmark identity: non-NULL ⟺ this session is a fitness test (`ftp_20min`, `run_5k_tt`, `e1rm`, …). Creation-time intent like `source` — a stored column, threaded through every save path and the model's generate/adapt output contracts so a moved test never loses its identity (`DESIGN_benchmark_workouts.md` §3.1). Rendered as `[BENCHMARK]` in `workout list`. |
 
 #### Workout state = four orthogonal axes (not one enum)
 
@@ -769,6 +781,29 @@ category and `value` an optional numeric magnitude. Reconciled by
 | `google_event_id` | TEXT UNIQUE | Calendar event id — reconciliation key         |
 | `updated`         | TEXT        | Event `updated` RFC3339 (debug)                |
 
+### benchmark_results
+The dated fitness-test logbook (`DESIGN_benchmark_workouts.md` §3.2) — the single home
+for the athlete's trainable thresholds now that `ftp`/`lthr` have left config (§3.4). One
+row per measurement; "latest" is newest by `date`, `id` as tiebreak. The latest row per
+`anchor_kind` is what `CoachService.effective_thresholds()` feeds the coaching prompt and
+the plan-staleness snapshot. No privileged kinds — cycling FTP and a first swim CSS flow
+identically (§3.5). Vocabulary (kind → label, unit, better-direction) lives in
+`trainmate/benchmarks.py`. CRUD in `db/benchmarks.py`; CLI verb `benchmark
+record`/`list`/`rm` (`cli/benchmarks.py`).
+
+| Column        | Type       | Notes                                                     |
+|---------------|------------|-----------------------------------------------------------|
+| `id`          | INTEGER PK | Autoincrement                                             |
+| `date`        | TEXT       | YYYY-MM-DD the test was performed                         |
+| `sport_type`  | TEXT       | Canonicalized sport                                       |
+| `anchor_kind` | TEXT       | `ftp` \| `lthr` \| `threshold_pace` \| `css` \| `e1rm` \| `mas` |
+| `value`       | REAL       | The measured number (pace kinds stored in base unit)     |
+| `unit`        | TEXT       | `W` \| `bpm` \| `min/km` \| `sec/100m` \| `kg` \| `km/h`  |
+| `source`      | TEXT       | `test` \| `manual` \| `modeled` (last anticipates Phase 3)|
+| `workout_id`  | INTEGER    | Nullable link to the planned benchmark it satisfied       |
+| `note`        | TEXT       | Free text (protocol, conditions)                          |
+| `created`     | TEXT       | UTC ISO                                                    |
+
 ### coach_learnings
 Discrete, addressable athlete-observation records. Confidence is **app-computed**
 from the `learning_evidence` basis (below), not asserted by the LLM. Full model:
@@ -813,10 +848,10 @@ guarantee (re-citing a counted week is an `INSERT OR IGNORE` no-op). Full model:
 | `constraints_hash`| TEXT                  | SHA-256 of the plan-shaping (replan=1) constraints at generation time (§7) |
 | `config_hash`     | TEXT                  | SHA-256 of the plan-shaping `user_profile`       |
 |                   |                       | fields (thresholds excluded)                     |
-| `config_snapshot` | TEXT                  | JSON of the `max_hr`/`lthr`/`ftp` values the plan |
-|                   |                       | was generated with; staleness only past          |
-|                   |                       | `coach.threshold_replan_pct` drift. NULL on      |
-|                   |                       | plans predating the column.                      |
+| `config_snapshot` | TEXT                  | JSON of the effective threshold anchors (`max_hr` |
+|                   |                       | + logbook kinds) the plan was generated with;     |
+|                   |                       | staleness only past `coach.threshold_replan_pct`  |
+|                   |                       | drift. NULL on plans predating the column.        |
 | `goals_snapshot`  | TEXT                  | JSON of the goals the plan was generated from    |
 |                   |                       | (same cleaned data the hash covers); NULL on     |
 |                   |                       | plans predating the column. Shown by `plan show` |
@@ -1068,12 +1103,15 @@ Required fields:
 | `threshold_replan_pct`  | float| Relative drift (%) a physiological threshold may move from   |
 |                         |      | the plan-generation value before the plan is flagged stale   |
 |                         |      | (default: 5). Under `coach:`.                                |
-| `user_profile`          | dict | Must contain `lthr` or `ftp` (see below)                     |
+| `user_profile`          | dict | Athlete profile block (see below); no threshold required     |
 
-`user_profile` keys: `name`, `birth_year`, `max_hr`, `lthr`, `ftp`,
-`weekly_target_hours`, `sport_preferences`, `chronic_injuries`, `preferences`,
-`equipment`, `weekly_schedule`. `weekly_schedule` maps day names to
-`{total_available_hours, max_sessions, certainty_percent, equipment}`.
+`user_profile` keys: `name`, `birth_year`, `max_hr`, `weekly_target_hours`,
+`sport_preferences`, `chronic_injuries`, `preferences`, `equipment`,
+`weekly_schedule`. `weekly_schedule` maps day names to
+`{total_available_hours, max_sessions, certainty_percent, equipment}`. Trainable
+thresholds (`ftp`/`lthr`/…) are **not** here — they live in the `benchmark_results`
+logbook (`DESIGN_benchmark_workouts.md` §3.4); config keeps only quasi-fixed `max_hr`. A
+threshold-less profile is a valid cold start (the coach nudges, never refuses).
 
 ---
 

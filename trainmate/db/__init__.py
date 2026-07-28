@@ -11,6 +11,7 @@ from trainmate.db.base import BaseDB
 from trainmate.db.objectives import ObjectivesMixin
 from trainmate.db.constraints import ConstraintsMixin
 from trainmate.db.dailycontext import DailyContextMixin
+from trainmate.db.benchmarks import BenchmarksMixin
 from trainmate.db.workouts import WorkoutsMixin
 from trainmate.db.activities import ActivitiesMixin
 from trainmate.db.learnings import (
@@ -33,6 +34,7 @@ class Database(
     ObjectivesMixin,
     ConstraintsMixin,
     DailyContextMixin,
+    BenchmarksMixin,
     WorkoutsMixin,
     ActivitiesMixin,
     LearningsMixin,

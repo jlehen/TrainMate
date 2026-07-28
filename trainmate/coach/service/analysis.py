@@ -684,7 +684,7 @@ class DataAnalysisMixin:
         ]
 
         guidelines = self._load_science_guidelines()
-        profile = config.user_profile
+        profile = self._effective_profile()
 
         # Quantitative context-impact rows (alcohol, big meal, …): episode-aligned dose
         # sequences + bracketing morning strips. These cover the athlete's FULL history of

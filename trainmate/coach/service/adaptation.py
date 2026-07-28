@@ -156,7 +156,7 @@ class AdaptationMixin:
             next_goal = objectives[0]
 
         guidelines = self._load_science_guidelines()
-        profile = config.user_profile
+        profile = self._effective_profile()
         objective_id = next_goal['id'] if next_goal else None
         strategy, meso_text = self._get_active_strategy_and_meso_text(
             objectives, objective_id=objective_id
@@ -258,7 +258,12 @@ class AdaptationMixin:
                 'google_event_id': None,
                 'duration_minutes': w.get('duration_minutes'),
                 'rpe': w.get('rpe'),
-                'tss': w.get('tss')
+                'tss': w.get('tss'),
+                # Carry the benchmark flag through the rebuild: a moved test must stay a
+                # test. The model owns its survival by re-emitting it (§3.1/§4.2); if it
+                # omits it on a same-row change, save_workout's COALESCE preserves the
+                # stored value. It is dropped only on a genuine sport swap, which is correct.
+                'benchmark_type': w.get('benchmark_type')
             } for w in adapted
         ], new_constraints
 
@@ -353,6 +358,7 @@ class AdaptationMixin:
                 rpe=w.get('rpe'),
                 tss=w.get('tss'),
                 source=source,
+                benchmark_type=w.get('benchmark_type'),
                 adapted_at=adapted_at
             )
 

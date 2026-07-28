@@ -30,6 +30,21 @@ def _ago(iso_utc: str) -> str:
     return f"{secs // 86400}d ago"
 
 
+def _days_ago_str(date_str: str) -> str:
+    """Compact ' (Nd ago)' for a plain YYYY-MM-DD calendar date, or '' if unparseable
+    or in the future. Distinct from `_ago`, which takes a UTC ISO instant."""
+    try:
+        d = datetime.strptime(date_str, "%Y-%m-%d").date()
+    except (ValueError, TypeError):
+        return ""
+    days = (_today_date() - d).days
+    if days < 0:
+        return ""
+    if days == 0:
+        return ", today"
+    return f", {days}d ago"
+
+
 def run_status(
     verbose: bool = False, no_pull: bool = False, force_pull: bool = False
 ) -> None:
@@ -96,6 +111,37 @@ def run_status(
     else:
         print(
             f"\n{bold('Next Objective')}: None (TrainMate needs at least one goal to start planning)"
+        )
+
+    # Fitness thresholds (the effective anchors the coach prescribes from). Each is the
+    # latest logbook row for its kind, with when it was tested (DESIGN_benchmark_workouts
+    # §6). max_hr is quasi-fixed physiology from config, shown for completeness.
+    from trainmate.benchmarks import ANCHOR_KINDS, LOGBOOK_KINDS, format_value
+    threshold_lines = []
+    for kind in LOGBOOK_KINDS:
+        latest = cli.db.get_latest_benchmark(kind)
+        if not latest:
+            continue
+        anchor = ANCHOR_KINDS[kind]
+        tested = _days_ago_str(latest['date'])
+        threshold_lines.append(
+            f"- {anchor.label}: {cyan(format_value(kind, float(latest['value'])))} "
+            f"({latest['sport_type']}, tested {cyan(fmt_date(latest['date']))}{tested})"
+        )
+    max_hr = config.user_profile.get('max_hr')
+    if max_hr is not None:
+        threshold_lines.append(
+            f"- {ANCHOR_KINDS['max_hr'].label}: {cyan(format_value('max_hr', max_hr))} "
+            f"{gray('(config)')}"
+        )
+    if threshold_lines:
+        print(f"\n{bold('Fitness Thresholds')}:")
+        for line in threshold_lines:
+            print(line)
+    else:
+        print(
+            f"\n{bold('Fitness Thresholds')}: {dim('none on record')} "
+            + gray("— record one with 'benchmark record …'")
         )
 
     # Recent Garmin metrics

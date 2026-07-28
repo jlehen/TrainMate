@@ -73,6 +73,17 @@ class WorkoutLogicMixin:
             "incorporate any deload weeks or exceptions for the athlete's active constraints in accordance\n"
             "with the science guidelines.\n"
             "\n"
+            "BENCHMARK PLACEMENT (fitness tests — see the BENCHMARK guidelines above):\n"
+            "Schedule ONE benchmark (fitness test) of the sport/kind appropriate to the athlete's goal in\n"
+            "each mesocycle-boundary week this span covers (a block's final week), plus one validation test\n"
+            "in the last week before the goal. Set that session's \"benchmark_type\" to the test kind and\n"
+            "precede it with an opener or easy day so the athlete is fresh (positive TSB) on test day — a\n"
+            "test on a fatigued day reads low and mis-scales every workout after it. Keep the session\n"
+            "venue-neutral in its title/description (e.g. \"20-min FTP test or ramp test\"); the athlete's\n"
+            "preferences say where they test. Do NOT place a benchmark in a week the athlete's constraints\n"
+            "put under full rest. If no threshold is on record yet, still schedule the first benchmark early —\n"
+            "it is how the athlete's zones get established.\n"
+            "\n"
             "You MUST respond with a JSON object containing:\n"
             "{\n"
             '  "reasoning": "Explain the microcycle design, detailing how workouts align with the active\n'
@@ -92,7 +103,11 @@ class WorkoutLogicMixin:
             '        duration, heart rate zones, and goals.",\n'
             "      \"duration_minutes\": 60, (Estimated workout duration in minutes, integer. Use 0 for rest days)\n"
             "      \"rpe\": 6, (Expected Rate of Perceived Exertion, integer 1-10. Use 0 for rest days)\n"
-            "      \"tss\": 45.0 (Expected Training Stress Score, float/integer. Use 0 for rest days)\n"
+            "      \"tss\": 45.0, (Expected Training Stress Score, float/integer. Use 0 for rest days)\n"
+            '      "benchmark_type": null (Normally null. Set ONLY on a scheduled fitness\n'
+            "        test — see BENCHMARK PLACEMENT — to the test kind, e.g. \"ftp_20min\" |\n"
+            '        "ftp_ramp" | "run_threshold_30min" | "run_5k_tt" | "css_400_200" |\n'
+            '        "e1rm" | "mas_cooper". An ordinary training session leaves it null.)\n'
             "    }\n"
             "  ]\n"
             "}\n"
@@ -256,6 +271,21 @@ the higher your bar for touching it again. Restoring load toward the original as
 athlete recovers is encouraged; deepening an already-fresh cut is not.
 """
 
+        custom_task += """
+PROTECTING A BENCHMARK — RESCHEDULE, DON'T DILUTE:
+A session tagged "[BENCHMARK ...]" is a fitness test: its purpose is measurement, not
+stimulus, so the usual "ease the hard day" logic is exactly wrong for it. NEVER reduce,
+soften, or shorten a benchmark, and never blank its benchmark_type. A test needs the
+athlete FRESH — a test run tired reads low and then mis-scales every workout after it.
+So if the athlete will not be fresh on test day (negative TSB / poor recovery), MOVE the
+benchmark intact — same content, same benchmark_type — to a later day within THIS block
+where they will be fresher, and lighten the days before it instead. To move it, emit the
+test on its new date (benchmark_type preserved) and a replacement for its old date.
+Fallback: if the benchmark is already on the block's LAST day and no later in-block day
+exists, leave it in place and lighten the days before it — slightly-off freshness beats a
+lost test. A benchmark you are NOT changing does not need to be returned at all.
+"""
+
         # Inside the block's terminal window a cut cannot rebound before the block ends
         # (DESIGN_block_boundary.md §3). Outside it the prompt is unchanged.
         days_left = days_between(target_date_str, meso_end_date_str)
@@ -330,7 +360,10 @@ evidence-backed observations are authored only by the weekly history analysis
                 '        duration, heart rate zones, and goals.",\n'
                 '      "duration_minutes": 45,\n'
                 '      "rpe": 5,\n'
-                '      "tss": 30.0\n'
+                '      "tss": 30.0,\n'
+                '      "benchmark_type": null (Preserve VERBATIM when the session is a\n'
+                "        benchmark — a moved/kept test must stay a test. Never invent one\n"
+                "        here; null for an ordinary session. See PROTECTING A BENCHMARK.)\n"
                 "    }\n"
                 "  ]"
             ),
