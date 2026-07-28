@@ -62,8 +62,23 @@ Add a nullable `benchmark_type` to the `Workout` TypedDict (`types.py:47`) and t
     ftp_20min | ftp_ramp | run_threshold_30min | run_5k_tt |
     css_400_200 | e1rm | mas_cooper | ...
 
-This rides the existing generate / adapt / list / calendar-sync machinery for
-free. As a stored column it is creation-time intent, exactly like the existing
+The column itself is cheap; carrying the value is not free. A workout is never
+passed around as an opaque row — every hand-off rebuilds it from an explicit
+field list, and a field missing from any list is silently dropped. The flag must
+therefore be threaded through each enumeration:
+
+- the model's JSON output contract in **both** generate and adapt, with a prompt
+  instruction to preserve the field when re-emitting a session. The model, not
+  the app, owns the flag's survival across an adaptation — consistent with
+  §4.2's no-guards stance;
+- `save_workout` (signature + SQL) on the generate save path;
+- the adapt rebuild dict (`adaptation.py:243-263`) and `workout_adapt_apply` —
+  the spot a first pass misses. Without it, the model's proposal to move a test
+  is rebuilt without the flag and saved as an ordinary workout: the act of
+  protecting the test is exactly what would strip its benchmark identity,
+  silently.
+
+As a stored column it is creation-time intent, exactly like the existing
 `source` column — *not* like the `[MANUAL]`/`[SWAPPED]` markers, which are
 deliberately **derived** from `modification_reason` (`modification_state.py`
 documents why derived kind-columns are preferred for mutable state). A
@@ -115,17 +130,23 @@ through:
 
 It lives in the **service layer**, which is the only layer that has both config
 and DB access — the engine is a pure prompt-builder over data handed to it and
-imports no `db`, and that stays true. The wiring is one move: the service
-already passes `profile=config.user_profile` into every engine call
-(`service/prompt.py:199`, `service/workouts.py:213`, `service/adaptation.py:159`);
-it now overlays the effective thresholds onto that dict first and passes the
-merged result. Both threshold consumers read from that one flow:
+imports no `db`, and that stays true. The service already passes
+`profile=config.user_profile` into every engine call (`service/prompt.py:199`,
+`service/workouts.py:213`, `service/adaptation.py:159`); it now overlays the
+effective thresholds onto that dict first and passes the merged result. Two
+engine-side changes complete the wiring (an earlier draft claimed "no engine
+change" — wrong on inspection):
 
-- **The prompt.** `_format_athlete_profile()` (`engine/prompt.py:39-44`) formats
-  its FTP/LTHR lines from the profile dict it is given — it now simply receives
-  logbook-backed values, no engine change.
-- **The staleness check.** `_get_config_snapshot()` and `config_changed()`
-  (`service/prompt.py:28-64`) read thresholds from the same merged source. The
+- **The prompt.** `_format_athlete_profile()` (`engine/prompt.py:39-44`) has
+  hand-named FTP/LTHR lines; it instead renders *whatever* threshold kinds the
+  profile dict carries, generically with the unit — no kind is privileged
+  (§3.5), so a first swim test shows up in the prompt with zero further code.
+- **The staleness check.** `_get_config_thresholds()` (`engine/prompt.py:251`)
+  today reads `config.user_profile` directly — once `ftp`/`lthr` leave config
+  (§3.4) it would silently return only `max_hr`. The threshold read moves to
+  the service (or takes the merged profile as an argument), so
+  `_get_config_snapshot()` and `config_changed()` (`service/prompt.py:28-64`)
+  judge drift over effective values. The
   plan **snapshots** whatever the effective value was at generation time;
   `config_changed()` compares effective-now against that snapshot. A benchmark
   result that moves the effective value **>5%** (the existing
@@ -134,18 +155,19 @@ merged result. Both threshold consumers read from that one flow:
   replan is suggested. Sub-5% retest corrections feed the next workout
   generation without invalidating the strategy — exactly today's behavior.
 
-**Snapshot scope.** The drift snapshot keeps its current key space —
-`max_hr` (config, §3.4), `ftp`, `lthr` — even though the logbook accepts more
-kinds. `config_changed()` treats a key it has never seen as instant drift
-("`css` was added", `service/prompt.py:59-60`), so letting a first-ever swim
-test into the snapshot would flag every pre-existing plan stale, bypassing the
-5% tolerance. Other kinds (`css`, `threshold_pace`, `e1rm`, `mas`) live in the
-logbook and appear in the prompt from day one, but join the drift snapshot only
-by a deliberate later change (teaching `config_changed()` to skip keys absent
-from the old snapshot) — made when a sport's anchor should actually drive
-replans, not by default.
+**Snapshot scope: uniform, no privileged kinds.** Every anchor kind on record
+joins the snapshot — `ftp`/`lthr` are not special (§3.5). That needs one small
+fix first: `config_changed()` treats a key it has never seen as instant drift
+("`css` was added", `service/prompt.py:59-60`), so a first-ever swim test would
+flag every pre-existing plan stale, bypassing the 5% tolerance. Teach it to
+**skip keys absent from the *old* snapshot**: a newly recorded kind starts
+feeding prompts immediately and joins drift-checking from the next generated
+plan onward; only a >5% *change* in a kind the plan was actually built with
+triggers a replan. A key that *disappears* still reads as drift — a threshold
+the plan relied on going missing is real. Same rule for every kind.
 
-No new staleness logic. One accessor, one wiring change — in the service.
+One accessor, one relocated threshold read, one skip rule in
+`config_changed()` — no other staleness logic changes.
 
 ### 3.4 `ftp`/`lthr` leave `config.yaml` entirely
 
@@ -185,6 +207,17 @@ benchmark."* The very first generated plan schedules a benchmark anyway (§4.1),
 so the gap closes itself within the first block. Refusing to plan would create
 a bootstrapping paradox — the planner is how a benchmark gets scheduled.
 
+### 3.5 No privileged anchor kinds
+
+Once this design lands, `ftp`/`lthr` are not special — they are merely the
+first two rows the logbook happens to hold. Every kind (`css`,
+`threshold_pace`, `e1rm`, `mas`, …) flows identically: recorded via
+`benchmark record`, rendered into the prompt generically (§3.3), drift-checked
+by the same skip-absent-keys snapshot rule (§3.3), trended by `benchmark list`
+and the progress timeline. Adding a future kind is a vocabulary addition — a
+new `anchor_kind` value, its unit, and its better-direction sign (§3.2) — not
+new machinery.
+
 ---
 
 ## 4. Behavior
@@ -216,32 +249,30 @@ session and warn. The benchmark is identified by its flag — no guessing needed
 
 ### 4.2 Adapt — "reschedule, don't dilute"
 
-This is the one rule genuinely different from every other session. Same split:
-the **prompt** tells the LLM the right behavior, and a **deterministic guard**
-backstops it — because determinism is good at *protection*, not scheduling.
+This is the one rule genuinely different from every other session, and it is
+enforced the way every other adapt behavior is: **by instructing the model, not
+by engineering guards around it**. A deterministic guard here would have to
+reverse-engineer intent from a proposal batch — is this pair of changes a move,
+a displacement, or a softening? (Concretely: exempting benchmark rows from the
+overridden-workout deletion in `workout_adapt_apply`, `adaptation.py:299-308`,
+would block the very deletion that completes a legitimate move, leaving the
+test duplicated on both days.) That is precisely the judgement the model
+already has in front of it, so the model keeps it.
 
 **The prompt rule:** never reduce or soften a benchmark session; if the athlete
-will not be fresh (negative TSB), move it *intact* to a later day within the
-block and lighten the days before it. Moving is necessarily the LLM's call:
-TSB is backward-looking only (`garmin/pmc.py:47` — computed from *completed*
-load), so no deterministic pass can know which future day will be fresh; the
-model, which sees the TSB history and the planned load ahead, judges it.
-Fallback the model is told explicitly: when the benchmark sits on the last day
-of the block and no later in-block day exists, leave it in place and lighten
-the days before it — slightly-off freshness beats a lost test.
+will not be fresh (negative TSB), move it *intact* — same content,
+`benchmark_type` preserved — to a later day within the block and lighten the
+days before it. Moving is necessarily the LLM's call: TSB is backward-looking
+only (`garmin/pmc.py:47` — computed from *completed* load), so no deterministic
+pass can know which future day will be fresh; the model, which sees the TSB
+history and the planned load ahead, judges it. Fallback the model is told
+explicitly: when the benchmark sits on the last day of the block and no later
+in-block day exists, leave it in place and lighten the days before it —
+slightly-off freshness beats a lost test.
 
-**The deterministic guard** — mirroring the `completed_keys` lock
-(`adaptation.py:214-219`), printing a warning whenever it fires (the LLM's
-surrounding proposals assumed the change happened, so the athlete should know
-the day may look slightly incoherent):
-
-- **No content changes.** Reject any adapt proposal that alters a benchmark
-  row's content. A pure move — same content, new date — passes.
-- **No displacement.** Exempt `benchmark_type` rows from the overridden-workout
-  deletion in `workout_adapt_apply` (`adaptation.py:299-308`). Without this, a
-  cross-sport proposal on test day (say, "easy yoga" because the model noticed
-  fatigue) silently deletes the planned test as "overridden" — never eased,
-  just gone.
+A moved benchmark rides the normal apply path like any rescheduled session; the
+flag travels because it is part of the model's output contract (§3.1). No
+exemptions, no proposal rejection, no special-casing in the apply step.
 
 This composes cleanly with the existing block-boundary firewall
 (`DESIGN_block_boundary.md`): `adapt` already never crosses into the next
@@ -338,15 +369,18 @@ everything sits on, so it ships first — not as a V2 refinement.
 **Phase 1 — the logbook replaces config thresholds:**
 `benchmark_results` table · `benchmark record` / `list` / `rm` CLI ·
 propose→confirm capture · service-layer effective-threshold overlay wired into
-the profile flow and the staleness snapshot · one-off seeding + removal of
-`ftp`/`lthr` from config · cold-start nudge. Standalone value: thresholds
-become dated, trended, and feed the existing >5% replan trigger.
+the profile flow and the staleness snapshot (threshold read relocated out of
+the engine, generic prompt rendering, skip-absent-keys drift rule — §3.3) ·
+one-off seeding + removal of `ftp`/`lthr` from config · cold-start nudge.
+Standalone value: thresholds become dated, trended, and feed the existing >5%
+replan trigger.
 
 **Phase 2 — planning & protection:**
-`benchmark_type` on `Workout` · placement prompt instruction + boundary-week
-post-check warning · opener day · the adapt prompt rule + deterministic guard
-(no content changes, no displacement) · same-day collision rule ·
-`[BENCHMARK]` marker.
+`benchmark_type` threaded through the workout plumbing (§3.1: column, model
+output contracts in generate *and* adapt, `save_workout`, adapt rebuild dict) ·
+placement prompt instruction + boundary-week post-check warning · opener day ·
+the adapt "reschedule, don't dilute" prompt rule (§4.2) · same-day collision
+rule · `[BENCHMARK]` marker.
 
 **Phase 3 — richer:**
 Activity matching auto-links results to planned benchmarks (`workout_id`) ·
@@ -357,11 +391,11 @@ modeled/passive anchors (power-duration curve for FTP, e1RM from rep-max sets)
 
 ## 8. Open decisions
 
-- **Anchor kinds beyond FTP/LTHR.** Phase 1 can ship cycling FTP (+ LTHR) alone;
-  threshold pace, CSS, and e1RM reuse the identical `benchmark_results` shape.
-  They stay out of the drift snapshot until a sport's anchor should drive
-  replans (§3.3 — a deliberate small change to `config_changed()`, not a
-  default).
+- **Anchor kinds beyond FTP/LTHR.** Phase 1 may ship with only cycling FTP
+  (+ LTHR) *recorded*, but the machinery is kind-agnostic from day one (§3.5):
+  later kinds reuse the identical `benchmark_results` shape, generic prompt
+  rendering, and skip-absent-keys drift rule with no code change beyond the
+  kind/unit vocabulary.
 - **Cadence knob.** Whether the 4–6 week cadence is a config value or fixed to
   "one per mesocycle boundary." Recommend the latter (simpler, matches block
   structure).
