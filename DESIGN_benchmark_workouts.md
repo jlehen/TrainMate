@@ -13,7 +13,7 @@ and there is nowhere to put the result. This design closes those three gaps.
 
 ---
 
-## 1. Why this is safe: TSS does not depend on the app's FTP
+## 1. Why this is safe: TSS does not depend on the app's thresholds
 
 The scary version of this feature is "a benchmark updates my FTP, which rewrites
 all my historical TSS and corrupts the PMC." **That cannot happen here**, and it
@@ -21,8 +21,8 @@ is worth stating up front because it shapes everything below.
 
 TrainMate computes TSS from Garmin's *time-in-zone seconds* (`garmin/load.py`),
 where the zoning was already done inside the athlete's Garmin account. The
-`ftp`/`lthr` scalars in `config.yaml` are never read by the load model. They feed
-exactly two things:
+app-side `ftp`/`lthr` values (the benchmark logbook, §3.2) are never read by the
+load model. They feed exactly two things:
 
 - the **coaching prompt** the LLM reads (so it prescribes zones/targets), and
 - the **plan-staleness check** (`config_changed()`, `service/prompt.py:33`).
@@ -63,106 +63,185 @@ Add a nullable `benchmark_type` to the `Workout` TypedDict (`types.py:47`) and t
     css_400_200 | e1rm | mas_cooper | ...
 
 This rides the existing generate / adapt / list / calendar-sync machinery for
-free — it is just a workout carrying a marker, exactly like today's `[MANUAL]`
-or `[SWAPPED]`.
+free. As a stored column it is creation-time intent, exactly like the existing
+`source` column — *not* like the `[MANUAL]`/`[SWAPPED]` markers, which are
+deliberately **derived** from `modification_reason` (`modification_state.py`
+documents why derived kind-columns are preferred for mutable state). A
+benchmark's identity is fixed when the session is created, so a column is the
+right shape here.
 
 ### 3.2 `benchmark_results` — the logbook
 
-This is the one genuinely new abstraction. It is **not** an abstract "anchor
-store" — it is a dated logbook of test results. One row per measurement:
+This is the one genuinely new abstraction, and — with §3.4 — the **only** place
+the athlete's thresholds live. It is **not** an abstract "anchor store" — it is
+a dated logbook of test results. One row per measurement:
 
 | column        | meaning                                              |
 | ------------- | ---------------------------------------------------- |
 | `id`          | pk                                                   |
 | `date`        | when the test was performed                          |
 | `sport_type`  | cycling, running, swimming, strength, …              |
-| `anchor_kind` | `ftp` \| `threshold_pace` \| `css` \| `e1rm` \| `mas` |
+| `anchor_kind` | `ftp` \| `lthr` \| `threshold_pace` \| `css` \| `e1rm` \| `mas` |
 | `value`       | the number (e.g. 250)                                |
-| `unit`        | `W` \| `min_per_km` \| `sec_per_100m` \| `kg` …        |
-| `source`      | `test` \| `modeled` \| `manual` \| `seed`             |
+| `unit`        | `W` \| `bpm` \| `min_per_km` \| `sec_per_100m` \| `kg` … |
+| `source`      | `test` \| `manual` \| `modeled`                      |
 | `workout_id`  | nullable link to the planned benchmark it satisfied  |
 | `note`        | free text (protocol, conditions)                     |
 
-Two reads answer everything:
+Each sport has its natural anchor kind(s): cycling→`ftp`, running→
+`threshold_pace` and `lthr`, swimming→`css`, strength→`e1rm`. `lthr` is a
+first-class kind — a run threshold test produces it, and it is one of the values
+the prompt prescribes from, so the logbook must be able to supersede it (§3.4).
 
-- **"What is my FTP right now?"** → the most recent `cycling` / `ftp` row.
+"Latest" is defined as **newest by `date`, `id` as tiebreak**, so backdated
+entries behave. Two reads answer everything:
+
+- **"What is my FTP right now?"** → the latest `cycling` / `ftp` row.
 - **"Is my fitness rising?"** → read down the column: 235 → 242 → 250. That
   progression *is* the signal `benchmarks.txt` cares about ("a rising anchor
   confirms progressive overload; a stalled or falling anchor signals plateau").
 
-A single overwritten scalar cannot show that trend; a dated logbook can.
+A single overwritten scalar cannot show that trend; a dated logbook can. One
+display caveat: for pace kinds (`threshold_pace`, `css`) *lower is better*, so
+trend/delta rendering carries a per-kind sign — a faster runner must not be
+shown a negative-looking progression.
 
-### 3.3 The `effective_threshold` accessor — the linchpin
+### 3.3 The effective-threshold accessor — the linchpin
 
 Introduce **one** accessor that both the prompt and the staleness check read
 through:
 
-    effective_threshold(sport, kind)  ->  latest benchmark_results row if any,
-                                          else config.user_profile value
+    effective_thresholds()  ->  {ftp, lthr, ...} from the latest logbook rows
 
-Then wire it into the single existing read point, `_get_config_thresholds()`
-(`engine/prompt.py:251`), which already feeds *both* the macrocycle threshold
-snapshot and the drift comparison in `config_changed()`. Route the prompt-side
-threshold injection through the same accessor.
+It lives in the **service layer**, which is the only layer that has both config
+and DB access — the engine is a pure prompt-builder over data handed to it and
+imports no `db`, and that stays true. The wiring is one move: the service
+already passes `profile=config.user_profile` into every engine call
+(`service/prompt.py:199`, `service/workouts.py:213`, `service/adaptation.py:159`);
+it now overlays the effective thresholds onto that dict first and passes the
+merged result. Both threshold consumers read from that one flow:
 
-Because `_get_config_thresholds()` is the one place thresholds are read, this one
-change gives us the whole behavior with no special cases:
-
-- The plan **snapshots** whatever the *effective* value was at generation time.
-- `config_changed()` compares *effective-now* against that snapshot.
-- Once a logbook value exists, editing `config.yaml`'s `ftp` no longer changes
-  *effective-now*, so it **cannot** trigger a replan — not because of an
-  "ignore ftp" rule, but because ftp is simply no longer the effective value.
-  It becomes inert everywhere, automatically.
-- A benchmark result that moves the effective value **>5%** (the existing
+- **The prompt.** `_format_athlete_profile()` (`engine/prompt.py:39-44`) formats
+  its FTP/LTHR lines from the profile dict it is given — it now simply receives
+  logbook-backed values, no engine change.
+- **The staleness check.** `_get_config_snapshot()` and `config_changed()`
+  (`service/prompt.py:28-64`) read thresholds from the same merged source. The
+  plan **snapshots** whatever the effective value was at generation time;
+  `config_changed()` compares effective-now against that snapshot. A benchmark
+  result that moves the effective value **>5%** (the existing
   `coach.threshold_replan_pct`, `config.py:130`) flows through the *same*
   threshold-drift axis that already exists → the plan is flagged stale and a
   replan is suggested. Sub-5% retest corrections feed the next workout
   generation without invalidating the strategy — exactly today's behavior.
 
-No new staleness logic. One accessor, one wiring change.
+**Snapshot scope.** The drift snapshot keeps its current key space —
+`max_hr` (config, §3.4), `ftp`, `lthr` — even though the logbook accepts more
+kinds. `config_changed()` treats a key it has never seen as instant drift
+("`css` was added", `service/prompt.py:59-60`), so letting a first-ever swim
+test into the snapshot would flag every pre-existing plan stale, bypassing the
+5% tolerance. Other kinds (`css`, `threshold_pace`, `e1rm`, `mas`) live in the
+logbook and appear in the prompt from day one, but join the drift snapshot only
+by a deliberate later change (teaching `config_changed()` to skip keys absent
+from the old snapshot) — made when a sport's anchor should actually drive
+replans, not by default.
 
-### 3.4 `config.yaml` becomes the seed, not the source of truth
+No new staleness logic. One accessor, one wiring change — in the service.
 
-`user_profile.ftp` / `lthr` do **not** disappear. They are the **cold-start
-seed** — effectively "row zero" of the logbook (`source: seed`) before any test
-exists. Once a real result lands, the latest logbook row wins and config is no
-longer read for prescription. The athlete never hand-edits it again; tests move
-the number forward.
+### 3.4 `ftp`/`lthr` leave `config.yaml` entirely
 
-Annotate both `config_template.yaml` and the real `config.yaml` so this is
-explicit:
+The logbook is the *only* home for trainable thresholds. `user_profile.ftp` and
+`user_profile.lthr` are **removed** from `config.yaml` and
+`config_template.yaml` (replaced by a pointer comment). `max_hr` stays in
+config: the split is principled — config keeps quasi-fixed physiology and life
+logistics (age, availability, equipment), the logbook keeps *trainable,
+measured* quantities. This deletes the "seed value that becomes inert" concept
+outright: there is no fallback branch in the accessor, no precedence rule to
+document, and no config field that looks editable but silently is not.
 
-```yaml
-  lthr: 165   # threshold HR — starting value only; superseded once you record a benchmark
-  ftp: 220    # FTP watts — starting value only; superseded once you record a benchmark
-```
+**Seeding is a one-off, not machinery.** By the time seeding is possible,
+`benchmark record` exists — and two invocations of it *are* the migration:
+
+    tm benchmark record --sport cycling --ftp 220 --note "seeded from config"
+    tm benchmark record --sport running --lthr 165 --note "seeded from config"
+
+Two rules make the cutover seamless:
+
+- **Sequence:** upgrade → seed → only then run any coach command. Once the code
+  reads thresholds from the DB alone, a `generate`/`status` run before the seed
+  rows exist finds no `ftp` key, compares against a macrocycle snapshot that has
+  one, and reports a spurious "ftp was removed" (`service/prompt.py:59-60`).
+- **Values:** seed the *exact* numbers currently in config, so existing
+  macrocycle snapshots still match and `config_changed()` stays quiet.
+
+**Cold start: nudge, never refuse.** A fresh install has no thresholds — and
+the codebase already degrades gracefully: the prompt formatter emits threshold
+lines conditionally (`engine/prompt.py:43`), and the snapshot/drift code skips
+absent keys. A plan generated with no FTP on record prescribes by RPE and HR
+feel, which is what a coach does with an untested athlete. So generation
+proceeds, and a cold-start hint mirrors `_maybe_nudge_bootstrap()`
+(`service/prompt.py:179`): *"No FTP on record — prescriptions will use RPE/HR
+until you record one (`tm benchmark record …`) or complete the scheduled
+benchmark."* The very first generated plan schedules a benchmark anyway (§4.1),
+so the gap closes itself within the first block. Refusing to plan would create
+a bootstrapping paradox — the planner is how a benchmark gets scheduled.
 
 ---
 
 ## 4. Behavior
 
-### 4.1 Placement — deterministic backbone, LLM garnish
+### 4.1 Placement — instruct, then verify
 
 Benchmarks belong at block boundaries and on a ~4–6 week cadence
-(`benchmarks.txt` §1). Place the backbone **deterministically** — one benchmark
-at each mesocycle boundary plus one validation test before the goal — the same
-way rest windows are enforced today (`_enforce_rest_windows`). Deterministic
-placement means a test can't silently vanish because a prompt got distracted.
-The strategy LLM may *add* sport-specific extras on top.
+(`benchmarks.txt` §1). The split of labor plays to each side's strength:
 
-The workout-gen pass then drops an **opener / easy day** in front of each test so
-TSB is positive on test day.
+- **The LLM places.** The generation prompt instructs the coach to schedule one
+  benchmark of the appropriate kind in each mesocycle-boundary week the
+  generated span covers (plus one validation test before the goal), preceded by
+  an opener/easy day so TSB is positive on test day. Day choice stays with the
+  model — it already handles weekly availability, equipment, and rest days, and
+  a deterministic pass re-implementing that logic is exactly the machinery we
+  do not want.
+- **A deterministic post-check verifies.** After generation, if a covered
+  boundary week ended up with no `benchmark_type` workout, print a warning —
+  same spirit as the rest-window pass (`_enforce_rest_windows_generate`), but a
+  warning rather than an insertion: a missing test surfaces for the athlete to
+  regenerate, it is not silently auto-fixed. The check stays silent when the
+  boundary week sits under a `rest` constraint — **rest wins**, and warning
+  about it would be noise.
+
+**Same-day collision.** `save_workout` keys on (date, sport), so a second
+same-sport session on a benchmark date would overwrite the test. Deterministic
+rule: on a date holding a benchmark of sport X, drop any other proposed sport-X
+session and warn. The benchmark is identified by its flag — no guessing needed.
 
 ### 4.2 Adapt — "reschedule, don't dilute"
 
-This is the one rule genuinely different from every other session, and it needs a
-**deterministic guard** (like rest-window enforcement), not just prose, so the
-LLM can't quietly soften a test:
+This is the one rule genuinely different from every other session. Same split:
+the **prompt** tells the LLM the right behavior, and a **deterministic guard**
+backstops it — because determinism is good at *protection*, not scheduling.
 
-- A benchmark is **never eased** (easing defeats its purpose).
-- If TSB is negative on the benchmark date, `adapt` **moves** the test to the
-  next fresh day within the block and lightens the days before it.
+**The prompt rule:** never reduce or soften a benchmark session; if the athlete
+will not be fresh (negative TSB), move it *intact* to a later day within the
+block and lighten the days before it. Moving is necessarily the LLM's call:
+TSB is backward-looking only (`garmin/pmc.py:47` — computed from *completed*
+load), so no deterministic pass can know which future day will be fresh; the
+model, which sees the TSB history and the planned load ahead, judges it.
+Fallback the model is told explicitly: when the benchmark sits on the last day
+of the block and no later in-block day exists, leave it in place and lighten
+the days before it — slightly-off freshness beats a lost test.
+
+**The deterministic guard** — mirroring the `completed_keys` lock
+(`adaptation.py:214-219`), printing a warning whenever it fires (the LLM's
+surrounding proposals assumed the change happened, so the athlete should know
+the day may look slightly incoherent):
+
+- **No content changes.** Reject any adapt proposal that alters a benchmark
+  row's content. A pure move — same content, new date — passes.
+- **No displacement.** Exempt `benchmark_type` rows from the overridden-workout
+  deletion in `workout_adapt_apply` (`adaptation.py:299-308`). Without this, a
+  cross-sport proposal on test day (say, "easy yoga" because the model noticed
+  fatigue) silently deletes the planned test as "overridden" — never eased,
+  just gone.
 
 This composes cleanly with the existing block-boundary firewall
 (`DESIGN_block_boundary.md`): `adapt` already never crosses into the next
@@ -198,16 +277,24 @@ is the primary capture path — reliable, one line, using Zwift's authoritative
 value. Auto-extraction from the activity stream is explicitly **not** built first
 (possible "later, other sports" idea, not load-bearing).
 
-### 5.3 Activity matching marks the test done
+### 5.3 Activity matching confirms the test happened
 
 The completed ride reaches Garmin Connect regardless of the Zwift→Garmin link,
 because the athlete also records on a Garmin device. TrainMate's normal Garmin
-pull sees it, and the adherence matcher marks the *planned* benchmark complete.
-The FTP *number* comes from the `benchmark record` command; Garmin's job is only
-"yes, the test happened."
+pull sees it, and the adherence matcher (derived per-run — nothing persists a
+completion flag today) confirms the *planned* benchmark was done. The FTP
+*number* comes from the `benchmark record` command; Garmin's job is only "yes,
+the test happened."
+
+When two same-sport activities land on the test date, match the one whose
+load/duration is closest to the planned test; if the candidates are too close
+to call, print an error and let the athlete resolve it — never guess.
 
 **No dedup needed:** the athlete deletes the Zwift-uploaded copy in Garmin
-Connect by hand, so a single Garmin-native activity remains.
+Connect by hand, so a single Garmin-native activity remains. (Known failure
+mode, accepted: sync keys on `activity_id`, so a forgotten deletion
+double-counts that day's load in the PMC. Not worth machinery until it actually
+happens.)
 
 ### 5.4 Venue lives in preferences, not in the benchmark
 
@@ -232,46 +319,54 @@ generic so an outdoor test just needs a preference edit.
 - `workout list` gains a `[BENCHMARK]` marker (alongside `[MANUAL]`, `[SWAPPED]`).
 - New CLI verb `benchmark`, mirroring `goal` / `constraint`:
   - `benchmark record --sport cycling --ftp 250 [--date …] [--note …]`
-  - `benchmark list` — the logbook, newest first, with deltas.
+  - `benchmark list` — the logbook, newest first, with deltas (signed per kind:
+    lower is better for pace anchors, §3.2).
+  - `benchmark rm <id>` — the correction path. A typo here is high-consequence
+    (`--ftp 520` jumps the effective threshold and flags a replan);
+    "latest row wins" makes delete-and-re-record a sufficient editing story.
 - `status` shows the current effective threshold per sport and its last-tested date.
 - Progress timeline (`DESIGN_progress_timeline.md`) plots the anchor trend beside
   CTL — the "is overload working?" line.
 
 ---
 
-## 7. Phasing — pick an ambition
+## 7. Phasing
 
-**MVP (pure planning win, planning + adapt only):**
-`benchmark_type` flag on `Workout` · deterministic block-boundary placement +
-opener day · the "reschedule-don't-ease" adapt guard · `[BENCHMARK]` marker. No
-result capture yet — the athlete just reliably gets tests on fresh days.
+Removing thresholds from config (§3.4) makes the logbook the foundation
+everything sits on, so it ships first — not as a V2 refinement.
 
-**V2 (the logbook unlocks the rest):**
-`benchmark_results` table · `effective_threshold` accessor wired into
-`_get_config_thresholds` · `benchmark record` / `benchmark list` CLI ·
-propose→confirm capture · config seed comments · anchor feeds the prompt and the
-existing >5% staleness/replan trigger.
+**Phase 1 — the logbook replaces config thresholds:**
+`benchmark_results` table · `benchmark record` / `list` / `rm` CLI ·
+propose→confirm capture · service-layer effective-threshold overlay wired into
+the profile flow and the staleness snapshot · one-off seeding + removal of
+`ftp`/`lthr` from config · cold-start nudge. Standalone value: thresholds
+become dated, trended, and feed the existing >5% replan trigger.
 
-**V3 (richer):**
-Activity matching auto-marks benchmarks done · modeled/passive anchors
-(power-duration curve for FTP, e1RM from rep-max sets) · progress-timeline
-integration · a measured-vs-modeled coach learning.
+**Phase 2 — planning & protection:**
+`benchmark_type` on `Workout` · placement prompt instruction + boundary-week
+post-check warning · opener day · the adapt prompt rule + deterministic guard
+(no content changes, no displacement) · same-day collision rule ·
+`[BENCHMARK]` marker.
 
-The MVP is useful standalone and touches only planning/adapt; the logbook (V2) is
-the piece that turns a benchmark from "a session the LLM happened to schedule"
-into "a measurement that updates a durable source of truth."
+**Phase 3 — richer:**
+Activity matching auto-links results to planned benchmarks (`workout_id`) ·
+modeled/passive anchors (power-duration curve for FTP, e1RM from rep-max sets)
+· progress-timeline integration · a measured-vs-modeled coach learning.
 
 ---
 
 ## 8. Open decisions
 
-- **Anchor kinds beyond FTP.** MVP/V2 can ship cycling FTP alone; threshold pace,
-  CSS, and e1RM reuse the identical `benchmark_results` shape and can follow.
+- **Anchor kinds beyond FTP/LTHR.** Phase 1 can ship cycling FTP (+ LTHR) alone;
+  threshold pace, CSS, and e1RM reuse the identical `benchmark_results` shape.
+  They stay out of the drift snapshot until a sport's anchor should drive
+  replans (§3.3 — a deliberate small change to `config_changed()`, not a
+  default).
 - **Cadence knob.** Whether the 4–6 week cadence is a config value or fixed to
-  "one per mesocycle boundary." Recommend the latter for MVP (simpler, matches
-  block structure).
+  "one per mesocycle boundary." Recommend the latter (simpler, matches block
+  structure).
 - **e1RM auto-capture** eventually blurs the test/normal-session line (any
-  rep-max set is a passive test) — deferred to V3, noted here so the schema
+  rep-max set is a passive test) — deferred to Phase 3, noted here so the schema
   (`source: modeled`) already anticipates it.
 
 ---
@@ -281,7 +376,9 @@ into "a measurement that updates a durable source of truth."
 - `DESIGN_block_boundary.md` — end-of-block benchmark is the natural replan
   trigger; adapt's within-block firewall already prevents a test from being
   dragged across a boundary.
-- `DESIGN_pmc_fitness_fatigue.md` — TSB gates test-day freshness (the
-  reschedule guard reads TSB); benchmarks do not alter PMC math.
+- `DESIGN_pmc_fitness_fatigue.md` — TSB gates test-day freshness (the adapt
+  prompt rule reads TSB history; benchmarks do not alter PMC math). TSB is
+  backward-looking, which is why *moving* a test is the LLM's judgement, not a
+  deterministic pass (§4.2).
 - `DESIGN_progress_timeline.md` — the anchor time series is a first-class
   progress signal to plot beside CTL.
