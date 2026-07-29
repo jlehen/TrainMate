@@ -8,6 +8,9 @@
   precision. Only round the values on display.
 - Avoid duplication. Do not duplicate function with business logic, instead
   re-use the existing code if this doesn't add too much complexity.
+- TrainMate is used by a single user. So when a migration is necessary,
+  plan for a one-off migration and don't bloat the code with backward
+  compatibility support.
 
 # Git policy
 - Never push without asking before.
