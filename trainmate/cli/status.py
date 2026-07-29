@@ -79,7 +79,7 @@ def run_status(
             change_reason = cli.coach_service.config_changed(macro)
             if change_reason:
                 print(yellow(
-                    "\nWarning: plan-shaping config.yaml settings have changed since the "
+                    "\nWarning: a plan-shaping input has changed since the "
                     f"active periodization plan was generated ({change_reason}).\nRun "
                 ) + green("'plan generate'") + yellow(" to regenerate."))
             

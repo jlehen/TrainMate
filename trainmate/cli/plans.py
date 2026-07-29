@@ -58,8 +58,8 @@ def run_plan_generate(args: argparse.Namespace) -> None:
                     change_reason = cli.coach_service.config_changed(macro)
                     if change_reason and not args.force:
                         if cli.prompt.confirm(
-                            "Plan-shaping configuration in config.yaml has changed "
-                            f"since the last plan generation ({change_reason}).\n"
+                            "A plan-shaping input has changed since the last plan "
+                            f"generation ({change_reason}).\n"
                             "Would you like to regenerate the periodization strategy?"
                         ):
                             args.force = True

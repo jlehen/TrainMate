@@ -44,7 +44,12 @@ class PromptConfigMixin:
 
     def _effective_profile(self) -> Dict[str, Any]:
         """`config.user_profile` with the effective threshold anchors overlaid, so every
-        engine prompt call prescribes zones/targets from the live logbook values (§3.3)."""
+        engine prompt call prescribes zones/targets from the live logbook values (§3.3).
+
+        The profile dict is passed through as-is; the logbook thresholds simply overlay it.
+        The code makes no assumption about which threshold keys the profile does or does not
+        carry — a logbook value overrides a same-named profile key, and any other key rides
+        through untouched."""
         return {**config.user_profile, **self.effective_thresholds()}
 
     def _get_config_snapshot(self) -> str:

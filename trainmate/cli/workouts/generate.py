@@ -232,7 +232,7 @@ def run_workout_generate(args: argparse.Namespace) -> None:
                     change_reason = cli.coach_service.config_changed(macro)
                     if change_reason:
                         message = (
-                            yellow("Warning: plan-shaping config.yaml settings have "
+                            yellow("Warning: a plan-shaping input has "
                                    "changed since the active periodization plan was "
                                    f"generated ({change_reason}).\n"
                                    "Generating workouts using the out-of-date plan might "

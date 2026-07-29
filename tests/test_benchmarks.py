@@ -156,6 +156,24 @@ class TestEffectiveThresholds(unittest.TestCase):
         # max_hr comes from config (quasi-fixed physiology).
         self.assertIn("max_hr", eff)
 
+    def test_config_ftp_lthr_are_inert_not_special(self):
+        from unittest.mock import patch
+        # The code makes no assumption about ftp/lthr in the profile: a value lingering in
+        # config is neither required, forbidden, nor stripped — it rides through as ordinary
+        # profile data, and a logbook value simply overlays it.
+        with patch.dict(
+            trainmate.coach.config.data,
+            {"user_profile": {"max_hr": 185, "ftp": 999, "lthr": 199}},
+        ):
+            prof = coach_service._effective_profile()
+            self.assertEqual(prof["lthr"], 199)  # rides through, untouched
+            # A logbook value overrides the same-named profile key.
+            test_db.add_benchmark_result(
+                date="2026-06-01", sport_type="road_biking",
+                anchor_kind="ftp", value=242, unit="W",
+            )
+            self.assertEqual(coach_service._effective_profile()["ftp"], 242.0)
+
     def test_profile_renders_logbook_threshold(self):
         test_db.add_benchmark_result(
             date="2026-06-01", sport_type="swimming",
