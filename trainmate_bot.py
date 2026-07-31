@@ -89,6 +89,7 @@ MENU_COMMANDS = [
     ("context", "Author daily-context signals"),
     ("learnings", "Inspect coach learnings"),
     ("constraint", "Manage directives the coach works around"),
+    ("model", "List/choose the LLM model"),
     ("cancel", "Abort the command awaiting your answer"),
     ("help", "Show command help"),
 ]

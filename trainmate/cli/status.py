@@ -279,6 +279,11 @@ def run_status(
             line += gray(f" · through {fmt_date(bootstrap_state['through_date'])}")
         print(gray(line))
 
+    # Which model will answer the next plan/adapt — the exchange logs only say so after the
+    # fact (DESIGN_model_selection.md §5).
+    from trainmate.openrouter import openrouter_client
+    print(gray(f"  LLM model:    {openrouter_client.model} · change with 'model'"))
+
     if verbose:
         goals = cli.db.get_objectives()
         print(bold(cyan("\nGoals:")))

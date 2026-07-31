@@ -18,6 +18,9 @@ class TestOpenRouterClient(unittest.TestCase):
         mock_post.return_value = mock_response
 
         client = OpenRouterClient()
+        # Pin the model: an unpinned client resolves it from the database, which this test
+        # has no business reaching (DESIGN_model_selection.md §3.1).
+        client.model = "openai/gpt-5.4"
         with patch.object(client, "_log_exchange"):
             with self.assertRaises(ValueError) as ctx:
                 client.complete("system prompt", "user prompt", label="test")

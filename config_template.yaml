@@ -1,6 +1,11 @@
 llm:
   api_key: "YOUR_OPENROUTER_API_KEY"
-  model: "google/gemini-3.5-flash"
+  # Models this install may use. `model list` numbers them in this order; the first entry
+  # is the default until `model set` picks another (DESIGN_model_selection.md §1).
+  # An entry is either a bare identifier or a `model:` mapping, as below.
+  models:
+    - model: "google/gemini-3.5-flash"
+    - model: "anthropic/claude-opus-5"
   # Seconds an OpenRouter HTTP request may run before it's aborted. Generation is
   # slow (large plans), so keep this generous. Default 120.
   #request_timeout_seconds: 120

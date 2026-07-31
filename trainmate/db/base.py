@@ -609,6 +609,17 @@ class BaseDB:
                 "CREATE INDEX IF NOT EXISTS idx_daily_context_date ON daily_context(date)"
             )
 
+            # App preferences that outlive one invocation but aren't training data. Generic
+            # key/value so the next single-value preference needs no schema change. First
+            # key: 'llm_model' (DESIGN_model_selection.md §2).
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS settings (
+                    key        TEXT PRIMARY KEY,
+                    value      TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                )
+            """)
+
             conn.commit()
 
         # Grandfather pre-evidence learnings with a synthetic basis that sustains their

@@ -49,7 +49,8 @@ from trainmate.cli.argparse_ext import (
 # name ("" = top level), each level's visible sub-commands most-useful first.
 COMMAND_ORDER = {
     "": ["status", "workout", "progress", "plan", "goal",
-         "constraint", "benchmark", "context", "learnings", "data", "shell", "help"],
+         "constraint", "benchmark", "context", "learnings", "data", "model", "shell", "help"],
+    "model": ["list", "set", "reset"],
     "goal": ["list", "add", "edit", "rm"],
     "constraint": ["list", "show", "add", "edit", "rm"],
     "benchmark": ["list", "record", "rm"],
@@ -103,6 +104,9 @@ from trainmate.cli.learnings import add_learnings_parser
 from trainmate.cli.plans import add_plan_parser
 from trainmate.cli.workouts import add_workout_parser
 from trainmate.cli.data import add_data_parser
+from trainmate.cli.models import (
+    add_model_parser, run_model_list, run_model_reset, run_model_set,
+)
 
 
 def build_parser():
@@ -220,6 +224,7 @@ def build_parser():
     plan_parser = add_plan_parser(subparsers, pull_bypass_parser, llm_debug_parser)
     workout_parser = add_workout_parser(subparsers, pull_bypass_parser, llm_debug_parser, plan_date_parser, sport_type_parser)
     data_parser = add_data_parser(subparsers, pull_bypass_parser, llm_debug_parser, basic_date_parser, plan_date_parser, sport_type_parser)
+    add_model_parser(subparsers)
 
     named_subparsers = {
         "goal": goal_parser,
@@ -400,6 +405,16 @@ def run_once(argv, parser, named_subparsers) -> None:
             run_data_show_activities(args)
         elif sub == "wipe":
             run_data_wipe(args)
+    elif cmd == "model":
+        # Read-only at the top level, so a bare 'model' lists rather than printing help
+        # (DESIGN_cli_noargs.md).
+        sub = (args.subcommand or "list").lower()
+        if sub in ("list", "l"):
+            run_model_list(args)
+        elif sub in ("set", "s", "use"):
+            run_model_set(args)
+        elif sub == "reset":
+            run_model_reset(args)
     elif cmd in ("plan", "pl"):
         if not args.subcommand:
             plan_parser.print_help()

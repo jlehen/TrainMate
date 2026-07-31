@@ -9,9 +9,29 @@ class OpenRouterClient:
     """Client for communicating with the OpenRouter LLM API."""
 
     def __init__(self) -> None:
-        """Initializes API endpoint and model from configuration."""
+        """Initializes the API endpoint. The model resolves lazily — see `model`."""
         self.api_url: str = "https://openrouter.ai/api/v1/chat/completions"
-        self.model: str = config.openrouter_model
+        self._model: Optional[str] = None
+
+    @property
+    def model(self) -> str:
+        """The model to query, resolved on first use rather than at import: resolution reads
+        the database, which must not be opened just because this module was imported
+        (DESIGN_model_selection.md §3.1). Assigning to it pins a model for this invocation,
+        which is how `--llm-model` overrides the stored choice."""
+        if self._model is None:
+            from trainmate.llm_models import active_model
+            self._model = active_model()
+        return self._model
+
+    @model.setter
+    def model(self, value: str) -> None:
+        self._model = value
+
+    def reset_model(self) -> None:
+        """Drops the cached model so the next call re-resolves it. The REPL runs many
+        commands in one process, so `model set` must not leave the old one pinned."""
+        self._model = None
 
     def _log_exchange(
         self,

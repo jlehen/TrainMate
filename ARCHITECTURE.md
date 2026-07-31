@@ -135,7 +135,12 @@ classes themselves.
 |                      |                      | `engine.py` `CoachEngine` pure logic +           |
 |                      |                      | `formatting.py` prompt helpers.                  |
 | `openrouter.py`      | `openrouter_client`  | HTTP client for OpenRouter; always expects       |
-|                      |                      | `json_object` response.                          |
+|                      |                      | `json_object` response. `.model` resolves lazily |
+|                      |                      | on first use (see `llm_models.py`).              |
+| `llm_models.py`      | —                    | Which model to query: the `llm.models` config    |
+|                      |                      | menu, the stored choice, and how they combine    |
+|                      |                      | (`list_models`, `active_model`, `set_active_model`) |
+|                      |                      | — DESIGN_model_selection.md.                     |
 | `garmin.py`          | module functions     | Logs into Garmin Connect; pulls metrics +        |
 |                      |                      | activities to DB, recomputes derived metrics,    |
 |                      |                      | maintains the `sync_state` watermark, and        |
@@ -764,6 +769,18 @@ only the columns it uses. See §10 (Data Pull), §13 (Daily Context),
 | `last_pull_utc` | TEXT    | ISO instant of last successful sync              |
 | `sync_token`    | TEXT    | Calendar `nextSyncToken` (calendar_context row)  |
 
+### settings
+App preferences that outlive one invocation but aren't training data — a generic
+key/value store, so the next single-value preference needs no schema change.
+Untouched by every `wipe` (a data wipe is about training history). Currently one
+key: `llm_model`, the chosen LLM identifier. See `DESIGN_model_selection.md` §2.
+
+| Column       | Type    | Notes                                              |
+|--------------|---------|----------------------------------------------------|
+| `key`        | TEXT PK | Preference name (`llm_model`)                      |
+| `value`      | TEXT    | Stored value (an OpenRouter model identifier)      |
+| `updated_at` | TEXT    | UTC ISO instant of the last write                  |
+
 ### daily_context
 External daily context signals (alcohol, sleep, stress, …) ingested from tagged
 Google Calendar events. TrainMate is domain-agnostic: `metric` is an opaque
@@ -913,6 +930,12 @@ from trainmate.google_calendar import calendar_syncer  # CalendarSyncer
 from trainmate import garmin                     # module functions (pull, ensure_data, …)
 ```
 
+`openrouter_client.model` is a lazily-resolved property, not a plain attribute: it reads
+the stored choice from the database on first use, so importing the module never opens the
+DB. Assigning to it pins a model for the invocation (how `--llm-model` overrides the stored
+choice); `reset_model()` drops the cache so the next call re-resolves — what `model set`
+calls, since the REPL runs many commands in one process (DESIGN_model_selection.md §3.1).
+
 `trainmate/garmin.py` exposes module-level functions rather than a singleton:
 `pull()`, `ensure_data()`, `recompute_derived()`, plus the `GarminClient` class
 and `GarminAuthRequired`.
@@ -948,7 +971,7 @@ Invoked as `python trainmate_cli.py [--llm-model MODEL] <command> [subcommand] [
 patchable singletons; the handler functions, named
 `run_<command>_<subcommand>()`, live in the `trainmate/cli/` package
 (one module per command family: `status`, `progress`, `goals`, `constraints`,
-`context`, `learnings`, `plans`, `workouts`, `data`). `help` is the one
+`context`, `learnings`, `plans`, `workouts`, `data`, `models`). `help` is the one
 exception — it just introspects the parser tree (`_print_command_tree` in
 `trainmate_cli.py`), so it has no handler of its own. `plan` has a
 top-level alias (`pl`) and `progress` has a top-level alias (`pr`) (the former
@@ -1006,6 +1029,9 @@ below (`g`, `s`, …) can abbreviate after the top-level alias, e.g. `pl g` or `
 | `data`       | `show-activities` | `d sa` | Show completed activities over a date range (default 7-day lookback). Date options plus `-a`/`--all`, `--type` filter, `--no-pull`, `--csv`. |
 | `data`       | `backfill-tss` | —      | Recompute the measured `tss` for all stored activities under the current zone model (no Garmin calls), then refresh derived workload |
 | `data`       | `wipe`       | `--garmin`, `--calendar`, `--from/--until/--days`, `-y` | Delete cached data. No scope flag = everything (Garmin evidence + daily context) and reset watermarks; `--garmin`/`--calendar` narrow the scope; date flags restrict to a window |
+| `model`      | `list`       | `model l` | List the models configured under `llm.models`, numbered, active one marked. A bare `model` does the same (DESIGN_model_selection.md §4) |
+| `model`      | `set`        | `model s`, `model use` | Choose the model, by list number (`model set 3`) or full identifier. Stored in `settings.llm_model`; survives restarts |
+| `model`      | `reset`      | —        | Forget the stored choice and fall back to the first `llm.models` entry |
 
 ---
 
@@ -1080,7 +1106,7 @@ Required fields:
 | Key                    | Type | Description                                                   |
 |------------------------|------|---------------------------------------------------------------|
 | `openrouter_api_key`   | str  | Also readable from `OPENROUTER_API_KEY` env var               |
-| `openrouter_model`     | str  | Default: `google/gemini-3.5-flash`                            |
+| `llm.models`           | list | Models the `model` command lists and switches between, in display order; first entry is the default until `model set` picks another. Absent/empty → `google/gemini-3.5-flash` alone (DESIGN_model_selection.md §1) |
 | `google_calendar_id`   | str  | Target calendar ID                                            |
 | `garmin_email` / `garmin_password` | str | Garmin login; config.yaml only (kept out of the environment) |
 | `data_refresh_minutes` | int | Throttle window shared by Garmin pulls **and** Calendar-context syncs; reads inside it reuse the cache. Top-level config key `refresh_minutes` (default 120) |

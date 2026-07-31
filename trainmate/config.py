@@ -4,6 +4,9 @@ from typing import Any, Optional
 
 CONFIG_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "config.yaml")
 
+# Fallback when `llm.models` is missing or empty.
+DEFAULT_LLM_MODEL = "google/gemini-3.5-flash"
+
 class Config:
     """Manages application settings loaded from config.yaml and env variables."""
 
@@ -44,9 +47,23 @@ class Config:
         return self.get("google", {}).get("calendar_id")
 
     @property
-    def openrouter_model(self) -> str:
-        """Gets the OpenRouter model identifier, defaulting to gemini-3.5-flash."""
-        return self.get("llm", {}).get("model", "google/gemini-3.5-flash")
+    def llm_models(self) -> list[str]:
+        """The OpenRouter models this install may use, in `model list` display order
+        (DESIGN_model_selection.md §1). Entries are either a bare identifier or a
+        `model:` mapping, so a list can carry per-entry keys later without a reformat.
+        An absent/empty `llm.models` yields the built-in default alone, so a bare
+        config still runs."""
+        models = []
+        for entry in self.get("llm", {}).get("models") or []:
+            identifier = entry.get("model") if isinstance(entry, dict) else entry
+            if identifier and str(identifier).strip():
+                models.append(str(identifier).strip())
+        return models or [DEFAULT_LLM_MODEL]
+
+    @property
+    def default_llm_model(self) -> str:
+        """The model used when nothing is stored in the database: first of `llm.models`."""
+        return self.llm_models[0]
 
     @property
     def llm_request_timeout(self) -> int:

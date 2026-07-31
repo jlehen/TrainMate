@@ -177,6 +177,15 @@ Your workouts sync to Google Calendar automatically as part of `plan generate`,
 (To force a manual re-push after a Calendar mishap, the maintenance command
 `workout push` is still there; see below.)
 
+Switch the LLM behind the coach without editing config by hand — `model` lists what
+`llm.models` in `config.yaml` offers, numbered, and `model set` picks one:
+```bash
+python trainmate_cli.py model
+python trainmate_cli.py model set 3
+```
+The choice is stored and survives restarts; `--llm-model <id>` still overrides it for a
+single command without storing anything.
+
 See `python trainmate_cli.py --help` for the everyday commands, or
 `python trainmate_cli.py help` to see every command and its sub-commands at once.
 Rarely-used maintenance commands — `wipe`, `workout push`, `data backfill-tss`,

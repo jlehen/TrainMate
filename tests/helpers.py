@@ -17,6 +17,7 @@ _ALL_TABLES = [
     "constraints",
     "benchmark_results",
     "objectives",
+    "settings",
 ]
 
 
