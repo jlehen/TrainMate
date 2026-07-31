@@ -168,7 +168,12 @@ class TestCliGoals(unittest.TestCase):
             "--status", "completed",
         ])
         self.assertEqual(exit_code, 0)
-        self.assertIn(f"Goal with ID {g_id} updated successfully", stdout)
+        self.assertIn(
+            f"[COMPLETED] ID: {g_id} | Berlin Marathon Elite "
+            "(running,strength_training) on 2026-09-28 (Priority: 1)",
+            stdout,
+        )
+        self.assertIn("Goal updated successfully", stdout)
 
         edited = test_db.get_objective(g_id)
         self.assertEqual(edited["title"], "Berlin Marathon Elite")

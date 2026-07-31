@@ -78,8 +78,11 @@ def run_goal_edit(args: argparse.Namespace) -> None:
         return
 
     cli.db.update_objective(args.id, **kwargs)
+    updated = cli.db.get_objective(args.id)
+    if updated:
+        _print_goal(updated)
     print(
-        green(f"Goal with ID {args.id} updated successfully. Run ")
+        green("Goal updated successfully. Run ")
         + bold(green("'plan generate'"))
         + green(" to regenerate training cycles if needed.")
     )
