@@ -4,7 +4,7 @@ from typing import Any, List, Optional, Dict
 from trainmate.config import config
 from trainmate.openrouter import openrouter_client
 from trainmate.types import Objective, Constraint, Workout, CompletedActivity
-from trainmate.util import today_date as _today_date, cyan
+from trainmate.util import today_date as _today_date, cyan, wrap_text
 from trainmate.coach.formatting import (
     format_metrics_history, format_completed_activities, format_baseline,
     format_planned_workouts, format_planned_workouts_detailed,
@@ -130,7 +130,10 @@ You MUST respond with a JSON object containing:
             f"Please determine the macrocycle and mesocycle blocks starting from {plan_start}."
         )
 
-        print(cyan("Querying OpenRouter to generate macrocycle and mesocycles periodization strategy..."))
+        print(cyan(wrap_text(
+            "Querying OpenRouter to generate macrocycle and mesocycles "
+            "periodization strategy..."
+        )))
         result = _eng.openrouter_client.complete(
             system_prompt, user_content, label="plan_generate"
         )

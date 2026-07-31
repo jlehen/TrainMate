@@ -13,10 +13,48 @@ from trainmate.garmin import activity_load
 from trainmate.util import (
     today_str as _today_str, today_date as _today_date,
     cyan, green, yellow, bold, red, gray, PMC_TSB_LAG_NOTE,
+    wrap_text, format_labeled_block, default_wrap_width,
 )
 from trainmate.coach.engine import CoachEngine, MIN_PLAN_WEEKS, MAX_PLAN_WEEKS
 from trainmate.coach.formatting import format_baseline, _load_science_guidelines
 import trainmate.coach.service as _svc
+
+
+def _banner(title: str, width: int) -> Tuple[str, str]:
+    """The '=== TITLE ===' head line and its matching closing rule, kept inside the
+    wrap width so a narrow client doesn't fold the rule onto a second line."""
+    head = f"=== {title} ===" if len(title) + 8 <= width else wrap_text(title, width)
+    return head, "=" * min(width, max(len(line) for line in head.split("\n")))
+
+
+def _print_prior_training_review(text: str, width: int) -> None:
+    """Shows the planned-vs-actual review that goes to the model as prompt context.
+
+    Wrapped for the screen only — the model still gets the unwrapped original."""
+    head, rule = _banner("PRIOR TRAINING REVIEW (planned vs actual)", width)
+    print(cyan(bold(f"\n{head}")))
+    print(wrap_text(text, width))
+    print(cyan(bold(f"{rule}\n")))
+
+
+def _print_new_strategy(
+    strategy: str, mesocycles: List[Dict[str, Any]], width: int
+) -> None:
+    """Shows the freshly generated plan for the apply/discard decision.
+
+    Each block is a head line plus its focus indented underneath, matching
+    `plan show`, rather than one long line the terminal breaks where it likes."""
+    head, rule = _banner("NEW PERIODIZATION STRATEGY (MACROCYCLE)", width)
+    print(cyan(bold(f"\n{head}")))
+    print(format_labeled_block(bold("Overall Strategy:"), strategy, width))
+    print()
+    print(bold("Mesocycle Blocks:"))
+    for m in mesocycles:
+        block_head = wrap_text(
+            f"- {m['name']} ({m['start_date']} to {m['end_date']})", width
+        )
+        print(format_labeled_block(bold(block_head), m['focus'], width))
+    print(cyan(bold(f"{rule}\n")))
 
 
 class PlanningMixin:
@@ -239,8 +277,10 @@ class PlanningMixin:
                 reused = True
                 strategy = existing_macro['strategy']
                 mesocycles = self._db.get_mesocycles_for_macrocycle(existing_macro['id'])
-                print(cyan("Reusing existing periodization strategy (macrocycle and mesocycles) "
-                      "from database."))
+                print(cyan(wrap_text(
+                    "Reusing existing periodization strategy (macrocycle and mesocycles) "
+                    "from database."
+                )))
 
         if not reused:
             # Get the previous strategy for context
@@ -278,8 +318,11 @@ class PlanningMixin:
                     feedback_text = "\n".join(fb_parts)
 
             # Generate new macrocycle strategy and mesocycles
-            print(cyan("Goals or plan-shaping constraints have changed, or force generation "
-                  "requested. Determining new overall periodization strategy..."))
+            width = default_wrap_width()
+            print(cyan(wrap_text(
+                "Goals or plan-shaping constraints have changed, or force generation "
+                "requested. Determining new overall periodization strategy..."
+            )))
             guidelines = self._load_science_guidelines()
             profile = self._effective_profile()
             history_summary = self._get_recent_history_summary(today_str)
@@ -288,9 +331,7 @@ class PlanningMixin:
             # replaced, or the preceding goal's plan when there is none.
             prior_training_text = self._build_prior_training_context(prev_macro, today_str)
             if prior_training_text:
-                print(cyan(bold("\n=== PRIOR TRAINING REVIEW (planned vs actual) ===")))
-                print(prior_training_text)
-                print(cyan(bold("==================================================\n")))
+                _print_prior_training_review(prior_training_text, width)
             macro_data = self.engine._plan_generate_strategy(
                 next_goal=next_goal,
                 objectives=objectives,
@@ -321,12 +362,7 @@ class PlanningMixin:
                     mesocycles=mesocycles
                 )
 
-            print(cyan(bold("\n=== NEW PERIODIZATION STRATEGY (MACROCYCLE) ===")))
-            print(f"{bold('Overall Strategy:')}\n{strategy}\n")
-            print(bold("Mesocycle Blocks:"))
-            for m in mesocycles:
-                print(f"- {bold(m['name'])} ({m['start_date']} to {m['end_date']}): {m['focus']}")
-            print(cyan(bold("==============================================\n")))
+            _print_new_strategy(strategy, mesocycles, width)
 
         self._maybe_nudge_bootstrap()
         return strategy, mesocycles, reused

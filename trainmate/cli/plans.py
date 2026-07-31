@@ -46,10 +46,10 @@ def run_plan_generate(args: argparse.Namespace) -> None:
         # there are no history-derived coach learnings to inform the plan. Offer to seed
         # them before generating (skipped in non-interactive --auto mode).
         if cli.db.get_sync_state("reflect") is None and not getattr(args, 'auto', False):
-            if cli.prompt.confirm(
+            if cli.prompt.confirm(wrap_text(
                 "No training-history analysis found. Run 'data bootstrap' first to "
                 "reconstruct past cycles and seed coach learnings?"
-            ):
+            )):
                 cli.coach_service.data_bootstrap(
                     no_pull=args.no_pull, force_pull=getattr(args, 'force_pull', False)
                 )
@@ -64,25 +64,27 @@ def run_plan_generate(args: argparse.Namespace) -> None:
                 next_goal = objectives[0]
                 # Name the defaulted goal so a bare `plan generate` isn't silent
                 # about which objective it planned for (DESIGN_cli_noargs.md §b).
-                print(dim(
+                print(dim(wrap_text(
                     f"No goal given — planning for your next goal: "
                     f"{next_goal.get('title', '')} on {fmt_date(next_goal['target_date'])}."
-                ))
+                )))
 
             if next_goal:
                 macro = cli.db.get_macrocycle_for_objective(next_goal['id'])
                 if macro:
                     change_reason = cli.coach_service.config_changed(macro)
                     if change_reason and not args.force:
-                        if cli.prompt.confirm(
+                        if cli.prompt.confirm(wrap_text(
                             "A plan-shaping input has changed since the last plan "
                             f"generation ({change_reason}).\n"
                             "Would you like to regenerate the periodization strategy?"
-                        ):
+                        )):
                             args.force = True
                         else:
-                            print("Keeping current periodization strategy. "
-                                   "Updating configuration hash in database.")
+                            print(wrap_text(
+                                "Keeping current periodization strategy. "
+                                "Updating configuration hash in database."
+                            ))
                             cli.db.update_macrocycle_config_hash(
                                 macro['id'], cli.coach_service._get_config_hash(),
                                 cli.coach_service._get_config_snapshot()
