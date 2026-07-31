@@ -171,7 +171,8 @@ class TestFeedback(unittest.TestCase):
         self.assertIn(f"Objective [ID: {obj_id}]", stdout)
         self.assertIn(f"[ID: {meso_id}]", stdout)
         self.assertIn("Macrocycle Feedback:\n  overall too easy", stdout)
-        self.assertIn("Mesocycle Feedback:\n    more speed", stdout)
+        # Mesocycle feedback is indented one step deeper than its own block indent.
+        self.assertRegex(stdout, r"Mesocycle Feedback:\n +more speed")
 
     @patch("trainmate_cli._edit_text_in_editor")
     def test_cli_feedback_edit(self, mock_editor):

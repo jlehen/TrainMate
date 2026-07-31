@@ -98,6 +98,46 @@ def run_plan_generate(args: argparse.Namespace) -> None:
         print(red(f"Error during plan generation: {e}"))
 
 
+def _print_hanging(head: str, text: str, width: int, color_fn=None) -> str:
+    """Prints ``text`` after ``head``, wrapped with continuation lines aligned under it.
+
+    Returns the indent string so the caller can align the block's follow-up lines
+    (dates, progress bar, prose) to the same column. A narrow client gets a plain
+    2-space indent instead, since aligning under a long head leaves no usable width."""
+    pad_len = visible_len(head)
+    if width - pad_len < 24:
+        pad_len = 2
+    pad = " " * pad_len
+    lines = textwrap.wrap(text or "", width=max(20, width - pad_len)) or [""]
+    for i, line in enumerate(lines):
+        print((head if i == 0 else pad) + (color_fn(line) if color_fn else line))
+    return pad
+
+
+def _print_indented(text: str, pad: str, width: int, color_fn=None) -> None:
+    """Prints wrapped prose at an existing block's indent."""
+    for line in textwrap.wrap(text, width=max(20, width - len(pad))):
+        print(pad + (color_fn(line) if color_fn else line))
+
+
+def _print_segments(pad: str, segments: list, width: int) -> None:
+    """Prints already-coloured metadata segments joined by ' · ', breaking onto a new
+    indented line rather than letting the terminal wrap them mid-word."""
+    avail = max(20, width - len(pad))
+    line = ""
+    for seg in segments:
+        if not seg:
+            continue
+        candidate = f"{line} · {seg}" if line else seg
+        if line and visible_len(candidate) > avail:
+            print(pad + line)
+            line = seg
+        else:
+            line = candidate
+    if line:
+        print(pad + line)
+
+
 def _print_considered_inputs(macrocycle: dict) -> None:
     """Prints the goals and plan-shaping constraints snapshotted when the plan was generated.
 
@@ -118,19 +158,26 @@ def _print_considered_inputs(macrocycle: dict) -> None:
 
     goals = json.loads(raw_goals) if raw_goals else []
     events = json.loads(raw_events) if raw_events else []
+    width = default_wrap_width()
 
     print(bold("Goals considered:"))
     if goals:
         for g in goals:
             sport = (g.get('sport_type') or '').upper()
-            print(
-                f"  - [ID: {g.get('id')}] {cyan(g.get('title', ''))} "
-                f"({magenta(sport)}) on {cyan(fmt_date(g.get('target_date')))} "
-                f"[priority {g.get('priority')}]"
+            pad = _print_hanging(
+                f"  - [ID: {g.get('id')}] ", g.get('title', ''), width, cyan
+            )
+            _print_segments(
+                pad,
+                [
+                    magenta(sport),
+                    cyan(fmt_date(g.get('target_date'))),
+                    f"priority {g.get('priority')}",
+                ],
+                width,
             )
             if g.get('description'):
-                for line in textwrap.wrap(g['description'], width=78):
-                    print(f"      {gray(line)}")
+                _print_indented(g['description'], pad, width, gray)
     else:
         print(f"  {gray('None')}")
 
@@ -153,15 +200,21 @@ def _print_considered_inputs(macrocycle: dict) -> None:
                     (f"[{sport}]" if sport else ""),
                 ) if t
             )
-            print(
-                f"  - [ID: {e.get('id')}] {cyan(e.get('title', ''))} "
-                f"({tags}) "
-                f"{fmt_date(e.get('start_date'))} -> {fmt_date(e.get('end_date'))}"
+            pad = _print_hanging(
+                f"  - [ID: {e.get('id')}] ", e.get('title', ''), width, cyan
+            )
+            _print_segments(
+                pad,
+                [
+                    tags,
+                    f"{cyan(fmt_date(e.get('start_date')))} -> "
+                    f"{cyan(fmt_date(e.get('end_date')))}",
+                ],
+                width,
             )
             detail = e.get('description') or e.get('impact_description')
             if detail:
-                for line in textwrap.wrap(detail, width=78):
-                    print(f"      {gray(line)}")
+                _print_indented(detail, pad, width, gray)
     else:
         print(f"  {gray('None')}")
     print()
@@ -223,11 +276,16 @@ def run_plan_show(args: argparse.Namespace) -> None:
         ) + green(f"'plan rollback --version {macrocycle['id']}'") + yellow(" to restore it."))
     else:
         print(bold(cyan("\n=== ACTIVE MACROCYCLE STRATEGY ===")))
+    width = default_wrap_width()
     sport_str = next_goal['sport_type'].upper()
-    print(
-        f"{bold('Objective')} [ID: {next_goal['id']}]: "
-        f"{cyan(next_goal['title'])} ({magenta(sport_str)}) "
-        f"on {cyan(fmt_date(next_goal['target_date']))}"
+    obj_pad = _print_hanging(
+        f"{bold('Objective')} [ID: {next_goal['id']}]: ",
+        next_goal['title'], width, cyan,
+    )
+    _print_segments(
+        obj_pad,
+        [magenta(sport_str), cyan(fmt_date(next_goal['target_date']))],
+        width,
     )
     print(format_labeled_block(f"{bold('Macrocycle Strategy')}:", macrocycle['strategy']))
     if macrocycle.get('feedback'):
@@ -246,56 +304,55 @@ def run_plan_show(args: argparse.Namespace) -> None:
         if total_days <= 0:
             total_days = 1
             
-        bar_length = 20
+        # The bar shares its line with the day counter, so it has to shrink on a
+        # narrow client rather than pushing the counter past the wrap width.
+        bar_length = min(20, max(8, width - 30))
+        is_active = start <= today <= end
         if end < today:
             status_str = gray("[DONE]  ")
             bar = gray("=" * bar_length)
             extra = ""
-        elif start <= today <= end:
+        elif is_active:
             status_str = green("[ACTIVE]")
             days_passed = (today - start).days + 1
             days_passed = max(1, min(days_passed, total_days))
             filled = round(bar_length * days_passed / total_days)
             filled = max(0, min(filled, bar_length))
             bar = green("=" * filled) + gray("." * (bar_length - filled))
-            extra = green(f" (Day {days_passed}/{total_days})")
+            extra = green(f" Day {days_passed}/{total_days}")
         else:
             status_str = blue("[FUTURE]")
             bar = gray("." * bar_length)
             extra = ""
-            
+
         if total_days >= 7:
             weeks = total_days / 7
             if weeks.is_integer():
-                duration_desc = f"({int(weeks)} weeks)"
+                duration_desc = f"{int(weeks)} weeks"
             else:
-                duration_desc = f"({weeks:.1f} weeks)"
+                duration_desc = f"{weeks:.1f} weeks"
         else:
-            duration_desc = f"({total_days} days)"
-            
-        prefix = "|->" if start <= today <= end else "|--"
-        if start <= today <= end:
-            prefix = green(prefix)
-            m_name_disp = green(m['name'])
-        else:
-            m_name_disp = m['name']
-            
-        print(
-            f"{prefix} {status_str} [ID: {m['id']}] {pad_visible(m_name_disp, 15)} "
-            f"({cyan(fmt_date(m['start_date']))} -> {cyan(fmt_date(m['end_date']))}) "
-            f"[{bar}]{extra} {duration_desc}"
+            duration_desc = f"{total_days} days"
+
+        prefix = green("|->") if is_active else "|--"
+        pad = _print_hanging(
+            f"{prefix} {status_str} ", m['name'], width, green if is_active else None
         )
-              
-        width = default_wrap_width()
-        focus_lines = textwrap.wrap(m['focus'], width=max(20, width - 2))
-        for line in focus_lines:
-            print(f"  {line}")
+        _print_segments(
+            pad,
+            [
+                f"[ID: {m['id']}]",
+                f"{cyan(fmt_date(m['start_date']))} -> {cyan(fmt_date(m['end_date']))}",
+                duration_desc,
+            ],
+            width,
+        )
+        print(f"{pad}[{bar}]{extra}")
+        _print_indented(m['focus'], pad, width)
         if m.get('feedback'):
-            fb_lines = textwrap.wrap(m['feedback'], width=max(20, width - 4))
-            print(f"  {bold('Mesocycle Feedback')}:")
-            for line in fb_lines:
-                print(f"    {line}")
-        print("  " + gray("-" * 40))
+            print(f"{pad}{bold('Mesocycle Feedback')}:")
+            _print_indented(m['feedback'], pad + "  ", width)
+        print(pad + gray("-" * min(40, max(10, width - len(pad)))))
 
 
 def run_plan_versions(args: argparse.Namespace) -> None:
