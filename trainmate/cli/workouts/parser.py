@@ -301,4 +301,36 @@ def add_workout_parser(subparsers, pull_bypass_parser, llm_debug_parser, plan_da
     )
     w_wipe.add_argument("-y", "--yes", action="store_true", help="Skip confirmation prompt")
 
+    # workout prune-calendar
+    w_prune = workout_subparsers.add_parser(
+        "prune-calendar", advanced=True,
+        help="Delete Google Calendar workout events no local workout references",
+        description=(
+            "Sweep the Google Calendar for TrainMate workout events that no workout in "
+            "the database points at, and delete them. These orphans are what a fresh "
+            "database, a restored backup, or a wipe that never reached Calendar leaves "
+            "behind. Events belonging to soft-removed workouts are kept (the row still "
+            "claims them). With no date filter the whole calendar is swept; "
+            "--from/--until/--days restrict it to a window, as on 'data wipe'. Use "
+            "--dry-run to preview."
+        )
+    )
+    w_prune.add_argument(
+        "--days", type=int, metavar="N",
+        help="Restrict to the trailing N days (ending --until, default today)"
+    )
+    w_prune.add_argument(
+        "--from", "--from-date", dest="from_date", metavar="YYYY-MM-DD",
+        help="Restrict to events on or after this date"
+    )
+    w_prune.add_argument(
+        "--until", "--until-date", dest="until_date", metavar="YYYY-MM-DD",
+        help="Restrict to events on or before this date"
+    )
+    w_prune.add_argument(
+        "-n", "--dry-run", action="store_true", dest="dry_run",
+        help="List the orphaned events without deleting anything"
+    )
+    w_prune.add_argument("-y", "--yes", action="store_true", help="Skip confirmation prompt")
+
     return workout_parser

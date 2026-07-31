@@ -15,7 +15,9 @@ from trainmate.util import (
     format_labeled_block, render_table, today_str as _today_str,
     today_date as _today_date,
 )
-from trainmate.cli.common import fmt_date, ensure_recent_data, mark_adherence_from_results
+from trainmate.cli.common import (
+    fmt_date, ensure_recent_data, mark_adherence_from_results, resolve_cleanup_range,
+)
 
 from trainmate.cli.workouts._helpers import _resolve_workout_date_range, _resolve_swap_ops
 
@@ -218,3 +220,89 @@ def run_workout_wipe(args: argparse.Namespace) -> None:
 
     cli.db.wipe_workouts()
     print(green("All workouts wiped successfully."))
+
+
+def _event_day(event: dict) -> Optional[str]:
+    """The day an event sits on. Workout events are all-day (`start.date`); a timed
+    start is tolerated in case one was hand-edited in Google Calendar."""
+    start = event.get('start') or {}
+    return start.get('date') or (start.get('dateTime') or "")[:10] or None
+
+
+def run_workout_prune_calendar(args: argparse.Namespace) -> None:
+    """Deletes workout events on the calendar that no local workout row references.
+
+    Ownership is read from the calendar side (the `source=TrainMate` tag), because the
+    orphans this cleans up are exactly the ones the database can no longer name — a
+    fresh DB, a restored backup, or a wipe that never reached Calendar.
+    """
+    start_date, end_date = resolve_cleanup_range(args)
+
+    try:
+        events = cli.calendar_syncer.list_workout_events()
+    except Exception as e:
+        print(red(f"Error reading Google Calendar: {e}"))
+        sys.exit(1)
+
+    # Every id any row still claims, removed rows included: a soft-removed workout
+    # keeps its "[Deleted]" event on purpose, and the window must not orphan it.
+    # Read *after* the calendar, so a workout pushed mid-command lands in `known`
+    # rather than in a stale event list — the race then errs towards keeping.
+    known = {
+        w['google_event_id']
+        for w in cli.db.get_workouts(include_removed=True)
+        if w.get('google_event_id')
+    }
+
+    orphans = []
+    for event in events:
+        if event.get('id') in known:
+            continue
+        day = _event_day(event)
+        if start_date and (day is None or day < start_date):
+            continue
+        if end_date and (day is None or day > end_date):
+            continue
+        orphans.append((day or "?", event))
+    orphans.sort(key=lambda pair: pair[0])
+
+    if start_date and end_date:
+        window = f" dated {start_date} to {end_date}"
+    elif start_date:
+        window = f" dated {start_date} onward"
+    elif end_date:
+        window = f" dated up to {end_date}"
+    else:
+        window = ""
+
+    if not orphans:
+        print(green(
+            f"No orphaned Calendar events{window}. "
+            f"{len(events)} workout event(s) all match a local workout."
+        ))
+        return
+
+    for day, event in orphans:
+        print(f"{cyan(day)}  {event.get('summary') or dim('(no title)')}")
+    print(dim(
+        f"{len(orphans)} of {len(events)} workout event(s) on the calendar "
+        f"match no local workout{window}."
+    ))
+
+    if getattr(args, 'dry_run', False):
+        print(yellow(f"Dry run: nothing deleted. Re-run without --dry-run to prune."))
+        return
+
+    if not args.yes:
+        if not cli.prompt.confirm(
+            f"Delete these {len(orphans)} Google Calendar event(s)?", danger=True
+        ):
+            print("Prune cancelled.")
+            return
+
+    deleted = sum(
+        1 for _, event in orphans if cli.calendar_syncer.delete_event(event['id'])
+    )
+    print(green(f"Pruned {deleted} orphaned Calendar event{'s' if deleted != 1 else ''}."))
+    if deleted != len(orphans):
+        print(yellow(f"{len(orphans) - deleted} event(s) could not be deleted (see above)."))

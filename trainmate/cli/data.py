@@ -13,6 +13,7 @@ from trainmate.util import (
 )
 from trainmate.cli.common import (
     fmt_date, ensure_recent_data, mark_adherence_range, pmc_warmup_cutoff,
+    resolve_cleanup_range,
 )
 
 
@@ -70,26 +71,6 @@ def run_data_backfill_tss(args: argparse.Namespace) -> None:
     print(green(f"Backfill complete. {changed} activities updated."))
 
 
-def _resolve_wipe_range(args: argparse.Namespace) -> tuple[Optional[str], Optional[str]]:
-    """Resolves the optional [start, end] window for `data wipe` from --from/--until/
-    --days. No date flag at all -> (None, None), meaning wipe the whole scope.
-
-    Mirrors `data pull`: --days N anchors a trailing N-day window on --until (default
-    today); --from / --until each bound their side, either open-ended on its own.
-    """
-    if not (args.from_date or args.until_date or args.days):
-        return None, None
-    start = args.from_date
-    end = args.until_date
-    if args.days and start is None:
-        base = end or _today_str()
-        start = (
-            datetime.strptime(base, "%Y-%m-%d").date() - timedelta(days=args.days - 1)
-        ).strftime("%Y-%m-%d")
-        end = end or base
-    return start, end
-
-
 def run_data_wipe(args: argparse.Namespace) -> None:
     """Wipes locally cached data after confirmation. --garmin / --calendar scope the
     wipe to Garmin evidence or ingested daily context respectively (neither flag = both);
@@ -100,7 +81,7 @@ def run_data_wipe(args: argparse.Namespace) -> None:
     if not garmin and not calendar:
         garmin = calendar = True
 
-    start, end = _resolve_wipe_range(args)
+    start, end = resolve_cleanup_range(args)
 
     scope_parts = []
     if garmin:

@@ -15,6 +15,10 @@ from trainmate.util import yellow, dim
 # through with pageToken regardless, so this only tunes round-trips vs payload size).
 CALENDAR_SYNC_PAGE_SIZE = 250
 
+# Tag stamped on every workout event we write, and the only handle on ownership left
+# once the rows that referenced the events are gone (see `list_workout_events`).
+WORKOUT_EVENT_TAG = "TrainMate"
+
 
 def event_url(event_id: Optional[str], calendar_id: Optional[str]) -> Optional[str]:
     """Rebuild an event's Google Calendar htmlLink from its stored id (eid = base64 of "<id> <cal>")."""
@@ -242,7 +246,7 @@ class CalendarSyncer:
             # Add metadata tag to identify TrainMate events
             'extendedProperties': {
                 'private': {
-                    'source': 'TrainMate',
+                    'source': WORKOUT_EVENT_TAG,
                     'sport_type': sport_type
                 }
             }
@@ -466,11 +470,42 @@ class CalendarSyncer:
         ).execute()
         return created.get('id')
 
-    def delete_event(self, google_event_id: str) -> None:
+    def list_workout_events(self) -> List[dict]:
+        """Every workout event on the calendar, found by tag rather than by stored id.
+
+        The tag is the only ownership handle that survives the database: a fresh DB
+        (or a wipe that skipped the calendar) orphans events no row points at any
+        more, so `workout prune-calendar` has to sweep from the calendar side.
+        """
+        if not self.calendar_id:
+            return []
+
+        events: List[dict] = []
+        page_token: Optional[str] = None
+        while True:
+            params: dict = {
+                'calendarId': self.calendar_id,
+                'singleEvents': True,
+                'maxResults': CALENDAR_SYNC_PAGE_SIZE,
+                'privateExtendedProperty': f"source={WORKOUT_EVENT_TAG}",
+            }
+            if page_token:
+                params['pageToken'] = page_token
+            resp = self.service.events().list(**params).execute()
+            events.extend(resp.get('items', []))
+            page_token = resp.get('nextPageToken')
+            if not page_token:
+                return events
+
+    def delete_event(self, google_event_id: str) -> bool:
         """Deletes an event from Google Calendar by id (source-agnostic).
 
         Args:
             google_event_id: The event ID to delete.
+
+        Returns:
+            True if the event was deleted; False if the API refused (best-effort —
+            a failure is warned about, never raised, so teardown paths continue).
         """
         try:
             self.service.events().delete(
@@ -478,13 +513,15 @@ class CalendarSyncer:
                 eventId=google_event_id
             ).execute()
             print(f"Deleted Google Calendar event {google_event_id}.")
+            return True
         except Exception as e:
             print(f"Warning: Failed to delete Google Calendar event {google_event_id}: {e}")
+            return False
 
     # Back-compat alias: workout teardown paths call this name.
-    def delete_workout_event(self, google_event_id: str) -> None:
+    def delete_workout_event(self, google_event_id: str) -> bool:
         """Deletes a workout event from Google Calendar (see `delete_event`)."""
-        self.delete_event(google_event_id)
+        return self.delete_event(google_event_id)
 
 # Singleton instance
 calendar_syncer = CalendarSyncer()

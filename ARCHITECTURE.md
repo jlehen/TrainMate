@@ -680,6 +680,10 @@ kind flag. Checked **in order**:
     through any path leaves it untouched, so the row reads `stale` automatically. The
     signature excludes `rpe` (never reaches Calendar). Push eligibility =
     `calendar_status != 'synced'`; calendar cleanup keys on `google_event_id`.
+  - **Orphans** are the reverse direction: an event whose row is gone (fresh DB,
+    restored backup, a wipe that skipped Calendar) can no longer be named locally, so
+    `workout prune-calendar` sweeps from the calendar side — `list_workout_events`
+    finds them by the `source=TrainMate` tag and deletes any id no row claims.
   - **Backward adherence marking** is the past-looking counterpart to the forward
     push: for each *strictly past* planned workout with an event, it re-renders the
     event with an adherence verdict from `adherence.classify_adherence` — a
@@ -1047,6 +1051,7 @@ below (`g`, `s`, …) can abbreviate after the top-level alias, e.g. `pl g` or `
 | `workout`    | `push`       | `w p`    | Sync planned workouts to Google Calendar. Defaults to today onward; pushes only unsynced unless `-f`/`--force` re-pushes already-synced ones. |
 | `workout`    | `swap`       | `w s`    | Swap two workouts by dates (`<date> <date>`) or IDs (`<id> <id>`), same kind on both sides; `--reason` required. Runs recovery checks (consecutive hard days, load spikes, mesocycle crossings), prompts on warnings unless `-f`; syncs unless `--no-sync`; `--reason` folded into `modification_reason`. |
 | `workout`    | `wipe`       | —        | Delete all workouts                                                      |
+| `workout`    | `prune-calendar` | —    | Delete Calendar workout events that no local row references — the orphans a fresh DB, a restored backup, or a wipe that never reached Calendar leaves behind. Ownership read from the `source=TrainMate` tag, not from stored ids; events of soft-removed workouts are kept. `--from`/`--until`/`--days` window it (as on `data wipe`), `-n`/`--dry-run` previews, `-y` skips the prompt |
 | `data`       | `pull`       | `d p`    | Fetch Garmin activities/metrics and Google Calendar context (`--days`/`--from`/`--until`/`--metrics-only`/`--activities-only`/`--sleep`). Defaults to the last 2 days ending today. |
 | `data`       | `bootstrap`  | `d b`    | Cold-start reconstruction over the full backlog; seeds evidence-based learnings, sets the reflect watermark. Flags: `--from`, `--until`, `--days`, `--weeks`, `--context`, `--force`, `--inspect-only`, `--auto`. No date filter → window auto-detected (since previous goal, else 12 wk). |
 | `data`       | `reflect`    | `d r`    | Incremental analysis since the reflect watermark; updates learnings + resolves pending demotions (same flags as `bootstrap`). `--auto`: unattended — staleness demotions auto-apply, contradiction ones stay queued. |

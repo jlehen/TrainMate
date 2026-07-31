@@ -87,6 +87,7 @@ from trainmate.cli.workouts import (
     run_workout_list, run_workout_compare, run_workout_generate, run_workout_rm,
     run_workout_restore, run_workout_adapt, run_workout_push, run_workout_swap,
     run_workout_add, run_workout_wipe, run_workout_batches, run_workout_rollback,
+    run_workout_prune_calendar,
 )
 from trainmate.cli.data import (
     run_data_pull, run_data_bootstrap, run_data_reflect, run_data_backfill_tss,
@@ -391,6 +392,8 @@ def run_once(argv, parser, named_subparsers) -> None:
             run_workout_add(args)
         elif sub == "wipe":
             run_workout_wipe(args)
+        elif sub == "prune-calendar":
+            run_workout_prune_calendar(args)
     elif cmd in ("data", "d"):
         if not args.subcommand:
             data_parser.print_help()

@@ -571,5 +571,28 @@ class TestCalendarSync(unittest.TestCase):
             test_db.get_sync_state(key="calendar_context")["sync_token"], "fresh-tok"
         )
 
+    def test_list_workout_events_pages_and_filters_by_tag(self):
+        """list_workout_events follows nextPageToken and asks the server for the
+        workout tag only (the ownership handle a wiped database no longer has)."""
+        mock_service = MagicMock()
+        mock_service.events().list.return_value.execute.side_effect = [
+            {"items": [{"id": "evt-a"}], "nextPageToken": "page-2"},
+            {"items": [{"id": "evt-b"}]},
+        ]
+
+        with patch.object(calendar_syncer, "service", mock_service), \
+                patch.object(calendar_syncer, "calendar_id", "cal-test"):
+            events = calendar_syncer.list_workout_events()
+
+        self.assertEqual([e["id"] for e in events], ["evt-a", "evt-b"])
+        first_kwargs = mock_service.events().list.call_args_list[-2][1]
+        second_kwargs = mock_service.events().list.call_args_list[-1][1]
+        self.assertEqual(
+            first_kwargs.get("privateExtendedProperty"), "source=TrainMate"
+        )
+        self.assertNotIn("pageToken", first_kwargs)
+        self.assertEqual(second_kwargs.get("pageToken"), "page-2")
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -15,6 +15,29 @@ def fmt_date(date_str: str) -> str:
     return datetime.strptime(date_str, "%Y-%m-%d").strftime("%Y-%m-%d %a")
 
 
+def resolve_cleanup_range(args) -> tuple[Optional[str], Optional[str]]:
+    """Resolves the optional [start, end] window shared by the cleanup commands
+    (`data wipe`, `workout prune-calendar`) from --from/--until/--days. No date flag
+    at all -> (None, None), meaning the whole scope.
+
+    Mirrors `data pull`: --days N anchors a trailing N-day window on --until (default
+    today); --from / --until each bound their side, either open-ended on its own.
+    Unlike the planning resolver, a lone --until does *not* imply a start of today —
+    a cleanup reaches backwards by nature.
+    """
+    if not (args.from_date or args.until_date or args.days):
+        return None, None
+    start = args.from_date
+    end = args.until_date
+    if args.days and start is None:
+        base = end or _today_str()
+        start = (
+            datetime.strptime(base, "%Y-%m-%d").date() - timedelta(days=args.days - 1)
+        ).strftime("%Y-%m-%d")
+        end = end or base
+    return start, end
+
+
 def pmc_warmup_cutoff(history_start: Optional[str] = None) -> Optional[str]:
     """The §3.3(a) leading-edge cutoff every CLI surface blanks PMC values against.
 
