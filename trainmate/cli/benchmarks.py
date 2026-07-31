@@ -238,7 +238,7 @@ def add_benchmark_parser(subparsers):
 
     # benchmark rm
     b_rm = b_subparsers.add_parser(
-        "rm", aliases=["r"], help="Remove a benchmark result by ID"
+        "rm", help="Remove a benchmark result by ID"
     )
     b_rm.add_argument("id", type=int, help="Benchmark result ID to remove")
 

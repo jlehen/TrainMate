@@ -137,7 +137,10 @@ class TestCommandPrefixResolution(unittest.TestCase):
         self.assertEqual(self._xlate("data sm"), ["data", "show-metrics"])
 
     def test_ambiguous_prefix_is_rejected(self):
-        for line, expected in [("c", "constraint, context"), ("workout ad", "adapt, add")]:
+        # 'rm' gets no tiebreaker alias on purpose: no one-letter destructive command.
+        for line, expected in [("c", "constraint, context"), ("workout ad", "adapt, add"),
+                               ("workout r", "restore, rm, rollback"),
+                               ("benchmark r", "record, rm")]:
             with patch("sys.stderr", io.StringIO()) as err:
                 with self.assertRaises(SystemExit) as ctx:
                     self._xlate(line)

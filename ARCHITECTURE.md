@@ -1007,9 +1007,10 @@ command at its level *is* that command — `pl g` is `plan generate`, `constr ed
 set. An ambiguous prefix (`p` → `plan`/`progress`, `c` → `constraint`/`context`)
 is refused, naming the candidates. Only shorthands that are *not* prefixes
 (`ctx`, `lm`, `df`, `rb`, `sm`, `sa`, `use`) or that pick a winner among an
-ambiguous set (`s` → `status`, `workout a` → `adapt`, `workout r` → `rm`,
-`workout p` → `push`, `benchmark r` → `rm`, `context l` → `list`, `data b` →
-`bootstrap`) stay registered as real aliases.
+ambiguous set (`s` → `status`, `workout a` → `adapt`, `workout p` → `push`,
+`context l` → `list`, `data b` → `bootstrap`) stay registered as real aliases.
+`rm` deliberately gets no winner — `r` stays ambiguous rather than shortening the
+destructive command.
 
 | Command      | Subcommand   | Short form | Description                                                            |
 |--------------|--------------|----------|--------------------------------------------------------------------------|
@@ -1049,7 +1050,7 @@ ambiguous set (`s` → `status`, `workout a` → `adapt`, `workout r` → `rm`,
 | `workout`    | `list`       | `w l`    | Show planned workouts. Defaults to today for 7 days. Flags: `--type TYPE`, `--days N`, `--weeks N`, `--from DATE`, `--until DATE`, `--from-mesocycle`, `--until-mesocycle [ID]`, `--mesocycle [ID]`, `--goal [ID]`, `--removed`. |
 | `workout`    | `compare`    | `w c`    | Compare planned vs completed (`analyze_adherence()`): prints PLANNED/ACTUAL per day, flags misses (red), rest violations (red), unplanned high-load (yellow), then a discrepancy summary. Same date flags as `workout list`; default 14-day lookback; `--days`/`--weeks` look *back*; end capped at today. |
 | `workout`    | `generate`   | `w g`    | Generate workouts from active strategy. No horizon flag → `config.workout_generation_span_days` ahead (28 default). Flags: `--goal ID`, `--days N`, `--weeks N`, `--until DATE`, `--until-goal [ID]`, `--until-mesocycle ID`. Eager: archives the previous plan's future workouts and pushes the new ones to Calendar immediately. |
-| `workout`    | `rm`         | `w r`    | Soft-remove by ID (`--reason TEXT` required): marks `removed`, marks the Calendar event deleted; kept in DB, hidden from list/compare, shown to coach as a cancellation. |
+| `workout`    | `rm`         | `w rm`   | Soft-remove by ID (`--reason TEXT` required): marks `removed`, marks the Calendar event deleted; kept in DB, hidden from list/compare, shown to coach as a cancellation. |
 | `workout`    | `restore`    | `w res`  | Restore soft-removed workout by ID. Clears `removed` flags and syncs to Calendar to remove the `[Deleted]` mark. |
 | `workout`    | `rollback`   | `w rb`   | Undo a regeneration: archive the upcoming sessions and restore a previously archived batch, re-pushing it to Calendar (`--batch N` per `workout batches`, default the most recent; `-y`). Leaves the active plan version alone — unlike `plan rollback`, so it also undoes a regeneration made under one plan (DESIGN_plan_rollback.md §9). Unrelated to `workout restore`. |
 | `workout`    | `batches`    | `w b`    | List the archived workout batches a rollback can restore, newest first: positional `#N`, archive time, total/restorable counts, date span, plan version |

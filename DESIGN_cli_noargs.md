@@ -86,15 +86,23 @@ That leaves exactly two reasons for an explicit alias to survive:
 
 * it is **not a prefix** of its command — `ctx`, `lm`, `df`, `rb`, `sm`, `sa`, `use`;
 * it **picks the winner** among an ambiguous prefix — `s` is `status` (not `shell`),
-  `workout a` is `adapt` (not `add`), `workout r` is `rm` (not `restore`/`rollback`),
-  `benchmark r` is `rm` (not `record`), `context l` is `list` (not `list-metrics`),
-  `data b` is `bootstrap` (not `backfill-tss`).
+  `workout a` is `adapt` (not `add`), `context l` is `list` (not `list-metrics`),
+  `data b` is `bootstrap` (not `backfill-tss`), `workout p` is `push` (not
+  `prune-calendar`).
 
-Everything else was deleted. Nothing an athlete could type before stopped working:
-each retired alias is a prefix of its own command, which is what makes it retired.
-The one deliberate change is `plan d`, which used to delete a plan and now resolves
-to `plan diff` — an exact alias beating the natural prefix of a visible everyday
-command is the trap this rule exists to remove, and the safe direction to fail in.
+`rm` gets no winner: `r` is left ambiguous (with `restore`/`rollback` under `workout`,
+with `record` under `benchmark`) rather than aliased. A one-letter shortcut for the
+destructive command is worth less than the two characters it saves, and `rm` is
+already the full name.
+
+Everything else was deleted. Almost nothing an athlete could type before stopped
+working: each retired alias is a prefix of its own command, which is what makes it
+retired. The two deliberate exceptions both concern a destructive command:
+
+* `plan d` used to delete a plan and now resolves to `plan diff` — an exact alias
+  beating the natural prefix of a visible everyday command is the trap this rule
+  exists to remove, and the safe direction to fail in;
+* `workout r` / `benchmark r` used to remove; both now report the ambiguity instead.
 
 ### Where it lives
 

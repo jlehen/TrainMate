@@ -191,7 +191,7 @@ def add_workout_parser(subparsers, pull_bypass_parser, llm_debug_parser, plan_da
 
     # workout rm
     w_rm = workout_subparsers.add_parser(
-        "rm", aliases=["r"], help="Remove a workout by ID"
+        "rm", help="Remove a workout by ID"
     )
     w_rm.add_argument("id", type=int, help="Workout ID to remove")
     w_rm.add_argument(
