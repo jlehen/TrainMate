@@ -39,6 +39,17 @@ def _resolve_dates(args: argparse.Namespace) -> tuple:
     return start, end
 
 
+def _constraint_line(c: dict) -> str:
+    """One-line rendering of a constraint for `list` (and the `add` echo)."""
+    tags = ("no training" if c.get('rest') else "advisory") + (
+        " · plan-shaping" if c.get('replan') else ""
+    )
+    return (
+        f"ID: {c['id']} | {yellow(c['title'])}: "
+        f"{cyan(c['start_date'])} to {cyan(c['end_date'])} | {tags}"
+    )
+
+
 def _maybe_replan(constraint_id: int, title: str, replan_flag: Optional[bool]) -> None:
     """Handles the §7 plan-invalidation decision after an add/edit.
 
@@ -105,11 +116,10 @@ def run_constraint_add(args: argparse.Namespace) -> None:
         description=args.desc, replan=1 if args.replan is True else 0,
         source='manual',
     )
-    span = start if start == end else f"{start}..{end}"
-    kind = "no training" if args.rest else "advisory"
-    print(green(
-        f"Added constraint [{cid}]: {bold(title)} ({kind}) over {cyan(span)}"
-    ))
+    constraint = cli.db.get_constraint(cid)
+    if constraint:
+        print(_constraint_line(constraint))
+    print(green("Constraint added successfully."))
     _maybe_replan(cid, title, args.replan)
 
 
@@ -142,17 +152,6 @@ def run_constraint_edit(args: argparse.Namespace) -> None:
 
     title = kwargs.get('title', constraint['title'])
     _maybe_replan(args.id, title, args.replan)
-
-
-def _constraint_line(c: dict) -> str:
-    """One-line rendering of a constraint for `list`."""
-    tags = ("no training" if c.get('rest') else "advisory") + (
-        " · plan-shaping" if c.get('replan') else ""
-    )
-    return (
-        f"ID: {c['id']} | {yellow(c['title'])}: "
-        f"{cyan(c['start_date'])} to {cyan(c['end_date'])} | {tags}"
-    )
 
 
 def run_constraint_list(args: argparse.Namespace) -> None:

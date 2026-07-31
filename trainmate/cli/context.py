@@ -35,6 +35,16 @@ def _context_summary(metric: str, value: Optional[float], label: str) -> str:
     return f"{base}: {value}" if value is not None else base
 
 
+def _context_line(row: dict) -> str:
+    """One-line rendering of a context row for `list` (and the `add` echo)."""
+    val = f" = {row['value']}" if row.get("value") is not None else ""
+    text = row.get("text") or ""
+    return (
+        f"ID: {row['id']} | {cyan(row['date'])} | {magenta(row['metric'])}{val}"
+        + (f" — {text}" if text else "")
+    )
+
+
 def run_context_add(args: argparse.Namespace) -> None:
     """Authors a daily-context signal over a day or date range, writing one tagged
     all-day event per day and mirroring the rows locally."""
@@ -54,7 +64,7 @@ def run_context_add(args: argparse.Namespace) -> None:
     label = (args.label or " ".join(args.text or [])).strip()
     text = _context_summary(metric, value, label)
 
-    count = 0
+    written = []
     for day in _date_range(start, end):
         existing = cli.db.get_daily_context(day, day, metric=metric)
         existing_id = existing[0]["google_event_id"] if existing else None
@@ -65,23 +75,15 @@ def run_context_add(args: argparse.Namespace) -> None:
             print(red(f"Failed to write context event for {day}."))
             continue
         cli.db.upsert_daily_context_by_event(event_id, day, metric, value, text)
-        count += 1
+        written.extend(cli.db.get_daily_context(day, day, metric=metric))
 
-    span = start if start == end else f"{start}..{end}"
+    for row in written:
+        print(_context_line(row))
+    count = len(written)
     print(green(
-        f"Logged '{text}' as {magenta(metric)} over {cyan(span)} "
+        f"Logged '{text}' as {magenta(metric)} "
         f"({count} day{'s' if count != 1 else ''})."
     ))
-
-
-def _context_line(row: dict) -> str:
-    """One-line rendering of a context row for `list`."""
-    val = f" = {row['value']}" if row.get("value") is not None else ""
-    text = row.get("text") or ""
-    return (
-        f"ID: {row['id']} | {cyan(row['date'])} | {magenta(row['metric'])}{val}"
-        + (f" — {text}" if text else "")
-    )
 
 
 def run_context_list(args: argparse.Namespace) -> None:

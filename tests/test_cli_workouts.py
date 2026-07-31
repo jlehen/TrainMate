@@ -440,6 +440,30 @@ class TestCliWorkouts(unittest.TestCase):
         self.assertIn("No orphaned Calendar events", stdout)
         mock_calendar.delete_event.assert_not_called()
 
+    @patch("trainmate_cli.coach_service")
+    def test_workout_add_echoes_list_line(self, mock_coach):
+        """`add` echoes the new session in the exact 'workout list' rendering."""
+        saved = {
+            "id": 7, "date": "2026-06-02", "sport_type": "running",
+            "title": "Tempo 6x800", "description": "intervals",
+            "duration_minutes": 60, "tss": 70, "rpe": 7, "source": "manual",
+            "google_event_id": "evt-1",
+        }
+        mock_coach.workout_add.return_value = (saved, [])
+        exit_code, stdout, _ = self.run_cli([
+            "workout", "add", "2026-06-02", "running", "--title", "Tempo 6x800",
+            "--description", "intervals", "--duration", "60", "--tss", "70", "--rpe", "7",
+        ])
+        self.assertEqual(exit_code, 0)
+        self.assertIn(
+            "ID: 7 | 2026-06-02 Tue | RUNNING | Tempo 6x800", stdout
+        )
+        self.assertIn("[MANUAL]", stdout)
+        self.assertIn("60min", stdout)
+        self.assertIn("TSS 70", stdout)
+        self.assertIn("RPE 7", stdout)
+        self.assertIn("Workout added successfully", stdout)
+
     def test_workout_list_filters(self):
         today_date = datetime.now(timezone.utc).date()
         today_str = today_date.strftime("%Y-%m-%d")

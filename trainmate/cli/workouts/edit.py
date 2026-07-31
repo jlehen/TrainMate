@@ -19,7 +19,8 @@ from trainmate.cli.common import (
     fmt_date, ensure_recent_data, mark_adherence_from_results, resolve_cleanup_range,
 )
 
-from trainmate.cli.workouts._helpers import _resolve_workout_date_range, _resolve_swap_ops
+from trainmate.cli.workouts._helpers import (_resolve_workout_date_range, _resolve_swap_ops,
+    workout_line)
 
 
 def run_workout_push(args: argparse.Namespace) -> None:
@@ -186,19 +187,9 @@ def run_workout_add(args: argparse.Namespace) -> None:
         print(red("Failed to save workout."))
         sys.exit(1)
 
-    stat_parts = []
-    if saved.get('duration_minutes') is not None:
-        stat_parts.append(f"{saved['duration_minutes']}m")
-    if saved.get('tss') is not None:
-        stat_parts.append(f"TSS {saved['tss']}")
-    if saved.get('rpe') is not None:
-        stat_parts.append(f"RPE {saved['rpe']}")
-    stats = f" ({', '.join(stat_parts)})" if stat_parts else ""
-    verb = "Replaced with" if replaced else "Added"
-    print(green(
-        f"{verb} [{saved['id']}] {saved['title']}{stats} on {saved['date']} "
-        f"({saved['sport_type']}) and synced to Calendar."
-    ))
+    print(workout_line(saved))
+    verb = "replaced" if replaced else "added"
+    print(green(f"Workout {verb} successfully and synced to Calendar."))
 def run_workout_wipe(args: argparse.Namespace) -> None:
     """Wipes all workouts from the database and Google Calendar after confirmation."""
     if not args.yes:

@@ -53,6 +53,9 @@ class TestCliContext(unittest.TestCase):
         ])
         self.assertEqual(exit_code, 0)
         self.assertIn("3 days", stdout)
+        # Each authored day is echoed in the exact 'context list' rendering.
+        for day in ("2026-06-25", "2026-06-26", "2026-06-27"):
+            self.assertIn(f"| {day} | heat = 38.0 — severe heatwave (38.0)", stdout)
         # One tagged event authored per day in the range.
         self.assertEqual(mock_calendar.add_context_event.call_count, 3)
         rows = test_db.get_daily_context("2026-06-25", "2026-06-27", metric="heat")

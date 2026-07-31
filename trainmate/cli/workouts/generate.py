@@ -6,12 +6,10 @@ from typing import Optional
 import trainmate_cli as cli
 from trainmate.config import config
 from trainmate.adherence import analyze_adherence, date_covered
-from trainmate.calendar_state import calendar_status
 from trainmate.google_calendar import event_url
-from trainmate.modification_state import modification_status
 from trainmate.sports import canonical_sport
 from trainmate.util import (
-    bold, dim, green, red, yellow, cyan, blue, magenta, gray, cmd,
+    bold, dim, green, red, yellow, cyan, magenta, gray, cmd,
     visible_len, pad_visible, wrap_text,
     format_labeled_text, format_labeled_block, render_table,
     today_str as _today_str, today_date as _today_date, days_between,
@@ -21,7 +19,7 @@ from trainmate.cli.common import (
 )
 
 from trainmate.cli.workouts._helpers import (_fmt_ts, _resolve_workout_date_range,
-    _resolve_workout_end_date)
+    _resolve_workout_end_date, workout_line)
 
 
 def _print_block_boundary_hint(date_str: str) -> None:
@@ -413,44 +411,7 @@ def run_workout_list(args: argparse.Namespace) -> None:
     # distinct summary only once across the listing so it doesn't dominate the output.
     seen_summaries: set = set()
     for w in workouts:
-        mod_marker = ""
-        mod_status = modification_status(w)
-        if mod_status == 'adapted':
-            # Surface repeat easings: a session adapted by more than one adapt run
-            # reads [ADAPTED ×N], flagging load that has been walked down multiple times.
-            count = w.get('adaptation_count') or 0
-            label = f" [ADAPTED ×{count}]" if count > 1 else " [ADAPTED]"
-            mod_marker = bold(yellow(label))
-        elif mod_status == 'swapped':
-            mod_marker = bold(yellow(" [SWAPPED]"))
-        elif mod_status == 'replaced':
-            mod_marker = bold(yellow(" [REPLACED]"))
-        sync_marker = ""
-        status = calendar_status(w)
-        if status == 'synced':
-            sync_marker = bold(green(" [SYNCED]"))
-        elif status == 'stale':
-            sync_marker = bold(yellow(" [STALE]"))
-        rem_marker = ""
-        if w.get('removed'):
-            rem_marker = bold(red(" [REMOVED]"))
-        src_marker = ""
-        if w.get('source') == 'manual':
-            src_marker = bold(magenta(" [MANUAL]"))
-        # Benchmark identity is a stored column, orthogonal to the modification/sync/removed
-        # axes (a benchmark can also be swapped), so it gets its own marker straight off the
-        # column (DESIGN_benchmark_workouts.md §3.1/§6).
-        bench_marker = bold(blue(" [BENCHMARK]")) if w.get('benchmark_type') else ""
-        duration = w.get('duration_minutes')
-        tss = w.get('tss')
-        rpe = w.get('rpe')
-        duration_str = f" | {duration}min" if duration else ""
-        tss_str = f" | TSS {tss}" if tss is not None else ""
-        rpe_str = f" | RPE {rpe}" if rpe is not None else ""
-        print(
-            f"ID: {w['id']} | {cyan(fmt_date(w['date']))} | {magenta(w['sport_type'].upper())} | "
-            f"{bold(w['title'])}{bench_marker}{mod_marker}{sync_marker}{rem_marker}{src_marker}{duration_str}{tss_str}{rpe_str}"
-        )
+        print(workout_line(w))
         # -l surfaces the Calendar event link (rebuilt from the stored event id) so it can
         # be opened without the sync commands having to print the URL every push.
         if getattr(args, "link", False):
