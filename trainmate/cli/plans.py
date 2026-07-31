@@ -1,12 +1,12 @@
-import json
 import textwrap
 import argparse
 import sys
 from datetime import datetime, timedelta
-from typing import Optional
+from typing import List, Optional
 import trainmate_cli as cli
+from trainmate import plan_diff
 from trainmate.config import config
-from trainmate.adherence import analyze_adherence, date_covered
+from trainmate.adherence import analyze_adherence, date_covered, planned_load
 from trainmate.util import (
     bold, dim, green, red, yellow, cyan, blue, magenta, gray,
     visible_len, pad_visible, wrap_text, format_labeled_text,
@@ -14,6 +14,23 @@ from trainmate.util import (
     today_date as _today_date,
 )
 from trainmate.cli.common import fmt_date, ensure_recent_data
+
+
+def _resolve_goal(goal_id: Optional[int]) -> Optional[dict]:
+    """The goal a plan command targets: the given ID (whatever its status, so archived
+    and completed goals stay reachable), else the next active goal by target date.
+    Prints the reason and returns None when there is none."""
+    if goal_id is not None:
+        goal = cli.db.get_objective(goal_id)
+        if not goal:
+            print(red(f"Goal with ID {goal_id} not found."))
+        return goal
+    objectives = cli.db.get_objectives(status='active')
+    if not objectives:
+        print(yellow("No active goals found. TrainMate needs at least one objective."))
+        return None
+    objectives.sort(key=lambda x: str(x['target_date']))
+    return objectives[0]
 
 
 def run_plan_generate(args: argparse.Namespace) -> None:
@@ -139,25 +156,14 @@ def _print_segments(pad: str, segments: list, width: int) -> None:
 
 
 def _print_considered_inputs(macrocycle: dict) -> None:
-    """Prints the goals and plan-shaping constraints snapshotted when the plan was generated.
-
-    These are preserved on the macrocycle (see save_macrocycle), so they reflect the
-    inputs the plan was actually built on rather than the current live records, which
-    may have since changed. Older plans predate the snapshot and have nothing to show;
-    plans that predate the constraints rename fall back to the legacy lifeevents snapshot.
-    """
-    raw_goals = macrocycle.get('goals_snapshot')
-    raw_events = (
-        macrocycle.get('constraints_snapshot')
-        or macrocycle.get('lifeevents_snapshot')
-    )
-    if raw_goals is None and raw_events is None:
+    """Prints the goals, constraints and threshold anchors the plan was generated from."""
+    goals, events, thresholds = plan_diff.input_snapshots(macrocycle)
+    if goals is None and events is None and thresholds is None:
         print(gray("Inputs considered: not recorded (plan predates input snapshots)."))
         print()
         return
 
-    goals = json.loads(raw_goals) if raw_goals else []
-    events = json.loads(raw_events) if raw_events else []
+    goals, events = goals or [], events or []
     width = default_wrap_width()
 
     print(bold("Goals considered:"))
@@ -217,31 +223,84 @@ def _print_considered_inputs(macrocycle: dict) -> None:
                 _print_indented(detail, pad, width, gray)
     else:
         print(f"  {gray('None')}")
+
+    # The effective threshold anchors the plan prescribed against; drift past
+    # `coach.threshold_replan_pct` is what makes it stale (ARCHITECTURE §5, macrocycles).
+    if thresholds is not None:
+        print(bold("Thresholds considered:"))
+        if thresholds:
+            for key in sorted(thresholds):
+                print(f"  - {key}: {cyan(f'{thresholds[key]:g}')}")
+        else:
+            print(f"  {gray('None recorded')}")
     print()
 
 
-def run_plan_show(args: argparse.Namespace) -> None:
-    """Displays the active training macrocycle and mesocycles periodization timeline."""
-    objectives = cli.db.get_objectives(status='active')
-    if not objectives:
-        print(yellow("No active goals found. TrainMate needs at least one objective."))
+def _fmt_duration(minutes: float) -> str:
+    """'8h20' / '45min' for a workout-block total."""
+    if minutes >= 60:
+        return f"{int(minutes // 60)}h{int(minutes % 60):02d}"
+    return f"{int(minutes)}min"
+
+
+def _plan_workouts(macrocycle: dict) -> List[dict]:
+    """Every workout (live or archived) the given plan version scheduled.
+
+    Rows carry the `macrocycle_id` of the version that created them. A database wholly
+    predating that column has none, so its rows are matched on dates alone; once any row
+    is stamped, an unstamped one is nobody's rather than everybody's."""
+    rows = cli.db.get_workouts(include_archived=True)
+    if any(w.get('macrocycle_id') is not None for w in rows):
+        return [w for w in rows if w.get('macrocycle_id') == macrocycle['id']]
+    return rows
+
+
+def _print_mesocycle_workouts(
+    meso: dict, workouts: List[dict], pad: str, width: int, detail: bool
+) -> None:
+    """Summarises (and with `detail`, lists) the workouts falling inside a mesocycle."""
+    inside = [w for w in workouts if meso['start_date'] <= w['date'] <= meso['end_date']]
+    if not inside:
+        print(pad + gray("no workouts generated"))
         return
-        
-    if args.goal_id is not None:
-        target_goals = [o for o in objectives if o['id'] == args.goal_id]
-        if not target_goals:
-            # Check if goal exists but is archived/completed
-            goal = cli.db.get_objective(args.goal_id)
-            if not goal:
-                print(red(f"Goal with ID {args.goal_id} not found."))
-                return
-            next_goal = goal
-        else:
-            next_goal = target_goals[0]
-    else:
-        objectives.sort(key=lambda x: str(x['target_date']))
-        next_goal = objectives[0]
-    
+    minutes = sum(w.get('duration_minutes') or 0 for w in inside)
+    load = sum(planned_load(w) for w in inside)
+    print(pad + gray(
+        f"{len(inside)} workouts · {_fmt_duration(minutes)} · load {load:.0f}"
+    ))
+    if not detail:
+        return
+    for w in inside:
+        tail = [f"{w.get('duration_minutes') or 0:.0f}min", f"load {planned_load(w):.0f}"]
+        if w.get('archived_at'):
+            tail.append("archived")
+        _print_hanging(
+            f"{pad}  {cyan(fmt_date(w['date']))} ",
+            f"[{w['sport_type']}] {w.get('title') or ''} ({' · '.join(tail)})", width, gray,
+        )
+
+
+def run_plan_show(args: argparse.Namespace) -> None:
+    """Displays the training macrocycle(s) and mesocycles periodization timeline."""
+    if getattr(args, 'all', False):
+        if args.goal_id is not None or getattr(args, 'version', None) is not None:
+            print(red("Error: --all cannot be combined with --goal or --version."))
+            return
+        goals = sorted(cli.db.get_objectives(), key=lambda g: str(g['target_date']))
+        planned = [(g, cli.db.get_macrocycle_for_objective(g['id'])) for g in goals]
+        planned = [(g, m) for g, m in planned if m]
+        if not planned:
+            print(yellow("No goal has a periodization plan yet."))
+            print(f"Run '{green('plan generate')}' to create one.")
+            return
+        for goal, macrocycle in planned:
+            _print_plan(goal, macrocycle, args)
+        return
+
+    next_goal = _resolve_goal(args.goal_id)
+    if not next_goal:
+        return
+
     version_id = getattr(args, 'version', None)
     if version_id is not None:
         macrocycle = cli.db.get_macrocycle(version_id)
@@ -260,7 +319,14 @@ def run_plan_show(args: argparse.Namespace) -> None:
         print(f"Run '{green('plan generate')}' to create one.")
         return
 
+    _print_plan(next_goal, macrocycle, args)
+
+
+def _print_plan(next_goal: dict, macrocycle: dict, args: argparse.Namespace) -> None:
+    """Renders one plan version: header, strategy, snapshotted inputs, mesocycle timeline."""
     mesocycles = cli.db.get_mesocycles_for_macrocycle(macrocycle['id'])
+    show_workouts = getattr(args, 'workouts', False)
+    workouts = _plan_workouts(macrocycle)
 
     is_superseded = macrocycle.get('status') == 'superseded'
     if is_superseded:
@@ -344,10 +410,12 @@ def run_plan_show(args: argparse.Namespace) -> None:
                 f"[ID: {m['id']}]",
                 f"{cyan(fmt_date(m['start_date']))} -> {cyan(fmt_date(m['end_date']))}",
                 duration_desc,
+                (f"phase {m['phase']}" if m.get('phase') else ""),
             ],
             width,
         )
         print(f"{pad}[{bar}]{extra}")
+        _print_mesocycle_workouts(m, workouts, pad, width, show_workouts)
         _print_indented(m['focus'], pad, width)
         if m.get('feedback'):
             print(f"{pad}{bold('Mesocycle Feedback')}:")
@@ -357,18 +425,9 @@ def run_plan_show(args: argparse.Namespace) -> None:
 
 def run_plan_versions(args: argparse.Namespace) -> None:
     """Lists every periodization plan version (active + superseded) for a goal."""
-    if getattr(args, 'goal_id', None) is not None:
-        goal = cli.db.get_objective(args.goal_id)
-        if not goal:
-            print(red(f"Goal with ID {args.goal_id} not found."))
-            return
-    else:
-        objectives = cli.db.get_objectives(status='active')
-        if not objectives:
-            print(yellow("No active goals found. TrainMate needs at least one objective."))
-            return
-        objectives.sort(key=lambda x: str(x['target_date']))
-        goal = objectives[0]
+    goal = _resolve_goal(getattr(args, 'goal_id', None))
+    if not goal:
+        return
 
     versions = cli.db.get_macrocycle_versions(goal['id'])
     if not versions:
@@ -405,8 +464,175 @@ def run_plan_versions(args: argparse.Namespace) -> None:
     print()
     print(gray(
         "Restore a version with "
-    ) + green("'plan rollback --version <ID>'") + gray(", or inspect one with ")
-        + green("'plan show --version <ID>'") + gray("."))
+    ) + green("'plan rollback --version <ID>'") + gray(", inspect one with ")
+        + green("'plan show --version <ID>'") + gray(", or compare two with ")
+        + green("'plan diff <ID> <ID>'") + gray("."))
+
+
+def _print_change(marker: str, text: str, width: int, color_fn, indent: str = "  ") -> None:
+    """One '+'/'-'/'~' diff line, wrapped with its continuation aligned past the marker."""
+    _print_hanging(f"{indent}{color_fn(marker)} ", text, width, color_fn)
+
+
+def _print_prose_diff(
+    prose: dict, width: int, full: bool, indent: str = "  "
+) -> None:
+    """Renders a `plan_diff.diff_prose` result. A block the coach rewrote wholesale
+    collapses to a one-line note unless `full` — the sentence lists would otherwise just
+    reprint both versions in their entirety."""
+    if not prose['changed']:
+        print(f"{indent}{gray('unchanged')}")
+        return
+    if prose['rewritten'] and not full:
+        _print_change(
+            "~", f"rewritten ({prose['old_count']} sentences -> {prose['new_count']}); "
+            f"pass --full for the sentence-level diff", width, yellow, indent=indent,
+        )
+        return
+    for block in prose['blocks']:
+        for s in block['removed']:
+            _print_change("-", s, width, red, indent=indent)
+        for s in block['added']:
+            _print_change("+", s, width, green, indent=indent)
+
+
+def _print_mesocycles_diff(entries: list, width: int, full: bool) -> None:
+    """Renders a `plan_diff.diff_mesocycles` result, skipping untouched blocks."""
+    changed = [e for e in entries if e['change'] != 'unchanged']
+    if not changed:
+        print(f"  {gray('unchanged')}")
+        return
+    for e in changed:
+        if e['change'] in ('added', 'removed'):
+            added = e['change'] == 'added'
+            label = f"{e['name']} ({e['dates']['start']} -> {e['dates']['end']})"
+            _print_change("+" if added else "-", label, width, green if added else red)
+            continue
+        header = f"{e['from_name']}  =>  {e['name']}" if e['renamed'] else e['name']
+        _print_change("~", header, width, yellow)
+        if e['dates']:
+            frm, to = e['dates']['from'], e['dates']['to']
+            print(f"      dates {cyan(frm['start'])} -> {cyan(frm['end'])}  =>  "
+                  f"{cyan(to['start'])} -> {cyan(to['end'])}")
+        for f in e['fields']:
+            print(f"      {f['field']}: {f['from'] or '—'}  =>  {f['to'] or '—'}")
+        if e['focus']:
+            print(f"      {gray('focus:')}")
+            _print_prose_diff(e['focus'], width, full, indent="        ")
+
+
+def _print_missing_snapshot(missing: str) -> None:
+    """Says which side lacks the snapshot, so a plan predating the column is never read
+    as everything having been added or removed."""
+    if missing == "both":
+        print(f"  {gray('not recorded on either version')}")
+        return
+    side = "A" if missing == "old" else "B"
+    print(f"  {gray(f'not recorded on {side} — that plan predates the snapshot')}")
+
+
+def _print_records_diff(diff: dict, width: int) -> None:
+    """Renders a `plan_diff.diff_records` result (snapshotted goals or constraints)."""
+    if diff['missing']:
+        _print_missing_snapshot(diff['missing'])
+        return
+    if not (diff['added'] or diff['removed'] or diff['changed']):
+        print(f"  {gray('unchanged')}")
+        return
+    for rec in diff['removed']:
+        _print_change("-", f"[ID: {rec.get('id')}] {rec.get('title', '')}", width, red)
+    for rec in diff['added']:
+        _print_change("+", f"[ID: {rec.get('id')}] {rec.get('title', '')}", width, green)
+    for rec in diff['changed']:
+        _print_change("~", f"[ID: {rec['id']}] {rec['title']}", width, yellow)
+        for f in rec['fields']:
+            print(f"      {f['field']}: {f['from']!r}  =>  {f['to']!r}")
+
+
+def _print_thresholds_diff(diff: dict, width: int) -> None:
+    """Renders a `plan_diff.diff_thresholds` result."""
+    if diff['missing']:
+        _print_missing_snapshot(diff['missing'])
+        return
+    if not (diff['added'] or diff['removed'] or diff['changed']):
+        print(f"  {gray('unchanged')}")
+        return
+    for t in diff['removed']:
+        _print_change("-", f"{t['key']}: {t['value']:g}", width, red)
+    for t in diff['added']:
+        _print_change("+", f"{t['key']}: {t['value']:g}", width, green)
+    for t in diff['changed']:
+        pct = f" ({t['pct']:+.1f}%)" if t['pct'] is not None else ""
+        _print_change("~", f"{t['key']}: {t['from']:g}  =>  {t['to']:g}{pct}", width, yellow)
+
+
+def _version_line(tag: str, macro: dict) -> str:
+    """'A  ID 12  generated 2026-07-29  superseded 2026-07-31' for a diff header."""
+    created = str(macro.get('created_at', ''))[:10]
+    if macro.get('status') == 'superseded':
+        superseded = str(macro.get('superseded_at', ''))[:10]
+        state = gray("superseded" + (f" {superseded}" if superseded else ""))
+    else:
+        state = green("active")
+    gen = f"generated {fmt_date(created)}" if created else ""
+    return f"  {bold(tag)}  {pad_visible('ID ' + str(macro['id']), 8)} {gray(gen)}  {state}"
+
+
+# The command that gets the athlete unstuck, per failure the version resolver reports.
+_DIFF_ERROR_HINTS = {
+    "no_active_plan": ("plan generate", "to create one."),
+    "not_found": ("plan versions", "to list this goal's plan versions."),
+}
+
+
+def run_plan_diff(args: argparse.Namespace) -> None:
+    """Compares two periodization plan versions field by field."""
+    goal = _resolve_goal(getattr(args, 'goal_id', None))
+    if not goal:
+        return
+    old, new, error = plan_diff.resolve_versions(
+        cli.db, goal, args.version_a, args.version_b
+    )
+    if error:
+        code, message = error
+        print(red(message) if code in ("same_version", "not_found") else yellow(message))
+        hint = _DIFF_ERROR_HINTS.get(code)
+        if hint:
+            print(f"Run '{green(hint[0])}' {hint[1]}")
+        return
+
+    width = default_wrap_width()
+    print(bold(cyan("\n=== PLAN DIFF ===")))
+    obj_pad = _print_hanging(
+        f"{bold('Objective')} [ID: {goal['id']}]: ", goal['title'], width, cyan,
+    )
+    _print_segments(
+        obj_pad,
+        [magenta(goal['sport_type'].upper()), cyan(fmt_date(goal['target_date']))],
+        width,
+    )
+    print(_version_line("A", old))
+    print(_version_line("B", new))
+
+    diff = plan_diff.diff_plans(
+        old, new,
+        cli.db.get_mesocycles_for_macrocycle(old['id']),
+        cli.db.get_mesocycles_for_macrocycle(new['id']),
+    )
+    full = getattr(args, 'full', False)
+    print(bold("\nStrategy:"))
+    _print_prose_diff(diff['strategy'], width, full)
+    print(bold("\nMacrocycle feedback:"))
+    _print_prose_diff(diff['feedback'], width, full)
+    print(bold("\nMesocycles:"))
+    _print_mesocycles_diff(diff['mesocycles'], width, full)
+    print(bold("\nGoals considered:"))
+    _print_records_diff(diff['goals'], width)
+    print(bold("\nConstraints considered:"))
+    _print_records_diff(diff['constraints'], width)
+    print(bold("\nThresholds considered:"))
+    _print_thresholds_diff(diff['thresholds'], width)
+    print()
 
 
 def run_plan_rm(args: argparse.Namespace) -> None:
@@ -460,19 +686,9 @@ def run_plan_wipe(args: argparse.Namespace) -> None:
 
 def run_plan_rollback(args: argparse.Namespace) -> None:
     """Restores a superseded periodization plan version (and its workouts)."""
-    # Resolve the target goal the same way generate/show do.
-    if getattr(args, 'goal_id', None) is not None:
-        goal = cli.db.get_objective(args.goal_id)
-        if not goal:
-            print(red(f"Goal with ID {args.goal_id} not found."))
-            return
-    else:
-        objectives = cli.db.get_objectives(status='active')
-        if not objectives:
-            print(yellow("No active goals found."))
-            return
-        objectives.sort(key=lambda x: str(x['target_date']))
-        goal = objectives[0]
+    goal = _resolve_goal(getattr(args, 'goal_id', None))
+    if not goal:
+        return
 
     versions = cli.db.get_macrocycle_versions(goal['id'])
     superseded = [v for v in versions if v.get('status') == 'superseded']
@@ -646,7 +862,15 @@ def add_plan_parser(subparsers, pull_bypass_parser, llm_debug_parser):
     # plan show
     p_show = plan_subparsers.add_parser(
         "show", aliases=["s"],
-        help="Show the active macrocycle and mesocycles periodization strategy"
+        help="Show a macrocycle and its mesocycles periodization strategy "
+             "(--goal/--version/--all, -w for workouts)",
+        description=(
+            "Show a periodization plan: the macrocycle strategy, the inputs it was "
+            "generated from (goals, constraints, threshold anchors) and its mesocycle "
+            "timeline. Defaults to the active plan of the next active goal; --goal reaches "
+            "any goal including completed/archived ones, --version an earlier plan version, "
+            "and --all every goal that has a plan."
+        )
     )
     p_show.add_argument(
         "--goal", "--goal-id", type=int, dest="goal_id",
@@ -656,6 +880,45 @@ def add_plan_parser(subparsers, pull_bypass_parser, llm_debug_parser):
     p_show.add_argument(
         "--version", type=int, dest="version", metavar="PLAN_ID",
         help="Show a specific (e.g. superseded) plan version by ID instead of the active one"
+    )
+    p_show.add_argument(
+        "-a", "--all", action="store_true",
+        help="Show the active plan of every goal that has one (any status), oldest target "
+             "date first"
+    )
+    p_show.add_argument(
+        "-w", "--workouts", action="store_true",
+        help="List each mesocycle's scheduled workouts, not just their count/load summary"
+    )
+
+    # plan diff
+    p_diff = plan_subparsers.add_parser(
+        "diff", aliases=["df"],
+        help="Compare two plan versions (strategy, mesocycles, inputs)",
+        description=(
+            "Compare two periodization plan versions field by field: what changed in the "
+            "macrocycle strategy and feedback, which mesocycles were added, removed, "
+            "renamed or re-dated, and how the snapshotted inputs (goals, constraints, "
+            "threshold anchors) differ. With no version given, compares the previous "
+            "version against the active one; with one, that version against the active one."
+        )
+    )
+    p_diff.add_argument(
+        "version_a", type=int, nargs="?", metavar="PLAN_ID_A",
+        help="Older plan version to compare from (defaults to the previous version)"
+    )
+    p_diff.add_argument(
+        "version_b", type=int, nargs="?", metavar="PLAN_ID_B",
+        help="Newer plan version to compare to (defaults to the active version)"
+    )
+    p_diff.add_argument(
+        "--goal", "--goal-id", type=int, dest="goal_id",
+        help="Target goal ID whose plan versions to compare (defaults to the next active goal)"
+    )
+    p_diff.add_argument(
+        "--full", action="store_true",
+        help="Diff wholesale-rewritten prose sentence by sentence instead of collapsing it "
+             "to a one-line note"
     )
 
     # plan versions

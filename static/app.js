@@ -1152,7 +1152,10 @@ async function loadPlanVersions() {
                 : `<span class="badge badge-info">superseded</span>`;
             const action = active
                 ? `<span class="item-meta">current</span>`
-                : `<button class="btn btn-secondary btn-sm" data-version="${v.id}">`
+                : `<button class="btn btn-secondary btn-sm" data-diff="${v.id}" `
+                  + `title="Compare this version against the active plan">`
+                  + `<i class="fa-solid fa-code-compare"></i> Compare</button> `
+                  + `<button class="btn btn-secondary btn-sm" data-version="${v.id}">`
                   + `<i class="fa-solid fa-rotate-left"></i> Restore</button>`;
             return `<div class="plan-version-row">`
                 + `<div class="plan-version-head">${badge} `
@@ -1164,8 +1167,142 @@ async function loadPlanVersions() {
         listEl.querySelectorAll("button[data-version]").forEach(btn => {
             btn.addEventListener("click", () => rollbackToVersion(btn.dataset.version));
         });
+        listEl.querySelectorAll("button[data-diff]").forEach(btn => {
+            btn.addEventListener("click", () => loadPlanDiff(btn.dataset.diff));
+        });
+        hidePlanDiff();
     } catch (e) {
         listEl.innerHTML = `<div class="item-meta">Failed to load versions: ${escapeHtml(e.message)}</div>`;
+    }
+}
+
+// --- Plan version comparison (GET /api/plan/diff; same structure the CLI's
+// `plan diff` renders as text — see trainmate/plan_diff.py) ---
+
+function hidePlanDiff() {
+    const panel = document.getElementById("plan-diff-panel");
+    if (panel) { panel.style.display = "none"; panel.innerHTML = ""; }
+}
+
+function diffLine(marker, text, cls) {
+    return `<div class="pd-line pd-${cls}">`
+        + `<span class="pd-marker">${marker}</span>`
+        + `<span class="pd-text">${escapeHtml(text)}</span></div>`;
+}
+
+/** Renders one prose comparison. A block the coach rewrote wholesale stays collapsed
+ *  behind a disclosure — expanded, it is just both versions in full (the web equivalent
+ *  of the CLI's --full). */
+function renderProse(prose) {
+    if (!prose || !prose.changed) return `<div class="pd-empty">unchanged</div>`;
+    const lines = prose.blocks.map(b =>
+        b.removed.map(s => diffLine("−", s, "removed")).join("")
+        + b.added.map(s => diffLine("+", s, "added")).join("")
+    ).join("");
+    if (!prose.rewritten) return lines;
+    return `<details class="pd-rewritten"><summary>`
+        + `rewritten (${prose.old_count} sentences → ${prose.new_count}) — show sentences`
+        + `</summary>${lines}</details>`;
+}
+
+function renderMesocycles(entries) {
+    const changed = (entries || []).filter(e => e.change !== "unchanged");
+    if (!changed.length) return `<div class="pd-empty">unchanged</div>`;
+    return changed.map(e => {
+        if (e.change === "added" || e.change === "removed") {
+            const added = e.change === "added";
+            return diffLine(added ? "+" : "−",
+                `${e.name} (${e.dates.start} → ${e.dates.end})`, added ? "added" : "removed");
+        }
+        const header = e.renamed ? `${e.from_name}  →  ${e.name}` : e.name;
+        let out = diffLine("~", header, "changed");
+        if (e.dates) {
+            out += `<div class="pd-detail">dates ${escapeHtml(e.dates.from.start)} → `
+                + `${escapeHtml(e.dates.from.end)}  ⇒  ${escapeHtml(e.dates.to.start)} → `
+                + `${escapeHtml(e.dates.to.end)}</div>`;
+        }
+        for (const f of e.fields) {
+            out += `<div class="pd-detail">${escapeHtml(f.field)}: `
+                + `${escapeHtml(f.from ?? "—")}  ⇒  ${escapeHtml(f.to ?? "—")}</div>`;
+        }
+        if (e.focus) out += `<div class="pd-detail pd-focus">focus:</div>` + renderProse(e.focus);
+        return out;
+    }).join("");
+}
+
+/** A plan predating a snapshot column has nothing recorded — never read that as the
+ *  inputs having been deleted. */
+function renderMissing(missing) {
+    if (missing === "both") return `<div class="pd-empty">not recorded on either version</div>`;
+    const side = missing === "old" ? "A" : "B";
+    return `<div class="pd-empty">not recorded on ${side} — that plan predates the snapshot</div>`;
+}
+
+function renderRecords(diff) {
+    if (diff.missing) return renderMissing(diff.missing);
+    if (!diff.added.length && !diff.removed.length && !diff.changed.length) {
+        return `<div class="pd-empty">unchanged</div>`;
+    }
+    return diff.removed.map(r => diffLine("−", `[ID ${r.id}] ${r.title || ""}`, "removed")).join("")
+        + diff.added.map(r => diffLine("+", `[ID ${r.id}] ${r.title || ""}`, "added")).join("")
+        + diff.changed.map(r => diffLine("~", `[ID ${r.id}] ${r.title}`, "changed")
+            + r.fields.map(f => `<div class="pd-detail">${escapeHtml(f.field)}: `
+                + `${escapeHtml(String(f.from))}  ⇒  ${escapeHtml(String(f.to))}</div>`).join("")
+        ).join("");
+}
+
+function renderThresholds(diff) {
+    if (diff.missing) return renderMissing(diff.missing);
+    if (!diff.added.length && !diff.removed.length && !diff.changed.length) {
+        return `<div class="pd-empty">unchanged</div>`;
+    }
+    return diff.removed.map(t => diffLine("−", `${t.key}: ${t.value}`, "removed")).join("")
+        + diff.added.map(t => diffLine("+", `${t.key}: ${t.value}`, "added")).join("")
+        + diff.changed.map(t => diffLine("~",
+            `${t.key}: ${t.from}  ⇒  ${t.to}`
+            + (t.pct != null ? ` (${t.pct >= 0 ? "+" : ""}${t.pct.toFixed(1)}%)` : ""),
+            "changed")).join("");
+}
+
+function diffSection(title, body) {
+    return `<div class="pd-section"><div class="si-heading">${title}</div>${body}</div>`;
+}
+
+async function loadPlanDiff(fromVersion) {
+    const panel = document.getElementById("plan-diff-panel");
+    if (!panel) return;
+    panel.style.display = "block";
+    panel.innerHTML = `<div class="item-meta">Comparing…</div>`;
+    try {
+        const params = new URLSearchParams({ from_version: fromVersion });
+        if (activeGoalId != null) params.set("goal_id", activeGoalId);
+        const res = await fetch(`${API_BASE}/api/plan/diff?${params}`);
+        const data = await res.json();
+        if (!res.ok) {
+            panel.innerHTML = `<div class="item-meta">${escapeHtml(data.error || "Comparison failed.")}</div>`;
+            return;
+        }
+        const d = data.diff;
+        const when = v => v.created_at
+            ? new Date(v.created_at).toLocaleDateString("en-US",
+                { month: "short", day: "numeric", year: "numeric" })
+            : "?";
+        panel.innerHTML = `<div class="pd-head">`
+            + `<span class="pd-title">Plan ID ${d.from.id} <span class="pd-arrow">→</span> `
+            + `ID ${d.to.id}</span>`
+            + `<span class="item-meta">${escapeHtml(when(d.from))} → ${escapeHtml(when(d.to))}</span>`
+            + `<button class="btn btn-secondary btn-sm pd-close" id="btn-close-plan-diff">`
+            + `<i class="fa-solid fa-xmark"></i></button></div>`
+            + diffSection("Strategy", renderProse(d.strategy))
+            + diffSection("Macrocycle feedback", renderProse(d.feedback))
+            + diffSection("Mesocycles", renderMesocycles(d.mesocycles))
+            + diffSection("Goals considered", renderRecords(d.goals))
+            + diffSection("Constraints considered", renderRecords(d.constraints))
+            + diffSection("Thresholds considered", renderThresholds(d.thresholds));
+        document.getElementById("btn-close-plan-diff")
+            .addEventListener("click", hidePlanDiff);
+    } catch (e) {
+        panel.innerHTML = `<div class="item-meta">Comparison error: ${escapeHtml(e.message)}</div>`;
     }
 }
 

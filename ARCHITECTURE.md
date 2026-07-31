@@ -60,6 +60,7 @@ Calendar.
   |  trainmate/coach/formatting.py (pure helpers)    |
   |  trainmate/openrouter.py  (OpenRouter LLM client) |
   |  trainmate/adherence.py   (plan vs actual diff)   |
+  |  trainmate/plan_diff.py   (plan version vs version)|
   +---------------------------+----------------------+
                               |
   +---------------------------v----------------------+
@@ -157,6 +158,14 @@ classes themselves.
 |                      |                      | (the latter yields a per-workout verdict). Also  |
 |                      |                      | exposes `planned_load()` (public), the expected- |
 |                      |                      | load valuation `progression.py` reuses.          |
+| `plan_diff.py`       | —                    | Compares two periodization plan versions:        |
+|                      |                      | `resolve_versions` (which two, over a passed-in  |
+|                      |                      | db handle) + `diff_plans` → strategy/feedback     |
+|                      |                      | prose, mesocycle fates, snapshotted-input deltas. |
+|                      |                      | Format-free, so `cli/plans.py` renders it as text |
+|                      |                      | and `/api/plan/diff` returns it as JSON. Also     |
+|                      |                      | owns `input_snapshots()` (the goals/constraints/  |
+|                      |                      | threshold JSON columns), which `plan show` reads. |
 | `progression.py`     | —                    | Pure functions merging past (measured) + future  |
 |                      |                      | (planned) load into one series and folding the   |
 |                      |                      | stored CTL/ATL/TSB series forward across the seam |
@@ -186,6 +195,7 @@ flow for each lives in [§10](#10-key-data-flows).
 |----------------------------------|----------------------------------------------------------------------------|
 | Daily adaptation logic           | `coach/service.py:workout_adapt*`, `coach/engine.py:_workout_adapt_logic`, prompt helpers in `coach/formatting.py` ([§10](#daily-adaptation-workout-adapt)) |
 | Plan / strategy generation       | `coach/service.py:plan_generate`, `coach/engine.py:_plan_generate_strategy` ([§10](#plan-generation-plan-generate)) |
+| Plan version comparison / display | `trainmate/plan_diff.py` (comparison + snapshot parsing), `cli/plans.py` (text rendering), `/api/plan/diff` in `trainmate_web.py`, `loadPlanDiff()`/`render*` in `static/app.js` |
 | Workout generation horizon       | `coach/service.py:workout_generate`, `cli/workouts.py` (flag parsing), `config.workout_generation_span_days` |
 | Coach-learnings / confidence     | `db/learnings.py`, `coach/service.py` (`_apply_learning_updates`), model is **canonical** in [§3](#3-coach-package-architecture) |
 | Backward analysis (bootstrap/reflect) | `coach/service.py:_run_workout_analysis`, `coach/engine.py:_data_analyze_logic` ([§10](#data-analysis-data-bootstrap--data-reflect)) |
@@ -871,7 +881,8 @@ guarantee (re-citing a counted week is an `INSERT OR IGNORE` no-op). Full model:
 | `config_snapshot` | TEXT                  | JSON of the effective threshold anchors (`max_hr` |
 |                   |                       | + logbook kinds) the plan was generated with;     |
 |                   |                       | staleness only past `coach.threshold_replan_pct`  |
-|                   |                       | drift. NULL on plans predating the column.        |
+|                   |                       | drift. NULL on plans predating the column. Shown  |
+|                   |                       | by `plan show`, compared by `plan diff`.          |
 | `goals_snapshot`  | TEXT                  | JSON of the goals the plan was generated from    |
 |                   |                       | (same cleaned data the hash covers); NULL on     |
 |                   |                       | plans predating the column. Shown by `plan show` |
@@ -1009,8 +1020,9 @@ below (`g`, `s`, …) can abbreviate after the top-level alias, e.g. `pl g` or `
 | `learnings`  | `keep`       | —        | Dismiss + affirm a pending downgrade by ID                             |
 | `learnings`  | `wipe`       | —        | Delete all coach learnings                                             |
 | `plan`       | `generate`   | `pl g`   | Generate/reuse macrocycle+mesocycles (`-f` to force, `--goal ID`)        |
-| `plan`       | `show`       | `pl s`   | Show active periodization plan (`--version PLAN_ID` for a superseded one) |
+| `plan`       | `show`       | `pl s`   | Show a periodization plan: strategy, snapshotted inputs (goals, constraints, threshold anchors), mesocycle timeline with each block's workout count/duration/load. Flags: `--goal ID` (any status, not just active), `--version PLAN_ID` for a superseded one, `-a/--all` for every goal that has a plan, `-w/--workouts` to list each mesocycle's sessions |
 | `plan`       | `versions`   | `pl v`   | List a goal's kept plan versions — active + superseded — with IDs and dates (`--goal ID`) |
+| `plan`       | `diff`       | `pl df`  | Compare two plan versions (`[PLAN_ID_A] [PLAN_ID_B]`, `--goal ID`): strategy + feedback prose, mesocycles added/removed/renamed/re-dated, and snapshotted input deltas. No ID → previous vs active; one ID → that vs active. Prose rewritten wholesale collapses to a note unless `--full`. Comparison logic in `trainmate/plan_diff.py`, shared with `/api/plan/diff` |
 | `plan`       | `rollback`   | `pl rb`  | Restore a superseded plan version + its workouts (`--goal ID`, `--version PLAN_ID`, `-y`); defaults to the chronologically previous version. The inverse of eager generation (DESIGN_plan_rollback.md) |
 | `plan`       | `rm`         | `pl d`   | Delete plan for a goal ID                                                |
 | `plan`       | `feedback`   | `pl f`   | Add feedback (`--macro` or `--meso ID`, `--goal ID`, text; `--edit` opens `$EDITOR` seeded with current feedback) |
@@ -1051,7 +1063,9 @@ use the non-interactive service account.
 
 The **front-end** (`static/index.html` + `static/app.js`) is organized into five
 top-level tabs — **Dashboard** (status/actions/metrics/strategy + goal & life-event
-CRUD + plan delete), **Workouts** (date/sport/removed-filtered list with derived
+CRUD + plan delete; the strategy card's "Plan versions, compare & rollback" disclosure
+lists kept versions, each superseded one offering *Compare* — rendering
+`/api/plan/diff` into the `#plan-diff-panel` — and *Restore*), **Workouts** (date/sport/removed-filtered list with derived
 state markers, manual add, swap, remove/restore, and the compare/adherence view),
 **Learnings** (filterable manager with per-week evidence, edit, demote/keep),
 **History** (read-only activities/metrics/daily-context tables), and **Progress**
@@ -1080,6 +1094,7 @@ markers as `workout list` without re-deriving the rules (§5).
 | POST        | `/api/workouts/swap`            | Swap two workouts (`{ops:[{id,new_date}], reason, force?, no_sync?}`); returns `{warnings}` unapplied unless `force` |
 | POST        | `/api/plan`                     | Generate periodization plan (`{goal_id?}`)   |
 | GET         | `/api/plan/versions`            | List plan versions for a goal (`?goal_id=`; active + superseded) |
+| GET         | `/api/plan/diff`                | Compare two plan versions (`?goal_id=&from_version=&to_version=`; defaults to previous vs active) → `{goal, diff}`, the same `plan_diff.diff_plans` structure the CLI renders. `{error, code}` + 400/404 when the pair cannot be formed |
 | POST        | `/api/plan/rollback`            | Restore a plan version + its workouts (`{goal_id?, version?}`; DESIGN_plan_rollback) |
 | DELETE      | `/api/plan/<goal_id>`           | Delete plan for goal (all versions)          |
 | POST        | `/api/macrocycles/<id>/feedback`| Save macrocycle feedback (`{feedback}`)      |
@@ -1321,8 +1336,10 @@ The shared core then:
 
 - **Plan** = periodization strategy: one *active* macrocycle (per objective, with
   superseded versions kept) + mesocycle blocks.  Commands:
-  `plan generate/show/versions/rm/rollback/feedback`. `plan versions` lists every kept
-  version; `plan show --version <id>` renders a specific (e.g. superseded) one.
+  `plan generate/show/versions/diff/rm/rollback/feedback`. `plan versions` lists every
+  kept version; `plan show --version <id>` renders a specific (e.g. superseded) one,
+  `--all` every goal's, `--workouts` each mesocycle's sessions; `plan diff` compares two
+  versions.
 - **Workouts** = daily microcycle activities implementing the mesocycle focus.
   Commands: `workout generate/adapt/push/swap/add`. `workout generate` pushes to
   Calendar eagerly; `plan rollback` undoes a plan regeneration and its workouts

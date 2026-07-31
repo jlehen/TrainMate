@@ -56,7 +56,7 @@ COMMAND_ORDER = {
     "benchmark": ["list", "record", "rm"],
     "context": ["list", "list-metrics", "add", "rm"],
     "learnings": ["list", "show", "edit", "demote", "keep", "rm"],
-    "plan": ["show", "generate", "feedback", "versions", "rollback"],
+    "plan": ["show", "generate", "feedback", "versions", "diff", "rollback"],
     "workout": ["list", "adapt", "compare", "generate", "swap", "add", "restore", "rm"],
     "data": ["pull", "reflect", "show-metrics", "show-activities"],
 }
@@ -80,7 +80,7 @@ from trainmate.cli.learnings import (
 )
 from trainmate.cli.plans import (
     run_plan_generate, run_plan_show, run_plan_rm, run_plan_feedback, run_plan_wipe,
-    run_plan_rollback, run_plan_versions,
+    run_plan_rollback, run_plan_versions, run_plan_diff,
 )
 from trainmate.cli.workouts import (
     run_workout_list, run_workout_compare, run_workout_generate, run_workout_rm,
@@ -426,6 +426,8 @@ def run_once(argv, parser, named_subparsers) -> None:
             run_plan_show(args)
         elif sub in ("versions", "v"):
             run_plan_versions(args)
+        elif sub in ("diff", "df"):
+            run_plan_diff(args)
         elif sub in ("rm", "d"):
             run_plan_rm(args)
         elif sub in ("rollback", "rb"):

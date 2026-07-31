@@ -2,7 +2,7 @@ import os
 from datetime import datetime, timedelta
 from flask import Flask, jsonify, request, send_from_directory
 from typing import Any, Dict, List
-from trainmate import garmin, progression
+from trainmate import garmin, plan_diff, progression
 from trainmate.db import db
 from trainmate.adherence import analyze_adherence, date_covered
 from trainmate.calendar_state import calendar_status
@@ -548,6 +548,40 @@ def plan_versions() -> Any:
     goal = db.get_objective(goal_id)
     versions = db.get_macrocycle_versions(goal_id)
     return jsonify({"goal": goal, "versions": versions})
+
+
+def _version_arg(raw: Any) -> Any:
+    """A plan-version id from a query string, or None when omitted/blank."""
+    return int(raw) if raw is not None and raw != "" else None
+
+
+@app.route("/api/plan/diff", methods=["GET"])
+def plan_diff_versions() -> Any:
+    """Compares two periodization plan versions (web equivalent of `plan diff`).
+
+    Query: {goal_id?, from_version?, to_version?}. Defaults to the version before the
+    active one vs the active one, for the next active goal. The comparison itself lives
+    in trainmate/plan_diff.py — the CLI renders the very same structure as text."""
+    goal_id = _resolve_goal_id(request.args.get("goal_id"))
+    if goal_id is None:
+        return jsonify({"error": "No goal to compare plan versions for."}), 400
+    goal = db.get_objective(goal_id)
+    if not goal:
+        return jsonify({"error": f"Goal with ID {goal_id} not found."}), 404
+    old, new, error = plan_diff.resolve_versions(
+        db, goal,
+        _version_arg(request.args.get("from_version")),
+        _version_arg(request.args.get("to_version")),
+    )
+    if error:
+        code, message = error
+        return jsonify({"error": message, "code": code}), 404 if code == "not_found" else 400
+    diff = plan_diff.diff_plans(
+        old, new,
+        db.get_mesocycles_for_macrocycle(old['id']),
+        db.get_mesocycles_for_macrocycle(new['id']),
+    )
+    return jsonify({"goal": goal, "diff": diff})
 
 
 @app.route("/api/plan/rollback", methods=["POST"])

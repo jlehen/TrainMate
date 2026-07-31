@@ -1,3 +1,4 @@
+import json
 import os
 import unittest
 from datetime import datetime, timedelta, timezone
@@ -203,3 +204,155 @@ class TestCliPlans(unittest.TestCase):
             ["plan", "show", "--goal", str(other), "--version", str(v1)]
         )
         self.assertIn("does not belong", stdout)
+
+    def _seed_two_versions(self) -> tuple:
+        """A goal with two plan versions differing in strategy, mesocycle dates and inputs."""
+        oid = test_db.add_objective(
+            title="Diffable Goal", target_date="2026-12-15",
+            sport_type="running", priority=1,
+        )
+        v1 = test_db.save_macrocycle(
+            objective_id=oid, strategy="Build a wide aerobic base. Then sharpen.",
+            goals_hash="g", constraints_hash="c",
+            mesocycles=[
+                {"name": "Base", "start_date": "2026-06-01",
+                 "end_date": "2026-06-28", "focus": "Aerobic volume."},
+                {"name": "Dropped Block", "start_date": "2026-06-29",
+                 "end_date": "2026-07-12", "focus": "Filler."},
+            ],
+            goals_snapshot=json.dumps([{"id": oid, "title": "Diffable Goal", "priority": 1}]),
+            constraints_snapshot=json.dumps([{"id": 7, "title": "Holiday", "rest": True}]),
+            config_snapshot=json.dumps({"ftp": 200.0, "max_hr": 185.0}),
+        )
+        v2 = test_db.save_macrocycle(
+            objective_id=oid, strategy="Build a wide aerobic base. Then sharpen.",
+            goals_hash="g", constraints_hash="c",
+            mesocycles=[
+                {"name": "Base", "start_date": "2026-06-01",
+                 "end_date": "2026-07-05", "focus": "Aerobic volume."},
+            ],
+            goals_snapshot=json.dumps([{"id": oid, "title": "Diffable Goal", "priority": 2}]),
+            constraints_snapshot=json.dumps([]),
+            config_snapshot=json.dumps({"ftp": 220.0, "max_hr": 185.0}),
+        )
+        return oid, v1, v2
+
+    def test_plan_diff(self):
+        """`plan diff` reports what changed between two versions: mesocycle dates, dropped
+        blocks, and the snapshotted goals/constraints/thresholds."""
+        oid, v1, v2 = self._seed_two_versions()
+
+        # No version given: previous vs active.
+        exit_code, stdout, _ = self.run_cli(["plan", "diff", "--goal", str(oid)])
+        self.assertEqual(exit_code, 0)
+        self.assertIn(f"ID {v1}", stdout)
+        self.assertIn(f"ID {v2}", stdout)
+        # Identical strategy text is reported as such, not re-printed.
+        self.assertIn("unchanged", stdout)
+        # Mesocycle end date moved; the second block disappeared.
+        self.assertIn("2026-06-28", stdout)
+        self.assertIn("2026-07-05", stdout)
+        self.assertIn("Dropped Block", stdout)
+        # Inputs: the constraint went away, the goal's priority changed, ftp moved.
+        self.assertIn("Holiday", stdout)
+        self.assertIn("priority", stdout)
+        self.assertIn("200  =>  220", stdout)
+        self.assertIn("+10.0%", stdout)
+
+        # Explicit versions in either order, and a version from another goal.
+        exit_code, stdout, _ = self.run_cli(
+            ["plan", "diff", str(v2), str(v1), "--goal", str(oid)]
+        )
+        self.assertEqual(exit_code, 0)
+        self.assertIn("220  =>  200", stdout)
+
+        exit_code, stdout, _ = self.run_cli(
+            ["plan", "diff", str(v1), str(v1), "--goal", str(oid)]
+        )
+        self.assertIn("cannot be compared against itself", stdout)
+
+        other = test_db.add_objective(
+            title="Unrelated", target_date="2027-03-01", sport_type="running",
+        )
+        test_db.save_macrocycle(
+            objective_id=other, strategy="s", goals_hash="g",
+            constraints_hash="c", mesocycles=[],
+        )
+        exit_code, stdout, _ = self.run_cli(
+            ["plan", "diff", str(v1), "--goal", str(other)]
+        )
+        self.assertIn("does not belong", stdout)
+
+    def test_plan_diff_single_version(self):
+        """A goal with only one plan version has nothing to compare against."""
+        oid = test_db.add_objective(
+            title="Lonely Goal", target_date="2026-12-15", sport_type="running",
+        )
+        test_db.save_macrocycle(
+            objective_id=oid, strategy="Only strategy", goals_hash="g",
+            constraints_hash="c", mesocycles=[],
+        )
+        exit_code, stdout, _ = self.run_cli(["plan", "diff", "--goal", str(oid)])
+        self.assertEqual(exit_code, 0)
+        self.assertIn("only one plan version", stdout)
+
+    def test_plan_show_all_and_workouts(self):
+        """`plan show --all` renders every planned goal; `--workouts` expands each
+        mesocycle's sessions, which are otherwise summarised."""
+        first = test_db.add_objective(
+            title="First Goal", target_date="2026-08-01", sport_type="running",
+        )
+        second = test_db.add_objective(
+            title="Second Goal", target_date="2026-11-01", sport_type="running",
+        )
+        unplanned = test_db.add_objective(
+            title="Unplanned Goal", target_date="2026-09-01", sport_type="running",
+        )
+        macro = test_db.save_macrocycle(
+            objective_id=first, strategy="First plan", goals_hash="g",
+            constraints_hash="c",
+            mesocycles=[{"name": "Base", "start_date": "2026-06-01",
+                         "end_date": "2026-06-28", "focus": "Aerobic volume."}],
+        )
+        test_db.save_macrocycle(
+            objective_id=second, strategy="Second plan", goals_hash="g",
+            constraints_hash="c", mesocycles=[],
+        )
+        test_db.save_workout(
+            date="2026-06-02", sport_type="running", title="Easy Run",
+            description="Zone 2", duration_minutes=60, rpe=3, tss=45,
+            macrocycle_id=macro,
+        )
+
+        exit_code, stdout, _ = self.run_cli(["plan", "show", "--all"])
+        self.assertEqual(exit_code, 0)
+        self.assertIn("First plan", stdout)
+        self.assertIn("Second plan", stdout)
+        self.assertNotIn("Unplanned Goal", stdout)
+        # Summarised by default, expanded with --workouts.
+        self.assertIn("1 workouts · 1h00 · load 45", stdout)
+        self.assertNotIn("Easy Run", stdout)
+
+        exit_code, stdout, _ = self.run_cli(
+            ["plan", "show", "--goal", str(first), "--workouts"]
+        )
+        self.assertEqual(exit_code, 0)
+        self.assertIn("Easy Run", stdout)
+
+        exit_code, stdout, _ = self.run_cli(["plan", "show", "--all", "--goal", str(first)])
+        self.assertIn("cannot be combined", stdout)
+
+    def test_plan_show_thresholds_snapshot(self):
+        """The threshold anchors a plan was generated against are shown among its inputs."""
+        oid = test_db.add_objective(
+            title="Threshold Goal", target_date="2026-12-15", sport_type="road_biking",
+        )
+        test_db.save_macrocycle(
+            objective_id=oid, strategy="Ride", goals_hash="g", constraints_hash="c",
+            mesocycles=[], config_snapshot=json.dumps({"ftp": 220.0, "max_hr": 185.0}),
+        )
+        exit_code, stdout, _ = self.run_cli(["plan", "show", "--goal", str(oid)])
+        self.assertEqual(exit_code, 0)
+        self.assertIn("Thresholds considered:", stdout)
+        self.assertIn("ftp: 220", stdout)
+        self.assertIn("max_hr: 185", stdout)
