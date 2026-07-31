@@ -13,10 +13,28 @@ from trainmate.util import (
 from trainmate.cli.common import fmt_date, ensure_recent_data
 
 
+def _print_goal(g: dict) -> None:
+    """Prints one goal in the 'goal list' format."""
+    sport_str = g['sport_type']
+    status_tag = g['status'].upper()
+    if g['status'] == 'active':
+        status_disp = green(f"[{status_tag}]")
+        title_disp = cyan(g['title'])
+    else:
+        status_disp = gray(f"[{status_tag}]")
+        title_disp = gray(g['title'])
+    print(
+        f"{status_disp} ID: {g['id']} | {title_disp} "
+        f"({sport_str}) on {cyan(g['target_date'])} (Priority: {g['priority']})"
+    )
+    if g.get('description'):
+        print(format_labeled_block("  Description:", g['description']))
+
+
 def run_goal_add(args: argparse.Namespace) -> None:
     """Creates a new objective goal via command line."""
     sports_str = ",".join(args.sport)
-    cli.db.add_objective(
+    goal_id = cli.db.add_objective(
         title=args.title,
         target_date=args.date,
         sport_type=sports_str,
@@ -24,8 +42,11 @@ def run_goal_add(args: argparse.Namespace) -> None:
         priority=args.priority,
         status='active'
     )
+    goal = cli.db.get_objective(goal_id)
+    if goal:
+        _print_goal(goal)
     print(
-        green(f"Goal '{args.title}' added successfully. Run ")
+        green("Goal added successfully. Run ")
         + bold(green("'plan generate'"))
         + green(" to generate training cycles.")
     )
@@ -69,20 +90,7 @@ def run_goal_list() -> None:
     goals = cli.db.get_objectives()
     print(bold(cyan("=== TRAINING OBJECTIVES / GOALS ===")))
     for g in goals:
-        sport_str = g['sport_type']
-        status_tag = g['status'].upper()
-        if g['status'] == 'active':
-            status_disp = green(f"[{status_tag}]")
-            title_disp = cyan(g['title'])
-        else:
-            status_disp = gray(f"[{status_tag}]")
-            title_disp = gray(g['title'])
-        print(
-            f"{status_disp} ID: {g['id']} | {title_disp} "
-            f"({sport_str}) on {cyan(g['target_date'])} (Priority: {g['priority']})"
-        )
-        if g.get('description'):
-            print(format_labeled_block("  Description:", g['description']))
+        _print_goal(g)
 
 
 def run_goal_rm(args: argparse.Namespace) -> None:
