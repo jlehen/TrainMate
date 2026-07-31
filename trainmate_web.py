@@ -503,13 +503,12 @@ def generate_plan() -> Any:
         goal_id = data.get("goal_id")
         if goal_id is not None:
             goal_id = int(goal_id)
-        strategy, mesocycles, _ = coach_service.plan_generate(
-            objective_id=goal_id
-        )
+        proposal = coach_service.plan_generate(objective_id=goal_id)
         return jsonify({
             "message": "Periodization plan generated and saved.",
-            "strategy": strategy,
-            "mesocycles_count": len(mesocycles)
+            "strategy": proposal['strategy'],
+            "mesocycles_count": len(proposal['mesocycles']),
+            "goal_id": (proposal['goal'] or {}).get('id'),
         })
     except Exception as e:
         return jsonify({"error": str(e)}), 500

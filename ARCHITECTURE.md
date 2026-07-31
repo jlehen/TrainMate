@@ -264,8 +264,10 @@ Module-level function in `formatting.py`. Concatenates all `*.txt` files from
   logbook, not config (`DESIGN_benchmark_workouts.md` §3.4); the service overlays them onto
   the profile for prompts and the drift snapshot. Prompt-context knobs
   (`metrics_lookback_days`) are not fingerprinted at all.
-- **`_plan_generate_strategy(...)`** — LLM call → `{strategy, mesocycles}`. Label
-  `periodization_plan`.
+- **`_plan_generate_strategy(..., split_weeks=)`** — LLM call → `{strategy,
+  mesocycles}`, plus `intermediate_goals[]` when `split_weeks` is set (timeline >
+  24 weeks), in which case the mesocycles cover only up to the first milestone.
+  Label `periodization_plan`.
 - **`_workout_generate_logic(...)`** — LLM call → `{reasoning, workouts[]}`. Accepts
   `num_days` (default 28) driving the horizon and `start_str` (defaults to today) for
   the first day to schedule — the prompt tells the model to begin there. **Read-only**
@@ -283,8 +285,6 @@ Module-level function in `formatting.py`. Concatenates all `*.txt` files from
   inferred_macrocycle, inferred_mesocycles[], physiological_insights[],
   learning_updates[]}`. Reverse-engineers cycles from weekly summaries. Label
   `workout_analysis`.
-- **`_generate_intermediate_goals(...)`** — LLM call → `{goals[]}` when timeline >
-  24 weeks. Label `generate_intermediate_goals`.
 
 **Coach learnings via evidence-cited deltas:** only `_data_analyze_logic`
 (the `data bootstrap`/`data reflect` flow) emits a `learning_updates` array
@@ -356,9 +356,11 @@ recompute does not silently demote them (see [§15](#15-design-rationale--histor
 **Orchestrator — owns all DB and calendar access.** Exposes the public API
 called by the UIs.
 
-- **`plan_generate(force, objective_id)`** — fetches objectives/constraints, checks
-  hashes (constraints hash covers only the plan-shaping `replan=1` rows), calls
-  `CoachEngine._plan_generate_strategy()`, saves to DB. Auto-splits timelines > 24 weeks.
+- **`plan_generate(force, objective_id, auto_apply)`** — fetches objectives/constraints,
+  checks hashes (constraints hash covers only the plan-shaping `replan=1` rows), calls
+  `CoachEngine._plan_generate_strategy()`, returns a `PlanProposal`. Saves to DB only
+  under `auto_apply`; otherwise the caller passes the proposal to `plan_apply()` once
+  the athlete accepts. Splits timelines > 24 weeks (§10, step 5).
 - **`workout_generate(objective_id, end_date)`** — requires an existing macrocycle.
   Applies the deterministic hard-constraint pre-pass to the generated workouts
   (`_enforce_hard_constraints_generate`: hard no-sport dates → rest, hard sport-scoped
@@ -374,9 +376,11 @@ called by the UIs.
     `macrocycle_id`, and pushes them to Calendar immediately — calendar always mirrors
     the active plan. Archive (not delete) makes regeneration undoable via
     `plan_rollback` (DESIGN_plan_rollback.md).
-- **`plan_apply(objective_id, strategy, mesocycles)`** — persists an
+- **`plan_apply(objective_id, strategy, mesocycles, pending_goals=None)`** — persists an
   already-generated strategy + mesocycles to the DB (recomputes the goals/constraints/
-  config hashes and snapshots). Used by the intermediate-goals branch of `plan generate`.
+  config hashes and snapshots), returning the goal id it saved under. `pending_goals`
+  (a split proposal's interim goals) are created first and the plan is saved against the
+  earliest of them, `objective_id` then being ignored.
 - **`replan(force, objective_id)`** — convenience: `plan_generate` then
   `workout_generate`.
 - **`workout_adapt(target_date_str, message=None)`** — fetches metrics + workouts in
@@ -1184,8 +1188,20 @@ threshold-less profile is a valid cold start (the coach nudges, never refuses).
    written to no `feedback` field), prints it, and passes it as
    `prior_training_text` into `CoachEngine._plan_generate_strategy()` →
    LLM → `{strategy, mesocycles}`.  See DESIGN_backward_evaluation.md §6.
-5. If timeline > 24 weeks: calls `CoachEngine._generate_intermediate_goals()`
-   first, saves intermediate objectives, then re-runs with the first goal.
+5. If timeline > 24 weeks: the **same** strategy call is asked to split it
+   (`split_weeks=`), returning `intermediate_goals[]` alongside the mesocycles —
+   so the milestones are chosen with the science guidelines, athlete profile and
+   history in scope. Only this branch may propose goals; the gate stays
+   deterministic. The proposals are validated (strictly between plan start and
+   goal date, first leg >= 5 weeks, mesocycles must stop at the first milestone),
+   but **not written**: they ride back in `PlanProposal.pending_goals` and are
+   created by `plan_apply()` when the athlete accepts, so a discarded plan leaves
+   the goal list untouched. `plan_apply()` creates them *before* computing the
+   goals hash — hashing first would make the next `plan generate` see its own new
+   goals as a change. Sub-goals inherit the parent's sport and `priority + 1`.
+   `PlanProposal.goal` is the goal the plan belongs to (the first milestone after
+   a split, id-less until applied); callers that persist or follow up (`plans.py`
+   apply, `replan()` → `workout_generate`) must key off it.
 6. Saves new macrocycle + mesocycles to DB (old ones deleted via
    `save_macrocycle`).
 

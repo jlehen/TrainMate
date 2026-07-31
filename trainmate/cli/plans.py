@@ -93,21 +93,38 @@ def run_plan_generate(args: argparse.Namespace) -> None:
         plan_kwargs = {'auto_apply': False}
         if args.goal_id is not None:
             plan_kwargs['objective_id'] = args.goal_id
-        strategy, mesocycles, reused = cli.coach_service.plan_generate(
+        proposal = cli.coach_service.plan_generate(
             force=bool(args.force), **plan_kwargs
         )
-        
-        if reused:
+        mesocycles = proposal['mesocycles']
+        pending_goals = proposal['pending_goals']
+
+        if proposal['reused']:
             print(green(f"\nActive plan is up to date ({len(mesocycles)} mesocycles)."))
             return
 
         if getattr(args, 'auto', False):
             apply = True
         else:
-            apply = cli.prompt.confirm("Apply this new periodization strategy?")
+            apply = cli.prompt.confirm(
+                "Apply this new periodization strategy"
+                + (f" and create {len(pending_goals)} interim goal(s)?" if pending_goals
+                   else "?")
+            )
 
         if apply:
-            cli.coach_service.plan_apply(next_goal['id'], strategy, mesocycles)
+            # A split timeline creates its interim goals here and re-targets the plan onto
+            # the first of them, so save against the goal the service planned for.
+            planned_id = cli.coach_service.plan_apply(
+                (proposal['goal'] or next_goal)['id'], proposal['strategy'], mesocycles,
+                pending_goals=pending_goals,
+            )
+            if pending_goals:
+                planned = cli.db.get_objective(planned_id) if planned_id else None
+                print(green(
+                    f"\nCreated {len(pending_goals)} interim goal(s)"
+                    + (f"; plan saved for '{planned['title']}'." if planned else ".")
+                ))
             print(green(f"\nGenerated {len(mesocycles)} mesocycles. Save complete."))
             print(f"Run '{green('workout generate')}' to schedule workouts based on this plan.")
         else:

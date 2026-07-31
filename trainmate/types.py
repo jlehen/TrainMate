@@ -1,4 +1,4 @@
-from typing import TypedDict, Optional
+from typing import Any, Dict, List, TypedDict, Optional
 
 class Objective(TypedDict):
     """Represents a training goal or target event."""
@@ -139,3 +139,18 @@ class Mesocycle(TypedDict):
     end_date: str
     focus: str
     feedback: Optional[str]
+
+class PlanProposal(TypedDict):
+    """What `plan generate` produced, before the athlete has accepted it.
+
+    `goal` is the objective the plan belongs to — not necessarily the one that was
+    asked for: a timeline too long for one macrocycle is split, and then `goal` is the
+    first entry of `pending_goals`, an unsaved proposal with no `id` yet. Applying the
+    proposal creates `pending_goals` first, so nothing lands in the athlete's goal list
+    until they accept.
+    """
+    strategy: str
+    mesocycles: List[Dict[str, Any]]
+    reused: bool
+    goal: Optional[Objective]
+    pending_goals: List[Objective]

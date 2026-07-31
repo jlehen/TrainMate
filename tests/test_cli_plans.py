@@ -43,12 +43,53 @@ class TestCliPlans(unittest.TestCase):
 
     @patch("trainmate_cli.garmin")
     @patch("trainmate_cli.coach_service")
-    def test_plan_commands(self, mock_coach, mock_garmin):
-        mock_coach.plan_generate.return_value = (
-            "Mock Strategy",
-            [{"name": "Meso 1", "start_date": "2026-01-01", "end_date": "2026-01-28", "focus": "Base"}],
-            False
+    def test_plan_generate_applies_split_proposal_to_its_own_goal(
+        self, mock_coach, mock_garmin
+    ):
+        # A split re-targets the plan onto an interim goal that does not exist yet.
+        # Applying must create it and save the plan there — not under the goal that
+        # was asked for on the command line.
+        far_id = test_db.add_objective(
+            title="Ski Mountaineering", target_date="2027-04-30",
+            sport_type="ski_touring", priority=1,
         )
+        pending = [{
+            "id": None, "title": "Ski Mountaineering - Interim: Base Check",
+            "target_date": "2026-12-10", "sport_type": "ski_touring",
+            "description": "Uphill endurance check", "priority": 2, "status": "active",
+        }]
+        mock_coach.plan_generate.return_value = {
+            "strategy": "First leg strategy",
+            "mesocycles": [{"name": "Base", "start_date": "2026-08-01",
+                            "end_date": "2026-12-10", "focus": "Aerobic durability"}],
+            "reused": False,
+            "goal": pending[0],
+            "pending_goals": pending,
+        }
+        mock_coach.plan_apply.return_value = 99
+
+        exit_code, stdout, stderr = self.run_cli(
+            ["plan", "generate", "--goal", str(far_id)], input_value="y"
+        )
+        self.assertEqual(exit_code, 0)
+        self.assertIn("interim goal", stdout)
+        args, kwargs = mock_coach.plan_apply.call_args
+        self.assertIsNone(args[0])  # the interim goal has no id yet
+        self.assertEqual(kwargs["pending_goals"], pending)
+
+    @patch("trainmate_cli.garmin")
+    @patch("trainmate_cli.coach_service")
+    def test_plan_commands(self, mock_coach, mock_garmin):
+        mock_coach.plan_generate.return_value = {
+            "strategy": "Mock Strategy",
+            "mesocycles": [
+                {"name": "Meso 1", "start_date": "2026-01-01",
+                 "end_date": "2026-01-28", "focus": "Base"}
+            ],
+            "reused": False,
+            "goal": None,
+            "pending_goals": [],
+        }
         mock_coach.workout_generate.return_value = (
             "Test workout reasoning",
             [{"title": "Test Workout"}],
@@ -129,11 +170,16 @@ class TestCliPlans(unittest.TestCase):
 
     @patch("trainmate_cli.coach_service")
     def test_plan_alias(self, mock_coach):
-        mock_coach.plan_generate.return_value = (
-            "Mock Strategy",
-            [{"name": "Meso 1", "start_date": "2026-01-01", "end_date": "2026-01-28", "focus": "Base"}],
-            False
-        )
+        mock_coach.plan_generate.return_value = {
+            "strategy": "Mock Strategy",
+            "mesocycles": [
+                {"name": "Meso 1", "start_date": "2026-01-01",
+                 "end_date": "2026-01-28", "focus": "Base"}
+            ],
+            "reused": False,
+            "goal": None,
+            "pending_goals": [],
+        }
         exit_code, stdout, stderr = self.run_cli(["pl", "generate"])
         self.assertEqual(exit_code, 0)
         self.assertIn("Plan discarded", stdout)
