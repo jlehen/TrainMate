@@ -141,9 +141,10 @@ def run_workout_swap(args: argparse.Namespace) -> None:
                 return
 
     updated = cli.coach_service.workout_swap_apply(ops, args.no_sync, reason=args.reason)
-    print(green(f"\nSwapped {len(updated)} workout(s) successfully."))
+    print()
     for w in updated:
-        print(f"  [{w['id']}] {w['title']} -> {w['date']}")
+        print(workout_line(w))
+    print(green(f"Swapped {len(updated)} workout(s) successfully."))
     if args.reason:
         print(f"Reason: {args.reason}")
     if args.no_sync:

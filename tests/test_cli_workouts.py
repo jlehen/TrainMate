@@ -4,6 +4,7 @@ from datetime import datetime, timedelta, timezone
 from unittest.mock import patch
 
 from tests.helpers import clear_all_tables, run_cli
+from trainmate.cli.common import fmt_date
 
 TEST_DB_PATH = os.path.join(os.path.dirname(__file__), "test_trainmate_cli_workouts.db")
 
@@ -147,9 +148,13 @@ class TestCliWorkouts(unittest.TestCase):
         d1 = (today + timedelta(days=1)).strftime("%Y-%m-%d")
         d2 = (today + timedelta(days=3)).strftime("%Y-%m-%d")
         mock_coach.workout_swap_validate.return_value = []
+        # The real service returns whole workout rows; the swap echo renders them in
+        # the 'workout list' format, so the stubs carry the same shape.
         mock_coach.workout_swap_apply.return_value = [
-            {"id": 1, "title": "Run A", "date": d2},
-            {"id": 2, "title": "Ride B", "date": d1},
+            {"id": 1, "title": "Run A", "date": d2, "sport_type": "running",
+             "duration_minutes": 45, "rpe": 4, "tss": 30},
+            {"id": 2, "title": "Ride B", "date": d1, "sport_type": "road_biking",
+             "duration_minutes": 60, "rpe": 4, "tss": 30},
         ]
         a = test_db.save_workout(
             date=d1, sport_type="running", title="Run A",
@@ -164,6 +169,9 @@ class TestCliWorkouts(unittest.TestCase):
         )
         self.assertEqual(exit_code, 0)
         self.assertIn("Swapped 2 workout(s) successfully", stdout)
+        # Each moved session is echoed in the 'workout list' format, at its new date.
+        self.assertIn(f"ID: 1 | {fmt_date(d2)} | RUNNING | Run A", stdout)
+        self.assertIn(f"ID: 2 | {fmt_date(d1)} | ROAD_BIKING | Ride B", stdout)
         # Each date's workout is moved to the other date.
         ops, no_sync = mock_coach.workout_swap_apply.call_args[0]
         self.assertCountEqual(ops, [
