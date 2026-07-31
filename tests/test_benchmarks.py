@@ -242,7 +242,9 @@ class TestBenchmarkCLI(unittest.TestCase):
             input_value="y",
         )
         self.assertEqual(code, 0)
-        self.assertIn("Recorded Functional Threshold Power (FTP) 250 W", out)
+        # Echoed in the 'benchmark list' format, then the confirmation.
+        self.assertIn("ROAD_BIKING | Functional Threshold Power (FTP): 250 W", out)
+        self.assertIn("Benchmark result recorded successfully", out)
         rows = test_db.get_benchmark_results()
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0]["anchor_kind"], "ftp")
@@ -256,6 +258,19 @@ class TestBenchmarkCLI(unittest.TestCase):
         self.assertEqual(code, 0)
         # >5% jump surfaces the replan hint.
         self.assertIn("replan band", out)
+
+    def test_record_echo_matches_the_list_line(self):
+        """The line `record` echoes is exactly the one `list` shows for that row,
+        signed delta against the previous latest included."""
+        run_cli(["benchmark", "record", "--sport", "cycling", "--ftp", "250", "-y"])
+        _, rec_out, _ = run_cli(
+            ["benchmark", "record", "--sport", "cycling", "--ftp", "262", "-y"]
+        )
+        _, list_out, _ = run_cli(["benchmark", "list"])
+
+        echoed = next(l for l in rec_out.splitlines() if l.startswith("ID: "))
+        self.assertIn("(+4.8%)", echoed)
+        self.assertIn(echoed, list_out)
 
     def test_record_pace_parses_mmss(self):
         run_cli(

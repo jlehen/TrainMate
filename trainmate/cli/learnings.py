@@ -43,6 +43,13 @@ def _print_learning(l: dict) -> None:
                      + cmd("learnings demote") + "/" + cmd("learnings keep") + ")"))
 
 
+def _echo_learning(learning_id: int) -> None:
+    """Re-reads a just-mutated learning and echoes it in the `learnings list` format."""
+    learning = next((l for l in cli.db.get_learnings() if l['id'] == learning_id), None)
+    if learning:
+        _print_learning(learning)
+
+
 def _print_learning_dates(l: dict) -> None:
     """Prints the created/updated/reinforced timestamps shared by `list -v` and `show`."""
     print(f"  created   : {l.get('created_at') or '-'}")
@@ -116,7 +123,8 @@ def run_learning_edit(args: argparse.Namespace) -> None:
         sys.exit(1)
 
     cli.db.update_learning(args.id, args.text)
-    print(green(f"Learning with ID {args.id} updated successfully."))
+    _echo_learning(args.id)
+    print(green("Learning updated successfully."))
 
 
 def run_learning_rm(args: argparse.Namespace) -> None:
@@ -137,9 +145,11 @@ def run_learning_demote(args: argparse.Namespace) -> None:
         print(yellow(f"Learning with ID {args.id} has no pending demotion."))
         return
     if result == "retired":
+        # A retirement deletes the row, so there is nothing left to echo.
         print(green(f"Learning with ID {args.id} retired."))
-    else:
-        print(green(f"Learning with ID {args.id} demoted to '{result}'."))
+        return
+    _echo_learning(args.id)
+    print(green(f"Learning demoted to '{result}'."))
 
 
 def run_learning_keep(args: argparse.Namespace) -> None:
@@ -153,7 +163,8 @@ def run_learning_keep(args: argparse.Namespace) -> None:
         return
 
     cli.db.keep_learning(args.id)
-    print(green(f"Learning with ID {args.id} kept; pending demotion dismissed."))
+    _echo_learning(args.id)
+    print(green("Learning kept; pending demotion dismissed."))
 
 
 def run_learning_wipe(args: argparse.Namespace) -> None:

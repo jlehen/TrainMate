@@ -49,6 +49,30 @@ def _selected_kind(args: argparse.Namespace) -> Tuple[Optional[str], Optional[st
     return present[0]
 
 
+def _benchmark_line(r: dict, prev_value: Optional[float]) -> str:
+    """One-line rendering of a logbook row for `list` (and the `record` echo).
+
+    `prev_value` is the next-older value of the same kind, which the signed delta is
+    measured against; None when this row is the first of its kind."""
+    kind = r["anchor_kind"]
+    anchor = ANCHOR_KINDS.get(kind)
+    label = anchor.label if anchor else kind
+    value = float(r["value"])
+    delta_disp = ""
+    if prev_value is not None:
+        delta = format_delta(kind, value, prev_value)
+        if delta:
+            better = is_improvement(kind, value, prev_value)
+            delta_disp = " " + (green if better else red)(f"({delta})")
+    src = r.get("source") or "test"
+    src_disp = "" if src == "test" else gray(f" [{src}]")
+    return (
+        f"ID: {r['id']} | {cyan(fmt_date(r['date']))} | "
+        f"{r['sport_type'].upper()} | {bold(label)}: {format_value(kind, value)}"
+        f"{delta_disp}{src_disp}"
+    )
+
+
 def run_benchmark_record(args: argparse.Namespace) -> None:
     """Records a benchmark result — propose→confirm, never silent (§5.1)."""
     kind, raw = _selected_kind(args)
@@ -95,7 +119,12 @@ def run_benchmark_record(args: argparse.Namespace) -> None:
         date=date, sport_type=sport, anchor_kind=kind, value=value,
         unit=unit, source=args.source, note=args.note,
     )
-    print(green(f"Recorded {label} {new_disp} on {fmt_date(date)} (id {rid})."))
+    row = cli.db.get_benchmark_result(rid)
+    if row:
+        # `prev` is this kind's previous latest — exactly the predecessor `list` would
+        # measure the new row's delta against.
+        print(_benchmark_line(row, float(prev["value"]) if prev else None))
+    print(green("Benchmark result recorded successfully."))
     if _crosses_replan_band(kind, value, prev):
         print(yellow(
             "This moves your effective threshold past the replan band — run "
@@ -136,26 +165,12 @@ def run_benchmark_list(args: argparse.Namespace) -> None:
         by_kind.setdefault(r["anchor_kind"], []).append(r)  # already newest-first
 
     for r in rows:
-        kind = r["anchor_kind"]
-        anchor = ANCHOR_KINDS.get(kind)
-        label = anchor.label if anchor else kind
-        value = float(r["value"])
-        series = by_kind[kind]
+        series = by_kind[r["anchor_kind"]]
         idx = series.index(r)
-        delta_disp = ""
-        if idx + 1 < len(series):
-            old_val = float(series[idx + 1]["value"])
-            delta = format_delta(kind, value, old_val)
-            if delta:
-                better = is_improvement(kind, value, old_val)
-                delta_disp = " " + (green if better else red)(f"({delta})")
-        src = r.get("source") or "test"
-        src_disp = "" if src == "test" else gray(f" [{src}]")
-        print(
-            f"ID: {r['id']} | {cyan(fmt_date(r['date']))} | "
-            f"{r['sport_type'].upper()} | {bold(label)}: {format_value(kind, value)}"
-            f"{delta_disp}{src_disp}"
+        prev_value = (
+            float(series[idx + 1]["value"]) if idx + 1 < len(series) else None
         )
+        print(_benchmark_line(r, prev_value))
         if r.get("note"):
             print(format_labeled_block("  Note:", r["note"]))
 

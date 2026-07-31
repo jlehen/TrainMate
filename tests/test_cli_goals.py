@@ -209,7 +209,11 @@ class TestCliGoals(unittest.TestCase):
             "--desc", "Light running only", "--rest",
         ])
         self.assertEqual(exit_code, 0)
-        self.assertIn(f"Constraint [{c_id}] updated.", stdout)
+        self.assertIn(
+            f"ID: {c_id} | Summer Vacation Adapted: 2026-08-02 to 2026-08-16 | no training",
+            stdout,
+        )
+        self.assertIn("Constraint updated successfully", stdout)
 
         edited = test_db.get_constraint(c_id)
         self.assertEqual(edited["title"], "Summer Vacation Adapted")

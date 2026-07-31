@@ -146,9 +146,16 @@ def run_constraint_edit(args: argparse.Namespace) -> None:
         print(yellow("No fields to update. Provide at least one field to change."))
         return
 
-    if kwargs:
-        cli.db.update_constraint(args.id, **kwargs)
-        print(green(f"Constraint [{args.id}] updated."))
+    # An explicit --replan/--no-replan lands in the same write, so the echo below shows
+    # the final state; _maybe_replan still owns the regen flow and the undecided case.
+    if args.replan is not None:
+        kwargs['replan'] = 1 if args.replan else 0
+
+    cli.db.update_constraint(args.id, **kwargs)
+    updated = cli.db.get_constraint(args.id)
+    if updated:
+        print(_constraint_line(updated))
+    print(green("Constraint updated successfully."))
 
     title = kwargs.get('title', constraint['title'])
     _maybe_replan(args.id, title, args.replan)
