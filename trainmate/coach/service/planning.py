@@ -1,10 +1,10 @@
 import json
-from datetime import date, datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, List, Optional, Tuple, Dict
 from trainmate.config import config
 from trainmate.db import db
 from trainmate.google_calendar import calendar_syncer
-from trainmate.types import Objective, Constraint, PlanProposal, Workout
+from trainmate.types import Constraint, PlanProposal, Workout
 from trainmate.adherence import analyze_adherence, planned_load
 from trainmate.sports import canonical_sport
 from trainmate.modification_state import SWAP_REASON_PREFIX, MANUAL_REPLACE_REASON_PREFIX
@@ -15,7 +15,7 @@ from trainmate.util import (
     cyan, green, yellow, bold, red, gray, PMC_TSB_LAG_NOTE,
     wrap_text, format_labeled_block, default_wrap_width,
 )
-from trainmate.coach.engine import CoachEngine, MIN_PLAN_WEEKS, MAX_PLAN_WEEKS
+from trainmate.coach.engine import CoachEngine
 from trainmate.coach.formatting import format_baseline, _load_science_guidelines
 import trainmate.coach.service as _svc
 
@@ -38,8 +38,7 @@ def _print_prior_training_review(text: str, width: int) -> None:
 
 
 def _print_new_strategy(
-    strategy: str, mesocycles: List[Dict[str, Any]], width: int,
-    pending_goals: Optional[List[Objective]] = None, pending_needs_apply: bool = True
+    strategy: str, mesocycles: List[Dict[str, Any]], width: int
 ) -> None:
     """Shows the freshly generated plan for the apply/discard decision.
 
@@ -47,18 +46,6 @@ def _print_new_strategy(
     `plan show`, rather than one long line the terminal breaks where it likes."""
     head, rule = _banner("NEW PERIODIZATION STRATEGY (MACROCYCLE)", width)
     print(cyan(bold(f"\n{head}")))
-    if pending_goals:
-        # Applying creates these, so they belong in what the athlete is agreeing to.
-        print(bold(
-            "New interim goals (created when you apply this plan):"
-            if pending_needs_apply else "New interim goals:"
-        ))
-        for g in pending_goals:
-            goal_head = wrap_text(
-                f"- {g['title']} ({g['target_date']}, priority {g['priority']})", width
-            )
-            print(format_labeled_block(bold(goal_head), g.get('description') or '', width))
-        print()
     print(format_labeled_block(bold("Overall Strategy:"), strategy, width))
     print()
     print(bold("Mesocycle Blocks:"))
@@ -176,9 +163,7 @@ class PlanningMixin:
         """Determines the macrocycle strategy and mesocycle blocks.
 
         With `auto_apply` the proposal is saved before returning; otherwise the caller
-        hands it back to :meth:`plan_apply` once the athlete accepts it. Either way the
-        plan may belong to a goal that is *not* the requested one — see `PlanProposal`."""
-        pending_goals: List[Objective] = []
+        hands it back to :meth:`plan_apply` once the athlete accepts it."""
         # Identify the target goal
         if objective_id is not None:
             next_goal = self._db.get_active_objective(objective_id)
@@ -193,7 +178,7 @@ class PlanningMixin:
                     'strategy': (
                         "No active goals found. TrainMate needs at least one objective."
                     ),
-                    'mesocycles': [], 'reused': False, 'goal': None, 'pending_goals': [],
+                    'mesocycles': [], 'reused': False, 'goal': None,
                 }
 
         # Compute plan-window dates (constraints are fetched below with the hashes).
@@ -221,29 +206,17 @@ class PlanningMixin:
             if plan_start_date < today_date:
                 plan_start_date = today_date
 
-        # Compute duration
+        # The plan window. There is no lower or upper bound on how long it may be: how a
+        # three-week run-in or a two-year horizon should be periodized is a question the
+        # science guidelines answer, not one the app pre-empts with a threshold. The only
+        # requirement is that the window exists.
         plan_start_str = plan_start_date.strftime("%Y-%m-%d")
         target_date = datetime.strptime(next_goal['target_date'], "%Y-%m-%d").date()
-        duration_days = (target_date - plan_start_date).days
-        duration_weeks = duration_days / 7.0
-
-        if duration_weeks < MIN_PLAN_WEEKS:
+        if target_date <= plan_start_date:
             raise ValueError(
-                f"Goal '{next_goal['title']}' is too close "
-                f"({duration_weeks:.1f} weeks away from the start date "
-                f"{plan_start_date.strftime('%Y-%m-%d')}). "
-                f"TrainMate requires at least {MIN_PLAN_WEEKS} weeks to generate a periodization plan."
+                f"Goal '{next_goal['title']}' is dated {next_goal['target_date']}, on or "
+                f"before the plan start {plan_start_str} — there is no window to plan in."
             )
-
-        # A timeline too long for one macrocycle is split by the strategy call itself, so
-        # the milestones are chosen with the science guidelines and the athlete's history
-        # in hand. The gate stays deterministic: only this branch may propose goals.
-        split_weeks = duration_weeks if duration_weeks > MAX_PLAN_WEEKS else None
-        if split_weeks is not None:
-            print(cyan(wrap_text(
-                f"Goal '{next_goal['title']}' is {duration_weeks:.1f} weeks away "
-                f"(> {MAX_PLAN_WEEKS} weeks) — the plan will be split into interim goals."
-            )))
 
         # Compute current hashes
         # We need to fetch active objectives for hash computation so the hash covers the whole landscape
@@ -254,7 +227,7 @@ class PlanningMixin:
         constraints = self._db.get_constraints(today_str)
         replan_constraints = [c for c in constraints if c.get('replan')]
         # Fingerprints for the reuse-vs-regenerate decision only; `plan_apply` recomputes
-        # them at accept time, after any interim goals exist.
+        # them at accept time.
         goals_hash = self.engine._get_goals_hash(objectives)
         constraints_hash = self.engine._get_constraints_hash(replan_constraints)
 
@@ -342,120 +315,26 @@ class PlanningMixin:
                 athlete_feedback=feedback_text,
                 history_summary=history_summary,
                 prior_training_text=prior_training_text,
-                split_weeks=split_weeks
             )
             strategy = macro_data.get("strategy", "Endurance preparation strategy.")
             mesocycles = macro_data.get("mesocycles", [])
 
-            if split_weeks is not None:
-                pending_goals = self._validate_interim_goals(
-                    macro_data.get("intermediate_goals", []), next_goal, plan_start_str
-                )
-                # The plan covers the first leg only, so it belongs to the first milestone
-                # — still unsaved, so a discarded proposal leaves the goal list untouched.
-                next_goal = pending_goals[0]
-                self._check_first_leg(next_goal, mesocycles, plan_start_date)
-
-            _print_new_strategy(
-                strategy, mesocycles, width, pending_goals, pending_needs_apply=not auto_apply
-            )
+            _print_new_strategy(strategy, mesocycles, width)
 
             if auto_apply:
-                planned_id = self.plan_apply(
-                    next_goal['id'], strategy, mesocycles, pending_goals=pending_goals
-                )
-                if planned_id is not None:
-                    next_goal = self._db.get_objective(planned_id) or next_goal
-                    pending_goals = []
+                self.plan_apply(next_goal['id'], strategy, mesocycles)
 
         self._maybe_nudge_bootstrap()
         return {
             'strategy': strategy, 'mesocycles': mesocycles, 'reused': reused,
-            'goal': next_goal, 'pending_goals': pending_goals,
+            'goal': next_goal,
         }
 
-    def _validate_interim_goals(
-        self, proposed: List[Dict[str, Any]], parent: Objective, plan_start_str: str
-    ) -> List[Objective]:
-        """The milestones from a split proposal, checked and normalised, earliest first.
-
-        Sub-goals inherit the parent's sport and sit one priority level below it — they
-        are stepping stones, not events the athlete is peaking for."""
-        goals: List[Objective] = []
-        for pg in proposed:
-            target = str(pg.get('target_date') or '')
-            title = str(pg.get('title') or '').strip()
-            if not title or not (plan_start_str < target < parent['target_date']):
-                continue
-            goals.append({
-                'id': None,
-                'title': title,
-                'target_date': target,
-                'sport_type': pg.get('sport_type') or parent['sport_type'],
-                'description': pg.get('description', ''),
-                'priority': parent['priority'] + 1,
-                'status': 'active',
-            })
-        if not goals:
-            raise ValueError(
-                "The coach did not propose any usable interim goals to split the "
-                f"{parent['title']} timeline (they must fall between the plan start "
-                f"{plan_start_str} and the goal date {parent['target_date']}). "
-                "Please re-run 'plan generate'."
-            )
-        goals.sort(key=lambda g: str(g['target_date']))
-        return goals
-
-    @staticmethod
-    def _check_first_leg(
-        first_goal: Objective, mesocycles: List[Dict[str, Any]], plan_start_date: date
-    ) -> None:
-        """Guards the one coupling a split introduces: the returned blocks must cover the
-        first leg, not the whole horizon the milestones span."""
-        leg_end = datetime.strptime(first_goal['target_date'], "%Y-%m-%d").date()
-        leg_weeks = (leg_end - plan_start_date).days / 7.0
-        if not MIN_PLAN_WEEKS <= leg_weeks <= MAX_PLAN_WEEKS:
-            raise ValueError(
-                f"The first interim goal '{first_goal['title']}' is {leg_weeks:.1f} weeks "
-                f"from the plan start {plan_start_date.strftime('%Y-%m-%d')}, outside the "
-                f"{MIN_PLAN_WEEKS}-{MAX_PLAN_WEEKS} week range a macrocycle has to fit in. "
-                "Please re-run 'plan generate'."
-            )
-        try:
-            last_end = max(
-                datetime.strptime(m['end_date'], "%Y-%m-%d").date() for m in mesocycles
-            )
-        except (KeyError, ValueError):
-            return
-        if (last_end - leg_end).days > 7:
-            raise ValueError(
-                f"The mesocycles run to {last_end.strftime('%Y-%m-%d')}, past the first "
-                f"interim goal '{first_goal['title']}' on {first_goal['target_date']} "
-                "they were supposed to stop at. Please re-run 'plan generate'."
-            )
-
     def plan_apply(
-        self, objective_id: Optional[int], strategy: str, mesocycles: List[Dict[str, Any]],
-        pending_goals: Optional[List[Objective]] = None
+        self, objective_id: Optional[int], strategy: str, mesocycles: List[Dict[str, Any]]
     ) -> Optional[int]:
         """Saves a generated periodization plan to the database, and returns the id of the
-        goal it was saved under.
-
-        `pending_goals` are the interim goals a split proposal came with: they are created
-        here, at accept time, and the plan is saved against the earliest of them —
-        `objective_id` is then ignored. Creating them before the hashes are computed is
-        what keeps the plan's goal fingerprint current; hashing first would make the next
-        `plan generate` see its own new goals as a change and regenerate."""
-        if pending_goals:
-            created_ids = [
-                self._db.add_objective(
-                    title=g['title'], target_date=g['target_date'],
-                    sport_type=g['sport_type'], description=g.get('description') or '',
-                    priority=g['priority'], status='active',
-                )
-                for g in sorted(pending_goals, key=lambda g: str(g['target_date']))
-            ]
-            objective_id = created_ids[0]
+        goal it was saved under."""
         if objective_id is None:
             return None
 
@@ -562,8 +441,8 @@ class PlanningMixin:
                 []
             )
 
-        # The planned goal, not the requested one: a split timeline puts the macrocycle on
-        # the first interim goal, and that is what the workouts must be generated against.
+        # Workouts are generated against the goal the plan was actually saved under, which
+        # is the next active one when no id was given.
         proposal = self.plan_generate(force=force, objective_id=objective_id)
         planned_goal = proposal['goal']
         return self.workout_generate(

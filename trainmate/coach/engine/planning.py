@@ -11,7 +11,7 @@ from trainmate.coach.formatting import (
     format_removed_workouts, format_daily_context,
 )
 import trainmate.coach.engine as _eng
-from trainmate.coach.engine import MIN_PLAN_WEEKS, MAX_PLAN_WEEKS, LEARNING_UPDATES_FIELD
+from trainmate.coach.engine import LEARNING_UPDATES_FIELD
 
 
 class PlanStrategyMixin:
@@ -23,50 +23,18 @@ class PlanStrategyMixin:
         profile: Optional[Dict[str, Any]], previous_strategy_text: Optional[str] = None,
         plan_start_str: Optional[str] = None, athlete_feedback: Optional[str] = None,
         history_summary: Optional[str] = None, prior_training_text: Optional[str] = None,
-        split_weeks: Optional[float] = None
     ) -> Dict[str, Any]:
         """Queries LLM to determine the overall macrocycle strategy and mesocycle blocks.
 
-        `split_weeks` (set when the goal is further out than MAX_PLAN_WEEKS) asks the same
-        call to first propose the interim goals that break the timeline into legs, then
-        plan the first leg only — so the milestones are chosen with the science guidelines
-        and the athlete's history in hand rather than by a context-free second call."""
+        The plan always runs from the start date to the goal, however far out that is: how
+        a long horizon gets structured is a question for the science guidelines, not for a
+        duration threshold in the app."""
         plan_start = plan_start_str or today_str
-        if split_weeks is not None:
-            plan_end_desc = "the FIRST intermediate goal you propose"
-            custom_task = f"""
-TASK — PART 1 (SPLIT THE TIMELINE):
-The goal '{next_goal['title']}' is {split_weeks:.1f} weeks away ({plan_start} to
-{next_goal['target_date']}), beyond the {MAX_PLAN_WEEKS}-week maximum for a single macrocycle.
-Propose the intermediate training goals (e.g. a base fitness check, a tune-up event, a long
-tour simulation) that break this timeline into sequential macrocycles, each anchored by one
-milestone. Requirements:
-1. Every leg — the plan start to the first milestone, each milestone to the next, and the
-   last milestone to the final event — must last between {MIN_PLAN_WEEKS} and
-   {MAX_PLAN_WEEKS} weeks, per the science guidelines.
-2. Target dates must be in chronological order, strictly after the plan start ({plan_start})
-   and strictly before the final event ({next_goal['target_date']}).
-3. The sport type of every milestone must be: {next_goal['sport_type']}.
-4. Title them '{next_goal['title']} - Interim: <milestone_name>' so they stay linked to the
-   long-term goal.
-5. Choose milestones that suit THIS athlete: their profile, recent training, demonstrated
-   volume and the science guidelines — not a generic template. Explain that reasoning in
-   each description, including why the milestone is a sensible progression checkpoint.
-
-TASK — PART 2 (PLAN THE FIRST LEG ONLY):
-Determine the overall periodization strategy (macrocycle) from {plan_start} until the first
-milestone you proposed in Part 1. Do NOT plan beyond it — the later legs get their own
-macrocycle when the athlete reaches them.
-"""
-        else:
-            plan_end_desc = f"the goal date ({next_goal['target_date']})"
-            custom_task = f"""
+        custom_task = f"""
 TASK:
 Determine the overall periodization strategy (macrocycle) from {plan_start} until the target
 goal ({next_goal['target_date']}).
-"""
 
-        custom_task += f"""
 Divide this timeframe into contiguous, sequential mesocycles (determining the duration of each
 block based on the periodization style guidelines provided in the science file). When planning
 mesocycles, it is acceptable to shorten/extend a block by a few days to align its transition or
@@ -74,7 +42,7 @@ recovery boundaries with the athlete's active constraints (e.g. aligning a deloa
 change with a long travel block).
 Make sure there are no gaps between the end date of one mesocycle and the start date of the next.
 The first mesocycle must start on the start date ({plan_start}) and the last mesocycle must end
-on or around {plan_end_desc}.
+on or around the goal date ({next_goal['target_date']}).
 """
 
         if athlete_feedback:
@@ -97,24 +65,11 @@ or done so far, rather than starting completely from scratch, unless a complete
 reset is warranted by major changes.
 """
 
-        interim_field = ""
-        if split_weeks is not None:
-            interim_field = f"""
-  "intermediate_goals": [
-    {{
-      "title": "{next_goal['title']} - Interim: <milestone_name>",
-      "target_date": "YYYY-MM-DD",
-      "sport_type": "{next_goal['sport_type']}",
-      "description": "Why this milestone suits this athlete's progression, citing their
-        profile/history and the science guidelines."
-    }}
-  ],"""
-
         custom_task += f"""
 You MUST respond with a JSON object containing:
-{{{interim_field}
+{{
   "strategy": "Explain the overall training strategy philosophy and periodization strategy
-    until {plan_end_desc}.",
+    until the goal date ({next_goal['target_date']}).",
   "mesocycles": [
     {{
       "name": "Phase Name (e.g., Base Building, Specific Preparation, Build,
@@ -177,23 +132,11 @@ You MUST respond with a JSON object containing:
         user_content = (
             f"Today's date is {today_str}. The target goal is "
             f"'{next_goal['title']}' on {next_goal['target_date']}. "
+            "Please determine the macrocycle and mesocycle blocks starting from "
+            f"{plan_start}."
         )
-        if split_weeks is not None:
-            user_content += (
-                "That is too far out for a single macrocycle: please propose the "
-                "intermediate goals that split the timeline, then determine the macrocycle "
-                f"and mesocycle blocks from {plan_start} to the first of them."
-            )
-        else:
-            user_content += (
-                "Please determine the macrocycle and mesocycle blocks starting from "
-                f"{plan_start}."
-            )
 
         print(cyan(wrap_text(
-            "Querying OpenRouter to generate intermediate goals, macrocycle and "
-            "mesocycles periodization strategy..."
-            if split_weeks is not None else
             "Querying OpenRouter to generate macrocycle and mesocycles "
             "periodization strategy..."
         )))

@@ -14,7 +14,7 @@ from trainmate.util import (
     today_str as _today_str, today_date as _today_date,
     cyan, green, yellow, bold, red, gray, PMC_TSB_LAG_NOTE,
 )
-from trainmate.coach.engine import CoachEngine, MIN_PLAN_WEEKS, MAX_PLAN_WEEKS
+from trainmate.coach.engine import CoachEngine
 from trainmate.coach.formatting import format_baseline, _load_science_guidelines
 
 # Fallback look-back for `reflect` when no watermark exists yet (bootstrap not run).

@@ -11,7 +11,7 @@ from trainmate.coach.formatting import (
     format_removed_workouts, format_daily_context,
 )
 import trainmate.coach.engine as _eng
-from trainmate.coach.engine import MIN_PLAN_WEEKS, MAX_PLAN_WEEKS, LEARNING_UPDATES_FIELD
+from trainmate.coach.engine import LEARNING_UPDATES_FIELD
 
 
 def _terminal_window_task(days_left: int, meso_end_date_str: str) -> str:

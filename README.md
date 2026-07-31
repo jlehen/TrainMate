@@ -18,8 +18,9 @@ does the coaching reasoning.
 
 - **Periodized planning.** From your goals, constraints, and fitness profile,
   TrainMate builds a full macrocycle → mesocycle → microcycle structure (long-term
-  strategy down to individual sessions). Timelines longer than ~24 weeks are
-  automatically broken into intermediate goals.
+  strategy down to individual sessions), over whatever horizon your goal sits on —
+  how a short run-in or a multi-season build should be structured comes from the
+  science guidelines you supply, not from thresholds baked into the app.
 
 - **Context-aware daily adaptation.** Each day it weighs your recovery signals
   against the planned session and eases, reschedules, or holds the workout

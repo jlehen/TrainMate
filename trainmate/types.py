@@ -143,14 +143,10 @@ class Mesocycle(TypedDict):
 class PlanProposal(TypedDict):
     """What `plan generate` produced, before the athlete has accepted it.
 
-    `goal` is the objective the plan belongs to — not necessarily the one that was
-    asked for: a timeline too long for one macrocycle is split, and then `goal` is the
-    first entry of `pending_goals`, an unsaved proposal with no `id` yet. Applying the
-    proposal creates `pending_goals` first, so nothing lands in the athlete's goal list
-    until they accept.
+    `goal` is the objective the plan belongs to — the requested one, or the next active
+    goal when none was named. It is `None` only when there are no active goals at all.
     """
     strategy: str
     mesocycles: List[Dict[str, Any]]
     reused: bool
     goal: Optional[Objective]
-    pending_goals: List[Objective]

@@ -11,14 +11,6 @@ from trainmate.coach.formatting import (
     format_removed_workouts, format_daily_context,
 )
 
-# Macrocycle duration bounds (weeks) enforced when turning a goal into a periodization
-# plan: shorter than MIN can't be periodized; longer than MAX is split into sequential
-# intermediate goals. These mirror the science guidelines (science/periodization.txt) and
-# are shared by the control flow (service.py) and the split-prompt text below.
-MIN_PLAN_WEEKS = 5
-MAX_PLAN_WEEKS = 24
-
-
 # Shared JSON-output instruction for incrementally updating coach learnings. The LLM emits
 # only deltas; the app owns the merge so unchanged observations are never lost. The model
 # does NOT set confidence — it attributes each observation to the training WEEK(S) that back

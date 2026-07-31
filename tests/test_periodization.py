@@ -850,247 +850,67 @@ class TestPeriodization(unittest.TestCase):
         self.assertEqual(macro["config_hash"], "confhash789")
         self.assertEqual(macro["config_snapshot"], '{"ftp": 220.0}')
 
-    def test_validation_under_5_weeks(self):
+    @patch("trainmate.coach.engine.openrouter_client")
+    def test_plans_a_goal_only_weeks_away(self, mock_client):
+        # No lower bound on the plan window: a near goal gets a short macrocycle rather
+        # than a refusal — how to periodize three weeks is the science docs' call.
         today = datetime.now(timezone.utc).date()
+        target_date_str = (today + timedelta(weeks=3)).strftime("%Y-%m-%d")
+        obj_id = test_db.add_objective(
+            title="Short Goal", target_date=target_date_str,
+            sport_type="running", priority=1,
+        )
+        mock_client.complete.return_value = {
+            "strategy": "Sharpen and taper",
+            "mesocycles": [{
+                "name": "Race Prep", "start_date": today.strftime("%Y-%m-%d"),
+                "end_date": target_date_str, "focus": "Freshness",
+            }],
+        }
+
+        proposal = coach_service.plan_generate(force=True)
+        self.assertEqual(proposal["strategy"], "Sharpen and taper")
+        self.assertIsNotNone(test_db.get_macrocycle_for_objective(obj_id))
+
+    @patch("trainmate.coach.service._today_str")
+    def test_rejects_goal_on_or_before_plan_start(self, mock_today):
+        # The only remaining window check: a goal dated today or earlier leaves nothing
+        # to plan.
+        mock_today.return_value = "2026-07-31"
         test_db.add_objective(
-            title="Short Goal",
-            target_date=(today + timedelta(weeks=3)).strftime("%Y-%m-%d"),
-            sport_type="running",
-            priority=1,
+            title="Yesterday's Race", target_date="2026-07-30",
+            sport_type="running", priority=1,
         )
 
         with self.assertRaises(ValueError) as ctx:
             coach_service.plan_generate()
-        self.assertIn("too close", str(ctx.exception))
+        self.assertIn("no window to plan in", str(ctx.exception))
 
+    @patch("trainmate.coach.service._today_str")
     @patch("trainmate.coach.engine.openrouter_client")
-    def test_splitting_over_24_weeks(self, mock_client):
-        today = datetime.now(timezone.utc).date()
-        target_date_str = (today + timedelta(weeks=30)).strftime("%Y-%m-%d")
-
-        test_db.add_objective(
-            title="Ultra Marathon", target_date=target_date_str,
+    def test_far_goal_plans_one_macrocycle_to_the_goal(self, mock_client, mock_today):
+        # A 30-week horizon is no longer split into interim goals: one macrocycle runs to
+        # the goal itself, and the athlete's goal list is left alone.
+        mock_today.return_value = "2026-07-31"
+        obj_id = test_db.add_objective(
+            title="Ultra Marathon", target_date="2027-02-26",
             sport_type="running", priority=1,
         )
-
-        phase_date_str = (today + timedelta(weeks=15)).strftime("%Y-%m-%d")
-        # One call now: the milestones and the first leg's blocks come back together, with
-        # the science guidelines and athlete history in scope for both.
         mock_client.complete.return_value = {
-            "intermediate_goals": [{
-                "title": "Ultra Marathon - Interim: Half Marathon Tune-Up",
-                "target_date": phase_date_str,
-                "sport_type": "running",
-                "description": "Mid-way aerobic benchmark",
-            }],
-            "strategy": "Simulated base building strategy",
+            "strategy": "Long build",
             "mesocycles": [{
-                "name": "Base Building",
-                "start_date": today.strftime("%Y-%m-%d"),
-                "end_date": phase_date_str,
-                "focus": "Aerobic conditioning",
+                "name": "Base Building", "start_date": "2026-07-31",
+                "end_date": "2027-02-26", "focus": "Aerobic conditioning",
             }],
         }
 
         coach_service.plan_generate(force=True)
-        self.assertEqual(mock_client.complete.call_count, 1)
-        split_prompt = mock_client.complete.call_args[0][0]
-        self.assertIn("TASK — PART 1 (SPLIT THE TIMELINE):", split_prompt)
-        self.assertIn("START OF SPORTS SCIENCE GUIDELINES", split_prompt)
-
-        active_objs = sorted(
-            test_db.get_objectives(status="active"), key=lambda x: str(x["target_date"])
-        )
-        self.assertEqual(len(active_objs), 2)
-
-        intermediate = active_objs[0]
-        self.assertEqual(intermediate["title"], "Ultra Marathon - Interim: Half Marathon Tune-Up")
-        self.assertEqual(intermediate["target_date"], phase_date_str)
-        # A stepping stone sits one level below the goal it leads to.
-        self.assertEqual(intermediate["priority"], 2)
-
-        macro = test_db.get_macrocycle_for_objective(intermediate["id"])
-        self.assertIsNotNone(macro)
-        self.assertEqual(macro["strategy"], "Simulated base building strategy")
-        # The fingerprint covers the interim goals the plan itself created, so the next
-        # run reuses the plan instead of seeing them as a change.
-        self.assertEqual(
-            macro["goals_hash"],
-            coach_service._get_goals_hash(test_db.get_objectives(status="active")),
-        )
-
-    @patch("trainmate.coach.engine.openrouter_client")
-    def test_split_goals_are_not_written_until_applied(self, mock_client):
-        # `plan generate` used to create the interim goals before showing the plan, so a
-        # discarded proposal still left them behind in the athlete's goal list.
-        today = datetime.now(timezone.utc).date()
-        test_db.add_objective(
-            title="Ultra Marathon",
-            target_date=(today + timedelta(weeks=30)).strftime("%Y-%m-%d"),
-            sport_type="running", priority=1,
-        )
-        phase_date_str = (today + timedelta(weeks=15)).strftime("%Y-%m-%d")
-        mock_client.complete.return_value = {
-            "intermediate_goals": [{
-                "title": "Ultra Marathon - Interim: Half Marathon Tune-Up",
-                "target_date": phase_date_str, "sport_type": "running",
-                "description": "Mid-way aerobic benchmark",
-            }],
-            "strategy": "Simulated base building strategy",
-            "mesocycles": [{
-                "name": "Base Building", "start_date": today.strftime("%Y-%m-%d"),
-                "end_date": phase_date_str, "focus": "Aerobic conditioning",
-            }],
-        }
-
-        proposal = coach_service.plan_generate(force=True, auto_apply=False)
-
-        self.assertEqual(len(proposal["pending_goals"]), 1)
-        self.assertIsNone(proposal["goal"]["id"])
+        prompt = mock_client.complete.call_args[0][0]
+        self.assertIn("until the target\ngoal (2027-02-26)", prompt)
+        self.assertNotIn("intermediate_goals", prompt)
+        # No goals were invented along the way.
         self.assertEqual(len(test_db.get_objectives(status="active")), 1)
-        self.assertIsNone(test_db.get_last_macrocycle())
-
-        # Accepting is what writes them.
-        planned_id = coach_service.plan_apply(
-            None, proposal["strategy"], proposal["mesocycles"],
-            pending_goals=proposal["pending_goals"],
-        )
-        self.assertEqual(len(test_db.get_objectives(status="active")), 2)
-        self.assertEqual(
-            test_db.get_objective(planned_id)["target_date"], phase_date_str
-        )
-        self.assertIsNotNone(test_db.get_macrocycle_for_objective(planned_id))
-
-    @patch("trainmate.coach.engine.openrouter_client")
-    def test_split_rejects_mesocycles_running_past_the_first_leg(self, mock_client):
-        today = datetime.now(timezone.utc).date()
-        target_date_str = (today + timedelta(weeks=30)).strftime("%Y-%m-%d")
-        test_db.add_objective(
-            title="Ultra Marathon", target_date=target_date_str,
-            sport_type="running", priority=1,
-        )
-        phase_date_str = (today + timedelta(weeks=15)).strftime("%Y-%m-%d")
-        mock_client.complete.return_value = {
-            "intermediate_goals": [{
-                "title": "Ultra Marathon - Interim: Half Marathon Tune-Up",
-                "target_date": phase_date_str, "sport_type": "running",
-                "description": "Mid-way aerobic benchmark",
-            }],
-            "strategy": "Planned the whole horizon by mistake",
-            "mesocycles": [{
-                "name": "Base Building", "start_date": today.strftime("%Y-%m-%d"),
-                "end_date": target_date_str, "focus": "Aerobic conditioning",
-            }],
-        }
-
-        with self.assertRaises(ValueError) as ctx:
-            coach_service.plan_generate(force=True)
-        self.assertIn("past the first", str(ctx.exception))
-        self.assertEqual(len(test_db.get_objectives(status="active")), 1)
-
-    @patch("trainmate.coach.engine.openrouter_client")
-    def test_split_rejects_first_leg_outside_macrocycle_bounds(self, mock_client):
-        # A milestone 28 weeks out leaves a first leg no longer than the goal it split.
-        today = datetime.now(timezone.utc).date()
-        test_db.add_objective(
-            title="Ultra Marathon",
-            target_date=(today + timedelta(weeks=40)).strftime("%Y-%m-%d"),
-            sport_type="running", priority=1,
-        )
-        phase_date_str = (today + timedelta(weeks=28)).strftime("%Y-%m-%d")
-        mock_client.complete.return_value = {
-            "intermediate_goals": [{
-                "title": "Ultra Marathon - Interim: Too Far Out",
-                "target_date": phase_date_str, "sport_type": "running",
-                "description": "",
-            }],
-            "strategy": "s",
-            "mesocycles": [{"name": "Base", "start_date": today.strftime("%Y-%m-%d"),
-                            "end_date": phase_date_str, "focus": "Aerobic"}],
-        }
-
-        with self.assertRaises(ValueError) as ctx:
-            coach_service.plan_generate(force=True)
-        self.assertIn("5-24 week range", str(ctx.exception))
-        self.assertEqual(len(test_db.get_objectives(status="active")), 1)
-
-    @patch("trainmate.coach.service._today_str")
-    @patch("trainmate.coach.engine.openrouter_client")
-    def test_splitting_targets_first_interim_goal_not_earliest_active(
-        self, mock_client, mock_today
-    ):
-        # A planned preceding goal pushes the plan start past its own date. Re-reading
-        # "the next active goal" after the split used to snap the target back onto that
-        # preceding goal, producing a plan window ending before it started.
-        mock_today.return_value = "2026-07-31"
-        prev_id = test_db.add_objective(
-            title="Vertical Power", target_date="2026-09-30",
-            sport_type="road_biking", priority=1,
-        )
-        test_db.save_macrocycle(
-            objective_id=prev_id, strategy="Preceding strategy",
-            goals_hash="g", constraints_hash="c",
-            mesocycles=[{
-                "name": "Build", "start_date": "2026-07-31",
-                "end_date": "2026-09-30", "focus": "Threshold",
-            }],
-        )
-        far_id = test_db.add_objective(
-            title="Ski Mountaineering", target_date="2027-04-30",
-            sport_type="ski_touring", priority=1,
-        )
-
-        mock_client.complete.return_value = {
-            "intermediate_goals": [
-                {"title": "Ski Mountaineering - Interim: Base Check",
-                 "target_date": "2026-12-10", "sport_type": "ski_touring",
-                 "description": "Uphill endurance check"},
-                {"title": "Ski Mountaineering - Interim: Long Tour",
-                 "target_date": "2027-02-18", "sport_type": "ski_touring",
-                 "description": "Steep skiing simulation"},
-            ],
-            "strategy": "First leg strategy", "mesocycles": [{
-                "name": "Base", "start_date": "2026-10-01",
-                "end_date": "2026-12-10", "focus": "Aerobic durability",
-            }],
-        }
-
-        proposal = coach_service.plan_generate(force=True, objective_id=far_id)
-        planned_goal = proposal["goal"]
-
-        self.assertEqual(planned_goal["title"], "Ski Mountaineering - Interim: Base Check")
-        # The plan window is the first leg, and it starts where the preceding plan ends.
-        strategy_prompt = mock_client.complete.call_args[0][0]
-        self.assertIn("(2026-10-01 to\n2027-04-30)", strategy_prompt)
-        self.assertIsNotNone(test_db.get_macrocycle_for_objective(planned_goal["id"]))
-        # The preceding goal keeps its own plan.
-        self.assertEqual(
-            test_db.get_macrocycle_for_objective(prev_id)["strategy"], "Preceding strategy"
-        )
-
-    @patch("trainmate.coach.service._today_str")
-    @patch("trainmate.coach.engine.openrouter_client")
-    def test_splitting_rejects_out_of_window_interim_goals(self, mock_client, mock_today):
-        mock_today.return_value = "2026-07-31"
-        far_id = test_db.add_objective(
-            title="Ski Mountaineering", target_date="2027-04-30",
-            sport_type="ski_touring", priority=1,
-        )
-        mock_client.complete.return_value = {
-            "intermediate_goals": [
-                {"title": "Bogus - before the plan start", "target_date": "2026-05-01",
-                 "sport_type": "ski_touring", "description": ""},
-                {"title": "Bogus - after the goal", "target_date": "2027-06-01",
-                 "sport_type": "ski_touring", "description": ""},
-            ],
-            "strategy": "s", "mesocycles": [],
-        }
-
-        with self.assertRaises(ValueError) as ctx:
-            coach_service.plan_generate(force=True, objective_id=far_id)
-        self.assertIn("usable interim goals", str(ctx.exception))
-        # Nothing bogus was written to the athlete's goal list.
-        self.assertEqual(len(test_db.get_objectives(status="active")), 1)
+        self.assertIsNotNone(test_db.get_macrocycle_for_objective(obj_id))
 
     @patch("trainmate.coach.service._today_str")
     @patch("trainmate.coach.engine.openrouter_client")
