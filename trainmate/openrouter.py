@@ -169,7 +169,6 @@ class OpenRouterClient:
         headers = {
             "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json",
-            "HTTP-Referer": "https://github.com/google-deepmind/antigravity",
             "X-Title": "TrainMate Coach"
         }
 
