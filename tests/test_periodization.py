@@ -870,7 +870,7 @@ class TestPeriodization(unittest.TestCase):
         )
         test_db.save_metric_cache(
             date="2026-06-04", rhr=55, hrv=60, sleep_score=80, stress=25,
-            acute_workload=420.0, chronic_workload=400.0, acwr=1.05,
+            ctl=58.0, atl=61.0, tsb=-3.0,
         )
 
         mock_client.complete.return_value = {
@@ -910,7 +910,7 @@ class TestPeriodization(unittest.TestCase):
         )
         test_db.save_metric_cache(
             date="2026-06-04", rhr=55, hrv=60, sleep_score=80, stress=25,
-            acute_workload=420.0, chronic_workload=400.0, acwr=1.05,
+            ctl=58.0, atl=61.0, tsb=-3.0,
         )
 
         mock_client.complete.return_value = {

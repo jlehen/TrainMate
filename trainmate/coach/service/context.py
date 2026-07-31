@@ -70,7 +70,6 @@ class PmcContextMixin:
             rhrs = [m['rhr'] for m in metrics if m.get('rhr') is not None]
             hrvs = [m['hrv'] for m in metrics if m.get('hrv') is not None]
             sleeps = [m['sleep_score'] for m in metrics if m.get('sleep_score') is not None]
-            acwrs = [m['acwr'] for m in metrics if m.get('acwr') is not None]
 
             lines.append("Physiological Metrics (15-day average):")
             if rhrs:
@@ -79,11 +78,6 @@ class PmcContextMixin:
                 lines.append(f"  - Heart Rate Variability (HRV): {sum(hrvs)/len(hrvs):.1f} ms")
             if sleeps:
                 lines.append(f"  - Sleep Score: {sum(sleeps)/len(sleeps):.1f}/100")
-            if acwrs:
-                lines.append(
-                    f"  - Current ACWR (Acute:Chronic Workload Ratio): "
-                    f"{acwrs[-1]:.2f} (latest)"
-                )
             # PMC (CTL/ATL/TSB) + the single ramp line, so the strategy/plan prompt can
             # reason about current freshness and a sustainable build rate against the
             # science directives (DESIGN_pmc_fitness_fatigue.md §5.2).
@@ -124,8 +118,8 @@ class PmcContextMixin:
     def _pmc_latest_line(
         self, metrics: List[Dict[str, Any]], warmup_cutoff: Optional[str]
     ) -> Optional[str]:
-        """'- Fitness/Fatigue (PMC): CTL .. ATL .. TSB ..' from the latest past-warm-up
-        row carrying PMC values, or None."""
+        """'- Fitness/Fatigue (PMC): CTL .. ATL .. TSB .. ATL:CTL ..' from the latest
+        past-warm-up row carrying PMC values, or None."""
         for m in reversed(metrics):
             if warmup_cutoff and m['date'] < warmup_cutoff:
                 continue
@@ -139,6 +133,9 @@ class PmcContextMixin:
                 parts.append(f"ATL {atl:.1f} (fatigue)")
             if tsb is not None:
                 parts.append(f"TSB {tsb:.1f} (form)")
+            ratio = garmin.load_ratio(atl, ctl)
+            if ratio is not None:
+                parts.append(f"ATL:CTL {ratio:.2f} (relative overload)")
             return "- Fitness/Fatigue (PMC): " + ", ".join(parts)
         return None
 

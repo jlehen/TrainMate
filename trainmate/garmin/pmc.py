@@ -12,12 +12,20 @@ import trainmate.garmin as _g
 from trainmate.garmin.client import _to_date
 from trainmate.garmin.load import _hr_zone_coverage, activity_load, compute_load, measured_tss
 
-# Acute:chronic workload ratio (Gabbett/Banister lineage) plus the PMC CTL/ATL EWMA
-# time constants. All four are config-backed under `garmin:` and read live every sweep
-# (not frozen at import) so an edit can't drift derived values apart. Non-default
-# windows are experimental — calibration caveat in config_template.yaml and
+# The PMC CTL/ATL EWMA time constants are config-backed under `garmin:` and read live
+# every sweep (not frozen at import) so an edit can't drift derived values apart.
+# Non-default windows are experimental — calibration caveat in config_template.yaml and
 # DESIGN_pmc_fitness_fatigue.md §3.4.
 
+def load_ratio(atl: Optional[float], ctl: Optional[float]) -> Optional[float]:
+    """ATL/CTL — fatigue relative to the athlete's own fitness base, the scale-invariant
+    companion to TSB's absolute difference (training_load.txt §3).
+
+    None when either EWMA is NULL (pre-recompute row) or CTL has not warmed above zero:
+    there is no base to divide by, and a ratio against ~0 is noise, not a spike."""
+    if atl is None or ctl is None or ctl <= 0.0:
+        return None
+    return atl / ctl
 def _mean_std(values: List[float]) -> Tuple[float, float]:
     if not values:
         return 0.0, 0.0
@@ -153,9 +161,9 @@ def pmc_data_caveat(
         return None
     return {"n_days": n_days, "history_start": history_start}
 def recompute_derived(dbh=None) -> None:
-    """Recomputes acute/chronic workload, ACWR, and 28-day baselines for ALL cached
-    days. A full sweep is trivially cheap on a local DB and avoids windowed-recompute
-    bugs (an activity affects 28 days of derived values).
+    """Recomputes the PMC (CTL/ATL/TSB) and 28-day baselines for ALL cached days. A full
+    sweep is trivially cheap on a local DB and avoids windowed-recompute bugs (an
+    activity affects 28 days of derived values).
 
     `dbh` defaults to the module db; the post-wipe recompute (cli/data.py) passes the
     CLI's own handle so it sweeps the same database the wipe just ran against, even
@@ -170,13 +178,6 @@ def recompute_derived(dbh=None) -> None:
 
     metrics = dbh.get_metrics_cache()  # sorted by date asc
     by_date = {m["date"]: m for m in metrics}
-
-    # Window constants read live from config every sweep (never frozen at import), so an
-    # edit can't drift derived values apart. CHRONIC_WEEKS is computed inline from the two
-    # windows — never stored or a standalone param — so it can never disagree with them.
-    acute_days = config.acwr_acute_days
-    chronic_days = config.acwr_chronic_days
-    chronic_weeks = chronic_days / acute_days
 
     # PMC (CTL/ATL/TSB) over EVERY calendar day so rest/gap days decay the EWMAs. The
     # span ends at max(last activity, last metrics): an activities-only pull can leave
@@ -195,23 +196,12 @@ def recompute_derived(dbh=None) -> None:
         date_str = m["date"]
         date_obj = _to_date(date_str)
 
-        acute = sum(daily_load.get((date_obj - timedelta(days=d)).isoformat(), 0.0) for d in range(acute_days))
-        total_chronic = sum(daily_load.get((date_obj - timedelta(days=d)).isoformat(), 0.0) for d in range(chronic_days))
-        chronic = total_chronic / chronic_weeks
-        if chronic > 0.0:
-            acwr = acute / chronic
-        elif acute > 0.0:
-            acwr = 2.0
-        else:
-            acwr = 1.0
-
         ctl_atl_tsb = pmc.get(date_str)
         ctl, atl, tsb = ctl_atl_tsb if ctl_atl_tsb else (None, None, None)
 
         dbh.save_metric_cache(
             date=date_str, rhr=m.get("rhr"), hrv=m.get("hrv"),
             sleep_score=m.get("sleep_score"), stress=m.get("stress"),
-            acute_workload=acute, chronic_workload=chronic, acwr=acwr,
             ctl=ctl, atl=atl, tsb=tsb,
         )
 
@@ -244,7 +234,7 @@ def backfill_tss(
     """Recomputes the measured TSS (power TSS or hrTSS) for every cached activity
     and rewrites the stored value. Activities keep their raw zone seconds, so
     this needs no Garmin calls. Returns the number of rows whose TSS changed, and
-    refreshes derived workload/ACWR (which run off the on-the-fly load)."""
+    refreshes the derived PMC (which runs off the on-the-fly load)."""
     activities = _g.db.get_completed_activities(start_date=start_date, end_date=end_date)
     changed = 0
     sparse: List[Dict[str, Any]] = []

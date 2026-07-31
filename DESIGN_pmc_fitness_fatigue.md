@@ -557,6 +557,11 @@ retention.
   splitting by sport is a different (and contested) model.
 - **Replacing ACWR** — `training_load.txt` §3 is explicit that they are
   complementary guardrails; both stay.
+  **Superseded (2026-07-31, DESIGN_load_ratio.md):** ACWR was retired and its
+  relative-overload role handed to ATL/CTL, which reads off the EWMAs this
+  document introduced. Everything below describing stored
+  `acute_workload`/`chronic_workload`/`acwr` columns, the `acwr_*_days` config
+  windows, or `color_acwr` is historical.
 - **Web PMC chart** — nice, not now.
 - **Eager recompute on config edit** — §3.4; accepted staleness instead.
 

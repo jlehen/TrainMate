@@ -2,7 +2,7 @@ import os
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Set, Tuple
 from trainmate.types import Workout, CompletedActivity
-from trainmate.garmin import activity_load, rpe_divergence
+from trainmate.garmin import activity_load, load_ratio, rpe_divergence
 from trainmate.util import PMC_TSB_LAG_NOTE
 from trainmate.sports import canonical_sport
 from trainmate.modification_state import modification_status
@@ -48,11 +48,12 @@ def format_metrics_history(
     """Formats metrics cache history to a readable block for LLM prompts.
 
     One None-omission convention for the whole line: every field (RHR, HRV, Sleep,
-    Stress, ACWR, and the PMC triple CTL/ATL/TSB) is emitted only when present, so a
-    NULL value is silently dropped rather than crashing a `:.2f`/rendering `Nonebpm`
-    (DESIGN_pmc_fitness_fatigue.md §5.1). The PMC triple is additionally suppressed for
-    rows dated before `warmup_cutoff` (garmin.pmc_warmup_cutoff_for), where the EWMAs are
-    still leading-edge warm-up artifacts (§3.3a). The TSB-lag footnote is appended once
+    Stress, and the PMC triple CTL/ATL/TSB plus the ATL:CTL ratio) is emitted only when
+    present, so a NULL value is silently dropped rather than crashing a `:.2f`/rendering
+    `Nonebpm` (DESIGN_pmc_fitness_fatigue.md §5.1). The PMC block is additionally
+    suppressed for rows dated before `warmup_cutoff` (garmin.pmc_warmup_cutoff_for),
+    where the EWMAs are still leading-edge warm-up artifacts (§3.3a) — the ratio rides
+    inside that gate since it divides two of them. The TSB-lag footnote is appended once
     when any row showed TSB (it explains the TSB lag; a CTL/ATL-only block has no lag
     to explain)."""
     metrics_lines = []
@@ -67,8 +68,6 @@ def format_metrics_history(
             fields.append(f"Sleep={m['sleep_score']}")
         if m.get('stress') is not None:
             fields.append(f"Stress={m['stress']}")
-        if m.get('acwr') is not None:
-            fields.append(f"ACWR={m['acwr']:.2f}")
         in_warmup = bool(warmup_cutoff and m['date'] < warmup_cutoff)
         if not in_warmup:
             pmc_fields = [
@@ -76,6 +75,9 @@ def format_metrics_history(
                 for label, key in (("CTL", "ctl"), ("ATL", "atl"), ("TSB", "tsb"))
                 if m.get(key) is not None
             ]
+            ratio = load_ratio(m.get('atl'), m.get('ctl'))
+            if ratio is not None:
+                pmc_fields.append(f"ATL:CTL={ratio:.2f}")
             if pmc_fields:
                 fields.extend(pmc_fields)
                 if m.get('tsb') is not None:

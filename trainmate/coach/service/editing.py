@@ -58,7 +58,7 @@ class WorkoutEditMixin:
 
         Each op is ``{'id': <workout id>, 'new_date': 'YYYY-MM-DD'}``. Checks for
         newly-created stretches of >2 consecutive high-intensity days, weekly load
-        spikes (an ACWR proxy), and mesocycle-boundary crossings. An empty list means
+        spikes (a relative-overload proxy), and mesocycle-boundary crossings. An empty list means
         the swap looks safe.
         """
         warnings: List[str] = []
@@ -106,7 +106,8 @@ class WorkoutEditMixin:
                 )
                 break
 
-        # 2. Weekly load spike (ACWR proxy). Only cross-week swaps shift weekly totals.
+        # 2. Weekly load spike (relative-overload proxy). Only cross-week swaps shift
+        # weekly totals.
         pre_weekly: Dict[str, float] = {}
         post_weekly: Dict[str, float] = {}
         for w in existing:
@@ -124,7 +125,7 @@ class WorkoutEditMixin:
             if before > 0 and delta > 0 and delta / before > 0.30 and delta >= 50:
                 warnings.append(
                     f"Week of {week}: planned load rises {before:.0f} -> {after:.0f} "
-                    f"TSS (+{delta / before * 100:.0f}%), which may spike your ACWR."
+                    f"TSS (+{delta / before * 100:.0f}%), which may spike your acute load."
                 )
 
         # 3. Mesocycle boundary crossings.

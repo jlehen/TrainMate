@@ -587,10 +587,13 @@ class DataAnalysisMixin:
             if hrvs:
                 avg_hrv = sum(hrvs) / len(hrvs)
 
-            max_acwr = None
-            acwrs = [m['acwr'] for m in w_metrics if m.get('acwr') is not None]
-            if acwrs:
-                max_acwr = max(acwrs)
+            max_load_ratio = None
+            ratios = [
+                r for r in (garmin.load_ratio(m.get('atl'), m.get('ctl')) for m in w_metrics)
+                if r is not None
+            ]
+            if ratios:
+                max_load_ratio = max(ratios)
 
             end_ctl, week_ramp, min_tsb = self._pmc_week_summary(
                 w_metrics, ctl_by_date, pmc_cutoff
@@ -659,7 +662,9 @@ class DataAnalysisMixin:
                 "avg_hrv": round(avg_hrv, 1) if avg_hrv is not None else None,
                 "avg_sleep_score": response["avg_sleep_score"],
                 "avg_stress": response["avg_stress"],
-                "max_acwr": round(max_acwr, 2) if max_acwr is not None else None,
+                "max_load_ratio": (
+                    round(max_load_ratio, 2) if max_load_ratio is not None else None
+                ),
                 "end_ctl": round(end_ctl, 1) if end_ctl is not None else None,
                 "week_ramp": week_ramp,
                 "min_tsb": round(min_tsb, 1) if min_tsb is not None else None,

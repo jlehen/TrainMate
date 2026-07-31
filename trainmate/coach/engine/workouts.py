@@ -219,7 +219,8 @@ if the athlete shows signs of accumulated fatigue.
 Based on this, determine if we need to adapt the training plan for the remainder of
 the active mesocycle block (from {target_date_str} to {meso_end_date_str}).
 - If they are showing high fatigue or injury risk (e.g. elevated RHR, depressed HRV,
-  poor sleep, or ACWR > 1.3), replace hard workouts with recovery or rest.
+  poor sleep, or ATL:CTL > 1.3 without a planned overload reason), replace hard workouts
+  with recovery or rest.
 - If they have missed key workouts, adjust the remaining workouts to safely build back
   volume without spiking the acute load too fast.
 - If they are fully recovered and on track, keep the plan as scheduled or make minor

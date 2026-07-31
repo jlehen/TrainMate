@@ -62,7 +62,7 @@ def run_workout_adapt(args: argparse.Namespace) -> None:
         date_str, no_pull=args.no_pull, force_pull=getattr(args, 'force_pull', False)
     )
 
-    # The coach reads the full per-day trajectory (HRV/RHR/sleep/ACWR/PMC) from the same
+    # The coach reads the full per-day trajectory (HRV/RHR/sleep/PMC) from the same
     # window; here we only tell the athlete how many days fed the decision, not the numbers.
     try:
         history_days = getattr(args, "lookback", None) or config.metrics_lookback_days

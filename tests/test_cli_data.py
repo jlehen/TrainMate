@@ -191,9 +191,10 @@ class TestCliData(unittest.TestCase):
         mock_garmin.pmc_history_start.return_value = None
         mock_garmin.pmc_warmup_cutoff_for.side_effect = real_garmin.pmc_warmup_cutoff_for
         mock_garmin.pmc_display_values.side_effect = real_garmin.pmc_display_values
+        mock_garmin.load_ratio.side_effect = real_garmin.load_ratio
         test_db.save_metric_cache(
             date="2026-06-03", rhr=50, hrv=75, sleep_score=80, stress=20,
-            acute_workload=4.0, chronic_workload=3.5, acwr=1.14
+            ctl=60.0, atl=68.4, tsb=-8.4
         )
         test_db.save_baseline(
             date="2026-06-03", rhr_mean=50.0, rhr_std=1.5,

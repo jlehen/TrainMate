@@ -234,7 +234,7 @@ def analyze_adherence(
                 )
             else:
                 # No plan governs this date (e.g. before tool adoption, or an
-                # unplanned off-season stretch). The load still feeds fatigue/ACWR
+                # unplanned off-season stretch). The load still feeds the PMC
                 # via completed_activities — surface it as informational, not a deviation.
                 informational.append(act)
 

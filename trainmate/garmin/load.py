@@ -1,4 +1,4 @@
-"""Training-load math: measured/HR/RPE TSS, ACWR load, RPE divergence."""
+"""Training-load math: measured/HR/RPE TSS, per-activity load, RPE divergence."""
 import math
 import sys
 import time

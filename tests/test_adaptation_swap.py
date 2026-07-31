@@ -80,7 +80,7 @@ class TestAdaptationSwap(unittest.TestCase):
         ops = self._swap_ops_for_dates("2026-06-09", "2026-06-15")
         warnings = coach_service.workout_swap_validate(ops)
         self.assertTrue(
-            any("spike your ACWR" in w for w in warnings),
+            any("spike your acute load" in w for w in warnings),
             f"expected a weekly load-spike warning, got {warnings}",
         )
 

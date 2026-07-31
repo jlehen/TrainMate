@@ -77,15 +77,13 @@ garmin:
   # hrTSS is trusted; below it, effort sat under zone 1 and hrTSS undercounts, so
   # RPE is preferred. Calibrated against the activity history. Default 0.5.
   #hr_zone_coverage_min: 0.5
-  # Load-model windows (ACWR + PMC/CTL/ATL). For deliberate experimentation ONLY:
-  # the interpretation bands (ACWR 0.8-1.3, TSB -30/+25, ramp 3-5/8) and CLI colors
+  # PMC (CTL/ATL) time constants. For deliberate experimentation ONLY: the
+  # interpretation bands (TSB -30/+25, ramp 3-5/8, ATL:CTL 1.3/1.5) and CLI colors
   # are calibrated to the defaults, so a non-default value changes what the numbers
   # MEAN while the bands keep judging them at the standard values. The defaults are
   # the supported configuration; see DESIGN_pmc_fitness_fatigue.md §3.4. Takes effect
   # on the next data pull/wipe/backfill (nothing recomputes on a config edit alone).
-  # All four must be positive integers (EWMA/averaging divisors).
-  #acwr_acute_days: 7      # ACWR acute (short) workload window
-  #acwr_chronic_days: 28   # ACWR chronic (long) window, as a rolling weekly average
+  # Both must be positive integers (EWMA divisors).
   #pmc_ctl_days: 42        # CTL (fitness) EWMA time constant, in days
   #pmc_atl_days: 7         # ATL (fatigue) EWMA time constant, in days
 

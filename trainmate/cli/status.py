@@ -7,7 +7,7 @@ from trainmate.config import config
 from trainmate.adherence import analyze_adherence, date_covered
 from trainmate.util import (
     bold, dim, green, red, yellow, cyan, blue, magenta, gray,
-    color_acwr, color_ramp, pmc_cells, pmc_warming_note, visible_len, pad_visible,
+    color_load_ratio, color_ramp, pmc_cells, pmc_warming_note, visible_len, pad_visible,
     wrap_text, format_labeled_text, format_labeled_block, PMC_TSB_LAG_NOTE,
     today_str as _today_str, today_date as _today_date,
 )
@@ -185,14 +185,6 @@ def run_status(
         print(f"- Sleep Score: {sleep_display}")
         print(f"- Stress     : {stress_display}")
         
-        acute = last_metrics['acute_workload'] or 0.0
-        chronic = last_metrics['chronic_workload'] or 0.0
-        acwr = last_metrics['acwr'] or 0.0
-        print(
-            f"- ACWR       : {color_acwr(acwr)} "
-            f"(Acute: {acute:.1f}, Chronic: {chronic:.1f})"
-        )
-
         # Fitness/Fatigue/Form (CTL/ATL/TSB) + ramp. The whole line is dropped when all
         # three are absent (DESIGN_pmc_fitness_fatigue.md §6.1); ramp comes from the full
         # stored CTL series. All garmin helpers read cli.db (dbh=), the same database the
@@ -207,8 +199,11 @@ def run_status(
                 ctl_by_date, last_metrics['date'], warmup_cutoff=warmup_cutoff
             )
             ramp_s = color_ramp(ramp_v) + "/wk" if ramp_v is not None else "—"
+            ratio_v = cli.garmin.load_ratio(atl_v, ctl_v)
+            ratio_s = color_load_ratio(ratio_v) if ratio_v is not None else "—"
             print(
-                f"- Fitness    : CTL {ctl_s} | ATL {atl_s} | TSB {tsb_s} | Ramp {ramp_s}"
+                f"- Fitness    : CTL {ctl_s} | ATL {atl_s} | TSB {tsb_s} | "
+                f"ATL:CTL {ratio_s} | Ramp {ramp_s}"
             )
             if tsb_v is not None:
                 print(dim(f"  {PMC_TSB_LAG_NOTE}"))

@@ -288,35 +288,37 @@ class TestColors(unittest.TestCase):
 
 class TestFormatMetricsHistory(unittest.TestCase):
     def test_null_fields_omitted_no_crash(self):
-        # Regression: NULL acwr used to crash `:.2f`; NULL rhr rendered `Nonebpm`.
+        # Regression: a NULL numeric used to crash `:.2f`; NULL rhr rendered `Nonebpm`.
         rows = [{"date": "2026-06-01", "rhr": None, "hrv": None, "sleep_score": None,
-                 "stress": None, "acwr": None, "ctl": None, "atl": None, "tsb": None}]
+                 "stress": None, "ctl": None, "atl": None, "tsb": None}]
         out = format_metrics_history(rows)
         self.assertIn("2026-06-01", out)
         self.assertNotIn("None", out)
-        self.assertNotIn("ACWR", out)
+        self.assertNotIn("CTL", out)
 
     def test_full_row_shows_pmc_and_footnote(self):
         rows = [{"date": "2026-07-02", "rhr": 52, "hrv": 61, "sleep_score": 78,
-                 "stress": 31, "acwr": 1.12, "ctl": 62.4, "atl": 71.7, "tsb": -8.9}]
+                 "stress": 31, "ctl": 62.4, "atl": 71.7, "tsb": -8.9}]
         out = format_metrics_history(rows)
         self.assertIn("CTL=62.4", out)
         self.assertIn("ATL=71.7", out)
         self.assertIn("TSB=-8.9", out)
+        self.assertIn("ATL:CTL=1.15", out)
         self.assertIn(PMC_TSB_LAG_NOTE, out)
 
     def test_warmup_rows_suppress_pmc(self):
         rows = [{"date": "2026-01-05", "rhr": 50, "hrv": 60, "sleep_score": 80,
-                 "stress": 20, "acwr": 1.0, "ctl": 20.0, "atl": 55.0, "tsb": -30.0}]
+                 "stress": 20, "ctl": 20.0, "atl": 55.0, "tsb": -30.0}]
         out = format_metrics_history(rows, warmup_cutoff="2026-02-12")
-        self.assertIn("ACWR=1.00", out)
+        self.assertIn("RHR=50bpm", out)
+        # "CTL" also catches a leaked ATL:CTL ratio, which rides inside the same gate.
         self.assertNotIn("CTL", out)
         self.assertNotIn(PMC_TSB_LAG_NOTE, out)
 
     def test_all_null_row_marked_no_data(self):
         # A pulled-but-empty day must not render a dangling "- 2026-06-01: " line.
         rows = [{"date": "2026-06-01", "rhr": None, "hrv": None, "sleep_score": None,
-                 "stress": None, "acwr": None, "ctl": None, "atl": None, "tsb": None}]
+                 "stress": None, "ctl": None, "atl": None, "tsb": None}]
         out = format_metrics_history(rows)
         self.assertIn("- 2026-06-01: (no data)", out)
 
@@ -324,7 +326,7 @@ class TestFormatMetricsHistory(unittest.TestCase):
         # The footnote explains the TSB lag; it must appear whenever TSB is shown,
         # even when CTL happens to be NULL.
         rows = [{"date": "2026-07-02", "rhr": 52, "hrv": 61, "sleep_score": 78,
-                 "stress": 31, "acwr": 1.1, "ctl": None, "atl": 71.7, "tsb": -8.9}]
+                 "stress": 31, "ctl": None, "atl": 71.7, "tsb": -8.9}]
         out = format_metrics_history(rows)
         self.assertIn("TSB=-8.9", out)
         self.assertIn(PMC_TSB_LAG_NOTE, out)
@@ -333,7 +335,7 @@ class TestFormatMetricsHistory(unittest.TestCase):
         # ...and conversely: a CTL/ATL-only block shows no TSB, so there is no lag
         # on display to explain and the footnote must be omitted.
         rows = [{"date": "2026-07-02", "rhr": 52, "hrv": 61, "sleep_score": 78,
-                 "stress": 31, "acwr": 1.1, "ctl": 62.4, "atl": 71.7, "tsb": None}]
+                 "stress": 31, "ctl": 62.4, "atl": 71.7, "tsb": None}]
         out = format_metrics_history(rows)
         self.assertIn("CTL=62.4", out)
         self.assertNotIn(PMC_TSB_LAG_NOTE, out)
@@ -451,33 +453,11 @@ class TestPMCIntegration(_DBBackedTest):
         after = next(m for m in test_db.get_metrics_cache() if m["date"] == d40)["ctl"]
         self.assertEqual(before, after)
 
-    def test_config_windows_move_normalized_chronic_in_same_sweep(self):
-        # chronic_weeks is computed INLINE from the live windows (never a frozen
-        # CHRONIC_WEEKS): with acute=14/chronic=28 and steady 60/day, chronic
-        # normalizes by 2 (not the default 4), so chronic == acute and ACWR == 1.0.
-        base = date(2026, 3, 1)
-        for i in range(60):
-            d = (base + timedelta(days=i)).isoformat()
-            test_db.save_metric_cache(date=d, rhr=50, hrv=70, sleep_score=80, stress=20)
-            self._add_activity(f"a{i}", d, 60.0)
-        with unittest.mock.patch.dict(
-            garmin.config.data,
-            {"garmin": {"acwr_acute_days": 14, "acwr_chronic_days": 28}},
-        ):
-            garmin.recompute_derived()
-        late = next(
-            m for m in test_db.get_metrics_cache()
-            if m["date"] == (base + timedelta(days=59)).isoformat()
-        )
-        self.assertAlmostEqual(late["acute_workload"], 840.0, delta=0.1)
-        self.assertAlmostEqual(late["chronic_workload"], 840.0, delta=0.1)
-        self.assertAlmostEqual(late["acwr"], 1.0, delta=0.01)
-
     def test_nonpositive_config_window_fails_loud(self):
-        # The windows are EWMA/averaging divisors; a zero must be rejected at read
-        # time with a clear message, not crash recompute mid-sweep (or store
-        # negative-window nonsense).
-        for key in ("acwr_acute_days", "acwr_chronic_days", "pmc_ctl_days", "pmc_atl_days"):
+        # The windows are EWMA divisors; a zero must be rejected at read time with a
+        # clear message, not crash recompute mid-sweep (or store negative-window
+        # nonsense).
+        for key in ("pmc_ctl_days", "pmc_atl_days"):
             with unittest.mock.patch.dict(garmin.config.data, {"garmin": {key: 0}}):
                 with self.assertRaises(ValueError):
                     getattr(garmin.config, key)

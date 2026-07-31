@@ -147,7 +147,7 @@ COACHING ROLE AND OBJECTIVES:
 2. Focus scheduling on the NEXT CHRONOLOGICAL GOAL only. If there are multiple goals, identify
    synergies between them (e.g. general base or strength building phases).
 3. Dynamically adjust training plans based on recent Garmin metrics (Resting HR, HRV, Sleep,
-   ACWR) to optimize recovery and prevent injury.
+   and the PMC CTL/ATL/TSB) to optimize recovery and prevent injury.
 4. Shift or scale training volume and intensity around the athlete's active constraints
    (travel, injury, capacity/intensity caps, preferences) to manage fatigue and respect
    what they've asked you to work around.
@@ -295,8 +295,7 @@ ACTIVE CONSTRAINTS (athlete-declared directives to work around):
         )
         met_digest = sorted(
             (m.get('date'), m.get('rhr'), m.get('hrv'), m.get('sleep_score'),
-             m.get('stress'), m.get('acwr'),
-             m.get('ctl'), m.get('atl'), m.get('tsb'))
+             m.get('stress'), m.get('ctl'), m.get('atl'), m.get('tsb'))
             for m in metrics
         )
         evt_digest = sorted(

@@ -10,16 +10,14 @@ from trainmate.db import db
 from trainmate.util import today_date, today_str, yellow, red, dim
 
 def _derivation_pad_days() -> int:
-    """Raw history needed *before* a displayed window so ACWR/chronic-load/baselines
-    and the CTL EWMA are warm for the earliest displayed day. Read live from config.
+    """Raw history needed *before* a displayed window so the baselines and the CTL EWMA
+    are warm for the earliest displayed day. Read live from config.
 
-    `max(acwr_chronic_days, 28, ceil(1.5*pmc_ctl_days))` (= 63 at defaults): the 28
-    floor pins the pad to the hardcoded 28-day baseline lookback in recompute_derived()
-    even if the chronic window is shrunk below it; the 1.5*τ_ctl term warms CTL to
-    ~78% at the left edge (the §3.3(b) accuracy caveat carries the residual). See
-    DESIGN_pmc_fitness_fatigue.md §3.4."""
+    `max(28, ceil(1.5*pmc_ctl_days))` (= 63 at defaults): the 28 floor pins the pad to
+    the hardcoded 28-day baseline lookback in recompute_derived(); the 1.5*τ_ctl term
+    warms CTL to ~78% at the left edge (the §3.3(b) accuracy caveat carries the
+    residual). See DESIGN_pmc_fitness_fatigue.md §3.4."""
     return max(
-        config.acwr_chronic_days,
         28,
         math.ceil(1.5 * config.pmc_ctl_days),
     )

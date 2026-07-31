@@ -5,7 +5,7 @@
 The shared `data bootstrap` / `data reflect` brain (`_analyze_workouts_logic`)
 reconstructs training phases and authors coach learnings from one input:
 `weekly_summaries`. Today each week is a coarse aggregate (load, zones, avg
-RHR/HRV, max ACWR, rest days) plus a `highlights` list gated on a hardcoded
+RHR/HRV, max ATL:CTL, rest days) plus a `highlights` list gated on a hardcoded
 TSS≥120 / RPE≥8 / name-match threshold. Two high-value, low-effort signals that
 *already live in the database* are never shown to the model:
 
@@ -83,7 +83,7 @@ training learning from a week whose anomaly a life event already explains.
 ### Surfaced raw metrics (already stored, currently dropped)
 Add to each weekly summary: `avg_sleep_score`, `avg_stress` (mean over the week's
 metric rows; `None` when absent), alongside the existing `avg_rhr` / `avg_hrv` /
-`max_acwr`.
+`max_load_ratio` (renamed from `max_acwr`, see DESIGN_load_ratio.md).
 
 ### Baseline-relative deviation (the real "response" signal)
 `athlete_baselines` stores rolling `{rhr,hrv,sleep}_baseline_{mean,std}` per date.
@@ -129,7 +129,7 @@ read a high-load week together with the **next** week's `vs_baseline_z`; treat
   "total_duration_hours": 7.5, "total_tss": 410.0, "average_rpe": 6.2,
   "sports": {"road_biking": 4, "running": 1},
   "zone_distribution_sec": {"Z1_Z2": 18000, "Z3": 2400, "Z4_Z5": 1200},
-  "avg_rhr": 53.0, "avg_hrv": 78.0, "max_acwr": 1.31,
+  "avg_rhr": 53.0, "avg_hrv": 78.0, "max_load_ratio": 1.31,
   "avg_sleep_score": 71.0, "avg_stress": 38.0,          // NEW (#2)
   "vs_baseline_z": {"rhr": 1.4, "hrv": -1.1, "sleep": -0.6},  // NEW (#2)
   "rest_days": 1,

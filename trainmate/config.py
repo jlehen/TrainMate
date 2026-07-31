@@ -280,30 +280,19 @@ class Config:
         clean gap at 0.5."""
         return float(self.get("garmin", {}).get("hr_zone_coverage_min", 0.5))
 
-    # --- Load-model windows (ACWR + PMC), config-backed under `garmin:`. Non-default
-    # values are experimental; calibration caveat in config_template.yaml and
+    # --- PMC time constants, config-backed under `garmin:`. Non-default values are
+    # experimental; calibration caveat in config_template.yaml and
     # DESIGN_pmc_fitness_fatigue.md §3.4. ---
     def _load_window_days(self, key: str, default: int) -> int:
-        """A `garmin:` load window/time-constant, validated positive — all four are
-        EWMA/averaging divisors, so a non-positive value would crash recompute or store
-        nonsense. Fail loud at read time."""
+        """A `garmin:` load time-constant, validated positive — both are EWMA divisors,
+        so a non-positive value would crash recompute or store nonsense. Fail loud at
+        read time."""
         v = int(self.get("garmin", {}).get(key, default))
         if v <= 0:
             raise ValueError(
                 f"config garmin.{key} must be a positive number of days, got {v}"
             )
         return v
-
-    @property
-    def acwr_acute_days(self) -> int:
-        """Acute (short) workload window for ACWR (garmin.py). Under `garmin:`. Default 7."""
-        return self._load_window_days("acwr_acute_days", 7)
-
-    @property
-    def acwr_chronic_days(self) -> int:
-        """Chronic (long) workload window for ACWR, expressed as a rolling weekly average
-        of chronic_days/acute_days weeks (garmin.py). Under `garmin:`. Default 28."""
-        return self._load_window_days("acwr_chronic_days", 28)
 
     @property
     def pmc_ctl_days(self) -> int:

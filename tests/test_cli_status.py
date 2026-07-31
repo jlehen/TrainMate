@@ -44,7 +44,7 @@ class TestCliStatus(unittest.TestCase):
         test_db.save_metric_cache(
             date="2026-05-31",
             rhr=48, hrv=82, sleep_score=90, stress=15,
-            acute_workload=4.0, chronic_workload=3.5, acwr=1.14,
+            ctl=60.0, atl=68.4, tsb=-8.4,
         )
         test_db.save_baseline(
             date="2026-05-31",
@@ -64,7 +64,6 @@ class TestCliStatus(unittest.TestCase):
         self.assertIn("London Marathon", stdout)
         self.assertIn("Resting HR : 48 bpm", stdout)
         self.assertIn("Overnight HRV: 82 ms", stdout)
-        self.assertIn("ACWR       : 1.14", stdout)
         self.assertIn("Baselines (28-day)", stdout)
         # Status shows only a one-line learnings summary; the full text lives under 'learnings'.
         self.assertIn("Coach Learnings:", stdout)
@@ -150,6 +149,7 @@ class TestCliStatus(unittest.TestCase):
         exit_code, stdout, stderr = self.run_cli(["status"])
         self.assertEqual(exit_code, 0)
         self.assertIn("- Fitness    : CTL ", stdout)
+        self.assertIn("ATL:CTL ", stdout)                  # relative-overload ratio
         self.assertIn("/wk", stdout)                       # ramp rendered
         self.assertIn("TSB is CTL(yesterday)", stdout)     # lag footnote rides with TSB
         self.assertIn("PMC still warming", stdout)
@@ -163,13 +163,14 @@ class TestCliStatus(unittest.TestCase):
         mock_garmin.pmc_history_start.return_value = None
         mock_garmin.pmc_warmup_cutoff_for.side_effect = real_garmin.pmc_warmup_cutoff_for
         mock_garmin.pmc_display_values.side_effect = real_garmin.pmc_display_values
+        mock_garmin.load_ratio.side_effect = real_garmin.load_ratio
         test_db.save_metric_cache(
             date="2026-06-03", rhr=50, hrv=75, sleep_score=80, stress=20,
-            acute_workload=4.0, chronic_workload=3.5, acwr=1.14,
         )
         exit_code, stdout, stderr = self.run_cli(["data", "show-metrics", "--all", "--csv"])
         self.assertEqual(exit_code, 0)
         header = stdout.splitlines()[0]
-        self.assertTrue(header.endswith("ctl,atl,tsb"))
+        self.assertTrue(header.endswith("ctl,atl,tsb,atl_ctl_ratio"))
         row = next(l for l in stdout.splitlines() if l.startswith("2026-06-03"))
-        self.assertTrue(row.endswith(",,,"), row)          # three empty cells, not zeros
+        # Four empty cells, not zeros — the ratio is NULL whenever its inputs are.
+        self.assertTrue(row.endswith(",,,,"), row)

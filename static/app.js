@@ -440,18 +440,22 @@ function updateMetrics(metrics, baseline) {
         } else { sleepBase.innerText = "baseline: N/A"; sleepBadge.style.display = "none"; }
     } else { sleepVal.innerText = "--"; sleepBase.innerText = "baseline: --"; sleepBadge.style.display = "none"; }
 
-    // 4. ACWR
-    const acwrVal = document.querySelector("#metric-acwr .metric-value");
-    const acwrBase = document.querySelector("#metric-acwr .metric-baseline");
-    const acwrBadge = document.getElementById("acwr-badge");
-    if (metrics && metrics.acwr !== null && metrics.acwr !== undefined) {
-        acwrVal.innerText = metrics.acwr.toFixed(2);
-        acwrBase.innerText = `acute: ${(metrics.acute_workload || 0).toFixed(0)} | chronic: ${(metrics.chronic_workload || 0).toFixed(0)}`;
-        acwrBadge.style.display = "inline-block";
-        if (metrics.acwr > 1.5) { acwrBadge.className = "status-badge badge badge-danger"; acwrBadge.innerText = "Danger"; }
-        else if (metrics.acwr > 1.3 || metrics.acwr < 0.8) { acwrBadge.className = "status-badge badge badge-warning"; acwrBadge.innerText = metrics.acwr > 1.3 ? "Overload" : "Detraining"; }
-        else { acwrBadge.className = "status-badge badge badge-success"; acwrBadge.innerText = "Sweet Spot"; }
-    } else { acwrVal.innerText = "--"; acwrBase.innerText = "acute: -- | chronic: --"; acwrBadge.style.display = "none"; }
+    // 4. ATL:CTL — relative overload. Only the high end warns: a LOW ratio is a taper,
+    // deload, or intensity block doing its job (training_load.txt §3/§4).
+    const ratioVal = document.querySelector("#metric-load-ratio .metric-value");
+    const ratioBase = document.querySelector("#metric-load-ratio .metric-baseline");
+    const ratioBadge = document.getElementById("load-ratio-badge");
+    const ratio = (metrics && metrics.ctl > 0 && metrics.atl != null)
+        ? metrics.atl / metrics.ctl : null;
+    if (ratio !== null) {
+        ratioVal.innerText = ratio.toFixed(2);
+        ratioBase.innerText = `fatigue: ${metrics.atl.toFixed(0)} | fitness: ${metrics.ctl.toFixed(0)}`;
+        ratioBadge.style.display = "inline-block";
+        if (ratio > 1.5) { ratioBadge.className = "status-badge badge badge-danger"; ratioBadge.innerText = "Spike"; }
+        else if (ratio > 1.3) { ratioBadge.className = "status-badge badge badge-warning"; ratioBadge.innerText = "Overload"; }
+        else if (ratio >= 1.0) { ratioBadge.className = "status-badge badge badge-success"; ratioBadge.innerText = "Building"; }
+        else { ratioBadge.className = "status-badge badge badge-info"; ratioBadge.innerText = "Unloading"; }
+    } else { ratioVal.innerText = "--"; ratioBase.innerText = "fatigue: -- | fitness: --"; ratioBadge.style.display = "none"; }
 }
 
 // --- OBJECTIVES ---
@@ -1024,7 +1028,7 @@ async function fetchHistory() {
             { label: "HRV", key: "hrv" },
             { label: "Sleep", key: "sleep_score" },
             { label: "Stress", key: "stress" },
-            { label: "ACWR", get: m => m.acwr != null ? m.acwr.toFixed(2) : "" },
+            { label: "ATL:CTL", get: m => (m.ctl > 0 && m.atl != null) ? (m.atl / m.ctl).toFixed(2) : "" },
         ], "No metrics in range.");
     } catch (e) { logConsole(`Metrics load error: ${e.message}`, "error"); }
 

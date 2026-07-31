@@ -100,13 +100,11 @@ class AthleteMetric(TypedDict):
     hrv: Optional[int]
     sleep_score: Optional[int]
     stress: Optional[int]
-    acute_workload: Optional[float]
-    chronic_workload: Optional[float]
-    acwr: Optional[float]
     # Performance Management Chart (DESIGN_pmc_fitness_fatigue.md §3). CTL = fitness
     # (42-day EWMA of load), ATL = fatigue (7-day EWMA), TSB = form = CTL(yesterday) -
     # ATL(yesterday). Suppressed at display inside the leading-edge warm-up window and
-    # NULL on any pre-recompute row.
+    # NULL on any pre-recompute row. The ATL/CTL load ratio derives from these at read
+    # time (garmin.pmc.load_ratio) rather than being stored.
     ctl: Optional[float]
     atl: Optional[float]
     tsb: Optional[float]

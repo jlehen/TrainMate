@@ -107,7 +107,7 @@ class TestWorkoutAnalysis(unittest.TestCase):
         # Metric cache for that week
         test_db.save_metric_cache(
             date="2026-06-03", rhr=50, hrv=75, sleep_score=85, stress=20,
-            acute_workload=300.0, chronic_workload=280.0, acwr=1.07
+            ctl=60.0, atl=68.0, tsb=-8.0
         )
 
         mock_client.complete.return_value = {

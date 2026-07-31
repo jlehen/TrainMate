@@ -1,6 +1,9 @@
 import unittest
 from unittest.mock import patch
-from trainmate.util import wrap_text, visible_len, pad_visible, color_acwr, format_labeled_text
+from trainmate.util import (
+    wrap_text, visible_len, pad_visible, color_load_ratio, format_labeled_text,
+    yellow, red,
+)
 
 
 class TestUtils(unittest.TestCase):
@@ -42,11 +45,16 @@ class TestUtils(unittest.TestCase):
         self.assertEqual(pad_visible("\033[31mhi\033[0m", 5), "\033[31mhi\033[0m   ")
         self.assertEqual(pad_visible("hi", 5, align_left=False), "   hi")
 
-    def test_color_acwr(self):
-        self.assertIn("0.70", color_acwr(0.70))
-        self.assertIn("1.10", color_acwr(1.10))
-        self.assertIn("1.40", color_acwr(1.40))
-        self.assertIn("1.60", color_acwr(1.60))
+    def test_color_load_ratio(self):
+        # Only the overload end is colored. A LOW ratio is phase-dependent (taper,
+        # deload, intensity block), so it must render bare — see training_load.txt §3/§4.
+        self.assertEqual("0.70", color_load_ratio(0.70))
+        self.assertEqual("1.10", color_load_ratio(1.10))
+        self.assertEqual("1.30", color_load_ratio(1.30))
+        # colorize() is a no-op off a TTY, so compare the overload end against the
+        # colorizer itself rather than asserting raw escape codes.
+        self.assertEqual(yellow("1.40"), color_load_ratio(1.40))
+        self.assertEqual(red("1.60"), color_load_ratio(1.60))
 
     def test_format_labeled_text(self):
         from trainmate.util import yellow

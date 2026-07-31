@@ -103,7 +103,7 @@ class TestCliWorkouts(unittest.TestCase):
             test_db.save_metric_cache(
                 date=(today - timedelta(days=n_days - 1 - i)).isoformat(),
                 rhr=50, hrv=70, sleep_score=80, stress=20,
-                acwr=1.12, ctl=62.4, atl=71.7, tsb=-8.9,
+                ctl=62.4, atl=71.7, tsb=-8.9,
             )
 
     @patch("trainmate.cli.workouts.generate.ensure_recent_data")

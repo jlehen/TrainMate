@@ -370,14 +370,21 @@ class BaseDB:
                     hrv INTEGER,
                     sleep_score INTEGER,
                     stress INTEGER,
-                    acute_workload REAL,
-                    chronic_workload REAL,
-                    acwr REAL,
                     ctl REAL,
                     atl REAL,
                     tsb REAL
                 )
             """)
+            # ACWR retired in favour of ATL/CTL, which reads off the PMC EWMAs already on
+            # this row (training_load.txt §3). Pure DDL, guarded by column presence, so
+            # it is idempotent and needs no separate migration script.
+            cursor.execute("PRAGMA table_info(athlete_metrics_cache)")
+            mcols = [row['name'] for row in cursor.fetchall()]
+            for col in ("acute_workload", "chronic_workload", "acwr"):
+                if col in mcols:
+                    cursor.execute(
+                        f"ALTER TABLE athlete_metrics_cache DROP COLUMN {col}"
+                    )
             # Performance Management Chart columns (DESIGN_pmc_fitness_fatigue.md §4):
             # CTL/ATL/TSB, back-populated for the whole history by the next
             # recompute_derived() sweep. NULL-tolerant on existing rows; no migration.

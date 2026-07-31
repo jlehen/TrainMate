@@ -303,7 +303,7 @@ def _warn_manual(start: str, end: str, *, cold: bool) -> None:
     else:
         print(yellow(
             f"This view needs Garmin data back to {start}, which hasn't been pulled. "
-            "Baselines and ACWR may be incomplete. Fitness/fatigue (CTL/ATL/TSB) also "
+            "Baselines may be incomplete. Fitness/fatigue (CTL/ATL/TSB) also "
             f"warm up over the first ~{config.pmc_ctl_days} days of history, so on a "
             "shallow backfill freshness can read artificially low. To backfill, run:"
         ))

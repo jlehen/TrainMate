@@ -7,7 +7,7 @@ import trainmate_cli as cli
 from trainmate.adherence import analyze_adherence, date_covered
 from trainmate.util import (
     bold, dim, green, red, yellow, cyan, blue, magenta, gray,
-    color_acwr, pmc_cells, visible_len, pad_visible, wrap_text, format_labeled_text,
+    color_load_ratio, pmc_cells, visible_len, pad_visible, wrap_text, format_labeled_text,
     format_labeled_block, render_table, is_narrow_client, default_wrap_width,
     today_str as _today_str, today_date as _today_date,
 )
@@ -61,7 +61,7 @@ def run_data_pull(args: argparse.Namespace) -> None:
 
 def run_data_backfill_tss(args: argparse.Namespace) -> None:
     """Recomputes stored TSS for all cached activities under the current
-    zone-based hierarchy, then refreshes derived workload/ACWR."""
+    zone-based hierarchy, then refreshes the derived PMC."""
     changed = cli.garmin.backfill_tss(
         start_date=args.from_date,
         end_date=args.until_date,
@@ -267,7 +267,7 @@ def run_data_show_metrics(args: argparse.Namespace) -> None:
 
     headers = [
         "Date", "HRV", "HRV Base", "RHR", "RHR Base", "Sleep", "Sleep Base",
-        "Stress", "ACWR", "Acute", "Chronic", "CTL", "ATL", "TSB",
+        "Stress", "CTL", "ATL", "TSB", "ATL:CTL",
     ]
     rows = []
 
@@ -280,21 +280,18 @@ def run_data_show_metrics(args: argparse.Namespace) -> None:
         rhr_val = m['rhr']
         sleep_val = m['sleep_score']
         stress_val = m['stress']
-        acwr_val = m['acwr']
-        acute_val = m['acute_workload']
-        chronic_val = m['chronic_workload']
 
         hrv_str = str(hrv_val) if hrv_val is not None else "N/A"
         rhr_str = str(rhr_val) if rhr_val is not None else "N/A"
         sleep_str = str(sleep_val) if sleep_val is not None else "N/A"
         stress_str = str(stress_val) if stress_val is not None else "N/A"
-        acwr_str = color_acwr(acwr_val) if acwr_val is not None else "N/A"
-        acute_str = f"{acute_val:.1f}" if acute_val is not None else "N/A"
-        chronic_str = f"{chronic_val:.1f}" if chronic_val is not None else "N/A"
 
-        ctl_str, atl_str, tsb_str = pmc_cells(
-            *cli.garmin.pmc_display_values(m, warmup_cutoff)
-        )
+        # Ratio off the *display* values, so a warm-up-suppressed CTL can't surface as a
+        # spurious spike (DESIGN_pmc_fitness_fatigue.md §6.2).
+        ctl_v, atl_v, tsb_v = cli.garmin.pmc_display_values(m, warmup_cutoff)
+        ctl_str, atl_str, tsb_str = pmc_cells(ctl_v, atl_v, tsb_v)
+        ratio_val = cli.garmin.load_ratio(atl_v, ctl_v)
+        ratio_str = color_load_ratio(ratio_val) if ratio_val is not None else "N/A"
 
         hrv_base_str = "N/A"
         rhr_base_str = "N/A"
@@ -329,8 +326,8 @@ def run_data_show_metrics(args: argparse.Namespace) -> None:
 
         rows.append([
             m['date'], hrv_str, hrv_base_str, rhr_str, rhr_base_str,
-            sleep_str, sleep_base_str, stress_str, acwr_str, acute_str,
-            chronic_str, ctl_str, atl_str, tsb_str,
+            sleep_str, sleep_base_str, stress_str,
+            ctl_str, atl_str, tsb_str, ratio_str,
         ])
 
     print(render_table(headers, rows))
@@ -342,8 +339,8 @@ def _show_metrics_csv(metrics_history: list) -> None:
     writer = csv_mod.writer(sys.stdout)
     writer.writerow([
         "date", "hrv", "hrv_baseline", "rhr", "rhr_baseline",
-        "sleep_score", "sleep_baseline", "stress", "acwr",
-        "acute_workload", "chronic_workload", "ctl", "atl", "tsb",
+        "sleep_score", "sleep_baseline", "stress", "ctl", "atl", "tsb",
+        "atl_ctl_ratio",
     ])
     # Suppressed (warm-up) or NULL PMC values are emitted as empty cells, never 0, so
     # downstream parsing can't read a zero as data (DESIGN_pmc_fitness_fatigue.md §6.2).
@@ -358,13 +355,14 @@ def _show_metrics_csv(metrics_history: list) -> None:
             rhr_base = base.get('rhr_baseline_mean')
             sleep_base = base.get('sleep_baseline_mean')
         ctl_v, atl_v, tsb_v = cli.garmin.pmc_display_values(m, warmup_cutoff)
+        ratio_v = cli.garmin.load_ratio(atl_v, ctl_v)
         writer.writerow([
             m['date'], m['hrv'], hrv_base, m['rhr'], rhr_base,
-            m['sleep_score'], sleep_base, m['stress'], m['acwr'],
-            m['acute_workload'], m['chronic_workload'],
+            m['sleep_score'], sleep_base, m['stress'],
             "" if ctl_v is None else ctl_v,
             "" if atl_v is None else atl_v,
             "" if tsb_v is None else tsb_v,
+            "" if ratio_v is None else ratio_v,
         ])
 
 

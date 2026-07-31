@@ -31,8 +31,9 @@ does the coaching reasoning.
 
 - **Real sports-science load model.** Training load is computed per activity using
   the best available method — power-based TSS (Coggan), heart-rate TSS (Friel), or
-  session-RPE (Foster) — and rolls up into acute/chronic workload and ACWR for
-  injury-risk and readiness assessment. An "RPE divergence" flag surfaces sessions
+  session-RPE (Foster) — and rolls up into the Performance Management Chart
+  (CTL/ATL/TSB) plus an ATL:CTL relative-overload ratio for injury-risk and
+  readiness assessment. An "RPE divergence" flag surfaces sessions
   that *felt* far harder than they measured (heat, sleep debt, muscular damage).
 
 - **A coach that learns, with evidence.** TrainMate maintains durable "coach

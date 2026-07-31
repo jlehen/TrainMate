@@ -94,17 +94,21 @@ def gray(text: str) -> str:
     return colorize(text, "\033[90m")
 
 
-def color_acwr(acwr: float) -> str:
-    """Returns colorized ACWR string based on values."""
-    acwr_str = f"{acwr:.2f}"
-    if acwr < 0.8:
-        return yellow(acwr_str)
-    elif 0.8 <= acwr <= 1.3:
-        return green(acwr_str)
-    elif 1.3 < acwr <= 1.5:
-        return yellow(acwr_str)
-    else:
-        return red(acwr_str)
+def color_load_ratio(ratio: float) -> str:
+    """ATL/CTL (fatigue vs fitness) coloring — colors only the overload end, phase-blind
+    (training_load.txt §3).
+
+    > 1.5 red (excessive relative spike), 1.3-1.5 yellow (caution). Everything at or
+    below 1.3 stays uncolored: a *low* ratio is phase-dependent, not a fault — an
+    intensity or realization block drives it to ~0.7 by design, and coloring that as
+    "under-training" is what made the old ACWR band fight block periodization. Bands are
+    half-open so no value is double-claimed."""
+    s = f"{ratio:.2f}"
+    if ratio > 1.5:
+        return red(s)
+    if ratio > 1.3:
+        return yellow(s)
+    return s
 
 
 # The printed CTL | ATL | TSB triple won't subtract to the shown TSB, because TSB is

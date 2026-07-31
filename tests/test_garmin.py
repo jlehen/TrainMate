@@ -219,9 +219,9 @@ class TestRecomputeDerived(unittest.TestCase):
         garmin.recompute_derived()
 
         today_row = test_db.get_metrics_cache(start_date=_d(0), end_date=_d(0))[0]
-        # Activity yesterday contributes to today's 7-day acute window.
-        self.assertGreater(today_row["acute_workload"], 0.0)
-        self.assertIsNotNone(today_row["acwr"])
+        # Activity yesterday still carries into today's ATL/CTL EWMAs.
+        self.assertGreater(today_row["atl"], 0.0)
+        self.assertIsNotNone(today_row["ctl"])
         # 28+ days of stable metrics -> a baseline exists for today.
         baseline = test_db.get_baseline(_d(0))
         self.assertIsNotNone(baseline)

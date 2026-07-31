@@ -354,7 +354,7 @@ header {
 .status-badge {
     /* Flow as a compact chip at the bottom of the metric box instead of being
        absolutely positioned over the header — at that position wide badges like
-       "Sweet Spot" overprinted long titles ("ACWR (7:28d)") and the metric icon. */
+       "Unloading" overprinted long titles and the metric icon. */
     align-self: flex-start;
     margin-top: auto;
     white-space: nowrap;

@@ -724,20 +724,23 @@ push until restored. See DESIGN_plan_rollback.md.
 | `hrv`             | INTEGER | Overnight HRV average  |
 | `sleep_score`     | INTEGER | 0–100                  |
 | `stress`          | INTEGER |                        |
-| `acute_workload`  | REAL    | acute (default 7-day) rolling sum |
-| `chronic_workload`| REAL    | chronic (default 28-day) sum ÷ (chronic/acute weeks) |
-| `acwr`            | REAL    | acute / chronic        |
 | `ctl`             | REAL    | Fitness — CTL, 42-day EWMA of daily load (PMC). NULL in the leading-edge warm-up window and on pre-recompute rows |
 | `atl`             | REAL    | Fatigue — ATL, 7-day EWMA of daily load |
 | `tsb`             | REAL    | Form — TSB = CTL(yesterday) − ATL(yesterday) |
 
 CTL/ATL/TSB (the Performance Management Chart, DESIGN_pmc_fitness_fatigue.md) are the
-EWMA half of the load model, computed alongside ACWR in `garmin.recompute_derived()`
-over every calendar day (rest days decay the EWMAs) and upserted onto existing metrics
-rows. The four windows (acute/chronic/CTL/ATL) are config-backed under `garmin:`; the
-defaults are the supported configuration. The warm-up window (first τ_ctl days of
-history) is suppressed at every surface, and a static "still warming up" flag is shown
-while total history is short (< 3·τ_ctl).
+whole stored load model, computed in `garmin.recompute_derived()` over every calendar
+day (rest days decay the EWMAs) and upserted onto existing metrics rows. The two time
+constants (CTL/ATL) are config-backed under `garmin:`; the defaults are the supported
+configuration. The warm-up window (first τ_ctl days of history) is suppressed at every
+surface, and a static "still warming up" flag is shown while total history is short
+(< 3·τ_ctl).
+
+**ATL:CTL ratio.** Relative overload — fatigue against the athlete's own fitness base —
+is *derived at read time* by `garmin.pmc.load_ratio(atl, ctl)`, never stored: it is a
+division of two columns already on the row. It replaced the stored ACWR
+(`acute_workload`/`chronic_workload`/`acwr`, dropped by the guarded DDL in
+`db/base.py`); see DESIGN_load_ratio.md.
 
 ### athlete_baselines
 28-day rolling baseline computed during `garmin.recompute_derived()` (a full

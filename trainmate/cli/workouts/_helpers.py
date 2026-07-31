@@ -12,7 +12,7 @@ from trainmate.modification_state import modification_status
 from trainmate.sports import canonical_sport
 from trainmate.util import (
     bold, dim, green, red, yellow, cyan, blue, magenta, gray,
-    color_acwr, visible_len, pad_visible, wrap_text, format_labeled_text,
+    visible_len, pad_visible, wrap_text, format_labeled_text,
     format_labeled_block, render_table, today_str as _today_str,
     today_date as _today_date,
 )
