@@ -23,7 +23,6 @@ def add_workout_parser(subparsers, pull_bypass_parser, llm_debug_parser, plan_da
     # workout command & subparsers
     workout_parser = subparsers.add_parser(
         "workout",
-        aliases=["w"],
         help="Manage workouts (microcycles)"
     )
     workout_subparsers = workout_parser.add_subparsers(
@@ -32,7 +31,7 @@ def add_workout_parser(subparsers, pull_bypass_parser, llm_debug_parser, plan_da
     
     # workout list
     w_list = workout_subparsers.add_parser(
-        "list", aliases=["l"],
+        "list",
         parents=[plan_date_parser, sport_type_parser],
         help="Show all planned workouts",
         description=(
@@ -57,7 +56,7 @@ def add_workout_parser(subparsers, pull_bypass_parser, llm_debug_parser, plan_da
     
     # workout compare
     w_cmp = workout_subparsers.add_parser(
-        "compare", aliases=["c"],
+        "compare",
         parents=[pull_bypass_parser, plan_date_parser, sport_type_parser],
         help="Compare planned workouts against completed activities",
         description=(
@@ -81,7 +80,7 @@ def add_workout_parser(subparsers, pull_bypass_parser, llm_debug_parser, plan_da
 
     # workout generate
     p_w_gen = workout_subparsers.add_parser(
-        "generate", aliases=["g"],
+        "generate",
         parents=[pull_bypass_parser, llm_debug_parser],
         help="Generate workouts (microcycles) based on the active strategy",
         description=(
@@ -146,7 +145,7 @@ def add_workout_parser(subparsers, pull_bypass_parser, llm_debug_parser, plan_da
 
     # workout batches
     workout_subparsers.add_parser(
-        "batches", aliases=["b"],
+        "batches",
         help="List archived workout batches that 'workout rollback' can restore",
         description=(
             "List the archived batches of workouts, newest first. Each batch is the set "
@@ -203,7 +202,7 @@ def add_workout_parser(subparsers, pull_bypass_parser, llm_debug_parser, plan_da
 
     # workout restore
     w_restore = workout_subparsers.add_parser(
-        "restore", aliases=["res"], help="Restore a soft-removed workout by ID"
+        "restore", help="Restore a soft-removed workout by ID"
     )
     w_restore.add_argument("id", type=int, help="Workout ID to restore")
     
@@ -260,7 +259,7 @@ def add_workout_parser(subparsers, pull_bypass_parser, llm_debug_parser, plan_da
 
     # workout swap
     w_swap = workout_subparsers.add_parser(
-        "swap", aliases=["s"],
+        "swap",
         parents=[llm_debug_parser],
         help="Swap two workouts, given either two dates or two workout IDs",
         description=(

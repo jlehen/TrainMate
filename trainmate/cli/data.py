@@ -627,7 +627,6 @@ def add_data_parser(subparsers, pull_bypass_parser, llm_debug_parser, basic_date
     # data command & subparsers
     data_parser = subparsers.add_parser(
         "data",
-        aliases=["d"],
         help="Manage and sync athlete metrics and activities"
     )
     data_subparsers = data_parser.add_subparsers(
@@ -637,7 +636,6 @@ def add_data_parser(subparsers, pull_bypass_parser, llm_debug_parser, basic_date
     # data pull
     d_pull = data_subparsers.add_parser(
         "pull",
-        aliases=["p"],
         help="Fetch Garmin activities/metrics and Google Calendar context",
         description=(
             "Fetch activities and daily metrics directly from Garmin Connect into the "
@@ -699,7 +697,7 @@ def add_data_parser(subparsers, pull_bypass_parser, llm_debug_parser, basic_date
     )
     # data reflect — incremental reflection over evidence since the last reflect
     d_reflect = data_subparsers.add_parser(
-        "reflect", aliases=["r"],
+        "reflect",
         parents=[pull_bypass_parser, basic_date_parser, llm_debug_parser],
         help="Update coach learnings from how the athlete responded to training "
              "since the last reflect (incremental; no reconstruction)",

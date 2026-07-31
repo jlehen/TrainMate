@@ -200,7 +200,6 @@ def run_benchmark_wipe(args: argparse.Namespace) -> None:
 def add_benchmark_parser(subparsers):
     benchmark_parser = subparsers.add_parser(
         "benchmark",
-        aliases=["bench"],
         help="Record and review fitness-test results (the threshold logbook)",
     )
     b_subparsers = benchmark_parser.add_subparsers(
@@ -209,7 +208,7 @@ def add_benchmark_parser(subparsers):
 
     # benchmark record
     b_rec = b_subparsers.add_parser(
-        "record", aliases=["rec"],
+        "record",
         help="Record a fitness-test result (e.g. --sport cycling --ftp 250)",
     )
     b_rec.add_argument(
@@ -234,7 +233,7 @@ def add_benchmark_parser(subparsers):
 
     # benchmark list
     b_subparsers.add_parser(
-        "list", aliases=["l"], help="Show the benchmark logbook, newest first"
+        "list", help="Show the benchmark logbook, newest first"
     )
 
     # benchmark rm

@@ -835,7 +835,6 @@ def add_plan_parser(subparsers, pull_bypass_parser, llm_debug_parser):
     # plan command & subparsers
     plan_parser = subparsers.add_parser(
         "plan",
-        aliases=["pl"],
         help="Manage and consult the periodized training plan (macrocycles & mesocycles)"
     )
     plan_subparsers = plan_parser.add_subparsers(
@@ -844,7 +843,7 @@ def add_plan_parser(subparsers, pull_bypass_parser, llm_debug_parser):
     
     # plan generate
     p_gen = plan_subparsers.add_parser(
-        "generate", aliases=["g"],
+        "generate",
         parents=[pull_bypass_parser, llm_debug_parser],
         help=(
             "Generate or adapt the periodized training plan strategy "
@@ -866,7 +865,7 @@ def add_plan_parser(subparsers, pull_bypass_parser, llm_debug_parser):
     
     # plan show
     p_show = plan_subparsers.add_parser(
-        "show", aliases=["s"],
+        "show",
         help="Show a macrocycle and its mesocycles periodization strategy "
              "(--goal/--version/--all, -w for workouts)",
         description=(
@@ -928,7 +927,7 @@ def add_plan_parser(subparsers, pull_bypass_parser, llm_debug_parser):
 
     # plan versions
     p_versions = plan_subparsers.add_parser(
-        "versions", aliases=["v"],
+        "versions",
         help="List all plan versions (active + superseded) for a goal",
         description=(
             "List every periodization plan version kept for a goal — the active one and "
@@ -944,7 +943,7 @@ def add_plan_parser(subparsers, pull_bypass_parser, llm_debug_parser):
 
     # plan rm
     p_rm = plan_subparsers.add_parser(
-        "rm", aliases=["d"], advanced=True,
+        "rm", advanced=True,
         help="Remove/delete a specific periodization plan by Goal ID"
     )
     p_rm.add_argument(
@@ -980,7 +979,6 @@ def add_plan_parser(subparsers, pull_bypass_parser, llm_debug_parser):
     # plan feedback
     p_fb = plan_subparsers.add_parser(
         "feedback",
-        aliases=["f"],
         description="Add athlete feedback (either --macro or --meso is mandatory).",
         help="Add athlete feedback (either --macro or --meso is mandatory)"
     )

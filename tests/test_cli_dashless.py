@@ -1,3 +1,4 @@
+import io
 import os
 import unittest
 from datetime import datetime, timedelta, timezone
@@ -98,6 +99,55 @@ class TestDashlessOptionTranslator(unittest.TestCase):
             self._xlate(["workout", "adapt", "m", "hello"]),
             ["workout", "adapt", "--message", "hello"],
         )
+
+
+class TestCommandPrefixResolution(unittest.TestCase):
+    """Any unambiguous prefix of a command resolves to it, and every accepted
+    spelling — prefix or surviving alias — reaches argparse as the canonical name
+    (DESIGN_cli_noargs.md §d). Runs against the real command tree, since the point
+    is which real commands collide."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.parser, _ = trainmate_cli.build_parser()
+
+    def _xlate(self, line):
+        return trainmate_cli.translate_dashless_argv(self.parser, line.split())
+
+    def test_prefix_resolves_at_every_level(self):
+        self.assertEqual(self._xlate("st"), ["status"])
+        self.assertEqual(self._xlate("wo li"), ["workout", "list"])
+        self.assertEqual(self._xlate("constr ed 3"), ["constraint", "edit", "3"])
+
+    def test_retired_aliases_still_work_as_prefixes(self):
+        # The shortcuts removed when prefixes landed keep resolving unchanged.
+        for line, expected in [
+            ("pl g", ["plan", "generate"]),
+            ("w l", ["workout", "list"]),
+            ("cons l", ["constraint", "list"]),
+            ("bench rec", ["benchmark", "record"]),
+            ("l s 4", ["learnings", "show", "4"]),
+        ]:
+            self.assertEqual(self._xlate(line), expected, line)
+
+    def test_surviving_aliases_normalize_to_canonical(self):
+        # Kept because they are not prefixes ('ctx', 'lm') or are ambiguous ones ('s').
+        self.assertEqual(self._xlate("ctx lm"), ["context", "list-metrics"])
+        self.assertEqual(self._xlate("s"), ["status"])
+        self.assertEqual(self._xlate("data sm"), ["data", "show-metrics"])
+
+    def test_ambiguous_prefix_is_rejected(self):
+        for line, expected in [("c", "constraint, context"), ("workout ad", "adapt, add")]:
+            with patch("sys.stderr", io.StringIO()) as err:
+                with self.assertRaises(SystemExit) as ctx:
+                    self._xlate(line)
+            self.assertEqual(ctx.exception.code, 2)
+            self.assertIn(expected, err.getvalue())
+
+    def test_option_keywords_win_over_command_prefixes(self):
+        # 'help' is a real top-level command; 'helpall' is a root flag whose exact
+        # keyword must still bind as the flag rather than prefix-matching a command.
+        self.assertEqual(self._xlate("helpall"), ["--helpall"])
 
 
 class TestDashlessEndToEnd(unittest.TestCase):

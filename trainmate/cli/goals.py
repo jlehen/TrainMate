@@ -117,14 +117,13 @@ def add_goal_parser(subparsers):
     # goal command & subparsers
     goal_parser = subparsers.add_parser(
         "goal",
-        aliases=["g"],
         help="Manage training objectives / goals of your training plan"
     )
     goal_subparsers = goal_parser.add_subparsers(dest="subcommand", help="Goal sub-commands")
     
     # goal add
     g_add = goal_subparsers.add_parser(
-        "add", aliases=["a"], help="Add a new training objective/goal"
+        "add", help="Add a new training objective/goal"
     )
     g_add.add_argument("--title", required=True, help="Goal title (e.g. Marathon)")
     g_add.add_argument("--date", required=True, help="Target event date (YYYY-MM-DD)")
@@ -138,7 +137,7 @@ def add_goal_parser(subparsers):
 
     # goal edit
     g_edit = goal_subparsers.add_parser(
-        "edit", aliases=["e"], help="Edit an existing goal/objective"
+        "edit", help="Edit an existing goal/objective"
     )
     g_edit.add_argument("id", type=int, help="Goal ID to edit")
     g_edit.add_argument("--title", help="New goal title")
@@ -156,11 +155,11 @@ def add_goal_parser(subparsers):
     )
     
     # goal rm
-    g_rm = goal_subparsers.add_parser("rm", aliases=["r"], help="Remove a goal by ID")
+    g_rm = goal_subparsers.add_parser("rm", help="Remove a goal by ID")
     g_rm.add_argument("id", type=int, help="Goal ID to remove")
     
     # goal list
-    goal_subparsers.add_parser("list", aliases=["l"], help="Show all training objectives")
+    goal_subparsers.add_parser("list", help="Show all training objectives")
 
     # goal wipe
     g_wipe = goal_subparsers.add_parser(

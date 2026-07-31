@@ -999,13 +999,19 @@ patchable singletons; the handler functions, named
 (one module per command family: `status`, `progress`, `goals`, `constraints`,
 `context`, `learnings`, `plans`, `workouts`, `data`, `models`). `help` is the one
 exception — it just introspects the parser tree (`_print_command_tree` in
-`trainmate_cli.py`), so it has no handler of its own. `plan` has a
-top-level alias (`pl`) and `progress` has a top-level alias (`pr`) (the former
-`p` was removed, and `progress`'s alias was changed from `p` to `pr` to prevent
-mid-typing confusion, DESIGN_progress_timeline.md §7.1). Its subcommand aliases
-below (`g`, `s`, …) can abbreviate after the top-level alias, e.g. `pl g` or `pl s`.
+`trainmate_cli.py`), so it has no handler of its own.
 
-| Command      | Subcommand   | Alias    | Description                                                              |
+**Short forms** (DESIGN_cli_noargs.md §d): any prefix that matches exactly one
+command at its level *is* that command — `pl g` is `plan generate`, `constr ed` is
+`constraint edit` — so the "Short form" column below lists examples, not a closed
+set. An ambiguous prefix (`p` → `plan`/`progress`, `c` → `constraint`/`context`)
+is refused, naming the candidates. Only shorthands that are *not* prefixes
+(`ctx`, `lm`, `df`, `rb`, `sm`, `sa`, `use`) or that pick a winner among an
+ambiguous set (`s` → `status`, `workout a` → `adapt`, `workout r` → `rm`,
+`workout p` → `push`, `benchmark r` → `rm`, `context l` → `list`, `data b` →
+`bootstrap`) stay registered as real aliases.
+
+| Command      | Subcommand   | Short form | Description                                                            |
 |--------------|--------------|----------|--------------------------------------------------------------------------|
 | `help`       | —            | —        | Print every command and sub-command with its one-line help, recursing through the whole sub-parser tree (unlike `--help`, which only shows one level) |
 | `status`     | —            | `s`      | Show active goals, recent metrics, coach learnings                       |
@@ -1036,7 +1042,7 @@ below (`g`, `s`, …) can abbreviate after the top-level alias, e.g. `pl g` or `
 | `plan`       | `versions`   | `pl v`   | List a goal's kept plan versions — active + superseded — with IDs and dates (`--goal ID`) |
 | `plan`       | `diff`       | `pl df`  | Compare two plan versions (`[PLAN_ID_A] [PLAN_ID_B]`, `--goal ID`): strategy + feedback prose, mesocycles added/removed/renamed/re-dated, and snapshotted input deltas. No ID → previous vs active; one ID → that vs active. Prose rewritten wholesale collapses to a note unless `--full`. Comparison logic in `trainmate/plan_diff.py`, shared with `/api/plan/diff` |
 | `plan`       | `rollback`   | `pl rb`  | Restore a superseded plan version + its workouts (`--goal ID`, `--version PLAN_ID`, `-y`); defaults to the chronologically previous version. The inverse of eager generation (DESIGN_plan_rollback.md) |
-| `plan`       | `rm`         | `pl d`   | Delete plan for a goal ID                                                |
+| `plan`       | `rm`         | `pl rm`  | Delete plan for a goal ID. The old `pl d` alias is gone — `d` now prefixes `diff` |
 | `plan`       | `feedback`   | `pl f`   | Add feedback (`--macro` or `--meso ID`, `--goal ID`, text; `--edit` opens `$EDITOR` seeded with current feedback) |
 | `plan`       | `wipe`       | —        | Delete all plans                                                         |
 | `progress`   | —            | `pr`     | Show the progress timeline: measured load to date, plan-projected forward (CTL/ATL/TSB), weekly planned-vs-actual bars (`--weeks N`, `--chart [PATH]` for a PNG; DESIGN_progress_timeline.md) |

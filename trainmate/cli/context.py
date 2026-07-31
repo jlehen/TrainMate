@@ -188,7 +188,7 @@ def add_context_parser(subparsers):
 
     # context add
     ctx_add = context_subparsers.add_parser(
-        "add", aliases=["a"],
+        "add",
         help="Author a context signal over a day or date range",
         description=(
             "Write a tagged all-day context event per day in the range and mirror it "
@@ -223,7 +223,7 @@ def add_context_parser(subparsers):
 
     # context rm
     ctx_rm = context_subparsers.add_parser(
-        "rm", aliases=["r"],
+        "rm",
         help="Remove signal(s) by ID, or by date range + metric",
         description=(
             "Delete context signal(s). Pass row IDs, or narrow with "

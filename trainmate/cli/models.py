@@ -96,14 +96,14 @@ def add_model_parser(subparsers):
 
     # model list
     model_subparsers.add_parser(
-        "list", aliases=["l"],
+        "list",
         help="List the configured models, active one marked",
         description="Numbered list of the configured models. Same as a bare 'model'."
     )
 
     # model set
     model_set = model_subparsers.add_parser(
-        "set", aliases=["s", "use"],
+        "set", aliases=["use"],
         help="Choose the model to use, by list number or identifier",
         description=(
             "Store the model to use for every subsequent command. Address it by its number "

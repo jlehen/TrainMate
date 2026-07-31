@@ -71,10 +71,17 @@ class _DescFromHelpSubParsersAction(argparse._SubParsersAction):
         super().__init__(*args, **kwargs)
         self._visible_names: list = []
         self.advanced_choices: list = []  # (name, help) for hidden sub-commands
+        # Prefix resolution (DESIGN_cli_noargs.md §d) matches canonical names only;
+        # aliases stay exact-match, which is why they survive at all.
+        self.canonical_names: list = []
+        self.alias_of: dict = {}
 
     def add_parser(self, name, advanced=False, aliases=(), **kwargs):
         if "help" in kwargs:
             kwargs.setdefault("description", kwargs["help"])
+        self.canonical_names.append(name)
+        for alias in aliases:
+            self.alias_of[alias] = name
         if advanced:
             # Omit ``help`` so argparse builds no listing entry for this command
             # (leaving it out of both ``-h`` and the ``help`` tree), but keep the
@@ -187,12 +194,44 @@ def _build_keyword_spec(parser: argparse.ArgumentParser) -> dict:
             spec[kw] = action
     return spec
 
-def _subparser_choices(parser: argparse.ArgumentParser) -> dict:
-    """The sub-command/alias -> sub-parser map for this level (empty for leaf commands)."""
+def _subparsers_action(parser: argparse.ArgumentParser):
+    """This level's sub-parsers action, or None for a leaf command."""
     for action in parser._actions:
         if isinstance(action, argparse._SubParsersAction):
-            return action.choices
-    return {}
+            return action
+    return None
+
+
+def _subparser_choices(parser: argparse.ArgumentParser) -> dict:
+    """The sub-command/alias -> sub-parser map for this level (empty for leaf commands)."""
+    action = _subparsers_action(parser)
+    return action.choices if action is not None else {}
+
+
+def _resolve_subcommand(action, token: str, exact_only: bool = False) -> Optional[str]:
+    """Map a typed sub-command token to its canonical name, or None if it matches nothing.
+
+    Exact canonical name or registered alias first; failing that, any prefix that
+    matches exactly one canonical name (DESIGN_cli_noargs.md §d). Hidden
+    ``advanced=True`` commands take part in matching — they dispatch like any other.
+    An ambiguous prefix is a user error, reported like argparse's own (exit 2).
+    """
+    names = getattr(action, "canonical_names", None) or list(action.choices)
+    if token in names:
+        return token
+    canonical = getattr(action, "alias_of", {}).get(token)
+    if canonical is not None:
+        return canonical
+    if exact_only:
+        return None
+    matches = [name for name in names if name.startswith(token)]
+    if len(matches) == 1:
+        return matches[0]
+    if matches:
+        print(red(f"Ambiguous command '{token}' — matches: " + ", ".join(sorted(matches))),
+              file=sys.stderr)
+        sys.exit(2)
+    return None
 
 def _print_command_tree(
     parser: argparse.ArgumentParser, indent: int = 0, include_advanced: bool = False
@@ -318,16 +357,27 @@ def translate_dashless_argv(parser: argparse.ArgumentParser, tokens: list) -> li
       * any other known keyword → ``--flag`` and binds the very next token as its value
         unconditionally (so a value colliding with a keyword name — a goal literally
         titled ``date`` — is still taken as the value).
-      * a sub-command/alias → emitted, then the remainder is translated in that
-        sub-parser's context (recursive descent mirroring the parser tree). This
-        also covers the top-level ``help`` command (a real sub-command), so it
-        takes priority over the next rule.
+      * a sub-command/alias → emitted *as its canonical name*, then the remainder is
+        translated in that sub-parser's context (recursive descent mirroring the parser
+        tree). This also covers the top-level ``help`` command (a real sub-command), so
+        it takes priority over the next rule.
       * the bare word ``help`` (not a sub-command at this level) → ``--help``,
         argparse's own one-level help for the current command.
+      * an unambiguous *prefix* of a sub-command → the same descent, tried only after
+        the exact-keyword rules above so no existing spelling changes meaning
+        (DESIGN_cli_noargs.md §d).
       * anything else → left as-is for argparse to bind positionally.
+
+    Because every sub-command reaches argparse under its canonical name, the dispatcher
+    in ``trainmate_cli`` compares canonical names only.
     """
     spec = _build_keyword_spec(parser)
-    sub_choices = _subparser_choices(parser)
+    sub_action = _subparsers_action(parser)
+    sub_choices = sub_action.choices if sub_action is not None else {}
+
+    def descend(canonical: str, rest: list) -> list:
+        return [canonical] + translate_dashless_argv(sub_choices[canonical], rest)
+
     out: list = []
     i, n = 0, len(tokens)
     while i < n:
@@ -337,10 +387,11 @@ def translate_dashless_argv(parser: argparse.ArgumentParser, tokens: list) -> li
             out.append(tok)
             i += 1
             continue
-        if tok_lower in sub_choices:
-            out.append(tok_lower)
-            out.extend(translate_dashless_argv(sub_choices[tok_lower], tokens[i + 1:]))
-            return out
+        if sub_action is not None:
+            canonical = _resolve_subcommand(sub_action, tok_lower, exact_only=True)
+            if canonical is not None:
+                out.extend(descend(canonical, tokens[i + 1:]))
+                return out
         if tok_lower == "help":
             out.append("--help")
             return out
@@ -376,6 +427,11 @@ def translate_dashless_argv(parser: argparse.ArgumentParser, tokens: list) -> li
                 else:
                     i += 1
             continue
+        if sub_action is not None:
+            canonical = _resolve_subcommand(sub_action, tok_lower)
+            if canonical is not None:
+                out.extend(descend(canonical, tokens[i + 1:]))
+                return out
         out.append(tok)
         i += 1
     return out

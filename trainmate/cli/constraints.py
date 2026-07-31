@@ -234,7 +234,6 @@ def add_constraint_parser(subparsers):
     # any horizon; supersedes `lifeevent`.
     constraint_parser = subparsers.add_parser(
         "constraint",
-        aliases=["cons"],
         help="Author/list directives the coach works around (availability, caps, "
              "preferences, disruptions)",
         description=(
@@ -278,7 +277,7 @@ def add_constraint_parser(subparsers):
 
     # constraint add
     cons_add = constraint_subparsers.add_parser(
-        "add", aliases=["a"], help="Author a directive over a day or range"
+        "add", help="Author a directive over a day or range"
     )
     cons_add.add_argument("title", nargs="?", help="The directive, stated short "
                           "(e.g. 'no run Thursday'); prompted if omitted")
@@ -292,7 +291,7 @@ def add_constraint_parser(subparsers):
 
     # constraint edit
     cons_edit = constraint_subparsers.add_parser(
-        "edit", aliases=["e"], help="Adjust scope / rest / text / replan"
+        "edit", help="Adjust scope / rest / text / replan"
     )
     cons_edit.add_argument("id", type=int, help="Constraint ID to edit")
     cons_edit.add_argument("--title", help="New directive title")
@@ -305,7 +304,7 @@ def add_constraint_parser(subparsers):
 
     # constraint list
     cons_list = constraint_subparsers.add_parser(
-        "list", aliases=["l"],
+        "list",
         help="List directives from the current mesocycle onward",
         description=(
             "List directives the coach works around. By default, shows everything from the "
@@ -331,13 +330,13 @@ def add_constraint_parser(subparsers):
 
     # constraint show
     cons_show = constraint_subparsers.add_parser(
-        "show", aliases=["s"], help="Show one directive in detail (incl. plan-shaping)"
+        "show", help="Show one directive in detail (incl. plan-shaping)"
     )
     cons_show.add_argument("id", type=int, help="Constraint ID to display")
 
     # constraint rm
     cons_rm = constraint_subparsers.add_parser(
-        "rm", aliases=["r"], help="Remove a directive by ID"
+        "rm", help="Remove a directive by ID"
     )
     cons_rm.add_argument("id", type=int, help="Constraint ID to remove")
 
