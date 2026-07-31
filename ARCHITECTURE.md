@@ -490,10 +490,11 @@ connection + schema setup), `objectives.py`, `constraints.py`,
   `adherence → garmin → trainmate.db` import cycle).
 - `archive_future_workouts(from_date)` **soft-archives** every live future workout
   (sets `archived_at`, clears the Calendar handle) and returns the pre-archive rows so
-  the caller can delete their events. Used by eager `workout generate` and
-  `plan rollback` to displace a plan's workouts without losing them — the archived rows
-  stay tagged with their `macrocycle_id` so `restore_macrocycle_workouts` can resurrect
-  them (DESIGN_plan_rollback.md).
+  the caller can delete their events. Used by eager `workout generate`, `plan rollback`
+  and `workout rollback` to displace a plan's workouts without losing them. One call
+  stamps one shared `archived_at`, which is therefore the **batch identity** a rollback
+  restores; the rows also stay tagged with their `macrocycle_id`, which is how
+  `plan rollback` picks a version's batch (DESIGN_plan_rollback.md).
 
 ### Methods by domain
 
@@ -519,10 +520,14 @@ methods whose behavior is *not* obvious from that convention are called out belo
   content change then reads as `stale`) vs `delete_workout_by_id` (hard); the push
   recorders `mark_workout_pushed` / `mark_workout_adherence_pushed` are the **only**
   writers of `pushed_signature` / `marked_signature` respectively; and
-  `archive_future_workouts(from_date)` / `restore_macrocycle_workouts(macrocycle_id)`
-  drive the soft-archive used by eager generate + rollback (archive sets
+  `archive_future_workouts(from_date)` / `restore_workout_batch(archived_at, from_date)`
+  drive the soft-archive used by eager generate + both rollbacks (archive sets
   `archived_at`, clears the Calendar handle, and returns the pre-archive rows so the
-  caller can delete the events). `get_workouts`/`get_workout` exclude soft-removed
+  caller can delete the events). `restore_macrocycle_workouts(macrocycle_id, from_date)`
+  resolves a plan version's newest batch and delegates to the same restore;
+  `get_archived_batches(from_date=None)` lists the batches (with a `restorable` count when
+  given a floor) for `workout rollback`. Restore is floored at `from_date` because archive
+  is — see DESIGN_plan_rollback.md §9. `get_workouts`/`get_workout` exclude soft-removed
   **and** archived rows unless asked (`include_removed=`/`include_archived=`).
   Rollback semantics: DESIGN_plan_rollback.md.
 - **Completed Activities** (`activities.py`) — `save_completed_activity` upserts on
@@ -622,7 +627,7 @@ below for the rules and [§15](#15-design-rationale--history) for why.
 | `original_date`        | TEXT       | YYYY-MM-DD — set once on creation (COALESCE); used to detect swap-back |
 | `source`               | TEXT       | Origin axis, fixed at creation: `generated` (plan/generate, or an adapt newly adds) or `manual` (`workout add`). Orthogonal to adaptation. NULL on legacy rows. |
 | `macrocycle_id`        | INTEGER    | Plan version this row belongs to, fixed at creation. Used by `plan rollback` to resurrect a version's workouts. NULL on legacy rows. |
-| `archived_at`          | TEXT       | Plan-version axis: non-NULL ⟺ archived (belonged to a superseded plan version). Hidden from reads, event torn down. Distinct from `removed`. See DESIGN_plan_rollback.md. |
+| `archived_at`          | TEXT       | Plan-version axis: non-NULL ⟺ archived (displaced by a regeneration or rollback). Shared by everything archived in the same call, so it doubles as the batch key `workout rollback` restores. Hidden from reads, event torn down. Distinct from `removed`. See DESIGN_plan_rollback.md. |
 | `created_at`           | TEXT       | UTC ISO; set once on INSERT — when the session entered the plan. Distinct from `date`/`original_date`. NULL on legacy rows. |
 | `adapted_at`           | TEXT       | UTC ISO of the most recent `workout adapt` run that eased this row. NULL ⟺ never adapted. Stored (not derivable) so adaptation can avoid compounding cuts. |
 | `adaptation_count`     | INTEGER    | Distinct adapt runs that eased this row (default 0). Bumped only with `adapted_at`; a fresh INSERT resets it. |
@@ -698,10 +703,11 @@ them to the coach as deliberate cancellations (with the optional `removed_reason
 `(date, sport_type)` slot revives it.
 
 **4. Archived?** = `archived_at IS NOT NULL` — the **plan-version** axis, orthogonal to
-the three above. Set by `archive_future_workouts` when a regeneration or `plan rollback`
+the three above. Set by `archive_future_workouts` when a regeneration or either rollback
 displaces the current plan's workouts; the row is **kept** (tagged with its
-`macrocycle_id`) so the matching rollback can resurrect it via
-`restore_macrocycle_workouts`, but its Calendar event is torn down and its handle
+`macrocycle_id`, and sharing one `archived_at` batch stamp with everything displaced in
+the same call) so a rollback can resurrect it — `plan rollback` selects a batch by plan
+version, `workout rollback` by stamp — but its Calendar event is torn down and its handle
 cleared. `get_workouts`/`get_workout` exclude archived rows by default
 (`include_archived=False`) and `save_workout`'s upsert ignores them, so archived
 workouts are invisible to listings, adherence, generation, adaptation, and the calendar
@@ -1033,6 +1039,8 @@ below (`g`, `s`, …) can abbreviate after the top-level alias, e.g. `pl g` or `
 | `workout`    | `generate`   | `w g`    | Generate workouts from active strategy. No horizon flag → `config.workout_generation_span_days` ahead (28 default). Flags: `--goal ID`, `--days N`, `--weeks N`, `--until DATE`, `--until-goal [ID]`, `--until-mesocycle ID`. Eager: archives the previous plan's future workouts and pushes the new ones to Calendar immediately. |
 | `workout`    | `rm`         | `w r`    | Soft-remove by ID (`--reason TEXT` required): marks `removed`, marks the Calendar event deleted; kept in DB, hidden from list/compare, shown to coach as a cancellation. |
 | `workout`    | `restore`    | `w res`  | Restore soft-removed workout by ID. Clears `removed` flags and syncs to Calendar to remove the `[Deleted]` mark. |
+| `workout`    | `rollback`   | `w rb`   | Undo a regeneration: archive the upcoming sessions and restore a previously archived batch, re-pushing it to Calendar (`--batch N` per `workout batches`, default the most recent; `-y`). Leaves the active plan version alone — unlike `plan rollback`, so it also undoes a regeneration made under one plan (DESIGN_plan_rollback.md §9). Unrelated to `workout restore`. |
+| `workout`    | `batches`    | `w b`    | List the archived workout batches a rollback can restore, newest first: positional `#N`, archive time, total/restorable counts, date span, plan version |
 | `workout`    | `adapt`      | `w a`    | Run daily adaptation check (`--date YYYY-MM-DD`, `-m` athlete note, `-y` auto-apply) |
 | `workout`    | `push`       | `w p`    | Sync planned workouts to Google Calendar. Defaults to today onward; pushes only unsynced unless `-f`/`--force` re-pushes already-synced ones. |
 | `workout`    | `swap`       | `w s`    | Swap two workouts by dates (`<date> <date>`) or IDs (`<id> <id>`), same kind on both sides; `--reason` required. Runs recovery checks (consecutive hard days, load spikes, mesocycle crossings), prompts on warnings unless `-f`; syncs unless `--no-sync`; `--reason` folded into `modification_reason`. |
@@ -1092,6 +1100,8 @@ markers as `workout list` without re-deriving the rules (§5).
 | POST        | `/api/workouts/<id>/remove`     | Soft-remove a workout (`{reason?}`)          |
 | POST        | `/api/workouts/<id>/restore`    | Restore a soft-removed workout               |
 | POST        | `/api/workouts/swap`            | Swap two workouts (`{ops:[{id,new_date}], reason, force?, no_sync?}`); returns `{warnings}` unapplied unless `force` |
+| GET         | `/api/workouts/batches`         | List archived workout batches, newest first (`{batches:[{archived_at, workouts, restorable, first_date, last_date, macrocycle_ids}]}`) |
+| POST        | `/api/workouts/rollback`        | Restore an archived batch, archiving the upcoming sessions (`{batch?}` — an `archived_at` stamp, default the newest); leaves the plan version alone (DESIGN_plan_rollback §9) |
 | POST        | `/api/plan`                     | Generate periodization plan (`{goal_id?}`)   |
 | GET         | `/api/plan/versions`            | List plan versions for a goal (`?goal_id=`; active + superseded) |
 | GET         | `/api/plan/diff`                | Compare two plan versions (`?goal_id=&from_version=&to_version=`; defaults to previous vs active) → `{goal, diff}`, the same `plan_diff.diff_plans` structure the CLI renders. `{error, code}` + 400/404 when the pair cannot be formed |
@@ -1197,7 +1207,8 @@ event-day TSB over the plan's own workouts — is a deferred Phase 2 follow-up.
 5. Archives the previous plan's future workouts (`archive_future_workouts`,
    tearing down their Calendar events), saves the new workouts tagged with the
    active `macrocycle_id`, and pushes them to Calendar eagerly — undoable via
-   `plan rollback` (see [§3](#3-coach-package-architecture)).
+   `workout rollback`, or `plan rollback` to step the strategy back with it
+   (see [§3](#3-coach-package-architecture)).
 
 ### Daily Adaptation (`workout adapt`)
 1. `CoachService.workout_adapt()` fetches metrics + planned workouts + completed
@@ -1341,9 +1352,10 @@ The shared core then:
   `--all` every goal's, `--workouts` each mesocycle's sessions; `plan diff` compares two
   versions.
 - **Workouts** = daily microcycle activities implementing the mesocycle focus.
-  Commands: `workout generate/adapt/push/swap/add`. `workout generate` pushes to
-  Calendar eagerly; `plan rollback` undoes a plan regeneration and its workouts
-  (DESIGN_plan_rollback.md).
+  Commands: `workout generate/adapt/push/swap/add/rollback/batches`. `workout generate`
+  pushes to Calendar eagerly; `workout rollback` undoes a regeneration by restoring an
+  archived batch (`workout batches` lists them), and `plan rollback` does the same while
+  also stepping the strategy back (DESIGN_plan_rollback.md).
 
 A `workout add` manually schedules a single session on a date (athlete-driven,
 not coach-driven, and LLM-free). It **replaces** any existing same-sport workout

@@ -559,3 +559,49 @@ class TestCliWorkouts(unittest.TestCase):
         ])
         self.assertEqual(exit_code, 0)
         self.assertIn("No planned workouts or completed activities found", stdout)
+
+    @patch("trainmate_cli.coach_service")
+    def test_workout_batches_and_rollback(self, mock_coach):
+        """`workout batches` lists archived batches and `workout rollback` picks one
+        (see DESIGN_plan_rollback.md §9)."""
+        exit_code, stdout, _ = self.run_cli(["workout", "batches"])
+        self.assertEqual(exit_code, 0)
+        self.assertIn("No archived workouts", stdout)
+
+        # Nothing archived yet: rollback declines without reaching the service.
+        exit_code, stdout, _ = self.run_cli(["workout", "rollback"])
+        self.assertEqual(exit_code, 0)
+        self.assertIn("No archived workouts to roll back to", stdout)
+        mock_coach.workout_rollback.assert_not_called()
+
+        today = datetime.now(timezone.utc).date()
+        future_str = (today + timedelta(days=2)).strftime("%Y-%m-%d")
+        test_db.save_workout(
+            date=future_str, sport_type="running", title="Archived Run",
+            description="45 mins", duration_minutes=45,
+        )
+        test_db.archive_future_workouts(today.strftime("%Y-%m-%d"))
+        stamp = test_db.get_archived_batches()[0]["archived_at"]
+
+        exit_code, stdout, _ = self.run_cli(["workout", "batches"])
+        self.assertEqual(exit_code, 0)
+        self.assertIn("#1", stdout)
+        self.assertIn("1 workout(s)", stdout)
+
+        # An out-of-range batch number is refused before anything is archived.
+        exit_code, stdout, _ = self.run_cli(["workout", "rollback", "--batch", "9"])
+        self.assertEqual(exit_code, 0)
+        self.assertIn("No archived batch #9", stdout)
+        mock_coach.workout_rollback.assert_not_called()
+
+        mock_coach.workout_rollback.return_value = {
+            "batch": stamp, "restored_workouts": 1, "archived_workouts": 0,
+            "first_date": future_str, "last_date": future_str,
+        }
+        exit_code, stdout, _ = self.run_cli(["workout", "rollback", "-y"])
+        self.assertEqual(exit_code, 0)
+        self.assertIn("Restored 1 workout(s)", stdout)
+        # The CLI resolves the positional #N to the batch's timestamp key.
+        self.assertEqual(
+            mock_coach.workout_rollback.call_args.kwargs.get("batch"), stamp
+        )

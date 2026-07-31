@@ -183,6 +183,56 @@ class TestPlanVersionsEndpoint(unittest.TestCase):
         self.assertEqual(versions[v1]["status"], "superseded")
 
 
+class TestWorkoutBatchesEndpoint(unittest.TestCase):
+    """GET /api/workouts/batches — the web face of `workout batches`
+    (see DESIGN_plan_rollback.md §9)."""
+
+    @classmethod
+    def setUpClass(cls):
+        if os.path.exists(TEST_DB_PATH):
+            os.remove(TEST_DB_PATH)
+        global test_db
+        test_db = Database(db_path=TEST_DB_PATH)
+        trainmate_web.db = test_db
+        cls.client = trainmate_web.app.test_client()
+
+    @classmethod
+    def tearDownClass(cls):
+        if os.path.exists(TEST_DB_PATH):
+            try:
+                os.remove(TEST_DB_PATH)
+            except OSError:
+                pass
+
+    def setUp(self):
+        clear_all_tables(test_db)
+
+    def test_batches_empty_when_nothing_archived(self):
+        res = self.client.get("/api/workouts/batches")
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.get_json()["batches"], [])
+
+    def test_batches_reports_span_and_restorable_count(self):
+        today = date.today()
+        past = (today - timedelta(days=3)).strftime("%Y-%m-%d")
+        future = (today + timedelta(days=3)).strftime("%Y-%m-%d")
+        for d in (past, future):
+            test_db.save_workout(
+                date=d, sport_type="running", title=f"Run {d}", description="x",
+            )
+        test_db.archive_future_workouts(past)
+
+        res = self.client.get("/api/workouts/batches")
+        self.assertEqual(res.status_code, 200)
+        batches = res.get_json()["batches"]
+        self.assertEqual(len(batches), 1)
+        self.assertEqual(batches[0]["workouts"], 2)
+        # Only the future row would come back — the past one's slot may be occupied.
+        self.assertEqual(batches[0]["restorable"], 1)
+        self.assertEqual(batches[0]["first_date"], past)
+        self.assertEqual(batches[0]["last_date"], future)
+
+
 class TestPlanDiffEndpoint(unittest.TestCase):
     """GET /api/plan/diff — the web face of `plan diff`. Both front-ends render the same
     trainmate/plan_diff.py structure, so this asserts the payload, not the wording."""

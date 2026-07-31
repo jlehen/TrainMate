@@ -620,6 +620,36 @@ def plan_rollback() -> Any:
         return jsonify({"error": str(e)}), 500
 
 
+@app.route("/api/workouts/batches", methods=["GET"])
+def workout_batches() -> Any:
+    """Lists the archived workout batches a rollback can restore (web equivalent of
+    `workout batches`, see DESIGN_plan_rollback.md §9)."""
+    return jsonify({"batches": db.get_archived_batches(from_date=today_str())})
+
+
+@app.route("/api/workouts/rollback", methods=["POST"])
+def workout_rollback() -> Any:
+    """Restores an archived batch of workouts, undoing a regeneration (web equivalent of
+    `workout rollback`). Body: {batch?} — an `archived_at` stamp, defaulting to the most
+    recently archived batch. Leaves the active plan version alone."""
+    data = request.json or {}
+    batch = data.get("batch") or None
+    try:
+        result = coach_service.workout_rollback(batch=batch)
+        return jsonify({
+            "message": (
+                f"Restored {result['restored_workouts']} workout(s) "
+                f"({result['first_date']} → {result['last_date']}), archived "
+                f"{result['archived_workouts']}; Google Calendar updated."
+            ),
+            **result,
+        })
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
 @app.route("/api/macrocycles/<int:macro_id>/feedback", methods=["POST"])
 def save_macrocycle_feedback(macro_id: int) -> Any:
     """API endpoint to save athlete feedback for a specific macrocycle."""

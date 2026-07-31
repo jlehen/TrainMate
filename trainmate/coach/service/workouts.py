@@ -217,6 +217,74 @@ class WorkoutGenMixin:
                     f"fitness test keeps your zones calibrated."
                 ))
 
+    def _archive_and_teardown(self, from_date: str) -> List[Workout]:
+        """Archives every live workout from `from_date` on and deletes their Calendar events.
+
+        The displaced rows keep their `macrocycle_id` tag and share one `archived_at` batch
+        stamp, so a later rollback can resurrect exactly this set (DESIGN_plan_rollback.md).
+        Returns the rows as they were before archival."""
+        archived = self._db.archive_future_workouts(from_date)
+        for ew in archived:
+            if ew.get('google_event_id'):
+                try:
+                    self._calendar_syncer.delete_workout_event(ew['google_event_id'])
+                except Exception as e:
+                    print(red(f"Error deleting Google Calendar event: {e}"))
+        return archived
+
+    def workout_rollback(self, batch: Optional[str] = None) -> Dict[str, Any]:
+        """Restores a previously archived batch of workouts, undoing a regeneration.
+
+        The sibling of `plan_rollback` on the workout axis: it swaps the live upcoming
+        sessions for an archived batch — the most recent one by default, or the batch
+        stamped `batch` — without touching the active plan version, so it also undoes a
+        regeneration that never changed the strategy (see DESIGN_plan_rollback.md §9).
+        The current sessions are archived (their Calendar events torn down) and the
+        target batch is resurrected and re-pushed, from today onward.
+
+        Returns {batch, restored_workouts, archived_workouts, first_date, last_date}.
+        Raises ValueError when there is no batch to restore.
+        """
+        today_str = _svc._today_str()
+        batches = self._db.get_archived_batches(from_date=today_str)
+        if not batches:
+            raise ValueError(
+                "No archived workouts to roll back to — nothing has displaced the "
+                "current sessions yet."
+            )
+
+        # Resolved before anything is archived: the archive below stamps a newer batch,
+        # which would otherwise become the default target and restore what it just
+        # displaced.
+        if batch is not None:
+            target = next((b for b in batches if b['archived_at'] == batch), None)
+            if not target:
+                raise ValueError(f"No archived workout batch stamped {batch}.")
+        else:
+            target = batches[0]
+
+        if not target['restorable']:
+            raise ValueError(
+                f"Every workout in that batch ({target['first_date']}..."
+                f"{target['last_date']}) is in the past — there is nothing to restore."
+            )
+
+        archived = self._archive_and_teardown(today_str)
+        restored = self._db.restore_workout_batch(target['archived_at'], today_str)
+        if restored:
+            try:
+                self._calendar_syncer.sync_multiple(restored)
+            except Exception as e:
+                print(red(f"Error syncing to Google Calendar: {e}"))
+
+        return {
+            'batch': target['archived_at'],
+            'restored_workouts': len(restored),
+            'archived_workouts': len(archived),
+            'first_date': min((w['date'] for w in restored), default=None),
+            'last_date': max((w['date'] for w in restored), default=None),
+        }
+
     def workout_generate(
         self, objective_id: Optional[int] = None, end_date: Optional[str] = None
     ) -> Tuple[str, List[Workout]]:
@@ -340,15 +408,8 @@ class WorkoutGenMixin:
         )
 
         # Archive (don't delete) future workouts from the previous plan so they can be
-        # resurrected by `plan rollback`, and tear down their Calendar events first so the
-        # old plan doesn't linger on the calendar (see DESIGN_plan_rollback.md). The
-        # displaced rows keep their macrocycle_id tag for the matching rollback.
-        for ew in self._db.archive_future_workouts(gen_start_str):
-            if ew.get('google_event_id'):
-                try:
-                    self._calendar_syncer.delete_workout_event(ew['google_event_id'])
-                except Exception as e:
-                    print(red(f"Error deleting Google Calendar event: {e}"))
+        # resurrected by `plan rollback` / `workout rollback` (see DESIGN_plan_rollback.md).
+        self._archive_and_teardown(gen_start_str)
 
         saved_workouts: List[Workout] = []
         for w in workouts:

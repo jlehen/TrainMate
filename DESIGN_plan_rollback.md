@@ -1,6 +1,6 @@
 # Design: Plan Versioning & Rollback
 
-**Status:** Implemented · **Date:** 2026-06-19 · **Branch:** main
+**Status:** Implemented · **Date:** 2026-06-19 (§9 added 2026-07-31) · **Branch:** main
 
 ## 1. Problem
 
@@ -162,3 +162,62 @@ in the web also pushes to Calendar eagerly, like the CLI.
   command.
 - **`plan rm` / `plan wipe`** delete *all* versions for the objective — rollback is
   for undoing regenerations, not for resurrecting a deleted plan.
+
+## 9. `workout rollback` — the same undo on the workout axis
+
+`plan rollback` can only express "restore the workouts of *another plan version*". Two
+regenerations under the **same** version — the common case, since `workout generate` is
+its own command — are indistinguishable to it: both batches carry the same
+`macrocycle_id`, and only the newest survives its `MAX(archived_at)` selector. So
+regenerating workouts twice without touching the strategy had no undo.
+
+### Batch = `archived_at`
+
+No new state was needed. One `archive_future_workouts` call stamps every row it displaces
+with a single `archived_at` value, so that timestamp already *is* a batch identity: the
+set of sessions that were live at that moment, whatever plan version tagged them and
+however they got there (generated, manually added, adapted). `get_archived_batches()`
+groups on it; `restore_workout_batch(archived_at, from_date)` restores one.
+`restore_macrocycle_workouts` is now a thin wrapper — resolve the version's newest stamp,
+delegate — so both commands share one restore path.
+
+### Mechanics (`workout_rollback(batch=None)`)
+1. Resolve the target batch **before** archiving anything: the newest stamp by default, or
+   an explicit one. The archive in step 2 creates a newer batch that would otherwise
+   become the default and restore what it just displaced.
+2. `_archive_and_teardown(today)` — archive the live upcoming sessions, delete their
+   events (the shared helper `workout generate` and `plan rollback` also use).
+3. `restore_workout_batch(target, today)` + `sync_multiple` to re-push.
+
+The active macrocycle is **not** touched: this is an undo of a workout generation, not of
+a plan decision. A restored row keeps the `macrocycle_id` of the version that created it,
+so it can be older than the active plan — harmless, since nothing reads workouts through
+that tag except `plan show`'s per-version listing. Like `plan rollback`, it is its own
+inverse: the batch it archives becomes the newest, so calling it again steps forward.
+
+### The date floor (bug fix)
+
+Restore is now bounded below by `from_date` (today), because archive always was: 
+`archive_future_workouts` only touches rows from a given date onward. A batch archived a
+week ago still contains rows for days that have since passed, and those slots are held by
+live rows the archive step deliberately left alone. Restoring them wholesale put **two
+live workouts on the same `(date, sport_type)`** — breaking the uniqueness
+`get_workout`/`save_workout`'s upsert assume — and re-created Calendar events in the past.
+`plan rollback` had the same defect; the floor lives in the shared
+`restore_workout_batch`, so both are fixed. Rows below the floor stay archived.
+
+`get_archived_batches(from_date)` reports `restorable` (rows at or after the floor)
+alongside the batch total, so the CLI and web can show what a restore would actually
+revive and refuse a batch that is wholly in the past instead of "restoring" nothing.
+
+### CLI & Web
+
+- **`workout batches`** (alias `b`) — lists batches newest first with a positional `#N`,
+  archive time, counts, date span, and plan version. Numbering is positional and shifts
+  after a rollback; the underlying key is the timestamp.
+- **`workout rollback [--batch N] [-y]`** (alias `rb`) — restores batch `#N`, default `#1`.
+  Confirms interactively, naming both what comes back and what gets archived.
+- Not to be confused with **`workout restore <id>`**, which un-cancels a single
+  soft-removed session (the `removed` axis, ARCHITECTURE.md §5). Both help texts say so.
+- Web: `GET /api/workouts/batches` and `POST /api/workouts/rollback` (`{batch?}`), with an
+  "Archived workout batches & rollback" panel under the schedule mirroring the plan one.

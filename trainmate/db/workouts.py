@@ -1,5 +1,5 @@
 from datetime import datetime, timezone
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 from trainmate.types import Workout
 from trainmate.sports import sport_aliases
 
@@ -212,14 +212,86 @@ class WorkoutsMixin:
             conn.commit()
             return rows
 
-    def restore_macrocycle_workouts(self, macrocycle_id: int) -> List[Workout]:
+    def get_archived_batches(
+        self, from_date: Optional[str] = None
+    ) -> List[Dict[str, Any]]:
+        """Lists the archived workout batches, newest first.
+
+        One `archive_future_workouts` call stamps every row it displaces with the same
+        `archived_at`, so that timestamp is the batch identity: the set of workouts that
+        were live at that moment. `workout rollback` restores one such batch and
+        `workout batches` lists them (see DESIGN_plan_rollback.md §9).
+
+        Each entry: {archived_at, workouts, first_date, last_date, macrocycle_ids} plus,
+        when `from_date` is given, `restorable` — how many of the batch's rows a restore
+        from that date would actually revive (see `restore_workout_batch`)."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT archived_at, COUNT(*) AS workouts, MIN(date) AS first_date, "
+                "MAX(date) AS last_date, "
+                "GROUP_CONCAT(DISTINCT macrocycle_id) AS macro_ids "
+                "FROM workouts WHERE archived_at IS NOT NULL "
+                "GROUP BY archived_at ORDER BY archived_at DESC"
+            )
+            batches = []
+            for row in cursor.fetchall():
+                raw_ids = row['macro_ids'] or ""
+                batches.append({
+                    'archived_at': row['archived_at'],
+                    'workouts': row['workouts'],
+                    'first_date': row['first_date'],
+                    'last_date': row['last_date'],
+                    'macrocycle_ids': sorted(
+                        int(i) for i in raw_ids.split(",") if i.strip()
+                    ),
+                })
+            if from_date is None:
+                return batches
+            cursor.execute(
+                "SELECT archived_at, COUNT(*) AS n FROM workouts "
+                "WHERE archived_at IS NOT NULL AND date >= ? GROUP BY archived_at",
+                (from_date,)
+            )
+            counts = {r['archived_at']: r['n'] for r in cursor.fetchall()}
+            for b in batches:
+                b['restorable'] = counts.get(b['archived_at'], 0)
+            return batches
+
+    def restore_workout_batch(self, archived_at: str, from_date: str) -> List[Workout]:
+        """Un-archives one archived batch, restricted to rows dated `from_date` onward.
+
+        The date floor keeps restore symmetric with `archive_future_workouts`, which only
+        ever archives from a given date onward: a batch older than that floor still holds
+        rows for days that have since passed, whose slots are occupied by live rows the
+        archive step left alone. Restoring those would put two live workouts on the same
+        date+sport and re-create Calendar events in the past, so they stay archived
+        (see DESIGN_plan_rollback.md §9). Calendar handles were cleared at archival, so
+        the caller must re-push what comes back. Returns the restored rows."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT * FROM workouts WHERE archived_at = ? AND date >= ?",
+                (archived_at, from_date)
+            )
+            restored = [dict(r) for r in cursor.fetchall()]  # type: ignore
+            cursor.execute(
+                "UPDATE workouts SET archived_at = NULL "
+                "WHERE archived_at = ? AND date >= ?",
+                (archived_at, from_date)
+            )
+            conn.commit()
+            return restored
+
+    def restore_macrocycle_workouts(
+        self, macrocycle_id: int, from_date: str
+    ) -> List[Workout]:
         """Un-archives the most recently archived batch of workouts for a plan version.
 
         A `plan rollback` to `macrocycle_id` resurrects the workouts that were live when
         that version was last superseded — i.e. the batch sharing the latest `archived_at`
-        among that version's archived rows. Their Calendar handles were cleared at archival,
-        so the caller must re-push them. Returns the restored rows (empty if the version
-        never had workouts). See DESIGN_plan_rollback.md."""
+        among that version's archived rows, restored from `from_date` onward. Returns the
+        restored rows (empty if the version never had workouts). See DESIGN_plan_rollback.md."""
         with self._get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute(
@@ -229,20 +301,9 @@ class WorkoutsMixin:
             )
             row = cursor.fetchone()
             batch = row['m'] if row else None
-            if not batch:
-                return []
-            cursor.execute(
-                "SELECT * FROM workouts WHERE macrocycle_id = ? AND archived_at = ?",
-                (macrocycle_id, batch)
-            )
-            restored = [dict(r) for r in cursor.fetchall()]  # type: ignore
-            cursor.execute(
-                "UPDATE workouts SET archived_at = NULL "
-                "WHERE macrocycle_id = ? AND archived_at = ?",
-                (macrocycle_id, batch)
-            )
-            conn.commit()
-            return restored
+        if not batch:
+            return []
+        return self.restore_workout_batch(batch, from_date)
 
     def get_workout_by_id(self, workout_id: int) -> Optional[Workout]:
         """Fetches a workout by its unique ID."""

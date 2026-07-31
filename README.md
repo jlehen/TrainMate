@@ -71,7 +71,10 @@ does the coaching reasoning.
 
 - **Plan versioning & rollback.** Regenerating a plan supersedes the old one
   rather than destroying it, so you can roll back a plan (and its workouts) to a
-  previous version.
+  previous version. Workouts get the same undo on their own axis: every
+  regeneration archives the sessions it displaces as a batch, and
+  `workout rollback` restores one (`workout batches` lists them) without
+  touching the strategy.
 
 ## Features at a glance
 
@@ -218,8 +221,9 @@ Two things to know when you regenerate:
   planned-vs-actual review of the blocks you've *already* trained, and your coach
   learnings — so it refines the existing arc rather than redrawing it from scratch.
 - **`workout generate` archives and rebuilds all future workouts**, manual edits
-  included (they are recoverable via `plan rollback`, not deleted; a session you've
-  already completed today is preserved). So make strategic changes *first*
+  included (they are recoverable via `workout rollback` or `plan rollback`, not
+  deleted; a session you've already completed today is preserved). So make
+  strategic changes *first*
   (a plan-shaping `constraint` → `plan generate` → `workout generate`), then layer
   manual `add`/`swap` tweaks on top — not the other way around.
 

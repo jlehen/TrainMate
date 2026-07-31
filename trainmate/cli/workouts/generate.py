@@ -270,9 +270,112 @@ def run_workout_generate(args: argparse.Namespace) -> None:
             f"Generated {len(workouts)} workouts starting from today and pushed them "
             "to Google Calendar."
         ))
-        print(f"Run '{green('plan rollback')}' to undo this regeneration if needed.")
+        print(
+            f"Run '{green('workout rollback')}' to undo this regeneration, or "
+            f"'{green('plan rollback')}' to step the strategy back with it."
+        )
     except Exception as e:
         print(red(f"Error during workout generation: {e}"))
+
+
+def _batch_line(index: int, batch: dict) -> str:
+    """One `workout batches` row: '#N  <when>  <n> workouts · <span>  plan ID …'."""
+    count = f"{batch['workouts']} workout(s)"
+    restorable = batch.get('restorable')
+    if restorable == 0:
+        count += gray(" — all in the past")
+    elif restorable is not None and restorable < batch['workouts']:
+        count += gray(f" ({restorable} restorable)")
+    macros = batch.get('macrocycle_ids') or []
+    plan = f"plan ID {', '.join(str(m) for m in macros)}" if macros else "unversioned"
+    span = f"{fmt_date(batch['first_date'])} → {fmt_date(batch['last_date'])}"
+    return (
+        f"{pad_visible(cyan(f'#{index}'), 5)} "
+        f"{pad_visible(_fmt_ts(batch['archived_at']), 18)} "
+        f"{pad_visible(count, 32)} {gray(span)}  {gray(plan)}"
+    )
+
+
+def run_workout_batches(args: argparse.Namespace) -> None:
+    """Lists the archived workout batches a `workout rollback` can restore."""
+    today = _today_str()
+    batches = cli.db.get_archived_batches(from_date=today)
+
+    print(bold(cyan("\n=== ARCHIVED WORKOUT BATCHES ===")))
+    if not batches:
+        print(gray(
+            "No archived workouts — nothing has displaced the current sessions yet."
+        ))
+        return
+    print(gray(
+        "Each batch is the set of upcoming sessions that was live when a regeneration "
+        "or rollback replaced it, newest first.\n"
+    ))
+    for i, b in enumerate(batches, start=1):
+        print(_batch_line(i, b))
+    print()
+    print(gray("Restore one with ") + green("'workout rollback [--batch N]'")
+          + gray(" (defaults to #1). Numbering is positional and shifts after a "
+                 "rollback."))
+
+
+def run_workout_rollback(args: argparse.Namespace) -> None:
+    """Restores an archived batch of workouts, undoing a `workout generate`."""
+    today = _today_str()
+    batches = cli.db.get_archived_batches(from_date=today)
+    if not batches:
+        print(yellow(
+            "No archived workouts to roll back to — nothing has displaced the current "
+            "sessions yet."
+        ))
+        return
+
+    index = getattr(args, 'batch', None) or 1
+    if not 1 <= index <= len(batches):
+        print(red(
+            f"No archived batch #{index} — there {'is' if len(batches) == 1 else 'are'} "
+            f"{len(batches)}."
+        ))
+        print(f"Run '{green('workout batches')}' to list them.")
+        return
+    target = batches[index - 1]
+
+    if not target['restorable']:
+        print(yellow(
+            f"Batch #{index} covers {fmt_date(target['first_date'])} → "
+            f"{fmt_date(target['last_date'])}, entirely in the past — there is nothing "
+            "to restore."
+        ))
+        print(f"Run '{green('workout batches')}' to pick another.")
+        return
+
+    if not getattr(args, 'yes', False):
+        live = len(cli.db.get_workouts(start_date=today))
+        if not cli.prompt.confirm(
+            f"Restore the {target['restorable']} upcoming workout(s) archived "
+            f"{_fmt_ts(target['archived_at'])}?\nThis archives the {live} currently "
+            "planned session(s) from today onward and updates Google Calendar. The "
+            "active plan version is unchanged.",
+            danger=True,
+        ):
+            print("Rollback cancelled.")
+            return
+
+    try:
+        result = cli.coach_service.workout_rollback(batch=target['archived_at'])
+    except ValueError as e:
+        print(red(str(e)))
+        return
+
+    span = (
+        f" ({fmt_date(result['first_date'])} → {fmt_date(result['last_date'])})"
+        if result['first_date'] else ""
+    )
+    print(green(
+        f"\nRestored {result['restored_workouts']} workout(s){span} and archived "
+        f"{result['archived_workouts']}; Google Calendar updated."
+    ))
+    print(f"Run '{green('workout list')}' to review the restored sessions.")
 def run_workout_list(args: argparse.Namespace) -> None:
     """Lists stored workouts chronologically, with optional date, goal, or type filters."""
     start_date, end_date = _resolve_workout_date_range(args)

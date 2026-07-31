@@ -600,6 +600,120 @@ class TestPeriodization(unittest.TestCase):
         with self.assertRaises(ValueError):
             coach_service.plan_rollback(objective_id=obj_id)
 
+    def _plan_v1(self, mock_client, strategy: str = "v1", force: bool = False) -> int:
+        """Generates a periodization plan and returns the active macrocycle id."""
+        mock_client.complete.return_value = {"strategy": strategy, "mesocycles": [{
+            "name": "Base", "start_date": "2026-06-01",
+            "end_date": "2026-06-28", "focus": "Base",
+        }]}
+        coach_service.plan_generate(force=force)
+        obj_id = test_db.get_active_objective()["id"]
+        return test_db.get_macrocycle_for_objective(obj_id)["id"]
+
+    @staticmethod
+    def _generate_workout(mock_client, today: str, title: str) -> None:
+        """Runs `workout generate` with a single-session response."""
+        mock_client.complete.return_value = {
+            "reasoning": title, "workouts": [{
+                "date": today, "sport_type": "running",
+                "title": title, "description": f"{title} session",
+            }],
+        }
+        coach_service.workout_generate()
+
+    @patch("trainmate.coach.service.calendar_syncer")
+    @patch("trainmate.coach.engine.openrouter_client")
+    def test_workout_rollback_restores_batch_leaving_plan_active(
+        self, mock_client, mock_calendar
+    ):
+        """`workout rollback` restores the archived batch and re-pushes it, without
+        touching the active plan version (see DESIGN_plan_rollback.md §9)."""
+        mock_calendar.sync_workout.return_value = "evt-new"
+        test_db.add_objective(
+            title="Zurich Marathon", target_date="2026-10-15",
+            sport_type="running", priority=1,
+        )
+        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+        self._plan_v1(mock_client)
+        self._generate_workout(mock_client, today, "V1 Run")
+        v2_id = self._plan_v1(mock_client, strategy="v2", force=True)
+        self._generate_workout(mock_client, today, "V2 Run")
+
+        result = coach_service.workout_rollback()
+
+        obj_id = test_db.get_active_objective()["id"]
+        self.assertEqual(test_db.get_macrocycle_for_objective(obj_id)["id"], v2_id)
+        self.assertEqual(
+            [w["title"] for w in test_db.get_workouts(start_date=today)], ["V1 Run"]
+        )
+        self.assertEqual(result["restored_workouts"], 1)
+        self.assertEqual(result["archived_workouts"], 1)
+        self.assertTrue(mock_calendar.sync_multiple.called)
+
+    @patch("trainmate.coach.service.calendar_syncer")
+    @patch("trainmate.coach.engine.openrouter_client")
+    def test_workout_rollback_within_one_plan_version(self, mock_client, mock_calendar):
+        """Two regenerations under the same plan are distinguished by their archive
+        batch, so a rollback undoes the second one (the case `plan rollback`'s
+        macrocycle-keyed restore cannot express)."""
+        mock_calendar.sync_workout.return_value = "evt-new"
+        test_db.add_objective(
+            title="Zurich Marathon", target_date="2026-10-15",
+            sport_type="running", priority=1,
+        )
+        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+        macro_id = self._plan_v1(mock_client)
+        self._generate_workout(mock_client, today, "First Run")
+        self._generate_workout(mock_client, today, "Second Run")
+
+        coach_service.workout_rollback()
+
+        live = test_db.get_workouts(start_date=today)
+        self.assertEqual([w["title"] for w in live], ["First Run"])
+        self.assertEqual(live[0]["macrocycle_id"], macro_id)
+
+        # A second rollback steps forward again: the batch just archived is now newest.
+        coach_service.workout_rollback()
+        self.assertEqual(
+            [w["title"] for w in test_db.get_workouts(start_date=today)], ["Second Run"]
+        )
+
+    def test_workout_rollback_without_archive_raises(self):
+        """Rolling back workouts with nothing archived is rejected."""
+        with self.assertRaises(ValueError):
+            coach_service.workout_rollback()
+
+    def test_restore_workout_batch_skips_past_dated_rows(self):
+        """A batch reaching back before the restore floor keeps its past-dated rows
+        archived — their slots are held by live rows the archive step left alone
+        (see DESIGN_plan_rollback.md §9)."""
+        test_db.save_workout(
+            date="2026-06-01", sport_type="running", title="Old Mon", description="x"
+        )
+        test_db.save_workout(
+            date="2026-06-05", sport_type="running", title="Old Fri", description="x"
+        )
+        test_db.archive_future_workouts("2026-06-01")
+        # A later generation re-occupied the early slot; only that row is live now.
+        test_db.save_workout(
+            date="2026-06-01", sport_type="running", title="New Mon", description="x"
+        )
+
+        batches = test_db.get_archived_batches(from_date="2026-06-03")
+        self.assertEqual(len(batches), 1)
+        self.assertEqual(batches[0]["workouts"], 2)
+        self.assertEqual(batches[0]["restorable"], 1)
+
+        restored = test_db.restore_workout_batch(batches[0]["archived_at"], "2026-06-03")
+        self.assertEqual([w["title"] for w in restored], ["Old Fri"])
+        # One live row per date+sport: the past-dated "Old Mon" stayed archived.
+        self.assertEqual(
+            [w["title"] for w in test_db.get_workouts(start_date="2026-06-01")],
+            ["New Mon", "Old Fri"],
+        )
+
     @patch("trainmate.coach.service.config")
     def test_load_science_guidelines(self, mock_config):
         temp_app_dir = tempfile.mkdtemp()

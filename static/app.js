@@ -1331,6 +1331,74 @@ document.getElementById("plan-versions").addEventListener("toggle", (e) => {
     if (e.target.open) loadPlanVersions();
 });
 
+// --- Archived workout batches & rollback (see DESIGN_plan_rollback.md §9) ---
+async function loadWorkoutBatches() {
+    const listEl = document.getElementById("workout-batches-list");
+    if (!listEl) return;
+    listEl.innerHTML = `<div class="item-meta">Loading batches…</div>`;
+    try {
+        const res = await fetch(`${API_BASE}/api/workouts/batches`);
+        const data = await res.json();
+        const batches = (data && data.batches) || [];
+        if (!batches.length) {
+            listEl.innerHTML = `<div class="item-meta">No archived workouts yet. `
+                + `Regenerating keeps the displaced sessions here so you can roll back.</div>`;
+            return;
+        }
+        listEl.innerHTML = batches.map(b => {
+            const when = new Date(b.archived_at).toLocaleString("en-US",
+                { month: "short", day: "numeric", year: "numeric",
+                  hour: "2-digit", minute: "2-digit" });
+            // A batch whose every session is in the past restores nothing, so it offers
+            // no button — the same guard the service raises on.
+            const action = b.restorable
+                ? `<button class="btn btn-secondary btn-sm" data-batch="${escapeHtml(b.archived_at)}">`
+                  + `<i class="fa-solid fa-rotate-left"></i> Restore</button>`
+                : `<span class="item-meta">all in the past</span>`;
+            const plans = (b.macrocycle_ids || []).join(", ");
+            return `<div class="plan-version-row">`
+                + `<div class="plan-version-head">`
+                + `<span class="badge badge-info">${b.restorable} of ${b.workouts}</span> `
+                + `<span class="item-meta">archived ${escapeHtml(when)}`
+                + (plans ? ` · plan ID ${escapeHtml(plans)}` : "") + `</span>`
+                + `<span class="plan-version-action">${action}</span></div>`
+                + `<div class="si-desc">${escapeHtml(b.first_date)} → ${escapeHtml(b.last_date)}</div>`
+                + `</div>`;
+        }).join("");
+        listEl.querySelectorAll("button[data-batch]").forEach(btn => {
+            btn.addEventListener("click", () => rollbackWorkoutBatch(btn.dataset.batch));
+        });
+    } catch (e) {
+        listEl.innerHTML = `<div class="item-meta">Failed to load batches: ${escapeHtml(e.message)}</div>`;
+    }
+}
+
+async function rollbackWorkoutBatch(batch) {
+    if (!confirm("Restore this batch of workouts? This archives the currently planned "
+        + "sessions from today onward and updates Google Calendar. The active plan "
+        + "version is unchanged.")) return;
+    logConsole("Rolling back workouts…", "system");
+    try {
+        const res = await fetch(`${API_BASE}/api/workouts/rollback`, {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ batch }),
+        });
+        const data = await res.json();
+        if (res.ok) {
+            logConsole(data.message || "Workout rollback complete.");
+            fetchStatus();
+            fetchWorkouts();
+            loadWorkoutBatches();
+        } else {
+            logConsole(`Workout rollback failed: ${data.error}`, "error");
+        }
+    } catch (e) { logConsole(`Workout rollback error: ${e.message}`, "error"); }
+}
+
+document.getElementById("workout-batches").addEventListener("toggle", (e) => {
+    if (e.target.open) loadWorkoutBatches();
+});
+
 document.getElementById("btn-generate-workouts").addEventListener("click", async () => {
     logConsole("Requesting Coach to generate workouts (microcycles)...", "system");
     try {

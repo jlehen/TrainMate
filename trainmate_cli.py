@@ -57,7 +57,8 @@ COMMAND_ORDER = {
     "context": ["list", "list-metrics", "add", "rm"],
     "learnings": ["list", "show", "edit", "demote", "keep", "rm"],
     "plan": ["show", "generate", "feedback", "versions", "diff", "rollback"],
-    "workout": ["list", "adapt", "compare", "generate", "swap", "add", "restore", "rm"],
+    "workout": ["list", "adapt", "compare", "generate", "swap", "add", "restore", "rm",
+                "rollback", "batches"],
     "data": ["pull", "reflect", "show-metrics", "show-activities"],
 }
 
@@ -85,7 +86,7 @@ from trainmate.cli.plans import (
 from trainmate.cli.workouts import (
     run_workout_list, run_workout_compare, run_workout_generate, run_workout_rm,
     run_workout_restore, run_workout_adapt, run_workout_push, run_workout_swap,
-    run_workout_add, run_workout_wipe,
+    run_workout_add, run_workout_wipe, run_workout_batches, run_workout_rollback,
 )
 from trainmate.cli.data import (
     run_data_pull, run_data_bootstrap, run_data_reflect, run_data_backfill_tss,
@@ -376,6 +377,10 @@ def run_once(argv, parser, named_subparsers) -> None:
             run_workout_rm(args)
         elif sub in ("restore", "res"):
             run_workout_restore(args)
+        elif sub in ("rollback", "rb"):
+            run_workout_rollback(args)
+        elif sub in ("batches", "b"):
+            run_workout_batches(args)
         elif sub in ("adapt", "a"):
             run_workout_adapt(args)
         elif sub in ("push", "p"):

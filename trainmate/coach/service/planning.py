@@ -440,19 +440,13 @@ class PlanningMixin:
         today_str = _svc._today_str()
 
         # 1. Archive the current plan's future workouts and tear down their events.
-        archived = self._db.archive_future_workouts(today_str)
-        for ew in archived:
-            if ew.get('google_event_id'):
-                try:
-                    self._calendar_syncer.delete_workout_event(ew['google_event_id'])
-                except Exception as e:
-                    print(red(f"Error deleting Google Calendar event: {e}"))
+        archived = self._archive_and_teardown(today_str)
 
         # 2. Flip the active version so date->plan lookups resolve to the restored plan.
         self._db.set_active_macrocycle(target['id'])
 
         # 3. Resurrect the restored version's workouts and re-push them.
-        restored = self._db.restore_macrocycle_workouts(target['id'])
+        restored = self._db.restore_macrocycle_workouts(target['id'], today_str)
         if restored:
             try:
                 self._calendar_syncer.sync_multiple(restored)

@@ -119,6 +119,42 @@ def add_workout_parser(subparsers, pull_bypass_parser, llm_debug_parser, plan_da
         help="Generate workouts until the end date of a mesocycle"
     )
     
+    # workout rollback
+    w_rollback = workout_subparsers.add_parser(
+        "rollback", aliases=["rb"],
+        help="Undo a workout regeneration by restoring a previously archived batch",
+        description=(
+            "Restore a previously archived batch of workouts — the inverse of "
+            f"'{green('workout generate')}'. The upcoming sessions from today onward are "
+            "archived (their Calendar events torn down) and the target batch is "
+            "restored and re-pushed. Defaults to the most recently archived batch; "
+            f"list them with '{green('workout batches')}' and pick one with --batch. "
+            "The active periodization plan is left untouched — use "
+            f"'{green('plan rollback')}' to step the strategy back as well. This is "
+            f"unrelated to '{green('workout restore')}', which un-cancels a single "
+            "soft-removed session."
+        )
+    )
+    w_rollback.add_argument(
+        "--batch", type=int, metavar="N",
+        help="Which archived batch to restore, as numbered by 'workout batches' "
+             "(1 = most recent, the default)"
+    )
+    w_rollback.add_argument(
+        "-y", "--yes", action="store_true", help="Skip confirmation prompt"
+    )
+
+    # workout batches
+    workout_subparsers.add_parser(
+        "batches", aliases=["b"],
+        help="List archived workout batches that 'workout rollback' can restore",
+        description=(
+            "List the archived batches of workouts, newest first. Each batch is the set "
+            "of upcoming sessions that was live when a regeneration or rollback replaced "
+            f"it; '{green('workout rollback --batch N')}' restores one."
+        )
+    )
+
     # workout add
     w_add = workout_subparsers.add_parser(
         "add",
