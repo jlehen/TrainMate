@@ -48,7 +48,7 @@ from typing import Dict, List, Optional, Tuple
 
 from trainmate.config import config
 from trainmate.prompt import PROMPT_SENTINEL, PROMPT_PROTOCOL_VERSION, PHOTO_SENTINEL
-from trainmate.util import ANSI_ESCAPE
+from trainmate.util import ANSI_ESCAPE, cmd
 
 # Telegram caps a message at 4096 chars; we wrap replies in <pre>…</pre> (7 chars
 # of overhead) and want headroom, so chunk the body well under the hard limit.
@@ -287,7 +287,7 @@ def main() -> None:
     except ImportError:
         sys.exit(
             "python-telegram-bot is not installed. Run: "
-            "venv/bin/pip install -r requirements.txt"
+            + cmd("venv/bin/pip install -r requirements.txt", quote=False)
         )
 
     sessions: Dict[int, _Session] = {}

@@ -184,7 +184,8 @@ classes themselves.
 |                      |                      | `canonical_sport`, `sport_aliases`); dependency- |
 |                      |                      | free so DB + adherence share it without a cycle. |
 | `util.py`            | —                    | ANSI color helpers (`bold`, `green`, `red`, …),  |
-|                      |                      | `wrap_text`, `format_labeled_text`.              |
+|                      |                      | `cmd` (every "run X" call to action), `wrap_text`,|
+|                      |                      | `format_labeled_text`, `strip_ansi`.             |
 
 ### Change recipes (where to edit for a given task)
 
@@ -204,6 +205,7 @@ flow for each lives in [§10](#10-key-data-flows).
 | Calendar push / daily-context ingest | `trainmate/google_calendar.py`, see [§13](#13-daily-context-calendar-ingest) |
 | Workout state (modified/calendar/removed/archived) | `trainmate/modification_state.py`, `trainmate/calendar_state.py`, `db/workouts.py` ([§5](#workout-state--four-orthogonal-axes-not-one-enum)) |
 | A CLI command                    | `trainmate/cli/<family>.py` (`run_*`), dispatcher in `trainmate_cli.py` ([§7](#7-cli-commands-reference)) |
+| A message telling the athlete to run something | wrap the command in `util.cmd()`, nested *inside* the line's colour call, so it renders as the bright shade of that colour |
 | A web endpoint                   | `trainmate_web.py` (thin wrapper over `coach_service`/`db`) ([§8](#8-web-api-endpoints)) |
 | The Telegram bot                 | `trainmate_bot.py` (runs the CLI as a subprocess) ([§2](#entry-points)) |
 | DB schema / a new column         | the relevant `db/*.py` mixin + the table in [§5](#5-database-schema) |

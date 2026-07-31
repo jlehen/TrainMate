@@ -16,7 +16,7 @@ from typing import Any, Dict, List, Optional
 
 from trainmate import progression, chart
 from trainmate.util import (
-    bold, green, red, yellow, gray, dim, pad_visible, visible_len, wrap_text,
+    bold, green, red, yellow, gray, dim, cmd, pad_visible, visible_len, wrap_text,
     color_tsb, today_str as _today_str, PMC_TSB_LAG_NOTE,
 )
 from trainmate.cli.common import ensure_recent_data
@@ -180,8 +180,24 @@ def format_plan_gap_banner(
             f"— {weeks_before} wks before"
         ),
         f"  \U0001F3C1 {next_objective['target_date']} {next_objective['title']}",
-        f"  ({green('workout generate --until-goal')})",
+        yellow(f"  ({cmd('workout generate --until-goal', quote=False)})"),
     ]
+
+
+# `progression` emits its warnings as plain text so the web payload stays ANSI-free, so
+# the one that names a command gets highlighted here instead, at render time.
+_WARNING_COMMANDS = ("data pull",)
+
+
+def _warning_line(w: str) -> str:
+    """One footer warning in yellow, with any command it names rendered as a call to
+    action."""
+    for name in _WARNING_COMMANDS:
+        marker = f"`{name}`"
+        if marker in w:
+            head, _, tail = w.partition(marker)
+            return yellow(f"⚠ {head}" + cmd(name) + tail)
+    return yellow(f"⚠ {w}")
 
 
 def format_no_plan_banner(lapsed_date: Optional[str]) -> List[str]:
@@ -190,12 +206,12 @@ def format_no_plan_banner(lapsed_date: Optional[str]) -> List[str]:
     if lapsed_date:
         return [
             yellow(f"⚠ plan lapsed {_short_date(lapsed_date)} — projection unavailable"),
-            f"  Run {green('workout generate')} to project forward again.",
+            green(f"  Run {cmd('workout generate')} to project forward again."),
         ]
     return [
         yellow("⚠ no plan generated — projection unavailable"),
-        f"  Run {green('plan generate')} "
-        f"(after {green('data bootstrap')} if never run) to project forward.",
+        green(f"  Run {cmd('plan generate')} "
+              f"(after {cmd('data bootstrap')} if never run) to project forward."),
     ]
 
 
@@ -420,7 +436,7 @@ def render_progress(
     for w in warnings:
         if w.startswith("plan generated through"):
             continue
-        lines.append(yellow(f"⚠ {w}"))
+        lines.append(_warning_line(w))
 
     return lines
 
@@ -439,9 +455,8 @@ def _emit_chart(chart_arg: Any, payload: Dict[str, Any], caption: str) -> None:
     try:
         png = chart.render_timeline_png(payload)
     except ImportError:
-        print(red(
-            "matplotlib is not installed — run: venv/bin/pip install -r requirements.txt"
-        ))
+        print(red("matplotlib is not installed — run: "
+                  + cmd("venv/bin/pip install -r requirements.txt", quote=False)))
         return
 
     if os.environ.get("TRAINMATE_FRONTEND", "").lower() == "json":

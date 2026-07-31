@@ -7,7 +7,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from trainmate.config import config
 from trainmate.db import db
-from trainmate.util import today_date, today_str, yellow, red, dim
+from trainmate.util import today_date, today_str, yellow, red, dim, cmd
 import trainmate.garmin as _g
 from trainmate.garmin.client import (GarminAuthRequired, GarminClient, _date_range,
     _derivation_pad_days, _shift, _to_date)
@@ -281,8 +281,9 @@ def ensure_data(start_date: str, end_date: str, force: bool = False) -> None:
             _g.pull(region[0], region[1], throttle=config.garmin_throttle_seconds)
         except GarminAuthRequired:
             print(yellow(
-                "Garmin re-auth required — run `python trainmate_cli.py data pull` "
-                "in a terminal. Continuing with cached data."
+                "Garmin re-auth required — run "
+                + cmd("python trainmate_cli.py data pull")
+                + " in a terminal. Continuing with cached data."
             ))
             break
         except Exception as e:
@@ -307,7 +308,7 @@ def _warn_manual(start: str, end: str, *, cold: bool) -> None:
             f"warm up over the first ~{config.pmc_ctl_days} days of history, so on a "
             "shallow backfill freshness can read artificially low. To backfill, run:"
         ))
-    print(f"  {_pull_command(start, end)}")
+    print(yellow("  " + cmd(_pull_command(start, end), quote=False)))
 def _remember(start: str, end: str) -> None:
     global _ensured
     if _ensured is None:

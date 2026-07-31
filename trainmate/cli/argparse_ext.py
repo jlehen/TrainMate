@@ -10,7 +10,9 @@ import sys
 import tempfile
 from typing import Optional
 
-from trainmate.util import bold, dim, red, yellow, default_wrap_width, format_labeled_block
+from trainmate.util import (
+    bold, dim, red, yellow, cmd, default_wrap_width, format_labeled_block
+)
 
 
 class WrapAwareHelpFormatter(argparse.RawDescriptionHelpFormatter):
@@ -118,7 +120,7 @@ class WrapAwareArgumentParser(argparse.ArgumentParser):
         # full usage block that argparse buries it under (DESIGN_cli_noargs.md §a).
         if message.startswith("the following arguments are required"):
             self.exit(2, red(f"{self.prog}: error: {message}\n")
-                      + dim(f"Run '{self.prog} -h' for usage.\n"))
+                      + dim("Run " + cmd(f"{self.prog} -h") + " for usage.\n"))
         super().error(message)
 
 def _edit_text_in_editor(initial: str) -> Optional[str]:

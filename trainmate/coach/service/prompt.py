@@ -12,7 +12,7 @@ from trainmate import garmin
 from trainmate.garmin import activity_load
 from trainmate.util import (
     today_str as _today_str, today_date as _today_date,
-    cyan, green, yellow, bold, red, gray, PMC_TSB_LAG_NOTE,
+    cyan, green, yellow, bold, red, gray, cmd, PMC_TSB_LAG_NOTE,
 )
 from trainmate.coach.engine import CoachEngine
 from trainmate.coach.formatting import format_baseline, _load_science_guidelines
@@ -225,9 +225,8 @@ class PromptConfigMixin:
             return
         print(yellow(
             "No fitness thresholds on record — prescriptions will use RPE/HR feel until "
-            "you record one ("
-        ) + green("'benchmark record …'") + yellow(
-            ") or complete the scheduled benchmark."
+            "you record one (" + cmd("benchmark record …")
+            + ") or complete the scheduled benchmark."
         ))
 
     def _maybe_nudge_bootstrap(self) -> None:
@@ -236,9 +235,8 @@ class PromptConfigMixin:
         if any(not l.get("dormant") for l in self._db.get_learnings()):
             return
         print(yellow(
-            "No coach learnings yet. Run "
-        ) + green("'data bootstrap'") + yellow(
-            " to reconstruct your training history and seed evidence-based observations."
+            "No coach learnings yet. Run " + cmd("data bootstrap")
+            + " to reconstruct your training history and seed evidence-based observations."
         ))
 
     def _get_coach_system_prompt(

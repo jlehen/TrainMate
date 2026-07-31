@@ -4,7 +4,7 @@ from typing import Optional, Tuple
 
 import trainmate_cli as cli
 from trainmate.util import (
-    bold, dim, green, red, yellow, cyan, blue, gray,
+    bold, dim, green, red, yellow, cyan, blue, gray, cmd,
     format_labeled_block, today_str as _today_str,
 )
 from trainmate.cli.common import fmt_date
@@ -99,8 +99,8 @@ def run_benchmark_record(args: argparse.Namespace) -> None:
     if _crosses_replan_band(kind, value, prev):
         print(yellow(
             "This moves your effective threshold past the replan band — run "
-        ) + bold(green("'plan generate'")) + yellow(
-            " to rebuild the next block against the fresh number."
+            + cmd("plan generate")
+            + " to rebuild the next block against the fresh number."
         ))
 
 

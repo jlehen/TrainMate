@@ -6,7 +6,7 @@ import trainmate_cli as cli
 from trainmate.config import config
 from trainmate.adherence import analyze_adherence, date_covered
 from trainmate.util import (
-    bold, dim, green, red, yellow, cyan, blue, magenta, gray,
+    bold, dim, green, red, yellow, cyan, blue, magenta, gray, cmd,
     visible_len, pad_visible, wrap_text, format_labeled_text,
     format_labeled_block, today_str as _today_str, today_date as _today_date,
 )
@@ -46,9 +46,8 @@ def run_goal_add(args: argparse.Namespace) -> None:
     if goal:
         _print_goal(goal)
     print(
-        green("Goal added successfully. Run ")
-        + bold(green("'plan generate'"))
-        + green(" to generate training cycles.")
+        green("Goal added successfully. Run " + cmd("plan generate")
+              + " to generate training cycles.")
     )
 
 
@@ -82,9 +81,8 @@ def run_goal_edit(args: argparse.Namespace) -> None:
     if updated:
         _print_goal(updated)
     print(
-        green("Goal updated successfully. Run ")
-        + bold(green("'plan generate'"))
-        + green(" to regenerate training cycles if needed.")
+        green("Goal updated successfully. Run " + cmd("plan generate")
+              + " to regenerate training cycles if needed.")
     )
 
 

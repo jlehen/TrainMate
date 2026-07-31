@@ -6,7 +6,7 @@ import trainmate_cli as cli
 from trainmate.config import config
 from trainmate.adherence import analyze_adherence, date_covered
 from trainmate.util import (
-    bold, dim, green, red, yellow, cyan, blue, magenta, gray,
+    bold, dim, green, red, yellow, cyan, blue, magenta, gray, cmd,
     color_load_ratio, color_ramp, pmc_cells, pmc_warming_note, visible_len, pad_visible,
     wrap_text, format_labeled_text, format_labeled_block, PMC_TSB_LAG_NOTE,
     today_str as _today_str, today_date as _today_date,
@@ -81,7 +81,7 @@ def run_status(
                 print(yellow(
                     "\nWarning: a plan-shaping input has changed since the "
                     f"active periodization plan was generated ({change_reason}).\nRun "
-                ) + green("'plan generate'") + yellow(" to regenerate."))
+                    + cmd("plan generate") + " to regenerate."))
             
             mesos = cli.db.get_mesocycles_for_macrocycle(macro['id'])
             active_meso = None
@@ -106,7 +106,7 @@ def run_status(
         else:
             print(
                 f"{bold('Active Mesocycle')}: "
-                f"No periodization strategy established. Run '{green('plan generate')}' first."
+                f"No periodization strategy established. Run {cmd('plan generate')} first."
             )
     else:
         print(
@@ -230,9 +230,8 @@ def run_status(
             )
     else:
         print(
-            yellow("\nRecent Garmin Metrics: No cached metrics. Run ")
-            + green("'data pull'")
-            + yellow(" first.")
+            yellow("\nRecent Garmin Metrics: No cached metrics. Run "
+                   + cmd("data pull") + " first.")
         )
 
     # Coach Learnings — one-line summary; the full list lives under 'learnings list'.
@@ -247,12 +246,12 @@ def run_status(
             summary += gray(f", {dormant} dormant")
         if proposed:
             summary += yellow(f", {proposed} pending demotion")
-        summary += green(" — see 'learnings list'")
+        summary += green(" — see " + cmd("learnings list"))
         print(summary)
     else:
         print(
-            gray("  None yet. Run ") + green("'data bootstrap'")
-            + gray(" to reconstruct your training history and seed observations.")
+            gray("  None yet. Run " + cmd("data bootstrap")
+                 + " to reconstruct your training history and seed observations.")
         )
 
     # When the learnings were last updated — reflect/bootstrap run watermarks.
@@ -267,7 +266,7 @@ def run_status(
             line += gray(f" · through {fmt_date(reflect_state['through_date'])}")
         print(line)
     elif learnings:
-        print(gray("  Last reflect: never — run ") + green("'data reflect'"))
+        print(gray("  Last reflect: never — run " + cmd("data reflect")))
     if bootstrap_state and bootstrap_state.get("last_pull_utc"):
         line = f"  Bootstrap:    {fmt_date(bootstrap_state['last_pull_utc'][:10])}"
         if bootstrap_state.get("through_date"):
@@ -277,7 +276,8 @@ def run_status(
     # Which model will answer the next plan/adapt — the exchange logs only say so after the
     # fact (DESIGN_model_selection.md §5).
     from trainmate.openrouter import openrouter_client
-    print(gray(f"  LLM model:    {openrouter_client.model} · change with 'model'"))
+    print(gray(f"  LLM model:    {openrouter_client.model} · change with "
+               + cmd("model")))
 
     if verbose:
         goals = cli.db.get_objectives()

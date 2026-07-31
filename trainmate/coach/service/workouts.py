@@ -12,7 +12,7 @@ from trainmate import garmin
 from trainmate.garmin import activity_load
 from trainmate.util import (
     today_str as _today_str, today_date as _today_date,
-    cyan, green, yellow, bold, red, gray, PMC_TSB_LAG_NOTE,
+    cyan, green, yellow, bold, red, gray, cmd, PMC_TSB_LAG_NOTE,
 )
 from trainmate.coach.engine import CoachEngine
 from trainmate.coach.formatting import format_baseline, _load_science_guidelines
@@ -305,8 +305,8 @@ class WorkoutGenMixin:
         macrocycle = self._db.get_macrocycle_for_objective(next_goal['id'])
         if not macrocycle:
             raise ValueError(
-                "No active periodization strategy found. "
-                "Please generate a periodization plan first."
+                "No active periodization strategy found. Run "
+                + cmd("plan generate") + " first."
             )
 
         today_str = _svc._today_str()

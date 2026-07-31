@@ -13,7 +13,7 @@ import sys
 from typing import Optional
 import trainmate_cli as cli
 from trainmate.util import (
-    bold, dim, green, red, yellow, cyan, gray, format_labeled_block,
+    bold, dim, green, red, yellow, cyan, gray, cmd, format_labeled_block,
     today_str as _today_str,
 )
 from trainmate.cli.common import fmt_date
@@ -86,7 +86,8 @@ def _run_replan_flow(title: str) -> None:
         no_pull=False, force_pull=False, auto=False, goal_id=None, force=False
     )
     run_plan_generate(ns)
-    print(dim("If you applied the new plan, run 'workout generate' to schedule it."))
+    print(dim("If you applied the new plan, run " + cmd("workout generate")
+              + " to schedule it."))
 
 
 def run_constraint_add(args: argparse.Namespace) -> None:

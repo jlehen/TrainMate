@@ -11,7 +11,7 @@ from trainmate.calendar_state import calendar_status
 from trainmate.modification_state import modification_status
 from trainmate.sports import canonical_sport
 from trainmate.util import (
-    bold, dim, green, red, yellow, cyan, blue, magenta, gray,
+    bold, dim, green, red, yellow, cyan, blue, magenta, gray, cmd,
     visible_len, pad_visible, wrap_text, format_labeled_text,
     format_labeled_block, render_table, today_str as _today_str,
     today_date as _today_date,
@@ -190,13 +190,10 @@ def _classify_swap_target(value: str) -> str | None:
 def _resolve_swap_ops(args: argparse.Namespace) -> list | None:
     """Turns CLI args into swap operations, or returns None on a usage/lookup error."""
     if not args.target1 or not args.target2:
-        print(
-            red("Specify two dates (e.g. ")
-            + bold(green("'workout swap 2026-06-09 2026-06-11'"))
-            + red(") or two workout IDs (e.g. ")
-            + bold(green("'workout swap 5 8'"))
-            + red(").")
-        )
+        print(red(
+            "Specify two dates (e.g. " + cmd("workout swap 2026-06-09 2026-06-11")
+            + ") or two workout IDs (e.g. " + cmd("workout swap 5 8") + ")."
+        ))
         return None
 
     kind1 = _classify_swap_target(args.target1)

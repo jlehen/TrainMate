@@ -10,7 +10,7 @@ from trainmate.calendar_state import calendar_status
 from trainmate.modification_state import modification_status
 from trainmate.sports import canonical_sport
 from trainmate.util import (
-    bold, dim, green, red, yellow, cyan, blue, magenta, gray,
+    bold, dim, green, red, yellow, cyan, blue, magenta, gray, cmd,
     visible_len, pad_visible, wrap_text, format_labeled_text,
     format_labeled_block, render_table, today_str as _today_str,
     today_date as _today_date,
@@ -52,11 +52,11 @@ def run_workout_push(args: argparse.Namespace) -> None:
         if force:
             print("No workouts found in the specified range.")
         else:
-            print(
-                f"No new or modified workouts to sync. "
-                f"Run '{green('workout generate')}' to generate a schedule, "
-                f"or use -f to re-push already-synced workouts."
-            )
+            print(green(
+                "No new or modified workouts to sync. "
+                f"Run {cmd('workout generate')} to generate a schedule, "
+                "or use -f to re-push already-synced workouts."
+            ))
         return
 
     print(f"Syncing {len(to_push)} workouts to Google Calendar...")

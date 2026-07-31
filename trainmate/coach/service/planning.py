@@ -12,7 +12,7 @@ from trainmate import garmin
 from trainmate.garmin import activity_load
 from trainmate.util import (
     today_str as _today_str, today_date as _today_date,
-    cyan, green, yellow, bold, red, gray, PMC_TSB_LAG_NOTE,
+    cyan, green, yellow, bold, red, gray, cmd, PMC_TSB_LAG_NOTE,
     wrap_text, format_labeled_block, default_wrap_width,
 )
 from trainmate.coach.engine import CoachEngine
@@ -129,7 +129,8 @@ class PlanningMixin:
             print(yellow(
                 f"  This looks plan-shaping ({impact['days']} days, displaces "
                 f"~{impact['displaced_pct']:.0f}% of a typical week). To build it into "
-                f"the plan, run 'constraint edit {cid} --replan' or 'plan generate'."
+                "the plan, run " + cmd(f"constraint edit {cid} --replan")
+                + " or " + cmd("plan generate") + "."
             ))
         return cid
 

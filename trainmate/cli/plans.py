@@ -8,7 +8,7 @@ from trainmate import plan_diff
 from trainmate.config import config
 from trainmate.adherence import analyze_adherence, date_covered, planned_load
 from trainmate.util import (
-    bold, dim, green, red, yellow, cyan, blue, magenta, gray,
+    bold, dim, green, red, yellow, cyan, blue, magenta, gray, cmd,
     visible_len, pad_visible, wrap_text, format_labeled_text,
     format_labeled_block, default_wrap_width, today_str as _today_str,
     today_date as _today_date,
@@ -47,8 +47,8 @@ def run_plan_generate(args: argparse.Namespace) -> None:
         # them before generating (skipped in non-interactive --auto mode).
         if cli.db.get_sync_state("reflect") is None and not getattr(args, 'auto', False):
             if cli.prompt.confirm(wrap_text(
-                "No training-history analysis found. Run 'data bootstrap' first to "
-                "reconstruct past cycles and seed coach learnings?"
+                f"No training-history analysis found. Run {cmd('data bootstrap')} first "
+                "to reconstruct past cycles and seed coach learnings?"
             )):
                 cli.coach_service.data_bootstrap(
                     no_pull=args.no_pull, force_pull=getattr(args, 'force_pull', False)
@@ -112,7 +112,8 @@ def run_plan_generate(args: argparse.Namespace) -> None:
                 (proposal['goal'] or next_goal)['id'], proposal['strategy'], mesocycles
             )
             print(green(f"\nGenerated {len(mesocycles)} mesocycles. Save complete."))
-            print(f"Run '{green('workout generate')}' to schedule workouts based on this plan.")
+            print(green(f"Run {cmd('workout generate')} to schedule workouts "
+                        "based on this plan."))
         else:
             print(yellow("\nPlan discarded."))
 
@@ -296,7 +297,7 @@ def run_plan_show(args: argparse.Namespace) -> None:
         planned = [(g, m) for g, m in planned if m]
         if not planned:
             print(yellow("No goal has a periodization plan yet."))
-            print(f"Run '{green('plan generate')}' to create one.")
+            print(green(f"Run {cmd('plan generate')} to create one."))
             return
         for goal, macrocycle in planned:
             _print_plan(goal, macrocycle, args)
@@ -313,7 +314,7 @@ def run_plan_show(args: argparse.Namespace) -> None:
             print(red(
                 f"Plan version {version_id} does not belong to goal '{next_goal['title']}'."
             ))
-            print(f"Run '{green('plan versions')}' to list this goal's plan versions.")
+            print(green(f"Run {cmd('plan versions')} to list this goal's plan versions."))
             return
     else:
         macrocycle = cli.db.get_macrocycle_for_objective(next_goal['id'])
@@ -321,7 +322,7 @@ def run_plan_show(args: argparse.Namespace) -> None:
         print(yellow(
             f"No active macrocycle strategy found for goal '{next_goal['title']}'."
         ))
-        print(f"Run '{green('plan generate')}' to create one.")
+        print(green(f"Run {cmd('plan generate')} to create one."))
         return
 
     _print_plan(next_goal, macrocycle, args)
@@ -343,8 +344,9 @@ def _print_plan(next_goal: dict, macrocycle: dict, args: argparse.Namespace) -> 
         )
         print(bold(yellow("\n" + header)))
         print(yellow(
-            f"This is a past version, kept for rollback. Run "
-        ) + green(f"'plan rollback --version {macrocycle['id']}'") + yellow(" to restore it."))
+            "This is a past version, kept for rollback. Run "
+            + cmd(f"plan rollback --version {macrocycle['id']}") + " to restore it."
+        ))
     else:
         print(bold(cyan("\n=== ACTIVE MACROCYCLE STRATEGY ===")))
     width = default_wrap_width()
@@ -437,7 +439,7 @@ def run_plan_versions(args: argparse.Namespace) -> None:
     versions = cli.db.get_macrocycle_versions(goal['id'])
     if not versions:
         print(yellow(f"No periodization plan exists for goal '{goal['title']}'."))
-        print(f"Run '{green('plan generate')}' to create one.")
+        print(green(f"Run {cmd('plan generate')} to create one."))
         return
 
     sport_str = goal['sport_type'].upper()
@@ -468,10 +470,10 @@ def run_plan_versions(args: argparse.Namespace) -> None:
             print(f"    {gray(excerpt)}")
     print()
     print(gray(
-        "Restore a version with "
-    ) + green("'plan rollback --version <ID>'") + gray(", inspect one with ")
-        + green("'plan show --version <ID>'") + gray(", or compare two with ")
-        + green("'plan diff <ID> <ID>'") + gray("."))
+        "Restore a version with " + cmd("plan rollback --version <ID>")
+        + ", inspect one with " + cmd("plan show --version <ID>")
+        + ", or compare two with " + cmd("plan diff <ID> <ID>") + "."
+    ))
 
 
 def _print_change(marker: str, text: str, width: int, color_fn, indent: str = "  ") -> None:
@@ -603,7 +605,7 @@ def run_plan_diff(args: argparse.Namespace) -> None:
         print(red(message) if code in ("same_version", "not_found") else yellow(message))
         hint = _DIFF_ERROR_HINTS.get(code)
         if hint:
-            print(f"Run '{green(hint[0])}' {hint[1]}")
+            print(green(f"Run {cmd(hint[0])} {hint[1]}"))
         return
 
     width = default_wrap_width()
@@ -671,7 +673,7 @@ def run_plan_rm(args: argparse.Namespace) -> None:
             "\nWarning: The following subsequent active goals have existing plans that\n"
             "were aligned with the plan you just deleted. You may need to regenerate them\n"
             "so their dates align correctly (e.g. running "
-        ) + green("'plan generate --goal <ID> --force'") + yellow("):"))
+            + cmd("plan generate --goal <ID> --force") + "):"))
         for sg in subsequent_goals_with_plans:
             print(yellow(f" - ID {sg['id']}: '{sg['title']}' (Target date: {sg['target_date']})"))
 
@@ -744,7 +746,7 @@ def run_plan_rollback(args: argparse.Namespace) -> None:
         f"Restored {result['restored_workouts']} workout(s) and archived "
         f"{result['archived_workouts']} from the superseded plan; Google Calendar updated."
     )
-    print(f"Run '{green('plan show')}' to review the restored strategy.")
+    print(green(f"Run {cmd('plan show')} to review the restored strategy."))
 
 
 def _resolve_feedback_text(args: argparse.Namespace, current: Optional[str]) -> Optional[str]:
@@ -766,11 +768,9 @@ def _resolve_feedback_text(args: argparse.Namespace, current: Optional[str]) -> 
 
 
 _FEEDBACK_REGEN_NOTE = (
-    yellow("Note: You must regenerate the periodization plan to apply this feedback.\nRun ")
-    + green("'plan generate --force'")
-    + yellow(" (or with ")
-    + green("'--goal <ID> --force'")
-    + yellow(") to update the plan.")
+    yellow("Note: You must regenerate the periodization plan to apply this feedback.\n"
+           "Run " + cmd("plan generate --force") + " (or with "
+           + cmd("--goal <ID> --force") + ") to update the plan.")
 )
 
 

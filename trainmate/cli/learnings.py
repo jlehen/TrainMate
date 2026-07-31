@@ -3,7 +3,7 @@ import sys
 
 import trainmate_cli as cli
 from trainmate.util import (
-    bold, green, red, yellow, cyan, magenta, gray,
+    bold, green, red, yellow, cyan, magenta, gray, cmd,
     format_labeled_block,
 )
 
@@ -39,8 +39,8 @@ def _print_learning(l: dict) -> None:
     proposed = l.get("proposed_confidence")
     if proposed:
         target = "retire" if proposed == "retire" else proposed
-        print(yellow(f"     ⚠ proposed demotion → {target} "
-                     "(confirm with 'learnings demote'/'keep')"))
+        print(yellow(f"     ⚠ proposed demotion → {target} (confirm with "
+                     + cmd("learnings demote") + "/" + cmd("learnings keep") + ")"))
 
 
 def _print_learning_dates(l: dict) -> None:
@@ -70,8 +70,8 @@ def run_learning_list(args: argparse.Namespace) -> None:
         ) else "None yet."))
         if not cli.db.get_learnings():
             print(
-                yellow("Run ") + green("'data bootstrap'")
-                + yellow(" to reconstruct your training history and seed observations.")
+                yellow("Run " + cmd("data bootstrap")
+                       + " to reconstruct your training history and seed observations.")
             )
         return
 

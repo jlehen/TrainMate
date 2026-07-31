@@ -9,6 +9,7 @@ function so importing this module (and `trainmate.openrouter` through it) never 
 from typing import Any, Dict, List, Optional
 
 from trainmate.config import config
+from trainmate.util import cmd
 
 LLM_MODEL_SETTING = "llm_model"
 
@@ -71,14 +72,14 @@ def resolve_token(token: str) -> str:
         if not 1 <= number <= len(models):
             raise ValueError(
                 f"No model numbered {number} — the list has {len(models)} "
-                f"{'entry' if len(models) == 1 else 'entries'}. Run `model` to see them."
+                f"{'entry' if len(models) == 1 else 'entries'}. Run {cmd('model')} to see them."
             )
         return models[number - 1]
     if token in models:
         return token
     raise ValueError(
-        f"'{token}' is not in the config list. Run `model` to see the list, or add it to "
-        "`llm.models` in config.yaml."
+        f"'{token}' is not in the config list. Run {cmd('model')} to see the list, or "
+        "add it to `llm.models` in config.yaml."
     )
 
 

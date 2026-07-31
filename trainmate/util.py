@@ -7,6 +7,7 @@ from typing import Optional, Tuple
 
 # ANSI escape codes for terminal coloring
 ANSI_ESCAPE = re.compile(r'(?:\033|\x1b)\[[0-9;]*m')
+RESET = "\033[0m"
 
 
 def default_wrap_width() -> int:
@@ -52,10 +53,14 @@ def is_color_enabled() -> bool:
 
 
 def colorize(text: str, color_code: str) -> str:
-    """Wraps text in ANSI escape code if coloring is enabled."""
-    if is_color_enabled():
-        return f"{color_code}{text}\033[0m"
-    return text
+    """Wraps text in ANSI escape code if coloring is enabled.
+
+    Any reset already inside `text` re-opens this code, so wrapping a string that
+    embeds its own colouring (a red error carrying a cmd(), say) keeps the rest of
+    the line in the outer colour instead of dropping it to the terminal default."""
+    if not is_color_enabled():
+        return text
+    return color_code + text.replace(RESET, RESET + color_code) + RESET
 
 
 def bold(text: str) -> str:
@@ -92,6 +97,23 @@ def magenta(text: str) -> str:
 
 def gray(text: str) -> str:
     return colorize(text, "\033[90m")
+
+
+def strip_ansi(text: str) -> str:
+    """Drops ANSI colour codes — for surfaces that aren't a terminal (JSON, logs)."""
+    return ANSI_ESCAPE.sub("", text)
+
+
+def cmd(text: str, *, quote: bool = True) -> str:
+    """Renders a command the message is telling the athlete to run, single-quoted.
+
+    Colour-neutral on purpose — bold only — so it comes out as the bright shade of
+    whatever colour encloses it: bright red inside an error, bright yellow inside a
+    warning. Nest it *inside* the surrounding colour call rather than concatenating
+    beside it; colorize() re-opens that colour afterwards, so the tail of the sentence
+    keeps it. `quote=False` for a command printed alone on its own line, where the
+    quotes are just noise."""
+    return bold(f"'{text}'" if quote else text)
 
 
 def color_load_ratio(ratio: float) -> str:
@@ -247,6 +269,28 @@ def render_table(
     return "\n".join(out)
 
 
+def _wrap_paragraph(para: str, width: int, subsequent_indent: str) -> list:
+    """One paragraph wrapped to `width`, measured in visible columns.
+
+    textwrap counts ANSI escape bytes as columns, so a coloured paragraph would wrap
+    ~10 columns short per colour span; a greedy word wrap on visible_len avoids that.
+    Uncoloured text still goes through textwrap so existing layout is untouched."""
+    if not ANSI_ESCAPE.search(para):
+        return textwrap.wrap(para, width=width, subsequent_indent=subsequent_indent)
+    lines, cur = [], ''
+    for word in para.split(' '):
+        if not cur:
+            cur = word
+        elif visible_len(cur) + 1 + visible_len(word) <= width:
+            cur += ' ' + word
+        else:
+            lines.append(cur)
+            cur = subsequent_indent + word
+    if cur:
+        lines.append(cur)
+    return lines
+
+
 def wrap_text(text: str, width: Optional[int] = None) -> str:
     """Wraps text at the specified width while preserving layout and indentation.
 
@@ -269,10 +313,10 @@ def wrap_text(text: str, width: Optional[int] = None) -> str:
             prefix, content = match.groups()
             indent = ' ' * len(prefix)
             # Wrap the paragraph, using the prefix indent for subsequent lines
-            wrapped = textwrap.wrap(para, width=width, subsequent_indent=indent)
+            wrapped = _wrap_paragraph(para, width, indent)
             wrapped_paragraphs.extend(wrapped)
         else:
-            wrapped_paragraphs.append(textwrap.fill(para, width=width))
+            wrapped_paragraphs.extend(_wrap_paragraph(para, width, ''))
             
     return '\n'.join(wrapped_paragraphs)
 

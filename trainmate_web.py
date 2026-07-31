@@ -10,7 +10,7 @@ from trainmate.modification_state import modification_status
 from trainmate.google_calendar import calendar_syncer
 from trainmate.coach import coach_service
 from trainmate.config import config
-from trainmate.util import today_str
+from trainmate.util import today_str, strip_ansi
 
 app = Flask(__name__, static_folder="static", static_url_path="")
 
@@ -229,7 +229,7 @@ def manage_workouts() -> Any:
                 "replaced": replaced,
             }), 201
         except Exception as e:
-            return jsonify({"error": str(e)}), 500
+            return jsonify({"error": strip_ansi(str(e))}), 500
 
     # GET method
     start_date = request.args.get("start_date")
@@ -264,7 +264,7 @@ def remove_workout(workout_id: int) -> Any:
             except Exception as e:
                 return jsonify({
                     "message": "Workout removed locally; calendar update failed.",
-                    "warning": str(e),
+                    "warning": strip_ansi(str(e)),
                 })
     return jsonify({"message": "Workout removed."})
 
@@ -289,7 +289,7 @@ def restore_workout(workout_id: int) -> Any:
             except Exception as e:
                 return jsonify({
                     "message": "Workout restored locally; calendar update failed.",
-                    "warning": str(e),
+                    "warning": strip_ansi(str(e)),
                 })
     return jsonify({"message": "Workout restored."})
 
@@ -327,7 +327,7 @@ def swap_workouts() -> Any:
             "message": f"Swapped {len(updated)} workout(s).",
         })
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": strip_ansi(str(e))}), 500
 
 
 @app.route("/api/workouts/compare", methods=["GET"])
@@ -511,7 +511,7 @@ def generate_plan() -> Any:
             "goal_id": (proposal['goal'] or {}).get('id'),
         })
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": strip_ansi(str(e))}), 500
 
 
 @app.route("/api/plan/<int:goal_id>", methods=["DELETE"])
@@ -522,7 +522,7 @@ def plan_rm(goal_id: int) -> Any:
         msg = f"Periodization plan for goal {goal_id} deleted successfully."
         return jsonify({"message": msg})
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": strip_ansi(str(e))}), 500
 
 
 def _resolve_goal_id(raw: Any) -> Any:
@@ -614,9 +614,9 @@ def plan_rollback() -> Any:
             "archived_workouts": result['archived_workouts'],
         })
     except ValueError as e:
-        return jsonify({"error": str(e)}), 400
+        return jsonify({"error": strip_ansi(str(e))}), 400
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": strip_ansi(str(e))}), 500
 
 
 @app.route("/api/workouts/batches", methods=["GET"])
@@ -644,9 +644,9 @@ def workout_rollback() -> Any:
             **result,
         })
     except ValueError as e:
-        return jsonify({"error": str(e)}), 400
+        return jsonify({"error": strip_ansi(str(e))}), 400
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": strip_ansi(str(e))}), 500
 
 
 @app.route("/api/macrocycles/<int:macro_id>/feedback", methods=["POST"])
@@ -658,7 +658,7 @@ def save_macrocycle_feedback(macro_id: int) -> Any:
         db.update_macrocycle_feedback(macro_id, feedback)
         return jsonify({"message": "Macrocycle feedback saved successfully."})
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": strip_ansi(str(e))}), 500
 
 
 @app.route("/api/mesocycles/<int:meso_id>/feedback", methods=["POST"])
@@ -670,7 +670,7 @@ def save_mesocycle_feedback(meso_id: int) -> Any:
         db.update_mesocycle_feedback(meso_id, feedback)
         return jsonify({"message": "Mesocycle feedback saved successfully."})
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": strip_ansi(str(e))}), 500
 
 
 @app.route("/api/workouts/generate", methods=["POST"])
@@ -688,7 +688,7 @@ def workout_generate() -> Any:
             "workouts_count": len(workouts)
         })
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": strip_ansi(str(e))}), 500
 
 
 # --- Adaptation ---
@@ -708,7 +708,7 @@ def workout_adapt() -> Any:
             "workouts": proposed,
         })
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": strip_ansi(str(e))}), 500
 
 
 @app.route("/api/adapt/apply", methods=["POST"])
@@ -729,7 +729,7 @@ def workout_adapt_apply() -> Any:
             "message": f"Applied {len(proposed)} adapted workout(s) and synced.",
         })
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": strip_ansi(str(e))}), 500
 
 
 @app.route("/api/workouts/push", methods=["POST"])
@@ -752,7 +752,7 @@ def sync_calendar() -> Any:
             "synced_count": len(unsynced)
         })
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": strip_ansi(str(e))}), 500
 
 
 # --- Coach Learnings ---

@@ -12,7 +12,7 @@ from trainmate import garmin
 from trainmate.garmin import activity_load
 from trainmate.util import (
     today_str as _today_str, today_date as _today_date,
-    cyan, green, yellow, bold, red, gray, PMC_TSB_LAG_NOTE,
+    cyan, green, yellow, bold, red, gray, cmd, PMC_TSB_LAG_NOTE,
 )
 from trainmate.coach.engine import CoachEngine
 from trainmate.coach.formatting import format_baseline, _load_science_guidelines
@@ -138,8 +138,7 @@ class DataAnalysisMixin:
             ran_on = (prior.get("last_pull_utc") or "")[:10] or "?"
             print(
                 yellow(f"Bootstrap already ran on {ran_on} (through {prior.get('through_date')}). "
-                       "For incremental updates use ")
-                + green("'data reflect'") + yellow(" instead.")
+                       "For incremental updates use " + cmd("data reflect") + " instead.")
             )
             if auto:
                 print(cyan("Skipping bootstrap (pass --force to re-run)."))
@@ -201,7 +200,7 @@ class DataAnalysisMixin:
             )
             print(yellow(
                 f"No reflect baseline found; reflecting over the last {_svc.DEFAULT_REFLECT_WEEKS} "
-                f"weeks. Run '{green('data bootstrap')}' to reconstruct your full training "
+                f"weeks. Run {cmd('data bootstrap')} to reconstruct your full training "
                 "history first."
             ))
 

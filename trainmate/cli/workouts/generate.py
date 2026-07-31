@@ -11,7 +11,7 @@ from trainmate.google_calendar import event_url
 from trainmate.modification_state import modification_status
 from trainmate.sports import canonical_sport
 from trainmate.util import (
-    bold, dim, green, red, yellow, cyan, blue, magenta, gray,
+    bold, dim, green, red, yellow, cyan, blue, magenta, gray, cmd,
     visible_len, pad_visible, wrap_text,
     format_labeled_text, format_labeled_block, render_table,
     today_str as _today_str, today_date as _today_date, days_between,
@@ -47,7 +47,8 @@ def _print_block_boundary_hint(date_str: str) -> None:
         f"Sessions in the next block ({next_meso['name']}) are outside this adaptation's "
         f"reach. To re-plan them against current metrics:"
     )))
-    print(gray(f"    workout generate --until-mesocycle {next_meso['id']}"))
+    print(gray("    " + cmd(f"workout generate --until-mesocycle {next_meso['id']}",
+                            quote=False)))
     print()
 
 
@@ -231,22 +232,20 @@ def run_workout_generate(args: argparse.Namespace) -> None:
                 if macro:
                     change_reason = cli.coach_service.config_changed(macro)
                     if change_reason:
-                        message = (
-                            yellow("Warning: a plan-shaping input has "
-                                   "changed since the active periodization plan was "
-                                   f"generated ({change_reason}).\n"
-                                   "Generating workouts using the out-of-date plan might "
-                                   "result in incorrect training targets.\n"
-                                   "It is highly recommended to run ")
-                            + green("'plan generate'")
-                            + yellow(" first. Proceed anyway?")
+                        message = yellow(
+                            "Warning: a plan-shaping input has "
+                            "changed since the active periodization plan was "
+                            f"generated ({change_reason}).\n"
+                            "Generating workouts using the out-of-date plan might "
+                            "result in incorrect training targets.\n"
+                            "It is highly recommended to run "
+                            + cmd("plan generate") + " first. Proceed anyway?"
                         )
                         if not cli.prompt.confirm(message):
-                            print(
-                                yellow("Workout generation cancelled. Please run ")
-                                + green("'plan generate'")
-                                + yellow(" first.")
-                            )
+                            print(yellow(
+                                "Workout generation cancelled. Please run "
+                                + cmd("plan generate") + " first."
+                            ))
                             return
                         else:
                             print("Proceeding. Updating configuration hash in database.")
@@ -270,10 +269,10 @@ def run_workout_generate(args: argparse.Namespace) -> None:
             f"Generated {len(workouts)} workouts starting from today and pushed them "
             "to Google Calendar."
         ))
-        print(
-            f"Run '{green('workout rollback')}' to undo this regeneration, or "
-            f"'{green('plan rollback')}' to step the strategy back with it."
-        )
+        print(green(
+            f"Run {cmd('workout rollback')} to undo this regeneration, or "
+            f"{cmd('plan rollback')} to step the strategy back with it."
+        ))
     except Exception as e:
         print(red(f"Error during workout generation: {e}"))
 
@@ -314,8 +313,8 @@ def run_workout_batches(args: argparse.Namespace) -> None:
     for i, b in enumerate(batches, start=1):
         print(_batch_line(i, b))
     print()
-    print(gray("Restore one with ") + green("'workout rollback [--batch N]'")
-          + gray(" (defaults to #1). Numbering is positional and shifts after a "
+    print(gray("Restore one with " + cmd("workout rollback [--batch N]")
+               + " (defaults to #1). Numbering is positional and shifts after a "
                  "rollback."))
 
 
@@ -336,7 +335,7 @@ def run_workout_rollback(args: argparse.Namespace) -> None:
             f"No archived batch #{index} — there {'is' if len(batches) == 1 else 'are'} "
             f"{len(batches)}."
         ))
-        print(f"Run '{green('workout batches')}' to list them.")
+        print(green(f"Run {cmd('workout batches')} to list them."))
         return
     target = batches[index - 1]
 
@@ -346,7 +345,7 @@ def run_workout_rollback(args: argparse.Namespace) -> None:
             f"{fmt_date(target['last_date'])}, entirely in the past — there is nothing "
             "to restore."
         ))
-        print(f"Run '{green('workout batches')}' to pick another.")
+        print(green(f"Run {cmd('workout batches')} to pick another."))
         return
 
     if not getattr(args, 'yes', False):
@@ -375,7 +374,7 @@ def run_workout_rollback(args: argparse.Namespace) -> None:
         f"\nRestored {result['restored_workouts']} workout(s){span} and archived "
         f"{result['archived_workouts']}; Google Calendar updated."
     ))
-    print(f"Run '{green('workout list')}' to review the restored sessions.")
+    print(green(f"Run {cmd('workout list')} to review the restored sessions."))
 def run_workout_list(args: argparse.Namespace) -> None:
     """Lists stored workouts chronologically, with optional date, goal, or type filters."""
     start_date, end_date = _resolve_workout_date_range(args)
