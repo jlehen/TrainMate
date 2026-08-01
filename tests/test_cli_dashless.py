@@ -153,6 +153,85 @@ class TestCommandPrefixResolution(unittest.TestCase):
         self.assertEqual(self._xlate("helpall"), ["--helpall"])
 
 
+class TestCommandTreeInvariants(unittest.TestCase):
+    """Guard rails on the shape of the command tree itself (DESIGN_cli_noargs.md §d).
+
+    Dashless options and command prefixes share one namespace at any level that has
+    both — today only the root, but these walk the whole tree, so a group-level
+    option added later is checked the same way. Each failure names the offending
+    level and what to do about it, because none of them is obvious from the symptom:
+    a shadowed spelling simply resolves to the wrong thing, silently."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.parser, _ = trainmate_cli.build_parser()
+
+    def _levels(self):
+        """Yield (path, sub-parsers action, parser) for every level that has commands."""
+        from trainmate.cli.argparse_ext import _subparsers_action
+
+        def walk(parser, path):
+            action = _subparsers_action(parser)
+            if action is None:
+                return
+            yield path or "<root>", action, parser
+            for name in action.canonical_names:
+                yield from walk(action.choices[name], f"{path} {name}".strip())
+
+        yield from walk(self.parser, "")
+
+    @staticmethod
+    def _as_command(action, token):
+        """What `token` would mean as a command here: a canonical name, or None."""
+        if token in action.canonical_names:
+            return token
+        if token in action.alias_of:
+            return action.alias_of[token]
+        matches = [n for n in action.canonical_names if n.startswith(token)]
+        return matches[0] if len(matches) == 1 else None
+
+    def test_no_option_keyword_collides_with_a_command(self):
+        # A dashless keyword that also names or abbreviates a command at the same level
+        # makes one of the two unreachable: exact commands are resolved before keywords,
+        # keywords before prefixes. Rename the option, or give it no dashless spelling.
+        from trainmate.cli.argparse_ext import _build_keyword_spec
+
+        for path, action, parser in self._levels():
+            for keyword in _build_keyword_spec(parser):
+                clash = self._as_command(action, keyword)
+                self.assertIsNone(
+                    clash,
+                    f"option '{keyword}' at level '{path}' also resolves to command "
+                    f"'{clash}' — one of the two becomes unreachable dashlessly",
+                )
+
+    def test_no_alias_shadows_another_commands_prefix(self):
+        # The `plan d` trap: an exact alias beats prefix matching, so aliasing a
+        # command to a letter that unambiguously abbreviates a *different* command
+        # silently steals it. Pick another alias, or drop it.
+        for path, action, _ in self._levels():
+            for alias, target in action.alias_of.items():
+                matches = [n for n in action.canonical_names if n.startswith(alias)]
+                if len(matches) == 1 and matches[0] != target:
+                    self.fail(
+                        f"alias '{alias}' -> '{target}' at level '{path}' shadows "
+                        f"'{matches[0]}', which it would otherwise abbreviate"
+                    )
+
+    def test_no_alias_is_redundant_with_prefix_matching(self):
+        # An alias earns its place only by being unreachable as a prefix (`ctx`, `lm`)
+        # or by breaking a tie (`s`, `a`). Anything else is a shortcut prefix matching
+        # already provides — delete it rather than maintain it in two places.
+        for path, action, _ in self._levels():
+            for alias, target in action.alias_of.items():
+                matches = [n for n in action.canonical_names if n.startswith(alias)]
+                self.assertNotEqual(
+                    matches, [target],
+                    f"alias '{alias}' -> '{target}' at level '{path}' is redundant: "
+                    f"'{alias}' already resolves there by prefix",
+                )
+
+
 class TestDashlessEndToEnd(unittest.TestCase):
     """End-to-end: dashless argv flows through real main() and reaches the handlers."""
 

@@ -117,6 +117,18 @@ resolve before dashless option keywords are considered, **prefix** matches only
 after. So no spelling that meant something before means something else now;
 prefixes fill in the gaps.
 
+Three invariants keep that namespace honest as commands and options are added;
+`TestCommandTreeInvariants` (tests/test_cli_dashless.py) walks the real tree and
+pins each, because every violation fails silently — the wrong thing simply resolves:
+
+* no dashless option keyword may also name or abbreviate a command at its level
+  (today only the root has both options and commands, but a group-level option
+  added later is checked the same way);
+* no alias may shadow a *different* command's otherwise-unambiguous prefix — this
+  is the `plan d` trap, stated as a rule;
+* no alias may be redundant with prefix matching, so the retired shortcuts cannot
+  creep back one at a time.
+
 Because resolution emits the **canonical** name, argparse — and therefore
 `args.command` / `args.subcommand` — never sees an alias or a prefix. The
 dispatcher in `trainmate_cli.py` compares one canonical name per branch, so a
