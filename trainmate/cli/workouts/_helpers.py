@@ -230,19 +230,16 @@ def _classify_swap_target(value: str) -> str | None:
 
 def _resolve_swap_ops(args: argparse.Namespace) -> list | None:
     """Turns CLI args into swap operations, or returns None on a usage/lookup error."""
-    if not args.target1 or not args.target2:
-        print(red(
-            "Specify two dates (e.g. " + cmd("workout swap 2026-06-09 2026-06-11")
-            + ") or two workout IDs (e.g. " + cmd("workout swap 5 8") + ")."
-        ))
-        return None
-
     kind1 = _classify_swap_target(args.target1)
     kind2 = _classify_swap_target(args.target2)
     for target, kind in ((args.target1, kind1), (args.target2, kind2)):
         if kind is None:
             print(red(
-                f"'{target}' is neither a date (YYYY-MM-DD) nor a workout ID."
+                f"'{target}' is neither a date (YYYY-MM-DD) nor a workout ID. Swap "
+                "two dates (e.g. "
+                + cmd("workout swap 2026-06-09 2026-06-11 'travelling'")
+                + ") or two workout IDs (e.g. "
+                + cmd("workout swap 5 8 'travelling'") + ")."
             ))
             return None
     if kind1 != kind2:

@@ -154,7 +154,7 @@ def run_benchmark_list(args: argparse.Namespace) -> None:
         print(dim("(no results recorded yet)"))
         print(gray(
             "Record one with e.g. "
-            "'benchmark record --sport cycling --ftp 250'."
+            "'benchmark record cycling --ftp 250'."
         ))
         return
 
@@ -209,10 +209,10 @@ def add_benchmark_parser(subparsers):
     # benchmark record
     b_rec = b_subparsers.add_parser(
         "record",
-        help="Record a fitness-test result (e.g. --sport cycling --ftp 250)",
+        help="Record a fitness-test result (e.g. 'record cycling --ftp 250')",
     )
     b_rec.add_argument(
-        "--sport", required=True,
+        "sport",
         help="Sport the test belongs to (e.g. cycling, running, swimming, strength)",
     )
     for kind in LOGBOOK_KINDS:

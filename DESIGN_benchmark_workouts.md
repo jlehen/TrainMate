@@ -183,8 +183,8 @@ document, and no config field that looks editable but silently is not.
 **Seeding is a one-off, not machinery.** By the time seeding is possible,
 `benchmark record` exists — and two invocations of it *are* the migration:
 
-    tm benchmark record --sport cycling --ftp 220 --note "seeded from config"
-    tm benchmark record --sport running --lthr 165 --note "seeded from config"
+    tm benchmark record cycling --ftp 220 --note "seeded from config"
+    tm benchmark record running --lthr 165 --note "seeded from config"
 
 Two rules make the cutover seamless:
 
@@ -302,7 +302,7 @@ bucketed zone-seconds, **not** the raw power stream (`garmin/load.py`) — so it
 cannot recompute "20-min best power × 0.95" after the fact. The data simply isn't
 there. Therefore:
 
-    tm benchmark record --sport cycling --ftp 250
+    tm benchmark record cycling --ftp 250
 
 is the primary capture path — reliable, one line, using Zwift's authoritative
 value. Auto-extraction from the activity stream is explicitly **not** built first
@@ -349,7 +349,7 @@ generic so an outdoor test just needs a preference edit.
 
 - `workout list` gains a `[BENCHMARK]` marker (alongside `[MANUAL]`, `[SWAPPED]`).
 - New CLI verb `benchmark`, mirroring `goal` / `constraint`:
-  - `benchmark record --sport cycling --ftp 250 [--date …] [--note …]`
+  - `benchmark record cycling --ftp 250 [--date …] [--note …]`
   - `benchmark list` — the logbook, newest first, with deltas (signed per kind:
     lower is better for pace anchors, §3.2).
   - `benchmark rm <id>` — the correction path. A typo here is high-consequence

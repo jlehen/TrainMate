@@ -48,9 +48,7 @@ class TestCliGoals(unittest.TestCase):
 
         exit_code, stdout, stderr = self.run_cli([
             "goal", "add",
-            "--title", "Zurich Marathon",
-            "--date", "2026-10-15",
-            "--sport", "running",
+            "Zurich Marathon", "2026-10-15", "running",
             "--desc", "Target sub 3:30",
             "--priority", "1",
         ])
@@ -61,9 +59,7 @@ class TestCliGoals(unittest.TestCase):
 
         exit_code, stdout, stderr = self.run_cli([
             "goal", "add",
-            "--title", "Morning Yoga Flow",
-            "--date", "2026-10-20",
-            "--sport", "yoga",
+            "Morning Yoga Flow", "2026-10-20", "yoga",
             "--desc", "Daily mindfulness and flexibility",
             "--priority", "2",
         ])
@@ -73,9 +69,7 @@ class TestCliGoals(unittest.TestCase):
 
         exit_code, stdout, stderr = self.run_cli([
             "goal", "add",
-            "--title", "Hybrid Strength Endurance",
-            "--date", "2026-11-30",
-            "--sport", "road_biking", "strength_training",
+            "Hybrid Strength Endurance", "2026-11-30", "road_biking", "strength_training",
             "--desc", "Aging well routine",
             "--priority", "3",
         ])
@@ -148,9 +142,7 @@ class TestCliGoals(unittest.TestCase):
     def test_goal_edit_command(self):
         self.run_cli([
             "goal", "add",
-            "--title", "Berlin Marathon",
-            "--date", "2026-09-27",
-            "--sport", "running",
+            "Berlin Marathon", "2026-09-27", "running",
             "--desc", "Sub 3:15 goal",
             "--priority", "2",
         ])

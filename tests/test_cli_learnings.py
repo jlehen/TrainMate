@@ -52,7 +52,7 @@ class TestCliLearnings(unittest.TestCase):
             "Runs better on 8h sleep", sports="running", confidence="moderate"
         )
         exit_code, stdout, _ = self.run_cli(
-            ["learnings", "edit", str(lid), "--text", "Runs much better on 8h sleep"]
+            ["learnings", "edit", str(lid), "Runs much better on 8h sleep"]
         )
         self.assertEqual(exit_code, 0)
         self.assertIn(f"[{lid}|running|moderate]", stdout)

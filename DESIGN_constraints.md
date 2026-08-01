@@ -176,14 +176,15 @@ that prints guidance.
 | `wipe` |     | Remove all (guarded; `-y`/`--yes` for the bot) |
 
 ```
-constraint add [--start YYYY-MM-DD] [--end YYYY-MM-DD] [--sport SPORT]
-               [--hard | --soft] [--type TYPE] [--desc TEXT]
-               [--replan | --no-replan] [TITLE]
+constraint add TITLE [--start YYYY-MM-DD] [--end YYYY-MM-DD] [--sport SPORT]
+                     [--hard | --soft] [--type TYPE] [--desc TEXT]
+                     [--replan | --no-replan]
 ```
 
 - `TITLE` (positional) is **the directive itself, stated short** — "no run
-  Thursday", "only 45 min today". Mandatory (prompted if omitted on `add`); it
-  doubles as the `list` display string. Quick capture stays flag-free:
+  Thursday", "only 45 min today". Mandatory, and positional because it is
+  mandatory (DESIGN_cli_noargs.md §a2): omitting it is a usage error, not a
+  prompt. It doubles as the `list` display string. Quick capture stays flag-free:
   `cons a "no run Thursday"`.
 - `--desc` is **optional richer context** for the coach, only when the one-liner
   isn't enough ("hotel gym only, no pool, long layover on the 14th"). Most

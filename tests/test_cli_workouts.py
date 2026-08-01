@@ -90,7 +90,7 @@ class TestCliWorkouts(unittest.TestCase):
             
         )
         exit_code, stdout, stderr = self.run_cli(
-            ["workout", "rm", str(w_id), "--reason", "Travelling"]
+            ["workout", "rm", str(w_id), "Travelling"]
         )
         self.assertEqual(exit_code, 0)
         self.assertIn(
@@ -165,7 +165,7 @@ class TestCliWorkouts(unittest.TestCase):
             description="easy", rpe=4, tss=30,
         )
         exit_code, stdout, stderr = self.run_cli(
-            ["workout", "swap", d1, d2, "--reason", "Travelling"]
+            ["workout", "swap", d1, d2, "Travelling"]
         )
         self.assertEqual(exit_code, 0)
         self.assertIn("Swapped 2 workout(s) successfully", stdout)
@@ -196,8 +196,7 @@ class TestCliWorkouts(unittest.TestCase):
             description="easy", rpe=4, tss=30,
         )
         exit_code, stdout, stderr = self.run_cli(
-            ["workout", "swap", str(a), str(b), "--no-sync",
-             "--reason", "Travelling"]
+            ["workout", "swap", str(a), str(b), "Travelling", "--no-sync"]
         )
         self.assertEqual(exit_code, 0)
         self.assertIn("Calendar sync skipped", stdout)
@@ -224,7 +223,7 @@ class TestCliWorkouts(unittest.TestCase):
         )
         # Default input is "n": the swap is cancelled and never applied.
         exit_code, stdout, stderr = self.run_cli(
-            ["workout", "swap", d1, d2, "--reason", "Travelling"]
+            ["workout", "swap", d1, d2, "Travelling"]
         )
         self.assertEqual(exit_code, 0)
         self.assertIn("Swap warnings", stdout)
@@ -245,29 +244,29 @@ class TestCliWorkouts(unittest.TestCase):
             description="easy", rpe=4, tss=30,
         )
         exit_code, stdout, stderr = self.run_cli(
-            ["workout", "swap", past, future, "--reason", "Travelling"]
+            ["workout", "swap", past, future, "Travelling"]
         )
         self.assertEqual(exit_code, 0)
         self.assertIn("in the past", stdout)
         mock_coach.workout_swap_apply.assert_not_called()
 
     def test_workout_swap_missing_args(self):
-        exit_code, stdout, stderr = self.run_cli(
-            ["workout", "swap", "2026-06-10", "--reason", "Travelling"]
-        )
-        self.assertEqual(exit_code, 0)
-        self.assertIn("Specify two dates", stdout)
+        # Both targets and the reason are positional and mandatory, so argparse
+        # names what is missing (DESIGN_cli_noargs.md §a) before any handler runs.
+        exit_code, stdout, stderr = self.run_cli(["workout", "swap", "2026-06-10"])
+        self.assertEqual(exit_code, 2)
+        self.assertIn("the following arguments are required: target2, reason", stderr)
 
     def test_workout_swap_mixed_date_and_id_rejected(self):
         exit_code, stdout, stderr = self.run_cli(
-            ["workout", "swap", "2026-06-10", "7", "--reason", "Travelling"]
+            ["workout", "swap", "2026-06-10", "7", "Travelling"]
         )
         self.assertEqual(exit_code, 0)
         self.assertIn("not one of each", stdout)
 
     def test_workout_swap_invalid_target_rejected(self):
         exit_code, stdout, stderr = self.run_cli(
-            ["workout", "swap", "tomorrow", "friday", "--reason", "Travelling"]
+            ["workout", "swap", "tomorrow", "friday", "Travelling"]
         )
         self.assertEqual(exit_code, 0)
         self.assertIn("neither a date", stdout)
@@ -279,7 +278,7 @@ class TestCliWorkouts(unittest.TestCase):
             description="30 mins", google_event_id="mock_event_123",
         )
         exit_code, stdout, stderr = self.run_cli(
-            ["workout", "rm", str(w_id), "--reason", "Travelling"]
+            ["workout", "rm", str(w_id), "Travelling"]
         )
         self.assertEqual(exit_code, 0)
         self.assertIn(
@@ -301,7 +300,7 @@ class TestCliWorkouts(unittest.TestCase):
             description="5x800m", google_event_id="evt-1",
         )
         exit_code, stdout, _ = self.run_cli(
-            ["workout", "rm", str(w_id), "--reason", "Travelling for work"]
+            ["workout", "rm", str(w_id), "Travelling for work"]
         )
         self.assertEqual(exit_code, 0)
         self.assertIn("Reason: Travelling for work", stdout)
@@ -325,7 +324,7 @@ class TestCliWorkouts(unittest.TestCase):
         # Removing an already-removed workout is a no-op that does not re-hit the calendar.
         mock_calendar.sync_workout.reset_mock()
         exit_code, stdout, _ = self.run_cli(
-            ["workout", "rm", str(w_id), "--reason", "Travelling"]
+            ["workout", "rm", str(w_id), "Travelling"]
         )
         self.assertEqual(exit_code, 0)
         self.assertIn("already removed", stdout)
@@ -459,7 +458,7 @@ class TestCliWorkouts(unittest.TestCase):
         }
         mock_coach.workout_add.return_value = (saved, [])
         exit_code, stdout, _ = self.run_cli([
-            "workout", "add", "2026-06-02", "running", "--title", "Tempo 6x800",
+            "workout", "add", "2026-06-02", "running", "Tempo 6x800",
             "--description", "intervals", "--duration", "60", "--tss", "70", "--rpe", "7",
         ])
         self.assertEqual(exit_code, 0)

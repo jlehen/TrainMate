@@ -124,7 +124,7 @@ Edit `config.yaml` to include your specific IDs and profile (use
 
 ### Personalizing TrainMate
 
-**Goals.** Don't fill in `goal add` flags cold. The title, target date, sport,
+**Goals.** Don't fill in `goal add` cold. The title, target date, sport,
 and priority are much easier to get right once you've actually thought the goal
 through — so brainstorm it first with an LLM (ChatGPT, Claude, whatever you
 use) through a short interview: what's the event, why does it matter, what's
@@ -162,7 +162,7 @@ sources TrainMate's author used to generate `science/jeremie_science_summary.txt
 
 Add a goal:
 ```bash
-python trainmate_cli.py goal add --title "Marathon Prep" --date "2026-10-15" --sport "running" --priority 1
+python trainmate_cli.py goal add "Marathon Prep" "2026-10-15" running --priority 1
 ```
 
 Generate a periodization plan and initial workouts:

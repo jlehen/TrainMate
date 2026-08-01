@@ -229,7 +229,7 @@ class TestBenchmarkCLI(unittest.TestCase):
     def test_record_confirm_and_cancel(self):
         # Decline: nothing recorded.
         code, out, _ = run_cli(
-            ["benchmark", "record", "--sport", "cycling", "--ftp", "250"],
+            ["benchmark", "record", "cycling", "--ftp", "250"],
             input_value="n",
         )
         self.assertEqual(code, 0)
@@ -238,7 +238,7 @@ class TestBenchmarkCLI(unittest.TestCase):
 
         # Accept: recorded, canonicalized sport.
         code, out, _ = run_cli(
-            ["benchmark", "record", "--sport", "cycling", "--ftp", "250"],
+            ["benchmark", "record", "cycling", "--ftp", "250"],
             input_value="y",
         )
         self.assertEqual(code, 0)
@@ -251,9 +251,9 @@ class TestBenchmarkCLI(unittest.TestCase):
         self.assertEqual(rows[0]["sport_type"], "road_biking")
 
     def test_record_yes_skips_prompt_and_flags_replan(self):
-        run_cli(["benchmark", "record", "--sport", "cycling", "--ftp", "235", "-y"])
+        run_cli(["benchmark", "record", "cycling", "--ftp", "235", "-y"])
         code, out, _ = run_cli(
-            ["benchmark", "record", "--sport", "cycling", "--ftp", "260", "-y"]
+            ["benchmark", "record", "cycling", "--ftp", "260", "-y"]
         )
         self.assertEqual(code, 0)
         # >5% jump surfaces the replan hint.
@@ -262,9 +262,9 @@ class TestBenchmarkCLI(unittest.TestCase):
     def test_record_echo_matches_the_list_line(self):
         """The line `record` echoes is exactly the one `list` shows for that row,
         signed delta against the previous latest included."""
-        run_cli(["benchmark", "record", "--sport", "cycling", "--ftp", "250", "-y"])
+        run_cli(["benchmark", "record", "cycling", "--ftp", "250", "-y"])
         _, rec_out, _ = run_cli(
-            ["benchmark", "record", "--sport", "cycling", "--ftp", "262", "-y"]
+            ["benchmark", "record", "cycling", "--ftp", "262", "-y"]
         )
         _, list_out, _ = run_cli(["benchmark", "list"])
 
@@ -274,7 +274,7 @@ class TestBenchmarkCLI(unittest.TestCase):
 
     def test_record_pace_parses_mmss(self):
         run_cli(
-            ["benchmark", "record", "--sport", "running",
+            ["benchmark", "record", "running",
              "--threshold-pace", "4:15", "-y"]
         )
         latest = test_db.get_latest_benchmark("threshold_pace")
@@ -282,22 +282,22 @@ class TestBenchmarkCLI(unittest.TestCase):
 
     def test_record_rejects_two_values(self):
         code, out, _ = run_cli(
-            ["benchmark", "record", "--sport", "cycling",
+            ["benchmark", "record", "cycling",
              "--ftp", "250", "--lthr", "165", "-y"]
         )
         self.assertEqual(code, 1)
         self.assertIn("exactly one anchor value", out)
 
     def test_list_shows_signed_delta(self):
-        run_cli(["benchmark", "record", "--sport", "cycling", "--ftp", "235", "-y"])
-        run_cli(["benchmark", "record", "--sport", "cycling", "--ftp", "250", "-y"])
+        run_cli(["benchmark", "record", "cycling", "--ftp", "235", "-y"])
+        run_cli(["benchmark", "record", "cycling", "--ftp", "250", "-y"])
         code, out, _ = run_cli(["benchmark", "list"])
         self.assertEqual(code, 0)
         self.assertIn("BENCHMARK LOGBOOK", out)
         self.assertIn("+6.4%", out)
 
     def test_rm(self):
-        run_cli(["benchmark", "record", "--sport", "cycling", "--ftp", "235", "-y"])
+        run_cli(["benchmark", "record", "cycling", "--ftp", "235", "-y"])
         rid = test_db.get_benchmark_results()[0]["id"]
         code, out, _ = run_cli(["benchmark", "rm", str(rid)])
         self.assertEqual(code, 0)

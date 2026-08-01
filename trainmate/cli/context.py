@@ -197,16 +197,15 @@ def add_context_parser(subparsers):
         )
     )
     ctx_add.add_argument(
+        "metric", help="Opaque category, e.g. heat, sleep, stress"
+    )
+    ctx_add.add_argument(
         "text", nargs="*", help="Human label/summary (e.g. severe heatwave)"
     )
     ctx_add.add_argument(
         "-l", "--label",
         help="Human label/summary (alternative to the positional text; takes "
              "precedence, and avoids word-splitting for multi-word labels)"
-    )
-    ctx_add.add_argument(
-        "-m", "--metric", required=True,
-        help="Opaque category, e.g. heat, sleep, stress"
     )
     ctx_add.add_argument(
         "--value", type=float, metavar="N",

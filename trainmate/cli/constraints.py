@@ -19,16 +19,6 @@ from trainmate.util import (
 from trainmate.cli.common import fmt_date
 
 
-def _prompt_title(existing: Optional[str]) -> Optional[str]:
-    """Returns the directive one-liner, prompting when it was omitted on the CLI."""
-    if existing:
-        return existing
-    title = cli.prompt.ask_text(
-        "Constraint (the directive, stated short — e.g. 'no run Thursday')"
-    ).strip()
-    return title or None
-
-
 def _resolve_dates(args: argparse.Namespace) -> tuple:
     """--start defaults to today; --end defaults to --start (single day)."""
     start = args.start or _today_str()
@@ -103,11 +93,7 @@ def _run_replan_flow(title: str) -> None:
 
 def run_constraint_add(args: argparse.Namespace) -> None:
     """Authors a directive over a day or range (DESIGN_constraints.md §4)."""
-    # Quick capture stays flag- and prompt-free: `cons a "no run Thursday"`.
-    title = _prompt_title(args.title)
-    if not title:
-        print(red("A constraint needs a title (the directive itself)."))
-        sys.exit(1)
+    title = args.title
     start, end = _resolve_dates(args)
 
     cid = cli.db.add_constraint(
@@ -279,9 +265,8 @@ def add_constraint_parser(subparsers):
     cons_add = constraint_subparsers.add_parser(
         "add", help="Author a directive over a day or range"
     )
-    cons_add.add_argument("title", nargs="?", help="The directive, stated short "
-                          "(e.g. 'no run Thursday'); prompted if omitted")
-    cons_add.add_argument("--title", dest="title_opt", help=argparse.SUPPRESS)
+    cons_add.add_argument("title", help="The directive, stated short "
+                          "(e.g. 'no run Thursday')")
     cons_add.add_argument("--start", help="Start date (YYYY-MM-DD; default: today)")
     cons_add.add_argument("--end", help="End date (YYYY-MM-DD; default: --start)")
     cons_add.add_argument("--desc", "--description", dest="desc",

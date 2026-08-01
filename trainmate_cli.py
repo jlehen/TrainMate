@@ -311,10 +311,6 @@ def run_once(argv, parser, named_subparsers) -> None:
             sys.exit(1)
         sub = args.subcommand.lower()
         if sub == "add":
-            # The positional TITLE and the hidden --title alias both land here; prefer
-            # the flag form when supplied.
-            if getattr(args, "title_opt", None):
-                args.title = args.title_opt
             run_constraint_add(args)
         elif sub == "edit":
             run_constraint_edit(args)

@@ -136,8 +136,8 @@ user_profile:
   max_hr: 185
   # Trainable thresholds (FTP, LTHR, threshold pace, CSS, e1RM, …) are recorded in the
   # dated benchmark logbook, not here — it is the source the coach reads.
-  # Record one with e.g.  `tm benchmark record --sport cycling --ftp 220`
-  # or  `tm benchmark record --sport running --lthr 165`. With none on record the coach
+  # Record one with e.g.  `tm benchmark record cycling --ftp 220`
+  # or  `tm benchmark record running --lthr 165`. With none on record the coach
   # prescribes by RPE/HR feel and schedules a benchmark to establish them. A logbook
   # value always overrides a same-named key here.
   weekly_target_hours: 6.0

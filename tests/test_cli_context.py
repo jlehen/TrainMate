@@ -47,8 +47,8 @@ class TestCliContext(unittest.TestCase):
         mock_calendar.add_context_event.side_effect = lambda *a, **k: next(ids)
 
         exit_code, stdout, _ = self.run_cli([
-            "context", "add", "severe", "heatwave",
-            "-m", "heat", "--value", "38",
+            "context", "add", "heat", "severe", "heatwave",
+            "--value", "38",
             "--from", "2026-06-25", "--until", "2026-06-27",
         ])
         self.assertEqual(exit_code, 0)
@@ -81,7 +81,7 @@ class TestCliContext(unittest.TestCase):
         mock_calendar.calendar_id = "cal-1"
         mock_calendar.add_context_event.return_value = "evt-1"
         # No label + a value → "Metric: value" (matching ingested "Alcohol: 2.0").
-        self.run_cli(["context", "add", "-m", "alcohol", "--value", "2",
+        self.run_cli(["context", "add", "alcohol", "--value", "2",
                       "--from", "2026-06-25"], input_value="")
         rows = test_db.get_daily_context("2026-06-25", "2026-06-25", metric="alcohol")
         self.assertEqual(rows[0]["text"], "Alcohol: 2.0")
@@ -96,7 +96,7 @@ class TestCliContext(unittest.TestCase):
         mock_calendar.add_context_event.return_value = "evt-1"
         # --label wins over (and is cleaner than) the positional text.
         exit_code, _, _ = self.run_cli([
-            "context", "add", "-m", "heat",
+            "context", "add", "heat",
             "--label", "severe heatwave, poor sleep", "--from", "2026-06-25",
         ])
         self.assertEqual(exit_code, 0)
@@ -108,8 +108,8 @@ class TestCliContext(unittest.TestCase):
         mock_calendar.calendar_id = "cal-1"
         mock_calendar.add_context_event.return_value = "evt-1"
 
-        self.run_cli(["context", "add", "first", "-m", "heat", "--from", "2026-06-25"])
-        self.run_cli(["context", "add", "second", "-m", "heat", "--from", "2026-06-25"])
+        self.run_cli(["context", "add", "heat", "first", "--from", "2026-06-25"])
+        self.run_cli(["context", "add", "heat", "second", "--from", "2026-06-25"])
 
         # Re-adding the same (date, metric) updates the existing event in place.
         last_call = mock_calendar.add_context_event.call_args

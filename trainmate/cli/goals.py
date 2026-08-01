@@ -125,12 +125,12 @@ def add_goal_parser(subparsers):
     g_add = goal_subparsers.add_parser(
         "add", help="Add a new training objective/goal"
     )
-    g_add.add_argument("--title", required=True, help="Goal title (e.g. Marathon)")
-    g_add.add_argument("--date", required=True, help="Target event date (YYYY-MM-DD)")
+    g_add.add_argument("title", help="Goal title (e.g. Marathon)")
+    g_add.add_argument("date", help="Target event date (YYYY-MM-DD)")
     g_add.add_argument(
-        "--sport", required=True, nargs="+",
+        "sport", nargs="+", metavar="SPORT",
         choices=["running", "road_biking", "hiking", "strength_training", "yoga", "ski_touring"],
-        help="Sport types (one or more)"
+        help="Sport types, one or more: %(choices)s"
     )
     g_add.add_argument("--desc", default="", help="Description")
     g_add.add_argument("--priority", type=int, default=1, help="Goal priority (1 = highest)")

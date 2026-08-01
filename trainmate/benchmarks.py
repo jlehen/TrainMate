@@ -47,8 +47,8 @@ ANCHOR_KINDS: Dict[str, AnchorKind] = {
 LOGBOOK_KINDS: List[str] = [k for k in ANCHOR_KINDS if k != "max_hr"]
 
 # The natural anchor kind(s) each sport is tested on, used for `status` display and to
-# suggest a kind from a bare `--sport`. Keyed by both canonical and loose sport spellings
-# so `--sport cycling` and `--sport road_biking` both resolve.
+# suggest a kind from a bare sport. Keyed by both canonical and loose sport spellings
+# so `record cycling` and `record road_biking` both resolve.
 SPORT_ANCHORS: Dict[str, List[str]] = {
     "road_biking": ["ftp"],
     "cycling": ["ftp"],

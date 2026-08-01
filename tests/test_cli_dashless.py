@@ -264,23 +264,24 @@ class TestDashlessEndToEnd(unittest.TestCase):
         # ...and `no-pull` reached ensure_recent_data → no Garmin pull.
         mock_garmin.ensure_data.assert_not_called()
 
-    def test_goal_add_comma_list_and_collision(self):
+    def test_goal_edit_comma_list_and_collision(self):
+        # `goal add` takes its mandatory fields positionally, so the option keywords
+        # this exercises live on `goal edit`, where every field is optional.
+        gid = test_db.add_objective(
+            title="Marathon", target_date="2026-10-15", sport_type="running",
+            description="", priority=1, status="active",
+        )
         # Comma list expands to two sports.
         exit_code, stdout, _ = self.run_cli([
-            "goal", "add", "title", "Marathon", "date", "2026-10-15",
-            "sport", "running,strength_training", "priority", "1",
+            "goal", "edit", str(gid), "sport", "running,strength_training",
         ])
         self.assertEqual(exit_code, 0)
-        self.assertIn("added successfully", stdout)
-        g = test_db.get_objectives()[0]
-        self.assertEqual(g["sport_type"], "running,strength_training")
-        self.assertEqual(g["title"], "Marathon")
+        self.assertIn("updated successfully", stdout)
+        self.assertEqual(
+            test_db.get_objective(gid)["sport_type"], "running,strength_training"
+        )
 
         # A value colliding with a keyword name ("date") is still bound as the value.
-        exit_code, _, _ = self.run_cli([
-            "goal", "add", "title", "date", "date", "2026-11-01", "sport", "running",
-        ])
+        exit_code, _, _ = self.run_cli(["goal", "edit", str(gid), "title", "date"])
         self.assertEqual(exit_code, 0)
-        titled_date = [o for o in test_db.get_objectives() if o["title"] == "date"]
-        self.assertEqual(len(titled_date), 1)
-        self.assertEqual(titled_date[0]["target_date"], "2026-11-01")
+        self.assertEqual(test_db.get_objective(gid)["title"], "date")

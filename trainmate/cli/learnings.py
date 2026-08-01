@@ -218,7 +218,7 @@ def add_learnings_parser(subparsers):
         "edit", help="Revise the text of a learning"
     )
     ln_edit.add_argument("id", type=int, help="Learning ID to edit")
-    ln_edit.add_argument("--text", required=True, help="New learning text")
+    ln_edit.add_argument("text", help="New learning text")
 
     # learnings rm
     ln_rm = learnings_subparsers.add_parser("rm", help="Remove a learning by ID")

@@ -510,8 +510,7 @@ methods whose behavior is *not* obvious from that convention are called out belo
 - **Objectives** (`objectives.py`) — plain CRUD; nothing beyond the convention.
 - **Constraints** (`constraints.py`) — the unified directive object. Beyond the CRUD
   convention: `get_constraints(start, end)` returns rows overlapping a window (open-ended
-  when `end` is None — the plan form), and `list_constraint_types()` returns the distinct
-  opaque `type` labels in use (powers the `add` prompt).
+  when `end` is None — the plan form).
 - **Daily Context** (`dailycontext.py`) — external signals are reconciled **by
   Calendar event id**, so the writer/deleter are `*_by_event(google_event_id, …)`
   variants alongside the id-based ones used by the `context` command. Cleared by
@@ -704,7 +703,7 @@ excludes removed rows by default (`include_removed=False`), so they vanish from
 `workout list`/`compare`, adherence, generation, and the web API, and are **not**
 counted as misses. The adapt flow re-fetches them (`include_removed=True`) and surfaces
 them to the coach as deliberate cancellations (with the optional `removed_reason` from
-`workout rm --reason`), distinct from a miss. `save_workout`'s upsert resets
+`workout rm`'s positional reason), distinct from a miss. `save_workout`'s upsert resets
 `removed=0`/`removed_reason`, so re-generating or adapting onto a removed
 `(date, sport_type)` slot revives it.
 
@@ -1016,24 +1015,24 @@ destructive command.
 |--------------|--------------|----------|--------------------------------------------------------------------------|
 | `help`       | —            | —        | Print every command and sub-command with its one-line help, recursing through the whole sub-parser tree (unlike `--help`, which only shows one level) |
 | `status`     | —            | `s`      | Show active goals, recent metrics, coach learnings                       |
-| `goal`       | `add`        | `g a`    | Add objective (`--title`, `--date`, `--sport`, `--desc`, `--priority`)   |
+| `goal`       | `add`        | `g a`    | Add objective (`TITLE DATE SPORT…` positional, `--desc`, `--priority`)   |
 | `goal`       | `edit`       | `g e`    | Edit objective by ID                                                     |
 | `goal`       | `rm`         | `g r`    | Remove objective by ID                                                   |
 | `goal`       | `list`       | `g l`    | List all objectives                                                      |
 | `goal`       | `wipe`       | —        | Delete all objectives                                                    |
-| `constraint` | `add`        | `cons a` | Author a directive (positional `TITLE`, `--start`, `--end`, `--sport`, `--hard`/`--soft`, `--type`, `--desc`, `--replan`/`--no-replan`; prompts for omitted mandatory fields) |
+| `constraint` | `add`        | `cons a` | Author a directive (positional `TITLE`, `--start`, `--end`, `--desc`, `--rest`, `--replan`/`--no-replan`; never prompts — see DESIGN_cli_noargs.md §a2) |
 | `constraint` | `edit`       | `cons e` | Adjust scope / bindingness / text / replan by ID                        |
 | `constraint` | `rm`         | `cons r` | Remove a directive by ID                                                |
 | `constraint` | `list`       | `cons l` | List directives from the current mesocycle onward (`-a`/`--all`, `-v`, `--from`, `--until`; default anchor: active mesocycle start, else show all) |
 | `constraint` | `show`       | `cons s` | Show a directive in detail (incl. plan-shaping status)                  |
 | `constraint` | `wipe`       | —        | Delete all constraints                                                  |
-| `context`    | `add`        | `ctx a`  | Author daily-context signal(s) (`text` or `-l/--label`, `-m METRIC`, `--value N`, `--from`, `--until`; one tagged all-day event per day, prompts if omitted) |
+| `context`    | `add`        | `ctx a`  | Author daily-context signal(s) (positional `METRIC [TEXT…]` or `-l/--label`, `--value N`, `--from`, `--until`; one tagged all-day event per day) |
 | `context`    | `rm`         | `ctx r`  | Remove signal(s) by ID(s), or by `--from`/`--until`/`-m` (deletes calendar event + local row) |
 | `context`    | `list`       | `ctx l`  | List signals (`-m METRIC`, `--from`, `--until`; default window `metrics_lookback_days`) |
 | `context`    | `list-metrics` | `ctx lm` | Show distinct metrics in use with counts and date span                   |
 | `learnings`  | `list`       | `l`      | Show coach learnings (`--sport`, `--confidence`, `--dormant`)            |
 | `learnings`  | `show`       | —        | Show a learning's full text + per-week evidence basis by ID             |
-| `learnings`  | `edit`       | —        | Edit a learning's text by ID                                            |
+| `learnings`  | `edit`       | —        | Edit a learning's text (`ID TEXT`, both positional)                     |
 | `learnings`  | `rm`         | `r`      | Delete a learning by ID                                                 |
 | `learnings`  | `demote`     | —        | Accept a pending confidence downgrade by ID                            |
 | `learnings`  | `keep`       | —        | Dismiss + affirm a pending downgrade by ID                             |
@@ -1050,13 +1049,13 @@ destructive command.
 | `workout`    | `list`       | `w l`    | Show planned workouts. Defaults to today for 7 days. Flags: `--type TYPE`, `--days N`, `--weeks N`, `--from DATE`, `--until DATE`, `--from-mesocycle`, `--until-mesocycle [ID]`, `--mesocycle [ID]`, `--goal [ID]`, `--removed`. |
 | `workout`    | `compare`    | `w c`    | Compare planned vs completed (`analyze_adherence()`): prints PLANNED/ACTUAL per day, flags misses (red), rest violations (red), unplanned high-load (yellow), then a discrepancy summary. Same date flags as `workout list`; default 14-day lookback; `--days`/`--weeks` look *back*; end capped at today. |
 | `workout`    | `generate`   | `w g`    | Generate workouts from active strategy. No horizon flag → `config.workout_generation_span_days` ahead (28 default). Flags: `--goal ID`, `--days N`, `--weeks N`, `--until DATE`, `--until-goal [ID]`, `--until-mesocycle ID`. Eager: archives the previous plan's future workouts and pushes the new ones to Calendar immediately. |
-| `workout`    | `rm`         | `w rm`   | Soft-remove by ID (`--reason TEXT` required): marks `removed`, marks the Calendar event deleted; kept in DB, hidden from list/compare, shown to coach as a cancellation. |
+| `workout`    | `rm`         | `w rm`   | Soft-remove by ID (`ID REASON`, both positional): marks `removed`, marks the Calendar event deleted; kept in DB, hidden from list/compare, shown to coach as a cancellation. |
 | `workout`    | `restore`    | `w res`  | Restore soft-removed workout by ID. Clears `removed` flags and syncs to Calendar to remove the `[Deleted]` mark. |
 | `workout`    | `rollback`   | `w rb`   | Undo a regeneration: archive the upcoming sessions and restore a previously archived batch, re-pushing it to Calendar (`--batch N` per `workout batches`, default the most recent; `-y`). Leaves the active plan version alone — unlike `plan rollback`, so it also undoes a regeneration made under one plan (DESIGN_plan_rollback.md §9). Unrelated to `workout restore`. |
 | `workout`    | `batches`    | `w b`    | List the archived workout batches a rollback can restore, newest first: positional `#N`, archive time, total/restorable counts, date span, plan version |
 | `workout`    | `adapt`      | `w a`    | Run daily adaptation check (`--date YYYY-MM-DD`, `-m` athlete note, `-y` auto-apply) |
 | `workout`    | `push`       | `w p`    | Sync planned workouts to Google Calendar. Defaults to today onward; pushes only unsynced unless `-f`/`--force` re-pushes already-synced ones. |
-| `workout`    | `swap`       | `w s`    | Swap two workouts by dates (`<date> <date>`) or IDs (`<id> <id>`), same kind on both sides; `--reason` required. Runs recovery checks (consecutive hard days, load spikes, mesocycle crossings), prompts on warnings unless `-f`; syncs unless `--no-sync`; `--reason` folded into `modification_reason`. |
+| `workout`    | `swap`       | `w s`    | Swap two workouts by dates (`<date> <date>`) or IDs (`<id> <id>`), same kind on both sides, plus a mandatory positional `REASON`. Runs recovery checks (consecutive hard days, load spikes, mesocycle crossings), prompts on warnings unless `-f`; syncs unless `--no-sync`; the reason is folded into `modification_reason`. |
 | `workout`    | `wipe`       | —        | Delete all workouts                                                      |
 | `workout`    | `prune-calendar` | —    | Delete Calendar workout events that no local row references — the orphans a fresh DB, a restored backup, or a wipe that never reached Calendar leaves behind. Ownership read from the `source=TrainMate` tag, not from stored ids; events of soft-removed workouts are kept. `--from`/`--until`/`--days` window it (as on `data wipe`), `-n`/`--dry-run` previews, `-y` skips the prompt |
 | `data`       | `pull`       | `d p`    | Fetch Garmin activities/metrics and Google Calendar context (`--days`/`--from`/`--until`/`--metrics-only`/`--activities-only`/`--sleep`). Defaults to the last 2 days ending today. |
@@ -1387,7 +1386,7 @@ that day — or, with `--replace-day`, **every** session that day regardless of
 sport — recording the overwritten session(s) on the new row the way an
 adaptation does (`CoachService.workout_add`, §3): the replaced description
 becomes `original_description` (rendered "Originally:" on the event) and each
-replaced title + duration/TSS/RPE plus the athlete's `--reason` become the
+replaced title + duration/TSS/RPE plus the athlete's optional `--reason` become the
 `modification_reason` (rendered "Reason:"); other-sport entries are prefixed
 with their sport. The same-sport row's `google_event_id` is carried over so its
 existing Calendar event is updated in place; any other replaced sessions'
@@ -1399,7 +1398,7 @@ surrounding days is intentionally **not** done here — run `workout adapt` for 
 
 A `workout swap` exchanges the dates of two workouts (or moves one onto an
 empty rest day). Moved workouts get a `modification_reason` recording the swap
-(`Swapped from X to Y`, plus the athlete's optional `--reason` appended as
+(`Swapped from X to Y`, plus the athlete's mandatory reason appended as
 `. Reason given: …`), so they read as `swapped` ([§5](#5-database-schema)), are
 re-synced by `workout push`, and are visibly distinguished from untouched ones.
 If a swap returns a workout to its

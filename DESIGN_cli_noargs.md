@@ -18,7 +18,7 @@ command into three predictable buckets:
 | --- | --- | --- |
 | Read-only | Just act | `list`, `show`, `status` |
 | Mutating, preview-then-confirm | Act on a sensible default, show the preview, gate the write behind a confirm | `workout adapt` (defaults to today), `plan generate` (defaults to the nearest goal) |
-| Mutating, immediate / no natural default | Print one line naming what's missing | `swap`, `goal add`, `constraint set` |
+| Mutating, immediate / no natural default | Print one line naming what's missing | `workout swap`, `goal add`, `constraint add` |
 
 The real axis is not "does it mutate?" but "does a bare run do something
 irreversible, or produce a reversible preview?" The confirm gate is what makes a
@@ -32,6 +32,34 @@ line plus a `-h` pointer, instead of the multi-line usage block argparse would
 otherwise print first. Every other error (bad choice, bad value) keeps the full
 usage block. The override lives on the root parser class, which argparse reuses
 for every subparser, so it applies at every command level.
+
+## §a2 — Mandatory arguments are positional, optional ones are flags
+
+A required `--flag` is a contradiction the athlete pays for twice: it is longer to
+type on the one path that always has to be taken, and it makes the usage line lie
+about which arguments are the command's subject. So the rule is mechanical:
+
+**If a command cannot run without it, it is a positional. If it can, it is a flag.**
+
+`goal add TITLE DATE SPORT…`, `constraint add TITLE`, `context add METRIC [TEXT…]`,
+`learnings edit ID TEXT`, `workout add DATE SPORT TITLE`, `workout rm ID REASON`,
+`workout swap TARGET1 TARGET2 REASON`, `benchmark record SPORT --<anchor> VALUE`.
+Everything those commands can do without stays a flag, `--desc` and `--priority`
+included. The same field is a positional where it is mandatory and a flag where it
+is not: `add` takes `TITLE` positionally, `edit` takes `--title` because an edit
+that only moves a date must not have to restate the title.
+
+Two shapes are deliberately *not* covered, because the mandatory thing is a choice
+among flags rather than a value: `benchmark record`'s anchor flags (`--ftp 250`,
+`--lthr 165` — the flag names the metric, so exactly one is required and the value
+rides along) and `plan feedback`'s `--macro | --meso ID`. Collapsing either into
+positionals would trade a self-documenting `-h` listing for argument order the
+athlete has to remember.
+
+Enforcement is argparse's, not the handlers': a missing positional is reported by
+§a before any handler runs, so no command re-checks for its own mandatory input,
+and none prompts for one either — a prompt is for a decision (§b's confirms), never
+for an argument the invocation should have carried.
 
 ## §b — Preview-then-confirm commands name the defaulted target
 

@@ -176,7 +176,7 @@ def add_workout_parser(subparsers, pull_bypass_parser, llm_debug_parser, plan_da
     )
     w_add.add_argument("date", help="Workout date (YYYY-MM-DD)")
     w_add.add_argument("sport_type", help="Sport type (e.g. running, road_biking)")
-    w_add.add_argument("--title", required=True, help="Workout title")
+    w_add.add_argument("title", help="Workout title")
     w_add.add_argument(
         "--description", "--desc", dest="description", help="Workout description / details"
     )
@@ -201,7 +201,7 @@ def add_workout_parser(subparsers, pull_bypass_parser, llm_debug_parser, plan_da
     )
     w_rm.add_argument("id", type=int, help="Workout ID to remove")
     w_rm.add_argument(
-        "--reason", required=True,
+        "reason",
         help="Why the workout is being removed (shown to the coach as a deliberate "
              "cancellation)"
     )
@@ -277,12 +277,16 @@ def add_workout_parser(subparsers, pull_bypass_parser, llm_debug_parser, plan_da
         )
     )
     w_swap.add_argument(
-        "target1", nargs="?",
+        "target1",
         help="First workout to swap: a date (YYYY-MM-DD) or a workout ID"
     )
     w_swap.add_argument(
-        "target2", nargs="?",
+        "target2",
         help="Second workout to swap: a date (YYYY-MM-DD) or a workout ID"
+    )
+    w_swap.add_argument(
+        "reason",
+        help="Why the workouts are being swapped (recorded and shown to the coach)"
     )
     w_swap.add_argument(
         "--no-sync", action="store_true", dest="no_sync",
@@ -291,10 +295,6 @@ def add_workout_parser(subparsers, pull_bypass_parser, llm_debug_parser, plan_da
     w_swap.add_argument(
         "-f", "--force", action="store_true", dest="force",
         help="Apply the swap without prompting, even if warnings are raised"
-    )
-    w_swap.add_argument(
-        "--reason", required=True,
-        help="Why the workouts are being swapped (recorded and shown to the coach)"
     )
 
 

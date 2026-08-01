@@ -51,25 +51,25 @@ Top-level `context` (alias `ctx`), with subcommands:
 | `list`         | `l`  | List signals, date-filtered and/or metric-filtered |
 | `list-metrics` | `lm` | Show distinct metrics already in use |
 
-Per the prompt-over-flags preference, `add` **prompts interactively** for any
-field omitted on the command line.
+`add` never prompts: its one mandatory field is positional and the rest default
+(DESIGN_cli_noargs.md §a2), so a signal is one line to author.
 
 ### `context add` (`a`)
 ```
-context add [--from YYYY-MM-DD] [--until YYYY-MM-DD] [-m METRIC] [--value N] [-l LABEL | TEXT]
+context add METRIC [TEXT] [--from YYYY-MM-DD] [--until YYYY-MM-DD] [--value N] [-l LABEL]
 ```
 - Date range defaults to **today** (single day) when neither bound is given;
   `--until` defaults to `--from`. One **all-day event per day** in the range —
   one event ⇒ one `daily_context` row, so it round-trips through the existing
   per-day ingest with zero schema change.
-- `-m/--metric`: opaque category. Prompted if omitted; the prompt shows existing
-  metrics (from `list-metrics`) to discourage `heat` vs `heatwave` drift.
+- `METRIC` (positional): opaque category, mandatory. `list-metrics` shows the
+  ones already in use, to discourage `heat` vs `heatwave` drift.
 - `--value`: optional **free numeric** the user supplies (severity, °C, count —
   TrainMate doesn't interpret it), kept for the future quantitative path
   (ingest §7). Free text alone is also fine.
-- `TEXT` (positional) or `-l/--label`: the human/LLM blurb. `--label` takes
-  precedence and avoids word-splitting for multi-word labels; the prompt ("Label")
-  is optional. The event `summary` (and the mirrored `text`) is derived to match
+- `TEXT` (trailing positional) or `-l/--label`: the human/LLM blurb, optional.
+  `--label` takes precedence and avoids word-splitting for multi-word labels.
+  The event `summary` (and the mirrored `text`) is derived to match
   the ingested-event style: **with a label** → `label (value)` (e.g.
   `severe heatwave (38.0)`); **without** → `Metric: value` (e.g. `Alcohol: 2.0`).
   The value is dropped from the rendering when absent.
