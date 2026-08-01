@@ -11,7 +11,7 @@ import tempfile
 from typing import Optional
 
 from trainmate.util import (
-    bold, red, yellow, default_wrap_width, format_labeled_block
+    bold, dim, red, yellow, cmd, default_wrap_width, format_labeled_block
 )
 
 
@@ -124,8 +124,13 @@ class WrapAwareArgumentParser(argparse.ArgumentParser):
 
     def error(self, message):
         # A missing-required-argument error answers itself with the command's own help,
-        # then names what is missing last, where the eye lands (DESIGN_cli_noargs.md §a).
+        # then names what is missing last, where the eye lands — except in chat, where
+        # a help dump costs a screenful (DESIGN_cli_noargs.md §a).
         if message.startswith("the following arguments are required"):
+            from trainmate.prompt import is_json_frontend
+            if is_json_frontend():
+                self.exit(2, red(f"{self.prog}: error: {message}\n")
+                          + dim("Run " + cmd(f"{self.prog} -h") + " for usage.\n"))
             self.print_help(sys.stderr)
             self.exit(2, red(f"\n{self.prog}: error: {message}\n"))
         super().error(message)

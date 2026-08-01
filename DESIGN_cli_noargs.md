@@ -19,7 +19,7 @@ command into three predictable buckets:
 | --- | --- | --- |
 | Read-only | Just act | `list`, `show`, `status` |
 | Mutating, preview-then-confirm | Act on a sensible default, show the preview, gate the write behind a confirm | `workout adapt` (defaults to today), `plan generate` (defaults to the nearest goal) |
-| Mutating, immediate / no natural default | Print the command's help, then the line naming what's missing | `workout swap`, `goal add`, `constraint add` |
+| Mutating, immediate / no natural default | Print the command's help, then the line naming what's missing (in chat, the line alone) | `workout swap`, `goal add`, `constraint add` |
 
 The real axis is not "does it mutate?" but "does a bare run do something
 irreversible, or produce a reversible preview?" The confirm gate is what makes a
@@ -41,10 +41,20 @@ it, and the case is narrow enough not to be noisy: it fires only when arguments
 are missing outright.
 
 Every other error (bad choice, bad value) keeps argparse's short usage block —
-there the shape is already known and only one token is wrong. Both go to stderr,
-which the Telegram front-end merges into stdout, so the athlete sees the same
-thing the terminal does. The override lives on the root parser class, which
-argparse reuses for every subparser, so it applies at every command level.
+there the shape is already known and only one token is wrong.
+
+**The exception is chat.** All of this goes to stderr, which the bot merges into
+stdout, so whatever the terminal prints the athlete reads as a message — and a
+help block that costs a scroll in a terminal costs a screenful of chat (37 lines
+for a forgotten `constraint add` title, at the bot's ~48-col wrap). So under
+`TRAINMATE_FRONTEND=json` the error keeps its older, shorter shape: the missing
+line plus a pointer to the `-h` the athlete can ask for on its own. The medium
+decides, not the command: same parser, same rule, one branch on
+`is_json_frontend()` (trainmate/prompt.py — the single reader of that env var,
+shared with the transport choice and `progress --chart`'s delivery).
+
+The override lives on the root parser class, which argparse reuses for every
+subparser, so it applies at every command level.
 
 ## §a2 — Mandatory arguments are positional, optional ones are flags
 

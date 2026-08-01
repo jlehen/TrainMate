@@ -200,14 +200,23 @@ class JsonPrompt:
         return str(answer)
 
 
+def is_json_frontend(frontend: Optional[str] = None) -> bool:
+    """True when a structured front-end (the Telegram bot) is driving the CLI.
+
+    The one place the ``TRAINMATE_FRONTEND`` env var is interpreted, so the transport
+    choice below and the output shapes that vary by front-end (chart delivery, the
+    missing-argument error of DESIGN_cli_noargs.md §a) cannot drift apart."""
+    if frontend is None:
+        frontend = os.environ.get("TRAINMATE_FRONTEND", "")
+    return frontend.lower() == "json"
+
+
 def make_prompt(frontend: Optional[str] = None, out=None, inp=None):
     """Returns the prompt transport for the active front-end.
 
     ``frontend`` defaults to the ``TRAINMATE_FRONTEND`` env var; ``"json"`` selects
     the structured ``JsonPrompt`` (used by the Telegram bot), anything else the
     interactive ``TtyPrompt``."""
-    if frontend is None:
-        frontend = os.environ.get("TRAINMATE_FRONTEND", "")
-    if frontend.lower() == "json":
+    if is_json_frontend(frontend):
         return JsonPrompt(out, inp)
     return TtyPrompt()

@@ -10,7 +10,6 @@ so a TTY and Telegram render identically; width is measured with `visible_len`
 import argparse
 
 from trainmate.cli.argparse_ext import _weeks_arg
-import os
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
 
@@ -459,12 +458,12 @@ def _emit_chart(chart_arg: Any, payload: Dict[str, Any], caption: str) -> None:
                   + cmd("venv/bin/pip install -r requirements.txt", quote=False)))
         return
 
-    if os.environ.get("TRAINMATE_FRONTEND", "").lower() == "json":
+    from trainmate.prompt import emit_photo, is_json_frontend
+    if is_json_frontend():
         import tempfile
         with tempfile.NamedTemporaryFile(delete=False, suffix=".png") as tmp:
             tmp.write(png)
             path = tmp.name
-        from trainmate.prompt import emit_photo
         emit_photo(path, caption=caption)
     else:
         path = chart_arg if isinstance(chart_arg, str) else DEFAULT_CHART_PATH

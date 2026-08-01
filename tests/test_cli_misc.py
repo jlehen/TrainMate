@@ -60,6 +60,30 @@ class TestCliMisc(unittest.TestCase):
         self.assertEqual(exit_code, 0)
         self.assertIn("pull", stdout)
 
+    def test_missing_argument_prints_help_then_the_missing_line(self):
+        # DESIGN_cli_noargs.md §a: on a terminal the error answers itself with the
+        # command's own help — the positional it names is only meaningful alongside
+        # its description — and puts the missing line last, where the eye lands.
+        with patch.dict(os.environ, {"TRAINMATE_FRONTEND": ""}):
+            exit_code, stdout, stderr = self.run_cli(["constraint", "add"])
+        self.assertEqual(exit_code, 2)
+        self.assertIn("positional arguments:", stderr)
+        self.assertIn("The directive, stated short", stderr)
+        self.assertIn(
+            "the following arguments are required: title",
+            stderr.strip().splitlines()[-1],
+        )
+
+    def test_missing_argument_stays_one_line_on_the_json_frontend(self):
+        # ...but a screenful of help is a screenful of chat, so the bot gets the
+        # line plus a pointer to the help it can ask for (§a).
+        with patch.dict(os.environ, {"TRAINMATE_FRONTEND": "json"}):
+            exit_code, stdout, stderr = self.run_cli(["constraint", "add"])
+        self.assertEqual(exit_code, 2)
+        self.assertNotIn("positional arguments:", stderr)
+        self.assertIn("the following arguments are required: title", stderr)
+        self.assertIn("constraint add -h", stderr)
+
     def test_advanced_command_hidden_but_runnable(self):
         # `workout push` is hidden from listings yet still parses and describes itself.
         exit_code, stdout, stderr = self.run_cli(["workout", "push", "--help"])
