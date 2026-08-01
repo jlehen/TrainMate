@@ -223,7 +223,10 @@ Two things to know when you regenerate:
   learnings — so it refines the existing arc rather than redrawing it from scratch.
 - **`workout generate` archives and rebuilds all future workouts**, manual edits
   included (they are recoverable via `workout rollback` or `plan rollback`, not
-  deleted; a session you've already completed today is preserved). So make
+  deleted; a session you've already completed today is preserved). Because it
+  replaces rather than fills in, it asks before overwriting an existing upcoming
+  plan — naming how many sessions are at stake and how many you added by hand;
+  `-f/--force` skips that question for unattended runs. So make
   strategic changes *first*
   (a plan-shaping `constraint` → `plan generate` → `workout generate`), then layer
   manual `add`/`swap` tweaks on top — not the other way around.

@@ -707,3 +707,100 @@ class TestCliWorkouts(unittest.TestCase):
         self.assertEqual(
             mock_coach.workout_rollback.call_args.kwargs.get("batch"), stamp
         )
+
+    @patch("trainmate.cli.workouts.generate.ensure_recent_data")
+    @patch("trainmate_cli.prompt")
+    @patch("trainmate_cli.coach_service")
+    def test_generate_confirms_before_replacing_live_plan(
+        self, mock_coach, mock_prompt, _ensure
+    ):
+        """A regen is archive-and-rebuild, so an existing upcoming plan is confirmed
+        before the LLM call; --force skips the prompt."""
+        mock_coach.workout_generate.return_value = ("Reasoning", [])
+        today = datetime.now(timezone.utc).date()
+        d1 = (today + timedelta(days=1)).strftime("%Y-%m-%d")
+        d2 = (today + timedelta(days=5)).strftime("%Y-%m-%d")
+
+        # Empty plan: nothing to lose, so no prompt stands between the athlete and the
+        # coach (confirm would decline if one were asked).
+        mock_prompt.confirm.return_value = False
+        exit_code, _, _ = self.run_cli(["workout", "generate"])
+        self.assertEqual(exit_code, 0)
+        mock_prompt.confirm.assert_not_called()
+        mock_coach.workout_generate.assert_called_once()
+
+        test_db.save_workout(
+            date=d1, sport_type="running", title="Tempo", description="30 min",
+        )
+        test_db.save_workout(
+            date=d2, sport_type="running", title="Long", description="90 min",
+            source="manual",
+        )
+
+        # Declining leaves the live plan alone and never spends the LLM call.
+        mock_coach.workout_generate.reset_mock()
+        exit_code, stdout, _ = self.run_cli(["workout", "generate"])
+        self.assertEqual(exit_code, 0)
+        # The question is wrapped for the terminal; compare on a single logical line.
+        question = " ".join(mock_prompt.confirm.call_args.args[0].split())
+        self.assertIn("You already have 2 upcoming workout(s) planned", question)
+        self.assertIn(fmt_date(d1), question)
+        self.assertIn(fmt_date(d2), question)
+        self.assertIn("1 added by hand", question)
+        self.assertIn("your current plan is unchanged", stdout)
+        mock_coach.workout_generate.assert_not_called()
+
+        # Accepting proceeds.
+        mock_prompt.confirm.return_value = True
+        exit_code, _, _ = self.run_cli(["workout", "generate"])
+        self.assertEqual(exit_code, 0)
+        mock_coach.workout_generate.assert_called_once()
+
+        # --force skips the question entirely, even when confirm would decline.
+        mock_prompt.confirm.reset_mock()
+        mock_prompt.confirm.return_value = False
+        mock_coach.workout_generate.reset_mock()
+        exit_code, _, _ = self.run_cli(["workout", "generate", "--force"])
+        self.assertEqual(exit_code, 0)
+        mock_prompt.confirm.assert_not_called()
+        mock_coach.workout_generate.assert_called_once()
+
+    @patch("trainmate.cli.workouts.generate.ensure_recent_data")
+    @patch("trainmate_cli.prompt")
+    @patch("trainmate_cli.coach_service")
+    def test_generate_force_keeps_out_of_date_plan_warning(
+        self, mock_coach, mock_prompt, _ensure
+    ):
+        """--force proceeds past the out-of-date-plan warning without stamping the
+        config hash — only an explicit confirmation accepts the stale plan."""
+        mock_coach.workout_generate.return_value = ("Reasoning", [])
+        mock_coach.config_changed.return_value = "athlete profile changed"
+        obj_id = test_db.add_objective(
+            title="London Marathon", target_date="2026-09-20",
+            sport_type="running", priority=1,
+        )
+        test_db.save_macrocycle(
+            objective_id=obj_id, strategy="Build then taper", goals_hash="g",
+            constraints_hash="c",
+            mesocycles=[{
+                "name": "Base", "start_date": "2026-06-01", "end_date": "2026-06-28",
+                "focus": "Aerobic volume",
+            }],
+        )
+
+        # Declining stops before the LLM call and leaves the plan flagged as stale.
+        mock_prompt.confirm.return_value = False
+        with patch.object(test_db, "update_macrocycle_config_hash") as mock_stamp:
+            exit_code, stdout, _ = self.run_cli(["workout", "generate"])
+            self.assertEqual(exit_code, 0)
+            self.assertIn("Workout generation cancelled. Please run", stdout)
+            mock_stamp.assert_not_called()
+        mock_coach.workout_generate.assert_not_called()
+
+        # --force proceeds, says why, and still leaves the warning live for next time.
+        with patch.object(test_db, "update_macrocycle_config_hash") as mock_stamp:
+            exit_code, stdout, _ = self.run_cli(["workout", "generate", "-f"])
+            self.assertEqual(exit_code, 0)
+            self.assertIn("Proceeding anyway (--force)", stdout)
+            mock_stamp.assert_not_called()
+        mock_coach.workout_generate.assert_called_once()

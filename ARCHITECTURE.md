@@ -1217,6 +1217,11 @@ event-day TSB over the plan's own workouts — is a deferred Phase 2 follow-up.
 1. CLI resolves the generation horizon (end date) from flags in priority order:
    `--days` / `--weeks` → `--until DATE` → `--until-goal [ID]` →
    `--until-mesocycle ID` → `config.workout_generation_span_days` (default 28).
+1b. Before spending the LLM call, the CLI confirms the replacement when live
+   workouts already exist from today onward — a regen is archive-and-rebuild, not
+   fill-in, so a repeat run would otherwise silently archive manual edits. The
+   question names the count, span, how many were hand-added, and the new horizon.
+   `-f/--force` skips it (and the out-of-date-plan warning) for unattended runs.
 2. `CoachService.workout_generate(end_date=...)` verifies a macrocycle exists,
    computes `num_days` from `(end_date − today)`.
 3. Fetches metrics history (last `metrics_lookback_days` days) + baseline.

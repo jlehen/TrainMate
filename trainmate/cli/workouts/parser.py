@@ -89,12 +89,18 @@ def add_workout_parser(subparsers, pull_bypass_parser, llm_debug_parser, plan_da
             "config.workout_generation_span_days days ahead (28 by default). The new plan "
             "is pushed to Google Calendar straight away (the previous plan's upcoming "
             f"workouts are archived first); use '{green('plan rollback')}' to undo a "
-            "regeneration."
+            "regeneration. This is a full rebuild, not a fill-in: when upcoming sessions "
+            "already exist it asks before replacing them (-f skips the prompt)."
         )
     )
     p_w_gen.add_argument(
         "--goal", "--goal-id", type=int, dest="goal_id",
         help="Target goal ID to generate workouts for"
+    )
+    p_w_gen.add_argument(
+        "-f", "--force", "-y", "--yes", action="store_true", dest="force",
+        help="Skip the confirmation prompts (replacing the upcoming plan, and the "
+             "out-of-date-plan warning)"
     )
     p_w_gen_horizon = p_w_gen.add_mutually_exclusive_group()
     p_w_gen_horizon.add_argument(
