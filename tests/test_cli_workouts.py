@@ -251,11 +251,17 @@ class TestCliWorkouts(unittest.TestCase):
         mock_coach.workout_swap_apply.assert_not_called()
 
     def test_workout_swap_missing_args(self):
-        # Both targets and the reason are positional and mandatory, so argparse
-        # names what is missing (DESIGN_cli_noargs.md §a) before any handler runs.
+        # Both targets and the reason are positional and mandatory, so argparse stops
+        # the run before any handler and answers with the command's own help, the
+        # missing line last (DESIGN_cli_noargs.md §a).
         exit_code, stdout, stderr = self.run_cli(["workout", "swap", "2026-06-10"])
         self.assertEqual(exit_code, 2)
-        self.assertIn("the following arguments are required: target2, reason", stderr)
+        self.assertIn("positional arguments:", stderr)
+        self.assertIn("Why the workouts are being swapped", stderr)
+        self.assertIn(
+            "the following arguments are required: target2, reason",
+            stderr.strip().splitlines()[-1],
+        )
 
     def test_workout_swap_mixed_date_and_id_rejected(self):
         exit_code, stdout, stderr = self.run_cli(

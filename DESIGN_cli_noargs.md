@@ -6,7 +6,8 @@ Running a command with no arguments does different things depending on the
 command: some act (`workout list`), some preview-then-confirm (`workout adapt`),
 and some refuse because they need a target (`workout swap`). Each is defensible
 alone, but the mix is unpredictable until learned, and the "refuse" case used to
-bury the one useful line under argparse's full usage block.
+answer with argparse's bare usage block, which names the missing argument
+without saying what belongs in it.
 
 ## The convention
 
@@ -18,20 +19,32 @@ command into three predictable buckets:
 | --- | --- | --- |
 | Read-only | Just act | `list`, `show`, `status` |
 | Mutating, preview-then-confirm | Act on a sensible default, show the preview, gate the write behind a confirm | `workout adapt` (defaults to today), `plan generate` (defaults to the nearest goal) |
-| Mutating, immediate / no natural default | Print one line naming what's missing | `workout swap`, `goal add`, `constraint add` |
+| Mutating, immediate / no natural default | Print the command's help, then the line naming what's missing | `workout swap`, `goal add`, `constraint add` |
 
 The real axis is not "does it mutate?" but "does a bare run do something
 irreversible, or produce a reversible preview?" The confirm gate is what makes a
 defaulting mutator safe, so those commands act rather than refuse.
 
-## §a — Missing-required-argument errors lead with the missing line
+## §a — A missing argument prints the command's help, then the missing line
 
 `WrapAwareArgumentParser.error` (trainmate/cli/argparse_ext.py) intercepts the
-argparse "the following arguments are required: …" message and prints just that
-line plus a `-h` pointer, instead of the multi-line usage block argparse would
-otherwise print first. Every other error (bad choice, bad value) keeps the full
-usage block. The override lives on the root parser class, which argparse reuses
-for every subparser, so it applies at every command level.
+argparse "the following arguments are required: …" message and answers it with
+the command's own `-h` output, followed by that line — last, where the eye lands
+after a block of text and where the shell prompt puts it next to what you type.
+
+Pointing at `-h` was enough while the mandatory fields were named flags: the
+message said `--reason` and that *was* the answer. Now that mandatory means
+positional (§a2), the same message names a slot — `target2`, `reason` — without
+saying what belongs in it or in what order, so it raises a question the help
+already answers. Printing it beats making the athlete re-type the command to get
+it, and the case is narrow enough not to be noisy: it fires only when arguments
+are missing outright.
+
+Every other error (bad choice, bad value) keeps argparse's short usage block —
+there the shape is already known and only one token is wrong. Both go to stderr,
+which the Telegram front-end merges into stdout, so the athlete sees the same
+thing the terminal does. The override lives on the root parser class, which
+argparse reuses for every subparser, so it applies at every command level.
 
 ## §a2 — Mandatory arguments are positional, optional ones are flags
 

@@ -11,7 +11,7 @@ import tempfile
 from typing import Optional
 
 from trainmate.util import (
-    bold, dim, red, yellow, cmd, default_wrap_width, format_labeled_block
+    bold, red, yellow, default_wrap_width, format_labeled_block
 )
 
 
@@ -123,11 +123,11 @@ class WrapAwareArgumentParser(argparse.ArgumentParser):
         self.register("action", "parsers", _DescFromHelpSubParsersAction)
 
     def error(self, message):
-        # A missing-required-argument error leads with the one missing line, not the
-        # full usage block that argparse buries it under (DESIGN_cli_noargs.md §a).
+        # A missing-required-argument error answers itself with the command's own help,
+        # then names what is missing last, where the eye lands (DESIGN_cli_noargs.md §a).
         if message.startswith("the following arguments are required"):
-            self.exit(2, red(f"{self.prog}: error: {message}\n")
-                      + dim("Run " + cmd(f"{self.prog} -h") + " for usage.\n"))
+            self.print_help(sys.stderr)
+            self.exit(2, red(f"\n{self.prog}: error: {message}\n"))
         super().error(message)
 
 def _edit_text_in_editor(initial: str) -> Optional[str]:
