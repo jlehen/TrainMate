@@ -135,14 +135,9 @@ is a different question, and every boundary the grouping erases carries a coachi
 - **Z6 vs Z7.** Power Z6 is anaerobic capacity (30s–3min, glycolytic); Z7 is neuromuscular
   sprint work. Merged, a `Z6-7: 25 min` block cannot be told apart from a lot of surging out
   of corners.
-- **HR's ceiling becomes self-evident.** HR stops at one "above threshold" bucket while power
-  resolves three. Shown side by side, that is the case for preferring power on the bike (§7),
-  demonstrated rather than asserted.
 
 The aggregation in §8 sums per-zone seconds either way, so banding is extra code whose only
-effect is to discard information. It does cost tokens: 12 figures per sport per block instead
-of 9, which across three sports and two blocks is the difference worth knowing about, given §9
-puts this in the `adapt` prompt alongside PMC, daily context and constraints.
+effect is to discard information.
 
 The zone **labels** above travel with every figure — bare `Z1..Z5` is markedly less legible to
 a model than named zones.
@@ -154,9 +149,9 @@ cleanly onto the polarized model to begin with.
 
 ## 6. Every sport gets a row; no sport is routed away
 
-An earlier draft split output into "endurance" and "structural" sections by sport, and sent
-`strength_training` to the latter with its zone minutes dropped. That is wrong, and the
-canonical mapping shows why (`sports.py`):
+Routing sports into "endurance" and "structural" sections — `strength_training` to the latter,
+its zone minutes dropped — was considered and rejected. The canonical mapping shows why
+(`sports.py`):
 
 ```python
 "strength_training": ["strength_training", "strength", "indoor_cardio", "fitness"],
@@ -172,9 +167,6 @@ is the opposite conclusion.
 
 So: **no routing.** Every canonical sport gets a zone row whenever it has zone data. Sports
 with RPE or benchmark data additionally get a structural row. Nothing is excluded from either.
-
-This is also §7's own principle applied consistently — caveats are emitted, not corrected.
-Silently deleting a class of sport is a correction, and the most opaque kind.
 
 ```
 Base 2 (4 weeks) — focus "aerobic volume"
@@ -192,15 +184,12 @@ Base 2 (4 weeks) — focus "aerobic volume"
     e1RM               102kg -> 108kg (+5.9%)
 ```
 
-Three things that table now does that the routed version could not: the kettlebell sessions'
-22 min of Z4 are counted; the bike appears under both currencies, so the rides without a meter
-are still visible in the HR row instead of being silently dropped from a power-only view; and
-heavy-lifting Z2 minutes are still visible but annotated, so a model can discount them against
-the RPE instead of never seeing them.
-
-The two bike rows overlap on purpose — a ride with a power meter contributes to both. The HR
-row spans 4h11 of riding and the power row 2h54, so 69% of bike time had a meter. That gap is
-the coverage line's job to state, not the table's to hide.
+Three things that table does that the routed version could not: the kettlebell sessions' 22 min
+of Z4 are counted; heavy-lifting Z2 minutes stay visible but annotated, so a model can discount
+them against the RPE instead of never seeing them; and the bike appears under both currencies
+on purpose — the HR row spans 4h11 of riding and the power row 2h54, so 69% of bike time had a
+meter. Rides without a meter stay visible in the HR row instead of vanishing from a power-only
+view, and that gap is the coverage line's job to state, not the table's to hide.
 
 **Never sum the HR and power tables.** A ride with a power meter appears in both; they are two
 views of the same time, never a total. The per-row percentages invite exactly that mistake, so
@@ -272,16 +261,11 @@ A sum over rows already stored. No new table, no migration, no Garmin calls, no 
 aggregation currently inline in `_build_prior_training_context` is extracted into a reusable
 helper and called for the current block and the preceding one.
 
-Two accessor details, since the current block is new territory:
-
-- `get_active_mesocycle` falls back to the next *future* block, then to the absolute first
-  one, when today sits inside none. Called naively that renders `Build 1 (0 of 4 weeks
-  elapsed)` with an empty table for a block that has not started. The helper takes the block
-  it is given and reports nothing when today is outside every block.
-- Block length is not bounded anywhere — it is LLM-authored free text into an unconstrained
-  column. Read cost is a sum over one block's activities either way, so nothing breaks; the
-  point is not to lean on "blocks are short" as the argument for computing on read. "A sum
-  over rows already in memory" is the argument.
+One accessor detail, since the current block is new territory: `get_active_mesocycle` falls
+back to the next *future* block, then to the absolute first one, when today sits inside none.
+Called naively that renders `Build 1 (0 of 4 weeks elapsed)` with an empty table for a block
+that has not started. The helper takes the block it is given and reports nothing when today is
+outside every block.
 
 ## 9. Where it surfaces
 
@@ -392,10 +376,6 @@ change_reason  "Third block week where 'easy' runs averaged Z3; adding an
 want more this week, add 15–20 min to Sunday at the same easy effort — that's this block's
 currency. Adding actual hard work changes the block's shape and belongs in the next plan
 generation."*
-
-Note what the advice is: **advice, not a restructuring.** Adapt caps the drift and tells the
-athlete where the appetite may go. If they want the block itself changed, they say so and
-`generate` handles it. That is what keeps this from becoming a backdoor into periodization.
 
 ### 9.4 The one collision with existing machinery
 
