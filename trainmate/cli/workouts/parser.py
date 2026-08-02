@@ -94,7 +94,7 @@ def add_workout_parser(subparsers, pull_bypass_parser, llm_debug_parser, plan_da
         )
     )
     p_w_gen.add_argument(
-        "--goal", "--goal-id", type=int, dest="goal_id",
+        "-g", "--goal", "--goal-id", type=int, dest="goal_id",
         help="Target goal ID to generate workouts for"
     )
     p_w_gen.add_argument(
@@ -104,11 +104,11 @@ def add_workout_parser(subparsers, pull_bypass_parser, llm_debug_parser, plan_da
     )
     p_w_gen_horizon = p_w_gen.add_mutually_exclusive_group()
     p_w_gen_horizon.add_argument(
-        "--days", type=int, dest="horizon_days", metavar="N",
+        "-d", "--days", type=int, dest="horizon_days", metavar="N",
         help="Generate workouts for N days from today"
     )
     p_w_gen_horizon.add_argument(
-        "--weeks", type=float, dest="horizon_weeks", metavar="N",
+        "-w", "--weeks", type=float, dest="horizon_weeks", metavar="N",
         help="Generate workouts for N weeks from today"
     )
     p_w_gen_horizon.add_argument(
@@ -321,7 +321,7 @@ def add_workout_parser(subparsers, pull_bypass_parser, llm_debug_parser, plan_da
         )
     )
     w_prune.add_argument(
-        "--days", type=int, metavar="N",
+        "-d", "--days", type=int, metavar="N",
         help="Restrict to the trailing N days (ending --until, default today)"
     )
     w_prune.add_argument(

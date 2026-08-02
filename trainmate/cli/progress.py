@@ -516,7 +516,7 @@ def add_progress_parser(subparsers, pull_bypass_parser):
         )
     )
     progress_parser.add_argument(
-        "--weeks", type=_weeks_arg, default=8, metavar="N",
+        "-w", "--weeks", type=_weeks_arg, default=8, metavar="N",
         help="Weeks of weekly load to show either side of today (default: 8, must be "
              ">= 1, or 'all' for the whole plan). The projection lines above the table "
              "always run to plan end regardless."

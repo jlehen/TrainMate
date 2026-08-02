@@ -859,7 +859,7 @@ def add_plan_parser(subparsers, pull_bypass_parser, llm_debug_parser):
         help="Apply proposed plan updates automatically without prompting"
     )
     p_gen.add_argument(
-        "--goal", "--goal-id", type=int, dest="goal_id",
+        "-g", "--goal", "--goal-id", type=int, dest="goal_id",
         help="Target goal ID to generate the periodization plan for"
     )
     
@@ -877,7 +877,7 @@ def add_plan_parser(subparsers, pull_bypass_parser, llm_debug_parser):
         )
     )
     p_show.add_argument(
-        "--goal", "--goal-id", type=int, dest="goal_id",
+        "-g", "--goal", "--goal-id", type=int, dest="goal_id",
         help="Target goal ID to show the periodization plan for (defaults to the next "
              "active goal)"
     )
@@ -916,7 +916,7 @@ def add_plan_parser(subparsers, pull_bypass_parser, llm_debug_parser):
         help="Newer plan version to compare to (defaults to the active version)"
     )
     p_diff.add_argument(
-        "--goal", "--goal-id", type=int, dest="goal_id",
+        "-g", "--goal", "--goal-id", type=int, dest="goal_id",
         help="Target goal ID whose plan versions to compare (defaults to the next active goal)"
     )
     p_diff.add_argument(
@@ -937,7 +937,7 @@ def add_plan_parser(subparsers, pull_bypass_parser, llm_debug_parser):
         )
     )
     p_versions.add_argument(
-        "--goal", "--goal-id", type=int, dest="goal_id",
+        "-g", "--goal", "--goal-id", type=int, dest="goal_id",
         help="Target goal ID whose plan versions to list (defaults to the next active goal)"
     )
 
@@ -965,7 +965,7 @@ def add_plan_parser(subparsers, pull_bypass_parser, llm_debug_parser):
         )
     )
     p_rollback.add_argument(
-        "--goal", "--goal-id", type=int, dest="goal_id",
+        "-g", "--goal", "--goal-id", type=int, dest="goal_id",
         help="Target goal ID whose plan to roll back (defaults to the next active goal)"
     )
     p_rollback.add_argument(
@@ -991,7 +991,7 @@ def add_plan_parser(subparsers, pull_bypass_parser, llm_debug_parser):
         help="Provide feedback on a specific mesocycle ID"
     )
     p_fb.add_argument(
-        "--goal", "--goal-id", type=int, dest="goal_id",
+        "-g", "--goal", "--goal-id", type=int, dest="goal_id",
         help=(
             "Target goal ID whose plan the feedback should attach to "
             "(default to the current active goal)"

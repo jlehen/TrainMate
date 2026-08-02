@@ -649,7 +649,7 @@ def add_data_parser(subparsers, pull_bypass_parser, llm_debug_parser, basic_date
         )
     )
     d_pull.add_argument(
-        "--days", type=int, default=2, metavar="N",
+        "-d", "--days", type=int, default=2, metavar="N",
         help="Number of days to pull, ending today (default: 2)"
     )
     d_pull.add_argument(
@@ -813,7 +813,7 @@ def add_data_parser(subparsers, pull_bypass_parser, llm_debug_parser, basic_date
         help="Wipe only ingested daily-context signals and reset the Calendar sync token"
     )
     d_wipe.add_argument(
-        "--days", type=int, metavar="N",
+        "-d", "--days", type=int, metavar="N",
         help="Restrict to the trailing N days (ending --until, default today)"
     )
     d_wipe.add_argument(

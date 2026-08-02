@@ -179,11 +179,11 @@ def build_parser():
     # Basic date parser containing base date-filtering options
     basic_date_parser = argparse.ArgumentParser(add_help=False)
     basic_date_parser.add_argument(
-        "--days", type=int, dest="days", metavar="N",
+        "-d", "--days", type=int, dest="days", metavar="N",
         help="Show/process data for N days"
     )
     basic_date_parser.add_argument(
-        "--weeks", type=float, dest="weeks", metavar="N",
+        "-w", "--weeks", type=float, dest="weeks", metavar="N",
         help="Show/process data for N weeks"
     )
     basic_date_parser.add_argument(
@@ -210,14 +210,14 @@ def build_parser():
         help="Filter within a mesocycle (uses current if ID omitted)"
     )
     plan_date_parser.add_argument(
-        "--goal", "--goal-id", type=int, nargs="?", const=-1, dest="goal_id", metavar="ID",
+        "-g", "--goal", "--goal-id", type=int, nargs="?", const=-1, dest="goal_id", metavar="ID",
         help="Filter by a specific goal's plan duration (uses active goal if ID omitted)"
     )
 
     # Common parser for sport type filtering
     sport_type_parser = argparse.ArgumentParser(add_help=False)
     sport_type_parser.add_argument(
-        "--type", "--sport-type", dest="sport_type",
+        "-t", "--type", "--sport-type", dest="sport_type",
         help="Filter by sport type"
     )
 
