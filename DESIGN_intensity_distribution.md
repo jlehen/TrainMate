@@ -84,8 +84,25 @@ easy, but every hard minute in the block went into cycling"*.
 recorded HR zones and the power row if it recorded power zones — both, when it did both.
 
 **Rates, not totals.** Blocks are unequal length and the current one is always partial. Emit
-per-week figures alongside `weeks_elapsed`, so a partial block reads as partial
-(`Build 1 (2 of 4 weeks elapsed)`).
+per-week figures alongside the week count, so a partial block reads as partial
+(`Build 1 (2 completed weeks of 4)`).
+
+**A week is 7 days from the block's `start_date`, and only completed weeks divide:**
+
+```
+completed_weeks = (today - block.start_date).days // 7
+```
+
+The partial tail is excluded from the rate entirely. Including it biases every mid-block
+reading the same way: the long easy session usually sits on the weekend, so a Wednesday
+reading that divides by 2.3 weeks understates easy volume — every time, in the same
+direction, which reads as a trend rather than as noise. That matters here more than
+elsewhere: the drift this feature exists to catch is a ~27% fall in Z2, and the choice of
+divisor moves the reported figure by more than the signal does (7h of Z2 over 16 days is
+3h03/wk at 2.3 weeks, 3h30/wk at 2). Under 7 elapsed days there is no rate — emit raw
+minutes and say the block is too young to rate. Weeks run from the block start rather than
+from calendar Mondays, so a block starting on a Thursday has Thursday-to-Wednesday weeks:
+ragged at one end only, and consistent between blocks, which is what comparison needs.
 
 Both minutes and percentages. Percentages answer "was this block polarized"; minutes answer
 "did easy volume actually go up". A block can hold 85% easy in both of two blocks while easy
@@ -97,18 +114,31 @@ gap, and the gap is not spread evenly: it sits entirely below Z1.
 
 ### 4.1 The delta
 
-Gap 3 above is the reason for the feature, so it needs specifying rather than implying:
+Gap 3 above is the reason for the feature, so it needs specifying rather than implying.
 
-- The **current block to date** against the **immediately preceding block**, both as per-week
-  rates. Comparing a partial rate to a complete rate is the only sane pairing, and rates are
-  what make it legitimate.
-- The preceding block may live in the **prior macrocycle**. `db/periodization.py` has
-  `get_next_mesocycle` but no previous-block accessor, so one is added — ordered by date
-  across macrocycle boundaries, not scoped within one.
+**The delta is a plan-generation view, not an adapt view.** Block-over-block change answers
+*"is intensity creeping across the macrocycle"* — a periodization question, and §9.2 assigns
+those to `generate`. `adapt` gets the current block measured against its own stated focus,
+plus the current week (§9.3); it never needs a preceding block.
+
+- The **current block to date** against the **immediately preceding block**, both as
+  per-week rates over completed weeks. Comparing a partial rate to a complete rate is the
+  only sane pairing, and rates are what make it legitimate.
+- **No new accessor, and no date-ordered mesocycle query.** Navigate macrocycle-first:
+  `get_mesocycles_for_macrocycle` returns a block list in order, so the preceding block is
+  the preceding element. `_build_prior_training_context` already walks the prior
+  macrocycle's list exactly this way, and `planning.py` already holds `prev_macro` for the
+  cross-plan case (`get_previous_macrocycle` exists). The one thing to avoid is the obvious
+  query — `SELECT … FROM mesocycles WHERE end_date < ? ORDER BY end_date DESC`. Every
+  existing mesocycle accessor filters `mac.status = 'active'`, and `set_active_macrocycle`
+  marks the outgoing plan `superseded`, so that filter hides precisely the cross-plan case;
+  but dropping it is worse, because `superseded` also covers earlier *versions* of the
+  current plan (rollback history) whose blocks overlap the live ones in date and describe
+  training that never happened. Navigating by macrocycle id fixes the lineage before any
+  dates are compared, so neither trap can fire.
 - A block whose sport mix differs materially from its predecessor gets the delta suppressed
   per-sport rather than globally: a sport absent from one side is reported as absent, never as
   a -100% swing.
-- Deltas spanning the Garmin zone-freeze date (§7.1) are suppressed with a stated reason.
 
 ## 5. Zones: every zone reported separately
 
@@ -169,14 +199,14 @@ So: **no routing.** Every canonical sport gets a zone row whenever it has zone d
 with RPE or benchmark data additionally get a structural row. Nothing is excluded from either.
 
 ```
-Base 2 (4 weeks) — focus "aerobic volume"
+Base 2 (4 completed weeks) — focus "aerobic volume"
   Intensity distribution, per week
     running           [HR]  Z1 55m (13%)  Z2 3h39 (53%)  Z3 1h20 (19%)  Z4 48m (12%)  Z5 11m (3%)
-    road_biking       [pwr] Z1 22m (13%)  Z2 1h50 (63%)  Z3 25m (14%)   Z4 12m (7%)   Z5 4m (2%)
+    cycling           [pwr] Z1 22m (13%)  Z2 1h50 (63%)  Z3 25m (14%)   Z4 12m (7%)   Z5 4m (2%)
                             Z6 1m (1%)    Z7 0m (0%)
-    road_biking       [HR]  Z1 30m (12%)  Z2 2h40 (64%)  Z3 40m (16%)   Z4 16m (6%)   Z5 5m (2%)
+    cycling           [HR]  Z1 30m (12%)  Z2 2h40 (64%)  Z3 40m (16%)   Z4 16m (6%)   Z5 5m (2%)
     strength_training [HR]  Z1 12m (9%)   Z2 74m (55%)   Z3 26m (19%)   Z4 22m (16%)  Z5 1m (1%)
-    Coverage: running 94% HR · road_biking 96% HR, 69% power · strength_training 88% HR
+    Coverage: running 94% HR · cycling 96% HR, 67% power · strength_training 88% HR
     Note: HR during strength and interval-with-rest work reflects rest intervals as
     much as effort — read these rows beside the session RPE below.
   Structural work
@@ -187,9 +217,10 @@ Base 2 (4 weeks) — focus "aerobic volume"
 Three things that table does that the routed version could not: the kettlebell sessions' 22 min
 of Z4 are counted; heavy-lifting Z2 minutes stay visible but annotated, so a model can discount
 them against the RPE instead of never seeing them; and the bike appears under both currencies
-on purpose — the HR row spans 4h11 of riding and the power row 2h54, so 69% of bike time had a
-meter. Rides without a meter stay visible in the HR row instead of vanishing from a power-only
-view, and that gap is the coverage line's job to state, not the table's to hide.
+on purpose — 4h21 of riding, of which the HR strap captured 4h11 and a meter recorded 2h54, so
+67% of bike time had power. Rides without a meter stay visible in the HR row instead of
+vanishing from a power-only view, and that gap is the coverage line's job to state, not the
+table's to hide.
 
 **Never sum the HR and power tables.** A ride with a power meter appears in both; they are two
 views of the same time, never a total. The per-row percentages invite exactly that mistake, so
@@ -197,16 +228,66 @@ the rule belongs here and not in §10.
 
 ### 6.1 One canonical sport mapping
 
-Two vocabularies currently disagree. `SPORT_MAPPING` (`sports.py`) has no `gravel_cycling` or
-`cyclocross`; `CYCLING_TERMS` (`garmin/load.py`) has both. So a gravel ride *does* get its
-power zones fetched, then falls through `canonical_sport` unchanged into a `gravel_cycling`
-row of its own — one athlete's cycling split across two rows, each looking like less volume
-than it is. That is a live bug today, independent of this feature.
+Two vocabularies currently disagree, and they are different *kinds* of list. `SPORT_MAPPING`
+(`sports.py`) holds complete activity-type names, matched exactly by `canonical_sport`.
+`CYCLING_TERMS` (`garmin/load.py`) holds substring *fragments* — `"ride"` is not an activity
+type — matched loosely by `sync.py`. `SPORT_MAPPING` has no `gravel_cycling` or `cyclocross`;
+`CYCLING_TERMS` has both. So a gravel ride *does* get its power zones fetched, then falls
+through `canonical_sport` unchanged into a `gravel_cycling` row of its own — one athlete's
+cycling split across two rows, each looking like less volume than it is. That is a live bug
+today, independent of this feature.
 
-Consolidate to a single table in `sports.py`, one row per canonical sport, carrying the alias
-list; `CYCLING_TERMS` becomes a derived view of it. **No currency or "HR is ambiguous here"
-flags** — under the no-routing rule nothing would read them, and the annotation above is one
-static footnote rather than per-sport configuration.
+**One table, exact matching, canonical name `cycling`:**
+
+```python
+"cycling": ["cycling", "road_cycling", "road_biking", "gravel_cycling",
+            "mountain_biking", "cyclocross", "bmx", "indoor_cycling",
+            "virtual_ride", "biking"],
+```
+
+`CYCLING_TERMS` is deleted and `sync.py`'s gate becomes
+`if canonical_sport(type_key) == "cycling":`. `road_biking` was never an honest canonical
+name — `indoor_cycling` and `virtual_ride` are already aliases of it, so a trainer session is
+currently stored as "road biking" — and road, gravel, cyclocross, MTB and BMX all share one
+set of Garmin cycling zone boundaries, which is the §4 criterion for sharing a row.
+
+**The gate stays, and it is a classifier, not a pre-filter.** It guards reading `avgPower`
+from the activity summary into `bike_avg_watts`, and power zones are fetched only when that
+produced a number. Garmin reports `avgPower` for running too (watch- or Stryd-derived), and
+running power has nothing to do with the Coggan cycling model — without the gate a run's
+watts land in `bike_avg_watts` and its zones get scored against a cycling FTP.
+
+**Exact over substring, because a miss is visible and repairable.** An unrecognised type
+falls through `canonical_sport` unchanged and appears as its own row with an HR row and no
+power row — you see `e_bike_ride` sitting in the table and know what alias to add. And
+`data pull --from/--until` re-pulls any window while `save_completed_activity` upserts every
+zone column explicitly, so adding the alias and re-pulling that range fills the data back in.
+Nothing is lost permanently, which is what would otherwise have argued for keeping the
+permissive substring net.
+
+**Canonicalize on read, not on write.** `completed_activities.activity_type` keeps Garmin's
+raw string; every read path goes through `canonical_sport()`. AGENTS.md asks for exact values
+in storage with reduction only on display, and overwriting `gravel_cycling` with `cycling`
+in the column is a lossy write undoable only by a re-pull. Read-time normalization gives the
+same single vocabulary — it is already how planned workouts match activities — without
+discarding the original.
+
+The rename touches six code sites that spell `road_biking` out: the generate and adapt LLM
+response schemas (`coach/engine/workouts.py:98`, `:355`), two CLI `choices` lists
+(`cli/goals.py:132`, `:147`), the learnings-schema example (`coach/engine/__init__.py:29`),
+and `workout add`'s help text (`cli/workouts/parser.py:178`). `SPORT_ANCHORS`
+(`benchmarks.py`) already carries both `road_biking` and `cycling` keys. Stored
+`workouts.sport_type` rows keep matching through the alias, but a one-off
+`UPDATE workouts SET sport_type='cycling' WHERE sport_type='road_biking'` stops the plan and
+the report disagreeing on screen. Thirteen files under `tests/` mention `road_biking`.
+
+**No currency or "HR is ambiguous here" flags** — under the no-routing rule nothing would
+read them, and the annotation above is one static footnote rather than per-sport
+configuration.
+
+What is lost: a technical MTB ride and a road endurance ride now share a row, and their zone
+shapes genuinely differ (terrain-driven surges, coasting). Accepted — the split-row bug costs
+more than the merged view does.
 
 ## 7. Measurement caveats are emitted, not corrected
 
@@ -220,6 +301,20 @@ would mislead a model reading the numbers naively is stated as a fact beside the
   reasoning as the existing `power_zone_distribution_sec: None` guard. Note the columns
   themselves cannot distinguish the two: `garmin/sync.py` writes zeros, not NULLs, when an
   activity has no average HR. The coverage fraction does all this work.
+
+  **One formula, both currencies** — matching the existing per-activity `_hr_zone_coverage`:
+
+  ```
+  coverage = Σ(zone seconds for that currency) ÷ Σ(duration_sec)
+  ```
+
+  summed over every activity of that canonical sport in the window, so the numerators share
+  a denominator and the two percentages are directly comparable. Deriving the power figure
+  against *HR* time instead would put two different denominators under one word. Two
+  consequences: a ride with no meter contributes its full duration and zero power seconds,
+  which is exactly what "a third of your bike time had no meter" should mean; and a currency
+  row is emitted only when that currency has recorded seconds for the sport, so strength
+  training never grows a `[pwr] 0%` row.
 - **HR lag under-reports Z5 on short intervals.** HR needs 60–90s to climb, so a 30/30 VO2max
   session banks most of its seconds in Z4. Measured by HR, a genuine VO2max block *will* look
   like a threshold block. Two consequences: for cycling the power table is preferred (power is
@@ -248,8 +343,19 @@ will otherwise overwrite the ruler behind their back.
 
 Nothing recomputes anything: the bucketing is already done when the data arrives, and there is
 no raw stream to re-bucket. So this fixes the future only. Every activity already stored was
-bucketed under whatever zones were in force then, which is why §4.1 suppresses deltas that
-straddle the freeze date. Manually-edited Garmin zones remain invisible; that is accepted.
+bucketed under whatever zones were in force then.
+
+**Documentation only — no freeze date is tracked, and no delta is suppressed.** An earlier
+draft had §4.1 discard any comparison straddling the day auto-detection was disabled. Dropped:
+the switch is flipped in Garmin Connect, so the app is never told when it happened, and there
+is no honest way to learn it. Storing the date as config would mean an athlete hand-entering a
+number that then silently governs whether the feature produces output at all — and the two
+readings of an unset value (trust nothing, so every delta vanishes; trust everything, so the
+caveat never fires) are both wrong. Not worth the machinery.
+
+The residual risk is stated here instead, once: a delta showing hard minutes falling sharply
+for no visible reason may be an FTP auto-bump moving the Z4/Z5 boundary rather than a change
+in training. Manually-edited Garmin zones are invisible in the same way. Both accepted.
 
 No app-coded verdict on whether a block matched its focus. The block's free-text `focus` is
 emitted beside the measured distribution and the model judges — the same split as the existing
@@ -259,21 +365,29 @@ emitted beside the measured distribution and the model judges — the same split
 
 A sum over rows already stored. No new table, no migration, no Garmin calls, no LLM calls. The
 aggregation currently inline in `_build_prior_training_context` is extracted into a reusable
-helper and called for the current block and the preceding one.
+helper taking a date window, and called three ways: the current block to date and the current
+week (for `adapt`), and the preceding block (for the strategy prompt's delta). One `UPDATE`
+on `workouts.sport_type` for the §6.1 rename is the only write.
 
 One accessor detail, since the current block is new territory: `get_active_mesocycle` falls
 back to the next *future* block, then to the absolute first one, when today sits inside none.
-Called naively that renders `Build 1 (0 of 4 weeks elapsed)` with an empty table for a block
+Called naively that renders `Build 1 (0 completed weeks of 4)` with an empty table for a block
 that has not started. The helper takes the block it is given and reports nothing when today is
 outside every block.
 
 ## 9. Where it surfaces
 
-- **`workout adapt` — primary.** Drift caught in week 2 of a block is correctable; drift
-  diagnosed at plan-generation time is history.
-- **Strategy prompt.** Replaces the inline computation in `_build_prior_training_context`,
-  now per-sport and resolved.
-- **CLI.** Rendered in the block summary display.
+Two views, because two different questions:
+
+- **`workout adapt` — primary.** *Is this block being executed as written?* The current block
+  to date beside its stated focus, plus the current week (§9.3). No preceding block, no
+  delta. Drift caught in week 2 of a block is correctable; drift diagnosed at plan-generation
+  time is history.
+- **Strategy prompt — the delta's only home.** *Is intensity creeping across blocks?*
+  Replaces the inline computation in `_build_prior_training_context`, now per-sport and
+  per-zone, and extended to the current plan's elapsed blocks (it walks only the prior
+  macrocycle today — gap 2 of §3).
+- **CLI.** Rendered in the block summary display, beside `status`'s `Cycle Focus`.
 
 This also closes the loop with `DESIGN_evidence_based_confidence.md`: the coach prescribes a
 concrete distribution ("hold Z2 near 4h30/wk, add 20 min Z4"), and the next block's measured
@@ -317,7 +431,39 @@ not change the block's composition. This resolves the apparent conflict with
 `DESIGN_block_boundary.md` without loosening anything about fatigue-driven cuts, and it gives
 "do not reshape the mesocycle" a definition it currently lacks.
 
-### 9.3 Prompt changes
+### 9.3 What `adapt` sees, and how it gets there
+
+Two blocks, neither of them a rate:
+
+```
+Build 1 — focus "threshold development" (2 completed weeks of 4, plus 2 days)
+  Block to date, per week (2 completed weeks)
+    running  [HR]  Z1 55m (13%)  Z2 3h39 (53%)  Z3 1h20 (19%)  Z4 48m (12%)  Z5 11m (3%)
+    ...
+  Current week so far — day 2 of 7 (29% elapsed)
+    running  [HR]  Z1 8m  Z2 46m  Z3 22m  Z4 4m  Z5 0m
+    ...
+```
+
+The current week is **raw minutes with the elapsed fraction stated, never extrapolated**.
+Turning 22 min of Z3 on day 2 into "77 min Z3 this week" would be a fabrication; a model given
+the raw figure and "29% elapsed" reasons about it perfectly well. It is also the part that
+makes this feature worth putting in `adapt` at all: two days in, already over the week's whole
+Z3 allowance is correctable *now*, which the block-to-date average would take another fortnight
+to reveal.
+
+**Threading.** Follow `pmc_context` exactly — it already does this end to end. Compute in the
+service layer in `coach/service/adaptation.py`, beside the `_pmc_prompt_context(...)` call;
+pass as a new named argument into `self.engine._workout_adapt_logic(...)`; accept it in that
+function's signature in `coach/engine/workouts.py` (which already ends `pmc_context:
+Optional[str] = None`) and render it as its own section.
+
+**Not via `meso_text`.** That string is built by `_get_active_strategy_and_meso_text`
+(`coach/service/prompt.py`) and handed to *both* plan generation and adaptation, so putting
+the table there would silently grow the generate prompt a section §9.2 says it should not
+have. It is the shortest path and nothing would fail; hence stating it.
+
+### 9.4 Prompt changes
 
 One added TASK bullet, alongside the existing three:
 
@@ -334,8 +480,11 @@ blocks:
 ```
 CORRECTING EXECUTION DRIFT:
 The block summary shows what the athlete's sessions ACTUALLY measured, per sport
-and zone, beside the block's stated focus. When the two disagree, that is an
-execution error, not a fatigue signal — and it is yours to fix.
+and zone, beside the block's stated focus — as a per-week rate over the block's
+completed weeks, then the current week's raw minutes so far with how much of that
+week has elapsed. The current week is NOT extrapolated: read it against the
+elapsed fraction yourself. When the measured picture and the focus disagree, that
+is an execution error, not a fatigue signal — and it is yours to fix.
 
 Correct it by changing HOW the remaining sessions are prescribed, not how much
 they contain. Hold duration and planned TSS; sharpen the intensity target and
@@ -377,10 +526,11 @@ want more this week, add 15–20 min to Sunday at the same easy effort — that'
 currency. Adding actual hard work changes the block's shape and belongs in the next plan
 generation."*
 
-### 9.4 The one collision with existing machinery
+### 9.5 The one collision with existing machinery
 
-A drift correction saves through `save_workout`, which stamps `adapted_at` and bumps
-`adaptation_count` unconditionally (`db/workouts.py`). The session then carries
+A drift correction saves through `save_workout`, which stores `adapted_at` and bumps
+`adaptation_count` whenever it is handed a timestamp — and `coach/service/adaptation.py`
+mints one per run and passes it to *every* session it saves. The session then carries
 `[ALREADY EASED by a prior adaptation …]`, and the `DO NOT COMPOUND` section instructs the
 model to default to holding it and to raise its bar with each prior easing.
 
@@ -401,8 +551,33 @@ six hand-maintained denormalizations (`original_description`, `original_duration
 history that would properly exist, which is what `modification_state.py` already argues for.
 
 That is a new table touching every workout write path and belongs in its own design doc; this
-feature does not block on it. Interim stopgap: do not stamp `adapted_at` when duration and TSS
-are both unchanged.
+feature does not block on it.
+
+**Interim stopgap — decide per session in the save loop, not in `save_workout`.** The DB layer
+is a generic writer that stamps whatever it is told, and other callers rely on that; the caller
+is what must stop handing over the timestamp. The loop in `coach/service/adaptation.py` already
+fetches the pre-save row on its first line (`existing = self._db.get_workout(...)`), so the
+comparison is free:
+
+```python
+# A drift correction rewrites the prescription without touching the load, so it is not
+# an easing — stamping it would raise the DO NOT COMPOUND bar for a session never cut (§9.5).
+eased = not existing or (
+    w.get('duration_minutes') != existing['duration_minutes']
+    or float(w.get('tss') or 0) != float(existing['tss'] or 0)
+)
+```
+
+then `adapted_at=adapted_at if eased else None`. Three things that wording settles:
+
+- **Against `existing`, not `original_*`.** A session planned at 60 min, cut to 45 last week,
+  re-worded today: against the current row nothing moved, so it stays unstamped — right.
+  Against `original_duration_minutes` it looks changed, re-arming the tag for an edit that
+  eased nothing.
+- **TSS is compared as a float with a `or 0` on both sides.** The model emits `30.0` against a
+  stored `30`, and `None != 30.0` would otherwise read a missing TSS as a change.
+- **A session `adapt` newly introduced (`not existing`) counts as eased.** There is no prior
+  form to compound and no load to compare, so this preserves today's behaviour.
 
 ## 10. Deliberately not done
 
@@ -412,9 +587,10 @@ are both unchanged.
   has no per-exercise field and `latest_thresholds()` keys on `anchor_kind` alone, so a
   deadlift PR logged after a squat PR becomes one `e1rm` value jumping 70%. TrainMate does not
   plan progressive strength well enough yet to justify the schema. Two smaller fixes instead:
-  exclude `e1rm` from `config_changed()`'s drift check (a squat PR should never invalidate a
-  periodization), and note in `benchmark record`'s help that one lift should be tracked for
-  now. The §6 mockup drops the exercise name accordingly.
+  exclude `e1rm` from the drift check in `config_changed()` (`coach/service/prompt.py`, the
+  loop over anchor kinds — a squat PR should never invalidate a periodization), and note in
+  `benchmark record`'s help that one lift should be tracked for now. The §6 mockup drops the
+  exercise name accordingly.
 - **Storing Garmin's zone boundaries per activity.** The airtight answer to §7.1, and a
   migration. Disabling auto-detection removes the cause at zero cost; revisit only if
   boundaries turn out to move anyway.
@@ -425,3 +601,13 @@ are both unchanged.
 - **Cross-referencing planned interval structure against measured zone time.** The plan already
   says "6×3min @ VO2max", and prescribed intent beats the HR bucket for short intervals (§7).
   Stronger than either alone, but a new data path. Phase 2.
+
+## 11. Housekeeping this lands on
+
+- **ARCHITECTURE.md** gains the aggregation helper and the `cycling` canonical rename.
+- **Tests** (`unittest`, `venv/bin/python -m unittest discover -s tests -p "test_*.py"`).
+  Thirteen files under `tests/` spell `road_biking` and move with §6.1. Worth their own: the
+  completed-weeks divisor at a block's first 6 days and across a partial tail (§4); the
+  coverage formula with a meterless ride in the set (§7); the §9.5 stopgap, specifically a
+  description-only edit leaving `adaptation_count` untouched.
+- **README.md** and `benchmark record`'s help gain the Garmin auto-detection note (§7.1).
