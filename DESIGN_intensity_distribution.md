@@ -700,11 +700,31 @@ about. `--weeks` already windows both tables together for anyone who wants it sh
 band rules render twice, once per table; that is deliberate, since it is what lets the two
 halves be read row against row.
 
-**One thing the sport argument exposes.** `format_notes` emits `HR_REST_NOTE` — the caveat
-about rest intervals inside strength and interval work — for any table containing an HR row.
-On the merged table that was right. On `tm progress running` it is a note about a sport not
-on screen. It should key on the sports actually present, which is a two-line fix in
-`format_notes` and not a change to any caller.
+**The whole option surface**, two of them new:
+
+| Option | | Effect |
+|---|---|---|
+| `[sport]` | new | Canonical sport to report intensity for. Default `athlete.sport_preferences[0]`. Scopes the zone tables only — never the PMC, the projection or the load table. An unrecognised value lists the canonical sports present in the window rather than rendering an empty table. |
+| `--blocks` | new | Per mesocycle instead of per week: rates over completed weeks, the stated `focus`, §4.1's delta, the current week, the structural rows. Replaces the weekly zone table; the load table stays. |
+| `--weeks N\|all` | | Windows *both* tables together, and the block set with them — `--blocks` reports the mesocycles overlapping the displayed weeks. Default 8. |
+| `--explain` | | The PMC footnote (§7.1). Does not touch either table. |
+| `--chart [PATH]` | | Unchanged, and **unaffected by `[sport]`**: the PNG's two panels are PMC and whole-athlete weekly load. A per-sport zone stack is `DESIGN_progress_timeline.md` §8 follow-on 3. |
+| `--no-pull` / `--force-pull` | | The standard auto-ensure throttle, mutually exclusive. No effect on layout. |
+
+**Two things the option sweep exposes**, both small and both in `intensity.py`:
+
+- `format_notes` emits `HR_REST_NOTE` — the caveat about rest intervals inside strength and
+  interval work — for any table containing an HR row. On the merged table that was right. On
+  `tm progress running` it is a note about a sport not on screen. It should key on the sports
+  actually present. Worse under `--blocks`, where the notes repeat per block: three blocks
+  render the same two caveats three times, nine lines saying two things. They belong once per
+  section, under the last block, not once per `block_report`.
+- **`--blocks` reproduces the very loss §9.6 exists to prevent.** The mesocycles overlapping
+  the window are reported; weeks belonging to none are silently absent — in the worked example
+  `06-15` and `06-22` vanish, and `06-22` is where Z3 doubled. So the block section must end
+  with a line naming them: `2 weeks in this window belong to no block (06-15, 06-22) — see
+  the weekly view`. Silence there would be the block-grained blindness this section was
+  written about, reintroduced by the flag that opts into block grain.
 
 ## 10. Deliberately not done
 
