@@ -984,8 +984,9 @@ additive:
    variants) from `completed_activities`; past-only until planned workouts
    carry intensity targets. **The text half is specified** in
    `DESIGN_intensity_distribution.md` §9.6 — a positional sport argument
-   (default `sport_preferences[0]`), an `easy` column in the WEEKLY LOAD
-   table, and `--zones` / `--zones block`. It scopes only the intensity
+   (default `sport_preferences[0]`), a per-zone weekly table stacked under
+   the WEEKLY LOAD table by default, and `--blocks` for the graded
+   per-mesocycle view. It scopes only the intensity
    content: CTL/ATL/TSB, the projection and the load table stay
    whole-athlete. The weekly grain is load-bearing rather than cosmetic —
    a regenerated plan moves mesocycle boundaries and orphans completed

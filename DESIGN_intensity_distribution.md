@@ -606,39 +606,60 @@ help text must say so, because the command shape invites the opposite reading. (
 argument with a default is `--sport`'s case by the convention in `cli/`; positional is the
 call taken, for `tm progress cycling` over `tm progress --sport cycling`.)
 
-**Default view — one column.** `easy`, the selected sport's Z1-2 share of its recorded zone
-seconds, in `NUM_COL_WIDTH` beside `adh`. §5 sanctions the polarized rollup as a render-time
-view; this is that view, and it is a pointer rather than a diagnostic — it says *something
-moved*, and `--zones` says what. Blank for future weeks, and blank when that week's coverage
-falls under `hr_zone_coverage_min`, so a strapless week reads as unmeasured rather than as a
-distribution. The row runs 45 of the 48 columns.
+**The default view is the per-zone table itself — every zone, no rollup, no flag.** An earlier
+draft put a single `easy` column (the selected sport's Z1-2 share) beside `adh` and left the
+zone table behind `--zones`. That column existed only because a merged-sport table could not
+fit a row, and the sport argument removed that constraint; keeping it would have left §5's
+argument — no banding, every zone stands alone, because every boundary the grouping erases
+carries a coaching decision — contradicted by the one view an athlete looks at daily. It also
+read worse. `easy 86% → 68%` says *something moved*; `Z2 5h00 → 4h00` beside `Z3 35m → 1h10`
+says a fifth of the aerobic base was traded for tempo, which is the sentence the feature
+exists to produce. The rollup stays derivable for any consumer that wants it (§5); nothing
+renders it here.
+
+Two stacked tables, sharing week labels and band rules so they scan as one unit — the load
+half, then the intensity half:
 
 ```
-WEEKLY LOAD plan  ▓done ▒plan  done  adh easy
+WEEKLY LOAD plan  ▓done ▒plan  done  adh
 ── Base 1 — Aerobic Volume Accumulation ────────
-w/c 05-25    655  ▓▓▓▓▓▓▓▓▓▓▓│  660 101%  86%
-w/c 06-08    655  ▓▓▓▓▓▓▓▓▓▓▓│  661 101%  86%
+w/c 05-25    655  ▓▓▓▓▓▓▓▓▓▓▓│  660 101%
+w/c 06-08    655  ▓▓▓▓▓▓▓▓▓▓▓│  661 101%
 ── unplanned ───────────────────────────────────
-w/c 06-15    655  ▓▓▓▓▓▓▓▓▓▓▓│  660 101%  85%
-w/c 06-22    655  ▓▓▓▓▓▓▓▓▓▓▓│  651  99%  78%
+w/c 06-15    655  ▓▓▓▓▓▓▓▓▓▓▓│  660 101%
+w/c 06-22    655  ▓▓▓▓▓▓▓▓▓▓▓│  651  99%
 ── Base 2 — Aerobic Volume Consolidation ───────
-w/c 06-29    655  ▓▓▓▓▓▓▓▓▓▓▓│  644  98%  76%
-w/c 07-06*   470  ▓▓▓▓▓▓▓▓▓│░░  473 101%  68%
-* in progress · easy = running Z1-2 share
-```
+w/c 06-29    655  ▓▓▓▓▓▓▓▓▓▓▓│  644  98%
+w/c 07-06*   470  ▓▓▓▓▓▓▓▓▓│░░  473 101%
+* in progress · plan ends 08-05 (Wed)
 
-**`--zones` — the same week rows, zone minutes instead of load.** Same band rules, same week
-labels, so it reads as the load table's other half:
-
-```
 ZONES running [HR] — minutes per week
-week          Z1   Z2   Z3   Z4   Z5 cov
+week          Z1   Z2   Z3   Z4   Z5
 ── Base 1 — Aerobic Volume Accumulation ────────
-w/c 05-25    50m 5h00  35m  15m   5m 95%
-...
+w/c 05-25    50m 5h00  35m  15m   5m
+w/c 06-08    48m 5h02  36m  16m   5m
 ── unplanned ───────────────────────────────────
-w/c 06-22    55m 4h18 1h02  17m   7m 93%
+w/c 06-15    28m 2h26  20m   8m   4m ~
+w/c 06-22    55m 4h18 1h02  17m   7m
+── Base 2 — Aerobic Volume Consolidation ───────
+w/c 06-29    55m 4h00 1h10  17m   7m
+w/c 07-06*   22m 1h22  38m   7m   3m
+Z1 recovery · Z2 aerobic · Z3 tempo · Z4 threshold · Z5 VO2max+ · ~ low zone coverage
 ```
+
+The zone table covers past and in-progress weeks only — the future half of the load table is
+planned TSS, and nothing in the schema gives a planned workout an intensity target to put
+under it (§10, phase 2). The load table keeps its ghost bars; the zone table simply stops at
+today.
+
+**Coverage is a marker, not a column.** `~` on any week whose zone coverage falls under
+`hr_zone_coverage_min`, named in the legend. Two reasons it cannot stay a column. It does not
+fit: 11 + 7×5 + 4 overruns the 48-column budget for the power table, and a per-week figure
+reading `95%` on nine rows out of ten spends four columns to say nothing. And with the `easy`
+column gone, the coverage guard that used to blank it has nowhere else to live — this is the
+week the strap died, and `Z2 2h26` against the neighbouring `5h00` reads as an athlete who
+stopped training rather than as a week that was not recorded. The marker is the whole defence
+against that misreading, so it is not optional.
 
 **Why a weekly grain exists at all, when §4's grain is the block.** A mesocycle is a plan
 object and `workout generate` rewrites plan objects. Regenerate, and the boundaries move:
@@ -652,15 +673,16 @@ label and `band_header` bands them `unplanned` — so the zone table inherits th
 reusing the band walk.
 
 This is not hypothetical loss. In the worked example above, the two weeks a regeneration
-orphaned are `06-15` and `06-22`, and `06-22` is precisely the week the easy share broke
-(85% → 78%). The block delta reports Z3 up 100% and cannot say when; the weekly table points
-at the week.
+orphaned are `06-15` and `06-22`, and `06-22` is precisely the week Z3 doubled (35m → 1h02).
+The block delta reports Z3 up 100% and cannot say when; the weekly table points at the week.
 
-**`--zones block` keeps the graded view.** Per-week rates over completed weeks, beside the
-block's stated `focus`, with §4.1's block-over-block delta — `block_report` unchanged but
-handed a sport-filtered fetch. Two grains, two questions: the week table answers *when did it
-change*, the block table answers *did the block do what it said*. Only the block has a stated
-intent to be graded against, which is why the weekly table carries no verdict and no focus.
+**`--blocks` keeps the graded view.** Per-week rates over completed weeks, beside the block's
+stated `focus`, with §4.1's block-over-block delta and the structural rows — `block_report`
+unchanged but handed a sport-filtered fetch. It replaces the weekly zone table rather than
+appending to it: the flag is a choice of grain, not an extra section. Two grains, two
+questions: the week table answers *when did it change*, the block table answers *did the block
+do what it said*. Only the block has a stated intent to be graded against, which is why the
+weekly table carries no verdict and no focus.
 
 **One currency for the whole table, chosen once.** Power where any displayed week recorded a
 meter, HR otherwise (§7 prefers power; it is instantaneous). Chosen over the window and not
@@ -669,10 +691,14 @@ power minutes down the page — §6's one prohibition, committed vertically inst
 horizontally. A week with no data in the chosen currency renders `(no power recorded)` rather
 than falling back to the other one.
 
-**Width.** The 5-zone HR table runs 40 columns with a per-week `cov` column; the 7-zone power
-table runs 46 without one, and coverage moves to the legend there — 11 + 7×5 + 4 overruns the
-48-column budget by two. Both stay inside it, so Telegram and a TTY render identically, which
-is the §7.1 contract the load table already holds.
+**Width and length.** The HR zone table runs 36 columns, the 7-zone power table 46, the load
+row 40 — all inside the 48-column budget, so Telegram and a TTY render identically, the §7.1
+contract the load table already holds. The cost is vertical: a default `tm progress` over 8
+weeks goes from ~23 lines to ~38. That is the price of the feature and it is paid on every
+invocation, which is the point — intensity drift is the failure an athlete cannot know to ask
+about. `--weeks` already windows both tables together for anyone who wants it shorter. The
+band rules render twice, once per table; that is deliberate, since it is what lets the two
+halves be read row against row.
 
 **One thing the sport argument exposes.** `format_notes` emits `HR_REST_NOTE` — the caveat
 about rest intervals inside strength and interval work — for any table containing an HR row.
@@ -714,5 +740,5 @@ on screen. It should key on the sports actually present, which is a two-line fix
 - **README.md** and `benchmark record`'s help gain the Garmin auto-detection note (§7.1).
 - **`DESIGN_progress_timeline.md`** §8 follow-on 3 (the zone-distribution stack) is where
   §9.6 lands; its chart half stays open and inherits §9.6's one-sport, one-currency rules.
-  Worth their own tests: the `easy` column blanked under `hr_zone_coverage_min`; a week whose
+  Worth their own tests: the `~` marker at `hr_zone_coverage_min`; a week whose
   chosen currency has no data; an orphaned week appearing in the weekly table and in no block.
