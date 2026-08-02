@@ -383,11 +383,16 @@ Two views, because two different questions:
   to date beside its stated focus, plus the current week (§9.3). No preceding block, no
   delta. Drift caught in week 2 of a block is correctable; drift diagnosed at plan-generation
   time is history.
-- **Strategy prompt — the delta's only home.** *Is intensity creeping across blocks?*
-  Replaces the inline computation in `_build_prior_training_context`, now per-sport and
-  per-zone, and extended to the current plan's elapsed blocks (it walks only the prior
-  macrocycle today — gap 2 of §3).
-- **CLI.** Rendered in the block summary display, beside `status`'s `Cycle Focus`.
+- **Strategy prompt — the delta's home among the prompts.** *Is intensity creeping across
+  blocks?* Replaces the inline computation in `_build_prior_training_context`, now per-sport
+  and per-zone, and extended to the current plan's elapsed blocks (it walks only the prior
+  macrocycle today — gap 2 of §3). No *prompt* other than this one carries the delta; §9.6
+  puts it in front of a human too, which is a different constraint and not in tension with
+  §4.1.
+- **`tm status` — the block you are in.** Rendered in the block summary display, beside
+  `Cycle Focus`. The snapshot: current block, all sports, no history.
+- **`tm progress [sport]` — the trend (§9.6).** *Where did it change?* One sport, weekly
+  grain, the whole displayed window. The only view that survives a mesocycle boundary moving.
 
 This also closes the loop with `DESIGN_evidence_based_confidence.md`: the coach prescribes a
 concrete distribution ("hold Z2 near 4h30/wk, add 20 min Z4"), and the next block's measured
@@ -579,6 +584,102 @@ then `adapted_at=adapted_at if eased else None`. Three things that wording settl
 - **A session `adapt` newly introduced (`not existing`) counts as eased.** There is no prior
   form to compound and no load to compare, so this preserves today's behaviour.
 
+### 9.6 `tm progress [sport]` — one sport, weekly grain
+
+`tm progress` (`DESIGN_progress_timeline.md`) is the fullest rendering anywhere of the
+picture §1 calls a lie: a CTL sparkline, a weekly TSS column, an adherence percentage and a
+forward projection, every one of them computed from load alone. An athlete whose easy days
+have drifted to tempo reads that screen as seven flat weeks at 97–101% adherence. So this is
+where the correction belongs, not only in `status`.
+
+**A positional sport, defaulting to `athlete.sport_preferences[0]`.** Not a rendering
+preference — it is what makes a weekly grain possible at all. §4 forbids merging sports and
+§6 forbids adding the HR and power rows of one sport; together those make a week's honest
+distribution three or four rows of five-to-seven named cells, which is a screenful per week.
+Fix the sport and the whole week collapses to one line. The argument buys the grain.
+
+**It scopes the intensity content only.** CTL, ATL, TSB, the projection and the WEEKLY LOAD
+table stay whole-athlete. A running-only CTL is not a quantity — the fitness model integrates
+every session the body paid for — and adherence is measured against the whole plan. `tm
+progress cycling` therefore shows whole-athlete form beside cycling-only intensity, and the
+help text must say so, because the command shape invites the opposite reading. (An optional
+argument with a default is `--sport`'s case by the convention in `cli/`; positional is the
+call taken, for `tm progress cycling` over `tm progress --sport cycling`.)
+
+**Default view — one column.** `easy`, the selected sport's Z1-2 share of its recorded zone
+seconds, in `NUM_COL_WIDTH` beside `adh`. §5 sanctions the polarized rollup as a render-time
+view; this is that view, and it is a pointer rather than a diagnostic — it says *something
+moved*, and `--zones` says what. Blank for future weeks, and blank when that week's coverage
+falls under `hr_zone_coverage_min`, so a strapless week reads as unmeasured rather than as a
+distribution. The row runs 45 of the 48 columns.
+
+```
+WEEKLY LOAD plan  ▓done ▒plan  done  adh easy
+── Base 1 — Aerobic Volume Accumulation ────────
+w/c 05-25    655  ▓▓▓▓▓▓▓▓▓▓▓│  660 101%  86%
+w/c 06-08    655  ▓▓▓▓▓▓▓▓▓▓▓│  661 101%  86%
+── unplanned ───────────────────────────────────
+w/c 06-15    655  ▓▓▓▓▓▓▓▓▓▓▓│  660 101%  85%
+w/c 06-22    655  ▓▓▓▓▓▓▓▓▓▓▓│  651  99%  78%
+── Base 2 — Aerobic Volume Consolidation ───────
+w/c 06-29    655  ▓▓▓▓▓▓▓▓▓▓▓│  644  98%  76%
+w/c 07-06*   470  ▓▓▓▓▓▓▓▓▓│░░  473 101%  68%
+* in progress · easy = running Z1-2 share
+```
+
+**`--zones` — the same week rows, zone minutes instead of load.** Same band rules, same week
+labels, so it reads as the load table's other half:
+
+```
+ZONES running [HR] — minutes per week
+week          Z1   Z2   Z3   Z4   Z5 cov
+── Base 1 — Aerobic Volume Accumulation ────────
+w/c 05-25    50m 5h00  35m  15m   5m 95%
+...
+── unplanned ───────────────────────────────────
+w/c 06-22    55m 4h18 1h02  17m   7m 93%
+```
+
+**Why a weekly grain exists at all, when §4's grain is the block.** A mesocycle is a plan
+object and `workout generate` rewrites plan objects. Regenerate, and the boundaries move:
+blocks shorten, shift or open a gap, and completed activities that used to sit inside a block
+now sit inside none. Every block-grained view drops them silently — `block_report` reports on
+the window it is handed and nothing tells it a fortnight went missing. **A calendar week is
+not a plan object.** It cannot move, and every activity belongs to exactly one, so the weekly
+table is the only intensity view whose coverage of the athlete's actual training is
+guaranteed. `progress` already renders these weeks — `progression._week_meso` returns a null
+label and `band_header` bands them `unplanned` — so the zone table inherits the fix by
+reusing the band walk.
+
+This is not hypothetical loss. In the worked example above, the two weeks a regeneration
+orphaned are `06-15` and `06-22`, and `06-22` is precisely the week the easy share broke
+(85% → 78%). The block delta reports Z3 up 100% and cannot say when; the weekly table points
+at the week.
+
+**`--zones block` keeps the graded view.** Per-week rates over completed weeks, beside the
+block's stated `focus`, with §4.1's block-over-block delta — `block_report` unchanged but
+handed a sport-filtered fetch. Two grains, two questions: the week table answers *when did it
+change*, the block table answers *did the block do what it said*. Only the block has a stated
+intent to be graded against, which is why the weekly table carries no verdict and no focus.
+
+**One currency for the whole table, chosen once.** Power where any displayed week recorded a
+meter, HR otherwise (§7 prefers power; it is instantaneous). Chosen over the window and not
+per row, because a column that switched currency mid-table would be adding HR minutes to
+power minutes down the page — §6's one prohibition, committed vertically instead of
+horizontally. A week with no data in the chosen currency renders `(no power recorded)` rather
+than falling back to the other one.
+
+**Width.** The 5-zone HR table runs 40 columns with a per-week `cov` column; the 7-zone power
+table runs 46 without one, and coverage moves to the legend there — 11 + 7×5 + 4 overruns the
+48-column budget by two. Both stay inside it, so Telegram and a TTY render identically, which
+is the §7.1 contract the load table already holds.
+
+**One thing the sport argument exposes.** `format_notes` emits `HR_REST_NOTE` — the caveat
+about rest intervals inside strength and interval work — for any table containing an HR row.
+On the merged table that was right. On `tm progress running` it is a note about a sport not
+on screen. It should key on the sports actually present, which is a two-line fix in
+`format_notes` and not a change to any caller.
+
 ## 10. Deliberately not done
 
 - **RPE or %1RM bands for strength.** Inventing a distribution from one per-session RPE number
@@ -611,3 +712,7 @@ then `adapted_at=adapted_at if eased else None`. Three things that wording settl
   coverage formula with a meterless ride in the set (§7); the §9.5 stopgap, specifically a
   description-only edit leaving `adaptation_count` untouched.
 - **README.md** and `benchmark record`'s help gain the Garmin auto-detection note (§7.1).
+- **`DESIGN_progress_timeline.md`** §8 follow-on 3 (the zone-distribution stack) is where
+  §9.6 lands; its chart half stays open and inherits §9.6's one-sport, one-currency rules.
+  Worth their own tests: the `easy` column blanked under `hr_zone_coverage_min`; a week whose
+  chosen currency has no data; an orphaned week appearing in the weekly table and in no block.

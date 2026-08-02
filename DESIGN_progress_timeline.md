@@ -982,7 +982,16 @@ additive:
    adapted plan vs actual — a visualization of the adaptation engine itself.
 3. **Zone-distribution stack.** Weekly stacked zone1–5 time (HR and power
    variants) from `completed_activities`; past-only until planned workouts
-   carry intensity targets.
+   carry intensity targets. **The text half is specified** in
+   `DESIGN_intensity_distribution.md` §9.6 — a positional sport argument
+   (default `sport_preferences[0]`), an `easy` column in the WEEKLY LOAD
+   table, and `--zones` / `--zones block`. It scopes only the intensity
+   content: CTL/ATL/TSB, the projection and the load table stay
+   whole-athlete. The weekly grain is load-bearing rather than cosmetic —
+   a regenerated plan moves mesocycle boundaries and orphans completed
+   activities, and a calendar week is the one bucket that cannot move.
+   The chart stack remains open, and inherits the same one-sport,
+   one-currency rules.
 4. **Coach-facing event-day TSB line** — the original deliverable of PMC
    Phase 2 (`DESIGN_pmc_fitness_fatigue.md`, end of doc): emit
    `Projected event-day TSB (from current plan): +12` into the plan/adapt
