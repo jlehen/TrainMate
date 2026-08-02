@@ -129,7 +129,7 @@ def add_goal_parser(subparsers):
     g_add.add_argument("date", help="Target event date (YYYY-MM-DD)")
     g_add.add_argument(
         "sport", nargs="+", metavar="SPORT",
-        choices=["running", "road_biking", "hiking", "strength_training", "yoga", "ski_touring"],
+        choices=["running", "cycling", "hiking", "strength_training", "yoga", "ski_touring"],
         help="Sport types, one or more: %(choices)s"
     )
     g_add.add_argument("--desc", default="", help="Description")
@@ -144,7 +144,7 @@ def add_goal_parser(subparsers):
     g_edit.add_argument("--date", help="New target event date (YYYY-MM-DD)")
     g_edit.add_argument(
         "--sport", nargs="+",
-        choices=["running", "road_biking", "hiking", "strength_training", "yoga", "ski_touring"],
+        choices=["running", "cycling", "hiking", "strength_training", "yoga", "ski_touring"],
         help="New sport types (one or more)"
     )
     g_edit.add_argument("--desc", help="New description")

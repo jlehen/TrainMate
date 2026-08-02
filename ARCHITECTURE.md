@@ -183,6 +183,16 @@ classes themselves.
 | `sports.py`          | —                    | Canonical sport vocabulary (`SPORT_MAPPING`,     |
 |                      |                      | `canonical_sport`, `sport_aliases`); dependency- |
 |                      |                      | free so DB + adherence share it without a cycle. |
+| `intensity.py`       | —                    | Per-(mesocycle × canonical sport × currency ×    |
+|                      |                      | zone) time in zone: `zone_rows` aggregates,      |
+|                      |                      | `rate_window` supplies the completed-weeks       |
+|                      |                      | divisor, `block_report` renders one block (rate  |
+|                      |                      | table, coverage, caveats, block-over-block delta,|
+|                      |                      | current week, structural row). No DB access —    |
+|                      |                      | callers pass a `fetch(start, end)` callable, so  |
+|                      |                      | `adapt`, the strategy prompt and `status` share  |
+|                      |                      | one implementation (DESIGN_intensity_            |
+|                      |                      | distribution.md).                                 |
 | `util.py`            | —                    | ANSI color helpers (`bold`, `green`, `red`, …),  |
 |                      |                      | `cmd` (every "run X" call to action), `wrap_text`,|
 |                      |                      | `format_labeled_text`, `strip_ansi`.             |
@@ -202,6 +212,7 @@ flow for each lives in [§10](#10-key-data-flows).
 | Backward analysis (bootstrap/reflect) | `coach/service.py:_run_workout_analysis`, `coach/engine.py:_data_analyze_logic` ([§10](#data-analysis-data-bootstrap--data-reflect)) |
 | Garmin pull / metrics / load model | `trainmate/garmin.py` (`pull`, `ensure_data`, `activity_load`), see [§12](#12-sports-science--coaching-mathematics) |
 | Progress timeline / PMC projection | `trainmate/progression.py` (pure math), `trainmate/timeline.py` (shared row-fetch), `trainmate/chart.py` (PNG), `cli/progress.py` (text), `/api/timeline.png` in `trainmate_web.py`, see [§12](#fitnessfatigueform-pmc-model), DESIGN_progress_timeline.md |
+| Intensity distribution / time in zone | `trainmate/intensity.py` (aggregation + rendering), `coach/service/context.py` (`_intensity_block_context` for adapt, `_intensity_history_context` for the strategy prompt), `cli/status.py`, DESIGN_intensity_distribution.md |
 | Calendar push / daily-context ingest | `trainmate/google_calendar.py`, see [§13](#13-daily-context-calendar-ingest) |
 | Workout state (modified/calendar/removed/archived) | `trainmate/modification_state.py`, `trainmate/calendar_state.py`, `db/workouts.py` ([§5](#workout-state--four-orthogonal-axes-not-one-enum)) |
 | A CLI command                    | `trainmate/cli/<family>.py` (`run_*`), dispatcher in `trainmate_cli.py` ([§7](#7-cli-commands-reference)) |
@@ -428,9 +439,22 @@ called by the UIs.
   `inspect_only` renders without writing. See DESIGN_backward_evaluation.md §5, §8, §9.
 - **`_build_prior_training_context(prior_macro, today)`** — builds the read-only
   "planned vs actual" review injected into the `plan generate` strategy prompt
-  (Option A). Anchored on the prior plan's elapsed mesocycle windows; folds in the
-  cached reconstruction's summary, inferred macro/mesocycle blocks, and physiological
-  insights. Writes no `feedback` field.
+  (Option A). Anchored on the elapsed mesocycle windows of the prior plan **and of the
+  plan the athlete is currently in** — drift diagnosed only one macrocycle late is
+  history. Each block carries its volume/load line plus the per-sport per-zone intensity
+  table and the **block-over-block delta**, which is the intensity-creep check and lives
+  here only: it is a periodization question, so `adapt` never sees it
+  (DESIGN_intensity_distribution.md §4.1/§9.2). Folds in the cached reconstruction's
+  summary, inferred macro/mesocycle blocks, and physiological insights. Writes no
+  `feedback` field. The whole review is wrapped **once**, at build time, and printed
+  verbatim — the zone tables are column-aligned and a screen-width re-wrap shreds them.
+- **`_intensity_history_context(macros, today)`** — the block walk behind the above.
+  Navigates **macrocycle-first** and flattens the block lists in order, so each block's
+  predecessor is the previous element (including across a plan boundary). Never a
+  date-ordered mesocycle query: every mesocycle accessor filters `mac.status = 'active'`,
+  which hides exactly the cross-plan case, and dropping that filter drags in superseded
+  rollback versions whose blocks overlap the live ones and describe training that never
+  happened.
 - **`plan_rm(objective_id)`** — deletes macrocycle + mesocycles for that objective
   (cascades in DB; removes *all* versions, active and superseded).
 - **`plan_rollback(objective_id, target_macrocycle_id)`** — restores a superseded plan
@@ -490,6 +514,26 @@ connection + schema setup), `objectives.py`, `constraints.py`,
   (`workout_adapt_apply`) compares canonically too. `adherence.py` re-exports
   `SPORT_MAPPING` from `trainmate/sports.py` (kept dependency-free to avoid the
   `adherence → garmin → trainmate.db` import cycle).
+- **The canonical cycling name is `cycling`**, with `road_biking`, `road_cycling`,
+  `gravel_cycling`, `mountain_biking`, `cyclocross`, `bmx`, `indoor_cycling`,
+  `virtual_ride` and `biking` as its aliases — they all share one set of Garmin cycling
+  zone boundaries, which is the criterion for sharing a zone-table row
+  (DESIGN_intensity_distribution.md §6.1). This replaced a second, disagreeing
+  vocabulary: `garmin/load.py::CYCLING_TERMS` held substring *fragments* matched loosely
+  by `sync.py`, and had `gravel_cycling`/`cyclocross` that `SPORT_MAPPING` lacked, so a
+  gravel ride got its power zones fetched and then fell through into a row of its own.
+  `CYCLING_TERMS` is gone; `sync.py`'s power gate is now
+  `canonical_sport(type_key) == "cycling"`. That gate is a **classifier, not a
+  pre-filter** — Garmin reports `avgPower` for running too, and running watts scored
+  against a cycling FTP are meaningless. Matching is exact, not substring: an
+  unrecognised type surfaces as its own row so you can see which alias to add, and
+  `data pull --from/--until` re-fills the window once you have.
+- **Canonicalize on read, not on write.** `completed_activities.activity_type` keeps
+  Garmin's raw string; every read path goes through `canonical_sport()`. Overwriting
+  `gravel_cycling` with `cycling` in the column would be a lossy write undoable only by
+  a re-pull. `scripts/migrate_cycling_sport_rename.py` is the one exception, and it
+  touches only `workouts.sport_type` (the plan's own vocabulary, which should agree with
+  what the reports print).
 - `archive_future_workouts(from_date)` **soft-archives** every live future workout
   (sets `archived_at`, clears the Calendar handle) and returns the pre-archive rows so
   the caller can delete their events. Used by eager `workout generate`, `plan rollback`
@@ -577,7 +621,7 @@ SQLite database at `trainmate.db` (path from `config.db_path`).
 | `id`          | INTEGER PK |                                                      |
 | `title`       | TEXT       |                                                      |
 | `target_date` | TEXT       | YYYY-MM-DD                                           |
-| `sport_type`  | TEXT       | Single or comma-separated (e.g. `running,road_biking`) |
+| `sport_type`  | TEXT       | Single or comma-separated (e.g. `running,cycling`) |
 | `status`      | TEXT       | `active`, `completed`, `archived`                    |
 | `priority`    | INTEGER    | 1 = highest                                          |
 | `description` | TEXT       |                                                      |
@@ -725,7 +769,7 @@ push until restored. See DESIGN_plan_rollback.md.
 | `date`              | TEXT    | YYYY-MM-DD                                         |
 | `start_time`        | TEXT    |                                                    |
 | `activity_name`     | TEXT    |                                                    |
-| `activity_type`     | TEXT    | Garmin type string (e.g. `running`, `road_biking`) |
+| `activity_type`     | TEXT    | Garmin type string, raw (e.g. `running`, `gravel_cycling`); canonicalized on read |
 | `duration_sec`      | REAL    |                                                    |
 | `distance_km`       | REAL    |                                                    |
 | `elevation_gain_m`  | REAL    |                                                    |
@@ -1190,9 +1234,10 @@ threshold-less profile is a valid cold start (the coach nudges, never refuses).
 2. Computes `goals_hash`, `constraints_hash` (plan-shaping constraints only), `config_hash`.
 3. If existing macrocycle has matching goals/constraints hashes,
    `config_changed()` reports no drift, and `force=False` → reuse.
-4. Otherwise: builds a read-only **planned-vs-actual review** of the prior plan
-   via `_build_prior_training_context()` (Option A — anchored on the prior
-   plan's elapsed mesocycle windows, plus the cached reconstruction's summary,
+4. Otherwise: builds a read-only **planned-vs-actual review** via
+   `_build_prior_training_context()` (Option A — anchored on the elapsed mesocycle
+   windows of the prior plan and of the current one, each with its per-sport per-zone
+   intensity table and block-over-block delta, plus the cached reconstruction's summary,
    reverse-engineered macro/mesocycle blocks, and physiological insights;
    written to no `feedback` field), prints it, and passes it as
    `prior_training_text` into `CoachEngine._plan_generate_strategy()` →
@@ -1255,6 +1300,16 @@ event-day TSB over the plan's own workouts — is a deferred Phase 2 follow-up.
    removed workouts never count as misses.
 3. Finds active mesocycle for the target date → sets `meso_end_date` for
    adaptation range.
+3b. `_intensity_block_context()` builds the block's **measured intensity distribution**
+   (`trainmate/intensity.py`): the block to date as a per-week rate over its *completed*
+   weeks, per canonical sport and per zone, beside its stated focus, plus the current
+   week's raw minutes and elapsed fraction. Threaded as its own `intensity_context`
+   argument — deliberately *not* via `meso_text`, which is shared with plan generation
+   and must not grow this section (DESIGN_intensity_distribution.md §9.3). It gates a
+   fourth TASK branch and the `CORRECTING EXECUTION DRIFT` prompt section: the existing
+   three branches all treat adaptation as a response to fatigue or absence, and an
+   athlete running their easy days at Z3 is neither — perfect attendance, normal RHR/HRV.
+   Nothing is emitted when today falls outside every block.
 4. Calls `CoachEngine._workout_adapt_logic()` → LLM → `{change_needed, reason,
    adapted_workouts[]}`. **Read-only w.r.t. coach learnings** (see
    [§3](#3-coach-package-architecture)).
@@ -1262,7 +1317,14 @@ event-day TSB over the plan's own workouts — is a deferred Phase 2 follow-up.
 6. If applied: `workout_adapt_apply()` deletes overridden calendar events + DB
    rows, saves adapted workouts (each carrying its `modification_reason` +
    `adaptation_summary`, so they read as `adapted`; see [§5](#5-database-schema)),
-   syncs to Calendar.
+   syncs to Calendar. `adapted_at` is passed **only for sessions whose load actually
+   moved** (duration or TSS differs from the pre-save row): a drift correction rewrites
+   the prescription and holds the load, and stamping it would tag the session
+   `[ALREADY EASED …]`, raising the `DO NOT COMPOUND` bar for a session that was never
+   cut — blunting adapt's fatigue response next time the athlete is genuinely wrecked.
+   The decision lives in the caller, not in `save_workout`, which is a generic writer
+   other callers rely on. Interim measure; the real fix is an append-only workout
+   changelog (DESIGN_intensity_distribution.md §9.5).
 
 ### Data Pull (`data pull`) and auto-ensure
 
@@ -1604,6 +1666,13 @@ venv/bin/python -m unittest discover -s tests -p "test_*.py"
 |                                | week validation, contradiction/demote/keep, staleness,          |
 |                                | grandfather migration), decay, `analysis_cache`                 |
 | `tests/test_feedback.py`       | Feedback saving + use in replanning                             |
+| `tests/test_intensity.py`      | `intensity.py`: the completed-weeks divisor (first six days,    |
+|                                | partial tail excluded from both sides, finished block, weeks    |
+|                                | from the block start not Mondays), coverage with a meterless    |
+|                                | ride, canonical `cycling` folding, every-zone-named rendering    |
+|                                | inside the prompt width, the raw non-extrapolated current week,  |
+|                                | per-sport delta suppression, and the structural row keeping a    |
+|                                | HIIT strength session's hard minutes in the zone table          |
 | `tests/test_periodization.py`  | `plan_generate`, `workout_generate`, hash logic, |
 |                                | system-prompt building                                          |
 | `tests/test_garmin.py`         | Garmin transforms (load model), zone parsing, watermark/         |

@@ -230,11 +230,11 @@ class TestDatabase(unittest.TestCase):
         # Citing 3 distinct weeks -> moderate; the LLM sets no confidence.
         test_db.apply_learning_deltas([
             {"op": "add", "text": "Recovers fast",
-             "sports": "Running, Road_Biking", "evidence": self.WEEKS[:3]},
+             "sports": "Running, Cycling", "evidence": self.WEEKS[:3]},
         ])
         learning = test_db.get_learnings()[0]
         lid = learning["id"]
-        self.assertEqual(learning["sports"], "running,road_biking")
+        self.assertEqual(learning["sports"], "running,cycling")
         self.assertEqual(learning["confidence"], "moderate")
         self.assertIsNone(learning["proposed_confidence"])
 

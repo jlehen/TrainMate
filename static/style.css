@@ -734,7 +734,7 @@ header {
     color: var(--text-secondary);
 }
 .workout-sport-icon.running { color: var(--accent-cyan); background: rgba(6, 182, 212, 0.1); }
-.workout-sport-icon.road_biking { color: var(--accent-purple); background: rgba(139, 92, 246, 0.1); }
+.workout-sport-icon.cycling { color: var(--accent-purple); background: rgba(139, 92, 246, 0.1); }
 .workout-sport-icon.hiking { color: var(--accent-green); background: rgba(16, 185, 129, 0.1); }
 .workout-sport-icon.strength_training { color: var(--accent-gold); background: rgba(245, 158, 11, 0.1); }
 .workout-sport-icon.yoga { color: var(--accent-blue); background: rgba(59, 130, 246, 0.1); }

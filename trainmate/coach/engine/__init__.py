@@ -26,7 +26,7 @@ LEARNING_UPDATES_FIELD = (
     '    //   {"op": "reinforce", "id": 4, "evidence": ["2026-05-25"]},\n'
     '    //   {"op": "contradict", "id": 5, "evidence": ["2026-06-01"]},\n'
     '    //   {"op": "retire", "id": 6}\n'
-    '    // "sports": comma-separated sport(s) the observation applies to (e.g. "running,road_biking"),\n'
+    '    // "sports": comma-separated sport(s) the observation applies to (e.g. "running,cycling"),\n'
     '    //   or "general" if not sport-specific. Defaults to "general".\n'
     '    // "evidence": the week_commencing date(s) of training that SUPPORT the observation\n'
     "    //   (add/revise/reinforce) or CONTRADICT it (contradict). Do NOT set a confidence\n"

@@ -67,23 +67,23 @@ class TestBenchmarkDB(unittest.TestCase):
 
     def test_latest_is_newest_by_date_then_id(self):
         test_db.add_benchmark_result(
-            date="2026-06-01", sport_type="road_biking",
+            date="2026-06-01", sport_type="cycling",
             anchor_kind="ftp", value=235, unit="W",
         )
         test_db.add_benchmark_result(
-            date="2026-08-01", sport_type="road_biking",
+            date="2026-08-01", sport_type="cycling",
             anchor_kind="ftp", value=250, unit="W",
         )
         # A backdated entry does not become "latest".
         test_db.add_benchmark_result(
-            date="2026-05-01", sport_type="road_biking",
+            date="2026-05-01", sport_type="cycling",
             anchor_kind="ftp", value=200, unit="W",
         )
         self.assertEqual(test_db.get_latest_benchmark("ftp")["value"], 250.0)
 
     def test_latest_thresholds_one_per_kind(self):
         test_db.add_benchmark_result(
-            date="2026-06-01", sport_type="road_biking",
+            date="2026-06-01", sport_type="cycling",
             anchor_kind="ftp", value=235, unit="W",
         )
         test_db.add_benchmark_result(
@@ -91,7 +91,7 @@ class TestBenchmarkDB(unittest.TestCase):
             anchor_kind="lthr", value=165, unit="bpm",
         )
         test_db.add_benchmark_result(
-            date="2026-07-01", sport_type="road_biking",
+            date="2026-07-01", sport_type="cycling",
             anchor_kind="ftp", value=250, unit="W",
         )
         self.assertEqual(
@@ -100,7 +100,7 @@ class TestBenchmarkDB(unittest.TestCase):
 
     def test_delete(self):
         rid = test_db.add_benchmark_result(
-            date="2026-06-01", sport_type="road_biking",
+            date="2026-06-01", sport_type="cycling",
             anchor_kind="ftp", value=235, unit="W",
         )
         test_db.delete_benchmark_result(rid)
@@ -108,7 +108,7 @@ class TestBenchmarkDB(unittest.TestCase):
 
     def test_workout_benchmark_type_persists_and_preserves(self):
         wid = test_db.save_workout(
-            date="2026-08-05", sport_type="road_biking", title="FTP Test",
+            date="2026-08-05", sport_type="cycling", title="FTP Test",
             description="[FTP Test]", benchmark_type="ftp_20min", source="generated",
         )
         self.assertEqual(
@@ -116,7 +116,7 @@ class TestBenchmarkDB(unittest.TestCase):
         )
         # A later same-row save that omits benchmark_type must preserve it (COALESCE).
         test_db.save_workout(
-            date="2026-08-05", sport_type="road_biking", title="FTP Test v2",
+            date="2026-08-05", sport_type="cycling", title="FTP Test v2",
             description="[FTP Test]",
         )
         self.assertEqual(
@@ -148,7 +148,7 @@ class TestEffectiveThresholds(unittest.TestCase):
 
     def test_effective_overlays_logbook_on_config(self):
         test_db.add_benchmark_result(
-            date="2026-06-01", sport_type="road_biking",
+            date="2026-06-01", sport_type="cycling",
             anchor_kind="ftp", value=242, unit="W",
         )
         eff = coach_service.effective_thresholds()
@@ -169,7 +169,7 @@ class TestEffectiveThresholds(unittest.TestCase):
             self.assertEqual(prof["lthr"], 199)  # rides through, untouched
             # A logbook value overrides the same-named profile key.
             test_db.add_benchmark_result(
-                date="2026-06-01", sport_type="road_biking",
+                date="2026-06-01", sport_type="cycling",
                 anchor_kind="ftp", value=242, unit="W",
             )
             self.assertEqual(coach_service._effective_profile()["ftp"], 242.0)
@@ -195,7 +195,7 @@ class TestEffectiveThresholds(unittest.TestCase):
         self.assertIn("No fitness thresholds on record", out.getvalue())
         # Once one is recorded, it goes quiet.
         test_db.add_benchmark_result(
-            date="2026-06-01", sport_type="road_biking",
+            date="2026-06-01", sport_type="cycling",
             anchor_kind="ftp", value=235, unit="W",
         )
         out = io.StringIO()
@@ -243,12 +243,12 @@ class TestBenchmarkCLI(unittest.TestCase):
         )
         self.assertEqual(code, 0)
         # Echoed in the 'benchmark list' format, then the confirmation.
-        self.assertIn("ROAD_BIKING | Functional Threshold Power (FTP): 250 W", out)
+        self.assertIn("CYCLING | Functional Threshold Power (FTP): 250 W", out)
         self.assertIn("Benchmark result recorded successfully", out)
         rows = test_db.get_benchmark_results()
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0]["anchor_kind"], "ftp")
-        self.assertEqual(rows[0]["sport_type"], "road_biking")
+        self.assertEqual(rows[0]["sport_type"], "cycling")
 
     def test_record_yes_skips_prompt_and_flags_replan(self):
         run_cli(["benchmark", "record", "cycling", "--ftp", "235", "-y"])

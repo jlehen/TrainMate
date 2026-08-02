@@ -3,13 +3,14 @@ import sys
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 import trainmate_cli as cli
+from trainmate import intensity
 from trainmate.config import config
 from trainmate.adherence import analyze_adherence, date_covered
 from trainmate.util import (
     bold, dim, green, red, yellow, cyan, blue, magenta, gray, cmd,
     color_load_ratio, color_ramp, pmc_cells, pmc_warming_note, visible_len, pad_visible,
-    wrap_text, format_labeled_text, format_labeled_block, PMC_TSB_LAG_NOTE,
-    today_str as _today_str, today_date as _today_date,
+    wrap_text, format_labeled_text, format_labeled_block, default_wrap_width,
+    PMC_TSB_LAG_NOTE, today_str as _today_str, today_date as _today_date,
 )
 from trainmate.cli.common import fmt_date, ensure_recent_data, pmc_warmup_cutoff
 
@@ -98,6 +99,17 @@ def run_status(
                     f"({cyan(active_meso['start_date'])} to {cyan(active_meso['end_date'])})"
                 )
                 print(format_labeled_block(f"{bold('Cycle Focus')}:", active_meso['focus']))
+                # What the block ACTUALLY measured, beside what it was for
+                # (DESIGN_intensity_distribution.md §9). Already wrapped to the target
+                # width — never re-wrap it, the zone table is column-aligned.
+                report = intensity.block_report(
+                    active_meso, _today_str(), cli.db.get_completed_activities,
+                    current_week=True, benchmarks=cli.db.get_benchmark_results(),
+                    with_focus=False, indent="", width=default_wrap_width(),
+                )
+                if report:
+                    print(f"\n{bold('Measured Intensity Distribution')}:")
+                    print(report)
             else:
                 print(
                     f"{bold('Active Mesocycle')}: "

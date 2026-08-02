@@ -210,6 +210,19 @@ def add_benchmark_parser(subparsers):
     b_rec = b_subparsers.add_parser(
         "record",
         help="Record a fitness-test result (e.g. 'record cycling --ftp 250')",
+        description=(
+            "Record a fitness-test result in the dated logbook — the source the coach "
+            "prescribes zones and targets from.\n\n"
+            "IMPORTANT: turn OFF Garmin Connect's automatic FTP and lactate-threshold "
+            "detection (they are two independent settings). TrainMate treats the values "
+            "you record here as authoritative, but Garmin buckets every activity into "
+            "zones using ITS OWN thresholds at the time. An auto-detected bump silently "
+            "moves the zone boundaries in your activity history, so the same effort lands "
+            "one zone lower and a training block looks easier than it was.\n\n"
+            "For --e1rm, track ONE lift for now: the logbook has no per-exercise field, so "
+            "a deadlift PR logged after a squat PR reads as one e1RM value jumping 70%."
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     b_rec.add_argument(
         "sport",

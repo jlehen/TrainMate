@@ -269,7 +269,7 @@ class TestCliData(unittest.TestCase):
     def test_data_show_activities_command(self, mock_garmin):
         test_db.save_completed_activity(
             activity_id="act_show_1", date="2026-06-03", start_time="09:00",
-            activity_name="Morning Ride", activity_type="road_biking", duration_sec=3600,
+            activity_name="Morning Ride", activity_type="cycling", duration_sec=3600,
             distance_km=30.0, elevation_gain_m=100.0, avg_hr=130, max_hr=150,
             rpe=4, tss=50.0
         )

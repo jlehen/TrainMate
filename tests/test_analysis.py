@@ -91,7 +91,7 @@ class TestWorkoutAnalysis(unittest.TestCase):
         # Week commencing 2026-06-01
         test_db.save_completed_activity(
             activity_id="act_1", date="2026-06-03", start_time="08:00:00",
-            activity_name="Base Ride", activity_type="road_biking",
+            activity_name="Base Ride", activity_type="cycling",
             duration_sec=7200.0, distance_km=50.0, elevation_gain_m=300.0,
             avg_hr=130, max_hr=150, rpe=5, tss=90.0,
             zone1_sec=3600, zone2_sec=3600
@@ -160,7 +160,7 @@ class TestWorkoutAnalysis(unittest.TestCase):
     def _seed_activity(self):
         test_db.save_completed_activity(
             activity_id="a1", date="2026-06-03", start_time="08:00:00",
-            activity_name="Ride", activity_type="road_biking",
+            activity_name="Ride", activity_type="cycling",
             duration_sec=3600.0, distance_km=20.0, elevation_gain_m=100.0,
             avg_hr=130, max_hr=150, rpe=5, tss=60.0,
         )
@@ -598,7 +598,7 @@ class TestRicherEvidenceIntegration(unittest.TestCase):
     def _seed_week(self):
         test_db.save_completed_activity(
             activity_id="a1", date="2026-06-03", start_time="08:00:00",
-            activity_name="Ride", activity_type="road_biking",
+            activity_name="Ride", activity_type="cycling",
             duration_sec=3600.0, distance_km=20.0, elevation_gain_m=100.0,
             avg_hr=130, max_hr=150, rpe=5, tss=60.0,
         )

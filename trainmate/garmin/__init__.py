@@ -9,7 +9,7 @@ from trainmate.garmin.client import (
     _derivation_pad_days, GarminAuthRequired, _to_date, _date_range, _shift, GarminClient
 )
 from trainmate.garmin.load import (
-    CYCLING_TERMS, POWER_ZONE_TSS_PER_SEC, HR_ZONE_TSS_PER_SEC, _zone_tss,
+    POWER_ZONE_TSS_PER_SEC, HR_ZONE_TSS_PER_SEC, _zone_tss,
     _hr_zone_coverage, _rpe_tss, measured_tss, compute_load, _has_power_zones,
     _measurement_is_load, _divergence_ratio, _divergence_threshold, activity_load,
     rpe_divergence, _safe_round

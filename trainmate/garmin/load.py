@@ -9,10 +9,6 @@ from trainmate.config import config
 from trainmate.db import db
 from trainmate.util import today_date, today_str, yellow, red, dim
 
-CYCLING_TERMS = (
-    "cycling", "biking", "ride", "cyclocross", "bmx",
-    "virtual_ride", "indoor_cycling", "gravel_cycling",
-)
 # --- Power-zone TSS weights (TSS per second in each zone) -------------------
 # Derived from Dr. Andrew Coggan's power-zone model (Allen & Coggan, "Training
 # and Racing with a Power Meter"). TSS over a steady effort is IF^2 * 100 per

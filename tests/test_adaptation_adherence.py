@@ -60,7 +60,7 @@ class TestAdaptationAdherence(unittest.TestCase):
             },
             {
                 "date": "2026-06-03",
-                "sport_type": "road_biking",
+                "sport_type": "cycling",
                 "title": "Ride",
                 "duration_minutes": 60,
                 "rpe": 6,

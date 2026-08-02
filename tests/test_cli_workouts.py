@@ -153,7 +153,7 @@ class TestCliWorkouts(unittest.TestCase):
         mock_coach.workout_swap_apply.return_value = [
             {"id": 1, "title": "Run A", "date": d2, "sport_type": "running",
              "duration_minutes": 45, "rpe": 4, "tss": 30},
-            {"id": 2, "title": "Ride B", "date": d1, "sport_type": "road_biking",
+            {"id": 2, "title": "Ride B", "date": d1, "sport_type": "cycling",
              "duration_minutes": 60, "rpe": 4, "tss": 30},
         ]
         a = test_db.save_workout(
@@ -161,7 +161,7 @@ class TestCliWorkouts(unittest.TestCase):
             description="easy", rpe=4, tss=30,
         )
         b = test_db.save_workout(
-            date=d2, sport_type="road_biking", title="Ride B",
+            date=d2, sport_type="cycling", title="Ride B",
             description="easy", rpe=4, tss=30,
         )
         exit_code, stdout, stderr = self.run_cli(
@@ -171,7 +171,7 @@ class TestCliWorkouts(unittest.TestCase):
         self.assertIn("Swapped 2 workout(s) successfully", stdout)
         # Each moved session is echoed in the 'workout list' format, at its new date.
         self.assertIn(f"ID: 1 | {fmt_date(d2)} | RUNNING | Run A", stdout)
-        self.assertIn(f"ID: 2 | {fmt_date(d1)} | ROAD_BIKING | Ride B", stdout)
+        self.assertIn(f"ID: 2 | {fmt_date(d1)} | CYCLING | Ride B", stdout)
         # Each date's workout is moved to the other date.
         ops, no_sync = mock_coach.workout_swap_apply.call_args[0]
         self.assertCountEqual(ops, [
@@ -192,7 +192,7 @@ class TestCliWorkouts(unittest.TestCase):
             description="easy", rpe=4, tss=30,
         )
         b = test_db.save_workout(
-            date=d2, sport_type="road_biking", title="Ride B",
+            date=d2, sport_type="cycling", title="Ride B",
             description="easy", rpe=4, tss=30,
         )
         exit_code, stdout, stderr = self.run_cli(
@@ -218,7 +218,7 @@ class TestCliWorkouts(unittest.TestCase):
             description="easy", rpe=8, tss=90,
         )
         b = test_db.save_workout(
-            date=d2, sport_type="road_biking", title="Ride B",
+            date=d2, sport_type="cycling", title="Ride B",
             description="easy", rpe=8, tss=90,
         )
         # Default input is "n": the swap is cancelled and never applied.
@@ -240,7 +240,7 @@ class TestCliWorkouts(unittest.TestCase):
             description="easy", rpe=4, tss=30,
         )
         test_db.save_workout(
-            date=future, sport_type="road_biking", title="Ride B",
+            date=future, sport_type="cycling", title="Ride B",
             description="easy", rpe=4, tss=30,
         )
         exit_code, stdout, stderr = self.run_cli(
@@ -489,7 +489,7 @@ class TestCliWorkouts(unittest.TestCase):
             description="30 mins", 
         )
         test_db.save_workout(
-            date=tomorrow_str, sport_type="road_biking", title="Tomorrow Ride",
+            date=tomorrow_str, sport_type="cycling", title="Tomorrow Ride",
             description="60 mins", 
         )
         test_db.save_workout(

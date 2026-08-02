@@ -120,7 +120,7 @@ class TestPeriodization(unittest.TestCase):
         # New goal added → hash mismatch → regenerate everything
         test_db.add_objective(
             title="Mini Triathlon", target_date="2026-08-01",
-            sport_type="road_biking", priority=2,
+            sport_type="cycling", priority=2,
         )
         mock_client.complete.reset_mock()
         mock_client.complete.side_effect = [mock_macro_response, mock_workouts_response]
@@ -226,6 +226,7 @@ class TestPeriodization(unittest.TestCase):
             activity_name="Base Run", activity_type="running",
             duration_sec=3600.0, distance_km=10.0, elevation_gain_m=50.0,
             avg_hr=140, max_hr=160, rpe=5, tss=60.0,
+            zone1_sec=300, zone2_sec=2700, zone3_sec=400, zone4_sec=200, zone5_sec=0,
         )
         mock_client.complete.return_value = {
             "strategy": "New strategy", "mesocycles": [{
@@ -238,7 +239,14 @@ class TestPeriodization(unittest.TestCase):
         self.assertIn("PRIOR TRAINING REVIEW:", system_prompt)
         self.assertIn("PLANNED vs ACTUAL", system_prompt)
         self.assertIn("Aerobic conditioning", system_prompt)
-        self.assertIn("1 sessions", system_prompt)
+        self.assertIn("1 session", system_prompt)
+        # The review now carries the per-sport, per-zone distribution as a per-week rate
+        # over completed weeks, not a Z1-2/Z3/Z4-5 rollup
+        # (DESIGN_intensity_distribution.md §5/§9).
+        self.assertIn("Intensity distribution, per week over 4 completed weeks",
+                      " ".join(system_prompt.split()))
+        self.assertIn("Z2 aerobic", system_prompt)
+        self.assertNotIn("HR zones Z1-2/Z3/Z4-5", system_prompt)
 
     def test_system_prompt_inserts_athlete_profile(self):
         test_profile = {
@@ -770,7 +778,7 @@ class TestPeriodization(unittest.TestCase):
         original_profile = dict(trainmate.coach.config.data["user_profile"])
         try:
             test_db.add_benchmark_result(
-                date="2026-06-01", sport_type="road_biking",
+                date="2026-06-01", sport_type="cycling",
                 anchor_kind="ftp", value=220, unit="W",
             )
             macro = {
@@ -781,14 +789,14 @@ class TestPeriodization(unittest.TestCase):
 
             # Within the default 5% band: still current.
             test_db.add_benchmark_result(
-                date="2026-06-15", sport_type="road_biking",
+                date="2026-06-15", sport_type="cycling",
                 anchor_kind="ftp", value=228, unit="W",
             )
             self.assertIsNone(coach_service.config_changed(macro))
 
             # Past the band: stale, with the threshold named in the reason.
             test_db.add_benchmark_result(
-                date="2026-07-01", sport_type="road_biking",
+                date="2026-07-01", sport_type="cycling",
                 anchor_kind="ftp", value=250, unit="W",
             )
             reason = coach_service.config_changed(macro)
@@ -798,7 +806,7 @@ class TestPeriodization(unittest.TestCase):
             # A newly recorded kind absent from the old snapshot is skipped (§3.5), not
             # read as instant drift — restore ftp to baseline first so it isn't the cause.
             test_db.add_benchmark_result(
-                date="2026-07-02", sport_type="road_biking",
+                date="2026-07-02", sport_type="cycling",
                 anchor_kind="ftp", value=220, unit="W",
             )
             test_db.add_benchmark_result(
@@ -820,6 +828,29 @@ class TestPeriodization(unittest.TestCase):
             self.assertIsNone(coach_service.config_changed(legacy))
         finally:
             trainmate.coach.config.data["user_profile"] = original_profile
+
+    def test_e1rm_never_invalidates_a_periodization(self):
+        """e1rm collides across lifts — the logbook has no per-exercise field, so a
+        deadlift PR logged after a squat PR is one value jumping 70%. It must not trip a
+        replan (DESIGN_intensity_distribution.md §10)."""
+        test_db.add_benchmark_result(
+            date="2026-06-01", sport_type="strength_training",
+            anchor_kind="e1rm", value=102, unit="kg",
+        )
+        macro = {
+            "config_hash": coach_service._get_config_hash(),
+            "config_snapshot": coach_service._get_config_snapshot(),
+        }
+        self.assertIsNone(coach_service.config_changed(macro))
+
+        # A different lift entirely — a 70% jump that would otherwise read as drift.
+        test_db.add_benchmark_result(
+            date="2026-07-01", sport_type="strength_training",
+            anchor_kind="e1rm", value=175, unit="kg",
+        )
+        self.assertIsNone(coach_service.config_changed(macro))
+        # It still reaches the coaching prompt; it just never invalidates the plan.
+        self.assertEqual(coach_service.effective_thresholds()["e1rm"], 175.0)
 
     def test_db_config_hash_operations(self):
         obj_id = test_db.add_objective(

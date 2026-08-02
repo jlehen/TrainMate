@@ -52,7 +52,7 @@ class TestAdaptationSwap(unittest.TestCase):
     def test_swap_validation_consecutive_hard_days(self):
         # Week of Mon 2026-06-08. Hard on Mon/Tue, easy Wed, hard Thu.
         test_db.save_workout("2026-06-08", "running", "Intervals", "hard", rpe=8, tss=80)
-        test_db.save_workout("2026-06-09", "road_biking", "Threshold", "hard", rpe=8, tss=90)
+        test_db.save_workout("2026-06-09", "cycling", "Threshold", "hard", rpe=8, tss=90)
         test_db.save_workout("2026-06-10", "yoga", "Mobility", "easy", rpe=2, tss=10)
         test_db.save_workout("2026-06-11", "running", "Tempo", "hard", rpe=8, tss=85)
 
@@ -74,7 +74,7 @@ class TestAdaptationSwap(unittest.TestCase):
     def test_swap_validation_weekly_load_spike(self):
         # Cross-week swap that shifts a big TSS session into a light week.
         test_db.save_workout("2026-06-08", "running", "Long", "big", rpe=6, tss=120)
-        test_db.save_workout("2026-06-09", "road_biking", "Long Ride", "big", rpe=6, tss=130)
+        test_db.save_workout("2026-06-09", "cycling", "Long Ride", "big", rpe=6, tss=130)
         test_db.save_workout("2026-06-15", "yoga", "Mobility", "easy", rpe=2, tss=40)
 
         ops = self._swap_ops_for_dates("2026-06-09", "2026-06-15")
@@ -86,7 +86,7 @@ class TestAdaptationSwap(unittest.TestCase):
 
     def test_apply_swap_moves_dates_and_syncs(self):
         a = test_db.save_workout("2026-06-10", "running", "Run A", "a", rpe=4, tss=30)
-        b = test_db.save_workout("2026-06-12", "road_biking", "Ride B", "b", rpe=4, tss=30)
+        b = test_db.save_workout("2026-06-12", "cycling", "Ride B", "b", rpe=4, tss=30)
         ops = [
             {"id": a, "new_date": "2026-06-12"},
             {"id": b, "new_date": "2026-06-10"},
@@ -105,7 +105,7 @@ class TestAdaptationSwap(unittest.TestCase):
 
     def test_apply_swap_records_reason(self):
         a = test_db.save_workout("2026-06-10", "running", "Run A", "a", rpe=4, tss=30)
-        b = test_db.save_workout("2026-06-12", "road_biking", "Ride B", "b", rpe=4, tss=30)
+        b = test_db.save_workout("2026-06-12", "cycling", "Ride B", "b", rpe=4, tss=30)
         ops = [
             {"id": a, "new_date": "2026-06-12"},
             {"id": b, "new_date": "2026-06-10"},
@@ -137,7 +137,7 @@ class TestAdaptationSwap(unittest.TestCase):
             "2026-06-10", "running", "Run A", "a", rpe=4, tss=30
         )
         b = test_db.save_workout(
-            "2026-06-12", "road_biking", "Ride B", "b", rpe=4, tss=30
+            "2026-06-12", "cycling", "Ride B", "b", rpe=4, tss=30
         )
         service = trainmate.coach.CoachService(
             db_instance=test_db, calendar_syncer_instance=Mock()
@@ -180,7 +180,7 @@ class TestAdaptationSwap(unittest.TestCase):
             "2026-06-10", "running", "Run A", "a", rpe=4, tss=30
         )
         b = test_db.save_workout(
-            "2026-06-12", "road_biking", "Ride B", "b", rpe=4, tss=30
+            "2026-06-12", "cycling", "Ride B", "b", rpe=4, tss=30
         )
         service = trainmate.coach.CoachService(
             db_instance=test_db, calendar_syncer_instance=Mock()

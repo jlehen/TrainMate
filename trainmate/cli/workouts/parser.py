@@ -175,7 +175,7 @@ def add_workout_parser(subparsers, pull_bypass_parser, llm_debug_parser, plan_da
         )
     )
     w_add.add_argument("date", help="Workout date (YYYY-MM-DD)")
-    w_add.add_argument("sport_type", help="Sport type (e.g. running, road_biking)")
+    w_add.add_argument("sport_type", help="Sport type (e.g. running, cycling)")
     w_add.add_argument("title", help="Workout title")
     w_add.add_argument(
         "--description", "--desc", dest="description", help="Workout description / details"

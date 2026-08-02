@@ -112,6 +112,25 @@ internals work, see the [Architecture Document](ARCHITECTURE.md).
 - A Garmin Connect account (for daily metrics and activities)
 - A Google Service Account with access to your Google Calendar (for workout sync)
 
+### Turn off Garmin's automatic threshold detection
+
+**Do this before you record your first benchmark.** In Garmin Connect, disable
+**automatic FTP detection** and **automatic lactate-threshold detection** — they are two
+independent settings, and turning off one leaves the other drifting.
+
+TrainMate treats the values you record with `benchmark record` as authoritative. Garmin,
+however, buckets each activity into heart-rate and power zones using *its own* threshold
+values as they stood at the time. When Garmin auto-detects a new FTP, the Z4/Z5 boundary
+moves, and from then on the same effort lands one zone lower. A training block then looks
+easier than it was, for no reason visible anywhere in the data.
+
+Nothing can be recomputed after the fact: the bucketing is already done when the activity
+arrives and there is no raw stream to re-bucket. So this fixes the future only — every
+activity already stored was bucketed under whatever zones were in force then. If an
+intensity report shows hard minutes falling sharply for no visible reason, an FTP
+auto-bump moving the boundary is a likely explanation. (Manually editing your Garmin zones
+has the same effect, and is invisible in the same way.)
+
 ### Configuration
 
 Edit `config.yaml` to include your specific IDs and profile (use

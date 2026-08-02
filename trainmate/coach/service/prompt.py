@@ -74,6 +74,11 @@ class PromptConfigMixin:
         from the next generated plan, so it is skipped here rather than read as instant
         drift. A kind that *disappears* still reads as drift — a threshold the plan relied
         on going missing is real.
+
+        `e1rm` is the one exclusion: it collides across lifts (a deadlift PR logged after a
+        squat PR reads as a 70% jump), so a squat PR would invalidate a whole periodization
+        (DESIGN_intensity_distribution.md §10). It still feeds the prompt; it just never
+        trips a replan.
         """
         if macro.get('config_hash') != self.engine._get_config_hash():
             return "athlete profile changed"
@@ -89,6 +94,8 @@ class PromptConfigMixin:
         current = self.effective_thresholds()
         tolerance = config.threshold_replan_pct / 100.0
         for key in sorted(set(old_thresholds) | set(current)):
+            if key == 'e1rm':
+                continue
             old_val, new_val = old_thresholds.get(key), current.get(key)
             if old_val is None:
                 continue  # newly recorded kind — joins drift-checking from the next plan

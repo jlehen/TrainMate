@@ -596,7 +596,7 @@ window.deleteEvent = async function(id) {
 // --- WORKOUTS ---
 
 const SPORT_ICONS = {
-    running: "fa-person-running", road_biking: "fa-bicycle", hiking: "fa-mountain-sun",
+    running: "fa-person-running", cycling: "fa-bicycle", hiking: "fa-mountain-sun",
     strength_training: "fa-dumbbell", yoga: "fa-spa", ski_touring: "fa-person-skiing-nordic",
     rest: "fa-bed",
 };

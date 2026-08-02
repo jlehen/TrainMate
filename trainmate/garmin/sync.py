@@ -11,7 +11,8 @@ from trainmate.util import today_date, today_str, yellow, red, dim, cmd
 import trainmate.garmin as _g
 from trainmate.garmin.client import (GarminAuthRequired, GarminClient, _date_range,
     _derivation_pad_days, _shift, _to_date)
-from trainmate.garmin.load import CYCLING_TERMS, _safe_round, compute_load, measured_tss
+from trainmate.garmin.load import _safe_round, compute_load, measured_tss
+from trainmate.sports import canonical_sport
 from trainmate.garmin.pmc import recompute_derived
 
 def _ingest_activities(client: GarminClient, start: str, end: str, throttle: float) -> None:
@@ -37,8 +38,11 @@ def _ingest_activities(client: GarminClient, start: str, end: str, throttle: flo
         duration_sec = act.get("duration") or 0.0
         avg_hr = act.get("averageHR")
 
+        # A classifier, not a pre-filter: Garmin reports avgPower for running too
+        # (watch-/Stryd-derived), and running watts scored against a cycling FTP are
+        # meaningless (DESIGN_intensity_distribution.md §6.1).
         bike_avg_watts = None
-        if any(term in (type_key or "").lower() for term in CYCLING_TERMS):
+        if canonical_sport(type_key or "") == "cycling":
             power = act.get("avgPower") or act.get("averagePower")
             if power is not None:
                 try:
