@@ -12,6 +12,30 @@ from trainmate.coach.formatting import (
 )
 import trainmate.coach.engine as _eng
 from trainmate.coach.engine import LEARNING_UPDATES_FIELD
+from trainmate.sports import CANONICAL_SPORTS
+
+
+def _sport_type_enum() -> str:
+    """The `"sport_type": ...` JSON-schema line(s) shared by the generate and adapt
+    prompts, wrapped like the surrounding hand-written schema. Built from
+    `CANONICAL_SPORTS` so adding a sport reaches both prompts."""
+    head, cont, width = '      "sport_type": ', "        ", 90
+    options = [f'"{s}"' for s in CANONICAL_SPORTS] + ['"rest"']
+    lines: List[str] = []
+    current = head
+    for i, option in enumerate(options):
+        token = option + ("," if i == len(options) - 1 else " |")
+        separator = "" if current in (head, cont) else " "
+        if len(current) + len(separator) + len(token) > width:
+            lines.append(current)
+            current = cont + token
+            continue
+        current += separator + token
+    lines.append(current)
+    return "".join(f"{line}\n" for line in lines)
+
+
+_SPORT_TYPE_ENUM = _sport_type_enum()
 
 
 def _terminal_window_task(days_left: int, meso_end_date_str: str) -> str:
@@ -95,8 +119,7 @@ class WorkoutLogicMixin:
             '  "workouts": [\n'
             "    {\n"
             '      "date": "YYYY-MM-DD",\n'
-            '      "sport_type": "running" | "road_biking" | "hiking" | "strength_training" | "yoga" |\n'
-            '        "ski_touring" | "rest",\n'
+            + _SPORT_TYPE_ENUM +
             '      "title": "Workout Title (e.g., Tempo Run, Long Ride, Rest Day)",\n'
             '      "description": "Start with the title on its own line in brackets followed by a\n'
             '        newline, e.g. \"[Tempo Run]\\n\", then a detailed description of intensity,\n'
@@ -352,8 +375,7 @@ evidence-backed observations are authored only by the weekly history analysis
                 "    // day so the kept one is not dropped.\n"
                 "    {\n"
                 '      "date": "YYYY-MM-DD",\n'
-                '      "sport_type": "running" | "road_biking" | "hiking" | "strength_training" |\n'
-                '        "yoga" | "ski_touring" | "rest",\n'
+                + _SPORT_TYPE_ENUM +
                 '      "title": "Adapted Workout Title",\n'
                 + change_reason_field +
                 '      "description": "Start with the title on its own line in brackets followed by a\n'

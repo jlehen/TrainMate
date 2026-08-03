@@ -24,7 +24,22 @@ SPORT_MAPPING = {
     "strength_training": ["strength_training", "strength", "indoor_cardio", "fitness"],
     "yoga": ["yoga", "stretching", "pilates"],
     "ski_touring": ["ski_touring", "backcountry_skiing", "nordic_skiing", "skiing"],
+    "rowing": ["rowing", "indoor_rowing", "rowing_v2", "indoor_rowing_v2", "erg", "ergometer"],
+    # Lift-served descending, kept apart from `ski_touring`: no sustained climb, so the
+    # load profile and the coach's prescriptions differ. Garmin files skiing and
+    # snowboarding under one resort type, and both ride the same lifts, so they share a
+    # canonical sport here too.
+    "downhill_skiing": [
+        "downhill_skiing", "resort_skiing", "resort_snowboarding",
+        "resort_skiing_snowboarding", "resort_skiing_snowboarding_ws",
+        "alpine_skiing", "snowboarding",
+    ],
 }
+
+# The planned/canonical sports, in declaration order. Single source of truth for the CLI's
+# `--sport` choices and the coach prompts' `sport_type` enum, so a new sport above reaches
+# both without a second edit.
+CANONICAL_SPORTS: List[str] = list(SPORT_MAPPING)
 
 # Reverse index: every alias (and each canonical name) -> canonical name.
 _ALIAS_TO_CANONICAL = {

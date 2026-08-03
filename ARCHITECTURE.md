@@ -181,8 +181,9 @@ classes themselves.
 |                      |                      | two-panel chart drawing (matplotlib, lazy import, |
 |                      |                      | `Agg`), shared by the bot photo and the web PNG.  |
 | `sports.py`          | —                    | Canonical sport vocabulary (`SPORT_MAPPING`,     |
-|                      |                      | `canonical_sport`, `sport_aliases`); dependency- |
-|                      |                      | free so DB + adherence share it without a cycle. |
+|                      |                      | `CANONICAL_SPORTS`, `canonical_sport`,           |
+|                      |                      | `sport_aliases`); dependency-free so DB +        |
+|                      |                      | adherence share it without a cycle.              |
 | `util.py`            | —                    | ANSI color helpers (`bold`, `green`, `red`, …),  |
 |                      |                      | `cmd` (every "run X" call to action), `wrap_text`,|
 |                      |                      | `format_labeled_text`, `strip_ansi`.             |
@@ -490,6 +491,15 @@ connection + schema setup), `objectives.py`, `constraints.py`,
   (`workout_adapt_apply`) compares canonically too. `adherence.py` re-exports
   `SPORT_MAPPING` from `trainmate/sports.py` (kept dependency-free to avoid the
   `adherence → garmin → trainmate.db` import cycle).
+- **The canonical sports are** `running`, `road_biking`, `hiking`, `strength_training`,
+  `yoga`, `ski_touring`, `rowing` and `downhill_skiing`. `downhill_skiing` covers
+  lift-served skiing *and* snowboarding (Garmin files both under one resort type) and is
+  deliberately kept apart from `ski_touring`: no sustained climb, so the load profile and
+  the prescriptions differ. `CANONICAL_SPORTS` (declaration order of `SPORT_MAPPING`) is
+  the single source of truth for the `goal add`/`goal edit` `--sport` choices
+  (`trainmate/cli/goals.py`) and for the `sport_type` enum in the generate/adapt prompts
+  (`_SPORT_TYPE_ENUM` in `trainmate/coach/engine/workouts.py`, wrapped to match the
+  hand-written schema around it) — adding a sport to `SPORT_MAPPING` reaches all three.
 - `archive_future_workouts(from_date)` **soft-archives** every live future workout
   (sets `archived_at`, clears the Calendar handle) and returns the pre-archive rows so
   the caller can delete their events. Used by eager `workout generate`, `plan rollback`

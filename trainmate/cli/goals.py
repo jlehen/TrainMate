@@ -11,6 +11,7 @@ from trainmate.util import (
     format_labeled_block, today_str as _today_str, today_date as _today_date,
 )
 from trainmate.cli.common import fmt_date, ensure_recent_data
+from trainmate.sports import CANONICAL_SPORTS
 
 
 def _print_goal(g: dict) -> None:
@@ -129,7 +130,7 @@ def add_goal_parser(subparsers):
     g_add.add_argument("date", help="Target event date (YYYY-MM-DD)")
     g_add.add_argument(
         "sport", nargs="+", metavar="SPORT",
-        choices=["running", "road_biking", "hiking", "strength_training", "yoga", "ski_touring"],
+        choices=CANONICAL_SPORTS,
         help="Sport types, one or more: %(choices)s"
     )
     g_add.add_argument("--desc", default="", help="Description")
@@ -144,7 +145,7 @@ def add_goal_parser(subparsers):
     g_edit.add_argument("--date", help="New target event date (YYYY-MM-DD)")
     g_edit.add_argument(
         "--sport", nargs="+",
-        choices=["running", "road_biking", "hiking", "strength_training", "yoga", "ski_touring"],
+        choices=CANONICAL_SPORTS,
         help="New sport types (one or more)"
     )
     g_edit.add_argument("--desc", help="New description")
