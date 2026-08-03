@@ -20,7 +20,7 @@ from trainmate.cli.common import (
 )
 
 from trainmate.cli.workouts._helpers import (_resolve_workout_date_range, _resolve_swap_ops,
-    workout_line)
+    workout_line, warn_stale_before)
 
 
 def run_workout_push(args: argparse.Namespace) -> None:
@@ -60,6 +60,7 @@ def run_workout_push(args: argparse.Namespace) -> None:
                 f"Run {cmd('workout generate')} to generate a schedule, "
                 "or use -f to re-push already-synced workouts."
             ))
+        warn_stale_before(start_date)
         return
 
     print(f"Syncing {len(to_push)} workouts to Google Calendar...")
@@ -68,6 +69,7 @@ def run_workout_push(args: argparse.Namespace) -> None:
         print(green("Google Calendar synchronization completed."))
     except Exception as e:
         print(red(f"Error syncing to Google Calendar: {e}"))
+    warn_stale_before(start_date)
 def run_workout_rm(args: argparse.Namespace) -> None:
     """Soft-removes a planned workout: marks it removed (kept in the DB) and updates its
     Calendar event to be marked as deleted. Removed workouts are excluded from listings,

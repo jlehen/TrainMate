@@ -740,6 +740,15 @@ kind flag. Checked **in order**:
     through any path leaves it untouched, so the row reads `stale` automatically. The
     signature excludes `rpe` (never reaches Calendar). Push eligibility =
     `calendar_status != 'synced'`; calendar cleanup keys on `google_event_id`.
+  - **Stale is a retry marker, not a defect.** Every write path that touches a
+    calendar field pushes immediately (generate, adapt, add, swap, rm, restore,
+    rollback), so a row is normally stale for milliseconds. It *persists* only when
+    the push could not land (offline, API error) or was declined (`swap --no-sync`) —
+    the durable record that Calendar owes an update, which a boolean reset at write
+    time could not survive. `workout push` defaults to **today onward**, so a row
+    stranded stale in the past would never be re-pushed; `warn_stale_before` (in
+    `cli/workouts/_helpers.py`) reports the count and the `--from` date to recover it
+    rather than silently widening the window.
   - **Orphans** are the reverse direction: an event whose row is gone (fresh DB,
     restored backup, a wipe that skipped Calendar) can no longer be named locally, so
     `workout prune-calendar` sweeps from the calendar side — `list_workout_events`

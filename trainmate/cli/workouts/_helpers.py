@@ -71,6 +71,30 @@ def workout_line(w: dict) -> str:
         f"{bold(w['title'])}{bench_marker}{mod_marker}{sync_marker}{rem_marker}"
         f"{src_marker}{duration_str}{tss_str}{rpe_str}"
     )
+def warn_stale_before(start_date: str) -> None:
+    """Flags workouts left `stale` on days earlier than the window just pushed.
+
+    `workout push` defaults to today onward, so a row that went stale in the past —
+    realistically a push that failed while offline — has nothing that would ever
+    re-push it. Freshness is derived, not stored (see trainmate.calendar_state), so
+    the marker is durable; this just makes it visible outside the pushed range."""
+    try:
+        cutoff = (
+            datetime.strptime(start_date, "%Y-%m-%d") - timedelta(days=1)
+        ).strftime("%Y-%m-%d")
+    except ValueError:
+        return
+    earlier = cli.db.get_workouts(end_date=cutoff, include_removed=True)
+    stale = [w for w in earlier if calendar_status(w) == 'stale']
+    if not stale:
+        return
+    label = "workout" if len(stale) == 1 else "workouts"
+    earliest = min(w['date'] for w in stale)
+    print(yellow(
+        f"Note: {len(stale)} {label} before {start_date} still read [STALE] — their "
+        f"calendar events are out of date and this push did not cover them. "
+        f"Run {cmd(f'workout push --from {earliest}')} to update them."
+    ))
 def _resolve_workout_end_date(
     args: argparse.Namespace, resolved_goal: dict | None
 ) -> str | None:

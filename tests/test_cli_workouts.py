@@ -142,6 +142,45 @@ class TestCliWorkouts(unittest.TestCase):
         self.assertIn("Syncing 1 workouts to Google Calendar", stdout)
         mock_calendar.sync_multiple.assert_called_once()
 
+    @patch("trainmate_cli.calendar_syncer")
+    def test_workout_push_warns_about_stale_past_workouts(self, mock_calendar):
+        """`push` defaults to today onward, so a past row left stale by a failed push
+        has nothing that would re-push it. It must at least be surfaced."""
+        from trainmate.calendar_state import calendar_signature
+        today = datetime.now(timezone.utc).date()
+        past = (today - timedelta(days=4)).strftime("%Y-%m-%d")
+
+        wid = test_db.save_workout(
+            date=past, sport_type="running", title="Old Run", description="easy",
+        )
+        test_db.mark_workout_pushed(
+            wid, "evt-past", calendar_signature(test_db.get_workout_by_id(wid))
+        )
+        # A push that never landed: content moves on, signature does not.
+        test_db.save_workout(
+            date=past, sport_type="running", title="Old Run", description="HARD",
+        )
+
+        exit_code, stdout, stderr = self.run_cli(["workout", "push"])
+        self.assertEqual(exit_code, 0)
+        self.assertIn("1 workout before", stdout)
+        self.assertIn("[STALE]", stdout)
+        self.assertIn(f"workout push --from {past}", stdout)
+        # Warning only — the past row stays outside the pushed window.
+        mock_calendar.sync_multiple.assert_not_called()
+
+    @patch("trainmate_cli.calendar_syncer")
+    def test_workout_push_no_warning_when_past_is_clean(self, mock_calendar):
+        """A past workout that is synced (or was never pushed) must not warn."""
+        today = datetime.now(timezone.utc).date()
+        past = (today - timedelta(days=4)).strftime("%Y-%m-%d")
+        test_db.save_workout(
+            date=past, sport_type="running", title="Old Run", description="easy",
+        )
+        exit_code, stdout, stderr = self.run_cli(["workout", "push"])
+        self.assertEqual(exit_code, 0)
+        self.assertNotIn("still read [STALE]", stdout)
+
     @patch("trainmate_cli.coach_service")
     def test_workout_swap_by_date(self, mock_coach):
         today = datetime.now(timezone.utc).date()
