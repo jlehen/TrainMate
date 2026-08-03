@@ -1,18 +1,48 @@
-import os
+"""The read-only web dashboard (ARCHITECTURE.md §8).
+
+The web app READS. It never writes a row, never calls Garmin, never calls the LLM and
+never touches Google Calendar — every one of those is a CLI (or bot) action. The rule is
+enforced by `_reject_writes` below rather than left to convention, because the previous
+"tracks the CLI feature set" contract silently decayed the moment a feature landed
+CLI-first: parity was true once, in June 2026, and nothing re-established it. A dashboard
+that only reads has no parity to lose — new CLI commands add a view here when their data
+is worth looking at, and cost nothing when it is not.
+
+What that buys, concretely: no request can leave the database in a state the CLI did not
+put it in, so the web app is safe to leave running, safe to expose on the LAN, and cannot
+race the CLI or the bot over a workout row.
+"""
 from datetime import datetime, timedelta
 from flask import Flask, jsonify, request, send_from_directory
 from typing import Any, Dict, List
-from trainmate import garmin, plan_diff, progression
+from trainmate import benchmarks, garmin, intensity, llm_models, plan_diff, progression
 from trainmate.db import db
 from trainmate.adherence import analyze_adherence, date_covered
 from trainmate.calendar_state import calendar_status
 from trainmate.modification_state import modification_status
-from trainmate.google_calendar import calendar_syncer
-from trainmate.coach import coach_service
-from trainmate.config import config
-from trainmate.util import today_str, strip_ansi
+from trainmate.config import config, plan_config_hash
+from trainmate.sports import canonical_sport
+from trainmate.util import today_str
 
 app = Flask(__name__, static_folder="static", static_url_path="")
+
+
+# Every mutating verb, refused in one place. A route that wants to write has to delete
+# this guard first — which is the point: the invariant is visible, not remembered.
+_WRITE_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
+
+
+@app.before_request
+def _reject_writes() -> Any:
+    """405s any mutating verb. The dashboard is a reader (module docstring); scheduling,
+    generating, adapting and syncing all run from the CLI."""
+    if request.method in _WRITE_METHODS:
+        return jsonify({
+            "error": "The web dashboard is read-only; this action runs from the CLI.",
+            "method": request.method,
+            "path": request.path,
+        }), 405
+    return None
 
 
 # --- Static Routes ---
@@ -47,6 +77,37 @@ def _learnings_summary(learnings: List[Dict[str, Any]]) -> Dict[str, int]:
     }
 
 
+def _resolve_goal_id(raw: Any) -> Any:
+    """Resolves a goal id from a query string, defaulting to the next active goal
+    (earliest target date) — mirrors the CLI's plan-command goal resolution."""
+    if raw is not None and raw != "":
+        return int(raw)
+    objectives = db.get_objectives(status='active')
+    if not objectives:
+        return None
+    objectives.sort(key=lambda x: str(x['target_date']))
+    return objectives[0]['id']
+
+
+def _version_arg(raw: Any) -> Any:
+    """A plan-version id from a query string, or None when omitted/blank."""
+    return int(raw) if raw is not None and raw != "" else None
+
+
+def _weeks_arg(raw: str) -> Any:
+    """`?weeks=` as the CLI's `--weeks` takes it: a positive int, or 'all'. Raises
+    ValueError with the message the caller should 400 with."""
+    if raw == "all":
+        return "all"
+    try:
+        weeks = int(raw)
+    except ValueError:
+        raise ValueError("weeks must be an integer or 'all'")
+    if weeks < 1:
+        raise ValueError("weeks must be >= 1")
+    return weeks
+
+
 # --- API Routes ---
 
 @app.route("/api/status", methods=["GET"])
@@ -73,8 +134,7 @@ def get_status() -> Any:
         macrocycle = db.get_macrocycle_for_objective(next_goal['id'])
         if macrocycle:
             mesocycles = db.get_mesocycles_for_macrocycle(macrocycle['id'])
-            current_hash = coach_service._get_config_hash()
-            config_mismatch = macrocycle.get('config_hash') != current_hash
+            config_mismatch = macrocycle.get('config_hash') != plan_config_hash()
 
     # The web app is a pure reader — it never pulls from Garmin (see
     # DESIGN_garmin_direct_pull.md §11). Surface the watermark so the UI can show
@@ -96,79 +156,17 @@ def get_status() -> Any:
     })
 
 
-@app.route("/api/objectives", methods=["GET", "POST"])
-def manage_objectives() -> Any:
-    """API endpoint to list or create objectives."""
-    if request.method == "POST":
-        data = request.json
-        if not data:
-            return jsonify({"error": "Missing payload"}), 400
-
-        title = data.get("title")
-        t_date = data.get("target_date")
-        s_type = data.get("sport_type")
-        if not title or not t_date or not s_type:
-            return jsonify({"error": "Missing title, target_date, or sport_type"}), 400
-
-        if isinstance(s_type, list):
-            s_type = ",".join(s_type)
-
-        obj_id = db.add_objective(
-            title=title,
-            target_date=t_date,
-            sport_type=s_type,
-            description=data.get("description", ""),
-            priority=int(data.get("priority", 1)),
-            status=data.get("status", "active")
-        )
-        return jsonify({"id": obj_id, "message": "Objective added successfully."}), 201
-
-    # GET method
+@app.route("/api/objectives", methods=["GET"])
+def list_objectives() -> Any:
+    """Every objective (mirrors `goal list`)."""
     return jsonify(db.get_objectives())
 
 
-@app.route("/api/objectives/<int:obj_id>", methods=["DELETE", "PUT"])
-def single_objective(obj_id: int) -> Any:
-    """API endpoint to update or delete a specific objective."""
-    if request.method == "DELETE":
-        db.delete_objective(obj_id)
-        return jsonify({"message": "Objective deleted."})
-    elif request.method == "PUT":
-        data = request.json
-        if not data:
-            return jsonify({"error": "No update fields provided"}), 400
-        db.update_objective(obj_id, **data)
-        return jsonify({"message": "Objective updated."})
-
-
-@app.route("/api/constraints", methods=["GET", "POST"])
-def manage_constraints() -> Any:
-    """API endpoint to list active/upcoming constraints or add a new one
-    (DESIGN_constraints.md §6/§10 — supersedes /api/life-events)."""
-    if request.method == "POST":
-        data = request.json
-        if not data:
-            return jsonify({"error": "Missing payload"}), 400
-
-        title = data.get("title")
-        start = data.get("start_date")
-        end = data.get("end_date")
-        if not title or not start or not end:
-            return jsonify({"error": "Missing title, start_date, or end_date"}), 400
-
-        constraint_id = db.add_constraint(
-            title=title,
-            start_date=start,
-            end_date=end,
-            rest=int(bool(data.get("rest", False))),
-            description=data.get("description"),
-            replan=int(bool(data.get("replan", False))),
-            source="manual",
-        )
-        return jsonify({"id": constraint_id, "message": "Constraint added successfully."}), 201
-
-    # GET method — active within the metrics lookback window plus everything upcoming,
-    # same default window as `constraint list` (anchored on the machine-local day).
+@app.route("/api/constraints", methods=["GET"])
+def list_constraints() -> Any:
+    """Active + upcoming directives (mirrors `constraint list`,
+    DESIGN_constraints.md §6/§10) — active within the metrics lookback window plus
+    everything upcoming, anchored on the machine-local day."""
     window = config.metrics_lookback_days
     start = (
         datetime.strptime(today_str(), "%Y-%m-%d").date() - timedelta(days=window - 1)
@@ -176,62 +174,12 @@ def manage_constraints() -> Any:
     return jsonify(db.get_constraints(start))
 
 
-@app.route("/api/constraints/<int:constraint_id>", methods=["DELETE", "PUT"])
-def single_constraint(constraint_id: int) -> Any:
-    """API endpoint to update or delete a specific constraint."""
-    if request.method == "DELETE":
-        db.delete_constraint(constraint_id)
-        return jsonify({"message": "Constraint deleted."})
-    elif request.method == "PUT":
-        data = request.json
-        if not data:
-            return jsonify({"error": "No update fields provided"}), 400
-        db.update_constraint(constraint_id, **data)
-        return jsonify({"message": "Constraint updated."})
-
-
 # --- Workouts ---
 
-@app.route("/api/workouts", methods=["GET", "POST"])
-def manage_workouts() -> Any:
-    """List workouts in a date range, or manually schedule a session.
-
-    POST mirrors `workout add` (CoachService.workout_add): a deterministic,
-    LLM-free manual schedule that replaces any same-sport session that day and
-    syncs the calendar event in place (ARCHITECTURE.md §11)."""
-    if request.method == "POST":
-        data = request.json or {}
-        date = data.get("date")
-        sport_type = data.get("sport_type")
-        title = data.get("title")
-        description = data.get("description", "")
-        if not date or not sport_type or not title:
-            return jsonify({"error": "Missing date, sport_type, or title"}), 400
-
-        def _opt_int(key):
-            val = data.get(key)
-            return int(val) if val not in (None, "") else None
-
-        try:
-            saved, replaced = coach_service.workout_add(
-                date=date,
-                sport_type=sport_type,
-                title=title,
-                description=description,
-                duration_minutes=_opt_int("duration_minutes"),
-                rpe=_opt_int("rpe"),
-                tss=_opt_int("tss"),
-                reason=data.get("reason"),
-            )
-            return jsonify({
-                "message": "Workout scheduled.",
-                "workout": saved,
-                "replaced": replaced,
-            }), 201
-        except Exception as e:
-            return jsonify({"error": strip_ansi(str(e))}), 500
-
-    # GET method
+@app.route("/api/workouts", methods=["GET"])
+def list_workouts() -> Any:
+    """Workouts in a date range (mirrors `workout list`). Rows carry the derived
+    `calendar_status` + `modification_status` the CLI renders as markers."""
     start_date = request.args.get("start_date")
     end_date = request.args.get("end_date")
     include_removed = request.args.get("include_removed", "").lower() in ("1", "true", "yes")
@@ -243,100 +191,12 @@ def manage_workouts() -> Any:
     return jsonify([_annotate_workout(w) for w in workouts])
 
 
-@app.route("/api/workouts/<int:workout_id>/remove", methods=["POST"])
-def remove_workout(workout_id: int) -> Any:
-    """Soft-removes a workout (mirrors `workout rm`): marks it removed, keeps it in
-    the DB, and updates the Calendar event to be marked deleted. `reason` optional."""
-    data = request.json or {}
-    workout = db.get_workout_by_id(workout_id)
-    if not workout:
-        return jsonify({"error": f"Workout {workout_id} not found."}), 404
-    if workout.get("removed"):
-        return jsonify({"message": "Workout is already removed."})
-
-    db.mark_workout_removed(workout_id, reason=data.get("reason"))
-
-    if workout.get("google_event_id"):
-        updated = db.get_workout_by_id(workout_id)
-        if updated is not None:
-            try:
-                calendar_syncer.sync_workout(updated)
-            except Exception as e:
-                return jsonify({
-                    "message": "Workout removed locally; calendar update failed.",
-                    "warning": strip_ansi(str(e)),
-                })
-    return jsonify({"message": "Workout removed."})
-
-
-@app.route("/api/workouts/<int:workout_id>/restore", methods=["POST"])
-def restore_workout(workout_id: int) -> Any:
-    """Restores a soft-removed workout (mirrors `workout restore`) and refreshes the
-    Calendar event to drop the deleted mark."""
-    workout = db.get_workout_by_id(workout_id)
-    if not workout:
-        return jsonify({"error": f"Workout {workout_id} not found."}), 404
-    if not workout.get("removed"):
-        return jsonify({"message": "Workout is not removed."})
-
-    db.restore_workout(workout_id)
-
-    if workout.get("google_event_id"):
-        updated = db.get_workout_by_id(workout_id)
-        if updated is not None:
-            try:
-                calendar_syncer.sync_workout(updated)
-            except Exception as e:
-                return jsonify({
-                    "message": "Workout restored locally; calendar update failed.",
-                    "warning": strip_ansi(str(e)),
-                })
-    return jsonify({"message": "Workout restored."})
-
-
-@app.route("/api/workouts/swap", methods=["POST"])
-def swap_workouts() -> Any:
-    """Swaps two workouts' dates (mirrors `workout swap`). Validates first: if the
-    swap raises sports-science warnings and `force` is not set, returns them without
-    applying so the caller can confirm. `reason` is required, as in the CLI."""
-    data = request.json or {}
-    ops = data.get("ops")
-    reason = data.get("reason")
-    force = bool(data.get("force"))
-    no_sync = bool(data.get("no_sync"))
-
-    if not ops or not isinstance(ops, list):
-        return jsonify({"error": "Missing 'ops' (list of {id, new_date})."}), 400
-    if not reason:
-        return jsonify({"error": "A reason is required for a swap."}), 400
-    try:
-        ops = [{"id": int(op["id"]), "new_date": op["new_date"]} for op in ops]
-    except (KeyError, TypeError, ValueError):
-        return jsonify({"error": "Each op must be {id, new_date}."}), 400
-
-    try:
-        warnings = coach_service.workout_swap_validate(ops)
-        if warnings and not force:
-            return jsonify({"applied": False, "warnings": warnings})
-
-        updated = coach_service.workout_swap_apply(ops, no_sync, reason=reason)
-        return jsonify({
-            "applied": True,
-            "warnings": warnings,
-            "workouts": updated,
-            "message": f"Swapped {len(updated)} workout(s).",
-        })
-    except Exception as e:
-        return jsonify({"error": strip_ansi(str(e))}), 500
-
-
 @app.route("/api/workouts/compare", methods=["GET"])
 def compare_workouts() -> Any:
     """Plan-vs-actual adherence over a date range (mirrors `workout compare`,
-    trainmate/cli/workouts.py). Pure reader: unlike the CLI it never calls
-    `garmin.ensure_data` — the web app is a read-only consumer of cached data
-    (ARCHITECTURE.md §8). Reuses `analyze_adherence`; returns a day-by-day
-    structure so the frontend renders without re-deriving any logic.
+    trainmate/cli/workouts.py). Unlike the CLI it never calls `garmin.ensure_data` —
+    the dashboard consumes cached data only (§8). Reuses `analyze_adherence`; returns a
+    day-by-day structure so the frontend renders without re-deriving any logic.
 
     Query params: ?start_date=&end_date= (default 14-day lookback ending today,
     end capped at today), optional ?sport= filter."""
@@ -455,26 +315,19 @@ def get_timeline_png() -> Any:
     across the seam. The same §7.2 renderer draws the Telegram photo, so bot and web
     show the identical picture.
 
-    Pure reader — never calls `garmin.ensure_data`; freshness is surfaced via
-    `sync_state` on the Dashboard. Not cached: recomputed per request so the
-    projection moves the instant `adapt`/`generate`/`swap`/`remove` rewrite future
-    workouts.
+    Never calls `garmin.ensure_data`; freshness is surfaced via `sync_state` on the
+    Dashboard. Not cached: recomputed per request so the projection moves the instant a
+    CLI `adapt`/`generate`/`swap`/`remove` rewrites future workouts.
 
     `?weeks=N` re-windows the past half exactly like the CLI's `--weeks` (default 8,
     must be >= 1 else 400; `all` extends to full history). The future half always runs
     to plan end. matplotlib absent (optional tier, §7.2) -> 503 with the install hint
     the tab shows verbatim."""
     today = today_str()
-    raw_weeks = request.args.get("weeks", "8")
-    if raw_weeks == "all":
-        weeks_arg: Any = "all"
-    else:
-        try:
-            weeks_arg = int(raw_weeks)
-        except ValueError:
-            return jsonify({"error": "weeks must be an integer or 'all'"}), 400
-        if weeks_arg < 1:
-            return jsonify({"error": "weeks must be >= 1"}), 400
+    try:
+        weeks_arg = _weeks_arg(request.args.get("weeks", "8"))
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
 
     from trainmate import timeline
     payload = timeline.build_timeline_payload(db)
@@ -493,48 +346,135 @@ def get_timeline_png() -> Any:
     return app.response_class(png, mimetype="image/png")
 
 
-# --- Plan & Workout Generation ---
+# --- Intensity distribution (DESIGN_intensity_distribution.md) ---
 
-@app.route("/api/plan", methods=["POST"])
-def generate_plan() -> Any:
-    """API endpoint to generate the periodization plan (macro/meso strategy)."""
+@app.route("/api/zones", methods=["GET"])
+def get_zones() -> Any:
+    """Per-sport, per-zone time in zone over the displayed window — the structured form
+    of the `tm progress -z` tables (DESIGN_intensity_distribution.md §9.6/§9.8).
+
+    Which sports qualify, and the currency each is drawn in, come from
+    `intensity.window_sport_stats`/`select_zone_sports`/`zone_currency` — the same three
+    functions the CLI tables call, so a sport the terminal omits is omitted here for the
+    same reason and named in `omitted` rather than silently dropped.
+
+    Weeks at or before today carry what was MEASURED; weeks beyond it carry what the plan
+    PRESCRIBES (`future: true`), the data behind the CLI's ghost rows. A future week whose
+    plan was written in the other currency reports `currency_mismatch` instead of
+    converting — collapsing 7 power zones onto 5 HR ones would be banding by the back
+    door (§5).
+
+    Query: ?weeks=N|all (default 8), ?sport= (repeatable; overrides the volume filter),
+    ?currency=hr|power (the CLI's --hr/--power)."""
+    today = today_str()
     try:
-        data = request.json or {}
-        goal_id = data.get("goal_id")
-        if goal_id is not None:
-            goal_id = int(goal_id)
-        proposal = coach_service.plan_generate(objective_id=goal_id)
-        return jsonify({
-            "message": "Periodization plan generated and saved.",
-            "strategy": proposal['strategy'],
-            "mesocycles_count": len(proposal['mesocycles']),
-            "goal_id": (proposal['goal'] or {}).get('id'),
+        weeks_arg = _weeks_arg(request.args.get("weeks", "8"))
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+
+    forced = request.args.get("currency") or None
+    if forced and forced not in intensity.CURRENCY_BY_KEY:
+        return jsonify({"error": "currency must be 'hr' or 'power'"}), 400
+
+    explicit = [s for s in request.args.getlist("sport") if s]
+
+    from trainmate import timeline
+    payload = timeline.build_timeline_payload(db)
+    past, future, hidden = progression.select_weeks(payload["weeks"], weeks_arg, today)
+    weeks = past + future
+
+    stats = intensity.window_sport_stats(weeks)
+    selected, low_volume, no_zone_data = intensity.select_zone_sports(
+        explicit, list(config.user_profile.get("sport_preferences") or []), stats
+    )
+    window_seconds = sum(agg["seconds"] for agg in stats.values())
+
+    sports_out: List[Dict[str, Any]] = []
+    for sport in selected:
+        currency = intensity.zone_currency(stats, sport, forced)
+        if not currency:
+            continue
+        spec = intensity.CURRENCY_BY_KEY[currency]
+        agg = stats.get(sport) or {"seconds": 0.0, "coverage": {}}
+
+        weeks_out = []
+        for week in weeks:
+            is_future = week["week_commencing"] > today
+            rows_key = "planned_zone_rows" if is_future else "zone_rows"
+            row = next(
+                (r for r in (week.get(rows_key) or [])
+                 if r.sport == sport and r.currency == currency),
+                None,
+            )
+            # Three states, not two (§9.6): a week with no duration in this sport was not
+            # trained; a week with duration but nothing recorded in this currency is
+            # undercounted, and saying "not trained" there would invert §7's meaning.
+            trained = bool((week.get("sport_seconds") or {}).get(sport))
+            entry: Dict[str, Any] = {
+                "week_commencing": week["week_commencing"],
+                "meso_label": week.get("meso_label"),
+                "in_progress": bool(week.get("in_progress")),
+                "future": is_future,
+                "seconds": list(row.seconds) if row else None,
+                "trained": trained,
+                "undercounted": bool(row.undercounted) if row else (
+                    trained and not is_future
+                ),
+            }
+            if is_future and row is None:
+                # Planned in the other currency: offered as a fact, never converted (§9.8).
+                entry["currency_mismatch"] = any(
+                    r.sport == sport for r in (week.get("planned_zone_rows") or [])
+                )
+            weeks_out.append(entry)
+
+        sports_out.append({
+            "sport": sport,
+            "currency": currency,
+            "tag": spec.tag,
+            "zone_labels": list(spec.labels),
+            "coverage": (agg.get("coverage") or {}).get(currency, 0.0),
+            "sport_seconds": agg["seconds"],
+            "weeks": weeks_out,
         })
-    except Exception as e:
-        return jsonify({"error": strip_ansi(str(e))}), 500
+
+    return jsonify({
+        "window": {
+            "weeks": weeks_arg,
+            "hidden_weeks": hidden,
+            "window_seconds": window_seconds,
+            "today": today,
+        },
+        "sports": sports_out,
+        "omitted": {
+            "low_volume": low_volume,
+            "no_zone_data": no_zone_data,
+            "min_share": intensity.ZONE_SPORT_MIN_SHARE,
+        },
+    })
 
 
-@app.route("/api/plan/<int:goal_id>", methods=["DELETE"])
-def plan_rm(goal_id: int) -> Any:
-    """API endpoint to delete the periodization plan for a specific goal."""
-    try:
-        coach_service.plan_rm(goal_id)
-        msg = f"Periodization plan for goal {goal_id} deleted successfully."
-        return jsonify({"message": msg})
-    except Exception as e:
-        return jsonify({"error": strip_ansi(str(e))}), 500
+# --- Plan ---
 
-
-def _resolve_goal_id(raw: Any) -> Any:
-    """Resolves a goal id from a request payload/query, defaulting to the next active
-    goal (earliest target date) — mirrors the CLI's plan-command goal resolution."""
-    if raw is not None and raw != "":
-        return int(raw)
-    objectives = db.get_objectives(status='active')
-    if not objectives:
-        return None
-    objectives.sort(key=lambda x: str(x['target_date']))
-    return objectives[0]['id']
+@app.route("/api/plan", methods=["GET"])
+def get_plan() -> Any:
+    """The active periodization plan for a goal (mirrors `plan show`): the governing
+    macrocycle plus its mesocycle blocks. `?goal_id=` defaults to the next active goal."""
+    goal_id = _resolve_goal_id(request.args.get("goal_id"))
+    if goal_id is None:
+        return jsonify({"goal": None, "macrocycle": None, "mesocycles": []})
+    goal = db.get_objective(goal_id)
+    if not goal:
+        return jsonify({"error": f"Goal with ID {goal_id} not found."}), 404
+    macrocycle = db.get_macrocycle_for_objective(goal_id)
+    mesocycles = (
+        db.get_mesocycles_for_macrocycle(macrocycle['id']) if macrocycle else []
+    )
+    return jsonify({
+        "goal": goal,
+        "macrocycle": macrocycle,
+        "mesocycles": mesocycles,
+    })
 
 
 @app.route("/api/plan/versions", methods=["GET"])
@@ -547,11 +487,6 @@ def plan_versions() -> Any:
     goal = db.get_objective(goal_id)
     versions = db.get_macrocycle_versions(goal_id)
     return jsonify({"goal": goal, "versions": versions})
-
-
-def _version_arg(raw: Any) -> Any:
-    """A plan-version id from a query string, or None when omitted/blank."""
-    return int(raw) if raw is not None and raw != "" else None
 
 
 @app.route("/api/plan/diff", methods=["GET"])
@@ -583,176 +518,12 @@ def plan_diff_versions() -> Any:
     return jsonify({"goal": goal, "diff": diff})
 
 
-@app.route("/api/plan/rollback", methods=["POST"])
-def plan_rollback() -> Any:
-    """Restores a superseded plan version and its workouts (web equivalent of
-    `plan rollback`). Body: {goal_id?, version?}. Defaults to the previous version of
-    the next active goal. See DESIGN_plan_rollback.md."""
-    data = request.json or {}
-    goal_id = _resolve_goal_id(data.get("goal_id"))
-    if goal_id is None:
-        return jsonify({"error": "No goal to roll back."}), 400
-    version = data.get("version")
-    if version is not None and version != "":
-        version = int(version)
-    else:
-        version = None
-    try:
-        result = coach_service.plan_rollback(
-            objective_id=goal_id, target_macrocycle_id=version
-        )
-        return jsonify({
-            "message": (
-                f"Rolled back to plan ID {result['to']['id']} "
-                f"(was {result['from']['id']}). Restored "
-                f"{result['restored_workouts']} workout(s), archived "
-                f"{result['archived_workouts']}; Google Calendar updated."
-            ),
-            "to_id": result['to']['id'],
-            "from_id": result['from']['id'],
-            "restored_workouts": result['restored_workouts'],
-            "archived_workouts": result['archived_workouts'],
-        })
-    except ValueError as e:
-        return jsonify({"error": strip_ansi(str(e))}), 400
-    except Exception as e:
-        return jsonify({"error": strip_ansi(str(e))}), 500
-
-
 @app.route("/api/workouts/batches", methods=["GET"])
 def workout_batches() -> Any:
-    """Lists the archived workout batches a rollback can restore (web equivalent of
-    `workout batches`, see DESIGN_plan_rollback.md §9)."""
+    """Lists the archived workout batches a `workout rollback` could restore (web
+    equivalent of `workout batches`, see DESIGN_plan_rollback.md §9). Restoring one is a
+    CLI action."""
     return jsonify({"batches": db.get_archived_batches(from_date=today_str())})
-
-
-@app.route("/api/workouts/rollback", methods=["POST"])
-def workout_rollback() -> Any:
-    """Restores an archived batch of workouts, undoing a regeneration (web equivalent of
-    `workout rollback`). Body: {batch?} — an `archived_at` stamp, defaulting to the most
-    recently archived batch. Leaves the active plan version alone."""
-    data = request.json or {}
-    batch = data.get("batch") or None
-    try:
-        result = coach_service.workout_rollback(batch=batch)
-        return jsonify({
-            "message": (
-                f"Restored {result['restored_workouts']} workout(s) "
-                f"({result['first_date']} → {result['last_date']}), archived "
-                f"{result['archived_workouts']}; Google Calendar updated."
-            ),
-            **result,
-        })
-    except ValueError as e:
-        return jsonify({"error": strip_ansi(str(e))}), 400
-    except Exception as e:
-        return jsonify({"error": strip_ansi(str(e))}), 500
-
-
-@app.route("/api/macrocycles/<int:macro_id>/feedback", methods=["POST"])
-def save_macrocycle_feedback(macro_id: int) -> Any:
-    """API endpoint to save athlete feedback for a specific macrocycle."""
-    try:
-        data = request.json or {}
-        feedback = data.get("feedback", "")
-        db.update_macrocycle_feedback(macro_id, feedback)
-        return jsonify({"message": "Macrocycle feedback saved successfully."})
-    except Exception as e:
-        return jsonify({"error": strip_ansi(str(e))}), 500
-
-
-@app.route("/api/mesocycles/<int:meso_id>/feedback", methods=["POST"])
-def save_mesocycle_feedback(meso_id: int) -> Any:
-    """API endpoint to save athlete feedback for a specific mesocycle block."""
-    try:
-        data = request.json or {}
-        feedback = data.get("feedback", "")
-        db.update_mesocycle_feedback(meso_id, feedback)
-        return jsonify({"message": "Mesocycle feedback saved successfully."})
-    except Exception as e:
-        return jsonify({"error": strip_ansi(str(e))}), 500
-
-
-@app.route("/api/workouts/generate", methods=["POST"])
-def workout_generate() -> Any:
-    """API endpoint to generate workouts (microcycles) based on active strategy."""
-    try:
-        data = request.json or {}
-        goal_id = data.get("goal_id")
-        if goal_id is not None:
-            goal_id = int(goal_id)
-        reasoning, workouts = coach_service.workout_generate(objective_id=goal_id)
-        return jsonify({
-            "message": "Workouts generated and pushed to Google Calendar.",
-            "reasoning": reasoning,
-            "workouts_count": len(workouts)
-        })
-    except Exception as e:
-        return jsonify({"error": strip_ansi(str(e))}), 500
-
-
-# --- Adaptation ---
-
-@app.route("/api/adapt", methods=["POST"])
-def workout_adapt() -> Any:
-    """Runs the daily adaptation check (read-only). Returns the proposed workouts;
-    apply them via POST /api/adapt/apply. Mirrors the CLI `workout adapt` flow."""
-    data = request.json or {}
-    date_str = data.get("date") or today_str()
-    try:
-        reason, proposed, _new_constraints = coach_service.workout_adapt(date_str)
-        return jsonify({
-            "message": "Daily adaptation check finished.",
-            "reason": reason,
-            "change_needed": bool(proposed),
-            "workouts": proposed,
-        })
-    except Exception as e:
-        return jsonify({"error": strip_ansi(str(e))}), 500
-
-
-@app.route("/api/adapt/apply", methods=["POST"])
-def workout_adapt_apply() -> Any:
-    """Applies proposed adaptations from POST /api/adapt: saves them, cleans up the
-    overridden sessions, and syncs the affected range to Calendar."""
-    data = request.json or {}
-    proposed = data.get("workouts")
-    reason = data.get("reason", "")
-    if not proposed:
-        return jsonify({"error": "No proposed workouts to apply."}), 400
-    try:
-        all_dates = [w["date"] for w in proposed]
-        coach_service.workout_adapt_apply(
-            proposed, reason, min(all_dates), max(all_dates)
-        )
-        return jsonify({
-            "message": f"Applied {len(proposed)} adapted workout(s) and synced.",
-        })
-    except Exception as e:
-        return jsonify({"error": strip_ansi(str(e))}), 500
-
-
-@app.route("/api/workouts/push", methods=["POST"])
-def sync_calendar() -> Any:
-    """API endpoint to synchronize planned and adapted workouts with Google Calendar."""
-    planned_workouts = db.get_workouts(start_date=today_str())
-    # Push eligibility = anything not currently in sync with Calendar (ARCHITECTURE.md §5).
-    unsynced = [w for w in planned_workouts if calendar_status(w) != 'synced']
-
-    if not unsynced:
-        return jsonify({
-            "message": "No planned or modified workouts to sync.",
-            "synced_count": 0
-        })
-
-    try:
-        calendar_syncer.sync_multiple(unsynced)
-        return jsonify({
-            "message": "Google Calendar sync complete.",
-            "synced_count": len(unsynced)
-        })
-    except Exception as e:
-        return jsonify({"error": strip_ansi(str(e))}), 500
 
 
 # --- Coach Learnings ---
@@ -795,49 +566,58 @@ def get_learning_evidence(learning_id: int) -> Any:
     })
 
 
-@app.route("/api/learnings/<int:learning_id>", methods=["PUT", "DELETE"])
-def single_learning(learning_id: int) -> Any:
-    """Edit the text of, or delete, a single learning (mirrors `learnings edit`/`rm`)."""
-    learning = next((l for l in db.get_learnings() if l['id'] == learning_id), None)
-    if not learning:
-        return jsonify({"error": f"Learning {learning_id} not found."}), 404
+# --- Benchmarks (DESIGN_benchmark_workouts.md) ---
 
-    if request.method == "DELETE":
-        db.delete_learning(learning_id)
-        return jsonify({"message": f"Learning {learning_id} removed."})
+@app.route("/api/benchmarks", methods=["GET"])
+def get_benchmarks() -> Any:
+    """The benchmark logbook, newest first (mirrors `benchmark list`), plus the effective
+    threshold set those rows currently imply (§3.3).
 
-    data = request.json or {}
-    text = data.get("text")
-    if not text:
-        return jsonify({"error": "Missing 'text'."}), 400
-    db.update_learning(learning_id, text)
-    return jsonify({"message": f"Learning {learning_id} updated."})
+    Each row carries its display `formatted` value and the signed, direction-aware
+    `delta` against the next-older row of the same kind — via `benchmarks.with_previous`
+    and `format_delta`, so a quickened pace reads positive here exactly as it does in the
+    terminal (§3.2). Optional filters: ?sport=&kind=."""
+    sport = request.args.get("sport")
+    rows = db.get_benchmark_results(
+        sport_type=canonical_sport(sport) if sport else None,
+        anchor_kind=request.args.get("kind") or None,
+    )
+
+    out = []
+    for row, prev in benchmarks.with_previous(rows):
+        kind = row["anchor_kind"]
+        value = float(row["value"])
+        anchor = benchmarks.anchor_for_kind(kind)
+        out.append({
+            **row,
+            "label": anchor.label if anchor else kind,
+            "formatted": benchmarks.format_value(kind, value),
+            "delta": benchmarks.format_delta(kind, value, prev) if prev else None,
+            "improvement": (
+                benchmarks.is_improvement(kind, value, prev) if prev else None
+            ),
+        })
+
+    thresholds = db.latest_thresholds()
+    return jsonify({
+        "results": out,
+        "thresholds": [
+            {
+                "anchor_kind": kind,
+                "label": (
+                    benchmarks.anchor_for_kind(kind).label
+                    if benchmarks.anchor_for_kind(kind) else kind
+                ),
+                "value": value,
+                "formatted": benchmarks.format_value(kind, value),
+                "unit": benchmarks.unit_for_kind(kind),
+            }
+            for kind, value in sorted(thresholds.items())
+        ],
+    })
 
 
-@app.route("/api/learnings/<int:learning_id>/demote", methods=["POST"])
-def demote_learning(learning_id: int) -> Any:
-    """Accepts a pending confidence downgrade (mirrors `learnings demote`)."""
-    result = db.demote_learning(learning_id)
-    if result is None:
-        return jsonify({"message": "No pending demotion."})
-    if result == "retired":
-        return jsonify({"message": f"Learning {learning_id} retired."})
-    return jsonify({"message": f"Learning {learning_id} demoted to '{result}'."})
-
-
-@app.route("/api/learnings/<int:learning_id>/keep", methods=["POST"])
-def keep_learning(learning_id: int) -> Any:
-    """Dismisses + affirms a pending downgrade (mirrors `learnings keep`)."""
-    learning = next((l for l in db.get_learnings() if l['id'] == learning_id), None)
-    if not learning:
-        return jsonify({"error": f"Learning {learning_id} not found."}), 404
-    if not learning.get("proposed_confidence"):
-        return jsonify({"message": "No pending demotion to dismiss."})
-    db.keep_learning(learning_id)
-    return jsonify({"message": f"Learning {learning_id} kept; pending demotion dismissed."})
-
-
-# --- Activities, Metrics & Daily Context (read-only) ---
+# --- Activities, Metrics & Daily Context ---
 
 @app.route("/api/activities", methods=["GET"])
 def get_activities() -> Any:
@@ -849,11 +629,22 @@ def get_activities() -> Any:
 
 @app.route("/api/daily-context", methods=["GET"])
 def get_daily_context() -> Any:
-    """External daily-context signals (alcohol/sleep/stress, ingested from Calendar)
-    over a date range — see ARCHITECTURE.md §13."""
+    """External daily-context signals (alcohol/sleep/stress, ingested from Calendar or
+    authored with `context add`) over a date range — mirrors `context list`, see
+    ARCHITECTURE.md §13. Optional ?metric= restricts to one category."""
     start_date = request.args.get("start_date")
     end_date = request.args.get("end_date")
-    return jsonify(db.get_daily_context(start_date=start_date, end_date=end_date))
+    return jsonify(db.get_daily_context(
+        start_date=start_date, end_date=end_date,
+        metric=request.args.get("metric") or None,
+    ))
+
+
+@app.route("/api/daily-context/metrics", methods=["GET"])
+def get_context_metrics() -> Any:
+    """The distinct context metrics in use, with row counts and first/last dates
+    (mirrors `context list-metrics`) — the vocabulary behind the context charts."""
+    return jsonify({"metrics": db.list_context_metrics()})
 
 
 @app.route("/api/metrics", methods=["GET"])
@@ -867,15 +658,18 @@ def get_metrics() -> Any:
     return jsonify(metrics[-30:] if metrics else [])
 
 
-@app.route("/api/metrics/pull", methods=["POST"])
-def sync_metrics() -> Any:
-    """Garmin pulls are CLI-only (the web app is a pure reader, see
-    DESIGN_garmin_direct_pull.md §11). Garmin login can require an interactive MFA
-    prompt, so syncing must run in a terminal."""
+# --- Configuration (read-only) ---
+
+@app.route("/api/models", methods=["GET"])
+def get_models() -> Any:
+    """The configured LLM menu with the active entry marked (mirrors `model list`,
+    DESIGN_model_selection.md §3.3). Choosing one is `model set`, a CLI action."""
     return jsonify({
-        "error": "Garmin sync runs from the CLI, not the web app.",
-        "command": "python trainmate_cli.py data pull"
-    }), 409
+        "models": llm_models.list_models(),
+        "active": llm_models.active_model(),
+        "source": llm_models.active_source(),
+        "set_at": llm_models.stored_at(),
+    })
 
 
 if __name__ == "__main__":

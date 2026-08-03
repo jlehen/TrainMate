@@ -438,3 +438,43 @@ class Config:
 
 # Singleton instance
 config = Config()
+
+
+# Threshold anchors are excluded from the config fingerprint: they anchor per-workout zone
+# targets (recomputed from live values at every generation), not the phase structure. They
+# are snapshotted on the macrocycle and only flag the plan stale past a relative drift
+# tolerance (`coach.threshold_replan_pct`) — see service.config_changed() /
+# service.effective_thresholds(). Post-DESIGN_benchmark_workouts §3.4 only `max_hr` still
+# lives in config (lthr/ftp moved to the benchmark logbook); the other two names are kept
+# here so any legacy config that still carries them is excluded from the hash.
+PROFILE_THRESHOLD_FIELDS = ('max_hr', 'lthr', 'ftp')
+
+
+def plan_profile() -> Dict[str, Any]:
+    """The user_profile fields that shape the periodization strategy.
+
+    Single source of truth for the config_hash fingerprint. Excludes the physiological
+    thresholds (tolerance-checked separately, see above); every other profile field —
+    availability, target hours, preferences, injuries, equipment — is plan-shaping.
+    Deliberately NOT fingerprinted: prompt-context knobs such as
+    `coach.metrics_lookback_days`, which change what the coach *sees*, not what the plan
+    should be.
+    """
+    return {
+        k: v for k, v in config.user_profile.items()
+        if k not in PROFILE_THRESHOLD_FIELDS
+    }
+
+
+def plan_config_hash() -> str:
+    """Hash of the plan-shaping user config (see `plan_profile`).
+
+    Lives here, beside the config it fingerprints, rather than on the coaching engine:
+    the read-only web dashboard shows a "config changed since this plan" banner, and
+    reaching the engine for it would drag the LLM client and the Google Calendar
+    service-account credentials into a surface that writes to neither (ARCHITECTURE.md §8).
+    """
+    import hashlib
+    import json
+    serialized = json.dumps({'user_profile': plan_profile()}, sort_keys=True)
+    return hashlib.sha256(serialized.encode('utf-8')).hexdigest()

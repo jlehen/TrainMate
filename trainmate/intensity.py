@@ -256,6 +256,83 @@ def currency_by_sport(activities: Sequence[Dict[str, Any]]) -> Dict[str, str]:
     return out
 
 
+# A sport must hold this share of the window's duration to earn a table by default; the
+# rest are named in the footer, never silently dropped.
+ZONE_SPORT_MIN_SHARE = 0.10
+
+
+def window_sport_stats(weeks: List[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
+    """Per canonical sport over the displayed window: total duration and total recorded
+    seconds per currency — everything the sport filter, the 10% floor and the currency
+    choice read.
+
+    All three are computed over the DISPLAYED window, which is what the header's share
+    figure means. One consequence to expect rather than to fix: `--weeks all` can qualify
+    a different set of sports than the default does, and can draw one of them in a
+    different currency, because both rules read the window they are given (§9.6).
+    """
+    stats: Dict[str, Dict[str, Any]] = {}
+
+    def entry(sport: str) -> Dict[str, Any]:
+        return stats.setdefault(sport, {"seconds": 0.0, "zone_seconds": {}})
+
+    for week in weeks:
+        for sport, secs in (week.get("sport_seconds") or {}).items():
+            entry(sport)["seconds"] += secs
+        for row in week.get("zone_rows") or []:
+            zones = entry(row.sport)["zone_seconds"]
+            zones[row.currency] = zones.get(row.currency, 0.0) + row.total
+    for agg in stats.values():
+        agg["coverage"] = {
+            cur: (secs / agg["seconds"] if agg["seconds"] else 0.0)
+            for cur, secs in agg["zone_seconds"].items()
+        }
+    return stats
+
+
+def select_zone_sports(
+    explicit: Optional[Sequence[str]], preferences: Sequence[str],
+    stats: Dict[str, Dict[str, Any]],
+) -> Tuple[List[str], List[str], List[str]]:
+    """`(sports, omitted_low_volume, omitted_no_zone_data)` — which sports get a table.
+
+    Naming sports explicitly overrides all three filters; the default is every
+    `sport_preferences` entry, **in config order** (the athlete's own priority list, and
+    stable across invocations — a screen someone checks daily must not reshuffle its rows
+    because last week's volume moved) that has zone data in the window and holds at least
+    `ZONE_SPORT_MIN_SHARE` of its duration.
+    """
+    if explicit:
+        return [canonical_sport(s) for s in explicit], [], []
+    total = sum(agg["seconds"] for agg in stats.values())
+    sports, low, no_data = [], [], []
+    for name in preferences:
+        sport = canonical_sport(name)
+        agg = stats.get(sport)
+        if not agg or not agg["seconds"]:
+            continue
+        if not any(agg["zone_seconds"].values()):
+            no_data.append(sport)
+        elif total and agg["seconds"] / total < ZONE_SPORT_MIN_SHARE:
+            low.append(sport)
+        else:
+            sports.append(sport)
+    return sports, low, no_data
+
+
+def zone_currency(
+    stats: Dict[str, Dict[str, Any]], sport: str, forced: Optional[str] = None
+) -> Optional[str]:
+    """The currency one sport's table is drawn in. `forced` (`--power`/`--hr`) wins where
+    that currency has data, and has no effect on a sport that has only the other."""
+    agg = stats.get(sport)
+    if not agg:
+        return None
+    if forced and agg["zone_seconds"].get(forced):
+        return forced
+    return pick_currency(agg["coverage"])
+
+
 # The window the planning currency is chosen over. Authoring has no window of its own —
 # at generation time there is only forward plan — so it borrows the display default, and
 # the ordinary case agrees by construction (§9.8).

@@ -87,8 +87,9 @@ classes themselves.
 - **`trainmate/cli/`** — per-command-family handler modules (`run_*()`): `status`,
   `progress`, `goals`, `constraints`, `benchmarks`, `context`, `learnings`,
   `plans`, `workouts`, `data`, plus shared `common`.
-- **`trainmate_web.py`** — Flask REST API; thin handler functions calling `db`,
-  `coach_service`, `calendar_syncer` (pure reader — never pulls).
+- **`trainmate_web.py`** — Flask REST API behind the dashboard. **Read-only**: GET
+  handlers over `db` and the shared pure modules, no writes, no Garmin, no LLM, no
+  Calendar ([§8](#8-web-api-endpoints)).
 - **`trainmate_bot.py`** — Telegram chat front-end. Launch with `./tm-bot`. Each
   fact below:
   - **Model:** a message is treated as a CLI command line (leading `/` optional) and
@@ -219,13 +220,14 @@ flow for each lives in [§10](#10-key-data-flows).
 | Backward analysis (bootstrap/reflect) | `coach/service.py:_run_workout_analysis`, `coach/engine.py:_data_analyze_logic` ([§10](#data-analysis-data-bootstrap--data-reflect)) |
 | Garmin pull / metrics / load model | `trainmate/garmin.py` (`pull`, `ensure_data`, `activity_load`), see [§12](#12-sports-science--coaching-mathematics) |
 | Progress timeline / PMC projection | `trainmate/progression.py` (pure math), `trainmate/timeline.py` (shared row-fetch), `trainmate/chart.py` (PNG), `cli/progress.py` (text), `/api/timeline.png` in `trainmate_web.py`, see [§12](#fitnessfatigueform-pmc-model), DESIGN_progress_timeline.md |
-| Intensity distribution / time in zone | `trainmate/intensity.py` (aggregation + prompt-width rendering), `coach/service/context.py` (`_intensity_block_context` for adapt, `_intensity_history_context` for the strategy prompt, `_planning_zone_currencies` for §9.8), `cli/status.py`, `cli/progress.py` (the weekly grid — it shares the load table's week column and 48-column budget), `progression.weekly_aggregates` (where the rows join the payload), `cli/data.py` (`--zones`), DESIGN_intensity_distribution.md. Undercount markers are proportional: `intensity.judgeable` (`config.zone_min_activity_minutes`) withholds a too-short session's vote, and the coverage bar is per sport (`intensity.COVERAGE_MIN_BY_SPORT`, overridable via `config.zone_coverage_display_min_by_sport`) because rest between sets is not a failed recording |
+| Intensity distribution / time in zone | `trainmate/intensity.py` (aggregation + prompt-width rendering + which sports qualify and in which currency — `window_sport_stats`/`select_zone_sports`/`zone_currency`, shared by the CLI tables and `/api/zones`), `coach/service/context.py` (`_intensity_block_context` for adapt, `_intensity_history_context` for the strategy prompt, `_planning_zone_currencies` for §9.8), `cli/status.py`, `cli/progress.py` (the weekly grid — it shares the load table's week column and 48-column budget), `progression.weekly_aggregates` (where the rows join the payload), `cli/data.py` (`--zones`), `/api/zones` + the Progress tab's tables in `static/app.js`, DESIGN_intensity_distribution.md. Undercount markers are proportional: `intensity.judgeable` (`config.zone_min_activity_minutes`) withholds a too-short session's vote, and the coverage bar is per sport (`intensity.COVERAGE_MIN_BY_SPORT`, overridable via `config.zone_coverage_display_min_by_sport`) because rest between sets is not a failed recording |
 | Planned time in zone (a session's intensity target) | `db/base.py` (`planned_zone_currency`, `planned_zone1..7_sec` on `workouts`), `db/workouts.py:save_workout`, `intensity.parse_planned_zones` / `format_planned_zones`, `coach/engine/workouts.py` (`_planned_zone_task`, `_planned_zone_fields` — both prompts), `google_calendar.py` + `coach/formatting.py` (rendered from the columns, never stored), DESIGN_intensity_distribution.md §9.8 |
 | Calendar push / daily-context ingest | `trainmate/google_calendar.py`, see [§13](#13-daily-context-calendar-ingest) |
 | Workout state (modified/calendar/removed/archived) | `trainmate/modification_state.py`, `trainmate/calendar_state.py`, `db/workouts.py` ([§5](#workout-state--four-orthogonal-axes-not-one-enum)) |
 | A CLI command                    | `trainmate/cli/<family>.py` (`run_*`), dispatcher in `trainmate_cli.py` ([§7](#7-cli-commands-reference)) |
 | A message telling the athlete to run something | wrap the command in `util.cmd()`, nested *inside* the line's colour call, so it renders as the bright shade of that colour |
-| A web endpoint                   | `trainmate_web.py` (thin wrapper over `coach_service`/`db`) ([§8](#8-web-api-endpoints)) |
+| A web *view* of existing data    | a GET in `trainmate_web.py` + a panel in `static/app.js` ([§8](#8-web-api-endpoints)) |
+| A web endpoint that would *write* | it does not go in the web app — add the CLI command instead ([§8](#8-web-api-endpoints)) |
 | The Telegram bot                 | `trainmate_bot.py` (runs the CLI as a subprocess) ([§2](#entry-points)) |
 | DB schema / a new column         | the relevant `db/*.py` mixin + the table in [§5](#5-database-schema) |
 
@@ -1146,67 +1148,93 @@ destructive command.
 Flask server at `trainmate_web.py`, runs on port 5000. Static files served from
 `static/`.
 
-The API tracks the CLI feature set (mirrors `data`/`workout`/`learnings` flows);
-all mutating handlers stay thin wrappers over `coach_service`/`db`/`calendar_syncer`.
-It remains a **pure reader** w.r.t. Garmin (never calls `ensure_data`/`pull`); the
-calendar *writes* it does perform (workout sync, swap/remove/restore/adapt-apply)
-use the non-interactive service account.
+**The dashboard is read-only.** It reads the database and renders it: it never writes a
+row, never calls Garmin, never calls the LLM, and never touches Google Calendar. Every
+one of those is a CLI (or bot) action. The rule is enforced, not merely documented — a
+`before_request` guard 405s every mutating verb, and `tests/test_web.py::TestReadOnly`
+fails if any route is registered with one.
 
-The **front-end** (`static/index.html` + `static/app.js`) is organized into five
-top-level tabs — **Dashboard** (status/actions/metrics/strategy + goal & life-event
-CRUD + plan delete; the strategy card's "Plan versions, compare & rollback" disclosure
-lists kept versions, each superseded one offering *Compare* — rendering
-`/api/plan/diff` into the `#plan-diff-panel` — and *Restore*), **Workouts** (date/sport/removed-filtered list with derived
-state markers, manual add, swap, remove/restore, and the compare/adherence view),
-**Learnings** (filterable manager with per-week evidence, edit, demote/keep),
-**History** (read-only activities/metrics/daily-context tables), and **Progress**
-(an `<img>` framing the server-rendered `/api/timeline.png` chart + quick-range
-buttons `8w`/`26w`/`all`, lazy-loaded like the other tabs; the interactive uPlot
-tab is a follow-on, DESIGN_progress_timeline.md §7.3/§8.5) — and surfaces every
-endpoint below. The deliberately-CLI-only flows (`data
-bootstrap`/`reflect` and
-Garmin `data pull`) are not web actions; the UI shows the command to run instead
-(interactive / MFA-bound, DESIGN_garmin_direct_pull.md §11). `GET /api/workouts`
-annotates each row with derived `calendar_status` + `modification_status` (via
-`_annotate_workout`) so the front-end renders the same `[SYNCED]`/`[ADAPTED]`/etc.
-markers as `workout list` without re-deriving the rules (§5).
+That is a deliberate demotion from the previous contract ("the API tracks the CLI feature
+set"), which decayed silently: parity was achieved once, in June 2026, and every feature
+added CLI-first afterwards — daily-context authoring, the benchmark logbook, model
+selection — was simply missing from the web with nothing to signal it. A surface that
+only reads has no parity to lose. New CLI commands add a *view* here when their data is
+worth looking at, and cost nothing when it is not.
 
-| Method      | Path                            | Description                                  |
-|-------------|---------------------------------|----------------------------------------------|
-| GET         | `/api/status`                   | Active goal, latest metrics, coach learnings (under `coach_learnings.learnings` + `.summary`), macrocycle+mesocycles, `sync_state` (data freshness) |
-| GET/POST    | `/api/objectives`               | List all / create objective                  |
-| DELETE/PUT  | `/api/objectives/<id>`          | Delete or update objective                   |
-| GET/POST    | `/api/constraints`              | List active/upcoming directives / create one (supersedes `/api/life-events`) |
-| DELETE/PUT  | `/api/constraints/<id>`         | Delete or update a directive                 |
-| GET/POST    | `/api/workouts`                 | List workouts (`?start_date=&end_date=&sport_type=&include_removed=`) / add a session (`{date, sport_type, title, description, duration_minutes?, rpe?, tss?, reason?}`). Listed rows carry derived `calendar_status` + `modification_status`. |
-| GET         | `/api/workouts/compare`         | Plan-vs-actual adherence (`workout compare`); pure reader, no `ensure_data`. `?start_date=&end_date=&sport=` (default 14-day lookback, end capped at today) → `{filters, days[], discrepancies[], informational[]}` |
-| POST        | `/api/workouts/<id>/remove`     | Soft-remove a workout (`{reason?}`)          |
-| POST        | `/api/workouts/<id>/restore`    | Restore a soft-removed workout               |
-| POST        | `/api/workouts/swap`            | Swap two workouts (`{ops:[{id,new_date}], reason, force?, no_sync?}`); returns `{warnings}` unapplied unless `force` |
-| GET         | `/api/workouts/batches`         | List archived workout batches, newest first (`{batches:[{archived_at, workouts, restorable, first_date, last_date, macrocycle_ids}]}`) |
-| POST        | `/api/workouts/rollback`        | Restore an archived batch, archiving the upcoming sessions (`{batch?}` — an `archived_at` stamp, default the newest); leaves the plan version alone (DESIGN_plan_rollback §9) |
-| POST        | `/api/plan`                     | Generate periodization plan (`{goal_id?}`)   |
-| GET         | `/api/plan/versions`            | List plan versions for a goal (`?goal_id=`; active + superseded) |
-| GET         | `/api/plan/diff`                | Compare two plan versions (`?goal_id=&from_version=&to_version=`; defaults to previous vs active) → `{goal, diff}`, the same `plan_diff.diff_plans` structure the CLI renders. `{error, code}` + 400/404 when the pair cannot be formed |
-| POST        | `/api/plan/rollback`            | Restore a plan version + its workouts (`{goal_id?, version?}`; DESIGN_plan_rollback) |
-| DELETE      | `/api/plan/<goal_id>`           | Delete plan for goal (all versions)          |
-| POST        | `/api/macrocycles/<id>/feedback`| Save macrocycle feedback (`{feedback}`)      |
-| POST        | `/api/mesocycles/<id>/feedback` | Save mesocycle feedback (`{feedback}`)       |
-| POST        | `/api/workouts/generate`        | Generate workouts (`{goal_id?}`); eager — archives old + pushes new to Calendar |
-| POST        | `/api/adapt`                    | Run daily adaptation check (read-only; `{date?}` → `{reason, change_needed, workouts}`) |
-| POST        | `/api/adapt/apply`              | Apply proposed adaptations + sync (`{workouts, reason}`) |
-| POST        | `/api/workouts/push`            | Sync workouts to Google Calendar             |
-| GET         | `/api/learnings`                | List coach learnings (`?sport=&confidence=&dormant=`) + `summary` |
-| GET         | `/api/learnings/<id>/evidence`  | Per-week evidence basis (supporting/contra)  |
-| PUT/DELETE  | `/api/learnings/<id>`           | Edit text / delete a learning                |
-| POST        | `/api/learnings/<id>/demote`    | Accept a pending confidence downgrade        |
-| POST        | `/api/learnings/<id>/keep`      | Dismiss + affirm a pending downgrade         |
-| GET         | `/api/timeline.png`             | Progress timeline as a PNG image (same §7.2 renderer as the bot photo): merged past/planned load + projected CTL/ATL/TSB. `?weeks=N` (default 8, ≥1 else 400; `all` = full history) re-windows the past half. Pure reader, not cached. matplotlib absent → 503 with install hint. The JSON payload endpoint ships with the interactive tab follow-on (DESIGN_progress_timeline.md §6/§8.5) |
-| GET         | `/api/activities`               | Completed activities (`?start_date=&end_date=`)|
-| GET         | `/api/daily-context`            | Daily-context signals (`?start_date=&end_date=`)|
-| POST        | `/api/metrics/pull`             | Returns 409 — Garmin pulls are CLI-only      |
-| GET         | `/api/metrics`                  | Cached metrics (range, else last 30 days)    |
+Consequences worth having: no request can leave the database in a state the CLI did not
+put it in, so the app is safe to leave running and cannot race the CLI or the bot over a
+workout row; and it needs neither the Calendar service-account credentials nor an LLM key
+to start, because it imports neither `google_calendar` nor `coach_service`. The one thing
+it did need from the coaching engine — the plan-shaping config fingerprint behind the
+"config changed" banner — now lives in `config.plan_config_hash()`, which the engine
+delegates to, so the two cannot drift.
 
+The **front-end** (`static/index.html` + `static/app.js`) is organized into six
+top-level tabs, all lazy-loaded on first show:
+
+- **Dashboard** — status, recovery/load metrics, sync freshness, coach-memory summary,
+  objective and constraint listings, the active LLM (`model list`), and the strategy card
+  (philosophy, the goals/constraints snapshot the plan was generated from, athlete
+  feedback, the mesocycle timeline, and a "Plan versions & compare" disclosure whose
+  superseded entries render `/api/plan/diff` into `#plan-diff-panel`).
+- **Workouts** — date/sport/removed-filtered list with the derived state markers, the
+  compare/adherence view, and the archived-batch listing.
+- **Progress** — an `<img>` framing the server-rendered `/api/timeline.png` chart with
+  `8w`/`26w`/`all` quick ranges (DESIGN_progress_timeline.md §7.3/§8.5), plus the **time
+  in zone** tables: the web form of `tm progress -z`, one table per qualifying sport,
+  measured behind today and prescribed ahead of it, each week also drawn as a stacked
+  proportion bar (DESIGN_intensity_distribution.md §9.6/§9.8).
+- **Benchmarks** — the current effective threshold set and the logbook, newest first,
+  each row carrying its direction-aware delta against the previous row of the same kind
+  (DESIGN_benchmark_workouts.md §3.2/§6).
+- **Learnings** — filterable list with per-week evidence.
+- **History** — activities and recovery-metric tables, and the **daily-context**
+  visualisation: the metric vocabulary (`context list-metrics`) as chips, then one
+  calendar strip per metric shaded within that metric's own range, over the raw rows.
+
+Panels that used to carry a button now name the command that does the job
+(`tm plan generate`, `tm workout swap`, `tm learnings demote`, …), including the
+long-standing CLI-only flows `data pull`/`bootstrap`/`reflect` (interactive / MFA-bound,
+DESIGN_garmin_direct_pull.md §11). Sport filter dropdowns are built from the sports
+actually present in the data rather than a hardcoded `<option>` list — the old list had
+itself fallen behind the canonical sports.
+
+Endpoints delegate rather than re-derive, so the two surfaces cannot disagree:
+`GET /api/workouts` annotates rows with `calendar_status` + `modification_status` (§5),
+`/api/workouts/compare` reuses `analyze_adherence`, `/api/plan/diff` returns
+`plan_diff.diff_plans` verbatim, and `/api/zones` picks its sports and currencies with
+`intensity.window_sport_stats`/`select_zone_sports`/`zone_currency` — the same three
+functions the CLI tables call, which moved from `cli/progress.py` into `intensity.py` for
+exactly that reason.
+
+| Method | Path                            | Description                                  |
+|--------|---------------------------------|----------------------------------------------|
+| GET    | `/api/status`                   | Active goal, latest metrics, coach learnings (under `coach_learnings.learnings` + `.summary`), macrocycle+mesocycles, `config_mismatch`, `sync_state` (data freshness) |
+| GET    | `/api/objectives`               | All objectives (`goal list`)                 |
+| GET    | `/api/constraints`              | Active + upcoming directives (`constraint list`) |
+| GET    | `/api/workouts`                 | List workouts (`?start_date=&end_date=&sport_type=&include_removed=`). Rows carry derived `calendar_status` + `modification_status`. |
+| GET    | `/api/workouts/compare`         | Plan-vs-actual adherence (`workout compare`); no `ensure_data`. `?start_date=&end_date=&sport=` (default 14-day lookback, end capped at today) → `{filters, days[], discrepancies[], informational[]}` |
+| GET    | `/api/workouts/batches`         | Archived workout batches, newest first (`{batches:[{archived_at, workouts, restorable, first_date, last_date, macrocycle_ids}]}`); restoring one is `workout rollback` |
+| GET    | `/api/plan`                     | Active plan for a goal (`plan show`): `?goal_id=` (default next active) → `{goal, macrocycle, mesocycles}` |
+| GET    | `/api/plan/versions`            | Plan versions for a goal (`?goal_id=`; active + superseded) |
+| GET    | `/api/plan/diff`                | Compare two plan versions (`?goal_id=&from_version=&to_version=`; defaults to previous vs active) → `{goal, diff}`, the same `plan_diff.diff_plans` structure the CLI renders. `{error, code}` + 400/404 when the pair cannot be formed |
+| GET    | `/api/zones`                    | Per-sport, per-zone time in zone (`progress -z`). `?weeks=N\|all` (default 8), `?sport=` (repeatable, overrides the volume filter), `?currency=hr\|power` → `{window, sports[{sport, currency, zone_labels, coverage, weeks[]}], omitted}`. Weeks past today carry the *prescribed* zones (`future: true`); a future week planned in the other currency reports `currency_mismatch` rather than converting (§9.8) |
+| GET    | `/api/benchmarks`               | Benchmark logbook newest first + current thresholds (`benchmark list`). `?sport=&kind=`; each row carries `formatted`, a direction-aware `delta` vs the previous row of its kind, and `improvement` |
+| GET    | `/api/learnings`                | List coach learnings (`?sport=&confidence=&dormant=`) + `summary` |
+| GET    | `/api/learnings/<id>/evidence`  | Per-week evidence basis (supporting/contra)  |
+| GET    | `/api/timeline.png`             | Progress timeline as a PNG image (same §7.2 renderer as the bot photo): merged past/planned load + projected CTL/ATL/TSB. `?weeks=N` (default 8, ≥1 else 400; `all` = full history) re-windows the past half. Not cached. matplotlib absent → 503 with install hint |
+| GET    | `/api/activities`               | Completed activities (`?start_date=&end_date=`) |
+| GET    | `/api/daily-context`            | Daily-context signals (`context list`; `?start_date=&end_date=&metric=`) |
+| GET    | `/api/daily-context/metrics`    | Distinct context metrics with counts + first/last date (`context list-metrics`) |
+| GET    | `/api/metrics`                  | Cached metrics (range, else last 30 days)    |
+| GET    | `/api/models`                   | Configured LLM menu with the active entry marked (`model list`) → `{models, active, source, set_at}` |
+
+Every other verb on every path returns **405** `{error, method, path}`.
+
+Writes live in the CLI: `goal`/`constraint`/`context`/`benchmark` authoring,
+`plan generate`/`rollback`/`feedback`, `workout add`/`swap`/`rm`/`restore`/`adapt`/
+`generate`/`push`/`rollback`, `learnings edit`/`demote`/`keep`/`rm`, `model set`, and
+`data pull`/`bootstrap`/`reflect`.
 
 ---
 
@@ -1726,8 +1754,11 @@ venv/bin/python -m unittest discover -s tests -p "test_*.py"
 |                                | and the 48-column width budget (via `visible_len`)               |
 | `tests/test_pmc.py`            | `compute_pmc` (also): `seed=(0,0)` reproduces from-zero, split/re- |
 |                                | fold reproduces the unsplit series exactly, full-precision output |
-| `tests/test_web.py`            | (also) `GET /api/timeline.png`: PNG magic bytes, `?weeks`         |
-|                                | validation, matplotlib-absent 503, payload shape via the shared builder |
+| `tests/test_web.py`            | (also) the read-only invariant (every route GET-only, mutating   |
+|                                | verbs 405, no Calendar/LLM import), the read views added with it |
+|                                | (benchmarks, context vocabulary, models, plan show, zones), and  |
+|                                | `GET /api/timeline.png`: PNG magic bytes, `?weeks` validation,   |
+|                                | matplotlib-absent 503, payload shape via the shared builder      |
 | `tests/test_utils.py`          | `util.py` helpers (text wrapping, ANSI width, ACWR coloring)     |
 
 Tests inject a fresh in-memory SQLite DB by assigning `test_db` to module-level

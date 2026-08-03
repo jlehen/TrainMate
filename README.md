@@ -99,8 +99,9 @@ TrainMate consists of three interfaces built on a unified coaching logic
 and SQLite database:
 1. **Command Line Interface (`trainmate_cli.py`)**: A rich CLI for managing
    goals, generating plans, syncing data, and viewing status.
-2. **Web API (`trainmate_web.py`)**: A Flask-based REST API serving a web
-   frontend for visual management.
+2. **Web dashboard (`trainmate_web.py`)**: A Flask-served, **read-only** view of
+   your training — status, workouts, plan, time in zone, benchmarks, learnings and
+   history. It never changes anything; every action lives in the CLI.
 3. **Telegram bot (`trainmate_bot.py`)**: A chat front-end that runs the same
    CLI commands from your phone (see [Running the Telegram bot](#running-the-telegram-bot)).
 
@@ -279,6 +280,18 @@ To start the Flask server locally:
 python trainmate_web.py
 ```
 Then visit `http://127.0.0.1:5000` in your browser.
+
+The dashboard is **read-only** — it shows what is in the database and nothing more.
+It never writes a row, pulls from Garmin, calls the LLM or touches your calendar, so
+it is safe to leave running and cannot race the CLI or the bot. Six tabs: Dashboard
+(status, metrics, objectives, constraints, strategy, active model), Workouts (schedule
++ plan-vs-actual compare), Progress (the timeline chart + per-sport time in zone),
+Benchmarks (thresholds + logbook), Learnings (with evidence), and History (activities,
+recovery metrics, and a daily-context heat strip).
+
+Anything that changes something is a CLI command, and each panel names the one it
+wants — `tm goal add`, `tm plan generate`, `tm workout swap`, `tm learnings demote`,
+`tm benchmark record`, `tm context add`, `tm model set`, `tm data pull`.
 
 ## Running the Telegram bot
 

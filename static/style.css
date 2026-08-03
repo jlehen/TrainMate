@@ -1444,3 +1444,117 @@ header {
    follow-on (§8.5), so the bar/legend styles it needed are gone with it. */
 .progress-range-btn.active { background: var(--gradient-primary); color: #fff; border-color: transparent; }
 .progress-image { width: 100%; max-width: 100%; height: auto; display: block; border-radius: var(--radius-md, 8px); }
+
+/* --- READ-ONLY DASHBOARD (ARCHITECTURE.md §8) --- */
+.readonly-chip {
+    display: inline-flex; align-items: center; gap: 0.3rem;
+    margin-left: 0.5rem; padding: 0.1rem 0.45rem;
+    border-radius: 999px; font-size: 0.65rem; letter-spacing: 0.04em;
+    text-transform: uppercase;
+    background: rgba(99,102,241,0.12); border: 1px solid rgba(99,102,241,0.28);
+    color: var(--accent-cyan);
+}
+
+/* --- COACHING MODEL (`model list`) --- */
+.model-active { font-size: 0.85rem; margin-bottom: 0.5rem; color: var(--text-secondary); }
+.model-active code, .model-row code { color: var(--accent-cyan); font-size: 0.78rem; }
+.model-row {
+    display: flex; align-items: center; gap: 0.5rem;
+    padding: 0.3rem 0.5rem; border-radius: 8px; font-size: 0.8rem;
+}
+.model-row.is-active { background: rgba(16,185,129,0.08); }
+.model-num {
+    min-width: 1.4rem; text-align: right;
+    color: var(--text-muted); font-variant-numeric: tabular-nums;
+}
+
+/* --- TIME IN ZONE (DESIGN_intensity_distribution.md §9.6) --- */
+.zone-table-wrap { margin-bottom: 1.5rem; }
+.zone-head {
+    display: flex; align-items: baseline; gap: 0.6rem;
+    flex-wrap: wrap; margin-bottom: 0.4rem;
+}
+.zone-sport {
+    font-family: var(--font-heading); font-weight: 600;
+    text-transform: capitalize; font-size: 0.95rem;
+}
+.zone-table td, .zone-table th { font-variant-numeric: tabular-nums; }
+.zone-table .zone-week { white-space: nowrap; color: var(--text-secondary); }
+/* Ahead of today the cells are what the plan prescribes, not what was measured (§9.8). */
+.zone-row.future { opacity: 0.62; font-style: italic; }
+.zone-row.current .zone-week { color: var(--accent-cyan); }
+.zone-mark { margin-left: 0.25rem; color: var(--accent-gold); font-weight: 700; cursor: help; }
+.zone-bar-cell { width: 34%; min-width: 120px; }
+.zone-bar {
+    display: flex; height: 9px; width: 100%;
+    border-radius: 999px; overflow: hidden; background: rgba(255,255,255,0.05);
+}
+.zone-bar.empty { background: rgba(255,255,255,0.03); }
+.zone-seg { display: block; height: 100%; }
+/* Cool through warm as intensity climbs — Z1 easiest, Z7 hardest. */
+.zone-seg.z1 { background: #38bdf8; }
+.zone-seg.z2 { background: #22c55e; }
+.zone-seg.z3 { background: #a3e635; }
+.zone-seg.z4 { background: #facc15; }
+.zone-seg.z5 { background: #fb923c; }
+.zone-seg.z6 { background: #f87171; }
+.zone-seg.z7 { background: #e879f9; }
+.zone-legend { margin-top: 0.5rem; }
+
+/* --- BENCHMARKS (DESIGN_benchmark_workouts.md) --- */
+.threshold-strip { display: flex; flex-wrap: wrap; gap: 0.75rem; }
+.threshold-box {
+    flex: 1 1 130px; padding: 0.7rem 0.9rem;
+    border-radius: 12px; background: rgba(255,255,255,0.03);
+    border: 1px solid var(--card-border);
+}
+.threshold-kind { font-size: 0.7rem; color: var(--text-muted); text-transform: uppercase; }
+.threshold-value {
+    font-family: var(--font-heading); font-size: 1.35rem; font-weight: 700;
+    color: var(--text-primary);
+}
+
+.bm-row {
+    padding: 0.6rem 0.25rem;
+    border-bottom: 1px solid var(--card-border);
+}
+.bm-row:last-child { border-bottom: none; }
+.bm-kind { font-weight: 600; }
+.bm-value { font-family: var(--font-heading); font-size: 1.05rem; }
+/* The sign is already direction-aware, so a quickened pace is `up` and green (§3.2). */
+.bm-delta { font-size: 0.8rem; font-weight: 600; margin-left: 0.35rem; }
+.bm-delta.up { color: var(--accent-green); }
+.bm-delta.down { color: var(--accent-red); }
+
+/* --- DAILY CONTEXT VISUALISATION (`context list`) --- */
+.context-vocab { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-bottom: 0.9rem; }
+.ctx-chip {
+    padding: 0.2rem 0.55rem; border-radius: 999px; font-size: 0.75rem;
+    background: rgba(255,255,255,0.04); border: 1px solid var(--card-border);
+    color: var(--text-secondary); cursor: help;
+}
+.ctx-chip-count { color: var(--accent-cyan); font-weight: 600; margin-left: 0.2rem; }
+.context-chart { margin-bottom: 0.75rem; }
+.ctx-row { display: flex; align-items: center; gap: 0.6rem; margin-bottom: 0.3rem; }
+.ctx-label {
+    flex: 0 0 7.5rem; font-size: 0.78rem; color: var(--text-secondary);
+    text-align: right; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.ctx-strip { display: flex; gap: 2px; flex: 1 1 auto; overflow-x: auto; }
+.ctx-cell {
+    flex: 1 0 6px; height: 15px; border-radius: 3px;
+    background: rgba(255,255,255,0.04); cursor: help;
+}
+/* Each metric is shaded within its own range: sleep hours and units of alcohol share
+   no scale, so one global ramp would be a false comparison. */
+.ctx-cell.lvl1 { background: rgba(56,189,248,0.25); }
+.ctx-cell.lvl2 { background: rgba(56,189,248,0.42); }
+.ctx-cell.lvl3 { background: rgba(56,189,248,0.60); }
+.ctx-cell.lvl4 { background: rgba(56,189,248,0.78); }
+.ctx-cell.lvl5 { background: rgba(56,189,248,0.95); }
+.ctx-axis { margin-top: 0.4rem; }
+
+/* --- PLAN / BLOCK FEEDBACK (read-only; written with `tm plan feedback`) --- */
+.strategy-feedback { margin: 0.5rem 0 0.75rem 0; }
+.cycle-details-feedback { margin-top: 0.75rem; }
+.bm-main { margin-bottom: 0.15rem; }

@@ -9,6 +9,7 @@ from trainmate.util import (
 )
 from trainmate.cli.common import fmt_date
 from trainmate.sports import canonical_sport
+from trainmate import benchmarks
 from trainmate.benchmarks import (
     ANCHOR_KINDS, LOGBOOK_KINDS, anchors_for_sport,
     unit_for_kind, format_value, format_delta, is_improvement,
@@ -158,18 +159,7 @@ def run_benchmark_list(args: argparse.Namespace) -> None:
         ))
         return
 
-    # For a per-row delta, compare each result to the next-older result OF THE SAME KIND.
-    # Rows arrive newest-first; walk each kind's series to find the predecessor.
-    by_kind: dict = {}
-    for r in rows:
-        by_kind.setdefault(r["anchor_kind"], []).append(r)  # already newest-first
-
-    for r in rows:
-        series = by_kind[r["anchor_kind"]]
-        idx = series.index(r)
-        prev_value = (
-            float(series[idx + 1]["value"]) if idx + 1 < len(series) else None
-        )
+    for r, prev_value in benchmarks.with_previous(rows):
         print(_benchmark_line(r, prev_value))
         if r.get("note"):
             print(format_labeled_block("  Note:", r["note"]))

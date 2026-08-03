@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>TrainMate - AI Athletic Coach</title>
+    <title>TrainMate - Training Dashboard</title>
     <!-- Google Fonts -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -23,7 +23,7 @@
                 <i class="fa-solid fa-bolt-lightning logo-icon"></i>
                 <div class="logo-text">
                     <h1>TrainMate</h1>
-                    <span>AI Athletic Coach & Planner</span>
+                    <span>Training Dashboard <span class="readonly-chip"><i class="fa-solid fa-eye"></i> read-only</span></span>
                 </div>
             </div>
 
@@ -38,44 +38,23 @@
         <nav class="main-tabs">
             <button class="main-tab-btn active" data-tab="view-dashboard" onclick="switchMainTab('view-dashboard')"><i class="fa-solid fa-gauge-high"></i> Dashboard</button>
             <button class="main-tab-btn" data-tab="view-workouts" onclick="switchMainTab('view-workouts')"><i class="fa-solid fa-calendar-days"></i> Workouts</button>
+            <button class="main-tab-btn" data-tab="view-progress" onclick="switchMainTab('view-progress')"><i class="fa-solid fa-chart-line"></i> Progress</button>
+            <button class="main-tab-btn" data-tab="view-benchmarks" onclick="switchMainTab('view-benchmarks')"><i class="fa-solid fa-stopwatch"></i> Benchmarks</button>
             <button class="main-tab-btn" data-tab="view-learnings" onclick="switchMainTab('view-learnings')"><i class="fa-solid fa-brain"></i> Learnings</button>
             <button class="main-tab-btn" data-tab="view-history" onclick="switchMainTab('view-history')"><i class="fa-solid fa-clock-rotate-left"></i> History</button>
-            <button class="main-tab-btn" data-tab="view-progress" onclick="switchMainTab('view-progress')"><i class="fa-solid fa-chart-line"></i> Progress</button>
         </nav>
 
         <!-- CONFIG WARNING BANNER -->
         <div id="config-warning-banner" style="display: none; margin-bottom: 1.5rem; padding: 0.75rem 1rem; border-radius: 12px; background: rgba(245, 158, 11, 0.1); border: 1px solid rgba(245, 158, 11, 0.25); font-size: 0.85rem; color: #fde047; align-items: center; gap: 0.75rem;">
             <i class="fa-solid fa-triangle-exclamation" style="font-size: 1.1rem; color: var(--accent-gold);"></i>
-            <span><strong>Configuration Changed:</strong> config.yaml has been updated since your periodization strategy was generated. Regenerate your plan to apply it.</span>
+            <span><strong>Configuration Changed:</strong> config.yaml has been updated since your periodization strategy was generated. Run <code>tm plan generate</code> to apply it.</span>
         </div>
 
         <!-- ============ DASHBOARD VIEW ============ -->
         <div id="view-dashboard" class="main-view active">
         <main class="dashboard-grid">
-            <!-- LEFT COLUMN: INPUTS & COACH STATE -->
+            <!-- LEFT COLUMN: STATE -->
             <section class="left-column">
-
-                <!-- COACH CONTROLS & ACTIONS -->
-                <div class="card control-card">
-                    <h2><i class="fa-solid fa-sliders"></i> Coaching Engine Actions</h2>
-                    <div class="action-grid">
-                        <button id="btn-pull-metrics" class="btn btn-secondary" title="Garmin pulls run from the CLI (interactive MFA)">
-                            <i class="fa-solid fa-cloud-arrow-down"></i> Garmin Data (CLI sync)
-                        </button>
-                        <button id="btn-adapt" class="btn btn-warning">
-                            <i class="fa-solid fa-shield-heart"></i> Run Daily Adapt Check
-                        </button>
-                        <button id="btn-generate-plan" class="btn btn-primary">
-                            <i class="fa-solid fa-route"></i> Generate Plan (Macro/Meso)
-                        </button>
-                        <button id="btn-generate-workouts" class="btn btn-info">
-                            <i class="fa-solid fa-calendar-plus"></i> Generate Workouts (Micro)
-                        </button>
-                        <button id="btn-push-workouts" class="btn btn-success btn-full">
-                            <i class="fa-solid fa-calendar-check"></i> Push to Calendar
-                        </button>
-                    </div>
-                </div>
 
                 <!-- ATHLETE METRICS CARD -->
                 <div class="card metrics-card">
@@ -130,68 +109,42 @@
                     <div class="memory-block">
                         <div class="memory-text" id="memory-learnings">No observations cached yet.</div>
                         <button class="btn btn-secondary btn-sm" style="margin-top: 0.75rem;" onclick="switchMainTab('view-learnings')">
-                            <i class="fa-solid fa-list"></i> Manage Learnings
+                            <i class="fa-solid fa-list"></i> View Learnings
                         </button>
                     </div>
                 </div>
 
-                <!-- GOALS & LIFE EVENTS ACCORDIONS -->
+                <!-- OBJECTIVES & CONSTRAINTS -->
                 <div class="card accordion-card">
                     <div class="tabs-header">
                         <button class="tab-btn active" onclick="switchTab('tab-goals')"><i class="fa-solid fa-trophy"></i> Objectives</button>
                         <button class="tab-btn" onclick="switchTab('tab-events')"><i class="fa-solid fa-plane-departure"></i> Constraints</button>
                     </div>
 
-                    <!-- GOALS TAB -->
                     <div id="tab-goals" class="tab-content active">
                         <div class="list-container" id="goals-list"></div>
-                        <form id="form-add-goal" class="add-form">
-                            <h3>Add Training Goal</h3>
-                            <div class="form-row">
-                                <input type="text" id="goal-title" placeholder="e.g. Zurich Marathon" required>
-                                <input type="date" id="goal-date" required>
-                            </div>
-                            <div class="sport-chips-container">
-                                <span class="form-label">Target Sports</span>
-                                <div class="sport-chips" id="goal-sports-chips">
-                                    <div class="sport-chip" data-value="running"><i class="fa-solid fa-person-running"></i> Running</div>
-                                    <div class="sport-chip" data-value="cycling"><i class="fa-solid fa-bicycle"></i> Cycling</div>
-                                    <div class="sport-chip" data-value="hiking"><i class="fa-solid fa-mountain-sun"></i> Hiking</div>
-                                    <div class="sport-chip" data-value="strength_training"><i class="fa-solid fa-dumbbell"></i> Strength</div>
-                                    <div class="sport-chip" data-value="yoga"><i class="fa-solid fa-spa"></i> Yoga</div>
-                                    <div class="sport-chip" data-value="ski_touring"><i class="fa-solid fa-person-skiing-nordic"></i> Ski Touring</div>
-                                </div>
-                            </div>
-                            <div class="form-row">
-                                <input type="number" id="goal-priority" placeholder="Priority (1-5)" min="1" max="5" value="1">
-                                <input type="text" id="goal-desc" placeholder="Goal details or target time (optional)">
-                            </div>
-                            <button type="submit" class="btn btn-primary btn-sm"><i class="fa-solid fa-plus"></i> Add Goal</button>
-                        </form>
+                        <div class="cli-guidance">
+                            <i class="fa-solid fa-terminal"></i>
+                            Manage with <code>tm goal add</code>, <code>tm goal edit</code>, <code>tm goal rm</code>.
+                        </div>
                     </div>
 
-                    <!-- LIFE EVENTS TAB -->
                     <div id="tab-events" class="tab-content">
                         <div class="list-container" id="events-list"></div>
-                        <form id="form-add-event" class="add-form">
-                            <h3>Log Constraint</h3>
-                            <div class="form-row">
-                                <input type="text" id="event-title" placeholder="e.g. no run Thursday, ride with a friend Sat" required>
-                            </div>
-                            <div class="form-row">
-                                <div class="date-input-group">
-                                    <label>Start</label>
-                                    <input type="date" id="event-start" required>
-                                </div>
-                                <div class="date-input-group">
-                                    <label>End</label>
-                                    <input type="date" id="event-end" required>
-                                </div>
-                            </div>
-                            <input type="text" id="event-desc" placeholder="Details for the coach (optional)">
-                            <label class="checkbox-row"><input type="checkbox" id="event-rest"> No training (deterministic rest window)</label>
-                            <button type="submit" class="btn btn-warning btn-sm"><i class="fa-solid fa-calendar-plus"></i> Log Constraint</button>
-                        </form>
+                        <div class="cli-guidance">
+                            <i class="fa-solid fa-terminal"></i>
+                            Manage with <code>tm constraint add</code>, <code>tm constraint edit</code>, <code>tm constraint rm</code>.
+                        </div>
+                    </div>
+                </div>
+
+                <!-- COACHING MODEL (read-only, `model list`) -->
+                <div class="card">
+                    <h2><i class="fa-solid fa-microchip"></i> Coaching Model</h2>
+                    <div id="models-list"></div>
+                    <div class="cli-guidance">
+                        <i class="fa-solid fa-terminal"></i>
+                        Switch with <code>tm model set &lt;n&gt;</code>, reset with <code>tm model reset</code>.
                     </div>
                 </div>
 
@@ -200,13 +153,9 @@
             <!-- RIGHT COLUMN: STRATEGY -->
             <section class="right-column">
 
-                <!-- TRAINING CYCLES & STRATEGY -->
                 <div class="card strategy-card" id="strategy-card" style="display: none;">
                     <div class="schedule-header">
                         <h2><i class="fa-solid fa-route"></i> Training Cycles & Strategy</h2>
-                        <button id="btn-delete-plan" class="btn btn-secondary btn-sm" title="Delete the periodization plan for this goal">
-                            <i class="fa-solid fa-trash-can"></i> Delete Plan
-                        </button>
                     </div>
                     <div class="strategy-details">
                         <div style="display: flex; justify-content: space-between;
@@ -219,22 +168,13 @@
                             </span>
                         </div>
                         <p id="strategy-philosophy"></p>
+                        <div id="strategy-feedback" class="strategy-feedback"></div>
                         <div id="strategy-inputs" class="strategy-inputs"></div>
                         <details class="strategy-inputs-details plan-versions" id="plan-versions">
-                            <summary><i class="fa-solid fa-clock-rotate-left"></i> Plan versions, compare &amp; rollback</summary>
+                            <summary><i class="fa-solid fa-clock-rotate-left"></i> Plan versions &amp; compare</summary>
                             <div id="plan-versions-list" class="plan-versions-list"></div>
                             <div id="plan-diff-panel" class="plan-diff-panel" style="display: none;"></div>
                         </details>
-                    </div>
-                    <div class="macro-feedback-box" id="macro-feedback-section" style="margin: 0 1.5rem 1rem 1.5rem; padding-top: 1rem; border-top: 1px solid var(--border-color);">
-                        <label class="form-label" style="font-size: 0.85rem; color: var(--text-muted); display: block; margin-bottom: 0.5rem;"><i class="fa-solid fa-comments"></i> Give Feedback to AI Coach</label>
-                        <div style="display: flex; gap: 0.5rem;">
-                            <textarea id="macro-feedback-input" placeholder="e.g. increase base volume or suggest lighter workouts..." style="flex-grow: 1; min-height: 40px; max-height: 120px; border-radius: 8px; padding: 0.5rem; background: rgba(0,0,0,0.25); color: #fff; border: 1px solid var(--border-color); resize: vertical; font-family: inherit; font-size: 0.85rem;"></textarea>
-                            <button id="btn-save-macro-feedback" class="btn btn-secondary btn-sm" style="align-self: flex-end; padding: 0.5rem 1rem;"><i class="fa-solid fa-save"></i> Save</button>
-                        </div>
-                        <div id="macro-feedback-notice" style="display: none; margin-top: 0.5rem; font-size: 0.75rem; color: var(--accent-gold);">
-                            <i class="fa-solid fa-triangle-exclamation"></i> Feedback saved! Regenerate your plan to apply it.
-                        </div>
                     </div>
                     <div class="timeline-wrapper">
                         <label>Periodization Timeline</label>
@@ -246,22 +186,19 @@
                             <span class="cycle-details-dates" id="cycle-details-dates"></span>
                         </div>
                         <div class="cycle-details-focus" id="cycle-details-focus"></div>
-                        <div class="meso-feedback-container" id="meso-feedback-section" style="margin-top: 1rem; border-top: 1px dashed rgba(255, 255, 255, 0.1); padding-top: 1rem;">
-                            <label class="form-label" style="font-size: 0.8rem; color: var(--text-muted); display: block; margin-bottom: 0.5rem;"><i class="fa-solid fa-comment-medical"></i> Focus Feedback for this Block</label>
-                            <div style="display: flex; gap: 0.5rem;">
-                                <input type="text" id="meso-feedback-input" placeholder="e.g. prioritize aerobic base or focus on speed..." style="flex-grow: 1; border-radius: 8px; padding: 0.45rem; background: rgba(0,0,0,0.2); color: #fff; border: 1px solid var(--border-color); font-family: inherit; font-size: 0.8rem; outline: none;">
-                                <button id="btn-save-meso-feedback" class="btn btn-secondary btn-sm" style="padding: 0.45rem 0.85rem;"><i class="fa-solid fa-save"></i> Save</button>
-                            </div>
-                            <div id="meso-feedback-notice" style="display: none; margin-top: 0.5rem; font-size: 0.75rem; color: var(--accent-gold);">
-                                <i class="fa-solid fa-triangle-exclamation"></i> Feedback saved! Regenerate your plan to apply it.
-                            </div>
-                        </div>
+                        <div class="cycle-details-feedback" id="cycle-details-feedback"></div>
+                    </div>
+                    <div class="cli-guidance">
+                        <i class="fa-solid fa-terminal"></i>
+                        Generate, roll back or comment on a plan with <code>tm plan generate</code>,
+                        <code>tm plan rollback</code>, <code>tm plan feedback</code>.
                     </div>
                 </div>
 
                 <div class="card" id="no-strategy-card">
                     <h2><i class="fa-solid fa-route"></i> Training Cycles & Strategy</h2>
-                    <p class="empty-note">No periodization plan yet. Add a goal, then click <strong>Generate Plan</strong>.</p>
+                    <p class="empty-note">No periodization plan yet. Add a goal with <code>tm goal add</code>,
+                        then run <code>tm plan generate</code>.</p>
                 </div>
 
             </section>
@@ -281,13 +218,6 @@
                     <div class="filter-field"><label>Sport</label>
                         <select id="wfilter-sport">
                             <option value="">All</option>
-                            <option value="running">Running</option>
-                            <option value="cycling">Cycling</option>
-                            <option value="hiking">Hiking</option>
-                            <option value="strength_training">Strength</option>
-                            <option value="yoga">Yoga</option>
-                            <option value="ski_touring">Ski Touring</option>
-                            <option value="rest">Rest</option>
                         </select>
                     </div>
                     <label class="filter-check"><input type="checkbox" id="wfilter-removed"> Show removed</label>
@@ -295,44 +225,14 @@
                 </div>
                 <div class="workout-list" id="workouts-list-container"></div>
                 <details class="strategy-inputs-details plan-versions" id="workout-batches">
-                    <summary><i class="fa-solid fa-clock-rotate-left"></i> Archived workout batches &amp; rollback</summary>
+                    <summary><i class="fa-solid fa-clock-rotate-left"></i> Archived workout batches</summary>
                     <div id="workout-batches-list" class="plan-versions-list"></div>
                 </details>
-            </div>
-
-            <!-- MANUAL ADD -->
-            <div class="card">
-                <h2><i class="fa-solid fa-square-plus"></i> Add Workout Manually</h2>
-                <form id="form-add-workout" class="add-form">
-                    <div class="form-row">
-                        <input type="date" id="wadd-date" required>
-                        <select id="wadd-sport" required>
-                            <option value="" disabled selected>Sport</option>
-                            <option value="running">Running</option>
-                            <option value="cycling">Cycling</option>
-                            <option value="hiking">Hiking</option>
-                            <option value="strength_training">Strength</option>
-                            <option value="yoga">Yoga</option>
-                            <option value="ski_touring">Ski Touring</option>
-                            <option value="rest">Rest</option>
-                        </select>
-                    </div>
-                    <div class="form-row">
-                        <input type="text" id="wadd-title" placeholder="Title (e.g. Tempo Run)" required>
-                    </div>
-                    <div class="form-row">
-                        <input type="text" id="wadd-desc" placeholder="Description (intervals, rest, etc.)">
-                    </div>
-                    <div class="form-row">
-                        <input type="number" id="wadd-duration" placeholder="Duration (min)" min="0">
-                        <input type="number" id="wadd-rpe" placeholder="RPE (1-10)" min="1" max="10">
-                        <input type="number" id="wadd-tss" placeholder="TSS" min="0">
-                    </div>
-                    <div class="form-row">
-                        <input type="text" id="wadd-reason" placeholder="Reason (optional, shown to coach)">
-                    </div>
-                    <button type="submit" class="btn btn-info btn-sm"><i class="fa-solid fa-plus"></i> Add / Replace Session</button>
-                </form>
+                <div class="cli-guidance">
+                    <i class="fa-solid fa-terminal"></i>
+                    Schedule and reshape sessions with <code>tm workout add</code>, <code>tm workout swap</code>,
+                    <code>tm workout rm</code>, <code>tm workout adapt</code>, <code>tm workout push</code>.
+                </div>
             </div>
 
             <!-- COMPARE / ADHERENCE -->
@@ -344,17 +244,75 @@
                     <div class="filter-field"><label>Sport</label>
                         <select id="cmp-sport">
                             <option value="">All</option>
-                            <option value="running">Running</option>
-                            <option value="cycling">Cycling</option>
-                            <option value="hiking">Hiking</option>
-                            <option value="strength_training">Strength</option>
-                            <option value="yoga">Yoga</option>
-                            <option value="ski_touring">Ski Touring</option>
                         </select>
                     </div>
                     <button id="btn-compare-run" class="btn btn-primary btn-sm"><i class="fa-solid fa-play"></i> Run Compare</button>
                 </div>
                 <div id="compare-results"></div>
+            </div>
+        </div>
+
+        <!-- ============ PROGRESS VIEW ============ -->
+        <!-- The PNG frames the same chart the Telegram bot sends
+             (DESIGN_progress_timeline.md §7.3); the zone tables below are the web form of
+             `tm progress -z` (DESIGN_intensity_distribution.md §9.6). -->
+        <div id="view-progress" class="main-view">
+            <div class="card">
+                <h2><i class="fa-solid fa-chart-line"></i> Progress Timeline</h2>
+                <div class="filter-row">
+                    <button class="btn btn-secondary btn-sm progress-range-btn active" data-weeks="8">8 weeks</button>
+                    <button class="btn btn-secondary btn-sm progress-range-btn" data-weeks="26">26 weeks</button>
+                    <button class="btn btn-secondary btn-sm progress-range-btn" data-weeks="all">All</button>
+                </div>
+            </div>
+
+            <div class="card">
+                <img id="progress-image" class="progress-image" alt="Progress timeline chart">
+                <div id="progress-image-error" class="item-meta" style="display:none;"></div>
+            </div>
+
+            <div class="card">
+                <div class="schedule-header">
+                    <h2><i class="fa-solid fa-layer-group"></i> Time in Zone</h2>
+                    <span class="workout-count-badge" id="zones-window-badge"></span>
+                </div>
+                <div class="filter-row">
+                    <div class="filter-field"><label>Currency</label>
+                        <select id="zfilter-currency">
+                            <option value="">Auto (per sport)</option>
+                            <option value="hr">Heart rate</option>
+                            <option value="power">Power</option>
+                        </select>
+                    </div>
+                    <button id="btn-zones-refresh" class="btn btn-secondary btn-sm"><i class="fa-solid fa-rotate"></i> Apply</button>
+                </div>
+                <div id="zones-container"></div>
+            </div>
+        </div>
+
+        <!-- ============ BENCHMARKS VIEW ============ -->
+        <div id="view-benchmarks" class="main-view">
+            <div class="card">
+                <h2><i class="fa-solid fa-gauge-simple-high"></i> Current Thresholds</h2>
+                <div id="thresholds-strip"></div>
+            </div>
+
+            <div class="card">
+                <div class="schedule-header">
+                    <h2><i class="fa-solid fa-stopwatch"></i> Benchmark Logbook</h2>
+                    <span class="workout-count-badge" id="benchmarks-count"></span>
+                </div>
+                <div class="filter-row">
+                    <div class="filter-field"><label>Sport</label><input type="text" id="bfilter-sport" placeholder="e.g. cycling"></div>
+                    <div class="filter-field"><label>Anchor</label><input type="text" id="bfilter-kind" placeholder="e.g. ftp"></div>
+                    <button id="btn-benchmarks-refresh" class="btn btn-secondary btn-sm"><i class="fa-solid fa-rotate"></i> Apply</button>
+                </div>
+                <div id="benchmarks-list"></div>
+                <div class="cli-guidance">
+                    <i class="fa-solid fa-terminal"></i>
+                    Record a test with <code>tm benchmark record &lt;sport&gt; --ftp 250</code>;
+                    correct one with <code>tm benchmark rm &lt;id&gt;</code>.
+                </div>
             </div>
         </div>
 
@@ -379,6 +337,11 @@
                     <button id="btn-learnings-refresh" class="btn btn-secondary btn-sm"><i class="fa-solid fa-rotate"></i> Apply</button>
                 </div>
                 <div id="learnings-list-container"></div>
+                <div class="cli-guidance">
+                    <i class="fa-solid fa-terminal"></i>
+                    Curate with <code>tm learnings edit</code>, <code>tm learnings demote</code>,
+                    <code>tm learnings keep</code>, <code>tm learnings rm</code>.
+                </div>
             </div>
         </div>
 
@@ -394,7 +357,25 @@
                 <div class="cli-guidance">
                     <i class="fa-solid fa-terminal"></i>
                     Garmin sync and history analysis run from the CLI:
-                    <code>data pull</code>, <code>data bootstrap</code>, <code>data reflect</code>.
+                    <code>tm data pull</code>, <code>tm data bootstrap</code>, <code>tm data reflect</code>.
+                </div>
+            </div>
+
+            <!-- DAILY CONTEXT VISUALISATION (`context list` / `context list-metrics`) -->
+            <div class="card">
+                <div class="schedule-header">
+                    <h3 class="subhead"><i class="fa-solid fa-wine-glass"></i> Daily Context</h3>
+                    <span class="workout-count-badge" id="context-window-badge"></span>
+                </div>
+                <div id="context-vocab" class="context-vocab"></div>
+                <div id="context-chart" class="context-chart"></div>
+                <details class="strategy-inputs-details">
+                    <summary>All context rows</summary>
+                    <div id="context-table"></div>
+                </details>
+                <div class="cli-guidance">
+                    <i class="fa-solid fa-terminal"></i>
+                    Author a signal with <code>tm context add</code>; remove one with <code>tm context rm</code>.
                 </div>
             </div>
 
@@ -407,53 +388,17 @@
                 <h3 class="subhead"><i class="fa-solid fa-heart-pulse"></i> Recovery Metrics</h3>
                 <div id="metrics-table"></div>
             </div>
-
-            <div class="card">
-                <h3 class="subhead"><i class="fa-solid fa-wine-glass"></i> Daily Context</h3>
-                <div id="context-table"></div>
-            </div>
         </div>
 
-        <!-- ============ PROGRESS VIEW ============ -->
-        <!-- V1 frames the same PNG the Telegram bot sends (DESIGN_progress_timeline.md
-             §7.3): one chart renderer for all surfaces. The interactive uPlot tab is a
-             follow-on (§8.5). -->
-        <div id="view-progress" class="main-view">
-            <div class="card">
-                <h2><i class="fa-solid fa-chart-line"></i> Progress Timeline</h2>
-                <div class="filter-row">
-                    <button class="btn btn-secondary btn-sm progress-range-btn active" data-weeks="8">8 weeks</button>
-                    <button class="btn btn-secondary btn-sm progress-range-btn" data-weeks="26">26 weeks</button>
-                    <button class="btn btn-secondary btn-sm progress-range-btn" data-weeks="all">All</button>
-                </div>
-            </div>
-
-            <div class="card">
-                <img id="progress-image" class="progress-image" alt="Progress timeline chart">
-                <div id="progress-image-error" class="item-meta" style="display:none;"></div>
-            </div>
-        </div>
-
-        <!-- COACH SYSTEM LOGS (global) -->
+        <!-- SYSTEM LOGS (global) -->
         <div class="card log-card">
             <div class="log-header">
-                <h2><i class="fa-solid fa-terminal"></i> Coach Reasoning & System Logs</h2>
+                <h2><i class="fa-solid fa-terminal"></i> System Logs</h2>
                 <button id="btn-clear-logs" class="btn btn-icon-only" title="Clear Logs"><i class="fa-solid fa-trash-can"></i></button>
             </div>
             <div class="console-log" id="console-logs">
-                <div class="log-line system">[SYSTEM] TrainMate Dashboard initialized. Fetching status...</div>
+                <div class="log-line system">[SYSTEM] TrainMate dashboard initialized (read-only). Fetching status...</div>
             </div>
-        </div>
-    </div>
-
-    <!-- MODAL -->
-    <div id="modal-overlay" class="modal-overlay" style="display: none;">
-        <div class="modal-box">
-            <div class="modal-header">
-                <span id="modal-title">Edit</span>
-                <button class="btn-icon-only" onclick="closeModal()"><i class="fa-solid fa-xmark"></i></button>
-            </div>
-            <div id="modal-body" class="modal-body"></div>
         </div>
     </div>
 

@@ -1,7 +1,7 @@
-// --- CONSTANTS & DOM REFERENCES ---
+// TrainMate dashboard — a READ-ONLY view over the database (ARCHITECTURE.md §8).
+// Nothing here writes: the API refuses every mutating verb, so each panel that used to
+// carry a button now names the CLI command that does the job instead.
 const API_BASE = "";
-let activeMacrocycleId = null;
-let activeMesocycleId = null;
 let activeGoalId = null;
 const loadedTabs = new Set(["view-dashboard"]);
 
@@ -25,16 +25,57 @@ function escapeHtml(s) {
 }
 
 function parseLocalDate(dateStr) {
-    const parts = dateStr.split("-");
+    const parts = String(dateStr).split("-");
     return new Date(parts[0], parts[1] - 1, parts[2]);
 }
 
 function todayStr() {
-    return new Date().toISOString().split("T")[0];
+    const d = new Date();
+    const pad = n => String(n).padStart(2, "0");
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 }
 
 function sportLabel(sport) {
     return (sport || "").replace(/_/g, " ").toUpperCase();
+}
+
+function sportTitle(sport) {
+    return (sport || "").replace(/_/g, " ");
+}
+
+const SPORT_ICONS = {
+    running: "fa-person-running", cycling: "fa-bicycle", hiking: "fa-mountain-sun",
+    strength_training: "fa-dumbbell", yoga: "fa-spa", ski_touring: "fa-person-skiing-nordic",
+    rowing: "fa-ship", downhill_skiing: "fa-person-skiing", resort_skiing: "fa-person-skiing",
+    swimming: "fa-person-swimming", rest: "fa-bed",
+};
+
+/** A zone cell's time, capped to four characters exactly as `progress.fmt_zone_cell`
+ *  renders it in the terminal — `55m`, `5h00`, `12h`, `—` for none. */
+function fmtZoneCell(seconds) {
+    const minutes = Math.round((seconds || 0) / 60);
+    if (minutes <= 0) return "—";
+    if (minutes < 60) return `${minutes}m`;
+    const hours = Math.floor(minutes / 60);
+    return hours >= 10 ? `${hours}h` : `${hours}h${String(minutes % 60).padStart(2, "0")}`;
+}
+
+function fmtDuration(seconds) {
+    const minutes = Math.round((seconds || 0) / 60);
+    if (minutes < 60) return `${minutes}min`;
+    return `${Math.floor(minutes / 60)}h${String(minutes % 60).padStart(2, "0")}`;
+}
+
+/** Fills a <select> with the sports actually present in the data, so the filter can
+ *  never fall behind the canonical sport list the way a hardcoded <option> set did. */
+function populateSportFilter(selectEl, sports) {
+    if (!selectEl) return;
+    const current = selectEl.value;
+    const opts = [`<option value="">All</option>`].concat(
+        sports.map(s => `<option value="${escapeHtml(s)}">${escapeHtml(sportTitle(s))}</option>`)
+    );
+    selectEl.innerHTML = opts.join("");
+    if (sports.includes(current)) selectEl.value = current;
 }
 
 // --- TAB NAVIGATION ---
@@ -53,11 +94,11 @@ window.switchMainTab = function(viewId) {
         if (viewId === "view-workouts") fetchWorkouts();
         else if (viewId === "view-learnings") fetchLearningsFull();
         else if (viewId === "view-history") fetchHistory();
-        else if (viewId === "view-progress") fetchProgress();
+        else if (viewId === "view-benchmarks") fetchBenchmarks();
+        else if (viewId === "view-progress") { fetchProgress(); fetchZones(); }
     }
 };
 
-// Switch tabs for objectives vs life events (dashboard accordion)
 window.switchTab = function(tabId) {
     document.querySelectorAll(".tab-content").forEach(el => el.classList.remove("active"));
     document.querySelectorAll(".accordion-card .tab-btn").forEach(el => el.classList.remove("active"));
@@ -65,74 +106,10 @@ window.switchTab = function(tabId) {
     document.getElementById(tabId).classList.add("active");
     const btn = Array.from(document.querySelectorAll(".accordion-card .tab-btn")).find(
         b => (tabId === "tab-goals" && b.innerText.includes("Objectives")) ||
-             (tabId === "tab-events" && b.innerText.includes("Life Events"))
+             (tabId === "tab-events" && b.innerText.includes("Constraints"))
     );
     if (btn) btn.classList.add("active");
 };
-
-// --- MODAL HELPER ---
-
-window.closeModal = function() {
-    const overlay = document.getElementById("modal-overlay");
-    if (overlay) overlay.style.display = "none";
-    document.getElementById("modal-body").innerHTML = "";
-};
-
-function openModal(title, fields, onSubmit, submitLabel = "Save") {
-    // fields: [{id, label, type, value, options?, required?, placeholder?}]
-    document.getElementById("modal-title").innerText = title;
-    const body = document.getElementById("modal-body");
-    body.innerHTML = "";
-    const form = document.createElement("form");
-    form.className = "add-form";
-    fields.forEach(f => {
-        const wrap = document.createElement("div");
-        wrap.className = "form-field";
-        const label = document.createElement("label");
-        label.innerText = f.label;
-        wrap.appendChild(label);
-        let input;
-        if (f.type === "select") {
-            input = document.createElement("select");
-            (f.options || []).forEach(o => {
-                const opt = document.createElement("option");
-                opt.value = o.value;
-                opt.innerText = o.label;
-                if (o.value === f.value) opt.selected = true;
-                input.appendChild(opt);
-            });
-        } else if (f.type === "textarea") {
-            input = document.createElement("textarea");
-            input.value = f.value || "";
-        } else {
-            input = document.createElement("input");
-            input.type = f.type || "text";
-            if (f.value != null) input.value = f.value;
-        }
-        input.id = `modal-field-${f.id}`;
-        if (f.required) input.required = true;
-        if (f.placeholder) input.placeholder = f.placeholder;
-        wrap.appendChild(input);
-        form.appendChild(wrap);
-    });
-    const submit = document.createElement("button");
-    submit.type = "submit";
-    submit.className = "btn btn-primary btn-sm";
-    submit.innerHTML = `<i class="fa-solid fa-save"></i> ${submitLabel}`;
-    form.appendChild(submit);
-
-    form.addEventListener("submit", (e) => {
-        e.preventDefault();
-        const values = {};
-        fields.forEach(f => {
-            values[f.id] = document.getElementById(`modal-field-${f.id}`).value;
-        });
-        onSubmit(values);
-    });
-
-    body.appendChild(form);
-    document.getElementById("modal-overlay").style.display = "flex";
-}
 
 // --- STATUS (dashboard) ---
 
@@ -166,7 +143,7 @@ async function fetchStatus() {
         } else {
             activeGoalId = null;
             goalTitleEl.innerText = "No Active Goal";
-            goalCountdownEl.innerText = "Add a goal to start planning";
+            goalCountdownEl.innerText = "Add a goal with 'tm goal add'";
             goalCountdownEl.style.color = "var(--text-muted)";
         }
 
@@ -180,35 +157,28 @@ async function fetchStatus() {
         const strategyCard = document.getElementById("strategy-card");
         const noStrategyCard = document.getElementById("no-strategy-card");
         if (data.macrocycle && data.mesocycles && data.mesocycles.length > 0) {
-            activeMacrocycleId = data.macrocycle.id;
             strategyCard.style.display = "block";
             if (noStrategyCard) noStrategyCard.style.display = "none";
             document.getElementById("strategy-philosophy").innerText =
                 data.macrocycle.strategy;
             renderStrategyInputs(data.macrocycle);
-            document.getElementById("macro-feedback-input").value =
-                data.macrocycle.feedback || "";
-            document.getElementById("macro-feedback-notice").style.display = "none";
+            renderMacroFeedback(data.macrocycle);
             renderTimeline(data.mesocycles);
 
             if (data.macrocycle.created_at) {
                 const created = new Date(data.macrocycle.created_at);
                 const formattedDate = created.toLocaleDateString("en-US", {
-                    month: "short",
-                    day: "numeric",
-                    year: "numeric"
+                    month: "short", day: "numeric", year: "numeric"
                 });
                 const formattedTime = created.toLocaleTimeString("en-US", {
-                    hour: "numeric",
-                    minute: "2-digit"
+                    hour: "numeric", minute: "2-digit"
                 });
-                const generatedText = `Generated ${formattedDate} at ${formattedTime}`;
-                document.getElementById("strategy-generated-at").innerText = generatedText;
+                document.getElementById("strategy-generated-at").innerText =
+                    `Generated ${formattedDate} at ${formattedTime}`;
             } else {
                 document.getElementById("strategy-generated-at").innerText = "";
             }
         } else {
-            activeMacrocycleId = null;
             strategyCard.style.display = "none";
             if (noStrategyCard) noStrategyCard.style.display = "block";
         }
@@ -218,8 +188,8 @@ async function fetchStatus() {
             if (data.config_mismatch) {
                 banner.style.display = "flex";
                 logConsole(
-                    "Warning: config.yaml has changed since the active periodization " +
-                    "plan was generated. Run 'Generate Plan' to update.", "warning"
+                    "Warning: config.yaml has changed since the active periodization "
+                    + "plan was generated. Run 'tm plan generate' to update.", "warning"
                 );
             } else {
                 banner.style.display = "none";
@@ -234,7 +204,7 @@ function renderLearningsSummary(learnings, summary) {
     const el = document.getElementById("memory-learnings");
     if (!el) return;
     if (!learnings || learnings.length === 0) {
-        el.innerText = "No observations cached yet. Run 'data bootstrap' (CLI) to "
+        el.innerText = "No observations cached yet. Run 'tm data bootstrap' (CLI) to "
             + "reconstruct your training history and seed observations.";
         return;
     }
@@ -248,7 +218,7 @@ function renderSyncFreshness(syncState) {
     const el = document.getElementById("sync-freshness");
     if (!el) return;
     if (!syncState || (!syncState.through_date && !syncState.last_pull_utc)) {
-        el.innerText = "Garmin data: never pulled — run 'data pull' (CLI).";
+        el.innerText = "Garmin data: never pulled — run 'tm data pull' (CLI).";
         return;
     }
     const through = syncState.through_date || "?";
@@ -263,10 +233,19 @@ function renderSyncFreshness(syncState) {
     el.innerText = `Garmin data through ${through}${ago} — pulling is CLI-only.`;
 }
 
-// Renders the goals and life events the plan was generated from. These are
-// snapshotted on the macrocycle (server-side), so they reflect the inputs the plan
-// was built on rather than the current live records, which may since have changed.
-// Older plans predate the snapshot (null fields) and show a brief note instead.
+/** Feedback the athlete left on the plan. Read-only here: it is written with
+ *  `tm plan feedback` and only takes effect on the next generation. */
+function renderMacroFeedback(macrocycle) {
+    const el = document.getElementById("strategy-feedback");
+    if (!el) return;
+    if (!macrocycle.feedback) { el.innerHTML = ""; return; }
+    el.innerHTML = `<div class="si-heading"><i class="fa-solid fa-comments"></i> Your feedback on this plan</div>`
+        + `<div class="si-desc">${escapeHtml(macrocycle.feedback)}</div>`;
+}
+
+// Renders the goals and constraints the plan was generated from. These are snapshotted
+// on the macrocycle (server-side), so they reflect the inputs the plan was built on
+// rather than the current live records, which may since have changed.
 function renderStrategyInputs(macrocycle) {
     const el = document.getElementById("strategy-inputs");
     if (!el) return;
@@ -338,6 +317,7 @@ function renderTimeline(mesocycles) {
     const detailsName = document.getElementById("cycle-details-name");
     const detailsDates = document.getElementById("cycle-details-dates");
     const detailsFocus = document.getElementById("cycle-details-focus");
+    const detailsFeedback = document.getElementById("cycle-details-feedback");
 
     if (!mesocycles || mesocycles.length === 0) {
         detailsBox.style.display = "none";
@@ -377,9 +357,10 @@ function renderTimeline(mesocycles) {
             detailsName.innerText = m.name;
             detailsDates.innerText = `${m.start_date} to ${m.end_date} (${duration} days)`;
             detailsFocus.innerText = m.focus;
-            activeMesocycleId = m.id;
-            document.getElementById("meso-feedback-input").value = m.feedback || "";
-            document.getElementById("meso-feedback-notice").style.display = "none";
+            detailsFeedback.innerHTML = m.feedback
+                ? `<div class="si-heading"><i class="fa-solid fa-comment-medical"></i> Block feedback</div>`
+                  + `<div class="si-desc">${escapeHtml(m.feedback)}</div>`
+                : "";
         });
 
         container.appendChild(block);
@@ -458,7 +439,7 @@ function updateMetrics(metrics, baseline) {
     } else { ratioVal.innerText = "--"; ratioBase.innerText = "fatigue: -- | fitness: --"; ratioBadge.style.display = "none"; }
 }
 
-// --- OBJECTIVES ---
+// --- OBJECTIVES & CONSTRAINTS (read-only listings) ---
 
 async function fetchObjectives() {
     try {
@@ -468,70 +449,29 @@ async function fetchObjectives() {
         const container = document.getElementById("goals-list");
         container.innerHTML = "";
         if (goals.length === 0) {
-            container.innerHTML = `<div class="item-meta" style="padding:0.5rem;">No goals. Add one below to start planning.</div>`;
+            container.innerHTML = `<div class="item-meta" style="padding:0.5rem;">No goals yet.</div>`;
             return;
         }
         goals.forEach(g => {
-            const sportsList = g.sport_type.split(',').map(s => s.trim().replace(/_/g, ' ')).join(', ');
+            const sportsList = g.sport_type.split(',').map(s => sportTitle(s.trim())).join(', ');
             const item = document.createElement("div");
             item.className = "list-item";
             item.innerHTML = `
                 <div class="item-info">
                     <span class="item-title">${escapeHtml(g.title)} (${escapeHtml(sportsList)})</span>
-                    <span class="item-meta">Target: ${g.target_date} | Priority: ${g.priority} | Status: ${g.status}</span>
-                </div>
-                <div class="item-actions">
-                    <button class="btn-icon-only" title="Edit" onclick="editObjective(${g.id})"><i class="fa-solid fa-pen"></i></button>
-                    <button class="btn-icon-only" title="Delete" onclick="deleteObjective(${g.id})"><i class="fa-solid fa-trash-can"></i></button>
+                    <span class="item-meta">ID ${g.id} · Target: ${escapeHtml(g.target_date)} `
+                    + `· Priority: ${escapeHtml(String(g.priority))} · ${escapeHtml(g.status)}</span>
+                    ${g.description ? `<span class="si-desc">${escapeHtml(g.description)}</span>` : ""}
                 </div>`;
             container.appendChild(item);
-            item._goal = g;
         });
-        window._goalsCache = goals;
     } catch (e) {
         logConsole("Failed to load goals", "error");
     }
 }
 
-window.editObjective = function(id) {
-    const g = (window._goalsCache || []).find(x => x.id === id);
-    if (!g) return;
-    openModal("Edit Objective", [
-        { id: "title", label: "Title", value: g.title, required: true },
-        { id: "target_date", label: "Target Date", type: "date", value: g.target_date, required: true },
-        { id: "sport_type", label: "Sports (comma-separated)", value: g.sport_type, required: true },
-        { id: "priority", label: "Priority", type: "number", value: g.priority },
-        { id: "description", label: "Description", value: g.description || "" },
-        { id: "status", label: "Status", type: "select", value: g.status, options: [
-            { value: "active", label: "active" },
-            { value: "completed", label: "completed" },
-            { value: "archived", label: "archived" },
-        ]},
-    ], async (vals) => {
-        vals.priority = parseInt(vals.priority, 10) || 1;
-        const res = await fetch(`${API_BASE}/api/objectives/${id}`, {
-            method: "PUT", headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(vals),
-        });
-        const data = await res.json();
-        if (res.ok) { logConsole(data.message || "Objective updated."); closeModal(); fetchObjectives(); fetchStatus(); }
-        else logConsole(`Update failed: ${data.error}`, "error");
-    });
-};
-
-window.deleteObjective = async function(id) {
-    if (!confirm("Delete this objective?")) return;
-    try {
-        const res = await fetch(`${API_BASE}/api/objectives/${id}`, { method: "DELETE" });
-        if (res.ok) { logConsole("Objective deleted."); fetchObjectives(); fetchStatus(); }
-    } catch (e) { logConsole("Failed to delete objective", "error"); }
-};
-
-// --- CONSTRAINTS (DESIGN_constraints.md — supersedes life events) ---
 // A constraint is advisory prose the coach works around; the one toggle is `rest`, a
-// deterministic full no-training window (rev 6). The `type`/`binding`/`sport` fields are
-// gone.
-
+// deterministic full no-training window (DESIGN_constraints.md rev 6).
 async function fetchEvents() {
     try {
         const res = await fetch(`${API_BASE}/api/constraints`);
@@ -540,66 +480,52 @@ async function fetchEvents() {
         const container = document.getElementById("events-list");
         container.innerHTML = "";
         if (events.length === 0) {
-            container.innerHTML = `<div class="item-meta" style="padding:0.5rem;">No upcoming constraints. Log travel or injuries.</div>`;
+            container.innerHTML = `<div class="item-meta" style="padding:0.5rem;">No active or upcoming constraints.</div>`;
             return;
         }
-        events.forEach(e => {
+        events.forEach(ev => {
+            const badge = ev.rest
+                ? `<span class="badge badge-danger">no training</span>`
+                : `<span class="badge badge-info">advisory</span>`;
             const item = document.createElement("div");
             item.className = "list-item";
             item.innerHTML = `
                 <div class="item-info">
-                    <span class="item-title">${escapeHtml(e.title)} (${e.rest ? "no training" : "advisory"})</span>
-                    <span class="item-meta">${e.start_date} to ${e.end_date}${e.description ? " · " + escapeHtml(e.description) : ""}</span>
-                </div>
-                <div class="item-actions">
-                    <button class="btn-icon-only" title="Edit" onclick="editEvent(${e.id})"><i class="fa-solid fa-pen"></i></button>
-                    <button class="btn-icon-only" title="Delete" onclick="deleteEvent(${e.id})"><i class="fa-solid fa-trash-can"></i></button>
+                    <span class="item-title">${escapeHtml(ev.title)} ${badge}</span>
+                    <span class="item-meta">ID ${ev.id} · ${escapeHtml(ev.start_date)} → ${escapeHtml(ev.end_date)}`
+                    + (ev.replan ? " · replan" : "") + `</span>
+                    ${ev.description ? `<span class="si-desc">${escapeHtml(ev.description)}</span>` : ""}
                 </div>`;
             container.appendChild(item);
         });
-        window._eventsCache = events;
-    } catch (e) { logConsole("Failed to load events", "error"); }
+    } catch (e) {
+        logConsole("Failed to load constraints", "error");
+    }
 }
 
-window.editEvent = function(id) {
-    const ev = (window._eventsCache || []).find(x => x.id === id);
-    if (!ev) return;
-    openModal("Edit Constraint", [
-        { id: "title", label: "Title", value: ev.title, required: true },
-        { id: "rest", label: "Enforcement", type: "select", value: ev.rest ? "1" : "0", options: [
-            { value: "0", label: "Advisory (coach works around it)" },
-            { value: "1", label: "No training (deterministic rest)" },
-        ]},
-        { id: "start_date", label: "Start", type: "date", value: ev.start_date, required: true },
-        { id: "end_date", label: "End", type: "date", value: ev.end_date, required: true },
-        { id: "description", label: "Details for the coach", type: "textarea", value: ev.description || "" },
-    ], async (vals) => {
-        vals.rest = vals.rest === "1" ? 1 : 0;
-        const res = await fetch(`${API_BASE}/api/constraints/${id}`, {
-            method: "PUT", headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(vals),
-        });
-        const data = await res.json();
-        if (res.ok) { logConsole(data.message || "Constraint updated."); closeModal(); fetchEvents(); }
-        else logConsole(`Update failed: ${data.error}`, "error");
-    });
-};
+// --- COACHING MODEL (`model list`) ---
 
-window.deleteEvent = async function(id) {
-    if (!confirm("Delete this constraint?")) return;
+async function fetchModels() {
+    const el = document.getElementById("models-list");
+    if (!el) return;
     try {
-        const res = await fetch(`${API_BASE}/api/constraints/${id}`, { method: "DELETE" });
-        if (res.ok) { logConsole("Constraint deleted."); fetchEvents(); }
-    } catch (e) { logConsole("Failed to delete event", "error"); }
-};
+        const res = await fetch(`${API_BASE}/api/models`);
+        const data = await res.json();
+        const rows = data.models || [];
+        if (!rows.length) { el.innerHTML = `<div class="item-meta">No models configured.</div>`; return; }
+        const source = data.source ? ` <span class="item-meta">(${escapeHtml(data.source)})</span>` : "";
+        el.innerHTML = `<div class="model-active">Active: <code>${escapeHtml(data.active || "?")}</code>${source}</div>`
+            + rows.map(m => `<div class="model-row${m.active ? " is-active" : ""}">`
+                + `<span class="model-num">${m.number == null ? "·" : m.number}</span>`
+                + `<code>${escapeHtml(m.model)}</code>`
+                + (m.active ? ` <span class="badge badge-success">active</span>` : "")
+                + `</div>`).join("");
+    } catch (e) {
+        el.innerHTML = `<div class="item-meta">Failed to load models: ${escapeHtml(e.message)}</div>`;
+    }
+}
 
-// --- WORKOUTS ---
-
-const SPORT_ICONS = {
-    running: "fa-person-running", cycling: "fa-bicycle", hiking: "fa-mountain-sun",
-    strength_training: "fa-dumbbell", yoga: "fa-spa", ski_touring: "fa-person-skiing-nordic",
-    rest: "fa-bed",
-};
+// --- WORKOUTS (read-only listing) ---
 
 async function fetchWorkouts() {
     try {
@@ -622,7 +548,8 @@ async function fetchWorkouts() {
         document.getElementById("workout-count").innerText = `${workouts.length} workouts`;
 
         if (workouts.length === 0) {
-            container.innerHTML = `<div class="item-meta" style="text-align:center; padding: 2rem;">No workouts in range. Generate a plan or add one manually.</div>`;
+            container.innerHTML = `<div class="item-meta" style="text-align:center; padding: 2rem;">`
+                + `No workouts in range. Generate some with 'tm workout generate'.</div>`;
             return;
         }
         workouts.forEach(w => container.appendChild(renderWorkoutCard(w)));
@@ -647,7 +574,7 @@ function renderWorkoutCard(w) {
     else if (modStatus !== "unmodified") cardClass += " adapted";
     else if (calStatus === "synced") cardClass += " synced";
 
-    const iconGlyph = SPORT_ICONS[w.sport_type] || "fa-bed";
+    const iconGlyph = SPORT_ICONS[w.sport_type] || "fa-dumbbell";
     const iconClass = `workout-sport-icon ${w.sport_type || "rest"}`;
 
     const badges = [];
@@ -692,87 +619,8 @@ function renderWorkoutCard(w) {
             <span class="workout-desc">${escapeHtml(w.description)}</span>
             ${reasonHtml}${origHtml}${removedHtml}
         </div>
-        <div class="${iconClass}"><i class="fa-solid ${iconGlyph}"></i></div>
-        <div class="workout-actions"></div>`;
-
-    // Wire actions programmatically so titles with quotes can't break markup.
-    const actionsEl = item.querySelector(".workout-actions");
-    if (isRemoved) {
-        const restore = document.createElement("button");
-        restore.className = "btn-icon-only"; restore.title = "Restore";
-        restore.innerHTML = `<i class="fa-solid fa-rotate-left"></i>`;
-        restore.addEventListener("click", () => restoreWorkout(w.id));
-        actionsEl.appendChild(restore);
-    } else {
-        const swap = document.createElement("button");
-        swap.className = "btn-icon-only"; swap.title = "Swap to another date";
-        swap.innerHTML = `<i class="fa-solid fa-right-left"></i>`;
-        swap.addEventListener("click", () => openSwapModal(w.id, w.date, w.title));
-        const rm = document.createElement("button");
-        rm.className = "btn-icon-only"; rm.title = "Remove";
-        rm.innerHTML = `<i class="fa-solid fa-xmark"></i>`;
-        rm.addEventListener("click", () => removeWorkout(w.id));
-        actionsEl.appendChild(swap);
-        actionsEl.appendChild(rm);
-    }
+        <div class="${iconClass}"><i class="fa-solid ${iconGlyph}"></i></div>`;
     return item;
-}
-
-window.removeWorkout = async function(id) {
-    const reason = prompt("Remove this session? Optionally note why (cancellation reason):");
-    if (reason === null) return;
-    try {
-        const res = await fetch(`${API_BASE}/api/workouts/${id}/remove`, {
-            method: "POST", headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ reason }),
-        });
-        const data = await res.json();
-        if (res.ok) {
-            logConsole(data.message || "Workout removed.");
-            if (data.warning) logConsole(`Calendar warning: ${data.warning}`, "warning");
-            fetchWorkouts();
-        } else logConsole(`Remove failed: ${data.error}`, "error");
-    } catch (e) { logConsole(`Remove error: ${e.message}`, "error"); }
-};
-
-window.restoreWorkout = async function(id) {
-    try {
-        const res = await fetch(`${API_BASE}/api/workouts/${id}/restore`, { method: "POST" });
-        const data = await res.json();
-        if (res.ok) {
-            logConsole(data.message || "Workout restored.");
-            if (data.warning) logConsole(`Calendar warning: ${data.warning}`, "warning");
-            fetchWorkouts();
-        } else logConsole(`Restore failed: ${data.error}`, "error");
-    } catch (e) { logConsole(`Restore error: ${e.message}`, "error"); }
-};
-
-window.openSwapModal = function(id, currentDate, title) {
-    openModal(`Swap "${title}"`, [
-        { id: "new_date", label: "New date for this session", type: "date", value: currentDate, required: true },
-        { id: "reason", label: "Reason (required)", value: "", required: true, placeholder: "Why move it?" },
-    ], (vals) => submitSwap(id, vals.new_date, vals.reason, false));
-};
-
-async function submitSwap(id, newDate, reason, force) {
-    try {
-        const res = await fetch(`${API_BASE}/api/workouts/swap`, {
-            method: "POST", headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ ops: [{ id, new_date: newDate }], reason, force }),
-        });
-        const data = await res.json();
-        if (!res.ok) { logConsole(`Swap failed: ${data.error}`, "error"); return; }
-        if (data.applied === false && data.warnings && data.warnings.length) {
-            // Validation raised recovery warnings — confirm a forced retry.
-            const msg = "Swap warnings:\n- " + data.warnings.join("\n- ") + "\n\nProceed anyway?";
-            if (confirm(msg)) { submitSwap(id, newDate, reason, true); }
-            else logConsole("Swap cancelled.", "system");
-            return;
-        }
-        logConsole(data.message || "Swap applied.");
-        closeModal();
-        fetchWorkouts();
-    } catch (e) { logConsole(`Swap error: ${e.message}`, "error"); }
 }
 
 // --- COMPARE / ADHERENCE ---
@@ -867,7 +715,173 @@ function renderCompare(data) {
     target.appendChild(summary);
 }
 
-// --- LEARNINGS (full manager) ---
+// --- TIME IN ZONE (DESIGN_intensity_distribution.md §9.6/§9.8) ---
+// The web form of `tm progress -z`: one table per qualifying sport, measured behind
+// today and prescribed ahead of it. Every judgement (which sports, which currency, what
+// counts as undercounted) is made server-side by the same functions the CLI calls — this
+// only draws the result.
+
+let zonesWeeks = "8";
+
+async function fetchZones() {
+    const container = document.getElementById("zones-container");
+    if (!container) return;
+    container.innerHTML = `<div class="item-meta">Loading zone distribution…</div>`;
+    const params = new URLSearchParams({ weeks: zonesWeeks });
+    const currency = document.getElementById("zfilter-currency").value;
+    if (currency) params.set("currency", currency);
+    try {
+        const res = await fetch(`${API_BASE}/api/zones?${params}`);
+        const data = await res.json();
+        if (!res.ok) {
+            container.innerHTML = `<div class="item-meta">${escapeHtml(data.error || "Zones unavailable.")}</div>`;
+            return;
+        }
+        renderZones(data);
+    } catch (e) {
+        container.innerHTML = `<div class="item-meta">Zone load error: ${escapeHtml(e.message)}</div>`;
+    }
+}
+
+function renderZones(data) {
+    const container = document.getElementById("zones-container");
+    const badge = document.getElementById("zones-window-badge");
+    if (badge) {
+        const w = data.window || {};
+        badge.innerText = `${w.weeks === "all" ? "all weeks" : `${w.weeks} weeks`} `
+            + `· ${fmtDuration(w.window_seconds || 0)} total`;
+    }
+
+    const parts = [];
+    const sports = data.sports || [];
+    if (!sports.length) {
+        parts.push(`<div class="item-meta">No sport has recorded zone data in this window. `
+            + `Zones come from HR or power streams on synced activities.</div>`);
+    }
+
+    sports.forEach(s => {
+        const nZones = s.zone_labels.length;
+        const header = `<div class="zone-head">`
+            + `<span class="zone-sport">${escapeHtml(sportTitle(s.sport))}</span>`
+            + `<span class="badge badge-info">${escapeHtml(s.tag)} ${Math.round((s.coverage || 0) * 100)}%</span>`
+            + `<span class="item-meta">${fmtDuration(s.sport_seconds)} in window</span>`
+            + `</div>`;
+
+        const cols = s.zone_labels.map((_, i) => `<th>Z${i + 1}</th>`).join("");
+        const rows = s.weeks.map(wk => {
+            const cells = [];
+            const total = (wk.seconds || []).reduce((a, b) => a + b, 0);
+            for (let i = 0; i < nZones; i++) {
+                const secs = wk.seconds ? wk.seconds[i] : 0;
+                cells.push(`<td>${escapeHtml(fmtZoneCell(secs))}</td>`);
+            }
+            // The stacked bar is the web's addition over the terminal: the same numbers,
+            // read as a shape. Weeks with nothing recorded draw no bar at all.
+            const bar = total > 0
+                ? `<div class="zone-bar">` + (wk.seconds || []).map((secs, i) =>
+                    secs > 0
+                        ? `<span class="zone-seg z${i + 1}" style="width:${(secs / total) * 100}%" `
+                          + `title="Z${i + 1} ${escapeHtml(s.zone_labels[i])}: ${escapeHtml(fmtZoneCell(secs))}"></span>`
+                        : ""
+                  ).join("") + `</div>`
+                : `<div class="zone-bar empty"></div>`;
+
+            const marks = [];
+            if (wk.undercounted) marks.push(`<span class="zone-mark" title="recording covered less of this week than the sport's bar — the row understates it">!</span>`);
+            if (wk.in_progress) marks.push(`<span class="zone-mark" title="week in progress">*</span>`);
+            if (wk.currency_mismatch) marks.push(`<span class="zone-mark" title="planned in the other currency; not converted">≠</span>`);
+
+            const cls = ["zone-row"];
+            if (wk.future) cls.push("future");
+            if (wk.in_progress) cls.push("current");
+            return `<tr class="${cls.join(" ")}">`
+                + `<td class="zone-week">${escapeHtml(wk.week_commencing)}${marks.join("")}</td>`
+                + cells.join("")
+                + `<td class="zone-bar-cell">${bar}</td></tr>`;
+        }).join("");
+
+        parts.push(`<div class="zone-table-wrap">${header}`
+            + `<table class="data-table zone-table"><thead><tr><th>Week</th>${cols}<th></th></tr></thead>`
+            + `<tbody>${rows}</tbody></table></div>`);
+    });
+
+    const om = data.omitted || {};
+    const notes = [];
+    if ((om.low_volume || []).length) {
+        notes.push(`${om.low_volume.map(sportTitle).join(", ")} omitted `
+            + `(under ${Math.round((om.min_share || 0.1) * 100)}% of the window's duration)`);
+    }
+    if ((om.no_zone_data || []).length) {
+        notes.push(`${om.no_zone_data.map(sportTitle).join(", ")} omitted (no zone data)`);
+    }
+    if ((data.window || {}).hidden_weeks) {
+        notes.push(`${data.window.hidden_weeks} more week(s) outside this window`);
+    }
+    notes.push(`weeks past today show what the plan prescribes`);
+    parts.push(`<div class="item-meta zone-legend">${escapeHtml(notes.join(" · "))}</div>`);
+
+    container.innerHTML = parts.join("");
+}
+
+// --- BENCHMARKS (DESIGN_benchmark_workouts.md) ---
+
+async function fetchBenchmarks() {
+    const listEl = document.getElementById("benchmarks-list");
+    const stripEl = document.getElementById("thresholds-strip");
+    const params = new URLSearchParams();
+    const sport = document.getElementById("bfilter-sport").value.trim();
+    const kind = document.getElementById("bfilter-kind").value.trim();
+    if (sport) params.set("sport", sport);
+    if (kind) params.set("kind", kind);
+
+    try {
+        const res = await fetch(`${API_BASE}/api/benchmarks?${params}`);
+        const data = await res.json();
+        if (!res.ok) {
+            listEl.innerHTML = `<div class="item-meta">${escapeHtml(data.error || "Failed to load.")}</div>`;
+            return;
+        }
+
+        const thresholds = data.thresholds || [];
+        stripEl.innerHTML = thresholds.length
+            ? `<div class="threshold-strip">` + thresholds.map(t =>
+                // `formatted` already carries the unit (`benchmarks.format_value`), so the
+                // box prints it alone rather than re-deriving or repeating the suffix.
+                `<div class="threshold-box">`
+                + `<div class="threshold-kind">${escapeHtml(t.label)}</div>`
+                + `<div class="threshold-value">${escapeHtml(t.formatted)}</div></div>`).join("") + `</div>`
+            : `<div class="item-meta">No thresholds on record. `
+              + `Record a test with 'tm benchmark record'.</div>`;
+
+        const rows = data.results || [];
+        document.getElementById("benchmarks-count").innerText =
+            `${rows.length} result${rows.length === 1 ? "" : "s"}`;
+        if (!rows.length) {
+            listEl.innerHTML = `<div class="item-meta">No benchmark results recorded yet.</div>`;
+            return;
+        }
+        listEl.innerHTML = rows.map(r => {
+            // `delta` already carries the direction-aware sign (a faster pace reads
+            // positive), so the colour follows `improvement`, never the raw arithmetic.
+            const delta = r.delta
+                ? `<span class="bm-delta ${r.improvement ? "up" : "down"}">${escapeHtml(r.delta)}</span>`
+                : `<span class="item-meta">first</span>`;
+            return `<div class="bm-row">`
+                + `<div class="bm-main">`
+                + `<span class="bm-kind">${escapeHtml(r.label)}</span> `
+                + `<span class="bm-value">${escapeHtml(r.formatted)}</span> ${delta}`
+                + `</div>`
+                + `<div class="item-meta">ID ${r.id} · ${escapeHtml(r.date)} · `
+                + `${escapeHtml(sportTitle(r.sport_type))} · ${escapeHtml(r.source || "test")}</div>`
+                + (r.note ? `<div class="si-desc">${escapeHtml(r.note)}</div>` : "")
+                + `</div>`;
+        }).join("");
+    } catch (e) {
+        listEl.innerHTML = `<div class="item-meta">Benchmark load error: ${escapeHtml(e.message)}</div>`;
+    }
+}
+
+// --- LEARNINGS (read-only, with evidence) ---
 
 async function fetchLearningsFull() {
     const sport = document.getElementById("lfilter-sport").value.trim();
@@ -889,7 +903,8 @@ async function fetchLearningsFull() {
         container.innerHTML = "";
         const learnings = data.learnings || [];
         if (!learnings.length) {
-            container.innerHTML = `<div class="item-meta" style="padding:1rem;">No learnings match. Run 'data bootstrap' (CLI) to seed observations.</div>`;
+            container.innerHTML = `<div class="item-meta" style="padding:1rem;">No learnings match. `
+                + `Run 'tm data bootstrap' (CLI) to seed observations.</div>`;
             return;
         }
         learnings.forEach(l => container.appendChild(renderLearningRow(l)));
@@ -907,13 +922,13 @@ function renderLearningRow(l) {
     let proposed = "";
     if (l.proposed_confidence) {
         const tgt = l.proposed_confidence === "retire" ? "retire" : l.proposed_confidence;
-        proposed = `<div class="learning-proposed">⚠ proposed demotion → ${tgt}
-            <button class="btn-link" onclick="learningAction(${l.id}, 'demote')">accept</button>
-            <button class="btn-link" onclick="learningAction(${l.id}, 'keep')">keep</button></div>`;
+        proposed = `<div class="learning-proposed">⚠ proposed demotion → ${escapeHtml(tgt)} `
+            + `<span class="item-meta">— resolve with 'tm learnings demote ${l.id}' or `
+            + `'tm learnings keep ${l.id}'</span></div>`;
     }
     row.innerHTML = `
         <div class="learning-main">
-            <span class="learning-tag">[${l.id} · ${escapeHtml(sports)} · ${conf}]</span>
+            <span class="learning-tag">[${l.id} · ${escapeHtml(sports)} · ${escapeHtml(conf)}]</span>
             ${escapeHtml(l.text)}
             ${l.dormant ? `<span class="learning-dormant">(dormant)</span>` : ""}
         </div>
@@ -922,16 +937,11 @@ function renderLearningRow(l) {
         <div class="learning-evidence" id="evidence-${l.id}" style="display:none;"></div>`;
 
     const actionsEl = row.querySelector(".learning-actions");
-    const mkBtn = (label, cls, handler) => {
-        const b = document.createElement("button");
-        b.className = "btn-link" + (cls ? " " + cls : "");
-        b.innerText = label;
-        b.addEventListener("click", handler);
-        return b;
-    };
-    actionsEl.appendChild(mkBtn("evidence", "", () => toggleEvidence(l.id)));
-    actionsEl.appendChild(mkBtn("edit", "", () => editLearning(l.id, l.text)));
-    actionsEl.appendChild(mkBtn("delete", "danger", () => learningAction(l.id, "delete")));
+    const b = document.createElement("button");
+    b.className = "btn-link";
+    b.innerText = "evidence";
+    b.addEventListener("click", () => toggleEvidence(l.id));
+    actionsEl.appendChild(b);
     return row;
 }
 
@@ -950,36 +960,6 @@ window.toggleEvidence = async function(id) {
             `<div class="evidence-line"><span class="evidence-pos">Supporting weeks:</span> ${fmt(data.supporting)}</div>` +
             `<div class="evidence-line"><span class="evidence-neg">Contradicting weeks:</span> ${fmt(data.contradicting)}</div>`;
     } catch (e) { box.innerHTML = `<span class="log-line error">${escapeHtml(e.message)}</span>`; }
-};
-
-window.editLearning = function(id, text) {
-    openModal("Edit Learning", [
-        { id: "text", label: "Observation", type: "textarea", value: text, required: true },
-    ], async (vals) => {
-        const res = await fetch(`${API_BASE}/api/learnings/${id}`, {
-            method: "PUT", headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ text: vals.text }),
-        });
-        const data = await res.json();
-        if (res.ok) { logConsole(data.message || "Learning updated."); closeModal(); fetchLearningsFull(); }
-        else logConsole(`Edit failed: ${data.error}`, "error");
-    });
-};
-
-window.learningAction = async function(id, action) {
-    if (action === "delete" && !confirm("Remove this learning permanently?")) return;
-    let url, method;
-    if (action === "delete") { url = `/api/learnings/${id}`; method = "DELETE"; }
-    else { url = `/api/learnings/${id}/${action}`; method = "POST"; }
-    try {
-        const res = await fetch(`${API_BASE}${url}`, { method });
-        const data = await res.json();
-        if (res.ok) {
-            logConsole(data.message || `Learning ${id} ${action} done.`);
-            fetchLearningsFull();
-            fetchStatus();
-        } else logConsole(`Learning ${action} failed: ${data.error}`, "error");
-    } catch (e) { logConsole(`Learning ${action} error: ${e.message}`, "error"); }
 };
 
 // --- HISTORY (activities / metrics / context) ---
@@ -1032,10 +1012,16 @@ async function fetchHistory() {
         ], "No metrics in range.");
     } catch (e) { logConsole(`Metrics load error: ${e.message}`, "error"); }
 
-    // Daily context
+    // Daily context — vocabulary, calendar strips, then the raw rows.
     try {
-        const res = await fetch(`${API_BASE}/api/daily-context?${range}`);
-        const ctx = await res.json();
+        const [ctxRes, vocabRes] = await Promise.all([
+            fetch(`${API_BASE}/api/daily-context?${range}`),
+            fetch(`${API_BASE}/api/daily-context/metrics`),
+        ]);
+        const ctx = await ctxRes.json();
+        const vocab = await vocabRes.json();
+        renderContextVocab(vocab.metrics || []);
+        renderContextChart(ctx);
         document.getElementById("context-table").innerHTML = buildTable(ctx, [
             { label: "Date", key: "date" },
             { label: "Metric", key: "metric" },
@@ -1043,6 +1029,77 @@ async function fetchHistory() {
             { label: "Note", key: "text" },
         ], "No daily-context signals in range.");
     } catch (e) { logConsole(`Context load error: ${e.message}`, "error"); }
+}
+
+/** `context list-metrics`: which signals exist at all, how many rows each has and the
+ *  span it covers — the vocabulary behind the strips below. */
+function renderContextVocab(metrics) {
+    const el = document.getElementById("context-vocab");
+    if (!el) return;
+    if (!metrics.length) {
+        el.innerHTML = `<div class="item-meta">No context signals recorded. `
+            + `Add one with 'tm context add'.</div>`;
+        return;
+    }
+    el.innerHTML = metrics.map(m =>
+        `<span class="ctx-chip" title="${escapeHtml(m.first_date)} → ${escapeHtml(m.last_date)}">`
+        + `${escapeHtml(m.metric)} <span class="ctx-chip-count">${m.count}</span></span>`).join("");
+}
+
+/** One row per metric, one cell per day in the loaded range: a calendar strip whose
+ *  shading is the value's rank within that metric (metrics have no shared scale — sleep
+ *  hours and units of alcohol cannot share a ramp). Days with no signal stay blank. */
+function renderContextChart(rows) {
+    const el = document.getElementById("context-chart");
+    const badge = document.getElementById("context-window-badge");
+    if (!el) return;
+    if (!rows || !rows.length) {
+        el.innerHTML = "";
+        if (badge) badge.innerText = "";
+        return;
+    }
+
+    const dates = rows.map(r => r.date).sort();
+    const start = parseLocalDate(dates[0]);
+    const end = parseLocalDate(dates[dates.length - 1]);
+    const days = [];
+    for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+        const pad = n => String(n).padStart(2, "0");
+        days.push(`${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`);
+    }
+    if (badge) badge.innerText = `${dates[0]} → ${dates[dates.length - 1]} · ${rows.length} signals`;
+
+    const byMetric = new Map();
+    rows.forEach(r => {
+        if (!byMetric.has(r.metric)) byMetric.set(r.metric, new Map());
+        byMetric.get(r.metric).set(r.date, r);
+    });
+
+    const html = Array.from(byMetric.entries()).map(([metric, byDate]) => {
+        const values = Array.from(byDate.values())
+            .map(r => Number(r.value)).filter(v => Number.isFinite(v));
+        const min = values.length ? Math.min(...values) : 0;
+        const max = values.length ? Math.max(...values) : 0;
+        const cells = days.map(day => {
+            const row = byDate.get(day);
+            if (!row) return `<span class="ctx-cell" title="${escapeHtml(day)}: —"></span>`;
+            const v = Number(row.value);
+            // A metric whose values never vary still deserves a visible mark, so a flat
+            // series pins to full intensity rather than dividing by a zero span.
+            const level = Number.isFinite(v) && max > min
+                ? Math.round(((v - min) / (max - min)) * 4) + 1
+                : 5;
+            const label = [day, row.value != null ? `value ${row.value}` : null, row.text]
+                .filter(Boolean).join(" · ");
+            return `<span class="ctx-cell lvl${level}" title="${escapeHtml(label)}"></span>`;
+        }).join("");
+        return `<div class="ctx-row"><span class="ctx-label">${escapeHtml(metric)}</span>`
+            + `<span class="ctx-strip">${cells}</span></div>`;
+    }).join("");
+
+    el.innerHTML = html
+        + `<div class="item-meta ctx-axis">${escapeHtml(days[0])} → ${escapeHtml(days[days.length - 1])}`
+        + ` · shading is each signal's own range</div>`;
 }
 
 // --- PROGRESS TAB (DESIGN_progress_timeline.md §7.3) ---
@@ -1084,47 +1141,15 @@ document.querySelectorAll(".progress-range-btn").forEach(btn => {
         document.querySelectorAll(".progress-range-btn").forEach(b => b.classList.remove("active"));
         btn.classList.add("active");
         progressWeeks = btn.dataset.weeks;
+        zonesWeeks = btn.dataset.weeks;
         fetchProgress();
+        fetchZones();
     });
 });
 
-// --- DASHBOARD ACTION BUTTONS ---
+// --- Plan versions & comparison (see DESIGN_plan_rollback.md; rolling back is
+//     `tm plan rollback`, a CLI action) ---
 
-document.getElementById("btn-pull-metrics").addEventListener("click", async () => {
-    try {
-        const res = await fetch(`${API_BASE}/api/metrics/pull`, { method: "POST" });
-        const data = await res.json();
-        logConsole(data.error || "Garmin sync is CLI-only.", "warning");
-        if (data.command) logConsole(`Run: ${data.command}`, "system");
-        fetchStatus();
-    } catch (e) { logConsole(`Pull metrics error: ${e.message}`, "error"); }
-});
-
-document.getElementById("btn-generate-plan").addEventListener("click", async () => {
-    logConsole("Requesting Coach to generate periodized plan strategy (macro/meso)...", "system");
-    try {
-        const res = await fetch(`${API_BASE}/api/plan`, { method: "POST" });
-        const data = await res.json();
-        if (res.ok) {
-            logConsole(`Periodization plan generated! ${data.mesocycles_count} mesocycles established.`);
-            if (data.strategy) logConsole(`Overall Strategy:\n${data.strategy}`, "system");
-            fetchStatus();
-        } else logConsole(`Plan generation failed: ${data.error}`, "error");
-    } catch (e) { logConsole(`AI Planning Error: ${e.message}`, "error"); }
-});
-
-document.getElementById("btn-delete-plan").addEventListener("click", async () => {
-    if (activeGoalId == null) { logConsole("No active goal to delete a plan for.", "error"); return; }
-    if (!confirm("Delete the periodization plan for the active goal?")) return;
-    try {
-        const res = await fetch(`${API_BASE}/api/plan/${activeGoalId}`, { method: "DELETE" });
-        const data = await res.json();
-        if (res.ok) { logConsole(data.message || "Plan deleted."); fetchStatus(); }
-        else logConsole(`Delete plan failed: ${data.error}`, "error");
-    } catch (e) { logConsole(`Delete plan error: ${e.message}`, "error"); }
-});
-
-// --- Plan versions & rollback (see DESIGN_plan_rollback.md) ---
 async function loadPlanVersions() {
     const listEl = document.getElementById("plan-versions-list");
     if (!listEl) return;
@@ -1136,7 +1161,7 @@ async function loadPlanVersions() {
         const versions = (data && data.versions) || [];
         if (versions.length <= 1) {
             listEl.innerHTML = `<div class="item-meta">No earlier versions yet. `
-                + `Regenerating this plan keeps the previous version here so you can roll back.</div>`;
+                + `Regenerating this plan keeps the previous version here so you can compare it.</div>`;
             return;
         }
         listEl.innerHTML = versions.map(v => {
@@ -1154,9 +1179,7 @@ async function loadPlanVersions() {
                 ? `<span class="item-meta">current</span>`
                 : `<button class="btn btn-secondary btn-sm" data-diff="${v.id}" `
                   + `title="Compare this version against the active plan">`
-                  + `<i class="fa-solid fa-code-compare"></i> Compare</button> `
-                  + `<button class="btn btn-secondary btn-sm" data-version="${v.id}">`
-                  + `<i class="fa-solid fa-rotate-left"></i> Restore</button>`;
+                  + `<i class="fa-solid fa-code-compare"></i> Compare</button>`;
             return `<div class="plan-version-row">`
                 + `<div class="plan-version-head">${badge} `
                 + `<span class="item-meta">ID ${v.id} · generated ${escapeHtml(created)}</span>`
@@ -1164,12 +1187,12 @@ async function loadPlanVersions() {
                 + (excerpt ? `<div class="si-desc">${escapeHtml(excerpt)}</div>` : "")
                 + `</div>`;
         }).join("");
-        listEl.querySelectorAll("button[data-version]").forEach(btn => {
-            btn.addEventListener("click", () => rollbackToVersion(btn.dataset.version));
-        });
         listEl.querySelectorAll("button[data-diff]").forEach(btn => {
             btn.addEventListener("click", () => loadPlanDiff(btn.dataset.diff));
         });
+        listEl.insertAdjacentHTML("beforeend",
+            `<div class="cli-guidance"><i class="fa-solid fa-terminal"></i> `
+            + `Restore one with <code>tm plan rollback --version &lt;id&gt;</code>.</div>`);
         hidePlanDiff();
     } catch (e) {
         listEl.innerHTML = `<div class="item-meta">Failed to load versions: ${escapeHtml(e.message)}</div>`;
@@ -1306,32 +1329,13 @@ async function loadPlanDiff(fromVersion) {
     }
 }
 
-async function rollbackToVersion(versionId) {
-    if (!confirm("Roll back to this plan version? This archives the current plan's "
-        + "upcoming workouts and restores that version's on Google Calendar.")) return;
-    logConsole(`Rolling back plan to version ${versionId}…`, "system");
-    try {
-        const res = await fetch(`${API_BASE}/api/plan/rollback`, {
-            method: "POST", headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ goal_id: activeGoalId, version: Number(versionId) }),
-        });
-        const data = await res.json();
-        if (res.ok) {
-            logConsole(data.message || "Rollback complete.");
-            fetchStatus();
-            fetchWorkouts();
-            loadPlanVersions();
-        } else {
-            logConsole(`Rollback failed: ${data.error}`, "error");
-        }
-    } catch (e) { logConsole(`Rollback error: ${e.message}`, "error"); }
-}
-
 document.getElementById("plan-versions").addEventListener("toggle", (e) => {
     if (e.target.open) loadPlanVersions();
 });
 
-// --- Archived workout batches & rollback (see DESIGN_plan_rollback.md §9) ---
+// --- Archived workout batches (see DESIGN_plan_rollback.md §9; restoring one is
+//     `tm workout rollback`) ---
+
 async function loadWorkoutBatches() {
     const listEl = document.getElementById("workout-batches-list");
     if (!listEl) return;
@@ -1349,11 +1353,10 @@ async function loadWorkoutBatches() {
             const when = new Date(b.archived_at).toLocaleString("en-US",
                 { month: "short", day: "numeric", year: "numeric",
                   hour: "2-digit", minute: "2-digit" });
-            // A batch whose every session is in the past restores nothing, so it offers
-            // no button — the same guard the service raises on.
-            const action = b.restorable
-                ? `<button class="btn btn-secondary btn-sm" data-batch="${escapeHtml(b.archived_at)}">`
-                  + `<i class="fa-solid fa-rotate-left"></i> Restore</button>`
+            // A batch whose every session is in the past restores nothing, so it is
+            // labelled as such — the same guard the service raises on.
+            const state = b.restorable
+                ? `<span class="item-meta">${b.restorable} restorable</span>`
                 : `<span class="item-meta">all in the past</span>`;
             const plans = (b.macrocycle_ids || []).join(", ");
             return `<div class="plan-version-row">`
@@ -1361,193 +1364,20 @@ async function loadWorkoutBatches() {
                 + `<span class="badge badge-info">${b.restorable} of ${b.workouts}</span> `
                 + `<span class="item-meta">archived ${escapeHtml(when)}`
                 + (plans ? ` · plan ID ${escapeHtml(plans)}` : "") + `</span>`
-                + `<span class="plan-version-action">${action}</span></div>`
+                + `<span class="plan-version-action">${state}</span></div>`
                 + `<div class="si-desc">${escapeHtml(b.first_date)} → ${escapeHtml(b.last_date)}</div>`
                 + `</div>`;
         }).join("");
-        listEl.querySelectorAll("button[data-batch]").forEach(btn => {
-            btn.addEventListener("click", () => rollbackWorkoutBatch(btn.dataset.batch));
-        });
+        listEl.insertAdjacentHTML("beforeend",
+            `<div class="cli-guidance"><i class="fa-solid fa-terminal"></i> `
+            + `Restore a batch with <code>tm workout rollback</code>.</div>`);
     } catch (e) {
         listEl.innerHTML = `<div class="item-meta">Failed to load batches: ${escapeHtml(e.message)}</div>`;
     }
 }
 
-async function rollbackWorkoutBatch(batch) {
-    if (!confirm("Restore this batch of workouts? This archives the currently planned "
-        + "sessions from today onward and updates Google Calendar. The active plan "
-        + "version is unchanged.")) return;
-    logConsole("Rolling back workouts…", "system");
-    try {
-        const res = await fetch(`${API_BASE}/api/workouts/rollback`, {
-            method: "POST", headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ batch }),
-        });
-        const data = await res.json();
-        if (res.ok) {
-            logConsole(data.message || "Workout rollback complete.");
-            fetchStatus();
-            fetchWorkouts();
-            loadWorkoutBatches();
-        } else {
-            logConsole(`Workout rollback failed: ${data.error}`, "error");
-        }
-    } catch (e) { logConsole(`Workout rollback error: ${e.message}`, "error"); }
-}
-
 document.getElementById("workout-batches").addEventListener("toggle", (e) => {
     if (e.target.open) loadWorkoutBatches();
-});
-
-document.getElementById("btn-generate-workouts").addEventListener("click", async () => {
-    logConsole("Requesting Coach to generate workouts (microcycles)...", "system");
-    try {
-        const res = await fetch(`${API_BASE}/api/workouts/generate`, { method: "POST" });
-        const data = await res.json();
-        if (res.ok) {
-            logConsole(`Workouts generated! ${data.workouts_count} workouts scheduled and pushed to Google Calendar.`);
-            if (data.reasoning) logConsole(`Coach Reasoning:\n${data.reasoning}`, "system");
-            fetchStatus();
-            fetchWorkouts();
-        } else logConsole(`Workout generation failed: ${data.error}`, "error");
-    } catch (e) { logConsole(`AI Workout Generation Error: ${e.message}`, "error"); }
-});
-
-document.getElementById("btn-adapt").addEventListener("click", async () => {
-    logConsole("Running daily Garmin metrics adaptation check...", "system");
-    try {
-        const res = await fetch(`${API_BASE}/api/adapt`, { method: "POST" });
-        const data = await res.json();
-        if (!res.ok) { logConsole(`Adaptation check failed: ${data.error}`, "error"); return; }
-        logConsole(`Daily Check Complete: ${data.reason}`, "system");
-        if (!data.change_needed || !data.workouts || data.workouts.length === 0) {
-            logConsole("Workouts remain as scheduled.", "system");
-            return;
-        }
-        data.workouts.forEach(w => logConsole(`Proposed: ${w.date} ${w.sport_type} — ${w.title}`, "warning"));
-        if (!confirm(`Apply ${data.workouts.length} proposed adaptation(s) and sync to Calendar?`)) {
-            logConsole("Adaptations discarded.", "system");
-            return;
-        }
-        const ap = await fetch(`${API_BASE}/api/adapt/apply`, {
-            method: "POST", headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ workouts: data.workouts, reason: data.reason }),
-        });
-        const apData = await ap.json();
-        if (ap.ok) { logConsole(apData.message || "Adaptations applied."); fetchStatus(); fetchWorkouts(); }
-        else logConsole(`Apply failed: ${apData.error}`, "error");
-    } catch (e) { logConsole(`Adaptation check error: ${e.message}`, "error"); }
-});
-
-document.getElementById("btn-push-workouts").addEventListener("click", async () => {
-    logConsole("Pushing planned training sessions to Google Calendar...", "system");
-    try {
-        const res = await fetch(`${API_BASE}/api/workouts/push`, { method: "POST" });
-        const data = await res.json();
-        if (res.ok) { logConsole(`Pushed! ${data.synced_count} workouts written to Google Calendar.`); fetchWorkouts(); }
-        else logConsole(`Calendar push failed: ${data.error}`, "error");
-    } catch (e) { logConsole(`Calendar Push Error: ${e.message}`, "error"); }
-});
-
-// --- FORMS ---
-
-document.getElementById("form-add-goal").addEventListener("submit", async (e) => {
-    e.preventDefault();
-    const title = document.getElementById("goal-title").value;
-    const target_date = document.getElementById("goal-date").value;
-    const selectedChips = document.querySelectorAll("#goal-sports-chips .sport-chip.selected");
-    const sports = Array.from(selectedChips).map(c => c.dataset.value);
-    if (sports.length === 0) { logConsole("Failed to add goal: select at least one sport.", "error"); alert("Please select at least one sport."); return; }
-    const priority = document.getElementById("goal-priority").value;
-    const description = document.getElementById("goal-desc").value;
-    logConsole(`Adding goal: ${title}...`, "system");
-    try {
-        const res = await fetch(`${API_BASE}/api/objectives`, {
-            method: "POST", headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ title, target_date, sport_type: sports, priority, description }),
-        });
-        if (res.ok) {
-            logConsole(`Goal '${title}' added!`);
-            document.getElementById("form-add-goal").reset();
-            selectedChips.forEach(c => c.classList.remove("selected"));
-            fetchObjectives(); fetchStatus();
-        } else { const data = await res.json(); logConsole(`Add goal failed: ${data.error}`, "error"); }
-    } catch (err) { logConsole(`Error adding goal: ${err.message}`, "error"); }
-});
-
-document.getElementById("form-add-event").addEventListener("submit", async (e) => {
-    e.preventDefault();
-    const title = document.getElementById("event-title").value;
-    const start_date = document.getElementById("event-start").value;
-    const end_date = document.getElementById("event-end").value;
-    const rest = document.getElementById("event-rest").checked ? 1 : 0;
-    const description = document.getElementById("event-desc").value;
-    logConsole(`Logging constraint: ${title}...`, "system");
-    try {
-        const res = await fetch(`${API_BASE}/api/constraints`, {
-            method: "POST", headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ title, start_date, end_date, rest, description }),
-        });
-        if (res.ok) { logConsole(`Logged constraint '${title}'!`); document.getElementById("form-add-event").reset(); fetchEvents(); }
-        else { const data = await res.json(); logConsole(`Log event failed: ${data.error}`, "error"); }
-    } catch (err) { logConsole(`Error logging event: ${err.message}`, "error"); }
-});
-
-document.getElementById("form-add-workout").addEventListener("submit", async (e) => {
-    e.preventDefault();
-    const payload = {
-        date: document.getElementById("wadd-date").value,
-        sport_type: document.getElementById("wadd-sport").value,
-        title: document.getElementById("wadd-title").value,
-        description: document.getElementById("wadd-desc").value,
-        duration_minutes: document.getElementById("wadd-duration").value,
-        rpe: document.getElementById("wadd-rpe").value,
-        tss: document.getElementById("wadd-tss").value,
-        reason: document.getElementById("wadd-reason").value || null,
-    };
-    logConsole(`Adding manual workout: ${payload.title}...`, "system");
-    try {
-        const res = await fetch(`${API_BASE}/api/workouts`, {
-            method: "POST", headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(payload),
-        });
-        const data = await res.json();
-        if (res.ok) {
-            logConsole(data.message || "Workout scheduled.");
-            document.getElementById("form-add-workout").reset();
-            fetchWorkouts();
-        } else logConsole(`Add workout failed: ${data.error}`, "error");
-    } catch (err) { logConsole(`Error adding workout: ${err.message}`, "error"); }
-});
-
-document.getElementById("btn-save-macro-feedback").addEventListener("click", async () => {
-    if (!activeMacrocycleId) { logConsole("No active macrocycle to save feedback for.", "error"); return; }
-    const feedback = document.getElementById("macro-feedback-input").value;
-    logConsole("Saving strategy feedback...", "system");
-    try {
-        const res = await fetch(`${API_BASE}/api/macrocycles/${activeMacrocycleId}/feedback`, {
-            method: "POST", headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ feedback }),
-        });
-        const data = await res.json();
-        if (res.ok) { logConsole("Strategy feedback saved."); document.getElementById("macro-feedback-notice").style.display = "block"; }
-        else logConsole(`Failed to save strategy feedback: ${data.error}`, "error");
-    } catch (e) { logConsole(`Error saving strategy feedback: ${e.message}`, "error"); }
-});
-
-document.getElementById("btn-save-meso-feedback").addEventListener("click", async () => {
-    if (!activeMesocycleId) { logConsole("No active mesocycle to save feedback for.", "error"); return; }
-    const feedback = document.getElementById("meso-feedback-input").value;
-    logConsole("Saving block feedback...", "system");
-    try {
-        const res = await fetch(`${API_BASE}/api/mesocycles/${activeMesocycleId}/feedback`, {
-            method: "POST", headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ feedback }),
-        });
-        const data = await res.json();
-        if (res.ok) { logConsole("Block feedback saved."); document.getElementById("meso-feedback-notice").style.display = "block"; }
-        else logConsole(`Failed to save block feedback: ${data.error}`, "error");
-    } catch (e) { logConsole(`Error saving block feedback: ${e.message}`, "error"); }
 });
 
 document.getElementById("btn-clear-logs").addEventListener("click", () => {
@@ -1560,21 +1390,31 @@ document.getElementById("btn-workout-refresh").addEventListener("click", fetchWo
 document.getElementById("btn-compare-run").addEventListener("click", runCompare);
 document.getElementById("btn-learnings-refresh").addEventListener("click", fetchLearningsFull);
 document.getElementById("btn-history-refresh").addEventListener("click", fetchHistory);
+document.getElementById("btn-benchmarks-refresh").addEventListener("click", fetchBenchmarks);
+document.getElementById("btn-zones-refresh").addEventListener("click", fetchZones);
 
-document.getElementById("modal-overlay").addEventListener("click", (e) => {
-    if (e.target.id === "modal-overlay") closeModal();
-});
+/** Sport filters are built from the sports actually planned, so a newly-canonical sport
+ *  appears here the moment it is used — the hardcoded <option> list this replaces had
+ *  silently fallen behind the CLI's. */
+async function populateSportFilters() {
+    try {
+        const res = await fetch(`${API_BASE}/api/workouts`);
+        if (!res.ok) return;
+        const workouts = await res.json();
+        const sports = Array.from(new Set(workouts.map(w => w.sport_type).filter(Boolean))).sort();
+        populateSportFilter(document.getElementById("wfilter-sport"), sports);
+        populateSportFilter(document.getElementById("cmp-sport"), sports.filter(s => s !== "rest"));
+    } catch (e) { /* filters simply stay at "All" */ }
+}
 
 // --- INITIALIZATION ---
 document.addEventListener("DOMContentLoaded", () => {
-    document.querySelectorAll("#goal-sports-chips .sport-chip").forEach(chip => {
-        chip.addEventListener("click", () => chip.classList.toggle("selected"));
-    });
-    // Default workouts filter to today.
     const wf = document.getElementById("wfilter-from");
     if (wf) wf.value = todayStr();
 
     fetchStatus();
     fetchObjectives();
     fetchEvents();
+    fetchModels();
+    populateSportFilters();
 });

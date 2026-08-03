@@ -12,7 +12,7 @@ machinery elsewhere.
 Kept dependency-free (like ``trainmate.sports``) so the DB, service, CLI and engine
 layers can all import it without an import cycle.
 """
-from typing import Dict, List, NamedTuple, Optional
+from typing import Any, Dict, List, NamedTuple, Optional, Sequence, Tuple
 
 
 class AnchorKind(NamedTuple):
@@ -120,3 +120,22 @@ def is_improvement(kind: str, new: float, old: float) -> bool:
     if a and a.lower_is_better:
         return new < old
     return new > old
+
+
+def with_previous(rows: Sequence[Dict[str, Any]]) -> List[Tuple[Dict[str, Any], Optional[float]]]:
+    """Pairs each logbook row with the value of the next-older row OF THE SAME KIND —
+    the comparison every per-row delta is against (§3.2/§6). Expects `rows` newest-first,
+    as `get_benchmark_results` returns them, and preserves that order.
+
+    Shared so `benchmark list` and the web logbook cannot disagree about what a row is
+    being compared to."""
+    by_kind: Dict[str, List[Dict[str, Any]]] = {}
+    for row in rows:
+        by_kind.setdefault(row["anchor_kind"], []).append(row)
+    out = []
+    for row in rows:
+        series = by_kind[row["anchor_kind"]]
+        idx = series.index(row)
+        prev = float(series[idx + 1]["value"]) if idx + 1 < len(series) else None
+        out.append((row, prev))
+    return out

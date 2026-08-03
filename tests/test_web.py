@@ -484,5 +484,207 @@ class TestTimelinePayload(unittest.TestCase):
         self.assertEqual(len(narrow["days"]), 5)
 
 
+class TestReadOnly(unittest.TestCase):
+    """The dashboard reads and nothing else (ARCHITECTURE.md §8). These tests are the
+    enforcement: a route added with a mutating verb fails here, which is the whole point
+    of demoting the surface rather than merely documenting it as read-only."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.client = trainmate_web.app.test_client()
+
+    def test_every_route_is_get_only(self):
+        for rule in trainmate_web.app.url_map.iter_rules():
+            verbs = rule.methods - {"HEAD", "OPTIONS"}
+            self.assertEqual(
+                verbs, {"GET"},
+                f"{rule} exposes {sorted(verbs)}; the dashboard must stay read-only",
+            )
+
+    def test_mutating_verbs_are_refused(self):
+        for verb, path in (
+            ("post", "/api/objectives"),
+            ("post", "/api/workouts"),
+            ("put", "/api/objectives/1"),
+            ("delete", "/api/objectives/1"),
+            ("post", "/api/plan"),
+            ("post", "/api/adapt"),
+        ):
+            res = getattr(self.client, verb)(path)
+            self.assertEqual(res.status_code, 405, f"{verb.upper()} {path}")
+            self.assertIn("read-only", res.get_json()["error"])
+
+    def test_no_google_or_llm_import_at_module_scope(self):
+        # A reader needs no Calendar service-account credentials and no LLM client;
+        # importing either would put write capability one call away.
+        source = open(trainmate_web.__file__).read()
+        self.assertNotIn("google_calendar", source)
+        self.assertNotIn("coach_service", source)
+
+
+class TestNewReadEndpoints(unittest.TestCase):
+    """The CLI-only features the demotion brought over as views: the benchmark logbook,
+    the daily-context vocabulary, the model menu, plan show and the zone tables."""
+
+    @classmethod
+    def setUpClass(cls):
+        if os.path.exists(TEST_DB_PATH):
+            os.remove(TEST_DB_PATH)
+        global test_db
+        test_db = Database(db_path=TEST_DB_PATH)
+        trainmate_web.db = test_db
+        # `/api/models` delegates to `llm_models`, which resolves `trainmate.db.db`
+        # lazily rather than taking the web app's handle — so that one has to be bound
+        # too, and restored afterwards so it does not leak into later test modules.
+        import trainmate.db
+        cls._saved_db = trainmate.db.db
+        trainmate.db.db = test_db
+        cls.client = trainmate_web.app.test_client()
+
+    @classmethod
+    def tearDownClass(cls):
+        import trainmate.db
+        trainmate.db.db = cls._saved_db
+        if os.path.exists(TEST_DB_PATH):
+            try:
+                os.remove(TEST_DB_PATH)
+            except OSError:
+                pass
+
+    def setUp(self):
+        clear_all_tables(test_db)
+
+    def test_benchmarks_carry_formatted_value_and_directional_delta(self):
+        test_db.add_benchmark_result(
+            date="2026-05-01", sport_type="cycling", anchor_kind="ftp",
+            value=240.0, unit="W", source="test",
+        )
+        test_db.add_benchmark_result(
+            date="2026-06-01", sport_type="cycling", anchor_kind="ftp",
+            value=250.0, unit="W", source="test",
+        )
+        data = self.client.get("/api/benchmarks").get_json()
+        # Newest first, and the newest compares against the older row of the same kind.
+        self.assertEqual([r["value"] for r in data["results"]], [250.0, 240.0])
+        newest = data["results"][0]
+        self.assertTrue(newest["improvement"])
+        self.assertTrue(newest["delta"].startswith("+"))
+        self.assertIsNone(data["results"][1]["delta"])
+        self.assertEqual(
+            [t["anchor_kind"] for t in data["thresholds"]], ["ftp"]
+        )
+        self.assertEqual(data["thresholds"][0]["value"], 250.0)
+
+    def test_benchmark_pace_delta_reads_positive_when_faster(self):
+        # A lower threshold pace is an improvement; the sign must reflect that (§3.2).
+        test_db.add_benchmark_result(
+            date="2026-05-01", sport_type="running", anchor_kind="threshold_pace",
+            value=300.0, unit="min/km", source="test",
+        )
+        test_db.add_benchmark_result(
+            date="2026-06-01", sport_type="running", anchor_kind="threshold_pace",
+            value=285.0, unit="min/km", source="test",
+        )
+        newest = self.client.get("/api/benchmarks").get_json()["results"][0]
+        self.assertTrue(newest["improvement"])
+        self.assertTrue(newest["delta"].startswith("+"))
+
+    def test_benchmarks_filter_by_sport(self):
+        test_db.add_benchmark_result(
+            date="2026-05-01", sport_type="cycling", anchor_kind="ftp",
+            value=240.0, unit="W", source="test",
+        )
+        test_db.add_benchmark_result(
+            date="2026-05-02", sport_type="running", anchor_kind="threshold_pace",
+            value=300.0, unit="min/km", source="test",
+        )
+        data = self.client.get("/api/benchmarks?sport=cycling").get_json()
+        self.assertEqual([r["sport_type"] for r in data["results"]], ["cycling"])
+
+    def test_context_metrics_vocabulary(self):
+        for d, val in (("2026-06-01", 2), ("2026-06-03", 1)):
+            test_db.upsert_daily_context_by_event(
+                google_event_id=f"e{d}", date=d, metric="alcohol",
+                value=val, text="drinks",
+            )
+        data = self.client.get("/api/daily-context/metrics").get_json()
+        self.assertEqual(len(data["metrics"]), 1)
+        row = data["metrics"][0]
+        self.assertEqual(row["metric"], "alcohol")
+        self.assertEqual(row["count"], 2)
+        self.assertEqual(row["first_date"], "2026-06-01")
+        self.assertEqual(row["last_date"], "2026-06-03")
+
+    def test_daily_context_filters_by_metric(self):
+        test_db.upsert_daily_context_by_event(
+            google_event_id="e1", date="2026-06-01", metric="alcohol", value=2, text="")
+        test_db.upsert_daily_context_by_event(
+            google_event_id="e2", date="2026-06-01", metric="stress", value=7, text="")
+        rows = self.client.get("/api/daily-context?metric=stress").get_json()
+        self.assertEqual([r["metric"] for r in rows], ["stress"])
+
+    def test_models_menu_marks_the_active_entry(self):
+        data = self.client.get("/api/models").get_json()
+        self.assertIn("models", data)
+        self.assertTrue(data["active"])
+        actives = [m for m in data["models"] if m["active"]]
+        self.assertEqual(len(actives), 1)
+        self.assertEqual(actives[0]["model"], data["active"])
+
+    def test_plan_show_returns_macro_and_mesocycles(self):
+        goal_id = test_db.add_objective(
+            title="A race", target_date="2026-09-01", sport_type="running",
+            description="", priority=1, status="active",
+        )
+        test_db.save_macrocycle(
+            objective_id=goal_id, strategy="build then peak", goals_hash="g",
+            constraints_hash="l", config_hash="c",
+            mesocycles=[{"name": "Base", "start_date": "2026-06-01",
+                         "end_date": "2026-06-28", "focus": "aerobic"}],
+        )
+        data = self.client.get("/api/plan").get_json()
+        self.assertEqual(data["goal"]["id"], goal_id)
+        self.assertEqual(data["macrocycle"]["strategy"], "build then peak")
+        self.assertEqual([m["name"] for m in data["mesocycles"]], ["Base"])
+
+    def test_plan_show_without_a_goal_is_empty_not_an_error(self):
+        res = self.client.get("/api/plan")
+        self.assertEqual(res.status_code, 200)
+        self.assertIsNone(res.get_json()["goal"])
+
+    def test_zones_rejects_a_bad_window_or_currency(self):
+        self.assertEqual(self.client.get("/api/zones?weeks=0").status_code, 400)
+        self.assertEqual(self.client.get("/api/zones?weeks=x").status_code, 400)
+        self.assertEqual(self.client.get("/api/zones?currency=rpe").status_code, 400)
+
+    def test_zones_empty_history_reports_no_sports(self):
+        data = self.client.get("/api/zones").get_json()
+        self.assertEqual(data["sports"], [])
+        self.assertEqual(data["window"]["weeks"], 8)
+
+    def test_zones_report_measured_seconds_for_a_recorded_sport(self):
+        # One run with its HR zone seconds recorded, inside the default 8-week window.
+        today = date.fromisoformat(trainmate_web.today_str())
+        when = (today - timedelta(days=7)).isoformat()
+        test_db.save_completed_activity(
+            activity_id="z1", date=when, start_time=f"{when} 08:00:00",
+            activity_name="Zone run", activity_type="running",
+            duration_sec=3600, distance_km=10.0, elevation_gain_m=0.0,
+            avg_hr=145, max_hr=170, rpe=None, tss=60.0,
+            zone1_sec=600, zone2_sec=1800, zone3_sec=900, zone4_sec=300, zone5_sec=0,
+        )
+        # Naming the sport explicitly is the CLI's own override of the volume filter,
+        # so the assertion does not depend on the machine's configured preferences.
+        data = self.client.get("/api/zones?sport=running").get_json()
+
+        running = next((s for s in data["sports"] if s["sport"] == "running"), None)
+        self.assertIsNotNone(running, f"expected a running table, got {data['sports']}")
+        self.assertEqual(running["currency"], "hr")
+        self.assertEqual(len(running["zone_labels"]), 5)
+        week = next(w for w in running["weeks"] if w["seconds"])
+        self.assertEqual(sum(week["seconds"]), 3600)
+        self.assertFalse(week["future"])
+
+
 if __name__ == "__main__":
     unittest.main()
