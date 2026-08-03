@@ -647,8 +647,8 @@ def run_workout_compare(args: argparse.Namespace) -> None:
     if informational:
         print()
         print(bold(gray("=== OUTSIDE ANY PLAN (informational) ===")))
-        for note in informational:
-            print(gray(note))
+        for act in informational:
+            print(gray(f"- {act['date']}: {_fmt_act(act)}"))
 
     if not getattr(args, 'no_mark', False) and config.google_calendar_id:
         marked = mark_adherence_from_results(matching_results, today_str)

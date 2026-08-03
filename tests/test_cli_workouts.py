@@ -667,6 +667,39 @@ class TestCliWorkouts(unittest.TestCase):
         self.assertEqual(exit_code, 0)
         self.assertIn("No planned workouts or completed activities found", stdout)
 
+    # Colour on: `informational` holds activity dicts, so a raw gray(dict) only blows
+    # up on a terminal — piped output short-circuits colorize and hides the bug.
+    @patch("trainmate.util.is_color_enabled", return_value=True)
+    def test_workout_compare_outside_any_plan(self, _color):
+        """Activities on dates no mesocycle covers are rendered as formatted lines,
+        not raw dicts."""
+        yesterday_str = (
+            datetime.now(timezone.utc).date() - timedelta(days=1)
+        ).strftime("%Y-%m-%d")
+
+        # No mesocycles saved -> no date is covered, and nothing is planned that day,
+        # so this lands in the informational bucket.
+        test_db.save_completed_activity(
+            activity_id="act_cmp_info",
+            date=yesterday_str,
+            start_time=f"{yesterday_str} 08:00:00",
+            activity_name="Off-Season Ride",
+            activity_type="road_biking",
+            duration_sec=3600.0,
+            distance_km=30.0,
+            elevation_gain_m=100.0,
+            avg_hr=140,
+            max_hr=170,
+            rpe=None,
+            tss=60.0,
+        )
+
+        exit_code, stdout, _ = self.run_cli(["workout", "compare", "--days", "2"])
+        self.assertEqual(exit_code, 0)
+        self.assertIn("=== OUTSIDE ANY PLAN (informational) ===", stdout)
+        self.assertIn(f"- {yesterday_str}: [road_biking] Off-Season Ride", stdout)
+        self.assertNotIn("'activity_id'", stdout)
+
     @patch("trainmate_cli.coach_service")
     def test_workout_batches_and_rollback(self, mock_coach):
         """`workout batches` lists archived batches and `workout rollback` picks one

@@ -119,7 +119,7 @@ def analyze_adherence(
     history_days: int,
     minor_activity_load_threshold: float = 25.0,
     covered_ranges: Optional[List[Tuple[str, str]]] = None,
-) -> Tuple[List[str], List[Dict[str, Any]], List[str]]:
+) -> Tuple[List[str], List[Dict[str, Any]], List[Dict[str, Any]]]:
     """Evaluates planned workouts vs completed Garmin activities over a rolling window.
 
     Calculates adherence discrepancies (missed workouts, duration/workload mismatches, and
