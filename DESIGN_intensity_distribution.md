@@ -647,6 +647,12 @@ Warning: sport_preferences: 'Road cycling' is
   mean 'cycling'?
 ```
 
+**"At config load" means at the point of use, not in `Config.__init__`.** `config.py` has no
+validation pass — every setting is a lazy property, and the only thing that happens at load is
+`yaml.safe_load`, at import time, in every process there is. A warning there greets `tm --help`,
+the Telegram bot and the web app alike, none of which read this list. It belongs where the list
+is consumed: `progress` resolving its default sports, once per invocation that uses them.
+
 **It scopes the intensity content only.** CTL, ATL, TSB, the projection and the WEEKLY LOAD
 table stay whole-athlete. A running-only CTL is not a quantity — the fitness model integrates
 every session the body paid for — and adherence is measured against the whole plan. `tm
@@ -659,9 +665,9 @@ instead of a collapse.
 
 (An optional argument with a default is `--sport`'s case by the convention in `cli/`;
 positional is the call taken, for `tm progress cycling` over `tm progress --sport cycling`.
-`nargs="*"` carries the multi-sport form, and `_dashless_spec` skips positionals so bare
-tokens still pass the dashless translator — worth a test, since this is the first positional
-on `progress` and `tm progress weeks 4` must keep working.)
+`nargs="*"` carries the multi-sport form, and `_build_keyword_spec` skips positionals
+(`cli/argparse_ext.py`) so bare tokens still pass the dashless translator — worth a test, since
+this is the first positional on `progress` and `tm progress weeks 4` must keep working.)
 
 **The default view is the per-zone table itself — every zone, no rollup, no flag.** An earlier
 draft put a single `easy` column (the selected sport's Z1-2 share) beside `adh` and left the
@@ -722,8 +728,8 @@ w/c 07-06*    35m  2h40  20m   8m   4m   1m    —
 Z1 recovery · Z2 endurance · Z3 tempo · Z4
   threshold · Z5 VO2max · Z6 anaerobic
   · Z7 neuromuscular · * in progress
-— not trained · ! zone minutes undercounted —
-  TSS beside them came from your RPE
+— not trained · ! zone minutes undercounted
+  — the recording missed time
 +3 more weeks (--weeks all)
 ```
 
@@ -755,8 +761,16 @@ reach ten hours in a week, so nothing above tempo loses precision anywhere.
 
 That lands the 7-zone power table at **48 columns** and the 5-zone HR table at **38**, both
 inside the budget, and the band rules span the full 48 in every table so the halves align.
-`block_report` keeps plain `fmt_duration`: it runs at `PROMPT_WIDTH` and lays one cell per
-line at phone width, so width is not its constraint.
+Against the existing `WEEK_COL_WIDTH = 11`: 11 + 6 + 6 + 5×5 = 48 and 11 + 6 + 6 + 3×5 = 38,
+beside a load row of 40. `block_report` keeps plain `fmt_duration`: it runs at `PROMPT_WIDTH`
+and lays one cell per line at phone width, so width is not its constraint.
+
+**The capped cell is a new formatter, and the grid lives with the load table.** `fmt_duration`
+is unchanged — `block_report` and both prompt paths want `12h30` — so the cap is its own
+function in `cli/progress.py`, beside `format_weekly_table`. The grid belongs there too, not in
+`intensity.py`: it has to align row for row with the load table and it shares that table's week
+column, band walk and 48-column budget. `intensity.py` keeps what it already owns, the
+aggregation (`zone_rows`) and the prompt-width table the coach reads.
 
 **Three glyphs, three meanings, none overlapping.** `~` is already taken: `meso_bands`
 prefixes it to the label of a block TrainMate *reconstructed from training history* rather
@@ -788,11 +802,23 @@ athlete's RPE. That is a "safe to compute load from" bar, not a "safe to show a 
 week at 55% passes it while missing nearly half its recorded time. And it is HR-named while
 the power table needs one too, where coverage is structurally lower because a ride with no
 meter contributes its full duration and zero power seconds. A display threshold of its own,
-around 0.8, keeps `!` rare enough to still be read.
+`ZONE_COVERAGE_DISPLAY_MIN = 0.8`, keeps `!` rare enough to still be read.
 
-**`!` means more than "low coverage", and the legend should say what it means.** Below the
-coverage bar `compute_load` does not merely lose zone detail — it changes where the TSS beside
-it came from:
+**A module constant in `intensity.py`, not config, and one value covering both currencies.**
+`hr_zone_coverage_min` earns its config key by changing a computed load; this one only decides
+whether a table admits it is incomplete, which is not a knob an athlete has a reason to turn.
+Where the currency rule picks power below the bar — power at 65% because HR is worse — every
+week takes a `!`, which is the honest reading and which the header's `[pwr 65%]` has already
+said once.
+
+It shares a number with the currency rule's "prefer power at 80% window coverage" and shares
+nothing else: that one decides which column a table is drawn in, over the whole window; this one
+decides whether a single week's row is trustworthy. They are free to diverge and should not be
+folded into one constant.
+
+**`!` speaks for the zone row alone, and must not borrow the load table's story.** An earlier
+draft had the legend read `TSS beside them came from your RPE`, reasoning from `compute_load`'s
+fallback:
 
 | `method` | what happened |
 |---|---|
@@ -801,10 +827,17 @@ it came from:
 | `rpe` | coverage poor, load rescued from the athlete's entered RPE |
 | `hr_sparse` | coverage poor **and** no RPE — the load number is undercounted too |
 
-So on a `!` week the load table's `done` figure and the zone row beside it are computed from
-two different instruments. That is `load.py` behaving correctly, but it is invisible, and it
-is the reason the two stacked halves can disagree. The legend therefore reads `! zone minutes
-undercounted — TSS beside them came from your RPE` rather than `low zone coverage`.
+But that swap happens at `hr_zone_coverage_min`, not at the display bar. A week at 70% takes a
+`!` and still returns `hr`: its TSS is hrTSS computed from these very seconds, and the sentence
+would be false across the whole 0.5–0.8 band — which is to say on most `!` weeks, since the
+display bar was introduced precisely to cover that band. So the legend keeps the glyph table's
+wording, `! zone minutes undercounted — the recording missed time`, and asserts nothing about
+the number beside it.
+
+Where the load came from is a real fact and currently an invisible one, so it is stated where
+it is true rather than inferred where it is not: per activity in `data show-activities` (§9.7),
+and on the load table itself for the `hr_sparse` week (§11). Each half of the screen accounts
+for its own instrument.
 
 The `hr_sparse` case is worse and belongs to the *load* table, not this one: the athlete
 trained normally, the strap died, no RPE was entered, and the week reads as a genuine
@@ -844,6 +877,22 @@ table is the only intensity view whose coverage of the athlete's actual training
 guaranteed. `progress` already renders these weeks — `progression._week_meso` returns a null
 label and `band_header` bands them `unplanned` — so the zone table inherits the fix by
 reusing the band walk.
+
+**Where the numbers come from: `weekly_aggregates`, not a second fetch.** `render_progress` is
+handed one payload and reads no database, and that payload — `progression.assemble_timeline` —
+carries load only. The zone rows join it where the load figures are already computed:
+`weekly_aggregates` receives every activity row and already buckets them by week to sum
+`activity_load`, so a week's zone rows are that same list passed to `intensity.zone_rows`. No new
+query, no second fetch path, and the renderer stays pure and DB-free — which is the property the
+one-payload rule exists to protect (`timeline.py`, CODE_REVIEW #5). `clip_payload_for_weeks`
+returns weeks whole, so windowing needs no change. The web endpoint then carries rows its PNG
+ignores; that is the price of one payload and it is a few hundred floats.
+
+The sport filter, the 10% floor and the currency choice are all computed over the **displayed**
+window, which is what the header's share figure (`5h42 of 9h10 total`) means. One consequence to
+expect rather than to fix: `--weeks all` can qualify a different set of sports than the default
+does, and can draw one of them in a different currency, because both rules read the window they
+are given.
 
 This is not hypothetical loss. In the worked example above, the two weeks a regeneration
 orphaned are `06-15` and `06-22`, and `06-22` is precisely the week Z3 doubled (35m → 1h02).
@@ -962,11 +1011,24 @@ this is lines per activity rather than width — twelve becomes fourteen. Three 
 fitting its medium:
 
 **The default table gains provenance, not zones.** The highest-value fact missing here is not
-the breakdown, it is where the `TSS` number came from — `compute_load` already returns it, and
-the column currently shows a bare figure that may be an RPE estimate. Render it as a tag:
-`243 (rpe)`, `188 (hr)`, `95 (sparse!)`. About six characters, no new column, and it is
-§9.6's `!` explained at source: every downstream confusion about the load half disagreeing
+the breakdown, it is where the `TSS` number came from. Render it as a tag: `188 (pwr)`,
+`142 (hr)`, `243 (rpe)`, `95 (sparse!)`, `210 (rpe+)`. About six characters, no new column, and
+it is §9.6's `!` explained at source: every downstream confusion about the load half disagreeing
 with the zone half traces back to a provenance that was invisible.
+
+**The column shows the load, which means the figure changes.** Today it prints the stored `tss`,
+which `measured_tss` defines as a pure measurement — no coverage gate, never RPE — while
+`progress`, the PMC and every coaching path use `activity_load()`. So the two commands already
+disagree about a session's load, silently, and a tag on the measurement would name a provenance
+that is not the provenance of the number shown. The column and the summary total therefore move
+to `activity_load()`. The view is informational and nothing is recorded from it, so the cost is
+one changed figure on some rows and the benefit is that every surface finally quotes one number.
+
+**Five tags, because `activity_load` has a path `compute_load` has no word for.** The first four
+are `compute_load`'s methods; `rpe+` is the RPE-divergence override (`rpe_divergence`), where the
+measurement was trustworthy but the athlete's RPE implied materially more strain, so the load
+came from RPE anyway — the kettlebell case §6 exists for. Without a fifth tag those rows would
+read `(hr)` above a figure hrTSS never produced.
 
 **`--zones` swaps the columns rather than widening.** Distance, Elev, Avg HR, Max HR and Avg
 Watts are not what the flag was reached for:
@@ -1012,7 +1074,17 @@ prescribed in HR zones, so this cannot be an athlete-level setting. But the spor
 enough — a cyclist without a meter must be planned in HR whatever `SPORT_ANCHORS` says — so
 **the planning currency is chosen by §9.6's rule**, the same one the display uses. One rule
 applied twice: get it wrong in either place and the plan is written in a currency the table
-never renders, and the comparison silently produces nothing.
+never renders.
+
+**§9.6's rule needs a window, and authoring has none, so it borrows the display default.** The
+rule reads coverage over the window it is shown; at generation time there is no window, only
+twelve weeks of forward plan. Take the trailing 8 weeks — the same span a bare `tm progress`
+uses — so the ordinary case agrees by construction. When it does not agree the failure is
+declared, not silent: the comparison is withheld and says why (below). The transient worth
+naming is the athlete who has just bought a power meter, whose trailing coverage still says HR
+while the display flips to power as the meter's weeks accumulate; the future half goes dark until
+the next `workout generate` re-picks the currency from fresh coverage. Self-healing, on the same
+rolling horizon that regenerates everything else.
 
 ```
 planned_zone_currency   TEXT     -- 'hr' | 'power' | NULL
@@ -1025,13 +1097,41 @@ one**, and says so when it does not. Power Z6 (anaerobic) and Z7 (neuromuscular)
 equivalent — that absence is `HR_LAG_NOTE`'s point restated — so collapsing seven onto five is
 banding by the back door and §5 forbids it.
 
+**The fields are declared the way every other field is: a prose-annotated JSON example in the
+prompt** (`coach/engine/workouts.py`), exactly as `duration_minutes` and `tss` are today. That is
+not in tension with §10's refusal to parse prose — §10 rejects reading intent back *out* of
+`description` after the fact. Here the model states the distribution as JSON while it still knows
+the intent, and the athlete-readable sentence is rendered back from the columns at display time.
+A session whose zone seconds do not sum to `duration_minutes` is stored as emitted and rendered
+as emitted: the numbers are a prescription, not an accounting identity, and silently scaling them
+would put the app back in the business of correcting the model rather than aligning for it (§7).
+
+**`adapt` emits them too.** §9.2 gives adapt the intensity factor of a scheduled session, and
+§9.4's whole drift correction is a rewrite of how a session is prescribed. An adapt that left the
+planned zones alone would leave them describing the prescription it has just replaced — the
+future half of the table would grade the athlete against a target no longer on the page. So the
+fields join the adapt response schema alongside the generate one.
+
+**And that leaves §9.5's stopgap correct as written, which is worth saying out loud.** It decides
+"was this an easing?" by comparing `duration_minutes` and `tss` only, so a drift correction that
+rewrites the planned zones while holding both stays unstamped — right, because nothing was cut.
+The rule predates this section; re-read with planned zones in the schema it still lands where it
+should, and the next reader should not have to re-derive that.
+
+**Back-compat needs nothing, and `data pull` could not help if it did.** A pull re-fetches
+*completed activities* from Garmin; these columns sit on `workouts` and are authored by the coach,
+so there is nothing upstream to fetch. Nor is there anything to backfill: the columns feed the
+*future* half of the table only, and the rolling horizon rewrites the future on every generation.
+Sessions planned before this ships render no ghost row until the next `workout generate`, which
+is a gap of days and wants one note line, not a migration.
+
 **Nothing has to be done about the calendar hash, and one thing must not be done.**
 `CALENDAR_FIELDS` (`calendar_state.py`) is an allowlist, so new columns are excluded by
 default; `rpe` is already there as deliberate precedent. But `description` *is* in the
-allowlist, so the athlete-readable sentence — `Target: ~25min Z1, ~30min Z2, ~10min Z4, ~18min
-Z5` — must be **rendered from the columns at display time and never stored**, or every
-regeneration that nudges a target by two minutes marks the row stale and re-pushes the
-calendar event.
+allowlist, so the athlete-readable sentence — `Target: ~25min recovery, ~30min aerobic, ~10min
+threshold, ~18min VO2max+` — must be **rendered from the columns at display time and never
+stored**, or every regeneration that nudges a target by two minutes marks the row stale and
+re-pushes the calendar event.
 
 **Zone names, not indices.** `CURRENCIES` already carries them. `30 min aerobic` is what the
 athlete can act on, and it survives the ruler shift below in a way `30 min Z2` does not; the
@@ -1090,7 +1190,8 @@ rows under today exactly like the load table's ghost bars, and §9.6's one asymm
   Thirteen files under `tests/` spell `road_biking` and move with §6.1. Worth their own: the
   completed-weeks divisor at a block's first 6 days and across a partial tail (§4); the
   coverage formula with a meterless ride in the set (§7); the §9.5 stopgap, specifically a
-  description-only edit leaving `adaptation_count` untouched.
+  description-only edit leaving `adaptation_count` untouched; `show-activities` quoting the
+  same load as `progress` for an RPE-divergent session, tagged `rpe+` (§9.7).
 - **README.md** and `benchmark record`'s help gain the Garmin auto-detection note (§7.1) —
   which §9.8 promotes from advice to a prerequisite.
 - **Two defects `progress` already has**, both surfaced by §9.6 and neither caused by it: the
@@ -1098,8 +1199,9 @@ rows under today exactly like the load table's ghost bars, and §9.6's one asymm
   (§9.6, `_measurement_is_load` already implements the test), and `data show-activities`'
   `--type` filtering on exact `activity_type` equality so `--type cycling` misses every alias
   (§9.7, `sport_aliases()` is the fix, rides with §6.1).
-- **Config validation.** `sport_preferences` entries that are not canonical sports warn at
-  load (§9.6) — a warning, not an error, since `SPORT_MAPPING` has no `swimming` entry.
+- **Config validation.** `sport_preferences` entries that are not canonical sports warn where
+  the list is consumed (§9.6) — a warning, not an error, since `SPORT_MAPPING` has no
+  `swimming` entry, and not in `Config.__init__`, which runs in every process.
 - **`DESIGN_progress_timeline.md`** §8 follow-on 3 (the zone-distribution stack) is where
   §9.6 lands; its chart half stays open and inherits §9.6's one-sport, one-currency rules.
   Worth their own tests: `!` at the display coverage threshold, distinct from
