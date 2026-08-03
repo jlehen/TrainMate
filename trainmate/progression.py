@@ -367,7 +367,8 @@ def weekly_aggregates(
     the earliest activity/workout date through plan end (or today):
 
         {week_commencing, planned_load, planned_load_elapsed?, in_progress,
-         actual_load, meso_label, meso_source, zone_rows, sport_seconds}
+         actual_load, meso_label, meso_source, zone_rows, sport_seconds,
+         load_sparse, planned_zone_rows}
 
     `planned_load` (Σ `adherence.planned_load` over non-removed workouts — the
     *adapted* plan, "what the plan asked at the time") is None for an **ungoverned**
@@ -423,6 +424,12 @@ def weekly_aggregates(
             "load_sparse": any(
                 garmin.load_method(a) == "hr_sparse" for a in week_acts
             ),
+            # The future half of the zone table: what the plan PRESCRIBES per zone, ghost
+            # rows under today exactly like the load table's ghost bars
+            # (DESIGN_intensity_distribution.md §9.8). Empty for every week planned
+            # before those columns existed — the rolling horizon rewrites the future on
+            # each generation, so nothing needs backfilling.
+            "planned_zone_rows": intensity.planned_zone_rows(week_workouts),
         }
         if governed:
             week["planned_load"] = sum(planned_load(w) for w in week_workouts)

@@ -9,6 +9,7 @@ from trainmate.config import config
 from trainmate.db import db
 from trainmate.types import Workout
 from trainmate.calendar_state import calendar_signature
+from trainmate import intensity
 from trainmate.util import yellow, dim
 
 # Events fetched per Calendar API page during a context sync (the response is paged
@@ -153,6 +154,16 @@ class CalendarSyncer:
                 event_description = f"{prefix}\n\n{event_description}"
             else:
                 event_description = prefix
+
+        # The intensity target, rendered FROM the planned-zone columns here and never
+        # stored (DESIGN_intensity_distribution.md §9.8): `description` is in
+        # CALENDAR_FIELDS, so a stored sentence would mark the row stale and re-push the
+        # event on every regeneration that nudges a target by two minutes.
+        target = intensity.format_planned_zones(workout)
+        if target:
+            event_description = (
+                f"{event_description}\n\n{target}" if event_description else target
+            )
 
         # Provenance / lifecycle footer, sitting just above the technical ID line so the two
         # read as one block at the bottom of the event:

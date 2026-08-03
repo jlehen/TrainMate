@@ -8,7 +8,7 @@ from trainmate.types import Objective, Constraint, Workout
 from trainmate.adherence import analyze_adherence, planned_load
 from trainmate.sports import canonical_sport
 from trainmate.modification_state import SWAP_REASON_PREFIX, MANUAL_REPLACE_REASON_PREFIX
-from trainmate import garmin
+from trainmate import garmin, intensity
 from trainmate.garmin import activity_load
 from trainmate.util import (
     today_str as _today_str, today_date as _today_date,
@@ -372,7 +372,8 @@ class WorkoutGenMixin:
             completed_activities=completed_activities,
             baseline=baseline,
             pmc_warmup_cutoff=pmc_cutoff,
-            pmc_context=pmc_context
+            pmc_context=pmc_context,
+            zone_currencies=self._planning_zone_currencies(today_str)
         )
 
         # NOTE: workout generation is read-only w.r.t. coach learnings (see
@@ -413,6 +414,9 @@ class WorkoutGenMixin:
 
         saved_workouts: List[Workout] = []
         for w in workouts:
+            # The intensity target the coach stated while it still knew the intent
+            # (DESIGN_intensity_distribution.md §9.8) — validated, never rescaled.
+            zone_currency, zone_sec = intensity.parse_planned_zones(w)
             wid = self._db.save_workout(
                 date=w['date'],
                 sport_type=w['sport_type'],
@@ -423,7 +427,9 @@ class WorkoutGenMixin:
                 tss=w.get('tss'),
                 source='generated',
                 benchmark_type=w.get('benchmark_type'),
-                macrocycle_id=macrocycle['id']
+                macrocycle_id=macrocycle['id'],
+                planned_zone_currency=zone_currency,
+                planned_zone_sec=zone_sec
             )
             # Sync from the persisted row, not a hand-built dict: the row's
             # calendar_signature is what freshness is later derived against, so any field

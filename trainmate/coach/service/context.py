@@ -251,6 +251,27 @@ class PmcContextMixin:
             current_week=True, benchmarks=self._db.get_benchmark_results(),
         )
 
+    def _planning_zone_currencies(self, as_of: str) -> Dict[str, str]:
+        """`{sport: 'power'|'hr'}` for the sports the coach may prescribe zone targets in
+        (DESIGN_intensity_distribution.md §9.8).
+
+        §9.6's currency rule needs a window and authoring has none — at generation time
+        there is only forward plan — so it borrows the display default of 8 trailing
+        weeks, and the ordinary case agrees by construction. The transient worth naming
+        is the athlete who has just bought a power meter: trailing coverage still says HR
+        while the display flips to power as the meter's weeks accumulate, so the future
+        half of the table goes dark until the next `workout generate` re-picks the
+        currency from fresh coverage. Self-healing, on the same rolling horizon that
+        regenerates everything else.
+        """
+        start = (
+            datetime.strptime(as_of, "%Y-%m-%d").date()
+            - timedelta(days=7 * intensity.PLANNING_COVERAGE_WEEKS)
+        ).strftime("%Y-%m-%d")
+        return intensity.currency_by_sport(
+            self._db.get_completed_activities(start_date=start, end_date=as_of)
+        )
+
     def _intensity_history_context(
         self, macros: List[Dict[str, Any]], today_str: str
     ) -> List[str]:

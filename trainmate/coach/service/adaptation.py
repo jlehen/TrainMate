@@ -8,7 +8,7 @@ from trainmate.types import Objective, Constraint, Workout
 from trainmate.adherence import analyze_adherence, planned_load
 from trainmate.sports import canonical_sport
 from trainmate.modification_state import SWAP_REASON_PREFIX, MANUAL_REPLACE_REASON_PREFIX
-from trainmate import garmin
+from trainmate import garmin, intensity
 from trainmate.garmin import activity_load
 from trainmate.util import (
     today_str as _today_str, today_date as _today_date,
@@ -201,7 +201,8 @@ class AdaptationMixin:
             constraints=constraints,
             pmc_warmup_cutoff=pmc_cutoff,
             pmc_context=pmc_context,
-            intensity_context=intensity_context
+            intensity_context=intensity_context,
+            zone_currencies=self._planning_zone_currencies(target_date_str)
         )
 
         # NOTE: daily adaptation is read-only w.r.t. coach learnings
@@ -362,6 +363,7 @@ class AdaptationMixin:
                 != float(existing['duration_minutes'] or 0)
                 or float(w.get('tss') or 0) != float(existing['tss'] or 0)
             )
+            zone_currency, zone_sec = intensity.parse_planned_zones(w)
 
             self._db.save_workout(
                 date=w['date'],
@@ -380,7 +382,15 @@ class AdaptationMixin:
                 tss=w.get('tss'),
                 source=source,
                 benchmark_type=w.get('benchmark_type'),
-                adapted_at=adapted_at if eased else None
+                adapted_at=adapted_at if eased else None,
+                # A drift correction rewrites HOW a session is prescribed, so its zone
+                # target moves with it; omitted, COALESCE preserves what the plan already
+                # held (DESIGN_intensity_distribution.md §9.8). Note this leaves §9.5's
+                # stopgap correct as written: `eased` compares duration and TSS only, so a
+                # correction that rewrites the zones while holding both stays unstamped —
+                # right, because nothing was cut.
+                planned_zone_currency=zone_currency,
+                planned_zone_sec=zone_sec
             )
 
             # Sync to Google Calendar

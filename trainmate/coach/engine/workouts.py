@@ -38,6 +38,60 @@ separately, against the athlete's metrics as they stand when it is generated.
 """
 
 
+def _planned_zone_task(zone_currencies: Optional[Dict[str, str]]) -> str:
+    """The PRESCRIBING INTENSITY section (DESIGN_intensity_distribution.md §9.8).
+
+    The coach already decides an intensity target — it writes "6x3min @ VO2max" — and is
+    the only thing in the system that knows the intent. So it states the distribution as
+    structured data while it still knows it, instead of the app parsing it back out of
+    prose afterwards (§10). Which currency each sport is planned in is the APP's call,
+    not the model's: it comes from the same coverage rule the display uses, so the plan
+    is never written in a currency the table cannot render.
+    """
+    if not zone_currencies:
+        return ""
+    names = {"power": "power (7 zones)", "hr": "heart rate (5 zones)"}
+    lines = "\n".join(
+        f"  {sport}: {names.get(cur, cur)}"
+        for sport, cur in sorted(zone_currencies.items())
+    )
+    return f"""
+PRESCRIBING INTENSITY (planned time in zone):
+State each session's intensity target as structured data, not only in the prose. The
+currency per sport is fixed by what the athlete's recordings actually cover — use
+exactly these and nothing else:
+{lines}
+A sport not listed above (and any rest day) leaves "planned_zone_currency" null and
+"planned_zone_sec" empty: swimming is anchored on pace and strength on load, and neither
+yields a zone model. Do NOT invent one for them.
+
+Split the session's minutes across the zones the way you intend it to be executed —
+warm-up and recovery minutes into the low zones, work minutes into the target zone. A
+5x4min VO2max session is mostly Z2 by the clock and that is what to write. Do NOT derive
+these numbers from "tss": TSS is duration x intensity folded into one scalar and cannot
+be unfolded, and zones computed from it would make planned-vs-measured intensity a
+restatement of the adherence percentage that already exists.
+
+The seconds do not have to sum to "duration_minutes" x 60 — they are a prescription, not
+an accounting identity. HR sessions fill zones 1-5 and leave 6 and 7 null.
+"""
+
+
+def _planned_zone_fields(zone_currencies: Optional[Dict[str, str]]) -> str:
+    """The two response-schema members carrying §9.8's target, declared the way every
+    other field is: a prose-annotated JSON example."""
+    if not zone_currencies:
+        return ""
+    return (
+        '      "planned_zone_currency": "hr" | "power" | null (the currency for THIS\n'
+        "        session's sport, from PRESCRIBING INTENSITY above; null for rest days\n"
+        "        and for any sport not listed there),\n"
+        '      "planned_zone_sec": [300, 1800, 600, 0, 0, null, null] (seconds intended\n'
+        "        in each zone, low to high. Five entries for heart rate, seven for\n"
+        "        power; use null or omit entirely when the currency is null),\n"
+    )
+
+
 class WorkoutLogicMixin:
     """Part of :class:`CoachEngine` — see coach/engine/__init__.py."""
 
@@ -51,7 +105,8 @@ class WorkoutLogicMixin:
         completed_activities: Optional[List[CompletedActivity]] = None,
         baseline: Optional[Dict[str, Any]] = None,
         pmc_warmup_cutoff: Optional[str] = None,
-        pmc_context: Optional[str] = None
+        pmc_context: Optional[str] = None,
+        zone_currencies: Optional[Dict[str, str]] = None
     ) -> Dict[str, Any]:
         """Queries LLM to generate workouts for a given number of days based on active strategy.
 
@@ -83,7 +138,8 @@ class WorkoutLogicMixin:
             "preferences say where they test. Do NOT place a benchmark in a week the athlete's constraints\n"
             "put under full rest. If no threshold is on record yet, still schedule the first benchmark early —\n"
             "it is how the athlete's zones get established.\n"
-            "\n"
+            + _planned_zone_task(zone_currencies)
+            + "\n"
             "You MUST respond with a JSON object containing:\n"
             "{\n"
             '  "reasoning": "Explain the microcycle design, detailing how workouts align with the active\n'
@@ -104,6 +160,7 @@ class WorkoutLogicMixin:
             "      \"duration_minutes\": 60, (Estimated workout duration in minutes, integer. Use 0 for rest days)\n"
             "      \"rpe\": 6, (Expected Rate of Perceived Exertion, integer 1-10. Use 0 for rest days)\n"
             "      \"tss\": 45.0, (Expected Training Stress Score, float/integer. Use 0 for rest days)\n"
+            + _planned_zone_fields(zone_currencies) +
             '      "benchmark_type": null (Normally null. Set ONLY on a scheduled fitness\n'
             "        test — see BENCHMARK PLACEMENT — to the test kind, e.g. \"ftp_20min\" |\n"
             '        "ftp_ramp" | "run_threshold_30min" | "run_5k_tt" | "css_400_200" |\n'
@@ -178,7 +235,8 @@ class WorkoutLogicMixin:
         athlete_message: Optional[str] = None,
         pmc_warmup_cutoff: Optional[str] = None,
         pmc_context: Optional[str] = None,
-        intensity_context: Optional[str] = None
+        intensity_context: Optional[str] = None,
+        zone_currencies: Optional[Dict[str, str]] = None
     ) -> Dict[str, Any]:
         """Queries LLM to evaluate metrics/activities and adapt workouts if needed.
 
@@ -337,6 +395,13 @@ is a periodization question, and it belongs to the next `workout generate`, not
 to you.
 """
 
+        # §9.2 gives adapt the intensity factor of a scheduled session, and §9.4's drift
+        # correction IS a rewrite of how a session is prescribed — so a session whose
+        # zones adapt leaves alone would keep describing the prescription it just
+        # replaced, and the future half of the zone table would grade the athlete against
+        # a target no longer on the page (§9.8).
+        custom_task += _planned_zone_task(zone_currencies)
+
         # Inside the block's terminal window a cut cannot rebound before the block ends
         # (DESIGN_block_boundary.md §3). Outside it the prompt is unchanged.
         days_left = days_between(target_date_str, meso_end_date_str)
@@ -412,6 +477,7 @@ evidence-backed observations are authored only by the weekly history analysis
                 '      "duration_minutes": 45,\n'
                 '      "rpe": 5,\n'
                 '      "tss": 30.0,\n'
+                + _planned_zone_fields(zone_currencies) +
                 '      "benchmark_type": null (Preserve VERBATIM when the session is a\n'
                 "        benchmark — a moved/kept test must stay a test. Never invent one\n"
                 "        here; null for an ordinary session. See PROTECTING A BENCHMARK.)\n"

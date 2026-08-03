@@ -422,6 +422,101 @@ class TestSportDurations(unittest.TestCase):
         self.assertEqual(intensity.sport_durations(acts), {"cycling": 5400})
 
 
+class TestPlannedZones(unittest.TestCase):
+    """§9.8: the coach states the distribution as structured data while it still knows
+    the intent, instead of the app parsing it back out of prose afterwards."""
+
+    def test_parses_an_hr_prescription(self):
+        currency, secs = intensity.parse_planned_zones({
+            "planned_zone_currency": "hr",
+            "planned_zone_sec": [300, 1800, 600, 0, 0],
+        })
+        self.assertEqual(currency, "hr")
+        self.assertEqual(secs, [300, 1800, 600, 0, 0, None, None])
+
+    def test_drops_entries_past_the_currencys_zone_count(self):
+        # Five HR zones: a sixth and seventh value have no HR equivalent.
+        _, secs = intensity.parse_planned_zones({
+            "planned_zone_currency": "hr",
+            "planned_zone_sec": [300, 1800, 600, 0, 0, 120, 60],
+        })
+        self.assertEqual(secs[5:], [None, None])
+
+    def test_an_unknown_currency_yields_nothing(self):
+        self.assertEqual(
+            intensity.parse_planned_zones(
+                {"planned_zone_currency": "rpe", "planned_zone_sec": [60]}
+            ),
+            (None, None),
+        )
+
+    def test_an_all_zero_distribution_is_no_prescription(self):
+        self.assertEqual(
+            intensity.parse_planned_zones(
+                {"planned_zone_currency": "hr", "planned_zone_sec": [0, 0, 0, 0, 0]}
+            ),
+            (None, None),
+        )
+
+    def test_seconds_are_never_rescaled_to_the_duration(self):
+        # A prescription, not an accounting identity: 40 minutes of zones under a
+        # 60-minute session is stored as emitted.
+        _, secs = intensity.parse_planned_zones({
+            "planned_zone_currency": "hr", "planned_zone_sec": [600, 1200, 600, 0, 0],
+            "duration_minutes": 60,
+        })
+        self.assertEqual(sum(s for s in secs if s), 2400)
+
+    def test_renders_zone_names_not_indices(self):
+        text = intensity.format_planned_zones({
+            "planned_zone_currency": "hr",
+            "planned_zone1_sec": 1500, "planned_zone2_sec": 1800,
+            "planned_zone3_sec": 0, "planned_zone4_sec": 600, "planned_zone5_sec": 0,
+        })
+        self.assertEqual(text, "Target: ~25min recovery, ~30min aerobic, ~10min threshold")
+        self.assertNotIn("Z1", text)
+
+    def test_a_session_with_no_target_renders_nothing(self):
+        self.assertIsNone(intensity.format_planned_zones({"title": "Rest"}))
+
+    def test_planned_rows_sum_per_sport_and_currency(self):
+        rows = intensity.planned_zone_rows([
+            {"sport_type": "running", "planned_zone_currency": "hr",
+             "planned_zone1_sec": 300, "planned_zone2_sec": 1800},
+            {"sport_type": "running", "planned_zone_currency": "hr",
+             "planned_zone2_sec": 1200, "planned_zone4_sec": 600},
+            {"sport_type": "road_biking", "planned_zone_currency": "power",
+             "planned_zone2_sec": 3600},
+            {"sport_type": "rest"},
+        ])
+        by_key = {(r.sport, r.currency): r for r in rows}
+        self.assertEqual(by_key[("running", "hr")].seconds, (300, 3000, 0, 600, 0))
+        self.assertEqual(len(by_key[("cycling", "power")].seconds), 7)
+        self.assertEqual(len(rows), 2)  # rest carries no target
+
+
+class TestPlanningCurrency(unittest.TestCase):
+    """§9.8: the planning currency is chosen by §9.6's rule — one rule applied twice, so
+    the plan is never written in a currency the table cannot render."""
+
+    def test_a_metered_cyclist_is_planned_in_power(self):
+        acts = [act("2026-06-02", "cycling", 3600,
+                    hr=[0, 3400, 0, 0, 0], power=[0, 3500, 0, 0, 0, 0, 0])]
+        self.assertEqual(intensity.currency_by_sport(acts), {"cycling": "power"})
+
+    def test_a_mixed_meter_cyclist_is_planned_in_hr(self):
+        acts = [
+            act("2026-06-02", "cycling", 3600,
+                hr=[0, 3500, 0, 0, 0], power=[0, 3500, 0, 0, 0, 0, 0]),
+            act("2026-06-03", "cycling", 3600, hr=[0, 3400, 0, 0, 0]),
+        ]
+        self.assertEqual(intensity.currency_by_sport(acts), {"cycling": "hr"})
+
+    def test_a_sport_with_no_zone_model_gets_no_currency(self):
+        acts = [act("2026-06-02", "yoga", 1800)]
+        self.assertEqual(intensity.currency_by_sport(acts), {})
+
+
 class TestPromptWidthContract(unittest.TestCase):
     def test_block_report_prose_respects_the_width_it_is_given(self):
         # §9.6: `format_header` and the `Change vs` header were bare appends measuring

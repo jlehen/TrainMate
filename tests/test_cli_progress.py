@@ -682,6 +682,75 @@ class TestZoneSection(unittest.TestCase):
             self.assertLessEqual(visible_len(line), TABLE_WIDTH, msg=repr(line))
 
 
+class TestZoneTableFutureHalf(unittest.TestCase):
+    """§9.8: ghost rows under today, exactly like the load table's ghost bars — which
+    closes §9.6's one asymmetry."""
+
+    TODAY = "2026-06-24"
+
+    def _weeks(self):
+        past = _zweek("2026-06-22",
+                      rows=[_hr("running", [55, 258, 62, 17, 7])],
+                      seconds={"running": _m(399)}, in_progress=True)
+        future = _zweek("2026-06-29", seconds={})
+        future["planned_zone_rows"] = [_hr("running", [20, 240, 30, 20, 5], 1.0)]
+        return [past, future]
+
+    def test_future_weeks_render_the_plan_and_are_marked(self):
+        lines, markers = zone_table(
+            self._weeks(), "running", "hr", _m(399), _m(399), 0.94, today=self.TODAY
+        )
+        rows = [l for l in lines if l.startswith("w/c")]
+        self.assertTrue(rows[0].startswith("w/c 06-22*"))   # measured, in progress
+        self.assertTrue(rows[1].startswith("w/c 06-29+"))   # prescribed
+        self.assertIn("4h00", rows[1])                      # 240 min of planned Z2
+        self.assertIn("+", markers)
+
+    def test_a_future_week_with_no_plan_renders_dashes_not_the_past(self):
+        weeks = self._weeks()
+        weeks[1]["planned_zone_rows"] = []
+        lines, _ = zone_table(
+            weeks, "running", "hr", _m(399), _m(399), 0.94, today=self.TODAY
+        )
+        future = [l for l in lines if l.startswith("w/c 06-29")][0]
+        self.assertNotIn("+", future)
+        self.assertEqual(future.count("—"), 5)
+
+    def test_a_plan_in_the_other_currency_is_declared_never_converted(self):
+        # Power Z6/Z7 have no HR equivalent, so collapsing seven onto five would be
+        # banding by the back door and §5 forbids it.
+        weeks = self._weeks()
+        weeks[1]["planned_zone_rows"] = [_pwr("running", [20, 240, 30, 20, 5, 2, 1], 1.0)]
+        lines, markers = zone_table(
+            weeks, "running", "hr", _m(399), _m(399), 0.94, today=self.TODAY
+        )
+        future = [l for l in lines if l.startswith("w/c 06-29")][0]
+        self.assertEqual(future.count("—"), 5)
+        self.assertIn("~mismatch", markers)
+
+    def test_the_mismatch_is_explained_in_the_section_footer(self):
+        weeks = self._weeks()
+        weeks[1]["planned_zone_rows"] = [_pwr("running", [20, 240, 30, 20, 5, 2, 1], 1.0)]
+        text = " ".join(
+            l.strip() for l in
+            zone_section(weeks, ["running"], today=self.TODAY, stats_weeks=weeks[:1])
+        )
+        self.assertIn("written in the other currency", text)
+
+    def test_the_currency_choice_still_reads_measured_coverage_only(self):
+        # A future week's planned rows must not vote on which column the table is drawn
+        # in — coverage is a property of recordings.
+        weeks = self._weeks()
+        stats = window_sport_stats(weeks[:1])
+        self.assertEqual(zone_currency(stats, "running"), "hr")
+
+    def test_future_rows_stay_inside_the_column_budget(self):
+        for line in zone_section(
+            self._weeks(), ["running"], today=self.TODAY, stats_weeks=self._weeks()[:1]
+        ):
+            self.assertLessEqual(visible_len(line), TABLE_WIDTH, msg=repr(line))
+
+
 class TestUnknownSportPreferences(unittest.TestCase):
     def test_a_canonical_sport_warns_about_nothing(self):
         self.assertEqual(unknown_sport_preferences(["cycling", "running"]), [])

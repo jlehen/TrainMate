@@ -182,6 +182,96 @@ def pick_currency(coverage: Dict[str, float]) -> Optional[str]:
     return "power" if power > hr else "hr"
 
 
+def currency_by_sport(activities: Sequence[Dict[str, Any]]) -> Dict[str, str]:
+    """`{canonical sport: 'power'|'hr'}` over one window — §9.6's currency rule applied to
+    raw activity rows, for callers that have no weekly payload to read it from.
+
+    `workout generate` uses it to pick the currency it PRESCRIBES in (§9.8). One rule
+    applied twice: get it wrong in either place and the plan is written in a currency the
+    table never renders. Sports with no recorded zone seconds are absent from the result
+    — swimming is anchored on CSS and strength on e1RM, and neither yields a zone model.
+    """
+    coverage: Dict[str, Dict[str, float]] = {}
+    for row in zone_rows(activities):
+        coverage.setdefault(row.sport, {})[row.currency] = row.coverage
+    out = {}
+    for sport, cov in coverage.items():
+        picked = pick_currency(cov)
+        if picked:
+            out[sport] = picked
+    return out
+
+
+# The window the planning currency is chosen over. Authoring has no window of its own —
+# at generation time there is only forward plan — so it borrows the display default, and
+# the ordinary case agrees by construction (§9.8).
+PLANNING_COVERAGE_WEEKS = 8
+
+
+def parse_planned_zones(
+    payload: Dict[str, Any]
+) -> Tuple[Optional[str], Optional[List[Optional[int]]]]:
+    """`(currency, 7-slot seconds list)` from one LLM-authored workout, or `(None, None)`.
+
+    Validates rather than corrects: an unknown currency, a non-list, or an all-zero
+    distribution yields nothing at all, and anything past the currency's zone count is
+    dropped. What it does NOT do is scale the seconds to match `duration_minutes` — the
+    numbers are a prescription, not an accounting identity, and rescaling them would put
+    the app back in the business of correcting the model rather than aligning for it (§7).
+    """
+    currency = (payload.get("planned_zone_currency") or "").strip().lower()
+    spec = CURRENCY_BY_KEY.get(currency)
+    raw = payload.get("planned_zone_sec")
+    if spec is None or not isinstance(raw, (list, tuple)):
+        return None, None
+    out: List[Optional[int]] = [None] * 7
+    for i in range(min(len(raw), len(spec.labels))):
+        try:
+            value = int(round(float(raw[i])))
+        except (TypeError, ValueError):
+            continue
+        out[i] = max(0, value)
+    if not any(out):
+        return None, None
+    return currency, out
+
+
+def planned_zone_seconds(workout: Dict[str, Any]) -> Optional[Tuple[str, Tuple[int, ...]]]:
+    """`(currency, seconds per zone)` from a planned workout's columns, or None when the
+    session carries no intensity target (§9.8)."""
+    currency = (workout.get("planned_zone_currency") or "").strip().lower()
+    spec = CURRENCY_BY_KEY.get(currency)
+    if spec is None:
+        return None
+    secs = tuple(
+        int(workout.get(f"planned_zone{i}_sec") or 0)
+        for i in range(1, len(spec.labels) + 1)
+    )
+    return (currency, secs) if any(secs) else None
+
+
+def format_planned_zones(workout: Dict[str, Any]) -> Optional[str]:
+    """'Target: ~25min recovery, ~30min aerobic, ~10min threshold' — the prescription an
+    athlete can act on, rendered FROM the columns at display time and never stored.
+
+    `description` is in `CALENDAR_FIELDS`, so storing this sentence would mark the row
+    stale and re-push the Calendar event on every regeneration that nudges a target by
+    two minutes (§9.8). Zone NAMES, not indices: `30 min aerobic` survives a ruler shift
+    in a way `30 min Z2` does not — the index is the join key, the name is the
+    prescription.
+    """
+    parsed = planned_zone_seconds(workout)
+    if parsed is None:
+        return None
+    currency, secs = parsed
+    labels = CURRENCY_BY_KEY[currency].labels
+    parts = [
+        f"~{int(round(s / 60.0))}min {labels[i]}"
+        for i, s in enumerate(secs) if s
+    ]
+    return f"Target: {', '.join(parts)}" if parts else None
+
+
 def zone_rows(activities: Sequence[Dict[str, Any]]) -> List[ZoneRow]:
     """Zone seconds per canonical sport and currency, busiest sport first.
 
@@ -214,6 +304,29 @@ def zone_rows(activities: Sequence[Dict[str, Any]]) -> List[ZoneRow]:
     order = [c.key for c in CURRENCIES]
     rows.sort(key=lambda r: (-duration.get(r.sport, 0.0), r.sport, order.index(r.currency)))
     return rows
+
+
+def planned_zone_rows(workouts: Sequence[Dict[str, Any]]) -> List[ZoneRow]:
+    """The same `(sport x currency x zone)` shape, summed over PLANNED sessions — the
+    future half of the weekly table (§9.8).
+
+    `coverage` is 1.0 throughout: a prescription is not a recording, so there is no
+    measurement gap to report and the `!` marker has nothing to say about these rows.
+    """
+    acc: Dict[Tuple[str, str], List[float]] = {}
+    for w in workouts:
+        parsed = planned_zone_seconds(w)
+        if parsed is None:
+            continue
+        currency, secs = parsed
+        sport = canonical_sport(w.get("sport_type") or "unknown")
+        bucket = acc.setdefault((sport, currency), [0.0] * len(secs))
+        for i, s in enumerate(secs):
+            bucket[i] += s
+    return [
+        ZoneRow(sport=sport, currency=key, seconds=tuple(vals), coverage=1.0)
+        for (sport, key), vals in acc.items()
+    ]
 
 
 # ------------------------------------------------------------------ render

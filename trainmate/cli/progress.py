@@ -51,6 +51,13 @@ UNDERCOUNTED = "!"
 # the LOAD is undercounted too and the week reads as an adherence miss it never was
 # (DESIGN_intensity_distribution.md §11).
 LOAD_SPARSE = "?"
+# The future half: this week's cells are what the plan PRESCRIBES, not what was measured
+# (DESIGN_intensity_distribution.md §9.8).
+PLANNED = "+"
+# Not a glyph — a footer note. The plan for this sport was written in the other currency,
+# so no comparison is offered: power Z6/Z7 have no HR equivalent and collapsing seven onto
+# five would be banding by the back door.
+CURRENCY_MISMATCH = "~mismatch"
 
 _NO_BAND = object()  # sentinel: no band emitted yet (a real meso_label may be None)
 
@@ -475,6 +482,24 @@ def zone_week_cells(
     )
 
 
+def planned_week_cells(
+    week: Dict[str, Any], sport: str, currency: str, n_zones: int
+) -> Tuple[List[str], bool]:
+    """`(cells, currency_mismatch)` for a FUTURE week — what the plan prescribes (§9.8).
+
+    Comparison is offered only when the planned currency matches the displayed one.
+    Power Z6 (anaerobic) and Z7 (neuromuscular) have no HR equivalent, so collapsing
+    seven onto five would be banding by the back door and §5 forbids it. A mismatch
+    therefore renders `—` and says why in the footer rather than converting.
+    """
+    rows = week.get("planned_zone_rows") or []
+    row = next((r for r in rows if r.sport == sport and r.currency == currency), None)
+    if row is not None:
+        return [fmt_zone_cell(s) for s in row.seconds], False
+    other = any(r.sport == sport for r in rows)
+    return [NOT_TRAINED] * n_zones, other
+
+
 def _legend(text: str) -> List[str]:
     """One legend paragraph wrapped into the table's budget, continuations indented so
     they read as the same line rather than as a new one."""
@@ -486,15 +511,16 @@ def _legend(text: str) -> List[str]:
 def zone_table(
     weeks: List[Dict[str, Any]], sport: str, currency: str,
     sport_seconds: float, window_seconds: float, coverage: float,
+    today: Optional[str] = None,
 ) -> Tuple[List[str], set]:
     """One sport's weekly zone table plus the set of glyphs it actually used: header,
     column row, band rules, one row per week.
 
-    The tables cover past and in-progress weeks only — the future half of the load table
-    is planned TSS, and until planned zones land there is no intensity target to put under
-    it (§9.6/§9.8). The current week sits inline with full weeks, marked `*`: the marker
-    is what §4's argument asks for at weekly grain, and a separate section for one week
-    would cost more than it saves.
+    Past and in-progress weeks carry what was MEASURED; weeks beyond today carry what the
+    plan PRESCRIBES, ghost rows under today exactly like the load table's ghost bars
+    (§9.8). The current week sits inline with full weeks, marked `*`: the marker is what
+    §4's argument asks for at weekly grain, and a separate section for one week would cost
+    more than it saves.
     """
     spec = intensity.CURRENCY_BY_KEY[currency]
     n_zones = len(spec.labels)
@@ -516,14 +542,27 @@ def zone_table(
         if label != current_label:
             lines.append(gray(band_header(label)))
             current_label = label
-        cells, undercounted = zone_week_cells(week, sport, currency, n_zones)
-        used.update(c for c in cells if c == NOT_TRAINED)
         week_label = f"w/c {_short_date(week['week_commencing'])}"
-        if week.get("in_progress"):
-            week_label += "*"
-        if undercounted:
-            week_label += UNDERCOUNTED
-            used.add(UNDERCOUNTED)
+        is_future = (
+            today is not None
+            and week["week_commencing"] > today
+            and not week.get("in_progress")
+        )
+        if is_future:
+            cells, mismatch = planned_week_cells(week, sport, currency, n_zones)
+            if any(c != NOT_TRAINED for c in cells):
+                week_label += PLANNED
+                used.add(PLANNED)
+            if mismatch:
+                used.add(CURRENCY_MISMATCH)
+        else:
+            cells, undercounted = zone_week_cells(week, sport, currency, n_zones)
+            if week.get("in_progress"):
+                week_label += "*"
+            if undercounted:
+                week_label += UNDERCOUNTED
+                used.add(UNDERCOUNTED)
+        used.update(c for c in cells if c == NOT_TRAINED)
         lines.append(_zone_cells_row(week_label, cells))
 
     names = " · ".join(
@@ -536,7 +575,8 @@ def zone_table(
 def zone_section(
     weeks: List[Dict[str, Any]], preferences: Sequence[str],
     explicit: Optional[Sequence[str]] = None, forced_currency: Optional[str] = None,
-    hidden_weeks: int = 0,
+    hidden_weeks: int = 0, today: Optional[str] = None,
+    stats_weeks: Optional[List[Dict[str, Any]]] = None,
 ) -> List[str]:
     """Every zone table plus the shared footer, or the empty-state line.
 
@@ -548,7 +588,9 @@ def zone_section(
     wrong. The cycling table rising as the running table falls makes "they rode instead"
     self-evident (§9.6).
     """
-    stats = window_sport_stats(weeks)
+    # The sport filter, the 10% floor and the currency choice all read MEASURED coverage,
+    # so they are computed over the past weeks even when future ones are drawn (§9.6).
+    stats = window_sport_stats(weeks if stats_weeks is None else stats_weeks)
     window_seconds = sum(agg["seconds"] for agg in stats.values())
     sports, low, no_data = select_zone_sports(explicit, preferences, stats)
 
@@ -564,7 +606,7 @@ def zone_section(
             lines.append("")
         table, markers = zone_table(
             weeks, sport, currency, agg["seconds"], window_seconds,
-            agg["coverage"].get(currency, 0.0),
+            agg["coverage"].get(currency, 0.0), today=today,
         )
         lines.extend(table)
         drawn.append(sport)
@@ -603,8 +645,15 @@ def zone_section(
         parts.append(
             f"{UNDERCOUNTED} zone minutes undercounted — the recording missed time"
         )
+    if PLANNED in used_markers:
+        parts.append(f"{PLANNED} planned, not yet ridden")
     if parts:
         footer.extend(_legend(" · ".join(parts)))
+    if CURRENCY_MISMATCH in used_markers:
+        footer.extend(_legend(
+            "Some planned sessions were written in the other currency — no comparison "
+            "is offered for those weeks. The next plan generation re-picks it."
+        ))
     if no_data:
         footer.extend(_legend(
             f"{', '.join(no_data)}: sessions but no zone recording in this window"
@@ -766,14 +815,15 @@ def render_progress(
     )
 
     if zone_opts is not None:
-        # Past and in-progress weeks only: the load table's ghost bars have no intensity
-        # target under them until §9.8 lands, so this is the one place the two halves do
-        # not align row for row (§9.6).
+        # Both halves, aligned row for row with the load table: measured behind today,
+        # the plan's own zone targets ahead of it (§9.8 closing §9.6's one asymmetry).
+        # Sessions planned before those columns existed simply render no ghost row until
+        # the next `workout generate`.
         zone_lines = zone_section(
-            past_weeks, zone_opts.get("preferences") or [],
+            display_weeks, zone_opts.get("preferences") or [],
             explicit=zone_opts.get("sports"),
             forced_currency=zone_opts.get("currency"),
-            hidden_weeks=len(past_all) - len(past_weeks),
+            hidden_weeks=hidden_weeks, today=today, stats_weeks=past_weeks,
         )
         if zone_lines:
             lines.append("")
@@ -1011,10 +1061,10 @@ def add_progress_parser(subparsers, pull_bypass_parser):
             "as written delivers peak fitness with positive form on race day. Under the "
             "load table, one time-in-zone table per sport: TSS folds volume and "
             "intensity into one number, so easy days drifting to tempo read as flat "
-            "weekly load and flat adherence. The zone tables cover past and in-progress "
-            "weeks only — planned sessions carry no intensity target yet. Naming sports "
-            "scopes those tables ONLY: CTL/ATL/TSB, the projection and the weekly load "
-            "table stay whole-athlete."
+            "weekly load and flat adherence. Weeks behind today show what you measured; "
+            "weeks ahead show what the plan prescribes, marked '+'. Naming sports scopes "
+            "those tables ONLY: CTL/ATL/TSB, the projection and the weekly load table "
+            "stay whole-athlete."
         )
     )
     progress_parser.add_argument(
@@ -1027,9 +1077,8 @@ def add_progress_parser(subparsers, pull_bypass_parser):
     progress_parser.add_argument(
         "--weeks", type=_weeks_arg, default=8, metavar="N",
         help="Weeks of weekly load to show either side of today (default: 8, must be "
-             ">= 1, or 'all' for the whole plan). Not symmetric: the zone tables cover "
-             "the past half only. The projection lines above the table always run to "
-             "plan end regardless."
+             ">= 1, or 'all' for the whole plan). The projection lines above the table "
+             "always run to plan end regardless."
     )
     progress_parser.add_argument(
         "--blocks", action="store_true",
