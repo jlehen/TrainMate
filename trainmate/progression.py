@@ -397,9 +397,12 @@ def weekly_aggregates(
             # The athlete trained normally, the strap died, and no RPE was entered — so
             # the week's own LOAD is undercounted and reads as an adherence miss the
             # coach will then adapt the plan around. A `progress` defect that predates
-            # the zone tables (DESIGN_intensity_distribution.md §11).
+            # the zone tables (DESIGN_intensity_distribution.md §11). Only sessions big
+            # enough to hide material load count: a 5-minute mobility session with a
+            # cold strap lit this on two thirds of a real athlete's weeks.
             "load_sparse": any(
                 garmin.load_method(a) == "hr_sparse" for a in week_acts
+                if intensity.judgeable(a)
             ),
             # The future half of the zone table: what the plan PRESCRIBES per zone, ghost
             # rows under today exactly like the load table's ghost bars

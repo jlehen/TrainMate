@@ -14,6 +14,7 @@ from datetime import date, datetime, timedelta
 from typing import Any, Callable, Dict, List, NamedTuple, Optional, Sequence, Tuple
 
 from trainmate.benchmarks import ANCHOR_KINDS, format_delta, format_value
+from trainmate.config import config
 from trainmate.garmin.load import _rpe_tss, activity_load
 from trainmate.sports import canonical_sport, is_strength_sport
 
@@ -43,11 +44,47 @@ CURRENCY_BY_KEY: Dict[str, Currency] = {c.key: c for c in CURRENCIES}
 # downstream — a screen-width re-wrap would shred the columns (§6).
 PROMPT_WIDTH = 100
 
-# A week's row admits it is incomplete below this. Deliberately NOT
-# `config.hr_zone_coverage_min` (0.5), which is a "safe to compute load from" bar: a week
-# at 55% clears that while missing nearly half its recorded time. This one only decides
-# whether a table says so, which is not a knob an athlete has a reason to turn (§9.6).
-ZONE_COVERAGE_DISPLAY_MIN = 0.8
+# A week's row admits it is incomplete below this — `config.zone_coverage_display_min`
+# (0.8). Deliberately NOT `hr_zone_coverage_min` (0.5), which is a "safe to compute load
+# from" bar: a week at 55% clears that while missing nearly half its recorded time (§9.6).
+#
+# The bar is PER SPORT, because uncovered time is not always a recording failure: it is
+# also the rest between sets, the chairlift back up, the gentle walking on a hike, the
+# held pose. Those seconds sit below zone 1 and no zone claims them, so one bar
+# calibrated on continuous efforts condemns every week of every sport that has them.
+# Over six months of history cycling and ski touring hold ~0.95 median coverage, while
+# strength training holds 0.90 with a 0.49 lower quartile, resort skiing 0.26 and hiking
+# 0.15. Each bar below sits near its own sport's 25th percentile, so `!` marks the worst
+# quarter of that sport's weeks rather than all of them (§11).
+COVERAGE_MIN_BY_SPORT: Dict[str, float] = {
+    "strength_training": 0.45,
+    "resort_skiing": 0.15,
+    "resort_snowboarding": 0.15,
+    "indoor_climbing": 0.15,
+    "hiking": 0.10,
+    "yoga": 0.05,
+}
+
+
+def coverage_display_min(sport: str) -> float:
+    """The bar one sport's weekly row is graded against: a config override first, then
+    the shipped per-sport table, then the global default (§11)."""
+    key = canonical_sport(sport)
+    override = config.zone_coverage_display_min_by_sport.get(key)
+    if override is not None:
+        return override
+    return COVERAGE_MIN_BY_SPORT.get(key, config.zone_coverage_display_min)
+
+
+def judgeable(act: Dict[str, Any]) -> bool:
+    """Whether an activity is big enough to carry a claim about recording quality, or
+    about undercounted load (`config.zone_min_activity_minutes`, §11).
+
+    A 5-minute mobility session with a cold strap is not evidence that a 340-TSS week is
+    undercounted, and it is not evidence about the strap either — it is below the noise
+    floor of both questions. Its load and its zone minutes still count everywhere; only
+    its vote on the markers is withheld."""
+    return float(act.get("duration_sec") or 0.0) / 60.0 >= config.zone_min_activity_minutes
 # Power is instantaneous and so the currency to read, but only once it can see the whole
 # window — the fraction it cannot see is the meterless easy commutes (§9.6). Shares a
 # number with the bar above and nothing else: that one grades a single week's row, this
@@ -137,15 +174,32 @@ class ZoneRow(NamedTuple):
     `coverage` is that currency's recorded seconds over the sport's TOTAL duration in
     the window, so both currencies share one denominator and read comparably (§7): a
     ride with no meter contributes its full duration and zero power seconds.
+
+    `judged_coverage` is the same ratio over the activities big enough to say anything
+    about recording quality (`judgeable`), and is what the `!` marker reads; None when
+    none of the window's sessions for this sport clear that floor, which is not a
+    failing recording but an unanswerable question (§11). `coverage` keeps every
+    session, because the header percentage and the currency choice are about how much
+    of the training this currency saw — a different question.
     """
     sport: str
     currency: str
     seconds: Tuple[float, ...]
     coverage: float
+    judged_coverage: Optional[float] = None
 
     @property
     def total(self) -> float:
         return sum(self.seconds)
+
+    @property
+    def undercounted(self) -> bool:
+        """Whether this row should mark itself incomplete (§11): a judgeable coverage
+        below the sport's own bar. Unjudgeable rows never mark."""
+        return (
+            self.judged_coverage is not None
+            and self.judged_coverage < coverage_display_min(self.sport)
+        )
 
 
 def sport_durations(activities: Sequence[Dict[str, Any]]) -> Dict[str, float]:
@@ -281,9 +335,16 @@ def zone_rows(activities: Sequence[Dict[str, Any]]) -> List[ZoneRow]:
     """
     duration: Dict[str, float] = {}
     acc: Dict[Tuple[str, str], List[float]] = {}
+    # The same two totals over judgeable sessions only — the basis for `!` (§11).
+    judged_duration: Dict[str, float] = {}
+    judged: Dict[Tuple[str, str], float] = {}
     for act in activities:
         sport = canonical_sport(act.get("activity_type") or "unknown")
-        duration[sport] = duration.get(sport, 0.0) + float(act.get("duration_sec") or 0.0)
+        secs = float(act.get("duration_sec") or 0.0)
+        big = judgeable(act)
+        duration[sport] = duration.get(sport, 0.0) + secs
+        if big:
+            judged_duration[sport] = judged_duration.get(sport, 0.0) + secs
         for cur in CURRENCIES:
             vals = [
                 float(act.get(f"{cur.prefix}{i}_sec") or 0.0)
@@ -294,10 +355,19 @@ def zone_rows(activities: Sequence[Dict[str, Any]]) -> List[ZoneRow]:
             bucket = acc.setdefault((sport, cur.key), [0.0] * len(cur.labels))
             for i, v in enumerate(vals):
                 bucket[i] += v
+            if big:
+                key = (sport, cur.key)
+                judged[key] = judged.get(key, 0.0) + sum(vals)
+
+    def _judged_coverage(sport: str, key: str) -> Optional[float]:
+        denom = judged_duration.get(sport)
+        return (judged.get((sport, key), 0.0) / denom) if denom else None
+
     rows = [
         ZoneRow(
             sport=sport, currency=key, seconds=tuple(vals),
             coverage=(sum(vals) / duration[sport]) if duration.get(sport) else 0.0,
+            judged_coverage=_judged_coverage(sport, key),
         )
         for (sport, key), vals in acc.items()
     ]

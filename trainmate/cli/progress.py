@@ -471,10 +471,7 @@ def zone_week_cells(
     if row is None:
         trained = bool((week.get("sport_seconds") or {}).get(sport))
         return [NOT_TRAINED] * n_zones, trained
-    return (
-        [fmt_zone_cell(s) for s in row.seconds],
-        row.coverage < intensity.ZONE_COVERAGE_DISPLAY_MIN,
-    )
+    return [fmt_zone_cell(s) for s in row.seconds], row.undercounted
 
 
 def planned_week_cells(

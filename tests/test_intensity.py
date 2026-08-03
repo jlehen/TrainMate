@@ -136,6 +136,64 @@ class TestCoverage(unittest.TestCase):
         self.assertEqual(intensity.zone_rows([act("2026-06-02", "hiking", 3600)]), [])
 
 
+class TestJudgeableCoverage(unittest.TestCase):
+    """§11: a session too short to hide load gets no vote on the undercount markers,
+    but keeps its minutes everywhere."""
+
+    def test_short_session_keeps_its_minutes_but_not_its_vote(self):
+        # An hour ridden at full coverage plus a 5-minute session with a cold strap.
+        # `coverage` sees both (it answers "how much of the riding did HR see");
+        # `judged_coverage` sees only the hour (it answers "did the strap work").
+        acts = [
+            act("2026-06-02", "cycling", 3600, hr=[0, 3600, 0, 0, 0]),
+            act("2026-06-03", "cycling", 300, hr=[30, 0, 0, 0, 0]),
+        ]
+        row = intensity.zone_rows(acts)[0]
+        self.assertAlmostEqual(row.coverage, 3630 / 3900, places=3)
+        self.assertAlmostEqual(row.judged_coverage, 1.0, places=3)
+        self.assertFalse(row.undercounted)
+        self.assertEqual(sum(row.seconds), 3630)  # the short session's minutes count
+
+    def test_nothing_judgeable_leaves_coverage_unanswerable(self):
+        row = intensity.zone_rows(
+            [act("2026-06-02", "yoga", 300, hr=[30, 0, 0, 0, 0])]
+        )[0]
+        self.assertIsNone(row.judged_coverage)
+        self.assertFalse(row.undercounted)  # unanswerable is not "failed"
+
+    def test_the_bar_is_per_sport(self):
+        # The same 0.5 coverage: a failure for running, normal for strength training,
+        # where the uncovered half is the rest between sets (§11).
+        def row_for(sport):
+            return intensity.zone_rows(
+                [act("2026-06-02", sport, 3600, hr=[1800, 0, 0, 0, 0])]
+            )[0]
+        self.assertTrue(row_for("running").undercounted)
+        self.assertFalse(row_for("strength_training").undercounted)
+
+    def test_config_overrides_the_shipped_per_sport_table(self):
+        import unittest.mock
+        from trainmate.config import config
+        with unittest.mock.patch.object(
+            type(config), "zone_coverage_display_min_by_sport",
+            new_callable=unittest.mock.PropertyMock,
+            return_value={"strength_training": 0.9},
+        ):
+            self.assertTrue(intensity.zone_rows(
+                [act("2026-06-02", "strength_training", 3600, hr=[1800, 0, 0, 0, 0])]
+            )[0].undercounted)
+
+    def test_planned_rows_never_mark(self):
+        # A prescription is not a recording, so it has no gap to report.
+        rows = intensity.planned_zone_rows([{
+            "date": "2026-06-02", "sport_type": "running", "duration_minutes": 60,
+            "planned_zone_currency": "hr", "planned_zone1_sec": 600,
+            "planned_zone2_sec": 0, "planned_zone3_sec": 0, "planned_zone4_sec": 0,
+            "planned_zone5_sec": 0,
+        }])
+        self.assertFalse(rows[0].undercounted)
+
+
 class TestCanonicalCycling(unittest.TestCase):
     """§6.1: one vocabulary, so an athlete's riding is not split across rows."""
 

@@ -1184,6 +1184,45 @@ rows under today exactly like the load table's ghost bars, and §9.6's one asymm
 
 ## 11. Housekeeping this lands on
 
+> **Rev note (2026-08-03) — the undercount markers get a sense of proportion.**
+> Both markers shipped as bare thresholds and both fired on the majority of rows,
+> which is the one thing an exception flag may not do. `?` lit 5 of 8 weeks, `!`
+> lit 9 rows across 3 tables. Two fixes, one idea — *ask whether the evidence is
+> big enough to carry the claim*:
+>
+> - **A duration floor** (`config.zone_min_activity_minutes`, default 20). Seven
+>   of the ten `hr_sparse` sessions in the window were under 15 minutes: a
+>   5-minute yoga worth 0.8 TSS, a 5-minute strength session worth 0.3. None of
+>   them is evidence that a 344-TSS week is undercounted, and none is evidence
+>   about the strap either — they are below the noise floor of both questions.
+>   Sessions under the floor keep their load and their zone minutes everywhere;
+>   they lose only their vote on the markers. 20 minutes sits just above this
+>   athlete's 25th-percentile session length (16 min), so it excludes the
+>   mobility/micro-session tail without touching a real workout. Implemented as
+>   `intensity.judgeable`, read by `progression.weekly_aggregates` (for `?`) and
+>   by `zone_rows`' new `judged_coverage` (for `!`).
+> - **A per-sport bar** (`intensity.COVERAGE_MIN_BY_SPORT`, overridable via
+>   `config.zone_coverage_display_min_by_sport`). The flat 0.8 was an
+>   endurance-sport bar applied to every sport, and uncovered time is not always
+>   a failed recording: it is also the rest between sets, the chairlift back up,
+>   the gentle walking on a hike, the held pose. Those seconds sit below zone 1
+>   where no zone claims them. Measured over six months of history — cycling and
+>   ski touring hold ~0.95 median coverage, strength training 0.90 with a 0.49
+>   lower quartile, resort skiing 0.26, hiking 0.15, yoga 0.05 — each bar is set
+>   near its own sport's 25th percentile, so `!` marks the worst quarter of that
+>   sport's weeks rather than every one. The code already knew this (the
+>   `HR_STRENGTH_NOTE` exists to say so) and graded against 0.8 anyway.
+>
+> A third state falls out: a sport-week where *nothing* cleared the floor has an
+> **unanswerable** coverage (`judged_coverage is None`) and takes no marker.
+> Unanswerable is not the same as failed. Result on real data: `?` 5 → 3 weeks,
+> `!` 9 → 4 rows, each survivor a genuine hole (a 3h16 hike at 12% coverage
+> valued at 8 TSS).
+>
+> `hr_zone_coverage_min` is deliberately untouched: it decides whether a stored
+> TSS is trusted, so a per-sport version of *that* would change the load values
+> and the PMC series, not a marker.
+
 - **ARCHITECTURE.md** gains the aggregation helper, the `cycling` canonical rename and §9.8's
   planned-zone columns.
 - **Tests** (`unittest`, `venv/bin/python -m unittest discover -s tests -p "test_*.py"`).

@@ -477,12 +477,16 @@ def _m(minutes):
     return minutes * 60.0
 
 
-def _hr(sport, mins, coverage=0.95):
-    return ZoneRow(sport, "hr", tuple(_m(v) for v in mins), coverage)
+def _hr(sport, mins, coverage=0.95, judged="same"):
+    # `judged=None` is the unjudgeable row: every session that week was under the
+    # `zone_min_activity_minutes` floor, so the recording can't be graded (§11).
+    jc = coverage if judged == "same" else judged
+    return ZoneRow(sport, "hr", tuple(_m(v) for v in mins), coverage, jc)
 
 
-def _pwr(sport, mins, coverage=0.9):
-    return ZoneRow(sport, "power", tuple(_m(v) for v in mins), coverage)
+def _pwr(sport, mins, coverage=0.9, judged="same"):
+    jc = coverage if judged == "same" else judged
+    return ZoneRow(sport, "power", tuple(_m(v) for v in mins), coverage, jc)
 
 
 def _zweek(mon, rows=(), seconds=None, label="Base 1", in_progress=False):
@@ -540,6 +544,37 @@ class TestZoneWeekCells(unittest.TestCase):
         )
         _, undercounted = zone_week_cells(week, "running", "hr", 5)
         self.assertTrue(undercounted)
+
+    def test_the_bar_is_per_sport_so_rest_between_sets_is_not_a_failure(self):
+        # 0.55 marks a run (bar 0.8) and must NOT mark strength training, where the
+        # uncovered time is the rest between sets, not a dead strap (§11).
+        week = _zweek(
+            "2026-06-29",
+            rows=[_hr("strength_training", [10, 20, 5, 2, 1], coverage=0.55)],
+            seconds={"strength_training": _m(70)},
+        )
+        _, undercounted = zone_week_cells(week, "strength_training", "hr", 5)
+        self.assertFalse(undercounted)
+
+    def test_a_sport_still_marks_below_its_own_bar(self):
+        week = _zweek(
+            "2026-06-29",
+            rows=[_hr("strength_training", [4, 2, 1, 0, 0], coverage=0.20)],
+            seconds={"strength_training": _m(70)},
+        )
+        _, undercounted = zone_week_cells(week, "strength_training", "hr", 5)
+        self.assertTrue(undercounted)
+
+    def test_unjudgeable_week_takes_no_marker(self):
+        # Nothing that week cleared the duration floor, so the recording cannot be
+        # graded — and an ungradeable week must not be graded as a failure (§11).
+        week = _zweek(
+            "2026-06-29", rows=[_hr("running", [2, 1, 0, 0, 0], coverage=0.1,
+                                    judged=None)],
+            seconds={"running": _m(10)},
+        )
+        _, undercounted = zone_week_cells(week, "running", "hr", 5)
+        self.assertFalse(undercounted)
 
     def test_adequate_coverage_takes_no_marker(self):
         week = _zweek(
