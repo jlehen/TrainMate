@@ -13,7 +13,7 @@ from trainmate.cli.progress import (
     render_progress, format_weekly_table, table_rows, _week_row,
     fmt_zone_cell, window_sport_stats, select_zone_sports, zone_currency,
     zone_week_cells, zone_table, zone_section, unknown_sport_preferences,
-    _orphan_week_note,
+    _orphan_week_note, render_block_section,
     BAND_LABEL_WIDTH, BAR_WIDTH, TABLE_WIDTH, WEEK_COL_WIDTH,
 )
 
@@ -795,6 +795,92 @@ class TestOrphanWeekNote(unittest.TestCase):
 
     def test_full_coverage_says_nothing(self):
         self.assertEqual(_orphan_week_note([_zweek("2026-06-29")], self.BLOCKS), [])
+
+
+class _StubDb:
+    """The four accessors `render_block_section` reads, and nothing else — it takes a
+    `dbh` precisely so the block walk stays testable without a database."""
+
+    def __init__(self, mesos, activities):
+        self._mesos, self._activities = mesos, activities
+
+    def get_governing_macrocycle(self):
+        return {"id": 1}
+
+    def get_previous_macrocycle(self):
+        return None
+
+    def get_mesocycles_for_macrocycle(self, macrocycle_id):
+        return self._mesos
+
+    def get_benchmark_results(self):
+        return []
+
+    def get_completed_activities(self, start_date=None, end_date=None):
+        return [a for a in self._activities if start_date <= a["date"] <= end_date]
+
+
+def _run_act(date, minutes, z2_minutes):
+    row = {"date": date, "activity_type": "running", "duration_sec": minutes * 60,
+           "rpe": None, "tss": None}
+    for i in range(1, 6):
+        row[f"zone{i}_sec"] = z2_minutes * 60 if i == 2 else 0
+    for i in range(1, 8):
+        row[f"power_zone{i}_sec"] = 0
+    return row
+
+
+class TestBlockSection(unittest.TestCase):
+    """`--blocks` reproduces the very loss §9.6 exists to prevent, by more than one
+    route, so it must name both."""
+
+    TODAY = "2026-07-09"
+    MESOS = [
+        {"id": 1, "name": "Base 1", "focus": "aerobic volume",
+         "start_date": "2026-05-25", "end_date": "2026-06-14"},
+        {"id": 2, "name": "Base 2", "focus": "aerobic consolidation",
+         "start_date": "2026-06-29", "end_date": "2026-07-26"},
+    ]
+
+    def _payload_weeks(self):
+        mondays = ["2026-06-01", "2026-06-08", "2026-06-15", "2026-06-22",
+                   "2026-06-29", "2026-07-06"]
+        return [_zweek(m, seconds={"running": _m(300)},
+                       rows=[_hr("running", [10, 250, 30, 8, 2])]) for m in mondays]
+
+    def _section(self):
+        acts = [_run_act(d, 300, 250) for d in
+                ("2026-06-02", "2026-06-09", "2026-06-16", "2026-06-23",
+                 "2026-06-30", "2026-07-07")]
+        return render_block_section(
+            _StubDb(self.MESOS, acts), {"weeks": self._payload_weeks()},
+            8, self.TODAY, [], ["running"],
+        )
+
+    def test_reports_each_block_overlapping_the_window(self):
+        text = "\n".join(self._section())
+        self.assertIn("ZONES BY BLOCK — running", text)
+        self.assertIn("Base 1", text)
+        self.assertIn("Base 2", text)
+        self.assertIn("aerobic volume", text)  # the stated focus, to be graded against
+
+    def test_names_the_weeks_that_belong_to_no_block(self):
+        text = " ".join(l.strip() for l in self._section())
+        self.assertIn("belong to no block", text)
+        self.assertIn("06-15", text)
+        self.assertIn("06-22", text)
+
+    def test_names_the_excluded_partial_tails(self):
+        text = " ".join(l.strip() for l in self._section())
+        self.assertIn("final partial week is excluded", text)
+
+    def test_the_caveats_are_emitted_once_not_once_per_block(self):
+        text = "\n".join(self._section())
+        self.assertEqual(text.count("interval work with rest"), 1)
+
+    def test_every_line_stays_inside_the_column_budget(self):
+        for line in self._section():
+            self.assertLessEqual(visible_len(line), TABLE_WIDTH, msg=repr(line))
 
 
 class TestLoadSparseWeek(unittest.TestCase):

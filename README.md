@@ -86,6 +86,10 @@ does the coaching reasoning.
   context events back in.
 - **Adherence tracking** — compares planned vs. completed and flags misses,
   load/duration mismatches, and rest-day violations.
+- **Time in zone, per sport** — TSS folds volume and intensity into one number,
+  so easy days drifting to tempo read as flat weekly load at 100% adherence.
+  `tm progress` puts a weekly zone table under the load table for each sport you
+  train — what you measured behind today, what the plan prescribes ahead of it.
 - **Manual overrides** — add, swap, or remove individual workouts by hand;
   adaptation re-balances around them.
 
@@ -130,6 +134,12 @@ activity already stored was bucketed under whatever zones were in force then. If
 intensity report shows hard minutes falling sharply for no visible reason, an FTP
 auto-bump moving the boundary is a likely explanation. (Manually editing your Garmin zones
 has the same effect, and is invisible in the same way.)
+
+This matters more for the sessions ahead of you than for the ones behind. A *measurement*
+compares like with like, so a moved boundary shows up as a one-off step; a *prescription*
+outlives the moment it was written. With auto-detection left on, two sessions planned
+identically six months apart mean different efforts, and neither you nor the coach can
+see it.
 
 ### Configuration
 
@@ -195,6 +205,18 @@ Pull Garmin data and adapt the plan daily:
 python trainmate_cli.py data pull
 python trainmate_cli.py workout adapt
 ```
+
+See where the plan is going, and how it is actually being executed:
+```bash
+python trainmate_cli.py progress                  # every sport you train
+python trainmate_cli.py progress cycling running  # just these two, in this order
+python trainmate_cli.py progress --blocks         # per mesocycle, graded on its focus
+```
+The load half (CTL/ATL/TSB, the projection, the weekly bars) is always
+whole-athlete — naming a sport scopes the zone tables only, because a
+running-only CTL is not a quantity. To see one session's recording rather than a
+week's, `data show-activities --zones` gives you per-activity zones and the
+coverage that tells you when the strap dropped out.
 
 Your workouts sync to Google Calendar automatically as part of `plan generate`,
 `workout generate`, and the daily `workout adapt` — there's no separate sync step.

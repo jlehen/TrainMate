@@ -181,18 +181,24 @@ classes themselves.
 |                      |                      | two-panel chart drawing (matplotlib, lazy import, |
 |                      |                      | `Agg`), shared by the bot photo and the web PNG.  |
 | `sports.py`          | —                    | Canonical sport vocabulary (`SPORT_MAPPING`,     |
-|                      |                      | `canonical_sport`, `sport_aliases`); dependency- |
-|                      |                      | free so DB + adherence share it without a cycle. |
+|                      |                      | `canonical_sport`, `sport_aliases`,              |
+|                      |                      | `STRENGTH_SPORTS`); dependency-free so DB +      |
+|                      |                      | adherence share it without a cycle.              |
 | `intensity.py`       | —                    | Per-(mesocycle × canonical sport × currency ×    |
 |                      |                      | zone) time in zone: `zone_rows` aggregates,      |
-|                      |                      | `rate_window` supplies the completed-weeks       |
-|                      |                      | divisor, `block_report` renders one block (rate  |
-|                      |                      | table, coverage, caveats, block-over-block delta,|
-|                      |                      | current week, structural row). No DB access —    |
-|                      |                      | callers pass a `fetch(start, end)` callable, so  |
-|                      |                      | `adapt`, the strategy prompt and `status` share  |
-|                      |                      | one implementation (DESIGN_intensity_            |
-|                      |                      | distribution.md).                                 |
+|                      |                      | `sport_durations` supplies its denominator,      |
+|                      |                      | `pick_currency` chooses the one column a table   |
+|                      |                      | is drawn in, `rate_window` supplies the          |
+|                      |                      | completed-weeks divisor, `block_report` renders  |
+|                      |                      | one block (rate table, coverage, caveats,        |
+|                      |                      | block-over-block delta, current week, structural |
+|                      |                      | row). `planned_zone_rows` /                      |
+|                      |                      | `format_planned_zones` do the same for the       |
+|                      |                      | coach's *prescribed* distribution (§9.8). No DB  |
+|                      |                      | access — callers pass a `fetch(start, end)`      |
+|                      |                      | callable, so `adapt`, the strategy prompt,       |
+|                      |                      | `status` and `progress` share one implementation |
+|                      |                      | (DESIGN_intensity_distribution.md).              |
 | `util.py`            | —                    | ANSI color helpers (`bold`, `green`, `red`, …),  |
 |                      |                      | `cmd` (every "run X" call to action), `wrap_text`,|
 |                      |                      | `format_labeled_text`, `strip_ansi`.             |
@@ -212,7 +218,8 @@ flow for each lives in [§10](#10-key-data-flows).
 | Backward analysis (bootstrap/reflect) | `coach/service.py:_run_workout_analysis`, `coach/engine.py:_data_analyze_logic` ([§10](#data-analysis-data-bootstrap--data-reflect)) |
 | Garmin pull / metrics / load model | `trainmate/garmin.py` (`pull`, `ensure_data`, `activity_load`), see [§12](#12-sports-science--coaching-mathematics) |
 | Progress timeline / PMC projection | `trainmate/progression.py` (pure math), `trainmate/timeline.py` (shared row-fetch), `trainmate/chart.py` (PNG), `cli/progress.py` (text), `/api/timeline.png` in `trainmate_web.py`, see [§12](#fitnessfatigueform-pmc-model), DESIGN_progress_timeline.md |
-| Intensity distribution / time in zone | `trainmate/intensity.py` (aggregation + rendering), `coach/service/context.py` (`_intensity_block_context` for adapt, `_intensity_history_context` for the strategy prompt), `cli/status.py`, DESIGN_intensity_distribution.md |
+| Intensity distribution / time in zone | `trainmate/intensity.py` (aggregation + prompt-width rendering), `coach/service/context.py` (`_intensity_block_context` for adapt, `_intensity_history_context` for the strategy prompt, `_planning_zone_currencies` for §9.8), `cli/status.py`, `cli/progress.py` (the weekly grid — it shares the load table's week column and 48-column budget), `progression.weekly_aggregates` (where the rows join the payload), `cli/data.py` (`--zones`), DESIGN_intensity_distribution.md |
+| Planned time in zone (a session's intensity target) | `db/base.py` (`planned_zone_currency`, `planned_zone1..7_sec` on `workouts`), `db/workouts.py:save_workout`, `intensity.parse_planned_zones` / `format_planned_zones`, `coach/engine/workouts.py` (`_planned_zone_task`, `_planned_zone_fields` — both prompts), `google_calendar.py` + `coach/formatting.py` (rendered from the columns, never stored), DESIGN_intensity_distribution.md §9.8 |
 | Calendar push / daily-context ingest | `trainmate/google_calendar.py`, see [§13](#13-daily-context-calendar-ingest) |
 | Workout state (modified/calendar/removed/archived) | `trainmate/modification_state.py`, `trainmate/calendar_state.py`, `db/workouts.py` ([§5](#workout-state--four-orthogonal-axes-not-one-enum)) |
 | A CLI command                    | `trainmate/cli/<family>.py` (`run_*`), dispatcher in `trainmate_cli.py` ([§7](#7-cli-commands-reference)) |
@@ -1089,7 +1096,7 @@ destructive command.
 | `plan`       | `rm`         | `pl rm`  | Delete plan for a goal ID. The old `pl d` alias is gone — `d` now prefixes `diff` |
 | `plan`       | `feedback`   | `pl f`   | Add feedback (`--macro` or `--meso ID`, `--goal ID`, text; `--edit` opens `$EDITOR` seeded with current feedback) |
 | `plan`       | `wipe`       | —        | Delete all plans                                                         |
-| `progress`   | —            | `pr`     | Show the progress timeline: measured load to date, plan-projected forward (CTL/ATL/TSB), weekly planned-vs-actual bars (`--weeks N`, `--chart [PATH]` for a PNG; DESIGN_progress_timeline.md) |
+| `progress`   | `[SPORT ...]` | `pr`    | Show the progress timeline: measured load to date, plan-projected forward (CTL/ATL/TSB), weekly planned-vs-actual bars (`--weeks N`, `--chart [PATH]` for a PNG; DESIGN_progress_timeline.md), then one weekly time-in-zone table per sport — measured behind today, prescribed ahead of it (`--blocks` for block grain, `--power`/`--hr` to force the currency; DESIGN_intensity_distribution.md §9.6/§9.8). The sport argument scopes the **zone tables only**: CTL/ATL/TSB, the projection and the load table stay whole-athlete |
 | `workout`    | `list`       | `w l`    | Show planned workouts. Defaults to today for 7 days. Flags: `--type TYPE`, `--days N`, `--weeks N`, `--from DATE`, `--until DATE`, `--from-mesocycle`, `--until-mesocycle [ID]`, `--mesocycle [ID]`, `--goal [ID]`, `--removed`. |
 | `workout`    | `compare`    | `w c`    | Compare planned vs completed (`analyze_adherence()`): prints PLANNED/ACTUAL per day, flags misses (red), rest violations (red), unplanned high-load (yellow), then a discrepancy summary. Same date flags as `workout list`; default 14-day lookback; `--days`/`--weeks` look *back*; end capped at today. |
 | `workout`    | `generate`   | `w g`    | Generate workouts from active strategy. No horizon flag → `config.workout_generation_span_days` ahead (28 default). Flags: `--goal ID`, `--days N`, `--weeks N`, `--until DATE`, `--until-goal [ID]`, `--until-mesocycle ID`. Eager: archives the previous plan's future workouts and pushes the new ones to Calendar immediately. |
@@ -1671,8 +1678,16 @@ venv/bin/python -m unittest discover -s tests -p "test_*.py"
 |                                | from the block start not Mondays), coverage with a meterless    |
 |                                | ride, canonical `cycling` folding, every-zone-named rendering    |
 |                                | inside the prompt width, the raw non-extrapolated current week,  |
-|                                | per-sport delta suppression, and the structural row keeping a    |
-|                                | HIIT strength session's hard minutes in the zone table          |
+|                                | per-sport delta suppression, the structural row keeping a        |
+|                                | HIIT strength session's hard minutes in the zone table, the     |
+|                                | strength/interval note split, the coverage-based currency        |
+|                                | choice, and §9.8's planned-zone parse/render                     |
+| `tests/test_cli_progress.py`   | `cli/progress.py` formatting: the load table, plus the weekly    |
+|                                | zone grid — capped cells, the 48-column power table with a       |
+|                                | 10h+ Z2, `—`/`!`/`+` as three distinct facts, the display        |
+|                                | coverage bar distinct from `hr_zone_coverage_min`, sport         |
+|                                | selection in config order, the orphan-week note, and the         |
+|                                | `hr_sparse` week the load table now marks                        |
 | `tests/test_periodization.py`  | `plan_generate`, `workout_generate`, hash logic, |
 |                                | system-prompt building                                          |
 | `tests/test_garmin.py`         | Garmin transforms (load model), zone parsing, watermark/         |
