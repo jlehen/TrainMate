@@ -307,3 +307,68 @@ class TestCliData(unittest.TestCase):
         self.assertIn("Morning Ride", stdout)
         self.assertIn("Morning Run", stdout)
         mock_garmin.ensure_data.assert_not_called()
+
+    # -------------------------------------- DESIGN_intensity_distribution.md §9.7
+
+    def _zoned_activities(self):
+        # A ride with both a meter and a strap, and a run with HR only.
+        test_db.save_completed_activity(
+            activity_id="z_ride", date="2026-06-03", start_time="09:00",
+            activity_name="Gravel Ride", activity_type="gravel_cycling",
+            duration_sec=3600, distance_km=30.0, elevation_gain_m=100.0,
+            avg_hr=130, max_hr=150, rpe=None, tss=48.0,
+            zone1_sec=600, zone2_sec=2400, zone3_sec=500, zone4_sec=0, zone5_sec=0,
+            power_zone1_sec=500, power_zone2_sec=2200, power_zone3_sec=600,
+            power_zone4_sec=100, power_zone5_sec=0, power_zone6_sec=0,
+            power_zone7_sec=0,
+        )
+        test_db.save_completed_activity(
+            activity_id="z_run", date="2026-06-04", start_time="08:00",
+            activity_name="Morning Run", activity_type="running", duration_sec=1800,
+            distance_km=5.0, elevation_gain_m=30.0, avg_hr=140, max_hr=160,
+            rpe=None, tss=22.0,
+            zone1_sec=200, zone2_sec=1300, zone3_sec=200, zone4_sec=0, zone5_sec=0,
+        )
+
+    @patch("trainmate_cli.garmin")
+    def test_load_column_carries_its_provenance(self, mock_garmin):
+        """The highest-value fact missing from this view was not the breakdown, it was
+        where the TSS came from — §9.6's `!` explained at source."""
+        self._zoned_activities()
+        _, stdout, _ = self.run_cli(["data", "show-activities", "-a"])
+        self.assertIn("(pwr)", stdout)   # the ride: power zones win
+        self.assertIn("(hr)", stdout)    # the run: hrTSS, coverage adequate
+
+    @patch("trainmate_cli.garmin")
+    def test_type_filter_is_alias_aware(self, mock_garmin):
+        """`--type cycling` used to miss every alias, so the athlete filtered for their
+        cycling and saw a fraction of it."""
+        self._zoned_activities()
+        _, stdout, _ = self.run_cli([
+            "data", "show-activities", "-a", "--type", "cycling"
+        ])
+        self.assertIn("Gravel Ride", stdout)
+        self.assertNotIn("Morning Run", stdout)
+
+    @patch("trainmate_cli.garmin")
+    def test_zones_renders_one_row_per_activity_and_currency(self, mock_garmin):
+        """§6's prohibition kept structural: the two views of the same time are separate
+        rows, never adjacent columns inviting addition."""
+        self._zoned_activities()
+        _, stdout, _ = self.run_cli(["data", "show-activities", "-a", "--zones"])
+        self.assertIn("[pwr]", stdout)
+        self.assertIn("[HR]", stdout)
+        self.assertEqual(stdout.count("GRAVEL_CYCLING"), 2)  # one per currency
+        self.assertEqual(stdout.count("RUNNING"), 1)         # HR only
+        self.assertIn("Cov", stdout)
+        self.assertIn("two views of the SAME time", stdout)  # NEVER_SUM_NOTE
+        self.assertNotIn("Avg Watts", stdout)                # swapped, not widened
+
+    @patch("trainmate_cli.garmin")
+    def test_csv_carries_every_zone_column_with_no_flag(self, mock_garmin):
+        self._zoned_activities()
+        _, stdout, _ = self.run_cli(["data", "show-activities", "-a", "--csv"])
+        header = stdout.strip().splitlines()[0]
+        for col in ["zone1_sec", "zone5_sec", "power_zone1_sec", "power_zone7_sec",
+                    "hr_coverage", "power_coverage", "load", "load_method", "tss"]:
+            self.assertIn(col, header)

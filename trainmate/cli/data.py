@@ -4,7 +4,10 @@ import sys
 from datetime import datetime, timedelta
 from typing import Optional
 import trainmate_cli as cli
+from trainmate import intensity
 from trainmate.adherence import analyze_adherence, date_covered
+from trainmate.garmin.load import activity_load, load_method
+from trainmate.sports import sport_aliases
 from trainmate.util import (
     bold, dim, green, red, yellow, cyan, blue, magenta, gray,
     color_load_ratio, pmc_cells, visible_len, pad_visible, wrap_text, format_labeled_text,
@@ -347,6 +350,75 @@ def _show_metrics_csv(metrics_history: list) -> None:
         ])
 
 
+# Where `activity_load` took a row's number from, as a tag beside it
+# (DESIGN_intensity_distribution.md §9.7). The highest-value fact missing from this view
+# is not the zone breakdown, it is the provenance of the TSS: every downstream confusion
+# about the load half of `tm progress` disagreeing with the zone half traces back to a
+# provenance that was invisible. `rpe+` is a path `compute_load` has no word for — the
+# measurement was trustworthy but the athlete's RPE implied materially more strain, so
+# the load came from RPE anyway (the kettlebell case §6 exists for).
+LOAD_TAGS = {
+    "power": "pwr", "hr": "hr", "rpe": "rpe", "hr_sparse": "sparse!",
+    "rpe_divergence": "rpe+", "measured": "tss", "none": "—",
+}
+
+
+def _load_cell(act: dict) -> str:
+    """`188 (pwr)` — the load and where it came from, about six characters.
+
+    The figure is `activity_load()`, NOT the stored `tss`. `measured_tss` defines that
+    column as a pure measurement — no coverage gate, never RPE — while `progress`, the
+    PMC and every coaching path use `activity_load()`, so the two commands already
+    disagreed about a session's load, silently. A tag on the measurement would name a
+    provenance that is not the provenance of the number shown.
+    """
+    return f"{activity_load(act):.1f} ({LOAD_TAGS.get(load_method(act), '?')})"
+
+
+def _zone_coverage(act: dict, prefix: str, n: int) -> float:
+    duration = float(act.get("duration_sec") or 0.0)
+    if not duration:
+        return 0.0
+    total = sum(float(act.get(f"{prefix}{i}_sec") or 0.0) for i in range(1, n + 1))
+    return total / duration
+
+
+def _show_activities_zones(activities: list) -> None:
+    """`--zones`: one row per activity x currency, both currencies, nothing aggregated.
+
+    It SWAPS columns rather than widening — Distance, Elev, Avg HR, Max HR and Avg Watts
+    are not what the flag was reached for, and five HR zones plus seven power zones
+    cannot join twelve existing columns. A ride with both a meter and a strap renders two
+    rows, which keeps §6's one prohibition structural: the two views of the same time are
+    separate rows, never adjacent columns inviting addition (§9.7).
+    """
+    headers = ["Date", "Type", "Duration", "Cur"] + [
+        f"Z{i}" for i in range(1, 8)
+    ] + ["Cov", "TSS"]
+    rows = []
+    for act in activities:
+        for cur in intensity.CURRENCIES:
+            n = len(cur.labels)
+            secs = [
+                float(act.get(f"{cur.prefix}{i}_sec") or 0.0) for i in range(1, n + 1)
+            ]
+            if not any(secs):
+                continue
+            cells = [intensity.fmt_duration(s) if s else "—" for s in secs]
+            cells += [""] * (7 - n)  # HR rows leave Z6/Z7 blank
+            rows.append(
+                [act["date"], act["activity_type"].upper(),
+                 intensity.fmt_duration(act.get("duration_sec") or 0.0), cur.tag]
+                + cells
+                + [f"{_zone_coverage(act, cur.prefix, n) * 100:.0f}%", _load_cell(act)]
+            )
+    if not rows:
+        print("No zone data recorded for these activities.")
+        return
+    print(render_table(headers, rows))
+    print(gray(wrap_text(intensity.NEVER_SUM_NOTE)))
+
+
 def run_data_show_activities(args: argparse.Namespace) -> None:
     """Displays completed activities over the resolved date range."""
     start_date, end_date = _resolve_historical_date_range(args, default_days=7)
@@ -364,20 +436,27 @@ def run_data_show_activities(args: argparse.Namespace) -> None:
     )
 
     if getattr(args, 'sport_type', None) is not None:
+        # Alias-aware, so `--type cycling` stops missing `road_biking`,
+        # `gravel_cycling`, `mountain_biking` and `indoor_cycling` — the athlete
+        # filtering for their cycling and seeing a fraction of it (§9.7).
+        wanted = set(sport_aliases(args.sport_type))
         activities = [
             act for act in activities
-            if act['activity_type'].lower() == args.sport_type.lower()
+            if (act['activity_type'] or "").strip().lower() in wanted
         ]
 
     if getattr(args, 'csv', False):
         _show_activities_csv(activities)
         return
 
-
     range_str = f"{start_date} to {end_date}" if start_date and end_date else "All Time"
     print(bold(cyan(f"\n=== COMPLETED ACTIVITIES ({range_str}) ===")))
     if not activities:
         print("No completed activities found in this range.")
+        return
+
+    if getattr(args, 'zones', False):
+        _show_activities_zones(activities)
         return
 
     headers = [
@@ -415,8 +494,7 @@ def run_data_show_activities(args: argparse.Namespace) -> None:
         rpe_val = act.get('rpe')
         rpe_str = str(rpe_val) if rpe_val is not None else "N/A"
 
-        tss_val = act.get('tss')
-        tss_str = f"{tss_val:.1f}" if tss_val is not None else "0.0"
+        tss_str = _load_cell(act)
 
         start_time = act.get('start_time') or ""
         if " " in start_time:
@@ -448,7 +526,9 @@ def run_data_show_activities(args: argparse.Namespace) -> None:
     total_duration_sec = sum(act.get('duration_sec') or 0.0 for act in activities)
     total_distance_km = sum(act.get('distance_km') or 0.0 for act in activities)
     total_elevation_m = sum(act.get('elevation_gain_m') or 0.0 for act in activities)
-    total_tss = sum(act.get('tss') or 0.0 for act in activities)
+    # The load, matching the column above — so this command and `progress` finally quote
+    # one number for the same session (§9.7).
+    total_tss = sum(activity_load(act) for act in activities)
 
     tot_h = int(total_duration_sec // 3600)
     tot_m = int((total_duration_sec % 3600) // 60)
@@ -470,14 +550,28 @@ def run_data_show_activities(args: argparse.Namespace) -> None:
     ])))
 
 
+_CSV_ZONE_COLUMNS = (
+    [f"zone{i}_sec" for i in range(1, 6)]
+    + [f"power_zone{i}_sec" for i in range(1, 8)]
+)
+
+
 def _show_activities_csv(activities: list) -> None:
-    """Output activities as CSV."""
+    """Output activities as CSV — everything, with no flag gating it.
+
+    No width constraint here and its consumers want completeness, so all twelve zone
+    columns, both coverage fractions and the load provenance go in unconditionally
+    (§9.7). `tss` stays the stored measurement; `load` and `load_method` carry the
+    number every coaching path actually uses, so a script can see both and know which
+    is which.
+    """
     writer = csv_mod.writer(sys.stdout)
     writer.writerow([
         "date", "start_time", "activity_type", "activity_name",
         "duration_sec", "distance_km", "elevation_gain_m",
         "avg_hr", "max_hr", "bike_avg_watts", "rpe", "tss",
-    ])
+        "load", "load_method", "hr_coverage", "power_coverage",
+    ] + _CSV_ZONE_COLUMNS)
     for act in activities:
         writer.writerow([
             act.get('date'), act.get('start_time'),
@@ -486,7 +580,10 @@ def _show_activities_csv(activities: list) -> None:
             act.get('elevation_gain_m'), act.get('avg_hr'),
             act.get('max_hr'), act.get('bike_avg_watts'),
             act.get('rpe'), act.get('tss'),
-        ])
+            f"{activity_load(act):.1f}", load_method(act),
+            f"{_zone_coverage(act, 'zone', 5):.3f}",
+            f"{_zone_coverage(act, 'power_zone', 7):.3f}",
+        ] + [act.get(col) for col in _CSV_ZONE_COLUMNS])
 
 
 def run_data_bootstrap(args: argparse.Namespace) -> None:
@@ -779,14 +876,27 @@ def add_data_parser(subparsers, pull_bypass_parser, llm_debug_parser, basic_date
         description=(
             "Show cached completed activities over a date range. With no date filter, "
             "looks back 7 days ending today; -a/--all shows every cached activity. "
-            "Filter with --type, freshen from Garmin unless --no-pull/--all, and use "
-            "--csv for machine-readable output."
+            "Filter with --type (alias-aware: 'cycling' matches gravel, MTB and indoor "
+            "rides too), freshen from Garmin unless --no-pull/--all, and use --csv for "
+            "machine-readable output. The TSS column shows the training LOAD with where "
+            "it came from — (pwr), (hr), (rpe), (rpe+) when your RPE outvoted a "
+            "trustworthy meter, (sparse!) when the recording was too thin to trust and "
+            "no RPE was entered."
         )
     )
     d_sa.add_argument(
          "--csv", action="store_true", dest="csv",
-         help="Output data as CSV for script consumption"
+         help="Output data as CSV for script consumption (every zone column, both "
+              "coverage fractions and the load provenance, unconditionally)"
      )
+    d_sa.add_argument(
+        "--zones", action="store_true", dest="zones",
+        help="Show time in zone per activity instead of the distance/HR/watts columns: "
+             "one row per activity and currency, so a ride with both a meter and a "
+             "strap gets a [pwr] row and an [HR] row. Includes per-activity zone "
+             "coverage — the column that turns 'the strap dropped out somewhere this "
+             "week' into a named session."
+    )
     d_sa.add_argument(
         "-a", "--all", action="store_true", dest="all",
         help="Show all cached completed activities"
