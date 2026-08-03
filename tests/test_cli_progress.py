@@ -7,10 +7,14 @@ import unittest
 os.environ.setdefault("NO_COLOR", "1")  # keep assertions ANSI-free
 
 from trainmate.util import visible_len, wrap_text
+from trainmate.intensity import ZoneRow
 from trainmate.cli.progress import (
     sparkline, render_bar, truncate_label, band_header, format_form_line,
     render_progress, format_weekly_table, table_rows, _week_row,
-    BAND_LABEL_WIDTH, BAR_WIDTH, TABLE_WIDTH,
+    fmt_zone_cell, window_sport_stats, select_zone_sports, zone_currency,
+    zone_week_cells, zone_table, zone_section, unknown_sport_preferences,
+    _orphan_week_note, render_block_section, _warning_line,
+    BAND_LABEL_WIDTH, BAR_WIDTH, TABLE_WIDTH, WEEK_COL_WIDTH,
 )
 
 
@@ -158,15 +162,15 @@ class TestWeekRow(unittest.TestCase):
         return week
 
     def test_past_governed_week_shows_bar_and_percentage(self):
-        row = _week_row(self._week(), 320.0, "2026-07-03", None)
+        row = _week_row(self._week(), 320.0, "2026-07-03")
         self.assertIn("320", row)
         self.assertIn("214", row)
         self.assertIn("67%", row)
 
-    def test_ungoverned_week_shows_dash_and_no_percentage(self):
+    def test_week_with_no_plan_shows_dash_and_no_percentage(self):
         row = _week_row(
             self._week(planned_load=None, meso_source="inferred", meso_label="~Base"),
-            320.0, "2026-07-03", None,
+            320.0, "2026-07-03",
         )
         self.assertIn("—", row)
         self.assertNotIn("%", row)
@@ -174,7 +178,7 @@ class TestWeekRow(unittest.TestCase):
     def test_future_week_ghost_bars_the_plan_and_omits_actual_columns(self):
         row = _week_row(
             self._week(week_commencing="2026-07-13", actual_load=0.0),
-            320.0, "2026-07-03", None,
+            320.0, "2026-07-03",
         )
         self.assertIn("320", row)
         self.assertIn("▒", row)      # ghost-filled, so the series is continuous
@@ -192,7 +196,7 @@ class TestWeekRow(unittest.TestCase):
              "actual_load": 0.0, "in_progress": False,
              "meso_label": "Build", "meso_source": "plan"},
         ]
-        rows = table_rows(weeks, "2026-07-03", None)
+        rows = table_rows(weeks, "2026-07-03")
         future_row = [r for r in rows if "07-13" in r][0]
         self.assertEqual(future_row.count("▒"), BAR_WIDTH)  # 400 == scale max
 
@@ -201,19 +205,22 @@ class TestWeekRow(unittest.TestCase):
             self._week(week_commencing="2026-06-29", in_progress=True,
                        planned_load=340.0, planned_load_elapsed=150.0,
                        actual_load=138.0),
-            360.0, "2026-07-03", None,
+            360.0, "2026-07-03",
         )
         self.assertIn("*", row)
         self.assertIn("150", row)          # elapsed, not the full 340
         self.assertIn("92%", row)          # round(138/150*100)
 
-    def test_partial_final_week_marked(self):
-        # plan ends Wed 2026-07-08, mid-week -> the week is marked partial.
+    def test_part_week_plan_gets_no_adherence_figure(self):
+        # The plan covers three of the week's seven trained days: dividing them was the
+        # 477% this rule exists to stop (§3). The plan total still shows.
         row = _week_row(
-            self._week(week_commencing="2026-07-06", actual_load=0.0),
-            360.0, "2026-07-03", "2026-07-08",
+            self._week(planned_load=72.0, actual_load=344.0, partial_plan=True),
+            400.0, "2026-07-03",
         )
-        self.assertIn("*", row)
+        self.assertIn("72", row)
+        self.assertIn("344", row)
+        self.assertNotIn("%", row)
 
 
 class TestWeeklyTableWidth(unittest.TestCase):
@@ -231,19 +238,19 @@ class TestWeeklyTableWidth(unittest.TestCase):
         ]
 
     def test_table_stays_within_the_48_column_budget(self):
-        for line in table_rows(self._weeks(), "2026-06-30", None):
+        for line in table_rows(self._weeks(), "2026-06-30"):
             self.assertLessEqual(visible_len(line), 48, msg=repr(line))
 
     def test_zero_max_scale_does_not_divide(self):
         weeks = [{"week_commencing": "2026-06-22", "planned_load": 0.0,
                   "actual_load": 0.0, "in_progress": False,
                   "meso_label": None, "meso_source": None}]
-        rows = table_rows(weeks, "2026-07-03", None)  # must not raise
+        rows = table_rows(weeks, "2026-07-03")  # must not raise
         self.assertTrue(rows)
 
     def test_one_band_rule_per_mesocycle_not_per_week(self):
         # Build 2 once, Build 3 once — the two Build 3 weeks share a rule.
-        rows = table_rows(self._weeks(), "2026-06-30", None)
+        rows = table_rows(self._weeks(), "2026-06-30")
         bands = [r for r in rows if r.startswith("──")]
         self.assertEqual(len(bands), 2)
         self.assertIn("Build 2", bands[0])
@@ -257,17 +264,17 @@ class TestWeeklyTableWidth(unittest.TestCase):
              "actual_load": 0.0, "in_progress": False,
              "meso_label": "Build 2", "meso_source": "plan"},
         ]
-        bands = [r for r in table_rows(weeks, "2026-06-30", None) if r.startswith("──")]
+        bands = [r for r in table_rows(weeks, "2026-06-30") if r.startswith("──")]
         self.assertEqual(len(bands), 3)
 
     def test_hidden_weeks_are_named_in_the_legend(self):
         lines = format_weekly_table(
-            self._weeks(), "2026-06-30", None, False, None, hidden_weeks=12,
+            self._weeks(), "2026-06-30", False, None, hidden_weeks=12,
         )
         self.assertIn("+12 more (--weeks all)", lines[-1])
 
     def test_no_legend_note_when_nothing_is_hidden(self):
-        lines = format_weekly_table(self._weeks(), "2026-06-30", None, False, None)
+        lines = format_weekly_table(self._weeks(), "2026-06-30", False, None)
         self.assertNotIn("more (--weeks", lines[-1])
 
 
@@ -276,24 +283,34 @@ def _day(date, ctl=None, atl=None, tsb=None, source="actual", load=0.0):
             "ctl": ctl, "atl": atl, "tsb": tsb}
 
 
+def _warn(code, text, command=None):
+    w = {"code": code, "text": text}
+    if command:
+        w["command"] = command
+    return w
+
+
 def _payload(days, weeks=None, plan_end=None, objectives=None, warnings=None,
-             meso_bands=None, today="2026-07-03"):
+             meso_bands=None, today="2026-07-03", plan_gap=None):
     return {
-        "today": today, "plan_end": plan_end, "days": days,
+        "today": today, "plan_start": None, "plan_end": plan_end, "days": days,
         "weeks": weeks or [], "objectives": objectives or [],
-        "warnings": warnings or [], "meso_bands": meso_bands or [],
+        "plan_gap": plan_gap, "warnings": warnings or [],
+        "meso_bands": meso_bands or [],
     }
 
 
 class TestRenderProgress(unittest.TestCase):
     MARATHON = {"id": 1, "title": "Marathon", "target_date": "2026-09-30",
                 "priority": 1, "status": "active"}
+    GAP = {"objective": MARATHON, "weeks_before": 9, "plan_end": "2026-07-31"}
 
     def test_plan_gap_banner_when_objective_not_reached(self):
         days = [_day("2026-07-03", 55, 61, -6, "actual"),
                 _day("2026-07-31", 61, 60, 1, "planned")]
         lines = render_progress(
-            _payload(days, plan_end="2026-07-31", objectives=[self.MARATHON]), 8)
+            _payload(days, plan_end="2026-07-31", objectives=[self.MARATHON],
+                     plan_gap=self.GAP), 8)
         text = "\n".join(lines)
         self.assertIn("FORM today (actual)", text)
         self.assertIn("plan generated through", text)
@@ -317,8 +334,9 @@ class TestRenderProgress(unittest.TestCase):
         objs = [self.MARATHON,
                 {"id": 2, "title": "Ultra", "target_date": "2026-11-30",
                  "priority": 1, "status": "active"}]
+        gap = {"objective": objs[1], "weeks_before": 8, "plan_end": "2026-09-30"}
         text = "\n".join(render_progress(
-            _payload(days, plan_end="2026-09-30", objectives=objs), 8))
+            _payload(days, plan_end="2026-09-30", objectives=objs, plan_gap=gap), 8))
         self.assertIn("projected CTL 68", text)
         self.assertIn("plan generated through", text)
 
@@ -354,22 +372,30 @@ class TestRenderProgress(unittest.TestCase):
                             explain=True))
         self.assertNotIn("TSB is CTL(yesterday)", text)
 
-    def test_footer_warnings_except_plan_gap(self):
+    def test_plan_gap_is_drawn_once_from_the_structured_field(self):
+        # It is not a `warnings` string, so no renderer has to recognise it by prose
+        # and then recompute it (§6.0).
         days = [_day("2026-07-03", 55, 61, -6, "actual"),
                 _day("2026-07-31", 61, 60, 1, "planned")]
-        warnings = ["plan generated through 2026-07-31 (9 wks before objective 2026-09-30)",
-                    "2 planned workouts lack TSS/RPE — count as 0"]
+        warnings = [_warn("zero_load_workouts",
+                          "2 planned workouts lack TSS/RPE — count as 0")]
         weeks = [{"week_commencing": "2026-06-29", "planned_load": 100.0,
                   "actual_load": 90.0, "in_progress": True,
                   "planned_load_elapsed": 80.0,
                   "meso_label": "Build", "meso_source": "plan"}]
         lines = render_progress(
             _payload(days, weeks=weeks, plan_end="2026-07-31",
-                     objectives=[self.MARATHON], warnings=warnings), 8)
-        # The plan-gap warning is rendered as the banner, not duplicated in the footer.
-        footer = [ln for ln in lines if "lack TSS/RPE" in ln]
-        self.assertEqual(len(footer), 1)
+                     objectives=[self.MARATHON], warnings=warnings,
+                     plan_gap=self.GAP), 8)
+        self.assertEqual(sum(1 for ln in lines if "lack TSS/RPE" in ln), 1)
         self.assertEqual(sum(1 for ln in lines if "plan generated through" in ln), 1)
+
+    def test_warning_command_is_styled_from_the_payload_field(self):
+        w = _warn("no_history", "no activity history yet — run `data pull` first",
+                  command="data pull")
+        line = _warning_line(w)
+        self.assertIn("data pull", line)
+        self.assertNotIn("`data pull`", line)  # replaced by the styled command
 
     def _windowed_payload(self):
         days = [_day("2026-07-03", 55, 61, -6, "actual")]
@@ -431,14 +457,513 @@ class TestRenderProgress(unittest.TestCase):
                       "meso_label": "Build 2", "meso_source": "plan"}]
             lines = render_progress(
                 _payload(days, weeks=weeks, plan_end="2026-07-31",
-                         objectives=[self.MARATHON],
-                         warnings=["2 planned workouts lack TSS/RPE — count as 0"]), 8)
+                         objectives=[self.MARATHON], plan_gap=self.GAP,
+                         warnings=[_warn(
+                             "zero_load_workouts",
+                             "2 planned workouts lack TSS/RPE — count as 0")]), 8)
             for line in lines:
                 wrapped = wrap_text(line) if visible_len(line) > 48 else line
                 for sub in wrapped.split("\n"):
                     self.assertLessEqual(visible_len(sub), 48, msg=repr(sub))
         finally:
             del os.environ["TRAINMATE_WRAP_WIDTH"]
+
+
+# ---------------------------------------------------------------- zone tables
+# DESIGN_intensity_distribution.md §9.6.
+
+
+def _m(minutes):
+    return minutes * 60.0
+
+
+def _hr(sport, mins, coverage=0.95, judged="same"):
+    # `judged=None` is the unjudgeable row: every session that week was under the
+    # `zone_min_activity_minutes` floor, so the recording can't be graded (§11).
+    jc = coverage if judged == "same" else judged
+    return ZoneRow(sport, "hr", tuple(_m(v) for v in mins), coverage, jc)
+
+
+def _pwr(sport, mins, coverage=0.9, judged="same"):
+    jc = coverage if judged == "same" else judged
+    return ZoneRow(sport, "power", tuple(_m(v) for v in mins), coverage, jc)
+
+
+def _zweek(mon, rows=(), seconds=None, label="Base 1", in_progress=False):
+    return {
+        "week_commencing": mon, "meso_label": label, "meso_source": "plan",
+        "in_progress": in_progress, "actual_load": 0.0, "planned_load": None,
+        "zone_rows": list(rows), "sport_seconds": dict(seconds or {}),
+    }
+
+
+class TestZoneCell(unittest.TestCase):
+    def test_under_an_hour_is_three_characters(self):
+        self.assertEqual(fmt_zone_cell(_m(55)), "55m")
+
+    def test_hours_render_four_characters(self):
+        self.assertEqual(fmt_zone_cell(_m(300)), "5h00")
+
+    def test_ten_hours_and_up_drop_the_minutes_to_stay_inside_the_budget(self):
+        self.assertEqual(fmt_zone_cell(_m(12 * 60 + 30)), "12h")
+        self.assertLessEqual(len(fmt_zone_cell(_m(99 * 60))), 4)
+
+    def test_no_seconds_is_a_dash_not_a_zero(self):
+        self.assertEqual(fmt_zone_cell(0), "—")
+
+
+class TestZoneWeekCells(unittest.TestCase):
+    """`—`, `!` and a plain row are three different facts (§9.6)."""
+
+    def test_sport_not_trained_renders_dashes_and_takes_no_marker(self):
+        week = _zweek("2026-06-29", rows=[], seconds={"cycling": _m(120)})
+        cells, undercounted = zone_week_cells(week, "running", "hr", 5)
+        self.assertEqual(cells, ["—"] * 5)
+        self.assertFalse(undercounted)
+
+    def test_trained_but_unrecorded_renders_dashes_and_takes_the_marker(self):
+        week = _zweek("2026-06-29", rows=[], seconds={"running": _m(120)})
+        cells, undercounted = zone_week_cells(week, "running", "hr", 5)
+        self.assertEqual(cells, ["—"] * 5)
+        self.assertTrue(undercounted)
+
+    def test_no_data_in_the_chosen_currency_does_not_fall_back_to_the_other(self):
+        week = _zweek(
+            "2026-06-29", rows=[_hr("cycling", [10, 60, 5, 2, 1])],
+            seconds={"cycling": _m(78)},
+        )
+        cells, _ = zone_week_cells(week, "cycling", "power", 7)
+        self.assertEqual(cells, ["—"] * 7)
+
+    def test_marker_fires_at_the_display_bar_not_the_load_bar(self):
+        # 0.55 clears `hr_zone_coverage_min` (0.5) and still misses nearly half the
+        # recorded time, so the row must admit it.
+        week = _zweek(
+            "2026-06-29", rows=[_hr("running", [10, 60, 5, 2, 1], coverage=0.55)],
+            seconds={"running": _m(140)},
+        )
+        _, undercounted = zone_week_cells(week, "running", "hr", 5)
+        self.assertTrue(undercounted)
+
+    def test_the_bar_is_per_sport_so_rest_between_sets_is_not_a_failure(self):
+        # 0.55 marks a run (bar 0.8) and must NOT mark strength training, where the
+        # uncovered time is the rest between sets, not a dead strap (§11).
+        week = _zweek(
+            "2026-06-29",
+            rows=[_hr("strength_training", [10, 20, 5, 2, 1], coverage=0.55)],
+            seconds={"strength_training": _m(70)},
+        )
+        _, undercounted = zone_week_cells(week, "strength_training", "hr", 5)
+        self.assertFalse(undercounted)
+
+    def test_a_sport_still_marks_below_its_own_bar(self):
+        week = _zweek(
+            "2026-06-29",
+            rows=[_hr("strength_training", [4, 2, 1, 0, 0], coverage=0.20)],
+            seconds={"strength_training": _m(70)},
+        )
+        _, undercounted = zone_week_cells(week, "strength_training", "hr", 5)
+        self.assertTrue(undercounted)
+
+    def test_unjudgeable_week_takes_no_marker(self):
+        # Nothing that week cleared the duration floor, so the recording cannot be
+        # graded — and an ungradeable week must not be graded as a failure (§11).
+        week = _zweek(
+            "2026-06-29", rows=[_hr("running", [2, 1, 0, 0, 0], coverage=0.1,
+                                    judged=None)],
+            seconds={"running": _m(10)},
+        )
+        _, undercounted = zone_week_cells(week, "running", "hr", 5)
+        self.assertFalse(undercounted)
+
+    def test_adequate_coverage_takes_no_marker(self):
+        week = _zweek(
+            "2026-06-29", rows=[_hr("running", [10, 60, 5, 2, 1], coverage=0.81)],
+            seconds={"running": _m(96)},
+        )
+        _, undercounted = zone_week_cells(week, "running", "hr", 5)
+        self.assertFalse(undercounted)
+
+
+class TestZoneTableWidth(unittest.TestCase):
+    def test_seven_zone_power_table_fits_48_columns_with_a_ten_hour_z2(self):
+        weeks = [_zweek(
+            "2026-06-29",
+            rows=[_pwr("cycling", [90, 11 * 60, 70, 35, 15, 5, 3])],
+            seconds={"cycling": _m(878)},
+        )]
+        lines, _ = zone_table(weeks, "cycling", "power", _m(878), _m(878), 0.9)
+        for line in lines:
+            self.assertLessEqual(visible_len(line), TABLE_WIDTH, msg=repr(line))
+        row = next(l for l in lines if l.startswith("w/c"))
+        self.assertEqual(visible_len(row), TABLE_WIDTH)
+        self.assertIn("11h", row)
+
+    def test_five_zone_hr_table_is_38_columns(self):
+        weeks = [_zweek(
+            "2026-06-29", rows=[_hr("running", [50, 300, 35, 15, 5])],
+            seconds={"running": _m(405)},
+        )]
+        lines, _ = zone_table(weeks, "running", "hr", _m(405), _m(405), 0.94)
+        row = next(l for l in lines if l.startswith("w/c"))
+        self.assertEqual(visible_len(row), 38)
+
+    def test_in_progress_and_undercounted_both_fit_the_week_column(self):
+        weeks = [_zweek(
+            "2026-07-06", rows=[_hr("running", [22, 82, 38, 7, 3], coverage=0.4)],
+            seconds={"running": _m(400)}, in_progress=True,
+        )]
+        lines, markers = zone_table(weeks, "running", "hr", _m(400), _m(400), 0.4)
+        row = next(l for l in lines if l.startswith("w/c"))
+        self.assertTrue(row.startswith("w/c 07-06*!"))
+        self.assertEqual(len("w/c 07-06*!"), WEEK_COL_WIDTH)
+        self.assertIn("!", markers)
+
+
+class TestZoneSportSelection(unittest.TestCase):
+    def _stats(self):
+        weeks = [_zweek(
+            "2026-06-29",
+            rows=[_hr("running", [50, 300, 35, 15, 5]),
+                  _pwr("cycling", [40, 130, 25, 12, 6, 2, 1]),
+                  _hr("cycling", [45, 140, 30, 14, 7])],
+            seconds={"running": _m(405), "cycling": _m(216), "yoga": _m(30)},
+        )]
+        return window_sport_stats(weeks), weeks
+
+    def test_coverage_shares_one_denominator_across_currencies(self):
+        stats, _ = self._stats()
+        cycling = stats["cycling"]
+        self.assertAlmostEqual(
+            cycling["coverage"]["power"], _m(216) / _m(216), places=6
+        )
+        self.assertAlmostEqual(
+            cycling["coverage"]["hr"], _m(236) / _m(216), places=6
+        )
+
+    def test_default_keeps_config_order_not_volume_order(self):
+        stats, _ = self._stats()
+        sports, _, _ = select_zone_sports(None, ["cycling", "running"], stats)
+        self.assertEqual(sports, ["cycling", "running"])
+
+    def test_low_volume_sport_is_named_never_silently_dropped(self):
+        stats, _ = self._stats()
+        sports, low, no_data = select_zone_sports(
+            None, ["running", "cycling", "yoga"], stats
+        )
+        self.assertEqual(sports, ["running", "cycling"])
+        self.assertEqual(no_data, ["yoga"])  # 30 min and no zone rows at all
+        self.assertEqual(low, [])
+
+    def test_naming_a_sport_overrides_every_filter(self):
+        stats, _ = self._stats()
+        sports, low, no_data = select_zone_sports(["yoga"], ["running"], stats)
+        self.assertEqual(sports, ["yoga"])
+        self.assertEqual((low, no_data), ([], []))
+
+    def test_explicit_names_are_canonicalised(self):
+        stats, _ = self._stats()
+        sports, _, _ = select_zone_sports(["Road_Biking"], [], stats)
+        self.assertEqual(sports, ["cycling"])
+
+
+class TestZoneCurrency(unittest.TestCase):
+    def test_power_wins_once_it_covers_the_window(self):
+        stats = {"cycling": {
+            "seconds": 100.0, "zone_seconds": {"power": 85.0, "hr": 95.0},
+            "coverage": {"power": 0.85, "hr": 0.95},
+        }}
+        self.assertEqual(zone_currency(stats, "cycling"), "power")
+
+    def test_below_the_bar_the_fuller_currency_wins(self):
+        # The 40% power cannot see IS the meterless easy commutes.
+        stats = {"cycling": {
+            "seconds": 100.0, "zone_seconds": {"power": 60.0, "hr": 95.0},
+            "coverage": {"power": 0.60, "hr": 0.95},
+        }}
+        self.assertEqual(zone_currency(stats, "cycling"), "hr")
+
+    def test_forcing_a_currency_the_sport_lacks_has_no_effect(self):
+        stats = {"running": {
+            "seconds": 100.0, "zone_seconds": {"hr": 95.0},
+            "coverage": {"hr": 0.95},
+        }}
+        self.assertEqual(zone_currency(stats, "running", forced="power"), "hr")
+
+    def test_forcing_a_currency_the_sport_has_wins_over_coverage(self):
+        stats = {"cycling": {
+            "seconds": 100.0, "zone_seconds": {"power": 60.0, "hr": 95.0},
+            "coverage": {"power": 0.60, "hr": 0.95},
+        }}
+        self.assertEqual(zone_currency(stats, "cycling", forced="power"), "power")
+
+
+class TestZoneSection(unittest.TestCase):
+    def _weeks(self):
+        return [
+            _zweek("2026-06-22",
+                   rows=[_hr("running", [55, 258, 62, 17, 7]),
+                         _pwr("cycling", [45, 140, 30, 15, 7, 3, 1])],
+                   seconds={"running": _m(399), "cycling": _m(241)}),
+            _zweek("2026-06-29",
+                   rows=[_pwr("cycling", [90, 570, 70, 35, 15, 5, 3])],
+                   seconds={"cycling": _m(788)}, label="Base 2"),
+        ]
+
+    def test_one_table_per_sport_so_a_swap_reads_as_a_swap(self):
+        lines = zone_section(self._weeks(), ["running", "cycling"])
+        text = "\n".join(lines)
+        self.assertIn("ZONES running", text)
+        self.assertIn("ZONES cycling", text)
+        # Running absent in 06-29 while cycling Z2 climbs: one table alone would have
+        # called that a collapsed aerobic base.
+        self.assertIn("—", text)
+
+    def test_header_carries_the_sport_share_of_the_window(self):
+        lines = zone_section(self._weeks(), ["running"])
+        header = next(l for l in lines if l.startswith("ZONES"))
+        self.assertIn(" of ", header)
+        self.assertIn("[HR", header)
+
+    def test_hidden_weeks_are_named_in_the_footer(self):
+        lines = zone_section(self._weeks(), ["running"], hidden_weeks=3)
+        self.assertIn("+3 more weeks (--weeks all)", "\n".join(lines))
+
+    def test_a_named_sport_with_no_rows_lists_the_sports_that_have_them(self):
+        lines = zone_section(self._weeks(), [], explicit=["swimming"])
+        text = "\n".join(lines)
+        self.assertIn("No zone data for swimming", text)
+        self.assertIn("cycling", text)
+        self.assertIn("running", text)
+
+    def test_every_line_stays_inside_the_column_budget(self):
+        for line in zone_section(self._weeks(), ["running", "cycling"], hidden_weeks=3):
+            self.assertLessEqual(visible_len(line), TABLE_WIDTH, msg=repr(line))
+
+
+class TestZoneTableFutureHalf(unittest.TestCase):
+    """§9.8: ghost rows under today, exactly like the load table's ghost bars — which
+    closes §9.6's one asymmetry."""
+
+    TODAY = "2026-06-24"
+
+    def _weeks(self):
+        past = _zweek("2026-06-22",
+                      rows=[_hr("running", [55, 258, 62, 17, 7])],
+                      seconds={"running": _m(399)}, in_progress=True)
+        future = _zweek("2026-06-29", seconds={})
+        future["planned_zone_rows"] = [_hr("running", [20, 240, 30, 20, 5], 1.0)]
+        return [past, future]
+
+    def test_future_weeks_render_the_plan_and_are_marked(self):
+        lines, markers = zone_table(
+            self._weeks(), "running", "hr", _m(399), _m(399), 0.94, today=self.TODAY
+        )
+        rows = [l for l in lines if l.startswith("w/c")]
+        self.assertTrue(rows[0].startswith("w/c 06-22*"))   # measured, in progress
+        self.assertTrue(rows[1].startswith("w/c 06-29+"))   # prescribed
+        self.assertIn("4h00", rows[1])                      # 240 min of planned Z2
+        self.assertIn("+", markers)
+
+    def test_a_future_week_with_no_plan_renders_dashes_not_the_past(self):
+        weeks = self._weeks()
+        weeks[1]["planned_zone_rows"] = []
+        lines, _ = zone_table(
+            weeks, "running", "hr", _m(399), _m(399), 0.94, today=self.TODAY
+        )
+        future = [l for l in lines if l.startswith("w/c 06-29")][0]
+        self.assertNotIn("+", future)
+        self.assertEqual(future.count("—"), 5)
+
+    def test_a_plan_in_the_other_currency_is_declared_never_converted(self):
+        # Power Z6/Z7 have no HR equivalent, so collapsing seven onto five would be
+        # banding by the back door and §5 forbids it.
+        weeks = self._weeks()
+        weeks[1]["planned_zone_rows"] = [_pwr("running", [20, 240, 30, 20, 5, 2, 1], 1.0)]
+        lines, markers = zone_table(
+            weeks, "running", "hr", _m(399), _m(399), 0.94, today=self.TODAY
+        )
+        future = [l for l in lines if l.startswith("w/c 06-29")][0]
+        self.assertEqual(future.count("—"), 5)
+        self.assertIn("~mismatch", markers)
+
+    def test_the_mismatch_is_explained_in_the_section_footer(self):
+        weeks = self._weeks()
+        weeks[1]["planned_zone_rows"] = [_pwr("running", [20, 240, 30, 20, 5, 2, 1], 1.0)]
+        text = " ".join(
+            l.strip() for l in
+            zone_section(weeks, ["running"], today=self.TODAY, stats_weeks=weeks[:1])
+        )
+        self.assertIn("written in the other currency", text)
+
+    def test_the_currency_choice_still_reads_measured_coverage_only(self):
+        # A future week's planned rows must not vote on which column the table is drawn
+        # in — coverage is a property of recordings.
+        weeks = self._weeks()
+        stats = window_sport_stats(weeks[:1])
+        self.assertEqual(zone_currency(stats, "running"), "hr")
+
+    def test_future_rows_stay_inside_the_column_budget(self):
+        for line in zone_section(
+            self._weeks(), ["running"], today=self.TODAY, stats_weeks=self._weeks()[:1]
+        ):
+            self.assertLessEqual(visible_len(line), TABLE_WIDTH, msg=repr(line))
+
+
+class TestUnknownSportPreferences(unittest.TestCase):
+    def test_a_canonical_sport_warns_about_nothing(self):
+        self.assertEqual(unknown_sport_preferences(["cycling", "running"]), [])
+
+    def test_a_free_text_entry_warns_and_suggests(self):
+        [warning] = unknown_sport_preferences(["Road cycling"])
+        self.assertIn("'Road cycling' is not a known sport", warning)
+        self.assertIn("cycling", warning)
+
+    def test_a_genuinely_new_sport_warns_without_a_suggestion(self):
+        [warning] = unknown_sport_preferences(["swimming"])
+        self.assertIn("not a known sport", warning)
+        self.assertNotIn("Did you mean", warning)
+
+    def test_an_alias_is_not_a_warning(self):
+        self.assertEqual(unknown_sport_preferences(["road_biking"]), [])
+
+
+class TestOrphanWeekNote(unittest.TestCase):
+    BLOCKS = [{"start_date": "2026-05-25", "end_date": "2026-06-14"},
+              {"start_date": "2026-06-29", "end_date": "2026-07-26"}]
+
+    def test_weeks_belonging_to_no_block_are_named(self):
+        weeks = [_zweek(d) for d in
+                 ("2026-06-01", "2026-06-15", "2026-06-22", "2026-06-29")]
+        lines = _orphan_week_note(weeks, self.BLOCKS)
+        note = " ".join(l.strip() for l in lines)
+        self.assertIn("2 weeks", note)
+        self.assertIn("06-15", note)
+        self.assertIn("06-22", note)
+        self.assertIn("partial week is excluded", note)
+        self.assertIn("without --blocks", note)
+        for line in lines:
+            self.assertLessEqual(visible_len(line), TABLE_WIDTH, msg=repr(line))
+
+    def test_a_long_orphan_list_is_capped(self):
+        weeks = [_zweek(f"2026-06-{d:02d}") for d in (15, 22)] + [
+            _zweek("2026-08-03"), _zweek("2026-08-10")
+        ]
+        note = "\n".join(_orphan_week_note(weeks, self.BLOCKS))
+        self.assertIn("+2 more", note)
+
+    def test_full_coverage_says_nothing(self):
+        self.assertEqual(_orphan_week_note([_zweek("2026-06-29")], self.BLOCKS), [])
+
+
+class _StubDb:
+    """The four accessors `render_block_section` reads, and nothing else — it takes a
+    `dbh` precisely so the block walk stays testable without a database."""
+
+    def __init__(self, mesos, activities):
+        self._mesos, self._activities = mesos, activities
+
+    def get_governing_macrocycle(self):
+        return {"id": 1, "objective_id": 1}
+
+    def get_previous_macrocycle(self, objective_id, before_id=None):
+        return None
+
+    def get_mesocycles_for_macrocycle(self, macrocycle_id):
+        return self._mesos
+
+    def get_benchmark_results(self):
+        return []
+
+    def get_completed_activities(self, start_date=None, end_date=None):
+        return [a for a in self._activities if start_date <= a["date"] <= end_date]
+
+
+def _run_act(date, minutes, z2_minutes):
+    row = {"date": date, "activity_type": "running", "duration_sec": minutes * 60,
+           "rpe": None, "tss": None}
+    for i in range(1, 6):
+        row[f"zone{i}_sec"] = z2_minutes * 60 if i == 2 else 0
+    for i in range(1, 8):
+        row[f"power_zone{i}_sec"] = 0
+    return row
+
+
+class TestBlockSection(unittest.TestCase):
+    """`--blocks` reproduces the very loss §9.6 exists to prevent, by more than one
+    route, so it must name both."""
+
+    TODAY = "2026-07-09"
+    MESOS = [
+        {"id": 1, "name": "Base 1", "focus": "aerobic volume",
+         "start_date": "2026-05-25", "end_date": "2026-06-14"},
+        {"id": 2, "name": "Base 2", "focus": "aerobic consolidation",
+         "start_date": "2026-06-29", "end_date": "2026-07-26"},
+    ]
+
+    def _payload_weeks(self):
+        mondays = ["2026-06-01", "2026-06-08", "2026-06-15", "2026-06-22",
+                   "2026-06-29", "2026-07-06"]
+        return [_zweek(m, seconds={"running": _m(300)},
+                       rows=[_hr("running", [10, 250, 30, 8, 2])]) for m in mondays]
+
+    def _section(self):
+        acts = [_run_act(d, 300, 250) for d in
+                ("2026-06-02", "2026-06-09", "2026-06-16", "2026-06-23",
+                 "2026-06-30", "2026-07-07")]
+        return render_block_section(
+            _StubDb(self.MESOS, acts), {"weeks": self._payload_weeks()},
+            8, self.TODAY, [], ["running"],
+        )
+
+    def test_reports_each_block_overlapping_the_window(self):
+        text = "\n".join(self._section())
+        self.assertIn("ZONES BY BLOCK — running", text)
+        self.assertIn("Base 1", text)
+        self.assertIn("Base 2", text)
+        self.assertIn("aerobic volume", text)  # the stated focus, to be graded against
+
+    def test_names_the_weeks_that_belong_to_no_block(self):
+        text = " ".join(l.strip() for l in self._section())
+        self.assertIn("belong to no block", text)
+        self.assertIn("06-15", text)
+        self.assertIn("06-22", text)
+
+    def test_names_the_excluded_partial_tails(self):
+        text = " ".join(l.strip() for l in self._section())
+        self.assertIn("final partial week is excluded", text)
+
+    def test_the_caveats_are_emitted_once_not_once_per_block(self):
+        text = "\n".join(self._section())
+        self.assertEqual(text.count("interval work with rest"), 1)
+
+    def test_every_line_stays_inside_the_column_budget(self):
+        for line in self._section():
+            self.assertLessEqual(visible_len(line), TABLE_WIDTH, msg=repr(line))
+
+
+class TestLoadSparseWeek(unittest.TestCase):
+    """§11: the strap died, no RPE was entered, and the week reads as an adherence
+    miss the coach will then adapt the plan around."""
+
+    def _week(self, sparse):
+        return {"week_commencing": "2026-06-29", "planned_load": 320.0,
+                "actual_load": 262.0, "in_progress": False, "meso_label": "Build 2",
+                "meso_source": "plan", "load_sparse": sparse}
+
+    def test_marked_in_the_week_column(self):
+        row = _week_row(self._week(True), 400.0, "2026-07-03")
+        self.assertTrue(row.startswith("w/c 06-29?"))
+
+    def test_legend_explains_it_only_when_it_fires(self):
+        marked = "\n".join(
+            format_weekly_table([self._week(True)], "2026-07-03", False, None)
+        )
+        self.assertIn("? load undercounted", marked)
+        clean = "\n".join(
+            format_weekly_table([self._week(False)], "2026-07-03", False, None)
+        )
+        self.assertNotIn("? load undercounted", clean)
 
 
 if __name__ == "__main__":

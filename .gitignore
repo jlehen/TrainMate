@@ -26,3 +26,6 @@ __pycache__/
 *.pyd
 .pytest_cache/
 .ipynb_checkpoints/
+
+# vim swap files (one was committed by accident)
+.*.swp

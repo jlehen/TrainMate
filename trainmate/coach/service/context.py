@@ -8,11 +8,11 @@ from trainmate.types import Objective, Constraint, Workout
 from trainmate.adherence import analyze_adherence, planned_load
 from trainmate.sports import canonical_sport
 from trainmate.modification_state import SWAP_REASON_PREFIX, MANUAL_REPLACE_REASON_PREFIX
-from trainmate import garmin
+from trainmate import garmin, intensity
 from trainmate.garmin import activity_load
 from trainmate.util import (
     today_str as _today_str, today_date as _today_date,
-    cyan, green, yellow, bold, red, gray, PMC_TSB_LAG_NOTE,
+    cyan, green, yellow, bold, red, gray, wrap_text, PMC_TSB_LAG_NOTE,
 )
 from trainmate.coach.engine import CoachEngine
 from trainmate.coach.formatting import format_baseline, _load_science_guidelines
@@ -232,18 +232,91 @@ class PmcContextMixin:
             min_tsb = min(tsbs)
         return end_ctl, week_ramp, min_tsb
 
+    # ------------------------------------------------------ intensity distribution
+    def _intensity_block_context(self, as_of: str) -> Optional[str]:
+        """The active block's measured intensity distribution for `adapt`
+        (DESIGN_intensity_distribution.md §9.3): the block to date as a per-week rate
+        beside its stated focus, plus the current week's raw minutes.
+
+        No preceding block and no delta — block-over-block creep is a periodization
+        question, and §9.2 gives those to `generate`. Returns None when today falls
+        outside every block: `get_active_mesocycle` falls back to the next FUTURE block,
+        which would render an empty table for training that has not happened (§8).
+        """
+        meso = self._db.get_active_mesocycle(as_of)
+        if not meso or not (meso['start_date'] <= as_of <= meso['end_date']):
+            return None
+        return intensity.block_report(
+            meso, as_of, self._db.get_completed_activities,
+            current_week=True, benchmarks=self._db.get_benchmark_results(),
+        )
+
+    def _planning_zone_currencies(self, as_of: str) -> Dict[str, str]:
+        """`{sport: 'power'|'hr'}` for the sports the coach may prescribe zone targets in
+        (DESIGN_intensity_distribution.md §9.8).
+
+        §9.6's currency rule needs a window and authoring has none — at generation time
+        there is only forward plan — so it borrows the display default of 8 trailing
+        weeks, and the ordinary case agrees by construction. The transient worth naming
+        is the athlete who has just bought a power meter: trailing coverage still says HR
+        while the display flips to power as the meter's weeks accumulate, so the future
+        half of the table goes dark until the next `workout generate` re-picks the
+        currency from fresh coverage. Self-healing, on the same rolling horizon that
+        regenerates everything else.
+        """
+        start = (
+            datetime.strptime(as_of, "%Y-%m-%d").date()
+            - timedelta(days=7 * intensity.PLANNING_COVERAGE_WEEKS)
+        ).strftime("%Y-%m-%d")
+        return intensity.currency_by_sport(
+            self._db.get_completed_activities(start_date=start, end_date=as_of)
+        )
+
+    def _intensity_history_context(
+        self, macros: List[Dict[str, Any]], today_str: str
+    ) -> List[str]:
+        """One intensity report per elapsed block across `macros`, each carrying the
+        delta against the block before it (§4.1) — the strategy prompt's view.
+
+        Blocks are walked macrocycle-first and then flattened in order, never fetched by
+        a date-ordered mesocycle query: every mesocycle accessor filters
+        ``mac.status = 'active'``, which hides the cross-plan case, and dropping that
+        filter drags in superseded rollback versions whose blocks overlap the live ones
+        and describe training that never happened. Navigating by macrocycle id fixes the
+        lineage before any dates are compared, so neither trap can fire.
+        """
+        blocks: List[Dict[str, Any]] = []
+        seen_macros = set()
+        for macro in macros:
+            if not macro or macro['id'] in seen_macros:
+                continue
+            seen_macros.add(macro['id'])
+            blocks.extend(self._db.get_mesocycles_for_macrocycle(macro['id']))
+        benchmarks = self._db.get_benchmark_results()
+        reports = []
+        for i, meso in enumerate(blocks):
+            text = intensity.block_report(
+                meso, today_str, self._db.get_completed_activities,
+                previous=blocks[i - 1] if i else None, benchmarks=benchmarks,
+            )
+            if text:
+                reports.append(text)
+        return reports
+
     def _build_prior_training_context(
         self, prior_macro: Optional[Dict[str, Any]], today_str: str
     ) -> Optional[str]:
         """Builds a read-only "planned vs actual" review for the strategy prompt
         (DESIGN_backward_evaluation.md §6, Option A).
 
-        Anchored on the prior plan's *elapsed* mesocycle windows (§6): each planned block's
-        focus is shown beside what the athlete actually did in that window (sessions,
-        volume, TSS, zone split) so the model can judge whether the block's intent
-        materialized. If a cached backward-evaluation reconstruction exists (from `data
-        bootstrap`), its summary, reverse-engineered macro/mesocycle structure, and
-        physiological insights are appended — reused without another LLM call (§10).
+        Anchored on the *elapsed* mesocycle windows of the prior plan AND of the plan the
+        athlete is currently in (§6): each planned block's focus is shown beside what the
+        athlete actually did in that window — volume, load, and the per-sport per-zone
+        intensity distribution with its block-over-block delta
+        (DESIGN_intensity_distribution.md §4.1/§9) — so the model can judge whether the
+        block's intent materialized. If a cached backward-evaluation reconstruction exists
+        (from `data bootstrap`), its summary, reverse-engineered macro/mesocycle structure,
+        and physiological insights are appended — reused without another LLM call (§10).
         Returns None if there is nothing to report.
 
         This does NOT write to any `feedback` field: under Option A the assessment is
@@ -251,62 +324,28 @@ class PmcContextMixin:
         """
         sections: List[str] = []
 
-        if prior_macro:
-            block_lines = []
-            for m in self._db.get_mesocycles_for_macrocycle(prior_macro['id']):
-                if m['start_date'] > today_str:
-                    continue  # future block; nothing actual to compare yet
-                win_end = min(m['end_date'], today_str)
-                acts = self._db.get_completed_activities(m['start_date'], win_end)
-                if not acts:
-                    block_lines.append(
-                        f"- {m['name']} ({m['start_date']}..{win_end}): planned focus "
-                        f"\"{m['focus']}\" — no completed activities recorded."
-                    )
-                    continue
-                hours = sum((a.get('duration_sec') or 0.0) for a in acts) / 3600.0
-                tss = sum(activity_load(a) for a in acts)
-                z12 = sum(
-                    (a.get('zone1_sec') or 0) + (a.get('zone2_sec') or 0) for a in acts
+        # The whole review is pre-wrapped here, not at print time: the zone tables are
+        # column-aligned and re-wrapping shreds them (DESIGN_intensity_distribution.md §6).
+        width = intensity.PROMPT_WIDTH
+
+        # The current plan's elapsed blocks join the prior plan's: drift diagnosed only
+        # one macrocycle late is history (gap 2 of DESIGN_intensity_distribution.md §3).
+        reports = self._intensity_history_context(
+            [prior_macro, self._db.get_governing_macrocycle()], today_str
+        )
+        if reports:
+            sections.append(
+                wrap_text(
+                    "PLANNED vs ACTUAL (elapsed blocks — judge whether each block's intent "
+                    "materialized). Each block shows its planned focus beside what the "
+                    "athlete's sessions ACTUALLY measured, per sport and per zone, as a "
+                    "per-week rate over the block's completed weeks, plus the change "
+                    "against the block before it. Read the delta as the intensity-creep "
+                    "check: weekly TSS can hold flat while easy volume quietly gives way "
+                    "to tempo.", width
                 )
-                z3 = sum((a.get('zone3_sec') or 0) for a in acts)
-                z45 = sum(
-                    (a.get('zone4_sec') or 0) + (a.get('zone5_sec') or 0) for a in acts
-                )
-                # Power zones use Garmin's 7-zone model, grouped polarized like HR:
-                # Z1-2 easy / Z3-4 threshold / Z5-7 hard.
-                pz12 = sum(
-                    (a.get('power_zone1_sec') or 0) + (a.get('power_zone2_sec') or 0)
-                    for a in acts
-                )
-                pz34 = sum(
-                    (a.get('power_zone3_sec') or 0) + (a.get('power_zone4_sec') or 0)
-                    for a in acts
-                )
-                pz567 = sum(
-                    (a.get('power_zone5_sec') or 0) + (a.get('power_zone6_sec') or 0)
-                    + (a.get('power_zone7_sec') or 0) for a in acts
-                )
-                zone_note = ""
-                if (z12 + z3 + z45) > 0:
-                    zone_note += (
-                        f", HR zones Z1-2/Z3/Z4-5 = {z12 // 60}/{z3 // 60}/{z45 // 60} min"
-                    )
-                if (pz12 + pz34 + pz567) > 0:
-                    zone_note += (
-                        f", power zones Z1-2/Z3-4/Z5-7 = "
-                        f"{pz12 // 60}/{pz34 // 60}/{pz567 // 60} min"
-                    )
-                block_lines.append(
-                    f"- {m['name']} ({m['start_date']}..{win_end}): planned focus "
-                    f"\"{m['focus']}\" — actual: {len(acts)} sessions, {hours:.1f}h, "
-                    f"{tss:.0f} TSS{zone_note}."
-                )
-            if block_lines:
-                sections.append(
-                    "PLANNED vs ACTUAL (elapsed blocks of the prior plan — judge whether "
-                    "each block's intent materialized):\n" + "\n".join(block_lines)
-                )
+                + "\n" + "\n".join(reports)
+            )
 
         cached = self._db.get_analysis_cache("long")
         recon = cached.get("reconstruction") if cached else None
@@ -344,9 +383,9 @@ class PmcContextMixin:
                 window = ""
                 if cached.get("window_start") and cached.get("window_end"):
                     window = f" ({cached['window_start']}..{cached['window_end']})"
-                sections.append(
+                sections.append(wrap_text(
                     f"INFERRED FROM PAST TRAINING{window} (latest data analysis):\n"
-                    + "\n".join(recon_lines)
-                )
+                    + "\n".join(recon_lines), width
+                ))
 
         return "\n\n".join(sections) if sections else None

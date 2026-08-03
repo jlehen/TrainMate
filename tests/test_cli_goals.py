@@ -69,7 +69,7 @@ class TestCliGoals(unittest.TestCase):
 
         exit_code, stdout, stderr = self.run_cli([
             "goal", "add",
-            "Hybrid Strength Endurance", "2026-11-30", "road_biking", "strength_training",
+            "Hybrid Strength Endurance", "2026-11-30", "cycling", "strength_training",
             "--desc", "Aging well routine",
             "--priority", "3",
         ])
@@ -85,7 +85,7 @@ class TestCliGoals(unittest.TestCase):
         self.assertIn("Priority: 1", stdout)
         self.assertIn("ID: 1", stdout)
         self.assertIn("Hybrid Strength Endurance", stdout)
-        self.assertIn("road_biking,strength_training", stdout)
+        self.assertIn("cycling,strength_training", stdout)
 
         exit_code, stdout, stderr = self.run_cli(["goal", "rm", "1"])
         self.assertEqual(exit_code, 0)

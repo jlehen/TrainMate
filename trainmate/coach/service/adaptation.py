@@ -8,7 +8,7 @@ from trainmate.types import Objective, Constraint, Workout
 from trainmate.adherence import analyze_adherence, planned_load
 from trainmate.sports import canonical_sport
 from trainmate.modification_state import SWAP_REASON_PREFIX, MANUAL_REPLACE_REASON_PREFIX
-from trainmate import garmin
+from trainmate import garmin, intensity
 from trainmate.garmin import activity_load
 from trainmate.util import (
     today_str as _today_str, today_date as _today_date,
@@ -171,6 +171,12 @@ class AdaptationMixin:
         # separate classification pass. The same LLM call also extracts any
         # constraint-shaped directives from it (see `new_constraints` below).
         pmc_cutoff, pmc_context = self._pmc_prompt_context(target_date_str)
+        # The block's measured intensity distribution — adapt's primary view, since drift
+        # caught in week 2 is correctable and drift diagnosed at plan-generation time is
+        # history (DESIGN_intensity_distribution.md §9). Threaded as its own argument, NOT
+        # folded into meso_text: that string is shared with plan generation, which §9.2
+        # says must not grow this section.
+        intensity_context = self._intensity_block_context(target_date_str)
         decision = self.engine._workout_adapt_logic(
             target_date_str=target_date_str,
             history_days=history_days,
@@ -194,7 +200,9 @@ class AdaptationMixin:
             athlete_message=message,
             constraints=constraints,
             pmc_warmup_cutoff=pmc_cutoff,
-            pmc_context=pmc_context
+            pmc_context=pmc_context,
+            intensity_context=intensity_context,
+            zone_currencies=self._planning_zone_currencies(target_date_str)
         )
 
         # NOTE: daily adaptation is read-only w.r.t. coach learnings
@@ -277,9 +285,10 @@ class AdaptationMixin:
             start_date=start_date, end_date=end_date
         )
 
-        # One timestamp for the whole run, stamped on every session it eases. Lets a
-        # re-run see how recently (and how many times) each session was already adapted
-        # and hold back from compounding the cut (see save_workout / the adapt prompt).
+        # One timestamp for the whole run, stamped on every session it EASES (see the
+        # per-session `eased` test below). Lets a re-run see how recently (and how many
+        # times) each session was already adapted and hold back from compounding the cut
+        # (see save_workout / the adapt prompt).
         adapted_at = datetime.now(timezone.utc).isoformat()
 
         # Group proposed workouts by date
@@ -342,6 +351,20 @@ class AdaptationMixin:
             # adapt newly introduces is coach-authored ('generated').
             source = None if existing else 'generated'
 
+            # A drift correction rewrites the prescription without touching the load, so it
+            # is not an easing — stamping it would raise the DO NOT COMPOUND bar for a
+            # session that was never cut (DESIGN_intensity_distribution.md §9.5). Decided
+            # here rather than in save_workout, which is a generic writer other callers
+            # rely on. Compared against `existing`, not `original_*`: a session already cut
+            # last week and merely re-worded today moved nothing now. A session adapt newly
+            # introduced counts as eased — there is no prior form to compound.
+            eased = not existing or (
+                float(w.get('duration_minutes') or 0)
+                != float(existing['duration_minutes'] or 0)
+                or float(w.get('tss') or 0) != float(existing['tss'] or 0)
+            )
+            zone_currency, zone_sec = intensity.parse_planned_zones(w)
+
             self._db.save_workout(
                 date=w['date'],
                 sport_type=w['sport_type'],
@@ -359,7 +382,15 @@ class AdaptationMixin:
                 tss=w.get('tss'),
                 source=source,
                 benchmark_type=w.get('benchmark_type'),
-                adapted_at=adapted_at
+                adapted_at=adapted_at if eased else None,
+                # A drift correction rewrites HOW a session is prescribed, so its zone
+                # target moves with it; omitted, COALESCE preserves what the plan already
+                # held (DESIGN_intensity_distribution.md §9.8). Note this leaves §9.5's
+                # stopgap correct as written: `eased` compares duration and TSS only, so a
+                # correction that rewrites the zones while holding both stays unstamped —
+                # right, because nothing was cut.
+                planned_zone_currency=zone_currency,
+                planned_zone_sec=zone_sec
             )
 
             # Sync to Google Calendar

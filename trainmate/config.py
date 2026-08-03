@@ -1,6 +1,6 @@
 import os
 import yaml
-from typing import Any, Optional
+from typing import Any, Dict, Optional
 
 CONFIG_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "config.yaml")
 
@@ -279,6 +279,36 @@ class Config:
         sessions cluster at >=0.77 coverage and low-intensity ones at <0.3, with a
         clean gap at 0.5."""
         return float(self.get("garmin", {}).get("hr_zone_coverage_min", 0.5))
+
+    @property
+    def zone_min_activity_minutes(self) -> float:
+        """Shortest activity that may raise an undercount marker in the progress tables
+        (DESIGN_intensity_distribution.md §11). Under `garmin:`. Default 20.
+
+        A 5-minute mobility session with a cold strap is not evidence that a 340-TSS
+        week is undercounted, and it is not evidence about recording quality either —
+        it is too small to carry either claim. Sessions below this still contribute
+        their load and their zone minutes; they simply get no vote on the markers."""
+        return float(self.get("garmin", {}).get("zone_min_activity_minutes", 20))
+
+    @property
+    def zone_coverage_display_min(self) -> float:
+        """Default share of a sport's duration that must land in a known zone before its
+        weekly row stops marking itself incomplete. Under `garmin:`. Default 0.8.
+
+        Deliberately NOT `hr_zone_coverage_min` (0.5), which is a "safe to compute load
+        from" bar. Per-sport overrides live in
+        `intensity.COVERAGE_MIN_BY_SPORT`; `zone_coverage_display_min_by_sport`
+        overrides those in turn."""
+        return float(self.get("garmin", {}).get("zone_coverage_display_min", 0.8))
+
+    @property
+    def zone_coverage_display_min_by_sport(self) -> Dict[str, float]:
+        """Per-canonical-sport overrides of the bar above, keyed by canonical sport name.
+        Under `garmin:`. Empty by default — the shipped per-sport table in
+        `intensity.COVERAGE_MIN_BY_SPORT` applies unless overridden here."""
+        raw = self.get("garmin", {}).get("zone_coverage_display_min_by_sport") or {}
+        return {str(k).strip().lower(): float(v) for k, v in raw.items()}
 
     # --- PMC time constants, config-backed under `garmin:`. Non-default values are
     # experimental; calibration caveat in config_template.yaml and

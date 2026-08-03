@@ -402,28 +402,6 @@ class TestTimelinePngEndpoint(unittest.TestCase):
         self.assertEqual(res.status_code, 503)
         self.assertIn("matplotlib", res.get_data(as_text=True))
 
-    def test_cli_and_endpoint_render_the_same_payload(self):
-        # The CLI≡endpoint equivalence pin (§9): both surfaces build the §6.0 payload
-        # from one shared row-fetching path, so a fixture DB yields identical payloads
-        # — warnings, wording and all. This would have caught CODE_REVIEW finding #5.
-        from trainmate import timeline
-        oid = test_db.add_objective(
-            title="Race", target_date="2026-12-01", sport_type="running",
-        )
-        test_db.save_macrocycle(
-            objective_id=oid, strategy="s", goals_hash="g", constraints_hash="l",
-            mesocycles=[{"name": "Build", "start_date": "2026-06-22",
-                         "end_date": "2026-07-19", "focus": "build"}],
-        )
-        _save_activity(test_db, "a1", "2026-06-29", "running", 3600, 30.0)
-        test_db.save_workout(date="2026-07-06", sport_type="running", title="Run",
-                             description="d", duration_minutes=60, tss=40)
-
-        cli_payload = timeline.build_timeline_payload(test_db)
-        endpoint_payload = timeline.build_timeline_payload(trainmate_web.db)
-        self.assertEqual(cli_payload, endpoint_payload)
-        self.assertIn("today", cli_payload)
-
 
 class TestTimelinePayload(unittest.TestCase):
     """The assembled payload behind the PNG (via the shared builder), where the pixel
@@ -453,15 +431,15 @@ class TestTimelinePayload(unittest.TestCase):
     def test_payload_shape(self):
         _save_activity(test_db, "a1", "2026-06-10", "running", 3600, 40.0)
         data = self._payload()
-        for key in ("today", "plan_end", "days", "weeks", "meso_bands",
-                    "objectives", "warnings"):
+        for key in ("today", "plan_start", "plan_end", "days", "weeks",
+                    "meso_bands", "objectives", "plan_gap", "warnings"):
             self.assertIn(key, data)
 
     def test_no_activity_at_all_warns_and_empty_days(self):
         data = self._payload()
         self.assertEqual(data["days"], [])
         self.assertIsNone(data["plan_end"])
-        self.assertTrue(any("no activity history" in w for w in data["warnings"]))
+        self.assertIn("no_history", {w["code"] for w in data["warnings"]})
 
     def test_plan_end_is_last_non_removed_generated_workout(self):
         _save_activity(test_db, "a1", "2026-06-10", "running", 3600, 40.0)

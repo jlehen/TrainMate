@@ -378,7 +378,7 @@ class TestCliPlans(unittest.TestCase):
     def test_plan_show_thresholds_snapshot(self):
         """The threshold anchors a plan was generated against are shown among its inputs."""
         oid = test_db.add_objective(
-            title="Threshold Goal", target_date="2026-12-15", sport_type="road_biking",
+            title="Threshold Goal", target_date="2026-12-15", sport_type="cycling",
         )
         test_db.save_macrocycle(
             objective_id=oid, strategy="Ride", goals_hash="g", constraints_hash="c",

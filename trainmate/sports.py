@@ -17,8 +17,13 @@ from typing import List
 # alias list, so it round-trips to itself.
 SPORT_MAPPING = {
     "running": ["running", "indoor_running", "trail_running", "treadmill_running"],
-    "road_biking": [
-        "road_biking", "indoor_cycling", "cycling", "virtual_ride", "biking"
+    # Road, gravel, cyclocross, MTB and BMX share one set of Garmin cycling zone
+    # boundaries, which is what qualifies them for a single row
+    # (DESIGN_intensity_distribution.md §6.1).
+    "cycling": [
+        "cycling", "road_cycling", "road_biking", "gravel_cycling",
+        "mountain_biking", "cyclocross", "bmx", "indoor_cycling",
+        "virtual_ride", "biking",
     ],
     "hiking": ["hiking", "walking"],
     "strength_training": ["strength_training", "strength", "indoor_cardio", "fitness"],
@@ -47,6 +52,18 @@ _ALIAS_TO_CANONICAL = {
     for canonical, aliases in SPORT_MAPPING.items()
     for alias in aliases
 }
+
+
+# Sports whose HR trace is dominated by rest between sets rather than by effort. The
+# caveat travelling with their zone rows is suppressed when none of them is on screen
+# (DESIGN_intensity_distribution.md §9.6); the interval-work half of that caveat is not,
+# because interval work with rest happens in running, cycling and rowing alike.
+STRENGTH_SPORTS = frozenset({"strength_training"})
+
+
+def is_strength_sport(value: str) -> bool:
+    """Whether `value` names a sport whose HR rows need the rest-between-sets caveat."""
+    return canonical_sport(value) in STRENGTH_SPORTS
 
 
 def canonical_sport(value: str) -> str:

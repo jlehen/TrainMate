@@ -63,16 +63,6 @@ def _dp(offset, load, source="actual"):
     return {"date": _d(offset), "load": float(load), "source": source}
 
 
-def _mv(created_offset, ranges, objective_id=1):
-    """A governance version: created at `created_offset`, covering `ranges` (each a
-    (start_offset, end_offset) pair)."""
-    return {
-        "objective_id": objective_id,
-        "created_at": _d(created_offset) + "T00:00:00+00:00",
-        "ranges": [(_d(s), _d(e)) for s, e in ranges],
-    }
-
-
 class TestPlanEnd(unittest.TestCase):
     def test_last_generated_workout_wins_over_far_future_manual(self):
         workouts = [_w(2, tss=50), _w(60, tss=50, source="manual")]
@@ -213,7 +203,7 @@ class TestZeroLoadWorkoutCount(unittest.TestCase):
             _w(4, rpe=5, duration_minutes=30),
             _w(5, tss=None, rpe=None, duration_minutes=None, removed=True),
         ]
-        self.assertEqual(progression.zero_load_workout_count(workouts), 1)
+        self.assertEqual(progression.zero_load_workout_count(workouts, TODAY), 1)
 
 
 class TestWeeklyAggregates(unittest.TestCase):
@@ -221,58 +211,62 @@ class TestWeeklyAggregates(unittest.TestCase):
         return {"label": label, "source": source, "start_date": _d(s), "end_date": _d(e)}
 
     def test_empty_without_activities_or_workouts(self):
-        self.assertEqual(progression.weekly_aggregates([], [], TODAY, [], []), [])
+        self.assertEqual(progression.weekly_aggregates([], [], TODAY, []), [])
 
     def test_monday_bucketing_and_actual_sum(self):
         activities = [_act(-4, tss=30.0), _act(-3, tss=20.0)]  # Mon + Tue
-        weeks = progression.weekly_aggregates(activities, [], TODAY, [], [])
+        weeks = progression.weekly_aggregates(activities, [], TODAY, [])
         self.assertEqual(weeks[0]["week_commencing"], "2026-06-29")
         self.assertEqual(weeks[0]["actual_load"], 50.0)
 
-    def test_ungoverned_week_has_no_planned_figure(self):
+    def test_week_the_plan_never_covered_has_no_planned_figure(self):
         activities = [_act(-4, tss=30.0)]
-        weeks = progression.weekly_aggregates(activities, [], TODAY, [], [])
+        weeks = progression.weekly_aggregates(activities, [], TODAY, [])
         self.assertIsNone(weeks[0]["planned_load"])
         self.assertEqual(weeks[0]["actual_load"], 30.0)
 
-    def test_governed_week_sums_planned_load(self):
-        macro_versions = [_mv(-30, [(-4, 2)])]  # covers the week 06-29..07-05
+    def test_covered_week_sums_planned_load(self):
         workouts = [_w(-4, tss=40), _w(-3, tss=60)]
-        weeks = progression.weekly_aggregates([], workouts, TODAY, [], macro_versions)
+        weeks = progression.weekly_aggregates([], workouts, TODAY, [])
         week = next(w for w in weeks if w["week_commencing"] == "2026-06-29")
         self.assertEqual(week["planned_load"], 100.0)
 
-    def test_governance_is_label_independent(self):
-        # An inferred label but a governing version -> planned still renders.
+    def test_planned_load_is_label_independent(self):
+        # An inferred label must not suppress the planned total (CODE_REVIEW #3).
         spans = [self._span(-4, 2, label="~Base", source="inferred")]
-        macro_versions = [_mv(-30, [(-4, 2)])]
-        workouts = [_w(-4, tss=40)]
-        weeks = progression.weekly_aggregates([], workouts, TODAY, spans, macro_versions)
+        weeks = progression.weekly_aggregates([], [_w(-4, tss=40)], TODAY, spans)
         week = next(w for w in weeks if w["week_commencing"] == "2026-06-29")
         self.assertEqual(week["meso_source"], "inferred")
         self.assertEqual(week["planned_load"], 40.0)
 
-    def test_all_removed_governed_week_is_planned_zero_not_none(self):
-        macro_versions = [_mv(-30, [(-4, 2)])]
-        # An activity anchors the week in the series; its only planned row is removed.
+    def test_all_removed_week_has_no_planned_figure(self):
+        # An activity anchors the week in the series; its only planned row is removed,
+        # so nothing survives to compare against — `—`, not a planned zero.
         activities = [_act(-4, tss=10.0)]
-        workouts = [_w(-4, tss=40, removed=True)]
-        weeks = progression.weekly_aggregates(activities, workouts, TODAY, [], macro_versions)
-        week = next(w for w in weeks if w["week_commencing"] == "2026-06-29")
-        self.assertEqual(week["planned_load"], 0.0)
-
-    def test_version_created_after_week_end_does_not_govern(self):
-        # created_at[:10] > week_sunday -> not in force -> ungoverned.
-        macro_versions = [_mv(30, [(-4, 2)])]  # created well after this week ended
-        workouts = [_w(-4, tss=40)]
-        weeks = progression.weekly_aggregates([], workouts, TODAY, [], macro_versions)
+        weeks = progression.weekly_aggregates(
+            activities, [_w(-4, tss=40, removed=True)], TODAY, []
+        )
         week = next(w for w in weeks if w["week_commencing"] == "2026-06-29")
         self.assertIsNone(week["planned_load"])
 
-    def test_in_progress_elapsed_excludes_unsynced_today(self):
-        macro_versions = [_mv(-30, [(-4, 3)])]
+    def test_week_the_plan_starts_midway_through_is_partial(self):
+        # The plan's first day is Thursday; the days trained before it sit outside the
+        # plan entirely, so the pair is not comparable and must not be divided (§3).
+        activities = [_act(o, tss=50.0) for o in (-4, -3, -2, -1)]
+        workouts = [_w(o, tss=20) for o in (-1, 0, 1, 2)]
+        weeks = progression.weekly_aggregates(activities, workouts, TODAY, [])
+        week = next(w for w in weeks if w["week_commencing"] == "2026-06-29")
+        self.assertTrue(week["partial_plan"])
+
+    def test_week_the_plan_fully_covers_is_not_partial(self):
         workouts = [_w(o, tss=40) for o in (-4, -3, -2, -1, 0, 1, 2)]  # Mon..Sun
-        weeks = progression.weekly_aggregates([], workouts, TODAY, [], macro_versions)
+        weeks = progression.weekly_aggregates([], workouts, TODAY, [])
+        week = next(w for w in weeks if w["week_commencing"] == "2026-06-29")
+        self.assertNotIn("partial_plan", week)
+
+    def test_in_progress_elapsed_excludes_unsynced_today(self):
+        workouts = [_w(o, tss=40) for o in (-4, -3, -2, -1, 0, 1, 2)]  # Mon..Sun
+        weeks = progression.weekly_aggregates([], workouts, TODAY, [])
         week = next(w for w in weeks if w["week_commencing"] == "2026-06-29")
         self.assertTrue(week["in_progress"])
         self.assertEqual(week["planned_load"], 40 * 7)
@@ -280,10 +274,9 @@ class TestWeeklyAggregates(unittest.TestCase):
         self.assertEqual(week["planned_load_elapsed"], 40 * 4)
 
     def test_in_progress_elapsed_includes_synced_today(self):
-        macro_versions = [_mv(-30, [(-4, 3)])]
         workouts = [_w(o, tss=40) for o in (-4, -3, -2, -1, 0, 1, 2)]
         activities = [_act(0, tss=25.0)]  # today's session has synced
-        weeks = progression.weekly_aggregates(activities, workouts, TODAY, [], macro_versions)
+        weeks = progression.weekly_aggregates(activities, workouts, TODAY, [])
         week = next(w for w in weeks if w["week_commencing"] == "2026-06-29")
         self.assertEqual(week["planned_load_elapsed"], 40 * 5)  # Mon..Fri
 
@@ -292,16 +285,16 @@ class TestWeeklyAggregates(unittest.TestCase):
         majority = self._span(-4, -2, label="A")   # Mon-Wed
         minority = {"label": "B", "source": "plan",
                     "start_date": _d(-1), "end_date": _d(-1)}
-        weeks = progression.weekly_aggregates(activities, [], TODAY, [majority, minority], [])
+        weeks = progression.weekly_aggregates(activities, [], TODAY, [majority, minority])
         self.assertEqual(weeks[0]["meso_label"], "A")
 
         tie_a = self._span(-4, -2, label="A")   # Mon-Wed (3)
         tie_b = self._span(-1, 1, label="B")    # Thu-Sat (3)
-        weeks = progression.weekly_aggregates(activities, [], TODAY, [tie_a, tie_b], [])
+        weeks = progression.weekly_aggregates(activities, [], TODAY, [tie_a, tie_b])
         self.assertEqual(weeks[0]["meso_label"], "B")
 
     def test_no_matching_span_leaves_week_unlabeled(self):
-        weeks = progression.weekly_aggregates([_act(-4, tss=10.0)], [], TODAY, [], [])
+        weeks = progression.weekly_aggregates([_act(-4, tss=10.0)], [], TODAY, [])
         self.assertIsNone(weeks[0]["meso_label"])
 
 
@@ -337,49 +330,78 @@ class TestMesoBands(unittest.TestCase):
 
 class TestAssembleTimeline(unittest.TestCase):
     def _assemble(self, activities=None, workouts=None, metrics=None,
-                  macro_versions=None, mesocycles=None, inferred=None,
-                  objectives=None, cutoff=None):
+                  mesocycles=None, inferred=None, objectives=None, cutoff=None):
         return progression.assemble_timeline(
-            activities or [], workouts or [], metrics or [],
-            macro_versions or [], mesocycles or [], inferred or [],
-            objectives or [], TODAY, CTL_DAYS, ATL_DAYS, cutoff,
+            activities or [], workouts or [], metrics or [], mesocycles or [],
+            inferred or [], objectives or [], TODAY, CTL_DAYS, ATL_DAYS, cutoff,
         )
+
+    @staticmethod
+    def _codes(payload):
+        return {w["code"] for w in payload["warnings"]}
 
     def test_payload_shape(self):
         p = self._assemble(activities=[_act(-2, tss=30.0)], workouts=[_w(2, tss=50)])
         self.assertEqual(
             set(p.keys()),
-            {"today", "plan_end", "days", "weeks", "meso_bands", "objectives", "warnings"},
+            {"today", "plan_start", "plan_end", "days", "weeks", "meso_bands",
+             "objectives", "plan_gap", "warnings"},
         )
         self.assertEqual(p["plan_end"], _d(2))
 
+    def test_warnings_carry_a_code_and_text(self):
+        # Renderers dispatch on `code`, never on the prose (§6.0).
+        p = self._assemble(workouts=[_w(1, tss=50)])
+        w = next(w for w in p["warnings"] if w["code"] == "no_history")
+        self.assertIn("no activity history", w["text"])
+        self.assertEqual(w["command"], "data pull")
+
     def test_no_activity_state_warns_and_still_has_weeks(self):
         p = self._assemble(workouts=[_w(1, tss=50)])
-        self.assertTrue(any("no activity history" in w for w in p["warnings"]))
+        self.assertIn("no_history", self._codes(p))
         self.assertTrue(p["weeks"])  # planned bars still render
 
     def test_beyond_plan_end_warning(self):
         workouts = [_w(2, tss=50), _w(30, tss=50, source="manual")]
         p = self._assemble(activities=[_act(-1, tss=30.0)], workouts=workouts)
-        self.assertTrue(any("beyond plan end" in w for w in p["warnings"]))
+        self.assertIn("beyond_plan_end", self._codes(p))
 
-    def test_plan_gap_warning_vs_next_active_objective(self):
+    def test_plan_gap_is_structured_not_a_warning_string(self):
         objectives = [{"id": 1, "title": "Marathon", "target_date": _d(60),
                        "priority": 1, "status": "active"}]
         p = self._assemble(activities=[_act(-1, tss=30.0)],
                            workouts=[_w(2, tss=50)], objectives=objectives)
-        self.assertTrue(any(w.startswith("plan generated through") for w in p["warnings"]))
+        self.assertEqual(p["plan_gap"]["objective"]["id"], 1)
+        self.assertEqual(p["plan_gap"]["plan_end"], _d(2))
+        self.assertGreater(p["plan_gap"]["weeks_before"], 0)
+        self.assertNotIn("plan_gap", self._codes(p))
+
+    def test_no_plan_gap_when_every_objective_is_reached(self):
+        objectives = [{"id": 1, "title": "Marathon", "target_date": _d(1),
+                       "priority": 1, "status": "active"}]
+        p = self._assemble(activities=[_act(-1, tss=30.0)],
+                           workouts=[_w(2, tss=50)], objectives=objectives)
+        self.assertIsNone(p["plan_gap"])
+
+    def test_zero_load_warning_ignores_past_workouts(self):
+        # A past row nobody can fix must not keep the banner permanently lit.
+        p = self._assemble(activities=[_act(-1, tss=30.0)],
+                           workouts=[_w(-3, tss=None), _w(2, tss=50)])
+        self.assertNotIn("zero_load_workouts", self._codes(p))
+        p = self._assemble(activities=[_act(-1, tss=30.0)],
+                           workouts=[_w(1, tss=None), _w(2, tss=50)])
+        self.assertIn("zero_load_workouts", self._codes(p))
 
     def test_young_db_caveat_in_warnings(self):
         # History starts today -> n_days small -> caveat fires.
         p = self._assemble(activities=[_act(0, tss=30.0)], workouts=[_w(1, tss=50)])
-        self.assertTrue(any("PMC still warming" in w for w in p["warnings"]))
+        self.assertIn("pmc_warming", self._codes(p))
 
     def test_unparseable_inferred_block_skipped_and_warned(self):
         inferred = [{"name": "Bad", "start_date": "not-a-date", "end_date": _d(0)}]
         p = self._assemble(activities=[_act(-1, tss=30.0)], workouts=[_w(2, tss=50)],
                            inferred=inferred)
-        self.assertTrue(any("unparseable" in w for w in p["warnings"]))
+        self.assertIn("bootstrap_dates", self._codes(p))
         self.assertFalse(any(b["source"] == "inferred" for b in p["meso_bands"]))
 
 
@@ -408,7 +430,12 @@ class TestClipPayloadForWeeks(unittest.TestCase):
         days = [{"date": _d(offset), "load": 0.0, "source": "planned",
                  "ctl": 1.0, "atl": 1.0, "tsb": 0.0}
                 for offset in range(-40, 90)]
-        return {"today": TODAY, "plan_end": plan_end, "days": days, "weeks": [],
+        # Real weeks: the cap is derived from `select_weeks`, the same choice the text
+        # table makes, so the fixture has to carry the weeks it chooses from.
+        weeks = [{"week_commencing": _d(offset), "actual_load": 0.0,
+                  "planned_load": None}
+                 for offset in range(-39, 90, 7)]  # _d(-39) is a Monday
+        return {"today": TODAY, "plan_end": plan_end, "days": days, "weeks": weeks,
                 "objectives": [], "warnings": [], "meso_bands": []}
 
     def test_default_keeps_the_whole_projection(self):

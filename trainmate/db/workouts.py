@@ -18,7 +18,9 @@ class WorkoutsMixin:
         removed: bool = False, removed_reason: Optional[str] = None,
         source: Optional[str] = None, adaptation_summary: Optional[str] = None,
         macrocycle_id: Optional[int] = None, adapted_at: Optional[str] = None,
-        benchmark_type: Optional[str] = None
+        benchmark_type: Optional[str] = None,
+        planned_zone_currency: Optional[str] = None,
+        planned_zone_sec: Optional[List[Optional[int]]] = None
     ) -> int:
         """Saves a workout, updating it if one already exists that day for the same
         sport. Existence is alias-aware (see trainmate.sports), so adapting/regenerating
@@ -53,7 +55,19 @@ class WorkoutsMixin:
         adaptation a recency/frequency signal so it can avoid compounding cuts. All other
         callers (plan/generate, swap, add) leave it None, which preserves both columns
         untouched — a fresh INSERT then starts at count 0 / NULL, so regenerating a plan
-        resets the adaptation history of that slot."""
+        resets the adaptation history of that slot.
+
+        `planned_zone_currency` + `planned_zone_sec` (a 7-slot list, HR sessions filling
+        1-5 and leaving 6-7 None) carry the session's intensity target
+        (DESIGN_intensity_distribution.md §9.8). Both COALESCE-preserve when omitted and
+        overwrite when given: `adapt` emits them too, because §9.4's drift correction IS
+        a rewrite of how a session is prescribed, and leaving them alone would leave them
+        describing the prescription that was just replaced. Stored as emitted — a session
+        whose zone seconds do not sum to `duration_minutes` is a prescription, not an
+        accounting identity, and silently scaling it would put the app back in the
+        business of correcting the model rather than aligning for it."""
+        zones = list(planned_zone_sec or [None] * 7)[:7]
+        zones += [None] * (7 - len(zones))
         aliases = sport_aliases(sport_type)
         placeholders = ",".join("?" * len(aliases))
         if macrocycle_id is None:
@@ -91,7 +105,16 @@ class WorkoutsMixin:
                         benchmark_type = COALESCE(?, benchmark_type),
                         adapted_at = COALESCE(?, adapted_at),
                         adaptation_count = COALESCE(adaptation_count, 0)
-                            + CASE WHEN ? IS NOT NULL THEN 1 ELSE 0 END
+                            + CASE WHEN ? IS NOT NULL THEN 1 ELSE 0 END,
+                        planned_zone_currency =
+                            COALESCE(?, planned_zone_currency),
+                        planned_zone1_sec = COALESCE(?, planned_zone1_sec),
+                        planned_zone2_sec = COALESCE(?, planned_zone2_sec),
+                        planned_zone3_sec = COALESCE(?, planned_zone3_sec),
+                        planned_zone4_sec = COALESCE(?, planned_zone4_sec),
+                        planned_zone5_sec = COALESCE(?, planned_zone5_sec),
+                        planned_zone6_sec = COALESCE(?, planned_zone6_sec),
+                        planned_zone7_sec = COALESCE(?, planned_zone7_sec)
                     WHERE id = ?
                 """, (title, description, original_description,
                       original_date,
@@ -101,6 +124,7 @@ class WorkoutsMixin:
                       int(removed), removed_reason, source,
                       benchmark_type,
                       adapted_at, adapted_at,
+                      planned_zone_currency, *zones,
                       workout_id))
             else:
                 cursor.execute("""
@@ -110,8 +134,13 @@ class WorkoutsMixin:
                         google_event_id, duration_minutes, rpe, tss,
                         original_duration_minutes, original_rpe, original_tss,
                         removed, removed_reason, source, macrocycle_id,
-                        created_at, adapted_at, adaptation_count, benchmark_type
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        created_at, adapted_at, adaptation_count, benchmark_type,
+                        planned_zone_currency,
+                        planned_zone1_sec, planned_zone2_sec, planned_zone3_sec,
+                        planned_zone4_sec, planned_zone5_sec, planned_zone6_sec,
+                        planned_zone7_sec
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                              ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (date, sport_type, title, description,
                       original_description or description,
                       original_date or date,
@@ -124,7 +153,8 @@ class WorkoutsMixin:
                       original_tss if original_tss is not None else tss,
                       int(removed), removed_reason, source, macrocycle_id,
                       datetime.now(timezone.utc).isoformat(),
-                      adapted_at, 1 if adapted_at else 0, benchmark_type))
+                      adapted_at, 1 if adapted_at else 0, benchmark_type,
+                      planned_zone_currency, *zones))
                 workout_id = cursor.lastrowid
             conn.commit()
             return int(workout_id)

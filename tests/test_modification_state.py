@@ -123,7 +123,7 @@ class TestModificationStatusViaDB(unittest.TestCase):
             date="2026-07-01", sport_type="running", title="Run", description="easy",
         )
         b = self.db.save_workout(
-            date="2026-07-03", sport_type="road_biking", title="Ride", description="easy",
+            date="2026-07-03", sport_type="cycling", title="Ride", description="easy",
         )
         service.workout_swap_apply(
             [{"id": a, "new_date": "2026-07-03"}, {"id": b, "new_date": "2026-07-01"}],

@@ -30,10 +30,12 @@ def _banner(title: str, width: int) -> Tuple[str, str]:
 def _print_prior_training_review(text: str, width: int) -> None:
     """Shows the planned-vs-actual review that goes to the model as prompt context.
 
-    Wrapped for the screen only — the model still gets the unwrapped original."""
+    Printed verbatim: the review now carries column-aligned zone tables already wrapped
+    to their own width, and re-wrapping would shred the alignment
+    (DESIGN_intensity_distribution.md §6)."""
     head, rule = _banner("PRIOR TRAINING REVIEW (planned vs actual)", width)
     print(cyan(bold(f"\n{head}")))
-    print(wrap_text(text, width))
+    print(text)
     print(cyan(bold(f"{rule}\n")))
 
 

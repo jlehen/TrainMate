@@ -6,6 +6,7 @@ from trainmate.garmin import activity_load, load_ratio, rpe_divergence
 from trainmate.util import PMC_TSB_LAG_NOTE
 from trainmate.sports import canonical_sport
 from trainmate.modification_state import modification_status
+from trainmate import intensity
 
 
 def _adapt_recency_tag(workout: Workout, eval_date: Optional[str]) -> str:
@@ -208,6 +209,12 @@ def format_planned_workouts_detailed(
         mod_reason = w.get('modification_reason')
         if mod_reason:
             header += f" — {mod_reason}"
+        # The stated intensity target beside the prose that describes it
+        # (DESIGN_intensity_distribution.md §9.8) — so an adapt rewriting how a session is
+        # prescribed can see what it is rewriting, and preserve the part it is not.
+        target = intensity.format_planned_zones(w)
+        if target:
+            header += f"\n  {target}"
         desc = (w.get('description') or '').strip()
         if desc:
             indented = "\n".join("    " + ln for ln in desc.splitlines())

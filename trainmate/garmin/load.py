@@ -9,10 +9,6 @@ from trainmate.config import config
 from trainmate.db import db
 from trainmate.util import today_date, today_str, yellow, red, dim
 
-CYCLING_TERMS = (
-    "cycling", "biking", "ride", "cyclocross", "bmx",
-    "virtual_ride", "indoor_cycling", "gravel_cycling",
-)
 # --- Power-zone TSS weights (TSS per second in each zone) -------------------
 # Derived from Dr. Andrew Coggan's power-zone model (Allen & Coggan, "Training
 # and Racing with a Power Meter"). TSS over a steady effort is IF^2 * 100 per
@@ -157,6 +153,41 @@ def activity_load(act: Dict[str, Any]) -> float:
     if rpe:
         return _rpe_tss(float(rpe), duration_sec)
     return 0.0
+def load_method(act: Dict[str, Any]) -> str:
+    """Where `activity_load` took this row's number from — the provenance that is
+    currently invisible everywhere (DESIGN_intensity_distribution.md §9.7):
+
+        power           | Coggan power zones
+        hr              | hrTSS, HR coverage adequate
+        rpe             | coverage poor, load rescued from the athlete's RPE
+        hr_sparse       | coverage poor AND no RPE — the load number is undercounted too
+        rpe_divergence  | measurement trustworthy, but RPE implied materially more
+                          strain, so the load came from RPE anyway
+        measured        | a stored TSS with no zone columns to attribute it to
+        none            | no power, HR or RPE
+
+    Kept beside `activity_load` and branching identically, so the tag a surface prints
+    can never name a provenance that is not the provenance of the number beside it.
+    `rpe_divergence` is a path `compute_load` has no word for: without it those rows
+    would read `hr` above a figure hrTSS never produced.
+    """
+    tss = act.get("tss")
+    rpe = act.get("rpe")
+    duration_sec = act.get("duration_sec") or 0.0
+    if tss is None:
+        return "rpe" if rpe else "none"
+    if not _measurement_is_load(act, duration_sec):
+        return "rpe" if rpe else "hr_sparse"
+    ratio = _divergence_ratio(act, duration_sec)
+    if ratio is not None and ratio >= _divergence_threshold():
+        return "rpe_divergence"
+    if _has_power_zones(act):
+        return "power"
+    if any(act.get(f"zone{i}_sec") for i in range(1, 6)):
+        return "hr"
+    return "measured"
+
+
 def rpe_divergence(act: Dict[str, Any]) -> Optional[float]:
     """If the load came from an objective measurement (power/HR) but the user's
     RPE implied a materially higher load, returns the ratio sRPE_load / measured;

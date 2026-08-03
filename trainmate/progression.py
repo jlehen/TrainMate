@@ -23,7 +23,7 @@ deterministic given rows + config.
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 
-from trainmate import garmin
+from trainmate import garmin, intensity
 from trainmate.garmin import activity_load
 from trainmate.adherence import planned_load
 
@@ -228,15 +228,17 @@ def fitness_series(
     return out
 
 
-def zero_load_workout_count(workouts: List[Dict[str, Any]]) -> int:
-    """Count of non-removed, non-rest planned workouts that value to 0 load — no
-    usable TSS and no RPE+duration, so `planned_load` falls back to 0 (§3). An
-    explicit `tss = 0` counts here too (it values to 0); a `rest` row does not (it
-    has no load by design)."""
+def zero_load_workout_count(workouts: List[Dict[str, Any]], today: str) -> int:
+    """Count of non-removed, non-rest planned workouts **from today on** that value to
+    0 load — no usable TSS and no RPE+duration, so `planned_load` falls back to 0 (§3).
+
+    Dated from today because the warning is about rows feeding the *projection*:
+    counting the whole table left the banner permanently lit by history nobody can
+    fix (CODE_REVIEW finding, 'the stale-workout warning never heals')."""
     return sum(
         1 for w in workouts
         if not w.get("removed") and w.get("sport_type") != "rest"
-        and planned_load(w) == 0
+        and w["date"] >= today and planned_load(w) == 0
     )
 
 
@@ -324,61 +326,32 @@ def _week_meso(week_dates: List[str], meso_spans: List[Dict[str, Any]]):
     return best["label"], best["source"]
 
 
-def _week_governed(
-    week_mon: str, week_sun: str, macro_versions: List[Dict[str, Any]]
-) -> bool:
-    """Whether a week was governed by a plan (§6.1): per objective, the latest
-    macrocycle version created before the week ended is the *version in force*; the
-    week is governed iff any in-force version's mesocycle coverage overlaps it.
-
-    Version history is consulted here (not the label) so a week whose plan was later
-    superseded still counts as governed — and so governance can't be silently deleted
-    by a labelling nit (CODE_REVIEW finding #3). Timestamp-vs-date pin: `created_at`
-    is a UTC ISO timestamp, the week end is a date, so a version counts iff
-    `created_at[:10] <= week_sunday`. A version with no usable `created_at` fails
-    *closed* — excluded rather than treated as created-before-all-time, which would
-    mark pre-plan weeks as governed (`created_at` is NOT NULL today, so this only
-    guards a future migration)."""
-    in_force: Dict[Any, Dict[str, Any]] = {}
-    for mv in macro_versions:
-        created = mv.get("created_at")
-        if not created or created[:10] > week_sun:
-            continue
-        cur = in_force.get(mv["objective_id"])
-        if cur is None or created > cur["created_at"]:
-            in_force[mv["objective_id"]] = mv
-    for mv in in_force.values():
-        for s, e in mv["ranges"]:
-            if s <= week_sun and e >= week_mon:
-                return True
-    return False
-
-
 def weekly_aggregates(
     activities: List[Dict[str, Any]],
     workouts: List[Dict[str, Any]],
     today: str,
     meso_spans: List[Dict[str, Any]],
-    macro_versions: List[Dict[str, Any]],
     *,
     window_end: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
     """Monday-commencing weekly planned-vs-actual load (§5/§6), one dict per week from
     the earliest activity/workout date through plan end (or today):
 
-        {week_commencing, planned_load, planned_load_elapsed?, in_progress,
-         actual_load, meso_label, meso_source}
+        {week_commencing, planned_load, planned_load_elapsed?, partial_plan?,
+         in_progress, actual_load, meso_label, meso_source, zone_rows, sport_seconds,
+         load_sparse, planned_zone_rows}
 
     `planned_load` (Σ `adherence.planned_load` over non-removed workouts — the
-    *adapted* plan, "what the plan asked at the time") is None for an **ungoverned**
-    week (no plan governed it, per the version-in-force rule) — matching
-    `adherence.py`'s precedent that activity outside planned coverage is
-    informational, not a deviation. Governance is decided by `macro_versions`, **not**
-    by the meso label: a week can carry an `~inferred` label yet still be governed
-    (its planned total and percentage render). The current (in-progress) week also
-    carries `planned_load_elapsed`, the Monday-through-elapsed slice — today included
-    only once its load has synced (§3), so a partial week doesn't read as poor
-    adherence every Monday."""
+    *adapted* plan, "what the plan asked at the time") is None for a week the plan
+    never covered, matching `adherence.py`'s precedent that activity outside planned
+    coverage is informational, not a deviation.
+
+    `partial_plan` marks a week the plan covers only *part* of: it began or ended
+    mid-week, so its planned total spans fewer days than its actual does and no
+    honest percentage can be formed from the pair (§3 'comparable days'). The
+    current (in-progress) week additionally carries `planned_load_elapsed`, the
+    Monday-through-elapsed slice — today included only once its load has synced —
+    so a partial week doesn't read as poor adherence every Monday."""
     non_removed_workouts = [w for w in workouts if not w.get("removed")]
     start = _series_start(activities, non_removed_workouts)
     if start is None:
@@ -386,6 +359,12 @@ def weekly_aggregates(
     end = window_end if window_end is not None else _window_end(workouts, today)
     week_start = _monday(_to_date(start))
     end_d = _to_date(end)
+
+    # The span the plan speaks for. A week only partly inside it compares a partial
+    # planned total against a whole week of training (§3).
+    plan_dates = [w["date"] for w in non_removed_workouts]
+    plan_first = min(plan_dates) if plan_dates else None
+    plan_last = plan_end(workouts)
 
     acts_by_date = _group_by_date(activities)
     workouts_by_date = _group_by_date(non_removed_workouts)
@@ -397,13 +376,11 @@ def weekly_aggregates(
         week_mon, week_sun = week_dates[0], week_dates[-1]
         in_progress = week_mon <= today <= week_sun
 
-        actual_load = sum(
-            activity_load(a) for d in week_dates for a in acts_by_date.get(d, [])
-        )
+        week_acts = [a for d in week_dates for a in acts_by_date.get(d, [])]
+        actual_load = sum(activity_load(a) for a in week_acts)
         week_workouts = [w for d in week_dates for w in workouts_by_date.get(d, [])]
 
         meso_label, meso_source = _week_meso(week_dates, meso_spans)
-        governed = _week_governed(week_mon, week_sun, macro_versions)
 
         week: Dict[str, Any] = {
             "week_commencing": week_mon,
@@ -411,13 +388,35 @@ def weekly_aggregates(
             "in_progress": in_progress,
             "meso_label": meso_label,
             "meso_source": meso_source,
+            # The intensity half of the same rows (DESIGN_intensity_distribution.md §9.6).
+            # Joined here rather than fetched again: this function already holds every
+            # activity bucketed by week, and `render_progress` is handed one payload and
+            # reads no database — the property the one-payload rule exists to protect.
+            "zone_rows": intensity.zone_rows(week_acts),
+            "sport_seconds": intensity.sport_durations(week_acts),
+            # The athlete trained normally, the strap died, and no RPE was entered — so
+            # the week's own LOAD is undercounted and reads as an adherence miss the
+            # coach will then adapt the plan around. A `progress` defect that predates
+            # the zone tables (DESIGN_intensity_distribution.md §11). Only sessions big
+            # enough to hide material load count: a 5-minute mobility session with a
+            # cold strap lit this on two thirds of a real athlete's weeks.
+            "load_sparse": any(
+                garmin.load_method(a) == "hr_sparse" for a in week_acts
+                if intensity.judgeable(a)
+            ),
+            # The future half of the zone table: what the plan PRESCRIBES per zone, ghost
+            # rows under today exactly like the load table's ghost bars
+            # (DESIGN_intensity_distribution.md §9.8). Empty for every week planned
+            # before those columns existed — the rolling horizon rewrites the future on
+            # each generation, so nothing needs backfilling.
+            "planned_zone_rows": intensity.planned_zone_rows(week_workouts),
         }
-        if governed:
+        if week_workouts:
             week["planned_load"] = sum(planned_load(w) for w in week_workouts)
+            # Elapsed = Mon..yesterday, plus today only once its load has synced
+            # (today's §3 source is 'actual'). Including an unfinished today would
+            # make an evening athlete read <100% all day (§3).
             if in_progress:
-                # Elapsed = Mon..yesterday, plus today only once its load has synced
-                # (today's §3 source is 'actual'). Including an unfinished today would
-                # make an evening athlete read <100% all day (§3).
                 today_synced = any(
                     activity_load(a) > 0 for a in acts_by_date.get(today, [])
                 )
@@ -427,6 +426,16 @@ def weekly_aggregates(
                 week["planned_load_elapsed"] = sum(
                     planned_load(w) for w in week_workouts if w["date"] <= elapsed_end
                 )
+            else:
+                elapsed_end = week_sun
+            # Comparable only if the plan speaks for every day already trained: the
+            # week the plan *starts* otherwise divides three planned days by seven
+            # trained ones and reads 477% (§3).
+            if elapsed_end >= week_mon and not (
+                plan_first is not None and plan_first <= week_mon
+                and plan_last is not None and plan_last >= elapsed_end
+            ):
+                week["partial_plan"] = True
         else:
             week["planned_load"] = None
 
@@ -462,11 +471,20 @@ def plan_gap(
     return next_obj, weeks_before
 
 
+def _warning(code: str, text: str, command: Optional[str] = None) -> Dict[str, Any]:
+    """One payload warning. `code` is what renderers dispatch on and `command` is what
+    a surface may style as a call to action — so nobody has to recognise a warning by
+    matching its prose (§6.0)."""
+    w: Dict[str, Any] = {"code": code, "text": text}
+    if command:
+        w["command"] = command
+    return w
+
+
 def assemble_timeline(
     activities: List[Dict[str, Any]],
     workouts: List[Dict[str, Any]],
     metrics_rows: List[Dict[str, Any]],
-    macro_versions: List[Dict[str, Any]],
     mesocycles: List[Dict[str, Any]],
     inferred_mesocycles: List[Dict[str, Any]],
     objectives: List[Dict[str, Any]],
@@ -476,20 +494,23 @@ def assemble_timeline(
     warmup_cutoff: Optional[str],
 ) -> Dict[str, Any]:
     """The ENTIRE §6.0 timeline payload — days, weeks, meso_bands, objectives,
-    warnings (exact strings) — built here and ONLY here, from the §5 helpers plus the
-    §6.1 layered lookup. Callers do db reads and hand rows in; neither the CLI handler
-    nor the web endpoint owns any assembly or warning-wording logic, so the two
-    surfaces render one payload (the fix for the rev-4 divergence, CODE_REVIEW #5).
+    plan_gap, warnings — built here and ONLY here, from the §5 helpers plus the §6.1
+    layered lookup. Callers do db reads and hand rows in; neither the CLI handler nor
+    the web endpoint owns any assembly or warning-wording logic, so the two surfaces
+    render one payload (the fix for the rev-4 divergence, CODE_REVIEW #5).
 
     `objectives` are ALL active AND completed objectives, unfiltered — a race weeks
     ago still gets its flag; renderers clip to their window. Stays row-in/row-out.
     """
-    warnings: List[str] = []
+    warnings: List[Dict[str, Any]] = []
 
     if not activities:
         # §3 empty state: no past series and no PMC, but the planned future still
         # renders (weekly bars); every surface shows this.
-        warnings.append("no activity history yet — run `data pull` first")
+        warnings.append(_warning(
+            "no_history", "no activity history yet — run `data pull` first",
+            command="data pull",
+        ))
 
     valid_inferred = [
         m for m in inferred_mesocycles
@@ -497,10 +518,11 @@ def assemble_timeline(
     ]
     skipped = len(inferred_mesocycles) - len(valid_inferred)
     if skipped:
-        warnings.append(
+        warnings.append(_warning(
+            "bootstrap_dates",
             f"{skipped} bootstrap mesocycle block{_plural(skipped)} skipped "
-            f"— unparseable dates"
-        )
+            f"— unparseable dates",
+        ))
     bands = meso_bands(mesocycles, valid_inferred)
 
     # One plan-end scan for the whole payload: `end` (payload `plan_end`, or None) and
@@ -515,47 +537,55 @@ def assemble_timeline(
     )
 
     weeks = weekly_aggregates(
-        activities, workouts, today, bands, macro_versions, window_end=window_end
+        activities, workouts, today, bands, window_end=window_end
     )
 
-    zero_count = zero_load_workout_count(workouts)
+    zero_count = zero_load_workout_count(workouts, today)
     if zero_count:
-        warnings.append(
+        warnings.append(_warning(
+            "zero_load_workouts",
             f"{zero_count} planned workout{_plural(zero_count)} lack TSS/RPE "
-            f"— count as 0"
-        )
+            f"— count as 0",
+        ))
 
+    gap = None
     if end is not None:
         beyond = [
             w for w in workouts if not w.get("removed") and w["date"] > end
         ]
         if beyond:
-            warnings.append(
+            warnings.append(_warning(
+                "beyond_plan_end",
                 f"{len(beyond)} workout{_plural(len(beyond))} beyond plan end "
-                f"— not projected"
-            )
+                f"— not projected",
+            ))
         gap = plan_gap(objectives, end)
-        if gap:
-            next_obj, weeks_before = gap
-            warnings.append(
-                f"plan generated through {end} ({weeks_before} wks before "
-                f"objective {next_obj['target_date']})"
-            )
 
     history_start = _history_start(activities, metrics_rows)
     caveat = garmin.pmc_data_caveat(history_start, as_of=today)
     if caveat:
-        warnings.append(
-            f"PMC still warming: CTL based on {caveat['n_days']} days of history"
-        )
+        warnings.append(_warning(
+            "pmc_warming",
+            f"PMC still warming: CTL based on {caveat['n_days']} days of history",
+        ))
 
+    plan_dates = [w["date"] for w in workouts if not w.get("removed")]
     return {
         "today": today,
+        # Both edges: a plan that begins or ends mid-week leaves that week's planned
+        # total covering fewer days than its actual, which the footnote names (§3).
+        "plan_start": min(plan_dates) if plan_dates else None,
         "plan_end": end,
         "days": days,
         "weeks": weeks,
         "meso_bands": bands,
         "objectives": objectives,
+        # Structured, not a `warnings` string: the CLI draws it as a three-line banner
+        # and used to recognise it by prefix-matching the prose, then recompute it.
+        "plan_gap": (
+            {"objective": gap[0], "weeks_before": gap[1], "plan_end": end}
+            if gap else None
+        ),
         "warnings": warnings,
     }
 
@@ -586,30 +616,45 @@ def clip_payload(
     }
 
 
+def select_weeks(
+    weeks: List[Dict[str, Any]], weeks_window: Any, today: str
+) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]], int]:
+    """`(past, future, hidden)` — the weeks a surface shows for `--weeks`, and how many
+    it drops. `weeks_window` is a positive int (that many either side of today) or
+    ``'all'``.
+
+    THE one answer to "which weeks", so the text table, the `--chart` window and the
+    `--blocks` section cannot disagree about the span they are all describing (§7.1).
+    `hidden` covers both sides: a default run over a long history drops far more past
+    weeks than projected ones, and the legend names the total."""
+    past = [w for w in weeks if w["week_commencing"] <= today]
+    future = [w for w in weeks if w["week_commencing"] > today]
+    if weeks_window == "all":
+        return past, future, 0
+    n = int(weeks_window)
+    shown_past, shown_future = past[-n:], future[:n]
+    hidden = (len(past) - len(shown_past)) + (len(future) - len(shown_future))
+    return shown_past, shown_future, hidden
+
+
 def clip_payload_for_weeks(
     payload: Dict[str, Any], weeks: Any, today: str, *, cap_future: bool = False
 ) -> Dict[str, Any]:
-    """Window a payload to the last `weeks` of past (§6.0/§7.1). `weeks` is a positive
-    int (past edge = today − 7·weeks) or the string ``'all'`` for full history; the
-    future edge is plan end, clamped up to today when the plan is absent or already
-    lapsed. Shared by the CLI `--chart` path and the web endpoint so their windows
-    can't drift.
+    """A payload windowed to what `select_weeks` shows (§6.0/§7.1) — the date form of
+    the same decision, for the chart and the web endpoint.
 
-    `cap_future` also cuts the projection to the next `weeks` whole weeks. The CLI
-    passes it so `--chart` frames the same span its text table does — a PNG showing
-    twenty projected weeks under a legend reading `+12 more` contradicts itself. The
-    web endpoint leaves it off: an `<img>` has no accompanying table to agree with,
-    and the whole projection is what that panel is for (§7.3)."""
-    if weeks == "all":
-        start_date = "0001-01-01"
-    else:
-        start_date = _date_str(_to_date(today) - timedelta(days=7 * int(weeks)))
+    `cap_future` cuts the projection to the last projected week shown. The CLI passes
+    it so `--chart` frames the same span its text table does; the web endpoint leaves
+    it off — an `<img>` has no accompanying table to agree with, and the whole
+    projection is what that panel is for (§7.3)."""
+    past, future, _ = select_weeks(payload["weeks"], weeks, today)
+    start_date = past[0]["week_commencing"] if past else (
+        future[0]["week_commencing"] if future else today
+    )
     end_date = payload["plan_end"] or today
     if end_date < today:
         end_date = today
-    if cap_future and weeks != "all":
-        # Sunday of the Nth whole week after the one containing today — the last week
-        # `render_progress` puts in the table.
-        last_shown = _monday(_to_date(today)) + timedelta(days=7 * int(weeks) + 6)
-        end_date = min(end_date, _date_str(last_shown))
+    if cap_future and future:
+        last_sunday = _to_date(future[-1]["week_commencing"]) + timedelta(days=6)
+        end_date = min(end_date, _date_str(last_sunday))
     return clip_payload(payload, start_date, end_date)

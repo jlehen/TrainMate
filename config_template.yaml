@@ -77,6 +77,26 @@ garmin:
   # hrTSS is trusted; below it, effort sat under zone 1 and hrTSS undercounts, so
   # RPE is preferred. Calibrated against the activity history. Default 0.5.
   #hr_zone_coverage_min: 0.5
+  # Shortest activity that may raise an undercount marker ('?' on the load table, '!'
+  # on the zone tables) in `tm progress`. A 5-minute mobility session with a cold strap
+  # is not evidence that a 340-TSS week is undercounted, nor evidence about the strap.
+  # Sessions below this still contribute their load and their zone minutes; they only
+  # lose their vote on the markers. Default 20 minutes.
+  #zone_min_activity_minutes: 20
+  # Share of a sport's duration that must land inside a known zone before its weekly row
+  # stops marking itself incomplete. Higher than hr_zone_coverage_min on purpose: that
+  # one decides whether load is trustworthy, this one only decides whether a table says
+  # it is patchy. Default 0.8.
+  #zone_coverage_display_min: 0.8
+  # Per-sport overrides, by canonical sport name. Uncovered time is not always a failed
+  # recording — it is also the rest between sets, the chairlift back up, the gentle
+  # walking on a hike, the held pose, all of which sit below zone 1 where no zone claims
+  # them. trainmate/intensity.py ships defaults for the sports where that is structural
+  # (strength_training 0.45, resort_skiing/snowboarding and indoor_climbing 0.15, hiking
+  # 0.10, yoga 0.05); everything else uses the bar above. Set an entry here to override.
+  #zone_coverage_display_min_by_sport:
+  #  strength_training: 0.45
+  #  hiking: 0.10
   # PMC (CTL/ATL) time constants. For deliberate experimentation ONLY: the
   # interpretation bands (TSB -30/+25, ramp 3-5/8, ATL:CTL 1.3/1.5) and CLI colors
   # are calibrated to the defaults, so a non-default value changes what the numbers
@@ -143,7 +163,7 @@ user_profile:
   weekly_target_hours: 6.0
   sport_preferences:
     - "running"
-    - "road_biking"
+    - "cycling"
     - "hiking"
     - "strength_training"
     - "yoga"

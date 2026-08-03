@@ -47,7 +47,7 @@ def main() -> None:
     # Workout 2: Modified session
     db.save_workout(
         date=tomorrow_str,
-        sport_type="road_biking",
+        sport_type="cycling",
         title="Active Recovery Spin",
         description="30 minutes of light cycling. Keep heart rate below 110 bpm.",
         original_description="90 minutes endurance road cycling with hill climbs.",

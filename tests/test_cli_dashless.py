@@ -147,6 +147,19 @@ class TestCommandPrefixResolution(unittest.TestCase):
             self.assertEqual(ctx.exception.code, 2)
             self.assertIn(expected, err.getvalue())
 
+    def test_progress_keywords_still_bind_past_the_new_positional(self):
+        # `progress` gained an nargs="*" SPORT positional
+        # (DESIGN_intensity_distribution.md §9.6). `_build_keyword_spec` skips
+        # positionals, so bare tokens must still reach the keyword translator: a sport
+        # name falls through as a positional, an option keyword still binds.
+        self.assertEqual(self._xlate("progress weeks 4"), ["progress", "--weeks", "4"])
+        self.assertEqual(self._xlate("progress cycling"), ["progress", "cycling"])
+        self.assertEqual(
+            self._xlate("progress running cycling weeks 4"),
+            ["progress", "running", "cycling", "--weeks", "4"],
+        )
+        self.assertEqual(self._xlate("progress blocks"), ["progress", "--blocks"])
+
     def test_option_keywords_win_over_command_prefixes(self):
         # 'help' is a real top-level command; 'helpall' is a root flag whose exact
         # keyword must still bind as the flag rather than prefix-matching a command.

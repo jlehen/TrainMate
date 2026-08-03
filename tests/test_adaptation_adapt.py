@@ -83,7 +83,7 @@ class TestAdaptationAdapt(unittest.TestCase):
                 duration_minutes=30, rpe=4, tss=20,
             )
             test_db.save_workout(
-                "2026-06-02", "road_biking", "Tempo Ride", "60 mins",
+                "2026-06-02", "cycling", "Tempo Ride", "60 mins",
                 duration_minutes=60, rpe=6, tss=40,
             )
             test_db.save_workout(
@@ -315,7 +315,7 @@ class TestAdaptationAdapt(unittest.TestCase):
                 "adapted_workouts": [
                     {
                         "date": "2026-06-03",
-                        "sport_type": "road_biking",
+                        "sport_type": "cycling",
                         "title": "Rewritten Ride (should be dropped)",
                         "description": "Restating the finished ride to match actual.",
                         "duration_minutes": 82,
@@ -339,7 +339,7 @@ class TestAdaptationAdapt(unittest.TestCase):
 
             # Today's planned ride and a future running session.
             test_db.save_workout(
-                "2026-06-03", "road_biking", "Aerobic Base Endurance", "70 mins",
+                "2026-06-03", "cycling", "Aerobic Base Endurance", "70 mins",
                 duration_minutes=70, rpe=4, tss=45,
             )
             test_db.save_workout(
@@ -401,7 +401,7 @@ class TestAdaptationAdapt(unittest.TestCase):
                     # no-op, must be dropped.
                     {
                         "date": "2026-06-05",
-                        "sport_type": "road_biking",
+                        "sport_type": "cycling",
                         "title": "Endurance Ride",
                         "description": "60 mins  aerobic   base",
                         "duration_minutes": 60,
@@ -429,7 +429,7 @@ class TestAdaptationAdapt(unittest.TestCase):
                 duration_minutes=30, rpe=4, tss=20,
             )
             test_db.save_workout(
-                "2026-06-05", "road_biking", "Endurance Ride", "60 mins aerobic base",
+                "2026-06-05", "cycling", "Endurance Ride", "60 mins aerobic base",
                 duration_minutes=60, rpe=5, tss=40,
             )
             test_db.save_workout(
@@ -445,9 +445,9 @@ class TestAdaptationAdapt(unittest.TestCase):
             self.assertEqual(proposed[0]["title"], "Eased Tempo")
 
     def test_adapt_apply_stamps_recency_and_bumps_count(self):
-        """Applying an adaptation stamps `adapted_at` and bumps `adaptation_count`;
-        a second adapt of the same session bumps it again. Non-adapt saves leave both
-        untouched."""
+        """Applying an adaptation that MOVES THE LOAD stamps `adapted_at` and bumps
+        `adaptation_count`; a second load-moving adapt of the same session bumps it
+        again. Non-adapt saves leave both untouched."""
         test_db.save_workout(
             "2026-06-20", "running", "Friday Tempo", "45 mins w/ tempo blocks",
             duration_minutes=45, rpe=7, tss=55,
@@ -471,9 +471,106 @@ class TestAdaptationAdapt(unittest.TestCase):
         self.assertEqual(row["adaptation_count"], 1)
 
         proposed[0]["description"] = "Cut further to easy walk"
+        proposed[0]["duration_minutes"] = 25
+        proposed[0]["tss"] = 18
         service.workout_adapt_apply(proposed, "Still fatigued", "2026-06-20", "2026-06-20")
         row = test_db.get_workout("2026-06-20", "running")
         self.assertEqual(row["adaptation_count"], 2)
+
+    def _seed_block_with_drift(self):
+        """A 3-week-elapsed block whose 'easy' running has drifted into Z3."""
+        obj_id = test_db.add_objective(
+            title="Autumn Half", target_date="2026-09-01",
+            sport_type="running", priority=1,
+        )
+        test_db.save_macrocycle(
+            objective_id=obj_id, strategy="s", goals_hash="g", constraints_hash="c",
+            mesocycles=[{
+                "name": "Base 2", "start_date": "2026-06-01",
+                "end_date": "2026-06-28", "focus": "aerobic volume",
+            }],
+        )
+        for i, day in enumerate(("2026-06-02", "2026-06-09", "2026-06-16")):
+            test_db.save_completed_activity(
+                f"drift_{i}", day, f"{day} 08:00:00", "Easy Run", "running",
+                5400.0, 12.0, 80.0, 150, 172, None, 70.0,
+                zone1_sec=300, zone2_sec=1800, zone3_sec=2700, zone4_sec=600,
+                zone5_sec=0,
+            )
+
+    @patch("trainmate.coach.engine.openrouter_client")
+    def test_adapt_prompt_carries_the_measured_distribution_and_drift_branch(
+        self, mock_client
+    ):
+        """§9.3/§9.4: the block's measured distribution reaches the adapt prompt as its
+        own section, and it gates both the fourth TASK branch and CORRECTING EXECUTION
+        DRIFT — the case no other branch covers, since the athlete showed up for
+        everything and feels fine."""
+        self._seed_block_with_drift()
+        mock_client.complete.return_value = {"change_needed": False, "reason": "ok"}
+        coach_service.workout_adapt("2026-06-24")
+
+        system_prompt, user_content = mock_client.complete.call_args[0][:2]
+        flat = " ".join(user_content.split())
+        self.assertIn("MEASURED INTENSITY DISTRIBUTION OF THE ACTIVE BLOCK", flat)
+        self.assertIn('Base 2 — focus "aerobic volume"', flat)
+        self.assertIn("Z3 tempo", flat)
+        self.assertIn("Current week so far", flat)
+        self.assertIn("NOT extrapolated", flat)
+        self.assertIn("CORRECTING EXECUTION DRIFT:", system_prompt)
+        self.assertIn("even when\n  recovery metrics are fine", system_prompt)
+        # §9.2: adapt may move a session's intensity, never the block's composition.
+        self.assertIn("belongs to the next `workout generate`", system_prompt)
+        # §4.1: the block-over-block delta is a generate view; adapt must not see it.
+        self.assertNotIn("Change vs", user_content)
+
+    @patch("trainmate.coach.engine.openrouter_client")
+    def test_adapt_prompt_omits_drift_instructions_without_a_block(self, mock_client):
+        """No active block -> no table, so the instructions that reference it must go
+        too (the has_message gating discipline)."""
+        mock_client.complete.return_value = {"change_needed": False, "reason": "ok"}
+        coach_service.workout_adapt("2026-06-24")
+        system_prompt, user_content = mock_client.complete.call_args[0][:2]
+        self.assertNotIn("CORRECTING EXECUTION DRIFT", system_prompt)
+        self.assertNotIn("MEASURED INTENSITY DISTRIBUTION", user_content)
+
+    def test_drift_correction_does_not_count_as_an_easing(self):
+        """A drift correction rewrites the prescription and holds the load, so it must
+        NOT be stamped as an easing (DESIGN_intensity_distribution.md §9.5). Stamping it
+        would raise the DO NOT COMPOUND bar for a session that was never cut, blunting
+        adapt's fatigue response the next time the athlete is genuinely wrecked."""
+        test_db.save_workout(
+            "2026-06-21", "running", "Easy Hour", "60 min conversational.",
+            duration_minutes=60, rpe=4, tss=40,
+        )
+        service = trainmate.coach.CoachService(
+            db_instance=test_db, calendar_syncer_instance=Mock()
+        )
+        # Same duration, same TSS (as a float against a stored int) — only the
+        # prescription's wording sharpens, with an explicit HR guard rail.
+        proposed = [{
+            "date": "2026-06-21", "sport_type": "running", "title": "Easy Hour",
+            "description": "60 min conversational. HR ceiling 145 — hard cap.",
+            "modification_reason": "Third block week where 'easy' runs averaged Z3.",
+            "duration_minutes": 60, "rpe": 4, "tss": 40.0,
+        }]
+        service.workout_adapt_apply(
+            proposed, "Correcting execution drift", "2026-06-21", "2026-06-21"
+        )
+        row = test_db.get_workout("2026-06-21", "running")
+        self.assertIsNone(row["adapted_at"])
+        self.assertEqual(row["adaptation_count"], 0)
+        self.assertIn("HR ceiling 145", row["description"])
+
+        # A genuine cut on the same session still stamps normally.
+        proposed[0]["duration_minutes"] = 40
+        proposed[0]["tss"] = 25
+        service.workout_adapt_apply(
+            proposed, "Fatigued", "2026-06-21", "2026-06-21"
+        )
+        row = test_db.get_workout("2026-06-21", "running")
+        self.assertIsNotNone(row["adapted_at"])
+        self.assertEqual(row["adaptation_count"], 1)
 
     def test_adapt_swap_inherits_displaced_session_as_original(self):
         """A cross-sport swap (strength -> yoga) deletes the planned strength session

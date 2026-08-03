@@ -295,6 +295,25 @@ class BaseDB:
             except sqlite3.OperationalError:
                 pass
 
+            # Planned time in zone (DESIGN_intensity_distribution.md §9.8): the intensity
+            # target of a session, stated by the coach as structured data at authoring
+            # time. NOT derived from `tss` — `tss ~ duration x IF^2` invites backing out an
+            # average intensity factor, which is §1 run backwards (TSS is the projection
+            # that destroyed the distribution and it cannot be un-projected) and circular
+            # besides, since planned zones computed from planned TSS make
+            # planned-vs-measured zones a restatement of the adherence percentage that
+            # already exists. HR sessions fill 1-5 and leave 6-7 NULL, mirroring what
+            # `garmin/sync.py` writes on the measured side; swimming (CSS) and strength
+            # (e1RM) yield no zone model and stay NULL throughout.
+            for col in (
+                ["planned_zone_currency TEXT"]
+                + [f"planned_zone{i}_sec INTEGER DEFAULT NULL" for i in range(1, 8)]
+            ):
+                try:
+                    cursor.execute(f"ALTER TABLE workouts ADD COLUMN {col}")
+                except sqlite3.OperationalError:
+                    pass
+
             # Benchmark results logbook (DESIGN_benchmark_workouts.md §3.2): a dated log of
             # fitness-test outcomes, one row per measurement. With config's `ftp`/`lthr`
             # removed (§3.4), this is the ONLY home for the athlete's trainable thresholds —

@@ -230,11 +230,11 @@ class TestDatabase(unittest.TestCase):
         # Citing 3 distinct weeks -> moderate; the LLM sets no confidence.
         test_db.apply_learning_deltas([
             {"op": "add", "text": "Recovers fast",
-             "sports": "Running, Road_Biking", "evidence": self.WEEKS[:3]},
+             "sports": "Running, Cycling", "evidence": self.WEEKS[:3]},
         ])
         learning = test_db.get_learnings()[0]
         lid = learning["id"]
-        self.assertEqual(learning["sports"], "running,road_biking")
+        self.assertEqual(learning["sports"], "running,cycling")
         self.assertEqual(learning["confidence"], "moderate")
         self.assertIsNone(learning["proposed_confidence"])
 
@@ -570,6 +570,84 @@ class TestDatabase(unittest.TestCase):
                  "last_reinforced_at": (base - timedelta(days=200)).isoformat()}
         self.assertFalse(learning_is_dormant(fresh, base))
         self.assertTrue(learning_is_dormant(stale, base))
+
+
+class TestPlannedZoneColumns(unittest.TestCase):
+    """DESIGN_intensity_distribution.md §9.8 — the intensity target on `workouts`."""
+
+    @classmethod
+    def setUpClass(cls):
+        global test_db
+        test_db = Database(db_path=TEST_DB_PATH)
+        trainmate.db.db = test_db
+
+    @classmethod
+    def tearDownClass(cls):
+        if os.path.exists(TEST_DB_PATH):
+            try:
+                os.remove(TEST_DB_PATH)
+            except OSError:
+                pass
+
+    def setUp(self):
+        clear_all_tables(test_db)
+
+    def _save(self, **kwargs):
+        return test_db.save_workout(
+            date="2026-06-10", sport_type="running", title="Tempo Run",
+            description="[Tempo Run]\nSteady.", **kwargs
+        )
+
+    def test_round_trips_an_hr_prescription_with_6_and_7_null(self):
+        self._save(
+            duration_minutes=60, tss=45.0,
+            planned_zone_currency="hr",
+            planned_zone_sec=[300, 1800, 600, 0, 0, None, None],
+        )
+        row = test_db.get_workout("2026-06-10", "running")
+        self.assertEqual(row["planned_zone_currency"], "hr")
+        self.assertEqual(row["planned_zone2_sec"], 1800)
+        self.assertIsNone(row["planned_zone6_sec"])
+        self.assertIsNone(row["planned_zone7_sec"])
+
+    def test_a_later_save_that_omits_them_preserves_the_target(self):
+        self._save(planned_zone_currency="hr", planned_zone_sec=[300, 1800, 0, 0, 0])
+        self._save(duration_minutes=45)
+        row = test_db.get_workout("2026-06-10", "running")
+        self.assertEqual(row["planned_zone_currency"], "hr")
+        self.assertEqual(row["planned_zone2_sec"], 1800)
+
+    def test_an_adapt_that_emits_them_overwrites_the_target(self):
+        """A drift correction rewrites HOW a session is prescribed, so leaving its zones
+        alone would leave them describing the prescription just replaced."""
+        self._save(planned_zone_currency="hr", planned_zone_sec=[300, 1800, 600, 0, 0])
+        self._save(planned_zone_currency="hr", planned_zone_sec=[300, 2700, 0, 0, 0])
+        row = test_db.get_workout("2026-06-10", "running")
+        self.assertEqual(row["planned_zone2_sec"], 2700)
+        # An emitted 0 is a statement, not an omission: the correction traded the tempo
+        # minutes for aerobic ones and says so. Only NULL (a zone the currency does not
+        # have) is preserved.
+        self.assertEqual(row["planned_zone3_sec"], 0)
+
+    def test_a_session_saved_without_a_target_has_null_columns(self):
+        self._save(duration_minutes=60)
+        row = test_db.get_workout("2026-06-10", "running")
+        self.assertIsNone(row["planned_zone_currency"])
+        self.assertIsNone(row["planned_zone1_sec"])
+
+    def test_the_target_is_outside_the_calendar_freshness_hash(self):
+        """`CALENDAR_FIELDS` is an allowlist, so new columns are excluded by default —
+        and must stay that way, or every regeneration that nudges a target by two
+        minutes marks the row stale and re-pushes the event (§9.8)."""
+        from trainmate.calendar_state import calendar_signature
+        self._save(duration_minutes=60, planned_zone_sec=[300, 1800, 0, 0, 0],
+                   planned_zone_currency="hr")
+        before = calendar_signature(test_db.get_workout("2026-06-10", "running"))
+        self._save(duration_minutes=60, planned_zone_sec=[420, 1680, 0, 0, 0],
+                   planned_zone_currency="hr")
+        after = test_db.get_workout("2026-06-10", "running")
+        self.assertEqual(after["planned_zone1_sec"], 420)
+        self.assertEqual(calendar_signature(after), before)
 
 
 if __name__ == "__main__":
