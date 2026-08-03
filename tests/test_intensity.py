@@ -344,5 +344,101 @@ class TestStructural(unittest.TestCase):
         self.assertNotIn("Coverage:", text)
 
 
+class TestNotes(unittest.TestCase):
+    """§9.6: `HR_REST_NOTE` held two claims with different scopes joined by an 'and'.
+    Strength is a property of the sport and is suppressed when that sport is off screen;
+    interval work with rest happens in running, cycling and rowing alike and is not."""
+
+    def _rows(self, *acts):
+        return intensity.zone_rows(list(acts))
+
+    def test_interval_note_travels_with_any_hr_row(self):
+        rows = self._rows(act("2026-06-02", "running", 3600, hr=[0, 3600, 0, 0, 0]))
+        text = flat("\n".join(intensity.format_notes(rows)))
+        self.assertIn("interval work with rest", text)
+        self.assertNotIn("rest between sets", text)
+
+    def test_strength_note_only_when_a_strength_sport_is_on_screen(self):
+        rows = self._rows(
+            act("2026-06-02", "strength_training", 3600, hr=[0, 1800, 1800, 0, 0])
+        )
+        text = flat("\n".join(intensity.format_notes(rows)))
+        self.assertIn("rest between sets", text)
+        self.assertIn("interval work with rest", text)
+
+    def test_indoor_cardio_folds_into_strength_and_keeps_the_note(self):
+        rows = self._rows(act("2026-06-02", "indoor_cardio", 3600, hr=[0, 0, 0, 3600, 0]))
+        text = flat("\n".join(intensity.format_notes(rows)))
+        self.assertIn("rest between sets", text)
+
+    def test_power_only_rows_carry_neither_hr_note(self):
+        rows = self._rows(
+            act("2026-06-02", "cycling", 3600, power=[0, 3600, 0, 0, 0, 0, 0])
+        )
+        text = flat("\n".join(intensity.format_notes(rows)))
+        self.assertNotIn("interval work with rest", text)
+        self.assertNotIn("rest between sets", text)
+
+    def test_block_report_can_leave_the_notes_to_its_caller(self):
+        acts = [act("2026-06-02", "running", 3600, hr=[0, 3600, 0, 0, 0])]
+        with_notes = intensity.block_report(BLOCK, "2026-06-09", fetch_from(acts))
+        without = intensity.block_report(
+            BLOCK, "2026-06-09", fetch_from(acts), notes=False
+        )
+        self.assertIn("interval work with rest", flat(with_notes))
+        self.assertNotIn("interval work with rest", flat(without))
+        # Everything else is unchanged: only the caveats move.
+        self.assertIn("Coverage:", without)
+
+
+class TestPickCurrency(unittest.TestCase):
+    def test_power_below_the_bar_loses_to_fuller_hr(self):
+        self.assertEqual(
+            intensity.pick_currency({"power": 0.6, "hr": 0.95}), "hr"
+        )
+
+    def test_power_at_the_bar_wins_even_against_fuller_hr(self):
+        self.assertEqual(
+            intensity.pick_currency({"power": 0.8, "hr": 0.99}), "power"
+        )
+
+    def test_power_wins_when_it_is_the_only_currency(self):
+        self.assertEqual(intensity.pick_currency({"power": 0.4}), "power")
+
+    def test_nothing_recorded_picks_nothing(self):
+        self.assertIsNone(intensity.pick_currency({}))
+        self.assertIsNone(intensity.pick_currency({"power": 0.0, "hr": 0.0}))
+
+
+class TestSportDurations(unittest.TestCase):
+    def test_a_sport_with_sessions_and_no_zone_rows_still_has_a_duration(self):
+        acts = [act("2026-06-02", "yoga", 1800)]
+        self.assertEqual(intensity.sport_durations(acts), {"yoga": 1800})
+        self.assertEqual(intensity.zone_rows(acts), [])
+
+    def test_aliases_fold_into_one_canonical_duration(self):
+        acts = [act("2026-06-02", "gravel_cycling", 3600),
+                act("2026-06-03", "road_biking", 1800)]
+        self.assertEqual(intensity.sport_durations(acts), {"cycling": 5400})
+
+
+class TestPromptWidthContract(unittest.TestCase):
+    def test_block_report_prose_respects_the_width_it_is_given(self):
+        # §9.6: `format_header` and the `Change vs` header were bare appends measuring
+        # 57 and 84 characters at width=48, so the column contract was false there.
+        acts = [act("2026-06-02", "running", 3600, hr=[0, 3600, 0, 0, 0]),
+                act("2026-05-06", "running", 3600, hr=[0, 3000, 600, 0, 0])]
+        previous = {"name": "Base 1 — Aerobic Volume Accumulation",
+                    "focus": "aerobic volume accumulation across a long base",
+                    "start_date": "2026-05-04", "end_date": "2026-05-31"}
+        text = intensity.block_report(
+            BLOCK, "2026-06-16", fetch_from(acts), previous=previous,
+            notes=False, indent="", width=48,
+        )
+        for line in text.split("\n"):
+            self.assertLessEqual(len(line), 48, msg=repr(line))
+        self.assertIn("Change vs", flat(text))
+
+
 if __name__ == "__main__":
     unittest.main()

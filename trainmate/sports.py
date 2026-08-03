@@ -39,6 +39,18 @@ _ALIAS_TO_CANONICAL = {
 }
 
 
+# Sports whose HR trace is dominated by rest between sets rather than by effort. The
+# caveat travelling with their zone rows is suppressed when none of them is on screen
+# (DESIGN_intensity_distribution.md §9.6); the interval-work half of that caveat is not,
+# because interval work with rest happens in running, cycling and rowing alike.
+STRENGTH_SPORTS = frozenset({"strength_training"})
+
+
+def is_strength_sport(value: str) -> bool:
+    """Whether `value` names a sport whose HR rows need the rest-between-sets caveat."""
+    return canonical_sport(value) in STRENGTH_SPORTS
+
+
 def canonical_sport(value: str) -> str:
     """Maps any sport-type spelling (canonical or alias, any case) to its canonical
     name. Unknown sports pass through stripped + lowercased so new sports still

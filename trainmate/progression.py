@@ -23,7 +23,7 @@ deterministic given rows + config.
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 
-from trainmate import garmin
+from trainmate import garmin, intensity
 from trainmate.garmin import activity_load
 from trainmate.adherence import planned_load
 
@@ -367,7 +367,7 @@ def weekly_aggregates(
     the earliest activity/workout date through plan end (or today):
 
         {week_commencing, planned_load, planned_load_elapsed?, in_progress,
-         actual_load, meso_label, meso_source}
+         actual_load, meso_label, meso_source, zone_rows, sport_seconds}
 
     `planned_load` (Σ `adherence.planned_load` over non-removed workouts — the
     *adapted* plan, "what the plan asked at the time") is None for an **ungoverned**
@@ -397,9 +397,8 @@ def weekly_aggregates(
         week_mon, week_sun = week_dates[0], week_dates[-1]
         in_progress = week_mon <= today <= week_sun
 
-        actual_load = sum(
-            activity_load(a) for d in week_dates for a in acts_by_date.get(d, [])
-        )
+        week_acts = [a for d in week_dates for a in acts_by_date.get(d, [])]
+        actual_load = sum(activity_load(a) for a in week_acts)
         week_workouts = [w for d in week_dates for w in workouts_by_date.get(d, [])]
 
         meso_label, meso_source = _week_meso(week_dates, meso_spans)
@@ -411,6 +410,19 @@ def weekly_aggregates(
             "in_progress": in_progress,
             "meso_label": meso_label,
             "meso_source": meso_source,
+            # The intensity half of the same rows (DESIGN_intensity_distribution.md §9.6).
+            # Joined here rather than fetched again: this function already holds every
+            # activity bucketed by week, and `render_progress` is handed one payload and
+            # reads no database — the property the one-payload rule exists to protect.
+            "zone_rows": intensity.zone_rows(week_acts),
+            "sport_seconds": intensity.sport_durations(week_acts),
+            # The athlete trained normally, the strap died, and no RPE was entered — so
+            # the week's own LOAD is undercounted and reads as an adherence miss the
+            # coach will then adapt the plan around. A `progress` defect that predates
+            # the zone tables (DESIGN_intensity_distribution.md §11).
+            "load_sparse": any(
+                garmin.load_method(a) == "hr_sparse" for a in week_acts
+            ),
         }
         if governed:
             week["planned_load"] = sum(planned_load(w) for w in week_workouts)

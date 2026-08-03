@@ -12,7 +12,7 @@ from trainmate.garmin.load import (
     POWER_ZONE_TSS_PER_SEC, HR_ZONE_TSS_PER_SEC, _zone_tss,
     _hr_zone_coverage, _rpe_tss, measured_tss, compute_load, _has_power_zones,
     _measurement_is_load, _divergence_ratio, _divergence_threshold, activity_load,
-    rpe_divergence, _safe_round
+    rpe_divergence, load_method, _safe_round
 )
 from trainmate.garmin.pmc import (
     _mean_std, load_ratio, compute_pmc, pmc_warmup_cutoff_for, pmc_ramp,

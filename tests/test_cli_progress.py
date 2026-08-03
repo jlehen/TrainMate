@@ -7,10 +7,14 @@ import unittest
 os.environ.setdefault("NO_COLOR", "1")  # keep assertions ANSI-free
 
 from trainmate.util import visible_len, wrap_text
+from trainmate.intensity import ZoneRow
 from trainmate.cli.progress import (
     sparkline, render_bar, truncate_label, band_header, format_form_line,
     render_progress, format_weekly_table, table_rows, _week_row,
-    BAND_LABEL_WIDTH, BAR_WIDTH, TABLE_WIDTH,
+    fmt_zone_cell, window_sport_stats, select_zone_sports, zone_currency,
+    zone_week_cells, zone_table, zone_section, unknown_sport_preferences,
+    _orphan_week_note,
+    BAND_LABEL_WIDTH, BAR_WIDTH, TABLE_WIDTH, WEEK_COL_WIDTH,
 )
 
 
@@ -439,6 +443,313 @@ class TestRenderProgress(unittest.TestCase):
                     self.assertLessEqual(visible_len(sub), 48, msg=repr(sub))
         finally:
             del os.environ["TRAINMATE_WRAP_WIDTH"]
+
+
+# ---------------------------------------------------------------- zone tables
+# DESIGN_intensity_distribution.md §9.6.
+
+
+def _m(minutes):
+    return minutes * 60.0
+
+
+def _hr(sport, mins, coverage=0.95):
+    return ZoneRow(sport, "hr", tuple(_m(v) for v in mins), coverage)
+
+
+def _pwr(sport, mins, coverage=0.9):
+    return ZoneRow(sport, "power", tuple(_m(v) for v in mins), coverage)
+
+
+def _zweek(mon, rows=(), seconds=None, label="Base 1", in_progress=False):
+    return {
+        "week_commencing": mon, "meso_label": label, "meso_source": "plan",
+        "in_progress": in_progress, "actual_load": 0.0, "planned_load": None,
+        "zone_rows": list(rows), "sport_seconds": dict(seconds or {}),
+    }
+
+
+class TestZoneCell(unittest.TestCase):
+    def test_under_an_hour_is_three_characters(self):
+        self.assertEqual(fmt_zone_cell(_m(55)), "55m")
+
+    def test_hours_render_four_characters(self):
+        self.assertEqual(fmt_zone_cell(_m(300)), "5h00")
+
+    def test_ten_hours_and_up_drop_the_minutes_to_stay_inside_the_budget(self):
+        self.assertEqual(fmt_zone_cell(_m(12 * 60 + 30)), "12h")
+        self.assertLessEqual(len(fmt_zone_cell(_m(99 * 60))), 4)
+
+    def test_no_seconds_is_a_dash_not_a_zero(self):
+        self.assertEqual(fmt_zone_cell(0), "—")
+
+
+class TestZoneWeekCells(unittest.TestCase):
+    """`—`, `!` and a plain row are three different facts (§9.6)."""
+
+    def test_sport_not_trained_renders_dashes_and_takes_no_marker(self):
+        week = _zweek("2026-06-29", rows=[], seconds={"cycling": _m(120)})
+        cells, undercounted = zone_week_cells(week, "running", "hr", 5)
+        self.assertEqual(cells, ["—"] * 5)
+        self.assertFalse(undercounted)
+
+    def test_trained_but_unrecorded_renders_dashes_and_takes_the_marker(self):
+        week = _zweek("2026-06-29", rows=[], seconds={"running": _m(120)})
+        cells, undercounted = zone_week_cells(week, "running", "hr", 5)
+        self.assertEqual(cells, ["—"] * 5)
+        self.assertTrue(undercounted)
+
+    def test_no_data_in_the_chosen_currency_does_not_fall_back_to_the_other(self):
+        week = _zweek(
+            "2026-06-29", rows=[_hr("cycling", [10, 60, 5, 2, 1])],
+            seconds={"cycling": _m(78)},
+        )
+        cells, _ = zone_week_cells(week, "cycling", "power", 7)
+        self.assertEqual(cells, ["—"] * 7)
+
+    def test_marker_fires_at_the_display_bar_not_the_load_bar(self):
+        # 0.55 clears `hr_zone_coverage_min` (0.5) and still misses nearly half the
+        # recorded time, so the row must admit it.
+        week = _zweek(
+            "2026-06-29", rows=[_hr("running", [10, 60, 5, 2, 1], coverage=0.55)],
+            seconds={"running": _m(140)},
+        )
+        _, undercounted = zone_week_cells(week, "running", "hr", 5)
+        self.assertTrue(undercounted)
+
+    def test_adequate_coverage_takes_no_marker(self):
+        week = _zweek(
+            "2026-06-29", rows=[_hr("running", [10, 60, 5, 2, 1], coverage=0.81)],
+            seconds={"running": _m(96)},
+        )
+        _, undercounted = zone_week_cells(week, "running", "hr", 5)
+        self.assertFalse(undercounted)
+
+
+class TestZoneTableWidth(unittest.TestCase):
+    def test_seven_zone_power_table_fits_48_columns_with_a_ten_hour_z2(self):
+        weeks = [_zweek(
+            "2026-06-29",
+            rows=[_pwr("cycling", [90, 11 * 60, 70, 35, 15, 5, 3])],
+            seconds={"cycling": _m(878)},
+        )]
+        lines, _ = zone_table(weeks, "cycling", "power", _m(878), _m(878), 0.9)
+        for line in lines:
+            self.assertLessEqual(visible_len(line), TABLE_WIDTH, msg=repr(line))
+        row = next(l for l in lines if l.startswith("w/c"))
+        self.assertEqual(visible_len(row), TABLE_WIDTH)
+        self.assertIn("11h", row)
+
+    def test_five_zone_hr_table_is_38_columns(self):
+        weeks = [_zweek(
+            "2026-06-29", rows=[_hr("running", [50, 300, 35, 15, 5])],
+            seconds={"running": _m(405)},
+        )]
+        lines, _ = zone_table(weeks, "running", "hr", _m(405), _m(405), 0.94)
+        row = next(l for l in lines if l.startswith("w/c"))
+        self.assertEqual(visible_len(row), 38)
+
+    def test_in_progress_and_undercounted_both_fit_the_week_column(self):
+        weeks = [_zweek(
+            "2026-07-06", rows=[_hr("running", [22, 82, 38, 7, 3], coverage=0.4)],
+            seconds={"running": _m(400)}, in_progress=True,
+        )]
+        lines, markers = zone_table(weeks, "running", "hr", _m(400), _m(400), 0.4)
+        row = next(l for l in lines if l.startswith("w/c"))
+        self.assertTrue(row.startswith("w/c 07-06*!"))
+        self.assertEqual(len("w/c 07-06*!"), WEEK_COL_WIDTH)
+        self.assertIn("!", markers)
+
+
+class TestZoneSportSelection(unittest.TestCase):
+    def _stats(self):
+        weeks = [_zweek(
+            "2026-06-29",
+            rows=[_hr("running", [50, 300, 35, 15, 5]),
+                  _pwr("cycling", [40, 130, 25, 12, 6, 2, 1]),
+                  _hr("cycling", [45, 140, 30, 14, 7])],
+            seconds={"running": _m(405), "cycling": _m(216), "yoga": _m(30)},
+        )]
+        return window_sport_stats(weeks), weeks
+
+    def test_coverage_shares_one_denominator_across_currencies(self):
+        stats, _ = self._stats()
+        cycling = stats["cycling"]
+        self.assertAlmostEqual(
+            cycling["coverage"]["power"], _m(216) / _m(216), places=6
+        )
+        self.assertAlmostEqual(
+            cycling["coverage"]["hr"], _m(236) / _m(216), places=6
+        )
+
+    def test_default_keeps_config_order_not_volume_order(self):
+        stats, _ = self._stats()
+        sports, _, _ = select_zone_sports(None, ["cycling", "running"], stats)
+        self.assertEqual(sports, ["cycling", "running"])
+
+    def test_low_volume_sport_is_named_never_silently_dropped(self):
+        stats, _ = self._stats()
+        sports, low, no_data = select_zone_sports(
+            None, ["running", "cycling", "yoga"], stats
+        )
+        self.assertEqual(sports, ["running", "cycling"])
+        self.assertEqual(no_data, ["yoga"])  # 30 min and no zone rows at all
+        self.assertEqual(low, [])
+
+    def test_naming_a_sport_overrides_every_filter(self):
+        stats, _ = self._stats()
+        sports, low, no_data = select_zone_sports(["yoga"], ["running"], stats)
+        self.assertEqual(sports, ["yoga"])
+        self.assertEqual((low, no_data), ([], []))
+
+    def test_explicit_names_are_canonicalised(self):
+        stats, _ = self._stats()
+        sports, _, _ = select_zone_sports(["Road_Biking"], [], stats)
+        self.assertEqual(sports, ["cycling"])
+
+
+class TestZoneCurrency(unittest.TestCase):
+    def test_power_wins_once_it_covers_the_window(self):
+        stats = {"cycling": {
+            "seconds": 100.0, "zone_seconds": {"power": 85.0, "hr": 95.0},
+            "coverage": {"power": 0.85, "hr": 0.95},
+        }}
+        self.assertEqual(zone_currency(stats, "cycling"), "power")
+
+    def test_below_the_bar_the_fuller_currency_wins(self):
+        # The 40% power cannot see IS the meterless easy commutes.
+        stats = {"cycling": {
+            "seconds": 100.0, "zone_seconds": {"power": 60.0, "hr": 95.0},
+            "coverage": {"power": 0.60, "hr": 0.95},
+        }}
+        self.assertEqual(zone_currency(stats, "cycling"), "hr")
+
+    def test_forcing_a_currency_the_sport_lacks_has_no_effect(self):
+        stats = {"running": {
+            "seconds": 100.0, "zone_seconds": {"hr": 95.0},
+            "coverage": {"hr": 0.95},
+        }}
+        self.assertEqual(zone_currency(stats, "running", forced="power"), "hr")
+
+    def test_forcing_a_currency_the_sport_has_wins_over_coverage(self):
+        stats = {"cycling": {
+            "seconds": 100.0, "zone_seconds": {"power": 60.0, "hr": 95.0},
+            "coverage": {"power": 0.60, "hr": 0.95},
+        }}
+        self.assertEqual(zone_currency(stats, "cycling", forced="power"), "power")
+
+
+class TestZoneSection(unittest.TestCase):
+    def _weeks(self):
+        return [
+            _zweek("2026-06-22",
+                   rows=[_hr("running", [55, 258, 62, 17, 7]),
+                         _pwr("cycling", [45, 140, 30, 15, 7, 3, 1])],
+                   seconds={"running": _m(399), "cycling": _m(241)}),
+            _zweek("2026-06-29",
+                   rows=[_pwr("cycling", [90, 570, 70, 35, 15, 5, 3])],
+                   seconds={"cycling": _m(788)}, label="Base 2"),
+        ]
+
+    def test_one_table_per_sport_so_a_swap_reads_as_a_swap(self):
+        lines = zone_section(self._weeks(), ["running", "cycling"])
+        text = "\n".join(lines)
+        self.assertIn("ZONES running", text)
+        self.assertIn("ZONES cycling", text)
+        # Running absent in 06-29 while cycling Z2 climbs: one table alone would have
+        # called that a collapsed aerobic base.
+        self.assertIn("—", text)
+
+    def test_header_carries_the_sport_share_of_the_window(self):
+        lines = zone_section(self._weeks(), ["running"])
+        header = next(l for l in lines if l.startswith("ZONES"))
+        self.assertIn(" of ", header)
+        self.assertIn("[HR", header)
+
+    def test_hidden_weeks_are_named_in_the_footer(self):
+        lines = zone_section(self._weeks(), ["running"], hidden_weeks=3)
+        self.assertIn("+3 more weeks (--weeks all)", "\n".join(lines))
+
+    def test_a_named_sport_with_no_rows_lists_the_sports_that_have_them(self):
+        lines = zone_section(self._weeks(), [], explicit=["swimming"])
+        text = "\n".join(lines)
+        self.assertIn("No zone data for swimming", text)
+        self.assertIn("cycling", text)
+        self.assertIn("running", text)
+
+    def test_every_line_stays_inside_the_column_budget(self):
+        for line in zone_section(self._weeks(), ["running", "cycling"], hidden_weeks=3):
+            self.assertLessEqual(visible_len(line), TABLE_WIDTH, msg=repr(line))
+
+
+class TestUnknownSportPreferences(unittest.TestCase):
+    def test_a_canonical_sport_warns_about_nothing(self):
+        self.assertEqual(unknown_sport_preferences(["cycling", "running"]), [])
+
+    def test_a_free_text_entry_warns_and_suggests(self):
+        [warning] = unknown_sport_preferences(["Road cycling"])
+        self.assertIn("'Road cycling' is not a known sport", warning)
+        self.assertIn("cycling", warning)
+
+    def test_a_genuinely_new_sport_warns_without_a_suggestion(self):
+        [warning] = unknown_sport_preferences(["swimming"])
+        self.assertIn("not a known sport", warning)
+        self.assertNotIn("Did you mean", warning)
+
+    def test_an_alias_is_not_a_warning(self):
+        self.assertEqual(unknown_sport_preferences(["road_biking"]), [])
+
+
+class TestOrphanWeekNote(unittest.TestCase):
+    BLOCKS = [{"start_date": "2026-05-25", "end_date": "2026-06-14"},
+              {"start_date": "2026-06-29", "end_date": "2026-07-26"}]
+
+    def test_weeks_belonging_to_no_block_are_named(self):
+        weeks = [_zweek(d) for d in
+                 ("2026-06-01", "2026-06-15", "2026-06-22", "2026-06-29")]
+        lines = _orphan_week_note(weeks, self.BLOCKS)
+        note = " ".join(l.strip() for l in lines)
+        self.assertIn("2 weeks", note)
+        self.assertIn("06-15", note)
+        self.assertIn("06-22", note)
+        self.assertIn("partial week is excluded", note)
+        self.assertIn("without --blocks", note)
+        for line in lines:
+            self.assertLessEqual(visible_len(line), TABLE_WIDTH, msg=repr(line))
+
+    def test_a_long_orphan_list_is_capped(self):
+        weeks = [_zweek(f"2026-06-{d:02d}") for d in (15, 22)] + [
+            _zweek("2026-08-03"), _zweek("2026-08-10")
+        ]
+        note = "\n".join(_orphan_week_note(weeks, self.BLOCKS))
+        self.assertIn("+2 more", note)
+
+    def test_full_coverage_says_nothing(self):
+        self.assertEqual(_orphan_week_note([_zweek("2026-06-29")], self.BLOCKS), [])
+
+
+class TestLoadSparseWeek(unittest.TestCase):
+    """§11: the strap died, no RPE was entered, and the week reads as an adherence
+    miss the coach will then adapt the plan around."""
+
+    def _week(self, sparse):
+        return {"week_commencing": "2026-06-29", "planned_load": 320.0,
+                "actual_load": 262.0, "in_progress": False, "meso_label": "Build 2",
+                "meso_source": "plan", "load_sparse": sparse}
+
+    def test_marked_in_the_week_column(self):
+        row = _week_row(self._week(True), 400.0, "2026-07-03", None)
+        self.assertTrue(row.startswith("w/c 06-29?"))
+
+    def test_legend_explains_it_only_when_it_fires(self):
+        marked = "\n".join(
+            format_weekly_table([self._week(True)], "2026-07-03", None, False, None)
+        )
+        self.assertIn("? load undercounted", marked)
+        clean = "\n".join(
+            format_weekly_table([self._week(False)], "2026-07-03", None, False, None)
+        )
+        self.assertNotIn("? load undercounted", clean)
 
 
 if __name__ == "__main__":

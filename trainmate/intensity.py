@@ -15,7 +15,7 @@ from typing import Any, Callable, Dict, List, NamedTuple, Optional, Sequence, Tu
 
 from trainmate.benchmarks import ANCHOR_KINDS, format_delta, format_value
 from trainmate.garmin.load import _rpe_tss, activity_load
-from trainmate.sports import canonical_sport
+from trainmate.sports import canonical_sport, is_strength_sport
 
 
 class Currency(NamedTuple):
@@ -43,9 +43,27 @@ CURRENCY_BY_KEY: Dict[str, Currency] = {c.key: c for c in CURRENCIES}
 # downstream — a screen-width re-wrap would shred the columns (§6).
 PROMPT_WIDTH = 100
 
-HR_REST_NOTE = (
-    "Note: HR during strength and interval-with-rest work reflects rest intervals as "
-    "much as effort — read those rows beside the session RPE."
+# A week's row admits it is incomplete below this. Deliberately NOT
+# `config.hr_zone_coverage_min` (0.5), which is a "safe to compute load from" bar: a week
+# at 55% clears that while missing nearly half its recorded time. This one only decides
+# whether a table says so, which is not a knob an athlete has a reason to turn (§9.6).
+ZONE_COVERAGE_DISPLAY_MIN = 0.8
+# Power is instantaneous and so the currency to read, but only once it can see the whole
+# window — the fraction it cannot see is the meterless easy commutes (§9.6). Shares a
+# number with the bar above and nothing else: that one grades a single week's row, this
+# one picks the column a whole table is drawn in.
+PREFER_POWER_COVERAGE_MIN = 0.8
+
+# Two claims with different scopes, so two notes: strength is a property of the sport and
+# is suppressed when no strength sport is on screen; interval work with rest happens in
+# running, cycling and rowing alike and never is (§9.6).
+HR_STRENGTH_NOTE = (
+    "Note: HR during strength work reflects rest between sets as much as effort — "
+    "read those rows beside the session RPE."
+)
+HR_INTERVAL_NOTE = (
+    "Note: HR during interval work with rest reflects the rest as much as the effort "
+    "— read those rows beside the session RPE."
 )
 HR_LAG_NOTE = (
     "Note: HR needs 60-90s to climb, so short VO2max intervals bank most of their "
@@ -128,6 +146,40 @@ class ZoneRow(NamedTuple):
     @property
     def total(self) -> float:
         return sum(self.seconds)
+
+
+def sport_durations(activities: Sequence[Dict[str, Any]]) -> Dict[str, float]:
+    """Total recorded duration per canonical sport — `zone_rows`' denominator, exposed
+    on its own because a sport can have sessions and no zone rows at all.
+
+    That distinction is the whole reason the weekly table needs three states rather than
+    two: no duration means not trained, duration with no zone seconds means trained and
+    not recorded, and the two must not render as the same thing (§9.6).
+    """
+    out: Dict[str, float] = {}
+    for act in activities:
+        sport = canonical_sport(act.get("activity_type") or "unknown")
+        out[sport] = out.get(sport, 0.0) + float(act.get("duration_sec") or 0.0)
+    return out
+
+
+def pick_currency(coverage: Dict[str, float]) -> Optional[str]:
+    """The one currency a sport's table is drawn in, from that sport's per-currency
+    coverage over the WHOLE window (§9.6).
+
+    Prefer power once it reaches `PREFER_POWER_COVERAGE_MIN`, otherwise take whichever
+    currency covers more. Power is more precise at the top end and blind to every ride
+    without a meter, so below that bar it cannot answer "did my easy volume shrink" —
+    the fraction it cannot see IS the easy commutes. Chosen once over the window and
+    never per row: a column that switched currency mid-table would be adding HR minutes
+    to power minutes down the page, §6's one prohibition committed vertically.
+    """
+    power, hr = coverage.get("power") or 0.0, coverage.get("hr") or 0.0
+    if power >= PREFER_POWER_COVERAGE_MIN:
+        return "power"
+    if not power and not hr:
+        return None
+    return "power" if power > hr else "hr"
 
 
 def zone_rows(activities: Sequence[Dict[str, Any]]) -> List[ZoneRow]:
@@ -281,7 +333,9 @@ def format_notes(rows: Sequence[ZoneRow], indent: str = "", width: int = PROMPT_
     out: List[str] = []
     if any(r.currency == "hr" for r in rows):
         out.extend(_wrap(HR_LAG_NOTE, indent, width))
-        out.extend(_wrap(HR_REST_NOTE, indent, width))
+        out.extend(_wrap(HR_INTERVAL_NOTE, indent, width))
+        if any(is_strength_sport(r.sport) for r in rows if r.currency == "hr"):
+            out.extend(_wrap(HR_STRENGTH_NOTE, indent, width))
     if len({r.sport for r in rows if r.currency == "power"} & {
         r.sport for r in rows if r.currency == "hr"
     }):
@@ -457,6 +511,7 @@ def block_report(
     previous: Optional[Dict[str, Any]] = None,
     benchmarks: Optional[Sequence[Dict[str, Any]]] = None,
     with_focus: bool = True,
+    notes: bool = True,
     indent: str = "  ",
     width: int = PROMPT_WIDTH,
 ) -> Optional[str]:
@@ -467,6 +522,10 @@ def block_report(
     never extrapolated, which would be a fabrication (§9.3). `previous` adds the
     block-over-block delta, which belongs to plan generation only (§4.1/§9.2).
 
+    `notes` off leaves the measurement caveats to the caller: three blocks in a row would
+    otherwise repeat them three times, nine lines saying two things (§9.6). It defaults on
+    for the prompt paths, which send one block each.
+
     The block it is given is the block it reports: no fallback to a future or first
     mesocycle, so a not-yet-started block renders nothing rather than an empty table (§8).
     """
@@ -476,20 +535,25 @@ def block_report(
         return None
 
     inner = indent + "  "
-    lines = [f"{indent}{format_header(meso, as_of, with_focus)}"]
+    # Prose, so it wraps: at width=48 the header runs 57 characters and would break the
+    # column contract the zone rows below it keep (§9.6).
+    lines = _wrap(format_header(meso, as_of, with_focus), indent, width)
     through = min(as_of, end)
     elapsed = fetch_activities(start, through)
     # Volume and load beside the distribution: load = volume x intensity, and this
     # feature exists because the third alone cannot recover the first two (§2).
     if not elapsed:
-        lines.append(f"{inner}No completed activities recorded in {start}..{through}.")
+        lines.extend(_wrap(
+            f"No completed activities recorded in {start}..{through}.", inner, width
+        ))
         return "\n".join(lines)
-    lines.append(
-        f"{inner}Volume and load ({start}..{through}): {len(elapsed)} "
+    lines.extend(_wrap(
+        f"Volume and load ({start}..{through}): {len(elapsed)} "
         f"session{'s' if len(elapsed) != 1 else ''}, "
         f"{fmt_duration(sum(float(a.get('duration_sec') or 0.0) for a in elapsed))}, "
-        f"{sum(activity_load(a) for a in elapsed):.0f} TSS"
-    )
+        f"{sum(activity_load(a) for a in elapsed):.0f} TSS",
+        inner, width,
+    ))
     window = rate_window(start, end, as_of)
 
     if window:
@@ -513,7 +577,8 @@ def block_report(
     else:
         lines.extend(format_table(rows, divisor=weeks or 1, indent=inner + "  ", width=width))
         lines.extend(format_coverage(rows, indent=inner + "  ", width=width))
-        lines.extend(format_notes(rows, indent=inner + "  ", width=width))
+        if notes:
+            lines.extend(format_notes(rows, indent=inner + "  ", width=width))
 
     if previous and weeks:
         # A finished block's own last day is over, so measure it one day past its end —
@@ -530,10 +595,11 @@ def block_report(
                 indent=inner + "  ", width=width,
             )
             if delta:
-                lines.append(
-                    f"{inner}Change vs {previous['name']} "
-                    f"({p_weeks} completed week{'s' if p_weeks != 1 else ''}), per week"
-                )
+                lines.extend(_wrap(
+                    f"Change vs {previous['name']} "
+                    f"({p_weeks} completed week{'s' if p_weeks != 1 else ''}), per week",
+                    inner, width,
+                ))
                 lines.extend(delta)
 
     # With no completed week the raw table above already IS the current week — same
@@ -547,7 +613,7 @@ def block_report(
         elapsed, benchmarks, start, through, indent=inner + "  ", width=width,
     )
     if structural:
-        lines.append(f"{inner}Structural work ({start}..{through})")
+        lines.extend(_wrap(f"Structural work ({start}..{through})", inner, width))
         lines.extend(structural)
 
     return "\n".join(lines)
