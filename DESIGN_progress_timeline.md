@@ -1,12 +1,61 @@
 # Design: Progress Timeline (past + projected training progression)
 
-**Status:** Shipped; presentation reworked (rev 8) · **Date:** 2026-07-09 ·
+**Status:** Shipped; simplification pass (rev 9) · **Date:** 2026-08-03 ·
 **Companion to:** ARCHITECTURE.md §12 (load model),
 `DESIGN_pmc_fitness_fatigue.md` (the **shipped** backward PMC core this feature
 consumes — and whose deferred Phase 2 projection this feature delivers, §4),
 `DESIGN_backward_evaluation.md` (the analysis-side view of the past; this doc is
 the *presentation*-side view of past **and future**)
 
+> **Rev 9 (2026-08-03) — the simplification pass.** A review of the shipped
+> feature against real data (six months of activities under a 28-day rolling
+> plan) cut machinery that could not earn its keep and fixed what it had been
+> hiding. Seven changes:
+> (1) **Version-in-force governance is cut** (§6.1). A week now shows a planned
+> total iff it *contains non-removed workout rows* — the same rows the total is
+> summed from, so the two can never disagree. The rule it replaces resolved,
+> per objective, which macrocycle version was in force when the week ended,
+> over a bespoke `db.get_governance_versions()` that deliberately collected
+> superseded versions. On the real database both live versions were created the
+> same day with **identical** mesocycle spans, so the rule had no discriminating
+> power at all — and it was incoherent with the data it gated, because
+> `get_workouts()` excludes *archived* rows (precisely the superseded version's
+> workouts), so a week "governed" by a superseded plan rendered `plan 0`,
+> asserting the plan asked for nothing. Rev 7 cut the label half of the same
+> version archaeology as "machinery out of proportion to the harm"; the
+> governance half fails the same test. `get_governance_versions()` is deleted.
+> (2) **The plan-start boundary is fixed** (§3). The elaborate rule above was
+> licensing arithmetic nonsense: a plan beginning on a Thursday left the week of
+> 07-27 dividing one planned day (72 TSS) by seven trained ones (344) and
+> printing **477%**. §3's in-progress rule guarded *today* and the partial-final
+> week guarded *plan end*; nobody guarded the week the plan *starts*. Generalised
+> to one rule — a week gets an adherence percentage only when the plan covers
+> every day it is being compared over — carried in the payload as
+> `partial_plan`. `*` correspondingly means "this row's planned figure spans
+> fewer than seven days", which is in-progress and plan-edge alike; the footnote
+> names whichever edge falls in view (`plan starts 08-01 (Sat)`).
+> (3) **The CLI≡endpoint equivalence test is deleted** (§9). Once `timeline.py`
+> made both surfaces call one builder, the test asserted `f(db) == f(db)` and
+> could not fail. The shared function *is* the pin.
+> (4) **Warnings are structured** (§6.0): `{code, text, command?}` instead of
+> prose. The CLI recognised the plan-gap by prefix-matching its wording, skipped
+> it, then recomputed `plan_gap()` to draw it richly — and scanned warning text
+> for a backtick-quoted command name against a hardcoded registry. `plan_gap` is
+> now its own payload field; renderers dispatch on `code`.
+> (5) **One windowing implementation** (§7.1). "Which weeks does `--weeks` show"
+> lived in three places — the text table, `clip_payload_for_weeks(cap_future)`
+> for the chart, and `--blocks`. All three now call `progression.select_weeks`.
+> (6) **The zone tables move behind `-z`/`--zones`** (naming a sport implies it).
+> They tripled a numbers-first command from ~27 lines to 96 at phone width and
+> answer a different question from the load table.
+> (7) Leftovers: `zero_load_workout_count` is dated from today, so a past row
+> nobody can fix no longer keeps the banner permanently lit; the FORM line prints
+> CTL/ATL at one decimal to match the TSB beside it and `tm status`; the config
+> `sport_preferences` check only runs when zone tables are asked for; and
+> `--blocks` no longer crashes on `get_previous_macrocycle()` (its hand-rolled
+> test stub had the wrong signature, so the suite passed while the flag died on
+> every real database).
+>
 > **Rev 8 (2026-07-09) — the renderer pass.** The rev-7 payload survived first
 > contact with real data; its two *renderers* did not. Nothing in §3–§6 changes;
 > §7.1 and §7.2 do. Five fixes, all presentation:
@@ -259,27 +308,38 @@ Non-removed workouts dated after plan end are counted into `warnings`
 ("1 workout beyond plan end — not projected"). Fallback: a DB with no
 generated workouts at all (fully manual planning) uses the last non-removed
 workout of any source. A plan ending mid-week leaves the final future
-week's planned total genuinely partial (Mon–Wed only); the week is marked
-like the in-progress row — `*` plus a footnote naming the date ("plan ends
-07-31 (Wed)") — rather than resliced or hidden: the bar stays honest, the
-marker explains it.
+week's planned total genuinely partial (Mon–Wed only); that week takes
+`partial_plan` and its `*` under the comparable-days rule above — rather than
+being resliced or hidden: the bar stays honest, the marker explains it.
 When plan end < the next objective's `target_date`, every surface annotates
 the gap — payload `warnings`, CLI banner, chart label: *"plan generated
 through 2026-07-31 (9 wks before objective)"* — and per-objective projected
 CTL/TSB figures are shown **only** for objectives the plan actually reaches.
 The CLI hint names the fix (`workout generate --until-goal`).
 
-**In-progress week.** The current week is neither past nor future: comparing
-a full-week planned total against a partial actual reads as poor adherence
-every Monday. Rule, identical on all three surfaces: the current week's
-planned figure covers **elapsed days only** — Monday through yesterday,
-plus today **iff today's load has synced** (today's §3 source is `actual`).
-Including an unfinished today would make an evening-training athlete read
-<100% all day, every day — the Monday-morning problem in one-day miniature —
-and would count today *against* actual where the today-rule counts it *in
-lieu of* actual. The row is marked *"in progress"*, and the payload carries
-both `planned_load` (full week) and `planned_load_elapsed` plus
-`in_progress: true` so renderers can't diverge.
+**Comparable days (rev 9).** A percentage is only honest when its two halves
+cover the same days. Two ways a week fails that, one rule for both:
+
+- *The current week* is neither past nor future: comparing a full-week planned
+  total against a partial actual reads as poor adherence every Monday. Its
+  planned figure covers **elapsed days only** — Monday through yesterday, plus
+  today **iff today's load has synced** (today's §3 source is `actual`).
+  Including an unfinished today would make an evening-training athlete read
+  <100% all day, every day, and would count today *against* actual where the
+  today-rule counts it *in lieu of* actual. The payload carries `planned_load`
+  (full week), `planned_load_elapsed`, and `in_progress: true`.
+- *A week a plan edge falls inside* — the week the plan **starts** or **ends**
+  mid-week — has a planned total spanning fewer days than its actual does. It
+  carries `partial_plan: true` and renders **no percentage at all**: there is
+  no elapsed-style slice to fall back on, because the missing days are missing
+  from the plan, not from the calendar. Shipped without this guard, a plan
+  beginning on a Thursday printed `72 … 344 477%` — §3's own Monday-morning lie
+  at the other boundary (rev 9).
+
+Both mark the row `*`, one marker with one meaning: *this row's planned figure
+spans fewer than seven days*. The footnote names whichever plan edge is in view
+(`plan starts 08-01 (Sat) · plan ends 08-27 (Thu)`), so the marker says *that*
+the row is partial and the footnote says *why*.
 
 **Empty states** (all reachable on a fresh install; none may crash):
 
@@ -307,11 +367,13 @@ both `planned_load` (full week) and `planned_load_elapsed` plus
   lines, banner "plan lapsed 2026-05-20 — run `workout generate`". Past
   weeks keep their planned/actual bars and percentages — the plan existed
   when they ran; only the projection is absent.
-- *Weeks with actual load but no governing plan* (pre-adoption history
-  inside the window) → actual bar renders, planned shows `—`, **no
-  adherence percentage** (never divide by zero) — matching `adherence.py`'s
-  precedent of treating activity outside planned coverage as informational,
-  not a deviation.
+- *Weeks the plan never covered* (pre-adoption history inside the window, or
+  a week whose every planned row was removed) → actual bar renders, planned
+  shows `—`, **no adherence percentage** (never divide by zero) — matching
+  `adherence.py`'s precedent of treating activity outside planned coverage as
+  informational, not a deviation. "Covered" means the week holds at least one
+  non-removed workout row: the same rows the planned total is summed from, so
+  the flag and the figure cannot disagree (rev 9 — see §6.1).
 
 **Accepted limitations (v1):**
 
@@ -488,18 +550,18 @@ def fitness_series(day_points, metrics_rows, ctl_days, atl_days,
 
 def weekly_aggregates(activities, workouts, today, meso_spans) -> list[dict]
     # {week_commencing (Monday, per learning_evidence precedent),
-    #  planned_load, planned_load_elapsed?, in_progress?, actual_load,
-    #  meso_label?, meso_source?}
+    #  planned_load, planned_load_elapsed?, in_progress?, partial_plan?,
+    #  actual_load, meso_label?, meso_source?}
     # planned = Σ adherence.planned_load over non-removed workouts (the
     # *adapted* plan — "what the plan asked at the time"; original_tss is
     # reserved for the drift follow-on, §8). meso_spans is the §6.1 layered
     # span list, built by assemble_timeline below.
 
-def assemble_timeline(activities, workouts, metrics_rows, macro_versions,
-                      mesocycles, inferred_mesocycles, objectives, today,
+def assemble_timeline(activities, workouts, metrics_rows, mesocycles,
+                      inferred_mesocycles, objectives, today,
                       ctl_days, atl_days, warmup_cutoff) -> dict
-    # The ENTIRE §6.0 payload — days, weeks, meso_bands, objectives, warnings
-    # (exact strings included) — built here and ONLY here, from the helpers
+    # The ENTIRE §6.0 payload — days, weeks, meso_bands, objectives, plan_gap,
+    # warnings — built here and ONLY here, from the helpers
     # above plus the §6.1 layered lookup. Callers do db reads and hand rows
     # in; neither the CLI handler nor the endpoint owns any assembly or
     # warning-wording logic. This is deliberate: the rev-4 snapshot let each
@@ -565,6 +627,7 @@ silently dropped.
 ```jsonc
 {
   "today": "2026-07-03",
+  "plan_start": "2026-07-01",      // first non-removed workout (§3), or null
   "plan_end": "2026-07-31",        // last non-removed generated workout (§3), or null
   "days": [   // §5 DayPoint series, window-clipped
     {"date": "2026-07-02", "load": 62.4, "source": "actual",
@@ -596,11 +659,21 @@ silently dropped.
                     // client-side — pre-filtering would drop flags)
     {"id": 1, "title": "...", "target_date": "2026-09-30", "priority": 1}
   ],
-  "warnings": [
-    "plan generated through 2026-07-31 (9 wks before objective 2026-09-30)",
-    "2 planned workouts lack TSS/RPE — count as 0"
-    // plus, on a young DB, the §4 pmc_data_caveat flag, e.g.
-    // "PMC still warming: CTL based on 38 days of history"
+  // Structured since rev 9, NOT a `warnings` string: the CLI draws it as a
+  // three-line banner and the chart as a footer line, and neither should have to
+  // recognise it by prefix-matching prose and then recompute it.
+  "plan_gap": {"objective": {...}, "weeks_before": 9, "plan_end": "2026-07-31"},
+  "warnings": [   // {code, text, command?} — renderers dispatch on `code`, never
+                  // on the wording; `command` is what a surface may style as a
+                  // call to action, so no renderer keeps its own registry of
+                  // command names to look for (rev 9)
+    {"code": "no_history",
+     "text": "no activity history yet — run `data pull` first",
+     "command": "data pull"},
+    {"code": "zero_load_workouts",
+     "text": "2 planned workouts lack TSS/RPE — count as 0"}
+    // codes: no_history, bootstrap_dates, zero_load_workouts, beyond_plan_end,
+    // pmc_warming (the §4 pmc_data_caveat flag on a young DB)
   ]
 }
 ```
@@ -659,25 +732,29 @@ its days** (tie → the later block, so a block starting mid-week owns that
 week from its first majority). Labels longer than the CLI column (8 chars)
 are truncated with `…`.
 
-**Governed weeks — pinned independently of labels.** A week is *governed*
-iff it overlaps the mesocycle coverage (`get_mesocycle_ranges()`) of the
-**version in force** that week: the latest macrocycle version created
-before the week ended, across all objectives' macrocycles, completed
-objectives included (versions are kept, ARCHITECTURE §11). Timestamp-vs-date
-pin: `created_at` is a UTC ISO timestamp, the week end is a date — a
-version is "created before the week ended" iff
-`created_at[:10] <= week_sunday`. This is the one place version history is
-still consulted (rev 7 cut its use for labels, above): governance — not the
-label — decides whether the planned total and adherence percentage render
-or show `—` (§3 empty states), and a week whose plan was later superseded
-still *had* a plan. The two must not be conflated: the rev-4 snapshot
-inferred governance from the label vote, so a labeling nit silently deleted
-planned data (CODE_REVIEW finding #3). Corner pins: a governed week whose
-planned rows were all `removed` shows planned 0 with `—` for the percentage
-(never divide by zero); an ungoverned week with actual load stays the §3
-informational case; a week governed only by a superseded version renders
-its percentage but (per the removal above) may carry an `~inferred` or `—`
-label.
+**Covered weeks — read from the rows, not from the label or the version
+history.** A week shows a planned total iff it contains at least one
+non-removed workout row. That is the same set of rows the total is summed
+from, so the flag and the figure can never disagree — and it stays
+independent of the meso label, which is what CODE_REVIEW finding #3 was
+about (the rev-4 snapshot inferred coverage from the label vote, so a
+labelling nit silently deleted planned data).
+
+**Removed (rev 9): version-in-force governance.** Rev 6 decided coverage by
+resolving, per objective, which macrocycle *version* was in force when the
+week ended (`created_at[:10] <= week_sunday`) and testing that version's
+mesocycle spans — over a `db.get_governance_versions()` written for this
+feature alone and deliberately including superseded versions. Cut for the
+same reason rev 7 cut superseded-version *labels*: machinery out of
+proportion to the harm. On real data both live versions were created the
+same day with identical mesocycle spans, so the rule never once discriminated
+— and it contradicted the data it gated, because `get_workouts()` excludes
+*archived* rows, which are exactly the superseded version's workouts: a week
+"governed" by a superseded plan therefore rendered `plan 0`, asserting the
+plan had asked for nothing. Accepted consequence, stated plainly: a week
+whose every planned row was later removed now shows `—` rather than a
+planned zero. That is the better of the two readings anyway — nothing
+survives to compare against.
 
 **Band trimming.** `meso_bands` are date spans, not per-week votes, so
 overlaps are possible where an inferred block runs into plan coverage (the
@@ -985,7 +1062,11 @@ additive:
    `DESIGN_intensity_distribution.md` §9.6: a positional sport argument
    (defaulting to every qualifying `sport_preferences` entry, one table
    each, not just the first), a per-zone weekly table stacked under the
-   WEEKLY LOAD table, and `--blocks` for the graded per-mesocycle view. It
+   WEEKLY LOAD table, and `--blocks` for the graded per-mesocycle view.
+   **Behind `-z`/`--zones` since rev 9** (naming a sport implies it): on real
+   data the tables took `tm progress` from 27 lines to 96 at phone width, and
+   they answer a different question from the load table they sit under — the
+   command's own answer to "am I on track" must stay readable without them. It
    scopes only the intensity content: CTL/ATL/TSB, the projection and the
    load table stay whole-athlete. The weekly grain is load-bearing rather
    than cosmetic — a regenerated plan moves mesocycle boundaries and
@@ -1053,18 +1134,21 @@ the §7.2 photo transport for free where they need a chart in chat.)*
   no-anchor / young-DB suppression, zero-gap day filling, planned-side sRPE
   fallback + zero-valued-row warning counting (rest rows excluded; explicit
   `tss=0` values to 0, not the sRPE fallback), Monday week bucketing,
-  in-progress-week elapsed split (today counted only once synced), plan-end clamp incl. the
+  in-progress-week elapsed split (today counted only once synced), the
+  part-week plan rule (a plan starting or ending mid-week takes
+  `partial_plan`; a week the plan spans whole does not), plan-end clamp incl. the
   generated-only rule (a manual workout beyond plan end leaves it unchanged
   and warns; no-generated-workouts fallback), the lapsed plan (plan_end <
   today → no fold, window ends today), §6.1 majority-overlap labeling over
   fixture spans, the rev-7 label fallback (weeks covered only by a
   superseded version or a completed objective's plan fall to
   `~inferred`/`—` labels while their planned totals and percentages still
-  render), governance decided by version-in-force meso-range overlap rather
-  than labels (all-removed week → planned 0, `—` percentage; the
-  `created_at[:10] <= week_sunday` timestamp pin), band trimming (payload
+  render), coverage decided by the week's own non-removed workout rows rather
+  than by the label (an all-removed week falls to `—`, not a planned zero),
+  the zero-load warning ignoring past rows, band trimming (payload
   never contains overlapping spans), payload-shape assertions on
-  `assemble_timeline`'s dict (incl. `plan_end`, in-progress week fields,
+  `assemble_timeline`'s dict (incl. `plan_start`/`plan_end`, the structured
+  `plan_gap` field and `{code, text, command?}` warnings, in-progress week fields,
   `meso_bands` layering, nullable `ctl`/`atl`/`tsb` with the warm-up nulls
   and the young-DB caveat in `warnings`, and the §6.0 clipping semantics —
   a point *inside* the window must reflect load *before* the window; a
@@ -1093,12 +1177,12 @@ the §7.2 photo transport for free where they need a chart in chat.)*
   PNG magic bytes (pixels stay untested, matching the front-end stance
   below); `?weeks` validation (`0` → 400, `all` accepted); matplotlib
   absent (import patched out) → 503 carrying the install hint; pure-reader
-  property (no Garmin/LLM mocks needed — that's the assertion); and the
-  CLI≡endpoint equivalence test: one fixture DB through the CLI handler's
-  rows and the endpoint's rows produces the identical `assemble_timeline`
-  payload — warnings, wording and all (the test that would have caught
-  CODE_REVIEW finding #5; it survives the JSON→PNG switch because it
-  compares the payload both surfaces render, not the serialization).
+  property (no Garmin/LLM mocks needed — that's the assertion).
+  **No CLI≡endpoint equivalence test (rev 9).** Rev 6 pinned the two surfaces
+  against each other after CODE_REVIEW finding #5. Once `timeline.py` gave both
+  a single row-fetching path, that test read `assertEqual(f(db), f(db))` and
+  could not fail — ceremony, not a pin. The shared builder *is* the guarantee;
+  a test can only restate it.
 - Web front-end stays untested, per existing practice.
 
 ## 10. Rollout

@@ -31,7 +31,6 @@ def build_timeline_payload(dbh) -> Dict[str, Any]:
 
     macro = dbh.get_governing_macrocycle()
     mesocycles = dbh.get_mesocycles_for_macrocycle(macro["id"]) if macro else []
-    macro_versions = dbh.get_governance_versions()
     cache = dbh.get_analysis_cache("long")
     inferred = (
         (cache.get("reconstruction") or {}).get("inferred_mesocycles", [])
@@ -42,7 +41,6 @@ def build_timeline_payload(dbh) -> Dict[str, Any]:
     warmup_cutoff = garmin.pmc_warmup_cutoff_for(history_start, config.pmc_ctl_days)
 
     return progression.assemble_timeline(
-        activities, workouts, metrics_rows, macro_versions, mesocycles,
-        inferred, objectives, today, config.pmc_ctl_days, config.pmc_atl_days,
-        warmup_cutoff,
+        activities, workouts, metrics_rows, mesocycles, inferred, objectives,
+        today, config.pmc_ctl_days, config.pmc_atl_days, warmup_cutoff,
     )

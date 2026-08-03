@@ -1096,7 +1096,7 @@ destructive command.
 | `plan`       | `rm`         | `pl rm`  | Delete plan for a goal ID. The old `pl d` alias is gone — `d` now prefixes `diff` |
 | `plan`       | `feedback`   | `pl f`   | Add feedback (`--macro` or `--meso ID`, `--goal ID`, text; `--edit` opens `$EDITOR` seeded with current feedback) |
 | `plan`       | `wipe`       | —        | Delete all plans                                                         |
-| `progress`   | `[SPORT ...]` | `pr`    | Show the progress timeline: measured load to date, plan-projected forward (CTL/ATL/TSB), weekly planned-vs-actual bars (`--weeks N`, `--chart [PATH]` for a PNG; DESIGN_progress_timeline.md), then one weekly time-in-zone table per sport — measured behind today, prescribed ahead of it (`--blocks` for block grain, `--power`/`--hr` to force the currency; DESIGN_intensity_distribution.md §9.6/§9.8). The sport argument scopes the **zone tables only**: CTL/ATL/TSB, the projection and the load table stay whole-athlete |
+| `progress`   | `[SPORT ...]` | `pr`    | Show the progress timeline: measured load to date, plan-projected forward (CTL/ATL/TSB), weekly planned-vs-actual bars (`--weeks N`, `--chart [PATH]` for a PNG; DESIGN_progress_timeline.md). `-z`/`--zones` (implied by naming a sport) adds one weekly time-in-zone table per sport — measured behind today, prescribed ahead of it (`--blocks` for block grain, `--power`/`--hr` to force the currency; DESIGN_intensity_distribution.md §9.6/§9.8). The sport argument scopes the **zone tables only**: CTL/ATL/TSB, the projection and the load table stay whole-athlete |
 | `workout`    | `list`       | `w l`    | Show planned workouts. Defaults to today for 7 days. Flags: `--type TYPE`, `--days N`, `--weeks N`, `--from DATE`, `--until DATE`, `--from-mesocycle`, `--until-mesocycle [ID]`, `--mesocycle [ID]`, `--goal [ID]`, `--removed`. |
 | `workout`    | `compare`    | `w c`    | Compare planned vs completed (`analyze_adherence()`): prints PLANNED/ACTUAL per day, flags misses (red), rest violations (red), unplanned high-load (yellow), then a discrepancy summary. Same date flags as `workout list`; default 14-day lookback; `--days`/`--weeks` look *back*; end capped at today. |
 | `workout`    | `generate`   | `w g`    | Generate workouts from active strategy. No horizon flag → `config.workout_generation_span_days` ahead (28 default). Flags: `--goal ID`, `--days N`, `--weeks N`, `--until DATE`, `--until-goal [ID]`, `--until-mesocycle ID`. Eager: archives the previous plan's future workouts and pushes the new ones to Calendar immediately. |
@@ -1698,17 +1698,17 @@ venv/bin/python -m unittest discover -s tests -p "test_*.py"
 |                                | anchor skip, no-anchor suppression, non-default τ continuity),    |
 |                                | generated-only plan-end clamp, Monday bucketing, in-progress      |
 |                                | elapsed split (today only once synced), §6.1 majority-overlap     |
-|                                | labeling, version-in-force governance, band trimming,             |
-|                                | `assemble_timeline` payload + warnings, `clip_payload`, empty states |
+|                                | labeling, part-week plan coverage, band trimming,             |
+|                                | `assemble_timeline` payload + coded warnings, `select_weeks`/`clip_payload`, empty states |
 | `tests/test_cli_progress.py`   | `cli/progress.py` formatting helpers + `render_progress`: sparkline/|
 |                                | bar scaling, label truncation, weekly-row rendering (past/in-      |
-|                                | progress/future/ungoverned), plan-gap vs per-objective projection, |
-|                                | lapsed/no-plan/still-warming banners, partial-final-week marker,   |
+|                                | progress/future/uncovered), plan-gap vs per-objective projection, |
+|                                | lapsed/no-plan/still-warming banners, the part-week marker,   |
 |                                | and the 48-column width budget (via `visible_len`)               |
 | `tests/test_pmc.py`            | `compute_pmc` (also): `seed=(0,0)` reproduces from-zero, split/re- |
 |                                | fold reproduces the unsplit series exactly, full-precision output |
 | `tests/test_web.py`            | (also) `GET /api/timeline.png`: PNG magic bytes, `?weeks`         |
-|                                | validation, matplotlib-absent 503, CLI≡endpoint payload equivalence |
+|                                | validation, matplotlib-absent 503, payload shape via the shared builder |
 | `tests/test_utils.py`          | `util.py` helpers (text wrapping, ANSI width, ACWR coloring)     |
 
 Tests inject a fresh in-memory SQLite DB by assigning `test_db` to module-level

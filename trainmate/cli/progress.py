@@ -154,13 +154,15 @@ def format_form_line(
     'am I on track', tagging where today's load came from (§7.1): `(actual)` once
     today's session has synced, `(planned)` while the fold counts the planned session
     in its place. TSB is coloured by `color_tsb`, reusing `tm status`'s conventions.
-    Returns the still-warming message when today has no PMC value (§4)."""
+    Returns the still-warming message when today has no PMC value (§4).
+
+    One decimal on all three, matching `tm status` — `color_tsb` has always printed
+    TSB to 1 dp, so rounding CTL/ATL to whole numbers beside it made one line carry
+    two precisions. Single-space separation keeps the trio inside the 48-col budget."""
     if ctl is None or atl is None or tsb is None:
         return dim("FORM today   PMC still warming — not enough history yet")
     tag = f" ({source})" if source else ""
-    return (
-        f"FORM today{tag}   CTL {ctl:.0f}   ATL {atl:.0f}   TSB {color_tsb(tsb)}"
-    )
+    return f"FORM today{tag} CTL {ctl:.1f} ATL {atl:.1f} TSB {color_tsb(tsb)}"
 
 
 def format_sparkline_line(
@@ -210,20 +212,17 @@ def format_plan_gap_banner(
     ]
 
 
-# `progression` emits its warnings as plain text so the web payload stays ANSI-free, so
-# the one that names a command gets highlighted here instead, at render time.
-_WARNING_COMMANDS = ("data pull",)
-
-
-def _warning_line(w: str) -> str:
-    """One footer warning in yellow, with any command it names rendered as a call to
-    action."""
-    for name in _WARNING_COMMANDS:
-        marker = f"`{name}`"
-        if marker in w:
-            head, _, tail = w.partition(marker)
-            return yellow(f"⚠ {head}" + cmd(name) + tail)
-    return yellow(f"⚠ {w}")
+def _warning_line(w: Dict[str, Any]) -> str:
+    """One footer warning in yellow. The payload stays ANSI-free for the web, so a
+    warning that names a command carries it in `command` and gets it styled here —
+    rather than this end guessing from the prose (§6.0)."""
+    text = w["text"]
+    name = w.get("command")
+    marker = f"`{name}`" if name else None
+    if marker and marker in text:
+        head, _, tail = text.partition(marker)
+        return yellow(f"⚠ {head}") + cmd(name) + yellow(tail)
+    return yellow(f"⚠ {text}")
 
 
 def format_no_plan_banner(lapsed_date: Optional[str]) -> List[str]:
@@ -242,9 +241,9 @@ def format_no_plan_banner(lapsed_date: Optional[str]) -> List[str]:
 
 
 def _week_plan_denom(week: Dict[str, Any]) -> Optional[float]:
-    """The planned figure a week's bar/percentage compares against (§3): the elapsed
-    slice for the in-progress week (so a partial week doesn't read as poor adherence),
-    the full planned total otherwise. None for an ungoverned week."""
+    """The planned figure a week's bar and percentage compare against (§3): the elapsed
+    slice for the in-progress week, the full planned total otherwise. None for a week
+    no plan covered."""
     if week.get("planned_load") is None:
         return None
     if week.get("in_progress"):
@@ -252,15 +251,11 @@ def _week_plan_denom(week: Dict[str, Any]) -> Optional[float]:
     return week["planned_load"]
 
 
-def _week_row(
-    week: Dict[str, Any], scale_max: float, today: str, plan_end: Optional[str]
-) -> str:
+def _week_row(week: Dict[str, Any], scale_max: float, today: str) -> str:
     week_label = f"w/c {_short_date(week['week_commencing'])}"
-    week_sunday = (
-        _to_date(week["week_commencing"]) + timedelta(days=6)
-    ).strftime("%Y-%m-%d")
-    partial = plan_end is not None and week["week_commencing"] <= plan_end < week_sunday
-    if week.get("in_progress") or partial:
+    # One marker, one meaning: this row's planned figure spans fewer than seven days —
+    # because the week is still running, or because a plan edge falls inside it (§3).
+    if week.get("in_progress") or week.get("partial_plan"):
         week_label += "*"
     if week.get("load_sparse"):
         week_label += LOAD_SPARSE
@@ -281,7 +276,9 @@ def _week_row(
     actual_col = pad_visible(
         f"{week['actual_load']:.0f}", NUM_COL_WIDTH, align_left=False
     )
-    if denom:
+    # A week the plan only half covers has no comparable pair to divide (§3): three
+    # planned days over seven trained ones is the 477% the `*` now stands for.
+    if denom and not week.get("partial_plan"):
         pct = f"{round(week['actual_load'] / denom * 100)}%"
     else:
         pct = "—"
@@ -289,9 +286,7 @@ def _week_row(
     return f"{week_col} {plan_col}  {bar} {actual_col} {pct_col}"
 
 
-def table_rows(
-    weeks: List[Dict[str, Any]], today: str, plan_end: Optional[str]
-) -> List[str]:
+def table_rows(weeks: List[Dict[str, Any]], today: str) -> List[str]:
     """The fixed-width WEEKLY LOAD table rows only (header, band rules, one row per
     week) — the part held to the 48-column budget (§7.1). Legend/warning lines are
     ordinary prose and wrap at the normal CLI width instead. Bar scale is the max
@@ -321,25 +316,25 @@ def table_rows(
         if label != current_label:
             lines.append(gray(band_header(label)))
             current_label = label
-        lines.append(_week_row(week, scale_max, today, plan_end))
+        lines.append(_week_row(week, scale_max, today))
     return lines
 
 
 def format_weekly_table(
-    weeks: List[Dict[str, Any]], today: str, plan_end: Optional[str],
+    weeks: List[Dict[str, Any]], today: str,
     has_inferred: bool, partial_note: Optional[str], hidden_weeks: int = 0,
 ) -> List[str]:
     """The WEEKLY LOAD table (§7.1): fixed-width rows plus a legend footer. `weeks`
     must already be windowed by the caller; `hidden_weeks` counts every week that
     window dropped — past *and* projected — named in the legend so the truncation is
     never silent."""
-    lines = table_rows(weeks, today, plan_end)
+    lines = table_rows(weeks, today)
     if not lines:
         return []
     legend_parts = []
     if has_inferred:
         legend_parts.append("~ inferred")
-    legend_parts.append("* in progress")
+    legend_parts.append("* part week")
     if any(w.get("load_sparse") for w in weeks):
         legend_parts.append(f"{LOAD_SPARSE} load undercounted — recording gap, no RPE")
     if partial_note:
@@ -713,23 +708,12 @@ def render_progress(
     today = payload["today"]
     plan_end = payload["plan_end"]
     days = payload["days"]
-    weeks = payload["weeks"]
     objectives = payload["objectives"]
     warnings = payload["warnings"]
     by_date = {p["date"]: p for p in days}
 
-    # Displayed weeks: the last `weeks_window` past/current weeks + the next
-    # `weeks_window` projected ones (all of both under `--weeks all`).
-    past_all = [w for w in weeks if w["week_commencing"] <= today]
-    future_all = [w for w in weeks if w["week_commencing"] > today]
-    if weeks_window == "all":
-        past_weeks, future_weeks = past_all, future_all
-    else:
-        past_weeks = past_all[-weeks_window:]
-        future_weeks = future_all[:weeks_window]
-    # Both sides: a default run over a long history hides far more past than future.
-    hidden_weeks = (len(past_all) - len(past_weeks)) + (
-        len(future_all) - len(future_weeks)
+    past_weeks, future_weeks, hidden_weeks = progression.select_weeks(
+        payload["weeks"], weeks_window, today
     )
     display_weeks = past_weeks + future_weeks
 
@@ -792,10 +776,11 @@ def render_progress(
         for o in reached:
             pt = by_date[o["target_date"]]
             lines += format_objective_projection_lines(o, pt["ctl"], pt["tsb"])
-        gap = progression.plan_gap(objectives, plan_end)
+        gap = payload.get("plan_gap")
         if gap:
-            next_obj, weeks_before = gap
-            lines += format_plan_gap_banner(plan_end, next_obj, weeks_before)
+            lines += format_plan_gap_banner(
+                plan_end, gap["objective"], gap["weeks_before"]
+            )
 
     # The lag note is a standing caveat, not news: printing it on every invocation
     # trained the eye to skip it. Behind `--explain` (§7.1).
@@ -805,13 +790,21 @@ def render_progress(
     lines.append("")
 
     has_inferred = any(b["source"] == "inferred" for b in payload["meso_bands"])
-    partial_note = None
-    if plan_end is not None:
-        # A plan ending on any day but Sunday leaves the final planned week partial.
-        if _to_date(plan_end).weekday() != 6:
-            partial_note = f"plan ends {_short_date(plan_end)} ({_weekday(plan_end)})"
+    # Name whichever plan edge falls inside a displayed week: that week's planned total
+    # covers fewer days than its bar does, which is why its adherence reads `—` (§3).
+    shown = {w["week_commencing"] for w in display_weeks}
+    notes = []
+    for verb, date, aligned in (
+        ("starts", payload.get("plan_start"), 0), ("ends", plan_end, 6),
+    ):
+        if not date or _to_date(date).weekday() == aligned:
+            continue  # a plan starting Monday / ending Sunday leaves no partial week
+        d = _to_date(date)
+        if (d - timedelta(days=d.weekday())).strftime("%Y-%m-%d") in shown:
+            notes.append(f"plan {verb} {_short_date(date)} ({_weekday(date)})")
     lines += format_weekly_table(
-        display_weeks, today, plan_end, has_inferred, partial_note, hidden_weeks
+        display_weeks, today, has_inferred,
+        " · ".join(notes) if notes else None, hidden_weeks,
     )
 
     if zone_opts is not None:
@@ -829,12 +822,7 @@ def render_progress(
             lines.append("")
             lines += zone_lines
 
-    # Footer warnings — everything except the plan-gap (rendered richly above).
-    for w in warnings:
-        if w.startswith("plan generated through"):
-            continue
-        lines.append(_warning_line(w))
-
+    lines += [_warning_line(w) for w in warnings]
     return lines
 
 
@@ -850,7 +838,10 @@ def _blocks_in_window(dbh, start: str, end: str) -> List[Dict[str, Any]]:
     blocks: List[Dict[str, Any]] = []
     seen = set()
     governing = dbh.get_governing_macrocycle()
-    macros = [dbh.get_previous_macrocycle(), governing]
+    previous = (
+        dbh.get_previous_macrocycle(governing["objective_id"]) if governing else None
+    )
+    macros = [previous, governing]
     for macro in macros:
         if not macro or macro["id"] in seen:
             continue
@@ -907,9 +898,7 @@ def render_block_section(
     grain rather than the other way round — a single block runs about 25 lines at phone
     width — so the help text says so.
     """
-    weeks = [w for w in payload["weeks"] if w["week_commencing"] <= today]
-    if weeks_window != "all":
-        weeks = weeks[-int(weeks_window):]
+    weeks, _, _ = progression.select_weeks(payload["weeks"], weeks_window, today)
     if not weeks:
         return []
     window_start = weeks[0]["week_commencing"]
@@ -1010,19 +999,23 @@ def run_progress(args: argparse.Namespace) -> None:
     payload = timeline.build_timeline_payload(cli.db)
 
     sports = list(getattr(args, "sports", None) or [])
+    blocks = getattr(args, "blocks", False)
+    # Naming a sport IS a request for its zone table; otherwise the tables are opt-in
+    # (`-z`). They are the longest thing on the screen and answer a different question
+    # from the load table above them (DESIGN_intensity_distribution.md §9.6).
+    zones = blocks or bool(sports) or getattr(args, "zones", False)
     forced = "power" if getattr(args, "power", False) else (
         "hr" if getattr(args, "hr", False) else None
     )
-    blocks = getattr(args, "blocks", False)
     preferences: List[str] = []
-    if not sports:
+    if zones and not sports:
         preferences = list(config.user_profile.get("sport_preferences") or [])
         for warning in unknown_sport_preferences(preferences):
             print(yellow(f"Warning: {warning}"))
 
-    zone_opts = None if blocks else {
+    zone_opts = {
         "preferences": preferences, "sports": sports, "currency": forced,
-    }
+    } if (zones and not blocks) else None
     lines = render_progress(
         payload, weeks_window, getattr(args, "explain", False), zone_opts
     )
@@ -1040,11 +1033,13 @@ def run_progress(args: argparse.Namespace) -> None:
 
     chart_arg = getattr(args, "chart", False)
     if chart_arg:
-        clipped = progression.clip_payload_for_weeks(
-            payload, weeks_window, today, cap_future=True
+        _emit_chart(
+            chart_arg,
+            progression.clip_payload_for_weeks(
+                payload, weeks_window, today, cap_future=True
+            ),
+            lines[0] if lines else "",
         )
-        form_line = lines[0] if lines else ""
-        _emit_chart(chart_arg, clipped, form_line)
 
 
 def add_progress_parser(subparsers, pull_bypass_parser):
@@ -1058,21 +1053,27 @@ def add_progress_parser(subparsers, pull_bypass_parser):
             "from completed activities, future days planned from the current plan, one "
             "fitness/fatigue model (CTL/ATL/TSB) run across the seam. Projects to plan "
             "end (or each objective the plan reaches) so you can see whether the plan "
-            "as written delivers peak fitness with positive form on race day. Under the "
-            "load table, one time-in-zone table per sport: TSS folds volume and "
+            "as written delivers peak fitness with positive form on race day. Add -z "
+            "for time-in-zone tables under the load table: TSS folds volume and "
             "intensity into one number, so easy days drifting to tempo read as flat "
-            "weekly load and flat adherence. Weeks behind today show what you measured; "
-            "weeks ahead show what the plan prescribes, marked '+'. Naming sports scopes "
-            "those tables ONLY: CTL/ATL/TSB, the projection and the weekly load table "
-            "stay whole-athlete."
+            "weekly load and flat adherence. Naming sports implies -z and scopes those "
+            "tables ONLY: CTL/ATL/TSB, the projection and the weekly load table stay "
+            "whole-athlete."
         )
     )
     progress_parser.add_argument(
         "sports", nargs="*", metavar="SPORT",
         help="Canonical sports to report intensity for, one table each in the order "
-             "given (e.g. 'tm progress running cycling'). Default: every sport "
-             "preference with zone data in the window that holds at least 10%% of its "
-             "duration, in config order; the rest are named in the footer."
+             "given (e.g. 'tm progress running cycling'). Implies --zones. Without "
+             "them, --zones covers every sport preference with zone data in the window "
+             "that holds at least 10%% of its duration, in config order; the rest are "
+             "named in the footer."
+    )
+    progress_parser.add_argument(
+        "-z", "--zones", action="store_true",
+        help="Also show weekly time-in-zone tables, one per sport. Weeks behind today "
+             "show what you measured; weeks ahead show what the plan prescribes, "
+             "marked '+'. Roughly triples the length of the output."
     )
     progress_parser.add_argument(
         "--weeks", type=_weeks_arg, default=8, metavar="N",

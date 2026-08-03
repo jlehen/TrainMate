@@ -13,7 +13,7 @@ from trainmate.cli.progress import (
     render_progress, format_weekly_table, table_rows, _week_row,
     fmt_zone_cell, window_sport_stats, select_zone_sports, zone_currency,
     zone_week_cells, zone_table, zone_section, unknown_sport_preferences,
-    _orphan_week_note, render_block_section,
+    _orphan_week_note, render_block_section, _warning_line,
     BAND_LABEL_WIDTH, BAR_WIDTH, TABLE_WIDTH, WEEK_COL_WIDTH,
 )
 
@@ -162,15 +162,15 @@ class TestWeekRow(unittest.TestCase):
         return week
 
     def test_past_governed_week_shows_bar_and_percentage(self):
-        row = _week_row(self._week(), 320.0, "2026-07-03", None)
+        row = _week_row(self._week(), 320.0, "2026-07-03")
         self.assertIn("320", row)
         self.assertIn("214", row)
         self.assertIn("67%", row)
 
-    def test_ungoverned_week_shows_dash_and_no_percentage(self):
+    def test_week_with_no_plan_shows_dash_and_no_percentage(self):
         row = _week_row(
             self._week(planned_load=None, meso_source="inferred", meso_label="~Base"),
-            320.0, "2026-07-03", None,
+            320.0, "2026-07-03",
         )
         self.assertIn("—", row)
         self.assertNotIn("%", row)
@@ -178,7 +178,7 @@ class TestWeekRow(unittest.TestCase):
     def test_future_week_ghost_bars_the_plan_and_omits_actual_columns(self):
         row = _week_row(
             self._week(week_commencing="2026-07-13", actual_load=0.0),
-            320.0, "2026-07-03", None,
+            320.0, "2026-07-03",
         )
         self.assertIn("320", row)
         self.assertIn("▒", row)      # ghost-filled, so the series is continuous
@@ -196,7 +196,7 @@ class TestWeekRow(unittest.TestCase):
              "actual_load": 0.0, "in_progress": False,
              "meso_label": "Build", "meso_source": "plan"},
         ]
-        rows = table_rows(weeks, "2026-07-03", None)
+        rows = table_rows(weeks, "2026-07-03")
         future_row = [r for r in rows if "07-13" in r][0]
         self.assertEqual(future_row.count("▒"), BAR_WIDTH)  # 400 == scale max
 
@@ -205,19 +205,22 @@ class TestWeekRow(unittest.TestCase):
             self._week(week_commencing="2026-06-29", in_progress=True,
                        planned_load=340.0, planned_load_elapsed=150.0,
                        actual_load=138.0),
-            360.0, "2026-07-03", None,
+            360.0, "2026-07-03",
         )
         self.assertIn("*", row)
         self.assertIn("150", row)          # elapsed, not the full 340
         self.assertIn("92%", row)          # round(138/150*100)
 
-    def test_partial_final_week_marked(self):
-        # plan ends Wed 2026-07-08, mid-week -> the week is marked partial.
+    def test_part_week_plan_gets_no_adherence_figure(self):
+        # The plan covers three of the week's seven trained days: dividing them was the
+        # 477% this rule exists to stop (§3). The plan total still shows.
         row = _week_row(
-            self._week(week_commencing="2026-07-06", actual_load=0.0),
-            360.0, "2026-07-03", "2026-07-08",
+            self._week(planned_load=72.0, actual_load=344.0, partial_plan=True),
+            400.0, "2026-07-03",
         )
-        self.assertIn("*", row)
+        self.assertIn("72", row)
+        self.assertIn("344", row)
+        self.assertNotIn("%", row)
 
 
 class TestWeeklyTableWidth(unittest.TestCase):
@@ -235,19 +238,19 @@ class TestWeeklyTableWidth(unittest.TestCase):
         ]
 
     def test_table_stays_within_the_48_column_budget(self):
-        for line in table_rows(self._weeks(), "2026-06-30", None):
+        for line in table_rows(self._weeks(), "2026-06-30"):
             self.assertLessEqual(visible_len(line), 48, msg=repr(line))
 
     def test_zero_max_scale_does_not_divide(self):
         weeks = [{"week_commencing": "2026-06-22", "planned_load": 0.0,
                   "actual_load": 0.0, "in_progress": False,
                   "meso_label": None, "meso_source": None}]
-        rows = table_rows(weeks, "2026-07-03", None)  # must not raise
+        rows = table_rows(weeks, "2026-07-03")  # must not raise
         self.assertTrue(rows)
 
     def test_one_band_rule_per_mesocycle_not_per_week(self):
         # Build 2 once, Build 3 once — the two Build 3 weeks share a rule.
-        rows = table_rows(self._weeks(), "2026-06-30", None)
+        rows = table_rows(self._weeks(), "2026-06-30")
         bands = [r for r in rows if r.startswith("──")]
         self.assertEqual(len(bands), 2)
         self.assertIn("Build 2", bands[0])
@@ -261,17 +264,17 @@ class TestWeeklyTableWidth(unittest.TestCase):
              "actual_load": 0.0, "in_progress": False,
              "meso_label": "Build 2", "meso_source": "plan"},
         ]
-        bands = [r for r in table_rows(weeks, "2026-06-30", None) if r.startswith("──")]
+        bands = [r for r in table_rows(weeks, "2026-06-30") if r.startswith("──")]
         self.assertEqual(len(bands), 3)
 
     def test_hidden_weeks_are_named_in_the_legend(self):
         lines = format_weekly_table(
-            self._weeks(), "2026-06-30", None, False, None, hidden_weeks=12,
+            self._weeks(), "2026-06-30", False, None, hidden_weeks=12,
         )
         self.assertIn("+12 more (--weeks all)", lines[-1])
 
     def test_no_legend_note_when_nothing_is_hidden(self):
-        lines = format_weekly_table(self._weeks(), "2026-06-30", None, False, None)
+        lines = format_weekly_table(self._weeks(), "2026-06-30", False, None)
         self.assertNotIn("more (--weeks", lines[-1])
 
 
@@ -280,24 +283,34 @@ def _day(date, ctl=None, atl=None, tsb=None, source="actual", load=0.0):
             "ctl": ctl, "atl": atl, "tsb": tsb}
 
 
+def _warn(code, text, command=None):
+    w = {"code": code, "text": text}
+    if command:
+        w["command"] = command
+    return w
+
+
 def _payload(days, weeks=None, plan_end=None, objectives=None, warnings=None,
-             meso_bands=None, today="2026-07-03"):
+             meso_bands=None, today="2026-07-03", plan_gap=None):
     return {
-        "today": today, "plan_end": plan_end, "days": days,
+        "today": today, "plan_start": None, "plan_end": plan_end, "days": days,
         "weeks": weeks or [], "objectives": objectives or [],
-        "warnings": warnings or [], "meso_bands": meso_bands or [],
+        "plan_gap": plan_gap, "warnings": warnings or [],
+        "meso_bands": meso_bands or [],
     }
 
 
 class TestRenderProgress(unittest.TestCase):
     MARATHON = {"id": 1, "title": "Marathon", "target_date": "2026-09-30",
                 "priority": 1, "status": "active"}
+    GAP = {"objective": MARATHON, "weeks_before": 9, "plan_end": "2026-07-31"}
 
     def test_plan_gap_banner_when_objective_not_reached(self):
         days = [_day("2026-07-03", 55, 61, -6, "actual"),
                 _day("2026-07-31", 61, 60, 1, "planned")]
         lines = render_progress(
-            _payload(days, plan_end="2026-07-31", objectives=[self.MARATHON]), 8)
+            _payload(days, plan_end="2026-07-31", objectives=[self.MARATHON],
+                     plan_gap=self.GAP), 8)
         text = "\n".join(lines)
         self.assertIn("FORM today (actual)", text)
         self.assertIn("plan generated through", text)
@@ -321,8 +334,9 @@ class TestRenderProgress(unittest.TestCase):
         objs = [self.MARATHON,
                 {"id": 2, "title": "Ultra", "target_date": "2026-11-30",
                  "priority": 1, "status": "active"}]
+        gap = {"objective": objs[1], "weeks_before": 8, "plan_end": "2026-09-30"}
         text = "\n".join(render_progress(
-            _payload(days, plan_end="2026-09-30", objectives=objs), 8))
+            _payload(days, plan_end="2026-09-30", objectives=objs, plan_gap=gap), 8))
         self.assertIn("projected CTL 68", text)
         self.assertIn("plan generated through", text)
 
@@ -358,22 +372,30 @@ class TestRenderProgress(unittest.TestCase):
                             explain=True))
         self.assertNotIn("TSB is CTL(yesterday)", text)
 
-    def test_footer_warnings_except_plan_gap(self):
+    def test_plan_gap_is_drawn_once_from_the_structured_field(self):
+        # It is not a `warnings` string, so no renderer has to recognise it by prose
+        # and then recompute it (§6.0).
         days = [_day("2026-07-03", 55, 61, -6, "actual"),
                 _day("2026-07-31", 61, 60, 1, "planned")]
-        warnings = ["plan generated through 2026-07-31 (9 wks before objective 2026-09-30)",
-                    "2 planned workouts lack TSS/RPE — count as 0"]
+        warnings = [_warn("zero_load_workouts",
+                          "2 planned workouts lack TSS/RPE — count as 0")]
         weeks = [{"week_commencing": "2026-06-29", "planned_load": 100.0,
                   "actual_load": 90.0, "in_progress": True,
                   "planned_load_elapsed": 80.0,
                   "meso_label": "Build", "meso_source": "plan"}]
         lines = render_progress(
             _payload(days, weeks=weeks, plan_end="2026-07-31",
-                     objectives=[self.MARATHON], warnings=warnings), 8)
-        # The plan-gap warning is rendered as the banner, not duplicated in the footer.
-        footer = [ln for ln in lines if "lack TSS/RPE" in ln]
-        self.assertEqual(len(footer), 1)
+                     objectives=[self.MARATHON], warnings=warnings,
+                     plan_gap=self.GAP), 8)
+        self.assertEqual(sum(1 for ln in lines if "lack TSS/RPE" in ln), 1)
         self.assertEqual(sum(1 for ln in lines if "plan generated through" in ln), 1)
+
+    def test_warning_command_is_styled_from_the_payload_field(self):
+        w = _warn("no_history", "no activity history yet — run `data pull` first",
+                  command="data pull")
+        line = _warning_line(w)
+        self.assertIn("data pull", line)
+        self.assertNotIn("`data pull`", line)  # replaced by the styled command
 
     def _windowed_payload(self):
         days = [_day("2026-07-03", 55, 61, -6, "actual")]
@@ -435,8 +457,10 @@ class TestRenderProgress(unittest.TestCase):
                       "meso_label": "Build 2", "meso_source": "plan"}]
             lines = render_progress(
                 _payload(days, weeks=weeks, plan_end="2026-07-31",
-                         objectives=[self.MARATHON],
-                         warnings=["2 planned workouts lack TSS/RPE — count as 0"]), 8)
+                         objectives=[self.MARATHON], plan_gap=self.GAP,
+                         warnings=[_warn(
+                             "zero_load_workouts",
+                             "2 planned workouts lack TSS/RPE — count as 0")]), 8)
             for line in lines:
                 wrapped = wrap_text(line) if visible_len(line) > 48 else line
                 for sub in wrapped.split("\n"):
@@ -805,9 +829,9 @@ class _StubDb:
         self._mesos, self._activities = mesos, activities
 
     def get_governing_macrocycle(self):
-        return {"id": 1}
+        return {"id": 1, "objective_id": 1}
 
-    def get_previous_macrocycle(self):
+    def get_previous_macrocycle(self, objective_id, before_id=None):
         return None
 
     def get_mesocycles_for_macrocycle(self, macrocycle_id):
@@ -893,16 +917,16 @@ class TestLoadSparseWeek(unittest.TestCase):
                 "meso_source": "plan", "load_sparse": sparse}
 
     def test_marked_in_the_week_column(self):
-        row = _week_row(self._week(True), 400.0, "2026-07-03", None)
+        row = _week_row(self._week(True), 400.0, "2026-07-03")
         self.assertTrue(row.startswith("w/c 06-29?"))
 
     def test_legend_explains_it_only_when_it_fires(self):
         marked = "\n".join(
-            format_weekly_table([self._week(True)], "2026-07-03", None, False, None)
+            format_weekly_table([self._week(True)], "2026-07-03", False, None)
         )
         self.assertIn("? load undercounted", marked)
         clean = "\n".join(
-            format_weekly_table([self._week(False)], "2026-07-03", None, False, None)
+            format_weekly_table([self._week(False)], "2026-07-03", False, None)
         )
         self.assertNotIn("? load undercounted", clean)
 

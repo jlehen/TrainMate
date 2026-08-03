@@ -118,48 +118,6 @@ class PeriodizationMixin:
                 return macro
         return None
 
-    def get_governance_versions(self) -> List[Dict[str, Any]]:
-        """Every macrocycle *version* — all objectives, active AND superseded,
-        completed objectives included — as
-        ``{objective_id, created_at, ranges: [(start, end), ...]}`` where ``ranges``
-        are the version's mesocycle spans.
-
-        The raw material for the version-in-force governance rule
-        (DESIGN_progress_timeline.md §6.1): a week is governed iff, per objective, the
-        latest version created before the week ended covers it — so a week whose plan
-        was later superseded still counts as having had a plan. Superseded versions
-        are kept (see DESIGN_plan_rollback.md), so they are included here on purpose;
-        this is why it can't reuse `get_mesocycle_ranges` (active-only)."""
-        with self._get_connection() as conn:
-            cursor = conn.cursor()
-            # One LEFT JOIN instead of a per-macrocycle mesocycle query (N+1); LEFT so a
-            # macrocycle with no mesocycles yet still surfaces (empty ranges), which the
-            # version-in-force rule relies on — it can still be the latest version and
-            # shadow an earlier one.
-            cursor.execute("""
-                SELECT mac.id, mac.objective_id, mac.created_at,
-                       m.start_date, m.end_date
-                FROM macrocycles mac
-                LEFT JOIN mesocycles m ON m.macrocycle_id = mac.id
-                ORDER BY mac.id ASC, m.start_date ASC
-            """)
-            rows = [dict(row) for row in cursor.fetchall()]
-        by_macro: "Dict[Any, Dict[str, Any]]" = {}
-        order: List[Any] = []
-        for r in rows:
-            entry = by_macro.get(r['id'])
-            if entry is None:
-                entry = {
-                    'objective_id': r['objective_id'],
-                    'created_at': r['created_at'],
-                    'ranges': [],
-                }
-                by_macro[r['id']] = entry
-                order.append(r['id'])
-            if r['start_date'] is not None and r['end_date'] is not None:
-                entry['ranges'].append((r['start_date'], r['end_date']))
-        return [by_macro[mid] for mid in order]
-
     def get_mesocycles_for_macrocycle(self, macrocycle_id: int) -> List[Mesocycle]:
         """Fetches all mesocycles in chronological order belonging to a macrocycle."""
         with self._get_connection() as conn:

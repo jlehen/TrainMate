@@ -36,7 +36,16 @@ def render_timeline_png(payload: Dict[str, Any]) -> bytes:
     objectives = payload.get("objectives") or []
     today = payload.get("today")
     plan_end = payload.get("plan_end")
-    warnings = payload.get("warnings") or []
+    # The plan-gap is structured on the payload rather than a warning string, so the
+    # footer re-words it here instead of the CLI recognising it by prefix (§6.0).
+    warnings = list(payload.get("warnings") or [])
+    gap = payload.get("plan_gap")
+    if gap:
+        warnings.append({"code": "plan_gap", "text": (
+            f"plan generated through {gap['plan_end']} "
+            f"({gap['weeks_before']} wks before objective "
+            f"{gap['objective']['target_date']})"
+        )})
 
     fig, (ax_top, ax_bottom) = plt.subplots(
         2, 1, figsize=(10, 6), dpi=150, gridspec_kw={"height_ratios": [2, 1]}
@@ -86,7 +95,8 @@ def render_timeline_png(payload: Dict[str, Any]) -> bytes:
         # No anchor / entire history inside the warm-up window (§4): suppress the PMC
         # panel and say why, rather than drawing a blank axis.
         msg = next(
-            (w for w in warnings if "warming" in w or "no activity" in w),
+            (w["text"] for w in warnings
+             if w.get("code") in ("pmc_warming", "no_history")),
             "Fitness/fatigue projection unavailable — not enough history yet.",
         )
         ax_top.text(0.5, 0.5, msg, ha="center", va="center", wrap=True,
@@ -110,7 +120,7 @@ def render_timeline_png(payload: Dict[str, Any]) -> bytes:
     fig.tight_layout(rect=(0, reserve, 1, 1))
     if warnings:
         fig.text(
-            0.01, reserve / 2, "\n".join("• " + w for w in warnings),
+            0.01, reserve / 2, "\n".join("• " + w["text"] for w in warnings),
             fontsize=6, va="center", ha="left", color="darkgoldenrod",
         )
 
