@@ -1,8 +1,30 @@
 # Review: DESIGN_pmc_fitness_fatigue.md
 
+> **HISTORICAL — a closed record, not a live checklist.** This is a code review of
+> **DESIGN_pmc_fitness_fatigue.md**, written 2026-07-04 against that design's *rev. 1*. Every
+> finding below — all 8 numbered ones and every smaller one — was resolved and verified live in
+> code on 2026-08-03. The file is kept for the *reasoning*, not for work still to do. Three
+> things a reader must know before following anything below:
+>
+> 1. **The resolutions live in the design's own prose, not in a resolution map.** This header
+>    used to point at "the design's §9"; revs. 6–7 restructured that document and no §9 exists.
+>    Read instead: §3.3 (finding 1), §1 + Phase 2 (2), §5.2 (3), §3.4 (4), §4 (5), §5.1 (6),
+>    §3.1 + §6.1 (7), §6.1 (8), and §5.5 / §3.4 / §5.4 / §8 for the smaller findings.
+> 2. **The final resolution is not the one this header recorded at the time.** It says the
+>    findings landed in rev. 2 and rev. 3; the design is now at **rev. 7**, and rev. 6 later
+>    *cut* or *deferred* parts of what this review argued for — finding 2's projection became
+>    Phase 2 (still unimplemented), and finding 8's green-TSB-band debate ended with the band
+>    removed outright rather than with either option the finding proposed.
+> 3. **ACWR is retired and the modules were split into packages.** ACWR went away on 2026-07-31
+>    (DESIGN_load_ratio.md); findings 4(b), 6 and 7 quote ACWR code that no longer exists, and
+>    those quotes are marked in place. Every module and line reference in this file also
+>    predates the package split (`garmin.py` → `trainmate/garmin/*`, `coach/engine.py` and
+>    `coach/service.py` → packages), and is left as written: read all file/line pointers below
+>    as *where the code lived in July 2026*, not as a map of the tree today.
+
 **Status:** Findings recorded 2026-07-04 — **all folded into the design**
-(rev. 2, then refined by author decisions in rev. 3, both 2026-07-04); see the
-design's §9 for the resolution map. Reviewed against the
+(rev. 2, then refined by author decisions in rev. 3, both 2026-07-04; but see
+banner note 2 — the final shape landed in revs. 6–7). Reviewed against the
 design at its initial snapshot (same branch, previous commit) and against every
 file it references. Findings 1–5 were blocking; 6–8 implementation decisions the
 doc now makes explicitly; the rest an editing pass. This file is retained as the
@@ -11,6 +33,9 @@ historical review record — the findings below describe the *rev. 1* design.
 ---
 
 ## 1. Zero-seeded EWMAs feed six weeks of garbage to the LLM (blocking)
+
+**Resolved** — accepted as written. Leading-edge blanking ships in `garmin/pmc.py` and every
+surface that reads PMC; design §3.3(a).
 
 The design seeds CTL and ATL at 0 at the start of DB history. An athlete
 training a steady 60 load/day then shows, three weeks in: ATL ≈ 58 (7-day
@@ -38,6 +63,10 @@ specifies.
 
 ## 2. "Fixes all four §1 failures" overclaims the taper fix (blocking)
 
+**Resolved (claim softened; projection deferred)** — design §1 now claims three fixes, not four,
+and calls the taper only *anchored*. The "optional middle ground" projection was deferred to the
+design's Phase 2 and is still unimplemented.
+
 The taper directive targets TSB on *event day*, weeks in the future. With
 backward-only PMC the LLM gets today's values and must mentally simulate two
 exponential decays across a 2–3 week taper — exactly the arithmetic the
@@ -49,6 +78,9 @@ planned-TSS decisions, and gives the LLM a hard anchor.
 
 ## 3. Ramp rate never reaches the prompts that set next week's load (blocking)
 
+**Resolved** — the ramp line is emitted into the generate and adapt contexts as well as the data
+summary; design §5.2.
+
 The ramp line lands only in the data summary, which feeds the strategy/plan
 prompts. Workout generation (engine.py ~L556) and adapt (~L792) — the
 prompts that actually write and adjust weekly TSS, and the subject of
@@ -57,6 +89,10 @@ would have to subtract CTL values seven lines apart. One-line fix: include
 the ramp figure in the generate/adapt context too.
 
 ## 4. DERIVATION_PAD_DAYS = chronic is under-padded twice over (blocking)
+
+**Resolved; (b) since moot** — the pad is now `max(28, ceil(1.5 × pmc_ctl_days))`, read live from
+config (design §3.4). Part (b)'s `acwr_chronic_days` term never landed because ACWR was retired
+before it was needed — see banner note 3.
 
 (a) CTL needs ~1.5×42 ≈ 63 days of prior data to be converged at the start
 of a displayed window; the 28-day pad neither pulls it nor warns (the
@@ -69,6 +105,9 @@ baselines near window edges. Pad should be
 
 ## 5. wipe_garmin_data() never recomputes; EWMAs make that unbounded (blocking)
 
+**Resolved, with a placement change** — the recompute runs at the *command* layer after the wipe,
+not inside `wipe_garmin_data()` itself (circular imports and lock scope); design §4.
+
 `db/wipes.py` deletes rows by range without calling `recompute_derived()`,
 contradicting "every existing refresh path picks the new values up for
 free". For ACWR the stale zone is bounded to 28 days after the wiped range;
@@ -78,6 +117,11 @@ amplified by this design. Fix: call `recompute_derived()` at the end of the
 wipe.
 
 ## 6. The None-guard claim misreads the current code
+
+**Resolved** — `format_metrics_history()` builds the line field by field, every field `is not
+None`-gated, and an all-NULL row renders `(no data)`; design §5.1. The ACWR field quoted below is
+**since-removed code** (banner note 3) — do not go looking for it; the crash it describes was
+real at the time and the fix that replaced it covers the whole line.
 
 `format_metrics_history()` does `f"ACWR={m['acwr']:.2f}"` with no guard — a
 NULL acwr **crashes** (TypeError), it is not "implicitly omitted". A
@@ -89,6 +133,11 @@ line.
 
 ## 7. Status-line NULL and gap handling is unspecified; zero-fill would lie
 
+**Resolved, both halves** — NULLs render `—` and never zero (design §6.1), and the interior d−7
+gap rule is specified *and* implemented: nearest-earlier baseline, rescaled to a per-week rate,
+lookback bounded (design §3.1). The `last_metrics['acwr'] or 0.0` pattern quoted below is
+**since-removed code** (banner note 3), cited here only as the zero-fill precedent to avoid.
+
 `status.py` uses `last_metrics['acwr'] or 0.0`. Copying that pattern means
 post-deploy `tm status --no-pull` prints `CTL 0.0 | ATL 0.0 | TSB 0.0` —
 and TSB 0.0 *looks like a meaningful neutral reading*, not missing data.
@@ -98,6 +147,10 @@ interior gap at d−7 in an older DB (nearest-earlier row vs omit — pick one).
 
 ## 8. Color band hole; green band contradicts the design's own reasoning
 
+**Resolved, by a third option** — the bands touch (yellow 5–8, red ≥8) as asked, but rev. 6 chose
+neither "uncolor it too" nor "note the inconsistency": the green band was **cut entirely**, along
+with the phase machinery that gated it. Design §6.1, rationale in §7.
+
 Ramp "`>8` red, `5–7` yellow" leaves 7.5 rendering *plain* while 6.0 renders
 yellow; bands must touch (yellow 5–8, red ≥8). And the argument used to
 leave TSB −30..+5 uncolored ("phase-dependent judgment belongs to the
@@ -106,6 +159,12 @@ decaying (the science file's "resume building" case), yet it renders green.
 Either uncolor it too or note the accepted inconsistency.
 
 ## Smaller findings
+
+**All resolved.** The fingerprint hashes all three PMC fields (§5.5); the params live under
+`garmin:` with the staleness accepted in writing (§3.4); the span ends at `max(last activity,
+last metrics)`; §4 exists; `daily_load` is ISO strings throughout; the real `recompute_derived()`
+callers are named; ARCHITECTURE.md was updated; the weekly-digest ramp has a straddle guard
+(§5.4); and every listed missing test exists (§8).
 
 - **Double cache invalidation.** Adding `tsb` to `met_digest` changes tuple
   arity, shifting every fingerprint at deploy (values still NULL); the first
