@@ -54,7 +54,7 @@ def compute_pmc(
         atl_d = atl_{d-1} + (load_d - atl_{d-1}) / atl_days
         tsb_d = ctl_{d-1} - atl_{d-1}   # yesterday's values — the form you woke up with
 
-    The TSB off-by-one is deliberate and load-bearing (training_load.txt §2): today's
+    The TSB off-by-one is deliberate and load-bearing (training_load.txt §1): today's
     form must NOT include today's workout. Returns {ISO date -> (ctl, atl, tsb)} at
     full precision — rounding moves to display, so the seed stays exact
     (DESIGN_progress_timeline.md §4). Empty {} on a degenerate span.
