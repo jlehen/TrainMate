@@ -670,6 +670,26 @@ class TestRicherEvidenceIntegration(unittest.TestCase):
         self.assertEqual(mock_client.complete.call_count, 2)  # not reused
 
     @patch("trainmate.coach.engine.openrouter_client")
+    def test_out_of_window_constraint_does_not_invalidate_the_cache(self, mock_client):
+        """Constraints are fetched windowed, so one lying entirely outside [from,until]
+        never reaches the fingerprint and the reconstruction stays reusable
+        (DESIGN_richer_analysis_evidence.md §5, §8)."""
+        self._seed_week()
+        mock_client.complete.return_value = {"macrocycle_summary": "s", "learning_updates": []}
+        coach_service.data_bootstrap(
+            from_date_str="2026-06-01", until_date_str="2026-06-07", no_pull=True
+        )
+        test_db.add_constraint(
+            title="Later trip", start_date="2026-07-01", end_date="2026-07-05",
+            description="out of window",
+        )
+        with patch("builtins.input", return_value="y"):
+            coach_service.data_bootstrap(
+                from_date_str="2026-06-01", until_date_str="2026-06-07", no_pull=True
+            )
+        self.assertEqual(mock_client.complete.call_count, 1)  # cached reconstruction reused
+
+    @patch("trainmate.coach.engine.openrouter_client")
     def test_out_of_window_context_signal_invalidates_the_cache(self, mock_client):
         """`context_days` is built full-history, so a signal logged OUTSIDE [from,until]
         still changes the prompt — and must therefore shift the fingerprint
