@@ -242,17 +242,6 @@ def format_no_plan_banner(lapsed_date: Optional[str]) -> List[str]:
     ]
 
 
-def _week_plan_denom(week: Dict[str, Any]) -> Optional[float]:
-    """The planned figure a week's bar and percentage compare against (§3): the elapsed
-    slice for the in-progress week, the full planned total otherwise. None for a week
-    no plan covered."""
-    if week.get("planned_load") is None:
-        return None
-    if week.get("in_progress"):
-        return week.get("planned_load_elapsed", 0.0)
-    return week["planned_load"]
-
-
 def _week_row(week: Dict[str, Any], scale_max: float, today: str) -> str:
     week_label = f"w/c {_short_date(week['week_commencing'])}"
     # One marker, one meaning: this row's planned figure spans fewer than seven days —
@@ -263,7 +252,7 @@ def _week_row(week: Dict[str, Any], scale_max: float, today: str) -> str:
         week_label += LOAD_SPARSE
     week_col = pad_visible(week_label, WEEK_COL_WIDTH)
 
-    denom = _week_plan_denom(week)
+    denom = progression.week_plan_denom(week)
     plan_col = pad_visible(
         "—" if denom is None else f"{denom:.0f}", NUM_COL_WIDTH, align_left=False
     )
@@ -675,9 +664,11 @@ def render_progress(
     # plan-end summary on the sparkline line plus the gap banner.
     reached = []
     if plan_end is not None:
+        # today..plan_end only: the payload deliberately carries completed objectives for
+        # the chart's flags, and a race already run has no projection (§7.1/§11).
         reached = [
             o for o in objectives
-            if o.get("target_date") and o["target_date"] <= plan_end
+            if o.get("target_date") and today <= o["target_date"] <= plan_end
             and o["target_date"] in by_date
             and by_date[o["target_date"]].get("ctl") is not None
         ]

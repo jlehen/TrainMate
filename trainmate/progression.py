@@ -450,6 +450,21 @@ def weekly_aggregates(
     return weeks
 
 
+def week_plan_denom(week: Dict[str, Any]) -> Optional[float]:
+    """The planned figure a week's bar and percentage compare against (§3 'comparable
+    days'): the elapsed slice for the in-progress week, the full planned total
+    otherwise, None for a week no plan covered.
+
+    Lives here rather than in one renderer because §3 is a payload rule, not a layout
+    one: the CLI table and the PNG both read it, and the PNG reading `planned_load`
+    directly is exactly how the two surfaces disagreed about the same week."""
+    if week.get("planned_load") is None:
+        return None
+    if week.get("in_progress"):
+        return week.get("planned_load_elapsed", 0.0)
+    return week["planned_load"]
+
+
 def plan_gap(
     objectives: List[Dict[str, Any]], plan_end_date: Optional[str]
 ) -> Optional[Tuple[Dict[str, Any], int]]:
@@ -457,10 +472,10 @@ def plan_gap(
     short of it the plan ends (§3), as `(objective, weeks_before)` — or None when there
     is no plan or every active objective is already reached.
 
-    The single source of the plan-gap derivation: `assemble_timeline` words it into a
-    payload `warnings` string, the CLI renders it as a rich banner (§7.1). Computing it
-    once here keeps the two surfaces from diverging on *when* the gap fires or *by how
-    much* — the CODE_REVIEW #5 class of drift."""
+    The single source of the plan-gap derivation: `assemble_timeline` puts it on the
+    payload as the structured `plan_gap` field and each surface words it itself (§6.0).
+    Computing it once here keeps the two surfaces from diverging on *when* the gap fires
+    or *by how much* — the CODE_REVIEW #5 class of drift."""
     if plan_end_date is None:
         return None
     active = sorted(

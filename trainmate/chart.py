@@ -15,6 +15,8 @@ photo recompression has little to smear.
 from datetime import datetime
 from typing import Any, Dict, List
 
+from trainmate.progression import week_plan_denom
+
 
 def _dt(date_str: str) -> datetime:
     return datetime.strptime(date_str, "%Y-%m-%d")
@@ -172,9 +174,8 @@ def _draw_weekly_bars(ax, mdates, weeks: List[Dict[str, Any]]) -> None:
     if not weeks:
         return
     week_dates = [_dt(w["week_commencing"]) for w in weeks]
-    planned = [
-        w["planned_load"] if w.get("planned_load") is not None else 0 for w in weeks
-    ]
+    # The elapsed slice for the in-progress week, same as the CLI table (§3).
+    planned = [week_plan_denom(w) or 0 for w in weeks]
     actual = [w["actual_load"] for w in weeks]
     x = mdates.date2num(week_dates)
     bar_w = 2.5

@@ -6,8 +6,10 @@ import unittest
 
 os.environ.setdefault("NO_COLOR", "1")  # keep assertions ANSI-free
 
-from trainmate.util import visible_len, wrap_text
+from trainmate.util import visible_len, wrap_text, pmc_cells
 from trainmate.intensity import ZoneRow
+from trainmate import garmin, progression
+from trainmate.garmin import pmc_display_values
 from trainmate.cli.progress import (
     sparkline, render_bar, truncate_label, band_header, format_form_line,
     render_progress, format_weekly_table, table_rows, _week_row,
@@ -340,6 +342,21 @@ class TestRenderProgress(unittest.TestCase):
         self.assertIn("projected CTL 68", text)
         self.assertIn("plan generated through", text)
 
+    def test_a_completed_objective_behind_today_is_not_projected(self):
+        # The payload carries completed objectives (the chart flags them), but a race
+        # already run has no projection to show — and printing one used to displace the
+        # plan-end figure, the command's headline number (§7.1/§11).
+        days = [_day("2026-05-10", 48, 40, 8, "actual"),
+                _day("2026-07-03", 55, 61, -6, "actual"),
+                _day("2026-07-31", 61, 60, 1, "planned")]
+        old = {"id": 3, "title": "Old 10k", "target_date": "2026-05-10",
+               "priority": 2, "status": "completed"}
+        text = "\n".join(render_progress(
+            _payload(days, plan_end="2026-07-31", objectives=[old]), 8))
+        self.assertNotIn("Old 10k", text)
+        self.assertNotIn("projected CTL", text)
+        self.assertIn("plan end 07-31", text)
+
     def test_lapsed_plan_banner(self):
         days = [_day("2026-07-03", 55, 61, -6, "actual")]
         text = "\n".join(render_progress(_payload(days, plan_end="2026-05-20"), 8))
@@ -467,6 +484,62 @@ class TestRenderProgress(unittest.TestCase):
                     self.assertLessEqual(visible_len(sub), 48, msg=repr(sub))
         finally:
             del os.environ["TRAINMATE_WRAP_WIDTH"]
+
+
+class TestStatusConsistencyContract(unittest.TestCase):
+    """§7.1's contract with `tm status`, pinned rather than argued.
+
+    `tm status` renders the latest stored metrics row through
+    `garmin.pmc_display_values` + `util.pmc_cells`; `tm progress` renders the §4 fold of
+    the same series through `format_form_line`. Both sides are built here from one set
+    of loads so the two really are the same day's numbers.
+    """
+    TODAY = "2026-07-03"
+    LOADS = {f"2026-06-{d:02d}": 40.0 + d for d in range(1, 31)}
+
+    def _stored_rows(self, today_load):
+        """The rows `recompute_derived()` would write — the series `tm status` reads."""
+        loads = dict(self.LOADS, **{self.TODAY: today_load})
+        pmc = garmin.compute_pmc(loads, "2026-06-01", self.TODAY, 42, 7)
+        return [{"date": d, "ctl": c, "atl": a, "tsb": t}
+                for d, (c, a, t) in sorted(pmc.items())]
+
+    def _day_points(self, today_load, today_source):
+        points = [{"date": d, "load": self.LOADS[d], "source": "actual"}
+                  for d in sorted(self.LOADS)]
+        return points + [{"date": self.TODAY, "load": today_load,
+                          "source": today_source}]
+
+    def _both(self, stored_today_load, folded_today_load, today_source):
+        rows = self._stored_rows(stored_today_load)
+        series = progression.fitness_series(
+            self._day_points(folded_today_load, today_source), rows,
+            self.TODAY, 42, 7, None,
+        )
+        today = series[-1]
+        form = format_form_line(
+            today["source"], today["ctl"], today["atl"], today["tsb"]
+        )
+        return form, today, pmc_cells(*pmc_display_values(rows[-1], None))
+
+    def test_today_synced_reads_verbatim_the_same_as_status(self):
+        # Full-precision storage + the same recurrence: the fold reproduces the stored
+        # row bit-exactly, so the two commands print one set of numbers (§4/§7.1).
+        form, _, (ctl_s, atl_s, tsb_s) = self._both(90.0, 90.0, "actual")
+        self.assertIn("(actual)", form)
+        self.assertIn(f"CTL {ctl_s} ATL {atl_s} TSB {tsb_s}", form)
+
+    def test_today_pending_keeps_tsb_and_diverges_on_ctl_atl(self):
+        # The morning pull stored a load-0 row; the fold counts tonight's planned
+        # session instead. TSB is day-entering, so it is identical either way; CTL/ATL
+        # deliberately differ and the `(planned)` tag is what says so (§7.1).
+        form, today, (ctl_s, atl_s, tsb_s) = self._both(0.0, 100.0, "planned")
+        self.assertIn("(planned)", form)
+        self.assertIn(f"TSB {tsb_s}", form)
+        self.assertNotIn(f"CTL {ctl_s} ", form)
+        self.assertNotIn(f"ATL {atl_s} ", form)
+        self.assertGreater(today["ctl"], float(ctl_s))
+        self.assertGreater(today["atl"], float(atl_s))
 
 
 # ---------------------------------------------------------------- zone tables

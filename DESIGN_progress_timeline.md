@@ -251,6 +251,9 @@ the same content:
   window and months of history the cutoff is normally off-canvas.
 - **Bottom panel (weekly):** for past weeks, planned TSS and actual load as
   paired bars (adherence at a glance); for future weeks, planned only. The
+  planned bar is `progression.week_plan_denom` (§5), so the current week bars
+  its **elapsed** slice and the picture cannot disagree with the CLI table about
+  the same week (§3 comparable days). The
   mesocycle band beneath labels each week's block via the layered lookup
   (§6.1): plan mesocycles where a plan governed the week, bootstrap-inferred
   blocks (rendered hatched/lighter, `~`-prefixed) for pre-plan history.
@@ -311,11 +314,16 @@ workout of any source. A plan ending mid-week leaves the final future
 week's planned total genuinely partial (Mon–Wed only); that week takes
 `partial_plan` and its `*` under the comparable-days rule above — rather than
 being resliced or hidden: the bar stays honest, the marker explains it.
-When plan end < the next objective's `target_date`, every surface annotates
-the gap — payload `warnings`, CLI banner, chart label: *"plan generated
-through 2026-07-31 (9 wks before objective)"* — and per-objective projected
-CTL/TSB figures are shown **only** for objectives the plan actually reaches.
-The CLI hint names the fix (`workout generate --until-goal`).
+When plan end < the next objective's `target_date`, the gap travels as its own
+**structured payload field**, `plan_gap` (§6.0) — `{objective, weeks_before,
+plan_end}`, derived once in `progression.plan_gap` — and each surface words it
+itself: the CLI as a banner, the chart as a footer line (*"plan generated
+through 2026-07-31 (9 wks before objective)"*). Deliberately **not** a
+`warnings` entry (rev 9): the renderers had to prefix-match its prose to skip
+it, then recompute the gap to draw it richly. Per-objective projected CTL/TSB
+figures are shown **only** for objectives the plan actually reaches, and only
+for those still ahead — a race already run has no projection (§7.1, §11). The
+CLI hint names the fix (`workout generate --until-goal`).
 
 **Comparable days (rev 9).** A percentage is only honest when its two halves
 cover the same days. Two ways a week fails that, one rule for both:
@@ -426,9 +434,10 @@ and gains a hard consistency requirement instead:
   "fitness on day d" disagreeing across commands would be a variant of the
   seam-lie §3 exists to prevent. (For *today*, where the fold deliberately
   runs ahead of a stored load-0 row, the precise consistency contract is in
-  §7.1.) Days with load but no metrics row (possible for trailing
-  activity days past the last metrics pull) carry no PMC point; renderers
-  join the line across the gap.
+  §7.1.) Days with load but no metrics row carry no PMC point and renderers
+  join the line across the gap — but only **at or before the anchor** below.
+  Past it the fold values every remaining day, so trailing activity days past
+  the last metrics pull get folded values rather than blanks.
 - **Warm-up rules adopted wholesale** (PMC design §3.3): points dated before
   `pmc_warmup_cutoff_for(history_start, τ_ctl)` carry `null` PMC values
   (leading-edge artifacts — same blanking `pmc_display_values` applies on the
@@ -462,7 +471,8 @@ and gains a hard consistency requirement instead:
   than owning a second copy of the recurrence.
 - **Stored values become full-precision** — the second (and last) change to
   the shipped core: `compute_pmc()` drops the 1-dp rounding of its outputs
-  (garmin.py:632); values are stored exact and rounded only at display —
+  (`trainmate/garmin/pmc.py` — `garmin` is a package now); values are stored
+  exact and rounded only at display —
   which every consumer already does (`:.1f` in status / show-metrics /
   prompt formatting), and which acute/chronic/ACWR storage already
   practices, so CTL/ATL/TSB rounding-at-storage was the odd one out. This
@@ -515,10 +525,11 @@ presentation-side model" — no longer true: the backward core is coach-facing.
 What *this* feature owns is presentation: the trend picture, the seam, and
 the projection.)
 
-## 5. New module: `trainmate/progression.py`
+## 5. New modules: `trainmate/progression.py` + `trainmate/timeline.py`
 
-Pure functions, no singleton state — same shape as `trainmate/adherence.py`
-and `coach/formatting.py` (the "pure helpers" precedent). Takes rows as
+`progression.py` is pure functions, no singleton state — same shape as
+`trainmate/adherence.py` and `coach/formatting.py` (the "pure helpers"
+precedent). Takes rows as
 arguments, never touches `db` directly, so it is shared verbatim by all
 three front-ends (§7). One purity caveat, same as `adherence.py`'s:
 `garmin.activity_load` reads `config` thresholds and importing
@@ -533,11 +544,14 @@ DayPoint = dict  # {date, load, source: 'actual'|'planned',
                  # metrics row, or when there is no anchor (§4).
                  # tsb is day-ENTERING form (§4): CTL_{d-1} − ATL_{d-1}
 
-def daily_loads(activities, workouts, today) -> list[DayPoint]
+def daily_loads(activities, workouts, today, *, window_end=None)
+        -> list[DayPoint]
     # merged per-day load series per §3 (no gaps: zero-load days included,
-    # from min(first activity, first planned workout) through plan end)
+    # from min(first activity, first planned workout) through plan end).
+    # window_end overrides the plan-end scan, so assemble_timeline computes
+    # plan end once and threads it into both series builders.
 
-def fitness_series(day_points, metrics_rows, ctl_days, atl_days,
+def fitness_series(day_points, metrics_rows, today, ctl_days, atl_days,
                    warmup_cutoff) -> list[DayPoint]
     # past (dates < today): ctl/atl/tsb copied verbatim from the stored rows,
     # nulled before warmup_cutoff (pmc_display_values semantics); from the
@@ -548,41 +562,75 @@ def fitness_series(day_points, metrics_rows, ctl_days, atl_days,
     # garmin.pmc_history_start / pmc_warmup_cutoff_for) so this stays
     # row-in/row-out.
 
-def weekly_aggregates(activities, workouts, today, meso_spans) -> list[dict]
+def weekly_aggregates(activities, workouts, today, meso_spans, *,
+                      window_end=None) -> list[dict]
     # {week_commencing (Monday, per learning_evidence precedent),
     #  planned_load, planned_load_elapsed?, in_progress?, partial_plan?,
-    #  actual_load, meso_label?, meso_source?}
+    #  actual_load, meso_label?, meso_source?,
+    #  zone_rows, sport_seconds, judged_sport_seconds, load_sparse,
+    #  planned_zone_rows}
     # planned = Σ adherence.planned_load over non-removed workouts (the
     # *adapted* plan — "what the plan asked at the time"; original_tss is
     # reserved for the drift follow-on, §8). meso_spans is the §6.1 layered
-    # span list, built by assemble_timeline below.
+    # span list, built by assemble_timeline below. The last five fields are
+    # the intensity half of the same rows, joined here because this function
+    # already holds every activity bucketed by week and no renderer may read
+    # the db (DESIGN_intensity_distribution.md §9.6/§9.8/§11).
+
+def week_plan_denom(week) -> float | None
+    # The planned figure a week's bar and percentage compare against (§3
+    # 'comparable days'): planned_load_elapsed for the in-progress week, the
+    # full planned_load otherwise, None for a week no plan covered. A payload
+    # rule, not a layout one — the CLI table and the PNG both call it, and the
+    # PNG reading planned_load directly is exactly how they disagreed.
 
 def assemble_timeline(activities, workouts, metrics_rows, mesocycles,
                       inferred_mesocycles, objectives, today,
                       ctl_days, atl_days, warmup_cutoff) -> dict
     # The ENTIRE §6.0 payload — days, weeks, meso_bands, objectives, plan_gap,
     # warnings — built here and ONLY here, from the helpers
-    # above plus the §6.1 layered lookup. Callers do db reads and hand rows
-    # in; neither the CLI handler nor the endpoint owns any assembly or
-    # warning-wording logic. This is deliberate: the rev-4 snapshot let each
-    # caller assemble its own payload and the two copies had already
-    # diverged on when the plan-gap warning fires and how it is worded
-    # (CODE_REVIEW finding #5). Purity and sharing are not in conflict —
-    # this stays row-in/row-out.
+    # above plus the §6.1 layered lookup. Rows come in from
+    # trainmate/timeline.py (below); neither the CLI handler nor the endpoint
+    # owns any assembly or warning-wording logic. This is deliberate: the
+    # rev-4 snapshot let each caller assemble its own payload and the two
+    # copies had already diverged on when the plan-gap warning fires and how
+    # it is worded (CODE_REVIEW finding #5). Purity and sharing are not in
+    # conflict — this stays row-in/row-out.
 ```
+
+**The row-fetching half: `trainmate/timeline.py`** (rev 6). `progression.py`
+stays pure, so *somebody* has to do the db reads — and having each front-end do
+them was the other half of the CODE_REVIEW #5 divergence. One small module
+owns them:
+
+```python
+def build_timeline_payload(dbh) -> dict
+    # get_completed_activities + get_workouts + get_metrics_cache (§4),
+    # get_objectives(active) + get_objectives(completed) sorted by target_date,
+    # get_governing_macrocycle() + its mesocycles (§6.1),
+    # get_analysis_cache("long") for the bootstrap reconstruction,
+    # garmin.pmc_history_start/pmc_warmup_cutoff_for for the warm-up cutoff,
+    # config.pmc_ctl_days/pmc_atl_days — then one call to assemble_timeline.
+    # `dbh` is passed explicitly so the CLI's rebindable db and the web's
+    # singleton each resolve against the handle the rest of their command used.
+```
+
+`run_progress` (§7.1) and `GET /api/timeline.png` (§6) both call it and read no
+rows of their own. That is what makes the CLI≡endpoint equivalence test
+redundant rather than reassuring (§9): the shared builder *is* the guarantee.
 
 ## 6. Web API: `GET /api/timeline.png`
 
 The v1 web surface serves the picture, not the data. Thin handler in
-`trainmate_web.py`: `db` reads (`get_completed_activities`, `get_workouts`,
-`get_metrics_cache` for the stored PMC rows (§4), the first-evidence dates
-behind `garmin.pmc_history_start` for the warm-up cutoff, macrocycle
-versions + mesocycles for labels and governance (§6.1), active objectives,
-`get_analysis_cache("long")` for the bootstrap reconstruction) + one call
-to `assemble_timeline` (§5) + one call to `chart.render_timeline_png`
-(§7.2), returned as `image/png`. The handler fetches rows and renders the
-result; it assembles nothing itself, and the CLI handler is the same shape,
-so the two surfaces render one payload (§5).
+`trainmate_web.py` — three statements, no row-fetching of its own: one call to
+`timeline.build_timeline_payload(db)` (§5, which owns every read: activities,
+workouts, the stored PMC rows (§4), the governing macrocycle + its mesocycles
+for the §6.1 labels, active *and* completed objectives, the bootstrap
+reconstruction, and the `garmin.pmc_history_start`-derived warm-up cutoff), one
+`progression.clip_payload_for_weeks` for `?weeks`, one
+`chart.render_timeline_png` (§7.2), returned as `image/png`. The CLI handler is
+the same shape and calls the same builder, so the two surfaces cannot render
+different payloads (§5, §9).
 
 A JSON endpoint (`GET /api/timeline`, serializing the §6.0 payload
 verbatim) is **deferred to the interactive-tab follow-on** (§8.5): with the
@@ -723,8 +771,9 @@ an old week (§3's own standard, cf. the rejected config fingerprints).
 Accepted consequence, stated honestly: weeks that only a superseded version
 (or a completed objective's plan) covered fall back to `~inferred` labels
 or `—`; their planned bars and adherence percentages are untouched, because
-governance below never depended on labels. The version-in-force rule
-survives *only* where it is load-bearing — governance.
+coverage never depended on labels — it reads the week's own rows (below).
+Rev 7 kept the version-in-force rule for governance alone; rev 9 cut that too,
+so no version archaeology survives anywhere in this feature.
 
 Week → block assignment: neither real nor inferred mesocycles are
 Monday-aligned, so a week belongs to the block covering the **majority of
@@ -767,8 +816,8 @@ spans as given.
 
 CLI and Telegram are the surfaces the athlete actually checks daily; the web
 tab is the least visited and, in v1, frames the same PNG the bot sends. All
-three consume the §5 functions — CLI/bot directly (`progression.py` + `db`
-reads inside the CLI handler), the web via `/api/timeline.png` (§6). Rollout
+three consume the §5 functions through `timeline.build_timeline_payload` —
+CLI/bot directly, the web via `/api/timeline.png` (§6). Rollout
 order follows usage:
 CLI first (§10), which also honours the existing convention that the web API
 *tracks* the CLI feature set (ARCHITECTURE §8), rather than inverting it.
@@ -776,7 +825,11 @@ CLI first (§10), which also honours the existing convention that the web API
 ### 7.1 CLI: `tm progress`
 
 New command family `trainmate/cli/progress.py` (`run_progress`) + dispatcher
-entry in `trainmate_cli.py`, alias **`prog`**. The top-level `p` alias for
+entry in `trainmate_cli.py`. **No registered alias**: `progress` is reachable by
+unambiguous prefix (`pr` — `p` is ambiguous against `plan`), which is a
+different guarantee from an alias and can be broken by any future sibling
+command. DESIGN_cli_noargs.md §d is the canonical statement of that distinction.
+The top-level `p` alias for
 `plan` (trainmate_cli.py:708) is **removed in the same change** — following
 the recent removal of the deprecated `c` alias for `context` — so the two
 command names can't be confused mid-typing. Follows the standard **auto-ensure**
@@ -809,7 +862,7 @@ w/c 06-22    320  ▓▓▓▓▓│░░░░░░  214   67%
 ── Build 3 ───────────────────────────────────
 w/c 06-29*   150  ▓▓▓│░░░░░░░░  138   92%
 w/c 07-06    360  ▒▒▒▒▒▒▒▒▒▒░░
-~ inferred · * in progress · +4 more (--weeks all)
+~ inferred · * part week · +4 more (--weeks all)
 ⚠ 2 planned workouts lack TSS/RPE — count as 0
 ```
 
@@ -821,9 +874,11 @@ objective line, wrapped inside the same width budget:
   load came from: `FORM today (actual)` once today's session has synced,
   `FORM today (planned)` while the fold is counting the planned session in
   its place. Presentation conventions are `tm status`'s, reused not
-  reimplemented: same `garmin.pmc_ramp` over the stored CTL series, same
-  `color_tsb`/`color_ramp`, same `PMC_TSB_LAG_NOTE` footnote wherever TSB is
-  printed (the PMC design's §6.1 conventions). The consistency contract with
+  reimplemented: same `color_tsb`, same one-decimal CTL/ATL, same
+  `PMC_TSB_LAG_NOTE` footnote wherever TSB is printed (the PMC design's §6.1
+  conventions). **No ramp figure**, though `tm status` prints one: the 48-column
+  line has no room for a fourth number, and the CTL trend it would summarise is
+  already the sparkline directly below it. The consistency contract with
   `tm status` (pinned by tests, §9): **TSB today is always identical** (it is
   day-entering — computed from yesterday's values, which both commands read
   from the same stored rows); **CTL/ATL today are identical whenever today's
@@ -906,8 +961,19 @@ objective line, wrapped inside the same width budget:
 - Past weeks: bullet bar + percentage; `—` planned/percentage for ungoverned
   weeks (§3 empty states); future weeks: planned number + ghost bar, the
   `done`/`adh` columns omitted rather than filled with em-dashes; current week
-  per the §3 in-progress rule. Objective lines only for objectives inside the
-  window (§11).
+  per the §3 in-progress rule. The plan figure a row bars and divides by is
+  `progression.week_plan_denom` (§5) on every surface, the PNG included.
+- **A second week-column marker, `?`** — the week holds a session whose HR
+  recording was too sparse to trust *and* carried no RPE, so the week's own
+  **load** is undercounted and reads as an adherence miss it never was. It earns
+  its own legend line (`? load undercounted — recording gap, no RPE`) and is a
+  different claim from the zone tables' `!`, which is only about zone minutes
+  (DESIGN_intensity_distribution.md §11).
+- **Objective lines are clipped to today..plan end.** The payload carries
+  `completed` objectives too — the chart flags a race three weeks back (§11) —
+  but a race already run has no *projection*, and printing one used to displace
+  the `plan end …: CTL … TSB …` figure the command exists to show, since that
+  summary only appears when no objective line does.
 - `--weeks N` windows **both halves** (default 8: 8 past, 8 projected);
   `--weeks all` shows the whole plan, matching the web endpoint's `?weeks=all`.
   Rev 7 ran the future half to plan end unconditionally, which on a 6-month
@@ -1160,13 +1226,23 @@ the §7.2 photo transport for free where they need a chart in chat.)*
   / future week rows, bar scaling (shared max anchor incl. a future planned
   week; ungoverned week still gets a bar), warning footer, the §7.1
   status-consistency contract over a fixture pair (today synced: FORM ≡
-  status verbatim, `(actual)` tag; today pending: TSB equal, CTL/ATL
-  deliberately diverge, `(planned)` tag), `PMC_TSB_LAG_NOTE` carried, the
+  status verbatim — both sides built from one set of loads, `compute_pmc`'s
+  full sweep against `fitness_series`'s anchored fold — `(actual)` tag; today
+  pending: TSB equal, CTL/ATL deliberately diverge, `(planned)` tag),
+  objective projections clipped to today..plan end (a completed race behind
+  today neither projects nor displaces the plan-end figure),
+  `PMC_TSB_LAG_NOTE` carried, the
   lapsed-plan banner, the partial-final-week marker, the degenerate inputs
   (zero-max bar scale, blank and flat sparklines, `--weeks 0` rejected), the
   young-DB still-warming state; plus a narrow `TRAINMATE_WRAP_WIDTH` variant
   asserting `visible_len(line) ≤ 48` for **every** output line (not `len` —
   emoji are double-width).
+- `tests/test_chart.py`: the pure helpers of the PNG — the §7.2 label-collision
+  machinery (`_fit_label`, `_chars_per_axis`, `_span_dates`, the
+  measure-after-`draw()` order), the plan-end marker suppressed outside the
+  drawn window, and `_draw_weekly_bars` barring the elapsed slice for the
+  in-progress week (§3 comparable days, so the PNG and the CLI table agree).
+  The pixels themselves stay untested, per the front-end stance below.
 - `tests/test_bot.py`: `parse_photo_request` round-trip with `emit_photo`
   framing (sentinel/JSON incl. the `caption` field, non-photo lines return
   `None`, unknown-sentinel lines dropped) — same pattern as the existing
@@ -1200,7 +1276,8 @@ implementing §10.2 from scratch — several steps are already partly done.
 - The photo transport, whole: `PHOTO_SENTINEL`/`emit_photo` in
   `trainmate/prompt.py`; `parse_photo_request`, the `_drive()` photo branch
   and the unknown-sentinel drop in `trainmate_bot.py`; the bot tests.
-- `tm progress` dispatcher entry + `prog` alias in `trainmate_cli.py`; the
+- `tm progress` dispatcher entry in `trainmate_cli.py` (no alias — the
+  prefix mechanism covers it, §7.1); the
   `p` alias for `plan` is **already removed** (rev 6 cited its pre-snapshot
   line 708 — stale; nothing left to do); the `MENU_COMMANDS` `progress`
   entry in `trainmate_bot.py`.
@@ -1215,7 +1292,7 @@ implementing §10.2 from scratch — several steps are already partly done.
   `assemble_timeline` (§5 — the snapshot has **no** such function; each
   caller assembles its own payload, the CODE_REVIEW #5 divergence).
 - `trainmate/cli/progress.py`: the renderer gains the rev-6 pins
-  (elapsed-week rule, governance, degenerate-input guards, the
+  (elapsed-week rule, degenerate-input guards, the
   `visible_len` width budget); `_render_chart_png` moves out to
   `trainmate/chart.py` (§7.2).
 - `trainmate_web.py`: the snapshot's JSON `/api/timeline` becomes
@@ -1230,8 +1307,10 @@ implementing §10.2 from scratch — several steps are already partly done.
 - `compute_pmc`'s `seed` parameter + the unrounding (+ `tests/test_pmc.py`
   updates) (§4).
 - `trainmate/chart.py` (§7.2; extraction, but the module is new).
-- The governing-objective db helper and the version-in-force governance
-  rule (§6.1).
+- `trainmate/timeline.py` (§5) — the shared row-fetching path, added in rev 6
+  after CODE_REVIEW #5 and the reason §9 needs no CLI≡endpoint test.
+- The governing-objective db helper (§6.1). (Rev 6 also added a
+  version-in-force governance rule here; rev 9 deleted it.)
 
 ### 10.2 Steps
 
@@ -1275,7 +1354,9 @@ Ordered by usage (CLI/bot before web), each step independently shippable:
   whose `target_date` falls inside the *displayed* window — clipping is the
   renderer's job, the endpoint returns them all (§6) — later ones are simply
   off-canvas until their plan exists; `priority` can gate flags if the panel
-  gets noisy.
+  gets noisy. The CLI's *projection* lines clip harder than the chart's flags:
+  today..plan end, because a completed objective has a stored CTL but no
+  projection (§7.1).
 - **Planned-today undercount** (§3 today rule; rev 2 mislabeled this
   "double-count") is accepted; if it proves annoying in practice (frequent
   two-session days), the rule can move to per-`sport_type` matching using

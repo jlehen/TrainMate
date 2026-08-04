@@ -147,5 +147,35 @@ class TestPlanEndMarkerStaysInsideTheWindow(unittest.TestCase):
         self.assertLess(self._top_axis_right_edge(payload), "2026-07-15")
 
 
+class TestWeeklyBarsUseTheComparableSlice(unittest.TestCase):
+    """§3's comparable-days rule holds on every surface: the in-progress week bars the
+    ELAPSED planned figure the CLI table divides by, not the full week's."""
+
+    def _planned_heights(self, weeks):
+        import matplotlib.pyplot as plt
+        import matplotlib.dates as mdates
+        from trainmate import chart
+
+        fig, ax = plt.subplots()
+        self.addCleanup(plt.close, fig)
+        chart._draw_weekly_bars(ax, mdates, weeks)
+        return [bar.get_height() for bar in ax.containers[0]]
+
+    def test_in_progress_week_bars_the_elapsed_plan(self):
+        weeks = [
+            {"week_commencing": "2026-06-22", "planned_load": 320.0,
+             "actual_load": 300.0},
+            {"week_commencing": "2026-06-29", "planned_load": 340.0,
+             "planned_load_elapsed": 150.0, "actual_load": 138.0,
+             "in_progress": True},
+        ]
+        self.assertEqual(self._planned_heights(weeks), [320.0, 150.0])
+
+    def test_ungoverned_week_bars_zero_rather_than_failing(self):
+        weeks = [{"week_commencing": "2026-06-22", "planned_load": None,
+                  "actual_load": 262.0}]
+        self.assertEqual(self._planned_heights(weeks), [0])
+
+
 if __name__ == "__main__":
     unittest.main()
