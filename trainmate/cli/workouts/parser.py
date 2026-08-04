@@ -208,7 +208,12 @@ def add_workout_parser(subparsers, pull_bypass_parser, llm_debug_parser, plan_da
 
     # workout restore
     w_restore = workout_subparsers.add_parser(
-        "restore", help="Restore a soft-removed workout by ID"
+        "restore", help="Restore a soft-removed workout by ID",
+        description=(
+            "Un-cancel a single soft-removed session and put it back on the schedule. "
+            f"This is unrelated to '{green('workout rollback')}', which restores a whole "
+            "archived batch of workouts (DESIGN_plan_rollback.md §9)."
+        )
     )
     w_restore.add_argument("id", type=int, help="Workout ID to restore")
     

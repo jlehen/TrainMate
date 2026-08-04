@@ -57,7 +57,9 @@ single-version plans behave unchanged.
   creation** and never overwritten. Generation passes it explicitly; other writers
   derive it from the macrocycle governing the workout's date
   (`get_periodization_ids_for_date`).
-- `archived_at TEXT` — non-NULL ⟺ the row belongs to a superseded plan version. This
+- `archived_at TEXT` — non-NULL ⟺ the row was **displaced by a regeneration or a
+  rollback**, whatever plan version tags it (§9): one archive call stamps every live
+  future row it displaces, including rows of the *currently active* version. This
   is a **fourth, orthogonal axis** alongside *modified / calendar-state / removed*
   (ARCHITECTURE.md §5). Archived rows are hidden from every read by default
   (`get_workouts`/`get_workout` exclude them, `save_workout`'s dedupe ignores them)
@@ -90,15 +92,22 @@ the generated batch, restored together).
 Marks the objective's current `active` version `superseded` (stamping `superseded_at`),
 then inserts the new version as `active`. No deletion.
 
-### `workout_generate` (coach/service.py) — eager
-1. `archive_future_workouts(today)` → soft-archives every live future row (sets
-   `archived_at`, clears `google_event_id`/`pushed_signature`) and **returns the
-   pre-archive rows** so their Calendar events can be deleted.
+### `workout_generate` (coach/service/workouts.py) — eager
+0. If live upcoming workouts exist, the CLI confirms first (`_confirm_regeneration`,
+   `cli/workouts/generate.py`) — it names how many are at stake, how many were added by
+   hand, and that `workout rollback` brings them back; `-f/--force/-y` skips it.
+1. `archive_future_workouts(<generation start>)` → soft-archives every live row from the
+   generation start onward (sets `archived_at`, clears
+   `google_event_id`/`pushed_signature`) and **returns the pre-archive rows** so their
+   Calendar events can be deleted. The generation start is today, or **tomorrow** when
+   today's planned session is already completed — that row and its Calendar event are
+   preserved as history. (`plan rollback` and `workout rollback` always archive from
+   today; the asymmetry is deliberate.)
 2. Delete those events.
 3. Save new workouts tagged `macrocycle_id = <active macro>`.
 4. `sync_multiple(new)` — push immediately.
 
-### `plan_rollback(objective_id, target_macrocycle_id)` (coach/service.py)
+### `plan_rollback(objective_id, target_macrocycle_id)` (coach/service/planning.py)
 1. Resolve target: `get_previous_macrocycle` (chronologically prior) by default, or a
    specific version id.
 2. `archive_future_workouts(today)` + delete their events.
@@ -127,18 +136,26 @@ These were updated to ignore superseded versions:
 
 ## 7. CLI & Web
 
-`plan rollback [--goal ID] [--version PLAN_ID] [-y]` (alias `rb`). Interactive
+`plan rollback [--goal ID] [--version PLAN_ID] [-y]` (registered alias `rb`). Interactive
 confirmation by default (shows the target version's generation date). Reports how many
 workouts were restored/archived. `workout generate`'s help and output now reflect the
-eager push and point at `plan rollback` to undo.
+eager push and point at `workout rollback` first (the same-version undo, §9), then at
+`plan rollback` to step the strategy back with it.
 
-Two read-only companions make versions discoverable (so rollback in either direction
+Three read-only companions make versions discoverable (so rollback in either direction
 doesn't require guessing ids):
 
-- **`plan versions [--goal ID]`** (alias `v`) — lists every kept version (active +
-  superseded) with id, generated-on date, status, and a one-line strategy excerpt.
+- **`plan versions [--goal ID]`** — lists every kept version (active + superseded) with
+  id, generated-on date, status, and a one-line strategy excerpt. `plan v` works, but as
+  an unambiguous **prefix** (DESIGN_cli_noargs.md §d), not a registered alias: it would
+  break silently if another `plan v…` sub-command were added.
 - **`plan show --version <PLAN_ID>`** — renders a specific version in full (strategy +
   mesocycle timeline) under a "superseded" header when it isn't the active one.
+- **`plan diff [PLAN_ID_A] [PLAN_ID_B] [-g ID] [--full]`** (registered alias `df`) —
+  compares two versions field by field (strategy/feedback prose, mesocycles added,
+  removed, renamed or re-dated, snapshotted inputs), defaulting to previous-vs-active.
+  The comparison itself lives in `trainmate/plan_diff.py`; `plan versions`' footer points
+  at it.
 
 **Redo** is just a rollback to a *newer* version id: `set_active_macrocycle` swaps
 active↔superseded in either direction, and the target version's workouts were archived
@@ -146,11 +163,12 @@ as one batch when it was last superseded, so restoring its `MAX(archived_at)` ba
 resurrects exactly that set. `plan versions` surfaces the ids; the default (no
 `--version`) always steps to the chronologically previous version.
 
-**Web** mirrors the same surface (ARCHITECTURE.md §8): `GET /api/plan/versions` lists
-versions and `POST /api/plan/rollback` (`{goal_id?, version?}`) performs the swap. The
-strategy card gains a "Plan versions & rollback" panel that lists each kept version with
-a per-version **Restore** button (picking a newer id is the redo path). `workout generate`
-in the web also pushes to Calendar eagerly, like the CLI.
+**Web** shows the version axis but no longer drives it: the dashboard has since become
+read-only (ARCHITECTURE.md §8) and 405s every mutating verb, so the `POST /api/plan/rollback`
+this design originally shipped is gone — rolling back is a CLI action. What remains is
+`GET /api/plan/versions` and `GET /api/plan/diff`, behind a "Plan versions & compare" panel
+on the strategy card: each kept version with a per-version **Compare** button, and a footer
+pointing at `tm plan rollback --version <id>`.
 
 ## 8. Limitations / non-goals
 
@@ -212,12 +230,14 @@ revive and refuse a batch that is wholly in the past instead of "restoring" noth
 
 ### CLI & Web
 
-- **`workout batches`** (alias `b`) — lists batches newest first with a positional `#N`,
-  archive time, counts, date span, and plan version. Numbering is positional and shifts
-  after a rollback; the underlying key is the timestamp.
-- **`workout rollback [--batch N] [-y]`** (alias `rb`) — restores batch `#N`, default `#1`.
-  Confirms interactively, naming both what comes back and what gets archived.
+- **`workout batches`** — lists batches newest first with a positional `#N`, archive time,
+  counts, date span, and plan version. Numbering is positional and shifts after a rollback;
+  the underlying key is the timestamp. Like `plan versions`, `workout b` resolves as an
+  unambiguous **prefix**, not a registered alias.
+- **`workout rollback [--batch N] [-y]`** (registered alias `rb`) — restores batch `#N`,
+  default `#1`. Confirms interactively, naming both what comes back and what gets archived.
 - Not to be confused with **`workout restore <id>`**, which un-cancels a single
   soft-removed session (the `removed` axis, ARCHITECTURE.md §5). Both help texts say so.
-- Web: `GET /api/workouts/batches` and `POST /api/workouts/rollback` (`{batch?}`), with an
-  "Archived workout batches & rollback" panel under the schedule mirroring the plan one.
+- Web (read-only, like the plan panel above): `GET /api/workouts/batches` feeds an
+  "Archived workout batches" panel under the schedule; restoring one is `tm workout
+  rollback`, which the panel's footer names.

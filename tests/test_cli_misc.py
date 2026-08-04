@@ -123,6 +123,15 @@ class TestCliMisc(unittest.TestCase):
         self.assertEqual(exit_code, 0)
         self.assertIn("Goal ID", stdout)
 
+    def test_restore_and_rollback_help_point_at_each_other(self):
+        # DESIGN_plan_rollback.md §9: the two easily-confused undos each name the other.
+        exit_code, stdout, stderr = self.run_cli(["workout", "restore", "--help"])
+        self.assertEqual(exit_code, 0)
+        self.assertIn("rollback", stdout)
+        exit_code, stdout, stderr = self.run_cli(["workout", "rollback", "--help"])
+        self.assertEqual(exit_code, 0)
+        self.assertIn("restore", stdout)
+
     def test_helpall_flag_reveals_advanced_at_root(self):
         # The top-level `--helpall` flag is the discoverable equivalent of `help --all`.
         exit_code, stdout, stderr = self.run_cli(["--helpall"])
