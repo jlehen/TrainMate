@@ -74,9 +74,16 @@ Same relative-overload signal, three improvements:
   construction. In the EWMAs a given day weighs ~14% in ATL but only ~2% in CTL.
 - **Nothing new to store.** It is a division of two columns already on every row.
 
-`garmin.pmc.load_ratio(atl, ctl)` is the single implementation, returning `None` when
-either EWMA is NULL or CTL has not warmed above zero (a ratio against ~0 is noise). It is
-derived at read time and never stored, so it cannot drift from the EWMAs it divides.
+`garmin.pmc.load_ratio(atl, ctl)` is the single server-side implementation, returning
+`None` when either EWMA is NULL or CTL has not warmed above zero (a ratio against ~0 is
+noise). It is derived at read time and never stored, so it cannot drift from the EWMAs it
+divides.
+
+One deliberate mirror: `/api/metrics` serves raw `ctl`/`atl` and no ratio, so the web
+dashboard repeats the division and the same `ctl > 0` / NULL guard in `static/app.js`
+(the status card and the metrics table). Every consumer that runs Python — CLI, coach,
+analysis — goes through `load_ratio`. Serving the ratio from the endpoint would remove
+the mirror; that is a separate change, not a defect here.
 
 ### Job assignment after the change
 
@@ -103,12 +110,18 @@ apply where there *is* no planned trajectory: unstructured training, off-plan we
 return from layoff or illness — which is where an unplanned spike is genuinely dangerous
 and where the ratio earns its keep.
 
-The display layer follows the same rule. `util.color_load_ratio` colors only the overload
-end (>1.5 red, 1.3–1.5 yellow) and leaves everything at or below 1.3 bare, matching the
-precedent `color_tsb` already set: a phase-dependent value's interpretation belongs to
-the coach reading the science file, not to a phase-blind color map. The old `color_acwr`
-yellow-flagged everything under 0.8, which is precisely the normal state of an intensity
-block or a taper.
+The display layer follows the same rule. `util.color_load_ratio` — the terminal color map
+— colors only the overload end (>1.5 red, 1.3–1.5 yellow) and leaves everything at or
+below 1.3 bare, matching the precedent `color_tsb` already set: a phase-dependent value's
+interpretation belongs to the coach reading the science file, not to a phase-blind color
+map. The old `color_acwr` yellow-flagged everything under 0.8, which is precisely the
+normal state of an intensity block or a taper.
+
+The rule that carries across surfaces is *no warning below 1.3*, not *no text below 1.3*.
+The web dashboard applies the same two warning badges (Spike >1.5, Overload >1.3) and
+below that switches to neutral, non-alarming labels — "Building" at or above 1.0,
+"Unloading" under it — which describe the state without telling the athlete to correct
+it. The terminal has no such affordance, so there it stays bare.
 
 ## 5. What this does NOT do
 
@@ -116,9 +129,12 @@ It does not implement planned-vs-actual comparison in code. §4 tells the coach 
 against the plan, but nothing computes a *planned* ATL:CTL trajectory to compare against
 — the coach infers the phase from the mesocycle context already in its prompt.
 
-`progression.daily_loads` already produces a merged actual/planned daily load series
-through plan end, so a planned PMC and a planned ratio are a small addition on top. The
-actionable form is a deviation: "ATL:CTL 1.44 (planned 1.40) — on plan" versus
+Most of the machinery is already built. `progression.daily_loads` produces a merged
+actual/planned daily load series through plan end, and `progression.fitness_series` folds
+`garmin.compute_pmc(seed=(ctl, atl))` forward over it, so every projected day *already*
+carries a planned CTL/ATL/TSB (DESIGN_progress_timeline.md §4). What is missing is only
+the last step: dividing those two projected EWMAs, and rendering the comparison.
+The actionable form is a deviation: "ATL:CTL 1.44 (planned 1.40) — on plan" versus
 "ATL:CTL 1.44 (planned 1.05) — unplanned spike". That is the natural next step and is
 deliberately out of scope here.
 
@@ -139,6 +155,10 @@ rolling-sum pass entirely.
 in `client._derivation_pad_days()` is unaffected — it was
 `max(acwr_chronic_days, 28, ceil(1.5 * pmc_ctl_days))` and the CTL term (63 at defaults)
 already dominated, so it becomes `max(28, ceil(1.5 * pmc_ctl_days))` with the same value.
+
+DESIGN_pmc_fitness_fatigue.md and DESIGN_garmin_direct_pull.md both describe the ACWR
+era; each now carries a banner marking those passages superseded by this doc. Read them
+as history.
 
 `coach/service/editing.py`'s swap warning was labelled an "ACWR proxy" but never read
 ACWR — it is a pure weekly-TSS-delta heuristic, so only its wording changed. The analysis
