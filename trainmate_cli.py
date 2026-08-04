@@ -419,7 +419,7 @@ def run_once(argv, parser, named_subparsers) -> None:
             run_data_wipe(args)
     elif cmd == "model":
         # Read-only at the top level, so a bare 'model' lists rather than printing help
-        # (DESIGN_cli_noargs.md).
+        # (DESIGN_cli_noargs.md §a3).
         sub = (args.subcommand or "list").lower()
         if sub == "list":
             run_model_list(args)

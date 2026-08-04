@@ -13,13 +13,19 @@ without saying what belongs in it.
 
 A bare command may **act** if — and only if — it can pick a sensible default
 target AND it won't write anything without showing you first. That splits every
-command into three predictable buckets:
+*leaf* command into three predictable buckets; a bare **command group** is a
+fourth case with its own rule (§a3):
 
 | Bucket | No-args behavior | Examples |
 | --- | --- | --- |
-| Read-only | Just act | `list`, `show`, `status` |
+| Read-only | Just act | `status`, `workout list`, `plan show` (defaults to the next active goal) |
 | Mutating, preview-then-confirm | Act on a sensible default, show the preview, gate the write behind a confirm | `workout adapt` (defaults to today), `plan generate` (defaults to the nearest goal) |
-| Mutating, immediate / no natural default | Print the command's help, then the line naming what's missing (in chat, the line alone) | `workout swap`, `goal add`, `constraint add` |
+| Mutating, immediate / no natural default | Print the command's help, then the line naming what's missing (in chat, that line plus a `-h` pointer instead of the help) | `workout swap`, `goal add`, `constraint add` |
+| Command group, no sub-command | Print the group's own help and exit 1 — the same output in chat, since no argument is missing (§a3) | `goal`, `workout`, `plan`; `model` is the one exception |
+
+Read-only is about the *bare* run, not the command name: `constraint show` and
+`learnings show` take a mandatory `id` and so land in the third bucket, while
+`plan show` has a default target and lands in the first.
 
 The real axis is not "does it mutate?" but "does a bare run do something
 irreversible, or produce a reversible preview?" The confirm gate is what makes a
@@ -84,6 +90,34 @@ Enforcement is argparse's, not the handlers': a missing positional is reported b
 and none prompts for one either — a prompt is for a decision (§b's confirms), never
 for an argument the invocation should have carried.
 
+## §a3 — A bare command group prints its own help, in chat too
+
+`goal`, `constraint`, `benchmark`, `context`, `learnings`, `workout`, `data`,
+`plan` — and the root command itself — take a sub-command, and a bare run prints
+that level's full help and exits **1** (trainmate_cli.py, one guard per group).
+
+This is *not* §a's path. The sub-command is registered as an optional argument,
+so argparse never raises "the following arguments are required" and the parser
+override never fires: there is no missing line to print, and none of §a's chat
+short form either. Under `TRAINMATE_FRONTEND=json` a bare `goal` therefore sends
+the whole help block to chat — the screenful §a exists to avoid.
+
+That is deliberate, because the two cases differ in what the athlete asked for. A
+leaf command with a missing argument already knows what you wanted; the help is a
+reminder, and a pointer to `-h` is enough. A bare group carries no intent beyond
+"what can I do here", and the listing of its sub-commands *is* the answer — the
+one place where a screenful is the content rather than the packaging. Exit 1
+(not 2) says the same: nothing was malformed, the command was simply incomplete.
+
+**The exception is `model`.** A bare `model` runs `model list` instead of printing
+help (trainmate_cli.py, `args.subcommand or "list"`). The rule it follows is the
+top-of-page one applied to the group: a group may act bare when it has a single
+read-only view that is its whole state, and the other sub-commands are addressed
+*through* that view — `model set` takes a number from `model list`, so printing
+help instead would answer the question with a second command to run. No other
+group qualifies: `goal`, `workout` and the rest each hold several views, and
+picking one for them would be arbitrary.
+
 ## §b — Preview-then-confirm commands name the defaulted target
 
 When `workout adapt` falls back to today, or `plan generate` falls back to the
@@ -132,6 +166,17 @@ An ambiguous prefix is refused by name — `c` prints `Ambiguous command 'c' —
 matches: constraint, context` and exits 2, the same shape as argparse's own errors.
 Hidden `advanced=True` commands take part in matching, since they dispatch like any
 other.
+
+**A prefix is not an alias, and this section is where that distinction is
+defined** — other designs describing a command's short forms should point here
+rather than restate it. An *alias* is a second name registered with the command
+(`add_parser(aliases=[…])`); it exists in the code, shows up in the help listing
+next to its command, and has to be maintained. A *prefix* is not registered
+anywhere: it falls out of the command's own name the moment the name is unique at
+its level, and it changes by itself when commands are added or renamed. So `wo li`
+and `constr ed` are prefixes, not aliases; writing them down as aliases in a
+design doc or a help string invents a vocabulary the code does not have, and
+freezes a spelling that is only valid until the next sibling command lands.
 
 That leaves exactly two reasons for an explicit alias to survive:
 
