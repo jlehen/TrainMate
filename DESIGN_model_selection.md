@@ -37,7 +37,9 @@ stored choice still points at the same model.
 ## §1 — Config: the menu
 
 `llm.model` (a single string) is replaced by `llm.models` (a list). The commented-out
-alternatives above become the list literally:
+alternatives above become the list literally. The block below is an **example** menu, not the
+shipped one — the list is meant to be edited freely, every install ends up with its own, and
+`config_template.yaml` starts from a short two-entry list:
 
 ```yaml
 llm:
@@ -85,9 +87,11 @@ CREATE TABLE IF NOT EXISTS settings (
 ```
 
 First and only key: `llm_model`. Created in `trainmate/db/base.py` alongside the other tables;
-accessors `get_setting(key)` / `set_setting(key, value)` / `clear_setting(key)` land in a new
-`trainmate/db/settings.py` mixin, following the `sync_state` upsert pattern
-(`INSERT … ON CONFLICT(key) DO UPDATE`).
+accessors `get_setting(key)` / `get_setting_row(key)` / `set_setting(key, value)` /
+`clear_setting(key)` land in a new `trainmate/db/settings.py` mixin, following the `sync_state`
+upsert pattern (`INSERT … ON CONFLICT(key) DO UPDATE`). `get_setting_row` returns the whole row
+(`{key, value, updated_at}`) rather than just the value, because the "set 3d ago" annotation §4.1
+asks for needs the timestamp — a value-only getter cannot answer *when*.
 
 Not reused: `sync_state`. Its columns are dates and watermarks; a model identifier is neither.
 
@@ -125,8 +129,9 @@ verbatim, and keeps the existing test (`tests/test_cli_misc.py::test_llm_model_o
 meaningful. Resolution happens on first use — after the DB exists, and after any
 `--llm-model` override has been applied.
 
-Because the resolved value is cached, `model set` calls `openrouter_client.reset_model()` to
-drop it. One CLI invocation is one process, so this matters only in the REPL (`tm shell`),
+Because the resolved value is cached, both `model set` and `model reset` call
+`openrouter_client.reset_model()` to drop it — either one changes what the next call should
+resolve to. One CLI invocation is one process, so this matters only in the REPL (`tm shell`),
 where many commands share a process and the athlete reasonably expects a `model set` to take
 effect on the very next line.
 
@@ -163,15 +168,22 @@ display state, not an error — nothing fails, nothing is auto-corrected.
 
 ## §4 — The `model` command
 
-A new top-level command. Per DESIGN_cli_noargs.md, it is read-only at the top level, so a bare
-`model` acts: it prints the list.
+A new top-level command, and the one command group that *acts* when run bare instead of printing
+its help: a bare `model` prints the list. DESIGN_cli_noargs.md §a3 is where that exception and
+the rule behind it live.
 
 ```
 model                     # same as `model list`
-model list | l            # numbered menu, active marked
-model set | s <n | id>    # choose by number or by full identifier — persists
+model list                # numbered menu, active marked
+model set <n | id>        # choose by number or by full identifier — persists
+model use <n | id>        # registered alias of `set`
 model reset               # forget the stored choice, fall back to the config default
 ```
+
+`model l` and `model s` also work, but they are prefixes, not aliases — every command level gets
+unambiguous prefixes for free and nothing registers them (DESIGN_cli_noargs.md §d, which is where
+that distinction is defined). `use` is the one alias registered here, precisely because it is
+*not* a prefix of `set`.
 
 `model set` accepts either form because the number is only convenient when you have the list in
 front of you; from a script or from memory the identifier is what you have. An identifier that
@@ -179,6 +191,9 @@ is *not* on the menu is refused: the menu is the allowlist, and `--llm-model` is
 escape hatch for a one-off model you don't want to keep.
 
 ### §4.1 — Output
+
+Against §1's example menu, and abridged — the real listing carries the usual `=== LLM MODELS ===`
+header and a closing hint pointing at `model set`:
 
 ```
 $ model
@@ -206,6 +221,10 @@ listing alone.
 When `--llm-model` is in play for the invocation, the listing adds a line noting the override is
 active for this run only — otherwise `model` would report a model that isn't the one about to be
 used.
+
+The two no-op paths say so rather than reporting a change that did not happen: `model set` on the
+already-active model prints `Model is X (unchanged).`, and `model reset` with nothing stored
+prints `No stored choice — already on the config default: X.`
 
 ### §4.2 — Wiring
 
