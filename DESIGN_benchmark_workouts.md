@@ -153,9 +153,11 @@ Each sport has its plausible anchor kind(s) — cycling→`ftp`, running→`thre
 `mas`, swimming→`css`, strength→`e1rm`, with `lthr` valid on every endurance sport
 (`benchmarks.py:55-61`). The map is a **sanity check, not a schema**: `benchmark record`
 warns (`cli/benchmarks.py:96-104`) when the kind is not one the named sport is normally
-tested on (a mistyped `record swimming --ftp 250`) and records the row anyway. It cannot
-be a hard error — `sport_type` is a label, the effective threshold is keyed on `anchor_kind`
-alone, and cross-sport pairings are real (a cyclist's LTHR, a rower's threshold pace).
+tested on (a mistyped `record swimming --ftp 250`) and **refuses the record**, exit 1. The
+map is deliberately generous, because cross-sport pairings are real — a cyclist's LTHR, a
+rower's threshold pace — and a sport with no entry at all has no opinion and is accepted.
+Within that, a mismatch is a typo rather than a legitimate entry, and refusing costs one
+retyped command where accepting silently pollutes the logbook the prompt prescribes from.
 `lthr` is a first-class kind — a run threshold test produces it, and it is one of the
 values the prompt prescribes from, so the logbook must be able to supersede it (§3.4).
 
@@ -514,7 +516,7 @@ rule · `[BENCHMARK]` marker.
 
 Shipped after both phases, not planned in rev. 1: the `benchmark wipe` verb, the
 block-report anchor lines, the read-only web Benchmarks view (all §6), and the
-sport/kind mismatch warning on `record` (§3.2).
+sport/kind mismatch check on `record` (§3.2).
 
 **Phase 3 — richer — NOT BUILT:**
 Activity matching auto-links results to planned benchmarks (`workout_id`), including

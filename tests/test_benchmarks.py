@@ -320,15 +320,15 @@ class TestBenchmarkCLI(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertIn("not found", out)
 
-    def test_record_warns_on_implausible_sport_kind(self):
-        """`record swimming --ftp 250` is almost certainly a slip, but the sport is only a
-        label on the row — so warn and record, never refuse (§3.2)."""
+    def test_record_rejects_implausible_sport_kind(self):
+        """`record swimming --ftp 250` is a slip, and a rejected record costs one retyped
+        command where a wrong one silently pollutes the logbook (§3.2)."""
         code, out, _ = run_cli(
             ["benchmark", "record", "swimming", "--ftp", "250", "-y"]
         )
-        self.assertEqual(code, 0)
-        self.assertIn("is not an anchor swimming is usually tested on", out)
-        self.assertEqual(test_db.get_latest_benchmark("ftp")["value"], 250.0)
+        self.assertEqual(code, 1)
+        self.assertIn("is not an anchor swimming is tested on", out)
+        self.assertIsNone(test_db.get_latest_benchmark("ftp"))
 
     def test_record_is_quiet_for_plausible_pairs(self):
         pairs = [
