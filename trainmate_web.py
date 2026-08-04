@@ -410,6 +410,9 @@ def get_zones() -> Any:
             # trained; a week with duration but nothing recorded in this currency is
             # undercounted, and saying "not trained" there would invert §7's meaning.
             trained = bool((week.get("sport_seconds") or {}).get(sport))
+            # `undercounted` reads the JUDGEABLE duration instead: a week whose only
+            # unrecorded session was 5 minutes long cannot carry the claim (§11).
+            judged = bool((week.get("judged_sport_seconds") or {}).get(sport))
             entry: Dict[str, Any] = {
                 "week_commencing": week["week_commencing"],
                 "meso_label": week.get("meso_label"),
@@ -418,7 +421,7 @@ def get_zones() -> Any:
                 "seconds": list(row.seconds) if row else None,
                 "trained": trained,
                 "undercounted": bool(row.undercounted) if row else (
-                    trained and not is_future
+                    judged and not is_future
                 ),
             }
             if is_future and row is None:

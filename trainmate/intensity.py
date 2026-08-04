@@ -56,10 +56,12 @@ PROMPT_WIDTH = 100
 # strength training holds 0.90 with a 0.49 lower quartile, resort skiing 0.26 and hiking
 # 0.15. Each bar below sits near its own sport's 25th percentile, so `!` marks the worst
 # quarter of that sport's weeks rather than all of them (§11).
+#
+# Keys are CANONICAL sports, because the lookup canonicalizes first: an alias key here is
+# unreachable and the sport silently falls back to the global bar (§11 rev note 2026-08-04).
 COVERAGE_MIN_BY_SPORT: Dict[str, float] = {
     "strength_training": 0.45,
-    "resort_skiing": 0.15,
-    "resort_snowboarding": 0.15,
+    "downhill_skiing": 0.15,
     "indoor_climbing": 0.15,
     "hiking": 0.10,
     "yoga": 0.05,

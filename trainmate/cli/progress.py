@@ -392,6 +392,9 @@ def zone_week_cells(
     duration with nothing recorded in this currency renders `—` and takes a `!`, because
     asserting the athlete simply did not train would be §7's meaning turned exactly
     backwards; a real row renders its minutes and takes a `!` below the display bar.
+
+    The unrecorded branch reads the JUDGEABLE duration, so one 5-minute unrecorded
+    session does not light the week — §11's floor, applied to both `!` paths.
     """
     row = next(
         (r for r in (week.get("zone_rows") or [])
@@ -399,7 +402,7 @@ def zone_week_cells(
         None,
     )
     if row is None:
-        trained = bool((week.get("sport_seconds") or {}).get(sport))
+        trained = bool((week.get("judged_sport_seconds") or {}).get(sport))
         return [NOT_TRAINED] * n_zones, trained
     return [fmt_zone_cell(s) for s in row.seconds], row.undercounted
 
@@ -502,7 +505,8 @@ def zone_section(
 ) -> List[str]:
     """Every zone table plus the shared footer, or the empty-state line.
 
-    `weeks` are the displayed PAST/in-progress weeks only. The default stacks one table
+    `weeks` is the whole displayed window, past and future (§9.8); `stats_weeks` is the past
+    half, since every filter reads MEASURED coverage. The default stacks one table
     per qualifying sport, because fixing the grain to a single sport buys legibility at
     the price of a new lie: an athlete who swapped two planned runs for two rides of equal
     TSS reads a running-only table as whole-athlete load held flat beside a collapsed

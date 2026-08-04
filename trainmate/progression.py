@@ -339,7 +339,7 @@ def weekly_aggregates(
 
         {week_commencing, planned_load, planned_load_elapsed?, partial_plan?,
          in_progress, actual_load, meso_label, meso_source, zone_rows, sport_seconds,
-         load_sparse, planned_zone_rows}
+         judged_sport_seconds, load_sparse, planned_zone_rows}
 
     `planned_load` (Σ `adherence.planned_load` over non-removed workouts — the
     *adapted* plan, "what the plan asked at the time") is None for a week the plan
@@ -394,6 +394,11 @@ def weekly_aggregates(
             # reads no database — the property the one-payload rule exists to protect.
             "zone_rows": intensity.zone_rows(week_acts),
             "sport_seconds": intensity.sport_durations(week_acts),
+            # The same durations over sessions big enough to grade: what the "trained but
+            # nothing recorded" `!` reads, so the floor applies there too (§11).
+            "judged_sport_seconds": intensity.sport_durations(
+                [a for a in week_acts if intensity.judgeable(a)]
+            ),
             # The athlete trained normally, the strap died, and no RPE was entered — so
             # the week's own LOAD is undercounted and reads as an adherence miss the
             # coach will then adapt the plan around. A `progress` defect that predates

@@ -183,6 +183,23 @@ class TestJudgeableCoverage(unittest.TestCase):
                 [act("2026-06-02", "strength_training", 3600, hr=[1800, 0, 0, 0, 0])]
             )[0].undercounted)
 
+    def test_every_per_sport_key_is_canonical(self):
+        # `coverage_display_min` canonicalizes before the lookup, so an alias key is
+        # unreachable and its sport silently falls back to the global 0.8 (§11 rev note
+        # 2026-08-04). Guarding the whole table stops the class of bug coming back.
+        for key in intensity.COVERAGE_MIN_BY_SPORT:
+            self.assertEqual(canonical_sport(key), key)
+
+    def test_resort_skiing_is_graded_against_the_lift_served_bar(self):
+        # Garmin files resort skiing and snowboarding under `downhill_skiing`; the
+        # chairlift back up is not a failed recording, so 0.26 coverage must not mark.
+        self.assertEqual(intensity.coverage_display_min("resort_skiing"), 0.15)
+        self.assertEqual(intensity.coverage_display_min("resort_snowboarding"), 0.15)
+        row = intensity.zone_rows(
+            [act("2026-06-02", "resort_skiing", 3600, hr=[900, 0, 0, 0, 0])]
+        )[0]
+        self.assertFalse(row.undercounted)
+
     def test_planned_rows_never_mark(self):
         # A prescription is not a recording, so it has no gap to report.
         rows = intensity.planned_zone_rows([{

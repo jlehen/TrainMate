@@ -99,7 +99,7 @@ garmin:
   # recording — it is also the rest between sets, the chairlift back up, the gentle
   # walking on a hike, the held pose, all of which sit below zone 1 where no zone claims
   # them. trainmate/intensity.py ships defaults for the sports where that is structural
-  # (strength_training 0.45, resort_skiing/snowboarding and indoor_climbing 0.15, hiking
+  # (strength_training 0.45, downhill_skiing and indoor_climbing 0.15, hiking
   # 0.10, yoga 0.05); everything else uses the bar above. Set an entry here to override.
   #zone_coverage_display_min_by_sport:
   #  strength_training: 0.45

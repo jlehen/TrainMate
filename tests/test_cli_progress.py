@@ -489,11 +489,16 @@ def _pwr(sport, mins, coverage=0.9, judged="same"):
     return ZoneRow(sport, "power", tuple(_m(v) for v in mins), coverage, jc)
 
 
-def _zweek(mon, rows=(), seconds=None, label="Base 1", in_progress=False):
+def _zweek(mon, rows=(), seconds=None, label="Base 1", in_progress=False, judged="same"):
+    # `judged` is the duration over sessions that cleared the floor (§11); it defaults to
+    # the whole of `seconds`, the ordinary case where every session is a real workout.
     return {
         "week_commencing": mon, "meso_label": label, "meso_source": "plan",
         "in_progress": in_progress, "actual_load": 0.0, "planned_load": None,
         "zone_rows": list(rows), "sport_seconds": dict(seconds or {}),
+        "judged_sport_seconds": dict(
+            (seconds or {}) if judged == "same" else (judged or {})
+        ),
     }
 
 
@@ -526,6 +531,14 @@ class TestZoneWeekCells(unittest.TestCase):
         cells, undercounted = zone_week_cells(week, "running", "hr", 5)
         self.assertEqual(cells, ["—"] * 5)
         self.assertTrue(undercounted)
+
+    def test_a_too_short_unrecorded_session_does_not_light_the_week(self):
+        # §11's floor applies to this branch too: 5 minutes of unrecorded training is
+        # not evidence that the week's zone minutes are undercounted.
+        week = _zweek("2026-06-29", rows=[], seconds={"running": _m(5)}, judged={})
+        cells, undercounted = zone_week_cells(week, "running", "hr", 5)
+        self.assertEqual(cells, ["—"] * 5)
+        self.assertFalse(undercounted)
 
     def test_no_data_in_the_chosen_currency_does_not_fall_back_to_the_other(self):
         week = _zweek(

@@ -219,6 +219,15 @@ class TestWeeklyAggregates(unittest.TestCase):
         self.assertEqual(weeks[0]["week_commencing"], "2026-06-29")
         self.assertEqual(weeks[0]["actual_load"], 50.0)
 
+    def test_judged_sport_seconds_drops_the_sessions_under_the_floor(self):
+        # The `!` marker's denominator: a 5-minute session keeps its duration in
+        # `sport_seconds` and loses only its vote on the markers (§11).
+        short = dict(_act(-4, duration_sec=300.0), activity_type="running")
+        real = dict(_act(-3, duration_sec=3600.0), activity_type="cycling")
+        week = progression.weekly_aggregates([short, real], [], TODAY, [])[0]
+        self.assertEqual(week["sport_seconds"], {"running": 300.0, "cycling": 3600.0})
+        self.assertEqual(week["judged_sport_seconds"], {"cycling": 3600.0})
+
     def test_week_the_plan_never_covered_has_no_planned_figure(self):
         activities = [_act(-4, tss=30.0)]
         weeks = progression.weekly_aggregates(activities, [], TODAY, [])
