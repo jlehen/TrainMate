@@ -62,6 +62,11 @@ CLI_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "trainmate_c
 # supervisor's RESTART_EXIT_CODE in tm-bot.
 RESTART_EXIT_CODE = 75
 
+# Bounds every blocking step of a /restart teardown (an open prompt's subprocess
+# exiting cleanly, then the long-poll closing): nothing may keep us from reaching
+# the exit code above. See DESIGN_bot_restart.md §5.2.
+RESTART_GRACE_SECONDS = 2.0
+
 WELCOME = (
     "TrainMate is connected. Send any CLI command — the leading slash is "
     "optional.\n\n"
@@ -257,6 +262,38 @@ class _Session:
         self.sent = False                         # whether anything was sent to the chat
 
 
+async def _exited_within_grace(proc) -> bool:
+    """True if proc exited on its own within RESTART_GRACE_SECONDS."""
+    try:
+        await asyncio.wait_for(proc.wait(), timeout=RESTART_GRACE_SECONDS)
+        return True
+    except asyncio.TimeoutError:
+        return False
+
+
+async def restart_teardown(session: Optional[_Session], stop_polling) -> None:
+    """Ends any live command and closes the Telegram long-poll, so /restart's hard exit
+    strands neither an orphaned subprocess nor an unconfirmed getUpdates offset.
+
+    Both halves are bounded and failure-tolerant: reaching os._exit(RESTART_EXIT_CODE)
+    matters more than a tidy teardown. See DESIGN_bot_restart.md §5.2."""
+    if session is not None and session.proc.returncode is None:
+        fut = session.answer_future
+        answered = session.awaiting is not None and fut is not None and not fut.done()
+        if answered:
+            fut.set_result({"v": PROMPT_PROTOCOL_VERSION, "id": session.awaiting.get("id"),
+                            "cancelled": True})
+        if not answered or not await _exited_within_grace(session.proc):
+            try:
+                session.proc.kill()
+            except ProcessLookupError:
+                pass
+    try:
+        await asyncio.wait_for(stop_polling(), timeout=RESTART_GRACE_SECONDS)
+    except Exception as e:
+        print(f"restart: could not stop polling cleanly: {e!r}", flush=True)
+
+
 def main() -> None:
     """Starts the long-polling Telegram bot. Blocks until interrupted."""
     token = config.telegram_bot_token
@@ -306,6 +343,7 @@ def main() -> None:
     # just guards against overlapping pause/resume calls, since start_polling()/
     # stop() aren't safe to double-call concurrently.
     _polling_lock = asyncio.Lock()
+    restarting = False  # latched by /restart: nothing may reopen the long-poll (§5.2)
 
     async def _pause_polling() -> None:
         async with _polling_lock:
@@ -314,8 +352,9 @@ def main() -> None:
 
     async def _resume_polling() -> None:
         async with _polling_lock:
-            if not updater.running:
-                await updater.start_polling(allowed_updates=Update.ALL_TYPES)
+            if restarting or updater.running:
+                return
+            await updater.start_polling(allowed_updates=Update.ALL_TYPES)
 
     async def _flush_output(session: "_Session", buf: List[str]) -> None:
         text = "\n".join(buf).strip()
@@ -477,29 +516,11 @@ def main() -> None:
         return "Cancelling…"
 
     async def _restart(chat_id: int) -> None:
-        """Cleans up any live session, replies, then hard-exits with
-        RESTART_EXIT_CODE for the tm-bot supervisor to relaunch us.
-
-        Under §5.1's polling model this can only ever be reached while idle or
-        while a prompt is open (never mid-compute, since polling — and thus
-        message delivery — is paused for that whole span). If a prompt is open,
-        answer it as cancelled so the CLI subprocess gets a chance to abort
-        cleanly (same as _cancel's mid-prompt path); we wait briefly for it to
-        exit on its own before force-killing, so os._exit() below never leaves it
-        orphaned and blocked on stdin forever."""
-        session = sessions.get(chat_id)
-        if session is not None and session.awaiting is not None:
-            fut = session.answer_future
-            if fut is not None and not fut.done():
-                fut.set_result({"v": PROMPT_PROTOCOL_VERSION, "id": session.awaiting.get("id"),
-                                "cancelled": True})
-            try:
-                await asyncio.wait_for(session.proc.wait(), timeout=2.0)
-            except asyncio.TimeoutError:
-                try:
-                    session.proc.kill()
-                except ProcessLookupError:
-                    pass
+        """Tears down, replies, then hard-exits with RESTART_EXIT_CODE for the tm-bot
+        supervisor to relaunch us. See DESIGN_bot_restart.md §5.2."""
+        nonlocal restarting
+        restarting = True
+        await restart_teardown(sessions.get(chat_id), _pause_polling)
         await bot.send_message(chat_id=chat_id, text="Restarting…")
         os._exit(RESTART_EXIT_CODE)
 

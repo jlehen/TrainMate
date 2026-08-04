@@ -1,7 +1,9 @@
 """Tests for the Telegram front-end's pure helpers (no telegram dependency)."""
+import asyncio
 import os
 import sys
 import unittest
+from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -216,6 +218,100 @@ class WrapWidthTest(unittest.TestCase):
         long = "word " * 40
         wrapped = self.util.wrap_text(long, width=60)
         self.assertTrue(any(len(line) > 30 for line in wrapped.splitlines()))
+
+
+class _FakeProc:
+    """Stand-in for the CLI subprocess: exits on its own only if told to."""
+
+    def __init__(self, exits_on_its_own: bool = False) -> None:
+        self.returncode = None
+        self.killed = False
+        self._exits_on_its_own = exits_on_its_own
+
+    async def wait(self) -> int:
+        if not self._exits_on_its_own:
+            await asyncio.sleep(3600)
+        self.returncode = 0
+        return 0
+
+    def kill(self) -> None:
+        self.killed = True
+        self.returncode = -9
+
+
+class RestartTeardownTest(unittest.IsolatedAsyncioTestCase):
+    """/restart's teardown (DESIGN_bot_restart.md §5.2): no orphaned subprocess and no
+    long-poll left open when os._exit() fires."""
+
+    def setUp(self):
+        patcher = mock.patch.object(bot, "RESTART_GRACE_SECONDS", 0.02)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        self.stops = []
+
+    async def _stop_polling(self):
+        self.stops.append(True)
+
+    def _session(self, awaiting=None, proc=None):
+        session = bot._Session(42, proc if proc is not None else _FakeProc(), "n0nce")
+        if awaiting is not None:
+            session.awaiting = awaiting
+            session.answer_future = asyncio.get_running_loop().create_future()
+        return session
+
+    async def test_kills_a_silently_computing_session(self):
+        # A single getUpdates batch can deliver a command and /restart together, so
+        # /restart can land with a subprocess running and no prompt open.
+        session = self._session()
+        await bot.restart_teardown(session, self._stop_polling)
+        self.assertTrue(session.proc.killed)
+
+    async def test_open_prompt_is_answered_cancelled_not_killed(self):
+        session = self._session({"id": "p1", "type": "confirm"}, _FakeProc(exits_on_its_own=True))
+        await bot.restart_teardown(session, self._stop_polling)
+        self.assertTrue(session.answer_future.result()["cancelled"])
+        self.assertFalse(session.proc.killed)
+
+    async def test_open_prompt_whose_process_lingers_is_killed_after_the_grace(self):
+        session = self._session({"id": "p1", "type": "confirm"})
+        await bot.restart_teardown(session, self._stop_polling)
+        self.assertTrue(session.proc.killed)
+
+    async def test_finished_process_is_left_alone(self):
+        session = self._session()
+        session.proc.returncode = 0
+        await bot.restart_teardown(session, self._stop_polling)
+        self.assertFalse(session.proc.killed)
+
+    async def test_releases_the_long_poll(self):
+        # Without this, the abandoned getUpdates never confirms its offset and the
+        # relaunched worker is served the same /restart again (§7).
+        await bot.restart_teardown(None, self._stop_polling)
+        self.assertEqual(self.stops, [True])
+        session = self._session()
+        await bot.restart_teardown(session, self._stop_polling)
+        self.assertEqual(len(self.stops), 2)
+
+    async def test_a_wedged_stop_still_returns(self):
+        async def _hangs():
+            await asyncio.sleep(3600)
+
+        await bot.restart_teardown(None, _hangs)  # must not block the hard exit
+
+    async def test_a_failing_stop_still_returns(self):
+        async def _raises():
+            raise RuntimeError("This Updater is not running!")
+
+        await bot.restart_teardown(None, _raises)
+
+
+class MenuCommandsTest(unittest.TestCase):
+    def test_restart_is_not_advertised_in_the_command_menu(self):
+        # Deliberate, like /start: a one-tap process restart next to the everyday
+        # commands is an accident waiting to happen (DESIGN_bot_restart.md §7).
+        names = [name for name, _ in bot.MENU_COMMANDS]
+        self.assertNotIn("restart", names)
+        self.assertIn("cancel", names)
 
 
 if __name__ == "__main__":

@@ -1,6 +1,7 @@
 # Design: Bot Self-Restart (`/restart`)
 
-**Status:** Proposed · **Date:** 2026-07-03 · **Branch:** main
+**Status:** Implemented (shipped 2026-07-03 in `6c6e7db`, alongside this doc) ·
+**Date:** 2026-07-03 · **Branch:** main
 
 ## 1. Motivation
 
@@ -116,7 +117,7 @@ CLI subprocess is silently churning with no prompt open.
 
 This has to be scoped to the *silent-compute* phase specifically, not the whole
 session — the existing interactive-prompt protocol (`_present_prompt`,
-`trainmate_bot.py:270-301`) depends on live polling to receive the athlete's
+`trainmate_bot.py:387-418`) depends on live polling to receive the athlete's
 button tap or text reply while the subprocess is blocked on stdin. Pausing
 polling for the entire session lifetime would silently break every confirm/choose
 prompt (plan apply, destructive-command confirmation, etc.) — the bot would never
@@ -135,41 +136,58 @@ today it kills a mid-compute subprocess instantly; under this model, a `/cancel`
 sent during the silent-compute phase just queues and only takes effect once the
 subprocess finishes on its own (transitions to idle or opens a prompt) and
 polling resumes — i.e. `/cancel` can no longer interrupt a command that's
-actually stuck computing, only one that's idle-waiting on the athlete. **Open
-question, not just an implementation detail**: is that an acceptable change to
-already-shipped `/cancel` behavior? Flagging explicitly since it wasn't the
-question being asked when this trade was made (§7).
+actually stuck computing, only one that's idle-waiting on the athlete. That is a
+real change to an already-shipped command and it was **accepted**, not stumbled
+into (§7); the `command_timeout` watchdog still bounds a genuinely stuck run.
 
-Implementation-wise this likely means replacing `application.run_polling()`'s
-always-on background fetch loop with an explicit start/stop around the compute
-phase (or a manual `get_updates()` loop) — `run_polling()` doesn't expose a
-"pause between messages" toggle, so this is more than a branch added to
-`on_message()`; treat it as a real touch point in `trainmate_bot.py`'s core loop,
-not a side effect of adding `/restart`.
+Implementation-wise this means replacing `application.run_polling()`'s always-on
+background fetch loop with an explicit start/stop around the compute phase —
+`run_polling()` doesn't expose a "pause between messages" toggle. Shipped as
+`_serve()` (`trainmate_bot.py:620-637`), which drives the Application and Updater
+lifecycle by hand so `_pause_polling`/`_resume_polling` can stop and start
+`getUpdates` mid-session. This is a real touch point in `trainmate_bot.py`'s core
+loop, not a side effect of adding `/restart`.
 
 ### 5.2 `/restart`
 
 Handled the same way `/cancel` and `/start` already are in `on_message()`
-(`trainmate_bot.py:398-404`) — matched on `token_low == "restart"`, gated by the
-existing `is_authorized(chat.id, allowed_ids)` check. No new auth mechanism: the
+(`trainmate_bot.py:527-581`, the `restart` branch at `:551-553`) — matched on
+`token_low == "restart"`, gated by the existing `is_authorized(chat.id,
+allowed_ids)` check. No new auth mechanism: the
 Telegram allowlist is already the access control, so there's no need for a
 shared secret at this layer (that idea only makes sense at the process layer in
 §3, where it's not doing security work either — it's just avoiding argv
 collisions).
 
-Because of §5.1's polling model, `/restart` can only ever be *received* while
-idle or while a prompt is open — never while a subprocess is silently
-computing, since polling is paused for that whole span. So the only cleanup
-`/restart` itself needs to do is for the prompt-open case:
+Because of §5.1's polling model, `/restart` is normally *received* only while
+idle or while a prompt is open — polling is paused for the whole silent-compute
+span. That is a steady-state property, not a guarantee: one `getUpdates` batch
+can carry a command *and* a `/restart` sent right behind it, and both are handled
+before `_drive` has paused polling. So the teardown deals with a live session in
+whatever state it happens to be in, not just a prompt-blocked one.
 
-Behavior:
-1. If a prompt is currently open for this chat (subprocess blocked on stdin
-   awaiting the athlete's tap/reply), kill it first — same as `_cancel`'s
-   mid-prompt path — so the child `tm` process isn't left blocked forever. (If
-   idle, there's nothing to clean up.)
-2. Reply "Restarting…".
-3. `os._exit(RESTART_EXIT_CODE)` — a hard exit rather than trying to unwind
-   `application.run_polling()` cleanly from inside a handler.
+Behavior — `restart_teardown()` (`trainmate_bot.py:274-294`), then the handler
+`_restart` (`:518-525`):
+
+1. If a prompt is open for this chat, resolve its answer future as `cancelled`.
+   That is what `_cancel` does mid-prompt — note it does *not* kill; the point is
+   to let the CLI unwind its own abort path. Then wait up to
+   `RESTART_GRACE_SECONDS` (2 s) for the subprocess to exit on its own, and
+   `kill()` it if it doesn't.
+2. If instead a subprocess is alive with no prompt open (mid-compute, reachable
+   via the batched delivery above), kill it immediately — same as `_cancel`'s
+   mid-compute path. Either way the hard exit below strands nothing blocked on
+   stdin.
+3. Stop the Updater — close the `getUpdates` long-poll — bounded by the same 2 s,
+   and latch a `restarting` flag first so `_drive`'s `finally` can't resume
+   polling behind us as its subprocess dies. Not cosmetic; see §7.
+4. Reply "Restarting…".
+5. `os._exit(RESTART_EXIT_CODE)` — a hard exit rather than trying to unwind the
+   Application cleanly from inside a handler.
+
+The exit code *is* the contract with the supervisor (§4), so every step above is
+bounded and failure-tolerant: a wedged subprocess or a hung `updater.stop()` is
+logged and stepped over, never allowed to prevent the exit.
 
 ## 6. Touch points
 
@@ -177,11 +195,16 @@ Behavior:
   signal trap (§4). No backoff logic needed. The existing venv-bootstrap + exec
   becomes the worker body, untouched.
 - **`trainmate_bot.py`**:
-  - `RESTART_EXIT_CODE = 75` constant.
-  - `on_message()`: new `token_low == "restart"` branch (§5.2).
+  - `RESTART_EXIT_CODE = 75` and `RESTART_GRACE_SECONDS = 2.0` constants.
+  - `on_message()`: new `token_low == "restart"` branch, dispatching to `_restart`
+    and the module-level `restart_teardown()` (§5.2).
   - Polling loop rework to pause/resume `getUpdates` around the silent-compute
     phase (§5.1) — the larger of the two `trainmate_bot.py` changes, and one
-    that touches existing `/cancel` behavior, not just new code.
+    that touches existing `/cancel` behavior, not just new code. Concretely:
+    `run_polling()` is replaced by `_serve()`, plus `_pause_polling` /
+    `_resume_polling` and the `restarting` latch they honour.
+  - `MENU_COMMANDS` (the `set_my_commands` list) is deliberately **not** touched —
+    `/restart` stays off Telegram's `/` menu, like `/start` (§7).
 - No config changes — reuses `telegram.allowed_chat_ids`.
 - No DB changes.
 
@@ -194,22 +217,35 @@ Behavior:
   (§5.1). Locked — a session-wide pause would break the interactive-prompt
   protocol.
 - **`/cancel` no longer interrupts silent compute instantly** — it now queues
-  behind polling being paused, same as `/restart`. **Open:** confirm this is an
-  acceptable behavior change to an already-shipped command; it wasn't the
-  original ask, it fell out of the polling-model simplification (§5.1).
-- **`/restart` kills only an open prompt's subprocess**, not a silently-computing
-  one — it can't be received during silent compute at all under the new polling
-  model (§5.2).
-- **Open:** does python-telegram-bot drop or replay updates that arrive during
-  the *restart* gap specifically (full process handoff, not the pause/resume
-  within one process)? `run_polling`'s update-offset tracking is in-memory only
-  and doesn't survive the process exiting, so it matters whether messages sent
-  in the ~1-2s gap get delivered once the new worker starts polling or are
-  silently missed — and separately, whether the new worker's first `getUpdates`
-  can race the old connection's teardown and hit a `409 Conflict` (Telegram
-  allows only one long-poll per bot token). Needs a quick check against the
-  installed PTB version before this ships; if updates drop, worth a one-line
-  warning in the `/restart` reply.
+  behind polling being paused, same as `/restart`. **Accepted**, though it wasn't
+  the original ask: it fell out of the polling-model simplification (§5.1) and
+  shipped with it. What's given up is interrupting a run that is genuinely stuck
+  computing; the `telegram.command_timeout` watchdog already bounds that case, and
+  the single-athlete deployment (§2) makes a few extra seconds of a doomed command
+  cheap. Revisit only if the pause window grows beyond one command's runtime.
+- **`/restart` tears down whatever session is live**, prompt-open or
+  mid-compute. The original design said "an open prompt's subprocess only,
+  because polling is paused during compute" — true in the steady state, but a
+  single `getUpdates` batch can deliver a command and a `/restart` together, and
+  the "can't happen" case then orphans a running `tm` (§5.2 steps 1-2).
+- **`/restart` stops the Updater before `os._exit()`.** This answers the original
+  open question about updates crossing the restart gap, checked against the
+  installed python-telegram-bot 22.8. PTB keeps the `getUpdates` offset in memory
+  and only *confirms* it to Telegram on the following call; `Updater.stop()` makes
+  exactly that confirming call (`_get_updates_cleanup`: one
+  `getUpdates(offset=last+1, timeout=0)`). A bare `os._exit()` therefore leaves
+  the batch containing `/restart` itself unconfirmed, so Telegram serves it again
+  to the relaunched worker — a restart loop, not merely a lost message — and
+  abandons the open long-poll, which is what lets the new worker's first
+  `getUpdates` race the old connection into a `409 Conflict`. The accepted cost is
+  the mirror image: any update fetched in the same batch *behind* `/restart` is
+  confirmed and dropped rather than replayed. Losing one queued message beats a
+  restart loop, and §5.2's teardown kills that message's subprocess anyway.
+- **`/restart` is not advertised in Telegram's command menu.** `MENU_COMMANDS`
+  (`set_my_commands`) lists the everyday command families and `/cancel`; `/start`
+  and `/restart` are both absent. Deliberate: a one-tap process restart sitting in
+  the `/` popup next to `/status` is an accident waiting to happen, and the two
+  people who need it (the athlete, this doc) already know the word.
 - **Open:** how is `tm-bot` actually run in production right now (bare
   foreground, `nohup`, `tmux`, a systemd unit)? Determines whether a plain
   `kill <supervisor-pid>` reaches the child automatically (process-group
