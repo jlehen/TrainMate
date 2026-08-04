@@ -92,6 +92,16 @@ def run_benchmark_record(args: argparse.Namespace) -> None:
     unit = unit_for_kind(kind)
     label = ANCHOR_KINDS[kind].label
 
+    # Catch `record swimming --ftp 250`. A warning, not an error: the effective threshold
+    # is keyed on the kind alone, so the sport is a label and cross-sport pairs are real
+    # (§3.2). An unknown sport has no opinion attached and stays silent.
+    plausible = anchors_for_sport(sport)
+    if plausible and kind not in plausible:
+        print(yellow(
+            f"{label} is not an anchor {sport} is usually tested on "
+            f"({', '.join(ANCHOR_KINDS[k].label for k in plausible)}) — recording anyway."
+        ))
+
     # Show the change against the current latest of this kind before touching anything.
     prev = cli.db.get_latest_benchmark(kind)
     new_disp = format_value(kind, value)

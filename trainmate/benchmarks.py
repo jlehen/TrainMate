@@ -14,6 +14,8 @@ layers can all import it without an import cycle.
 """
 from typing import Any, Dict, List, NamedTuple, Optional, Sequence, Tuple
 
+from trainmate.sports import canonical_sport
+
 
 class AnchorKind(NamedTuple):
     """One threshold anchor kind. `key` doubles as the ``anchor_kind`` stored in the
@@ -46,18 +48,16 @@ ANCHOR_KINDS: Dict[str, AnchorKind] = {
 # are the `--<kind>` value flags `benchmark record` accepts.
 LOGBOOK_KINDS: List[str] = [k for k in ANCHOR_KINDS if k != "max_hr"]
 
-# The natural anchor kind(s) each sport is tested on, used for `status` display and to
-# suggest a kind from a bare sport. Keyed by both canonical and loose sport spellings
-# so `record cycling` and `record road_biking` both resolve.
+# The anchor kind(s) each sport is plausibly tested on — a sanity check for
+# `benchmark record`, not a schema (§3.2): a mismatch warns, it never refuses. Generous
+# on purpose, since `lthr` is measurable in any endurance sport. Keyed by canonical sport;
+# `anchors_for_sport` normalizes before the lookup.
 SPORT_ANCHORS: Dict[str, List[str]] = {
-    "road_biking": ["ftp"],
-    "cycling": ["ftp"],
-    "running": ["threshold_pace", "lthr"],
-    "swimming": ["css"],
+    "cycling": ["ftp", "lthr"],
+    "running": ["threshold_pace", "lthr", "mas"],
+    "swimming": ["css", "lthr"],
     "strength_training": ["e1rm"],
-    "strength": ["e1rm"],
-    "rowing": ["threshold_pace"],
-    "general": ["mas"],
+    "rowing": ["threshold_pace", "ftp", "lthr"],
 }
 
 
@@ -73,8 +73,9 @@ def unit_for_kind(kind: str) -> str:
 
 
 def anchors_for_sport(sport: str) -> List[str]:
-    """The natural anchor kind(s) for a sport spelling (empty if none known)."""
-    return SPORT_ANCHORS.get((sport or "").strip().lower(), [])
+    """The plausible anchor kind(s) for any sport spelling. Empty for a sport with no
+    known anchors, which callers must read as "no opinion", not as "nothing valid"."""
+    return SPORT_ANCHORS.get(canonical_sport(sport or ""), [])
 
 
 def _fmt_pace(value: float, per: str) -> str:

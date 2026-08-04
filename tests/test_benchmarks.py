@@ -37,10 +37,21 @@ class TestBenchmarkVocabulary(unittest.TestCase):
         self.assertFalse(bm.is_improvement("ftp", 230, 235))
 
     def test_anchors_for_sport(self):
-        self.assertEqual(bm.anchors_for_sport("cycling"), ["ftp"])
+        self.assertIn("ftp", bm.anchors_for_sport("cycling"))
         self.assertIn("lthr", bm.anchors_for_sport("running"))
-        self.assertEqual(bm.anchors_for_sport("swimming"), ["css"])
+        self.assertIn("css", bm.anchors_for_sport("swimming"))
+        # Aliases resolve through canonical_sport, so a Garmin spelling works too.
+        self.assertIn("ftp", bm.anchors_for_sport("road_biking"))
+        self.assertIn("e1rm", bm.anchors_for_sport("strength"))
+        # An unknown sport carries no opinion — callers must not read [] as "invalid".
         self.assertEqual(bm.anchors_for_sport("unknown-sport"), [])
+
+    def test_plausible_cross_sport_pairs_are_not_flagged(self):
+        """The map gates a *warning* (§3.2), so real cross-sport pairs must be in it:
+        a cyclist has an LTHR, a runner has a MAS, a rower has a threshold pace."""
+        self.assertIn("lthr", bm.anchors_for_sport("cycling"))
+        self.assertIn("mas", bm.anchors_for_sport("running"))
+        self.assertIn("threshold_pace", bm.anchors_for_sport("rowing"))
 
 
 class TestBenchmarkDB(unittest.TestCase):
@@ -308,6 +319,156 @@ class TestBenchmarkCLI(unittest.TestCase):
         code, out, _ = run_cli(["benchmark", "rm", "999"])
         self.assertEqual(code, 1)
         self.assertIn("not found", out)
+
+    def test_record_warns_on_implausible_sport_kind(self):
+        """`record swimming --ftp 250` is almost certainly a slip, but the sport is only a
+        label on the row — so warn and record, never refuse (§3.2)."""
+        code, out, _ = run_cli(
+            ["benchmark", "record", "swimming", "--ftp", "250", "-y"]
+        )
+        self.assertEqual(code, 0)
+        self.assertIn("is not an anchor swimming is usually tested on", out)
+        self.assertEqual(test_db.get_latest_benchmark("ftp")["value"], 250.0)
+
+    def test_record_is_quiet_for_plausible_pairs(self):
+        pairs = [
+            ("cycling", "--ftp", "250"),
+            ("cycling", "--lthr", "158"),      # a cyclist's LTHR is real
+            ("running", "--mas", "18"),        # so is a runner's MAS
+            ("strength", "--e1rm", "120"),     # alias resolves to strength_training
+            ("kitesurfing", "--ftp", "200"),   # unknown sport -> no opinion, no warning
+        ]
+        for sport, flag, value in pairs:
+            with self.subTest(sport=sport, flag=flag):
+                _, out, _ = run_cli(
+                    ["benchmark", "record", sport, flag, value, "-y"]
+                )
+                self.assertNotIn("usually tested on", out)
+
+
+class TestBenchmarkPlacementGuards(unittest.TestCase):
+    """The two deterministic passes around generation (§4.1)."""
+
+    @classmethod
+    def setUpClass(cls):
+        if os.path.exists(TEST_DB_PATH):
+            os.remove(TEST_DB_PATH)
+        global test_db
+        test_db = Database(db_path=TEST_DB_PATH)
+        trainmate.db.db = test_db
+        trainmate.coach.service.db = test_db
+        trainmate_cli.db = test_db
+
+    @classmethod
+    def tearDownClass(cls):
+        if os.path.exists(TEST_DB_PATH):
+            try:
+                os.remove(TEST_DB_PATH)
+            except OSError:
+                pass
+
+    def setUp(self):
+        clear_all_tables(test_db)
+
+    @staticmethod
+    def _capture(fn, *args):
+        import io
+        from unittest.mock import patch
+        out = io.StringIO()
+        with patch("sys.stdout", out):
+            result = fn(*args)
+        return result, out.getvalue()
+
+    def test_collision_drops_the_same_sport_session_not_the_benchmark(self):
+        workouts = [
+            {"date": "2026-08-05", "sport_type": "cycling", "title": "FTP Test",
+             "benchmark_type": "ftp_20min"},
+            {"date": "2026-08-05", "sport_type": "road_biking", "title": "Z2 spin"},
+            {"date": "2026-08-05", "sport_type": "running", "title": "Easy run"},
+            {"date": "2026-08-06", "sport_type": "cycling", "title": "Intervals"},
+        ]
+        kept, out = self._capture(
+            coach_service._drop_benchmark_collisions, workouts
+        )
+        titles = [w["title"] for w in kept]
+        # The alias-spelled ride collides and goes; the other sport and the next day stay.
+        self.assertEqual(titles, ["FTP Test", "Easy run", "Intervals"])
+        self.assertIn("Dropping road_biking session on 2026-08-05", out)
+
+    def test_collision_pass_is_a_no_op_without_benchmarks(self):
+        workouts = [
+            {"date": "2026-08-05", "sport_type": "cycling", "title": "Z2 spin"},
+            {"date": "2026-08-05", "sport_type": "cycling", "title": "Openers"},
+        ]
+        kept, out = self._capture(
+            coach_service._drop_benchmark_collisions, workouts
+        )
+        self.assertEqual(len(kept), 2)
+        self.assertEqual(out, "")
+
+    def _macrocycle_with_boundary(self):
+        obj_id = test_db.add_objective(
+            title="Gran Fondo", target_date="2026-10-15",
+            sport_type="cycling", priority=1,
+        )
+        return test_db.save_macrocycle(
+            objective_id=obj_id, strategy="Build", goals_hash="g",
+            constraints_hash="c",
+            mesocycles=[{
+                "name": "Base 1", "start_date": "2026-08-03",
+                "end_date": "2026-08-30", "focus": "Aerobic",
+            }],
+        )
+
+    def test_boundary_week_without_a_benchmark_warns(self):
+        macro_id = self._macrocycle_with_boundary()
+        workouts = [
+            {"date": "2026-08-26", "sport_type": "cycling", "title": "Z2"},
+            {"date": "2026-08-30", "sport_type": "running", "title": "Long run"},
+        ]
+        _, out = self._capture(
+            coach_service._warn_missing_boundary_benchmarks,
+            workouts, [], macro_id, "2026-08-03",
+        )
+        self.assertIn("No benchmark scheduled in the boundary week of 'Base 1'", out)
+        self.assertIn("2026-08-24 to 2026-08-30", out)
+
+    def test_boundary_week_with_a_benchmark_is_silent(self):
+        macro_id = self._macrocycle_with_boundary()
+        workouts = [
+            {"date": "2026-08-26", "sport_type": "cycling", "title": "FTP Test",
+             "benchmark_type": "ftp_20min"},
+            {"date": "2026-08-30", "sport_type": "running", "title": "Long run"},
+        ]
+        _, out = self._capture(
+            coach_service._warn_missing_boundary_benchmarks,
+            workouts, [], macro_id, "2026-08-03",
+        )
+        self.assertEqual(out, "")
+
+    def test_rest_constraint_over_the_boundary_week_wins(self):
+        macro_id = self._macrocycle_with_boundary()
+        workouts = [{"date": "2026-08-26", "sport_type": "cycling", "title": "Z2"}]
+        rest = [{
+            "title": "Family holiday", "start_date": "2026-08-25",
+            "end_date": "2026-08-31", "rest": 1,
+        }]
+        _, out = self._capture(
+            coach_service._warn_missing_boundary_benchmarks,
+            workouts, rest, macro_id, "2026-08-03",
+        )
+        self.assertEqual(out, "")
+
+    def test_boundary_outside_the_generated_span_is_not_checked(self):
+        macro_id = self._macrocycle_with_boundary()
+        # The span stops well before the 2026-08-30 boundary, so there is nothing to warn
+        # about yet — the test simply has not been generated into view.
+        workouts = [{"date": "2026-08-05", "sport_type": "cycling", "title": "Z2"}]
+        _, out = self._capture(
+            coach_service._warn_missing_boundary_benchmarks,
+            workouts, [], macro_id, "2026-08-03",
+        )
+        self.assertEqual(out, "")
 
 
 if __name__ == "__main__":
