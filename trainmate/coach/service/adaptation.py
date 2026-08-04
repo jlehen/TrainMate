@@ -216,6 +216,11 @@ class AdaptationMixin:
         if decision.get("change_needed"):
             adapted = decision.get("adapted_workouts", [])
 
+        # Drop any proposal dated past the adaptation range: the next block is out of reach
+        # and was never shown to the model, so a post-boundary date is a hallucination
+        # (DESIGN_block_boundary.md §1).
+        adapted = [w for w in adapted if str(w.get("date", "")) <= meso_end_date_str]
+
         # Drop any proposal that targets an already-completed session — those are locked
         # history (see completed_keys above). This is the load-bearing guard: it holds even
         # if the model ignores the prompt instruction not to adapt finished sessions.

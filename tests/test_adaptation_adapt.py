@@ -295,6 +295,45 @@ class TestAdaptationAdapt(unittest.TestCase):
         self.assertEqual(buf.getvalue(), "")
 
     @patch("trainmate.coach.engine.openrouter_client")
+    def test_adapt_drops_proposal_past_block_end(self, mock_client):
+        """The next block is out of adapt's reach on the write side too: a proposal dated past
+        the block's end is dropped, so the applied range can never stretch into the next block
+        (DESIGN_block_boundary.md §1)."""
+        self._save_two_block_plan()
+        with patch.dict(trainmate.coach.config.data, {
+            "user_profile": {"lthr": 165, "max_hr": 185},
+            "coach": {
+                "metrics_lookback_days": 3,
+                "minor_activity_load_threshold": 10.0,
+            }
+        }):
+            # The model invents a session in the NEXT block (starts 2026-07-01) alongside a
+            # legitimate in-block one.
+            mock_client.complete.return_value = {
+                "change_needed": True,
+                "reason": "Ease into the block's last days.",
+                "adapted_workouts": [
+                    {
+                        "date": "2026-06-29", "sport_type": "running",
+                        "title": "Easy Run", "description": "30 mins easy Z2",
+                        "duration_minutes": 30, "rpe": 4, "tss": 20.0,
+                    },
+                    {
+                        "date": "2026-07-02", "sport_type": "running",
+                        "title": "Next-block Session (should be dropped)",
+                        "description": "Past the boundary.",
+                        "duration_minutes": 60, "rpe": 7, "tss": 55.0,
+                    },
+                ],
+            }
+            test_db.save_metric_cache("2026-06-28", 56, 42, 60, 35, 14.0, 8.0, 1.75)
+            test_db.save_baseline("2026-06-28", 50.0, 2.0, 60.0, 5.0, 80.0, 5.0)
+
+            _reason, proposed, _new_constraints = coach_service.workout_adapt("2026-06-28")
+
+            self.assertEqual([p["date"] for p in proposed], ["2026-06-29"])
+
+    @patch("trainmate.coach.engine.openrouter_client")
     def test_adapt_drops_already_completed_session(self, mock_client):
         """A session already performed (matched by a completed activity) is locked history:
         the guard drops any proposal targeting it, even if the model returns one — you cannot

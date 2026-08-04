@@ -4,8 +4,9 @@
 
 `workout adapt` reads a backward window of recovery metrics (`config.metrics_lookback_days`)
 and adapts forward from the evaluation date to the end of the mesocycle containing it
-(`coach/service.py::workout_adapt`). The backward window has a fixed size. The forward range
-does not — it shrinks toward nothing as the evaluation date approaches the block's end.
+(`coach/service/adaptation.py::workout_adapt`). The backward window has a fixed size. The
+forward range does not — it shrinks toward nothing as the evaluation date approaches the
+block's end.
 
 Two consequences follow:
 
@@ -13,7 +14,14 @@ Two consequences follow:
   penultimate day the only adaptable sessions are today's and tomorrow's, and today's is
   locked if a matching activity was already recorded.
 - The next block is invisible. `get_workouts` is bounded at the mesocycle end, so an
-  already-generated next block is neither read nor writable.
+  already-generated next block is neither read nor writable. Both halves are enforced
+  separately: the read bound keeps post-boundary sessions out of the prompt, and a
+  write-side filter drops any proposal dated past the range end, so a hallucinated date
+  cannot slip through (the apply range is derived from the surviving proposals, so it
+  cannot stretch past the block either).
+
+When no mesocycle covers the evaluation date at all, `workout_adapt` falls back to a
+synthetic range end of evaluation date + 6 days, and both bounds then apply to that.
 
 The fatigue signal is not actually lost, though — it travels a different path.
 `workout_generate` reads the same `metrics_lookback_days` window (metrics, completed
@@ -43,8 +51,8 @@ of it.
 ## 3. Terminal-window guidance (prompt)
 
 When the evaluation date falls within `config.adapt_terminal_window_days` of the block's end,
-`engine.py::_workout_adapt_logic` appends a `THIS BLOCK IS ENDING` section to the task. It
-states the two consequences from §1 and biases the model toward holding planned load:
+`coach/engine/workouts.py::_workout_adapt_logic` appends a `THIS BLOCK IS ENDING` section to
+the task. It states the two consequences from §1 and biases the model toward holding planned load:
 preserve or reschedule rather than cut, and do not deepen a cut to "carry" the athlete into a
 block that will be planned against its own metrics when it is generated.
 
@@ -53,10 +61,15 @@ prompt to before.
 
 ## 4. Regeneration nudge (CLI)
 
-`cli/workouts.py::run_workout_adapt` prints a hint whenever the evaluation date is in the
-terminal window and a next block exists: which block is ending, when, and the exact
-`workout generate --until-mesocycle <id>` invocation that re-plans the next one against
-current metrics.
+`cli/workouts/generate.py::_print_block_boundary_hint` (called by `run_workout_adapt`) prints
+a hint whenever the evaluation date is in the terminal window and a next block exists: which
+block is ending, when, and the exact `workout generate --until-mesocycle <id>` invocation that
+re-plans the next block against current metrics.
+
+`--until-mesocycle` sets only the end date; generate starts from today, so that command also
+rewrites the ending block's remaining sessions. That is the intent — inside the terminal
+window the tail is a few days, and they are re-planned against the same current metrics — but
+it is a wider rewrite than the phrasing suggests.
 
 It fires on **every** run inside the window, not only when adaptations are proposed. The next
 block is equally stale on a green day, and gating the hint on detected fatigue would surface
@@ -67,16 +80,24 @@ it only once it was too late to act on.
 - **Extending the adaptation range past `meso_end`.** See §2.
 - **Feeding the next block's concrete sessions to the model as read-only context.** The system
   prompt already lists every mesocycle's name, date range and focus
-  (`coach/service.py::_get_active_strategy_and_meso_text`), which is enough to support the "is
-  easing cheap here?" judgement. Adding the sessions would introduce a new data path and a new
-  class of prompt-visible-but-immutable workout for modest gain.
+  (`coach/service/prompt.py::_get_active_strategy_and_meso_text`), which is enough to support
+  the "is easing cheap here?" judgement. Adding the sessions would introduce a new data path
+  and a new class of prompt-visible-but-immutable workout for modest gain.
 
 ## 6. Known asymmetry
 
-`get_active_mesocycle` falls back to the next *future* block when no block contains the
-evaluation date. On a calendar gap between blocks the adaptation range therefore snaps from
-one day (the last day of a block) to the whole upcoming block, rather than tapering.
+`get_active_mesocycle` has two fallbacks when no block contains the evaluation date: first
+the next *future* block, then — if every block is already over — the absolute first
+mesocycle. On a calendar gap between blocks the adaptation range therefore snaps from one day
+(the last day of a block) to the whole upcoming block, rather than tapering.
 
-Blocks are contiguous in practice. Both features here gate on a small day-delta against the
-returned block's end date, so neither misfires in the gap case: the returned block is the
-upcoming one, whose end is far away. Recorded rather than fixed.
+Blocks are contiguous in practice. Both features here gate on `0 <= days_left <= N` against
+the returned block's end date, so neither misfires in either fallback: the future block's end
+is far away (`days_left` large), and a wholly-past block gives a negative `days_left`.
+Recorded rather than fixed.
+
+One caveat is not guarded. With no mesocycle at all, §1's synthetic range end is evaluation
+date + 6 days, and the prompt gate compares against it — so an `adapt_terminal_window_days`
+of 6 or more would announce `THIS BLOCK IS ENDING` for a block that does not exist. The
+default is 3, so it never fires; the CLI hint is immune because it returns early when there
+is no block. Recorded rather than fixed, to keep the gate a single predicate.
