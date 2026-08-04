@@ -86,7 +86,8 @@ class WorkoutGenMixin:
 
     @classmethod
     def _enforce_rest_windows_generate(
-        cls, workouts: List[Dict[str, Any]], constraints: List[Constraint], gen_start: str
+        cls, workouts: List[Dict[str, Any]], constraints: List[Constraint], gen_start: str,
+        gen_end: str
     ) -> List[Dict[str, Any]]:
         """Forces `rest` constraints onto a freshly generated workout list (§6): every rest
         date inside the generated span becomes a single rest, deterministically, bypassing
@@ -95,14 +96,14 @@ class WorkoutGenMixin:
 
         Dates the model simply left out are filled too, not only the ones it scheduled: an
         absent row and an explicit rest day mean different things to adherence (§6). The
-        span is `gen_start` to the last date the model returned, so this still never invents
-        days beyond what was generated."""
+        span is the *requested* `gen_start`..`gen_end`, not what the model happened to
+        return — a rest window at the tail of the range is exactly the case the model
+        answers with silence, so bounding by its last date would reopen the gap (§6)."""
         full_rest = cls._hard_rest_windows(constraints)
-        dated = [w['date'] for w in workouts if w.get('date')]
-        if not full_rest or not dated:
+        if not full_rest:
             return workouts
 
-        span_end = max(dated)
+        span_end = gen_end
         forced: Dict[str, str] = {}          # date -> constraint title
         for (s, e, title) in full_rest:
             day = datetime.strptime(max(s, gen_start), "%Y-%m-%d").date()
@@ -352,8 +353,10 @@ class WorkoutGenMixin:
         if end_date is not None:
             end_date_obj = datetime.strptime(end_date, "%Y-%m-%d").date()
             num_days = max(1, (end_date_obj - gen_start_obj).days)
+            gen_end_str = end_date
         else:
             num_days = config.workout_generation_span_days
+            gen_end_str = (gen_start_obj + timedelta(days=num_days - 1)).strftime("%Y-%m-%d")
 
         constraints = self._db.get_constraints(gen_start_str)
         guidelines = self._load_science_guidelines()
@@ -410,7 +413,9 @@ class WorkoutGenMixin:
         # constraint forces its dates to rest regardless of what the LLM produced. Every
         # other constraint is advisory and left to the model. Applied after generation so
         # the guarantee holds even if the model ignores the constraint block it was shown.
-        workouts = self._enforce_rest_windows_generate(workouts, constraints, gen_start_str)
+        workouts = self._enforce_rest_windows_generate(
+            workouts, constraints, gen_start_str, gen_end_str
+        )
 
         # Boundary-week benchmark post-check (§4.1): warn (don't auto-insert) if a covered
         # block boundary lacks a fitness test. Runs after the rest pass so a rest-covered

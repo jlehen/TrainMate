@@ -344,9 +344,12 @@ For each directive in the fetched set:
     the prompt renders a rest window as "no training (rest enforced)"
     (`coach/engine/prompt.py`), so the model routinely returns *nothing at all* for
     those dates, and a pass that only rewrote what it returned would leave exactly
-    the gap this paragraph forbids. The span is `gen_start` to the last date the
-    model returned — bounded by what was actually generated, so the pass still never
-    invents days past the horizon the model planned to.
+    the gap this paragraph forbids. The span is the **requested** range —
+    `gen_start` to `gen_end`, i.e. the `--days`/`--until` horizon the athlete asked
+    for — not the last date the model happened to return. Bounding by the model's
+    last date would reopen the gap at the tail: a rest window covering the final
+    days of the range is precisely the case the model answers with silence, so
+    those days would fall outside the span and stay empty.
   - `adapt` eases whatever is already planned on that date — possibly more than
     one session, if multiple sports were scheduled that day — to the same
     explicit rest entry, with a `change_reason` naming the constraint (the
