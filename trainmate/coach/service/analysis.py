@@ -442,9 +442,9 @@ class DataAnalysisMixin:
         - The reconstruction is cached per `horizon`, keyed by an evidence fingerprint. If
           the evidence is unchanged since the last run and `force` is False, the cached
           reconstruction is returned without an LLM call.
-        - `force` bypasses *reuse* only (recompute even if unchanged); it never bypasses
-          the reinforcement integrity invariant — a forced re-run over unchanged evidence
-          still suppresses the confidence/recency ratchet.
+        - `force` bypasses *reuse* only (recompute even if unchanged); integrity is owned by
+          the per-learning evidence basis, which dedupes re-cited weeks
+          (DESIGN_evidence_based_confidence.md §8).
         - `inspect_only` is read-only: it renders the reconstruction but writes neither coach
           learnings nor the cache.
         """

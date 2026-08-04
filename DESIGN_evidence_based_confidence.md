@@ -2,6 +2,15 @@
 
 **Status:** Implemented (2026-06-12) · **Branch:** `evident-based-confidence-claude`
 
+> **Rev. 2 (2026-08-04) — reconciliation with the code as built.** The model itself
+> (evidence basis, dedup, upgrade-auto / downgrade-propose, two-sided pressure, `--auto`,
+> the grandfather migration) shipped exactly as designed. What drifted afterwards was the
+> **curation UX**: a `learnings` CLI verb group was added, and the per-learning proposal
+> line moved out of `status` into it (§7 *AS BUILT rev 2*, §10). Also corrected here: the
+> no-evidence case of the §3 mapping, the `source` enum in §5, the shape and default of
+> the confirm prompt (§7), what `--auto` does at the bottom rung (§2, §7), and stale
+> symbol/module paths (§3, §4, §6). Superseded text is struck through, not deleted.
+
 **Implementation notes — decisions taken where the design met the codebase:**
 - **`plan generate` stays a non-writer.** The design (§6) assumes it authors
   learnings, but in this codebase it never did (only the analysis flow and `adapt`
@@ -14,10 +23,12 @@
   "adapt does not write durable learnings" premise (§2/§11). The old
   `_apply_learning_updates(decision)` call and the learning-writing instructions in
   `_adapt_logic`'s prompt are removed.
-- **No new CLI verbs.** The propose/confirm flow (§7) is resolved via **interactive
-  prompts** at the end of `data bootstrap`/`data reflect` (the `data wipe` /
-  `workout swap` `input()` idiom) rather than `data learning demote|keep`. `status`
-  still displays pending proposals; `--auto` skips the prompts.
+- ~~**No new CLI verbs.**~~ **Superseded — see §7 *AS BUILT (rev 2)*.** The
+  propose/confirm flow (§7) first shipped as **interactive prompts** at the end of
+  `data bootstrap`/`data reflect`, with `--auto` skipping them. A later change added an
+  out-of-band `learnings` command family, so `demote`/`keep` are now reachable both from
+  the run-end prompt and as standalone verbs; `status` was slimmed to a one-line count at
+  the same time.
 
 Original draft preamble follows.
 
@@ -52,6 +63,9 @@ shipped mechanisms:
    so overlapping evidence is not re-counted — see [reflect/bootstrap split]); and
 2. the **window-level evidence fingerprint** + `suppress_reinforcement`
    (a forced re-read of unchanged evidence drops the reinforce ratchet).
+   *(Correction: `suppress_reinforcement` was designed but never actually shipped — see
+   DESIGN_backward_evaluation.md §8 *AS BUILT*. Only the fingerprint existed, so the
+   "already contained" claim rested on the fingerprint alone.)*
 
 So this is **not** a rescue. It is a correctness/honesty upgrade: make the
 confidence *label* mean something concrete, and give contradiction a voice. The
@@ -81,7 +95,9 @@ A per-learning basis closes that structurally.
 - Per-*session* provenance. Evidence is keyed on **weeks** (see §4) — the unit the
   LLM is actually shown.
 - Silent auto-erasure. Demotions are human-confirmed by default; `--auto` is an
-  explicit opt-out for unattended runs, and only for *staleness* (§7).
+  explicit opt-out for unattended runs, and only for *staleness* (§7). Note that the
+  opted-into `--auto` ladder *does* end in a hard delete at its bottom rung — §7 spells
+  out why that is the ladder finishing, not erasure behind the user's back.
 - Replacing recency dormancy. Dormancy stays as the "hide from prompts" mechanism;
   this only *adds* a demotion proposal when a learning crosses into it (§8).
 - A confidence model for `workout adapt` (it does not write durable learnings).
@@ -100,12 +116,18 @@ net_support = (# distinct supporting weeks) − (# distinct contradicting weeks)
 net_support ≥ established_min (default 5)  → established
 net_support ≥ moderate_min    (default 3)  → moderate
 net_support ≥ 1                            → tentative
-net_support ≤ 0                            → (proposed retirement)
+net_support ≤ 0 *and* ≥1 contradicting wk  → (proposed retirement)
+net_support ≤ 0 with an empty basis        → tentative (the floor)
 ```
+
+**Retirement needs an actual contradiction.** The `≤ 0` rung fires only when
+contradicting weeks drove it there. A learning with no basis at all (net 0, nothing
+against it) rests at the tentative floor instead — otherwise every freshly added,
+not-yet-cited learning would be proposed for retirement on its first recompute.
 
 The two cut points are **configurable in `config.yaml`** (the project uses YAML,
 not env vars — see [garmin direct-pull design]), mirroring how
-`LEARNING_STALENESS_DAYS` already parameterizes the dormancy budgets:
+`config.learning_staleness_days` already parameterizes the dormancy budgets:
 
 ```yaml
 learning_confidence_thresholds:   # distinct net supporting weeks to reach each level
@@ -114,8 +136,10 @@ learning_confidence_thresholds:   # distinct net supporting weeks to reach each 
 ```
 
 A loader reads these with the defaults above as fallback (tentative is always ≥1,
-retirement always ≤0 — not knobs). Tuning the map re-levels learnings on the next
-recompute without a migration.
+retirement always ≤0 — not knobs); `config_template.yaml` carries the commented block
+next to `learning_staleness_days`. Tuning the map re-levels learnings on the next
+recompute without a migration — `db.recompute_all_confidence()` is the entry point that
+re-derives every learning from its basis on demand.
 
 The LLM no longer sets confidence. It does the one thing it is positioned to do —
 **attribute observations to the weeks of training it is looking at** — and the app
@@ -133,7 +157,8 @@ for the human to accept or dismiss (§7).
 
 ## 4. Why Weeks, Not Sessions
 
-The analysis prompt (`CoachService._run_workout_analysis`) feeds the LLM **weekly
+The analysis prompt (`CoachService._run_workout_analysis`, now in
+`coach/service/analysis.py`) feeds the LLM **weekly
 aggregate summaries** keyed by `week_commencing` (totals, zone seconds, RHR/HRV,
 highlights) — never a list of individual workouts with stable IDs. So the only
 evidence anchor the model can actually *point at* is the week.
@@ -166,7 +191,7 @@ learning_evidence
 | learning_id     | INTEGER    | FK → coach_learnings.id (ON DELETE CASCADE)        |
 | week_commencing | TEXT       | YYYY-MM-DD (Monday) — the evidence anchor          |
 | polarity        | INTEGER    | +1 supporting · −1 contradicting                   |
-| source          | TEXT       | 'reflect' | 'bootstrap' | 'plan' | 'migration'     |
+| source          | TEXT       | 'reflect' | 'bootstrap' | 'manual' | 'migration'   |
 | created_at      | TEXT       | ISO timestamp                                      |
 UNIQUE(learning_id, week_commencing, polarity)
 ```
@@ -174,6 +199,13 @@ UNIQUE(learning_id, week_commencing, polarity)
 `UNIQUE(learning_id, week_commencing, polarity)` is the dedup guarantee: re-citing
 a counted (week, polarity) pair is an `INSERT OR IGNORE` no-op. A week may appear
 once as +1 and once as −1 (genuine flip over time); `net_support` nets them.
+
+**AS BUILT — the `source` values.** `'plan'` is never written: `plan generate` stayed a
+non-writer (§6 *AS BUILT*), so the value survives only as a vestige in the schema
+comment. `'manual'` was added instead, for `db.add_learning(text, sports, confidence)` —
+a hand-added learning seeds a synthetic supporting basis sized to sustain the confidence
+it was created with, so the first recompute does not demote it for lack of evidence. It
+is the per-row analogue of the §9 grandfather migration.
 
 `coach_learnings` changes:
 - `confidence` — still present, but now **derived/written by the app** from the
@@ -189,8 +221,9 @@ the same transaction that mutates the basis.
 
 ## 6. Delta Protocol Changes
 
-`learning_updates` deltas (LEARNING_UPDATES_FIELD in `coach/engine.py`) change so
-the LLM attributes evidence instead of asserting confidence:
+`learning_updates` deltas (`LEARNING_UPDATES_FIELD`, now in `coach/engine/__init__.py`
+after the engine became a package) change so the LLM attributes evidence instead of
+asserting confidence:
 
 | op           | shape                                              | effect |
 |--------------|----------------------------------------------------|--------|
@@ -258,27 +291,49 @@ propose moderate → (60d) → propose tentative → (21d) → propose retire. E
 accepted step adopts the lower level's shorter budget, so an untouched learning
 walks down to retirement over time rather than vanishing in one jump.
 
-`status` surfaces a pending proposal, e.g.:
+The three human actions and their effects are:
 
-```
-[4|cycling|moderate] Responds well to back-to-back hard days.
-   ⚠ proposed demotion → tentative  (confirm on the next 'data reflect')
-```
-
-The two human actions and their effects are unchanged, but **AS BUILT** they are
-**not** a `data learning demote|keep` CLI verb group. Instead they are offered as an
-**interactive prompt at the end of `data bootstrap`/`data reflect`** (the
-`data wipe` / `workout swap` `input()` idiom), one line per pending proposal:
-
-- **accept (`y`)** → `db.demote_learning(id)`: write `confidence = proposed_confidence`
+- **demote** → `db.demote_learning(id)`: write `confidence = proposed_confidence`
   (or retire on the retirement sentinel), clear `proposed_confidence`, re-arm the clock.
-- **keep (`N`)** → `db.keep_learning(id)`: dismiss + **affirm** — for a *contradiction*
+- **keep** → `db.keep_learning(id)`: dismiss + **affirm** — for a *contradiction*
   proposal, neutralize the −1 rows; for a *staleness* proposal, refresh
   `last_reinforced_at`. Either way clear `proposed_confidence`.
-- **skip (`s`)** → leave it pending; re-raised on the next run.
+- **skip** → leave it pending; re-raised on the next run.
 
-`status` only *displays* pending proposals; `--auto` skips the prompt entirely
-(staleness applied directly, contradiction left queued).
+> **AS BUILT (rev 1) — resolved at the end of a run, not by new CLI verbs.** The three
+> actions are offered as an **interactive prompt at the end of `data bootstrap`/`data
+> reflect`**, one block per pending proposal. It is not the `y`/`N`/`s` `input()` idiom
+> the draft assumed: it uses the shared `cli.prompt.choose` selection menu, with
+> **`skip` as the default answer** — the safest of the three, since an unattended Enter
+> then changes nothing. `--auto` skips the prompt entirely (staleness applied directly,
+> contradiction left queued).
+
+> **AS BUILT (rev 2) — a `learnings` verb group was added later, and `status` slimmed.**
+> Out-of-band curation turned out to be wanted, so the run-end prompt gained standalone
+> siblings: `learnings list | show | edit | rm | demote | keep | wipe`. `demote`/`keep`
+> call the same `db.demote_learning`/`db.keep_learning`, so a proposal can be resolved
+> either at the end of a run or at any later moment. `learnings show <id>` additionally
+> renders the per-week evidence basis (supporting/contradicting, each with its `source`)
+> — the audit view §1 asks for but never specified.
+>
+> At the same time the per-learning proposal line moved **out of** `status`. `status` now
+> prints only a one-line roll-up:
+>
+> ```
+> Coach Learnings:
+>   7 active, 2 dormant, 1 pending demotion — see `learnings list`
+> ```
+>
+> and the full line lives in `learnings list` / `learnings show`:
+>
+> ```
+> [4|cycling|moderate] Responds well to back-to-back hard days.
+>    ⚠ proposed demotion → tentative (confirm with `learnings demote`/`learnings keep`)
+> ```
+>
+> The web front-end exposes the **read** half only — `GET /api/learnings` and
+> `GET /api/learnings/<id>/evidence`. The dashboard is read-only by design, so there are
+> no `demote`/`keep` HTTP endpoints; resolving a proposal is a CLI (or run-end) action.
 
 **`--auto` (unattended runs).** `plan generate` already carries an `--auto` flag
 for non-interactive use (plans.py — skips prompts, see [reflect/bootstrap split]
@@ -291,6 +346,16 @@ time-driven, low-stakes, and pointless to queue when nobody will review it. **Co
 training as disconfirming a real pattern) and stay queued as proposals for the next
 interactive review. This keeps the strong caution on contradiction while letting
 staleness decay on its own when run from cron.
+
+**The bottom rung of the `--auto` ladder erases the row.** Stating plainly what "walks
+down to retirement" means unattended: when a *tentative* learning goes dormant under
+`--auto`, the step down lands on the retirement sentinel, and there is no proposal queue
+to park it in — so the learning is `DELETE`d from `coach_learnings` outright (its basis
+cascades). This is the intended end of the ladder, not silent auto-erasure in the §2
+sense: it takes a full budget of silence at *every* level to get there (180d → 60d →
+21d, each step re-arming the clock), and it only ever happens on a run the user
+explicitly asked to be unattended. Interactively the same learning stops one rung
+earlier, as a `retire` proposal waiting on a human.
 
 ---
 
@@ -308,6 +373,11 @@ shape, which is strictly stronger than the all-or-nothing fingerprint guard. So:
   threaded through `CoachService`) is removed; the basis subsumes it. Keeping two
   mechanisms for one property invites drift. This deletes the `evidence_unchanged`
   plumbing in `_run_workout_analysis` and simplifies `_apply_learning_updates`.
+  *(AS BUILT: role 2 never shipped in the first place — DESIGN_backward_evaluation.md §8
+  *AS BUILT* — so this was a design retirement, not a code deletion. `evidence_unchanged`
+  survives in `_run_workout_analysis`, but purely as the reuse/cache-hit test of role 1;
+  `apply_learning_deltas(deltas, available_weeks=None, source=…)` has no suppression
+  parameter.)*
 
 **Dormancy gains a demotion role.** Recency dormancy (`learning_is_dormant`) still
 hides stale learnings from prompts, but crossing the budget now *also* proposes a
@@ -372,9 +442,16 @@ Schema is additive (new table + nullable column), consistent with the in-place
   it stayed a non-writer; the evidence-cited protocol is emitted only by
   `data bootstrap`/`data reflect`, with a cold-start nudge from `plan generate`/`status`
   (see §6 *AS BUILT*).
-- **Propose/confirm via interactive prompts, not new CLI verbs** (§7 *AS BUILT*) —
-  resolved in `data bootstrap`/`data reflect`; `--auto` skips. No `data learning`
-  verb group was added.
+- **Propose/confirm via interactive prompts** (§7 *AS BUILT rev 1*) — resolved at the end
+  of `data bootstrap`/`data reflect` via a `prompt.choose` menu defaulting to `skip`;
+  `--auto` skips it.
+- ~~**No `data learning` verb group was added.**~~ — **superseded (§7 *AS BUILT rev 2*):**
+  a `learnings` group (`list`/`show`/`edit`/`rm`/`demote`/`keep`/`wipe`) was added
+  afterwards for out-of-band curation, and the per-learning proposal line moved there out
+  of `status`, which kept only a one-line count. The web surface stayed read-only.
+- **Under `--auto`, the last staleness step deletes the learning** (§7) — the bottom of
+  the "walks down to retirement" ladder, reached only after a full silence budget at
+  every level, and only on a run the user marked unattended.
 
 **Open**
 

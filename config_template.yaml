@@ -23,6 +23,13 @@ llm:
 #  moderate: 60
 #  established: 180
 
+# Distinct net supporting weeks (supporting minus contradicting) a learning needs to
+# reach each confidence level. Tentative is always >=1 and proposed-retirement <=0 —
+# those are not knobs. Retuning re-levels learnings on the next recompute, no migration.
+#learning_confidence_thresholds:
+#  moderate: 3
+#  established: 5
+
 # Flask web front-end (run trainmate_web.py directly). Optional — omit to use defaults.
 #web:
 #  # Interface to bind. Loopback by default so the dev server isn't exposed on all
