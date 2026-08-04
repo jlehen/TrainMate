@@ -12,7 +12,7 @@ from trainmate import garmin, intensity
 from trainmate.garmin import activity_load
 from trainmate.util import (
     today_str as _today_str, today_date as _today_date,
-    cyan, green, yellow, bold, red, gray, PMC_TSB_LAG_NOTE,
+    cyan, green, yellow, bold, red, gray, cmd, PMC_TSB_LAG_NOTE,
 )
 from trainmate.coach.engine import CoachEngine
 from trainmate.coach.formatting import format_baseline, _load_science_guidelines
@@ -99,11 +99,16 @@ class AdaptationMixin:
         # whole span (lookback start -> mesocycle end), not just the backward window —
         # otherwise the LLM never sees already-scheduled future sessions and reinvents
         # them from scratch (losing their sport/title and overwriting the athlete's plan).
+        # No plan, no adaptation: every judgement below is relative to the block — its
+        # focus, its remaining days, what a cut can still rebound from — so without one
+        # there is nothing to adapt *towards* (DESIGN_block_boundary.md §6).
         active_meso = self._db.get_active_mesocycle(target_date_str)
-        if active_meso:
-            meso_end_date_str = active_meso['end_date']
-        else:
-            meso_end_date_str = (target_date_obj + timedelta(days=6)).strftime("%Y-%m-%d")
+        if not active_meso:
+            raise ValueError(
+                "No active periodization strategy found. Run "
+                + cmd("plan generate") + " first."
+            )
+        meso_end_date_str = active_meso['end_date']
 
         window_workouts = self._db.get_workouts(
             start_date=start_date_str, end_date=meso_end_date_str, include_removed=True

@@ -20,8 +20,11 @@ Two consequences follow:
   cannot slip through (the apply range is derived from the surviving proposals, so it
   cannot stretch past the block either).
 
-When no mesocycle covers the evaluation date at all, `workout_adapt` falls back to a
-synthetic range end of evaluation date + 6 days, and both bounds then apply to that.
+When no mesocycle covers the evaluation date at all, `workout_adapt` **refuses**, raising
+the same "run `plan generate` first" error `workout_generate` already raises (§6). There is
+no synthetic range: every judgement adapt makes is relative to the block — its focus, the
+days it has left, whether a cut can still rebound before it ends — so without one there is
+nothing to adapt *towards*.
 
 The fatigue signal is not actually lost, though — it travels a different path.
 `workout_generate` reads the same `metrics_lookback_days` window (metrics, completed
@@ -96,8 +99,17 @@ the returned block's end date, so neither misfires in either fallback: the futur
 is far away (`days_left` large), and a wholly-past block gives a negative `days_left`.
 Recorded rather than fixed.
 
-One caveat is not guarded. With no mesocycle at all, §1's synthetic range end is evaluation
-date + 6 days, and the prompt gate compares against it — so an `adapt_terminal_window_days`
-of 6 or more would announce `THIS BLOCK IS ENDING` for a block that does not exist. The
-default is 3, so it never fires; the CLI hint is immune because it returns early when there
-is no block. Recorded rather than fixed, to keep the gate a single predicate.
+**No mesocycle at all — `adapt` refuses.** This case used to synthesize a range end of
+evaluation date + 6 days, which meant the prompt gate compared `days_left` against an
+invented boundary: an `adapt_terminal_window_days` of 6 or more would have announced
+`THIS BLOCK IS ENDING` for a block that does not exist. Rather than special-case the gate,
+adapt now requires a block, matching `workout_generate`, which has always refused without a
+periodization strategy. The phantom-boundary case stops existing instead of being guarded.
+
+The cost is deliberate and worth naming: adapt used to degrade all the way down — it
+tolerates a missing *goal* too (`objective_id` is `None` when there is no active
+objective), so it kept answering "you slept badly, should today change?" in the gap between
+one goal ending and the next being set. It no longer does. Two consequences follow: a
+manually added workout (`workout add` needs no plan) cannot be adapted, and the engine's
+"no active block" branch — which dropped the intensity table and the drift instructions
+that reference it — is no longer reachable through this path.

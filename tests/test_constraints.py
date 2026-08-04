@@ -263,6 +263,20 @@ class TestMessageCapture(unittest.TestCase):
 
     def setUp(self):
         clear_all_tables(test_db)
+        # `adapt` refuses without a plan (DESIGN_block_boundary.md §6); these cases are
+        # about the note, not the block, so give them one wide enough to ignore.
+        obj_id = test_db.add_objective(
+            title="Background goal", target_date="2026-12-31",
+            sport_type="running", priority=1,
+        )
+        test_db.save_macrocycle(
+            objective_id=obj_id, strategy="General preparation.",
+            goals_hash="bg", constraints_hash="bg",
+            mesocycles=[{
+                "name": "Base", "start_date": "2026-01-01",
+                "end_date": "2026-12-31", "focus": "Aerobic base",
+            }],
+        )
 
     @patch("trainmate.coach.engine.openrouter_client")
     def test_new_constraints_returned_raw_and_unconfirmed(self, mock_client):

@@ -466,10 +466,13 @@ called by the UIs.
   - **Rest-window pre-pass** (`_enforce_rest_windows_adapt`): eases any future,
     not-yet-completed planned session under a `rest = 1` constraint to rest, regardless
     of the model's proposals.
-  - **Block firewall (write side):** any proposal dated past the adaptation range end
-    (the block end, or a synthetic target+6 with no mesocycle) is dropped — the next
-    block was never shown to the model, so a post-boundary date is a hallucination
-    ([§15](#15-design-rationale--history), DESIGN_block_boundary.md §1).
+  - **Block firewall (write side):** any proposal dated past the block end is dropped —
+    the next block was never shown to the model, so a post-boundary date is a
+    hallucination ([§15](#15-design-rationale--history), DESIGN_block_boundary.md §1).
+  - **Requires a block:** `workout_adapt` raises "No active periodization strategy found"
+    when `get_active_mesocycle` returns nothing, as `workout_generate` does. Adapt's
+    judgements are all relative to the block, so there is nothing to adapt towards
+    without one (DESIGN_block_boundary.md §6).
   - **Constraint magnitude** (`constraint_plan_impact` / `constraint_is_plan_shaping`):
     the §7 heuristic behind the `constraint add`/`edit` replan proposal. Two independent
     triggers, either firing: displaced planned load ≥ `config.replan_displaced_load_pct`

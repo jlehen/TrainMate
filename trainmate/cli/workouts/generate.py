@@ -207,6 +207,8 @@ def run_workout_adapt(args: argparse.Namespace) -> None:
         else:
             print("\nAdaptations discarded.")
 
+    except ValueError as e:
+        print(red(str(e)))
     except Exception as e:
         print(red(f"Error executing daily adaptation: {e}"))
 

@@ -45,6 +45,33 @@ class TestAdaptationAdapt(unittest.TestCase):
 
     def setUp(self):
         clear_all_tables(test_db)
+        # `adapt` refuses without a plan (§6), so every case needs one. A single wide
+        # block keeps it out of the way: tests that care about block edges save their
+        # own plan over this one.
+        self._save_background_plan()
+
+    @staticmethod
+    def _clear_plans():
+        """Drops setUp's background plan so a test's own plan is the governing one."""
+        with test_db._get_connection() as conn:
+            for table in ("mesocycles", "macrocycles", "objectives"):
+                conn.execute(f"DELETE FROM {table}")
+            conn.commit()
+
+    @staticmethod
+    def _save_background_plan():
+        obj_id = test_db.add_objective(
+            title="Background goal", target_date="2026-12-31",
+            sport_type="running", priority=1,
+        )
+        test_db.save_macrocycle(
+            objective_id=obj_id, strategy="General preparation.",
+            goals_hash="bg", constraints_hash="bg",
+            mesocycles=[{
+                "name": "Base", "start_date": "2026-01-01",
+                "end_date": "2026-12-31", "focus": "Aerobic base",
+            }],
+        )
 
     @patch("trainmate.coach.engine.openrouter_client")
     def test_adaptation_matching_and_discrepancies(self, mock_client):
@@ -206,6 +233,7 @@ class TestAdaptationAdapt(unittest.TestCase):
 
     def _save_two_block_plan(self):
         """Saves a plan whose first block ends 2026-06-30 and whose second opens 2026-07-01."""
+        self._clear_plans()
         obj_id = test_db.add_objective(
             title="Zurich Marathon", target_date="2026-10-15",
             sport_type="running", priority=1,
@@ -518,6 +546,7 @@ class TestAdaptationAdapt(unittest.TestCase):
 
     def _seed_block_with_drift(self):
         """A 3-week-elapsed block whose 'easy' running has drifted into Z3."""
+        self._clear_plans()
         obj_id = test_db.add_objective(
             title="Autumn Half", target_date="2026-09-01",
             sport_type="running", priority=1,
@@ -564,14 +593,15 @@ class TestAdaptationAdapt(unittest.TestCase):
         self.assertNotIn("Change vs", user_content)
 
     @patch("trainmate.coach.engine.openrouter_client")
-    def test_adapt_prompt_omits_drift_instructions_without_a_block(self, mock_client):
-        """No active block -> no table, so the instructions that reference it must go
-        too (the has_message gating discipline)."""
-        mock_client.complete.return_value = {"change_needed": False, "reason": "ok"}
-        coach_service.workout_adapt("2026-06-24")
-        system_prompt, user_content = mock_client.complete.call_args[0][:2]
-        self.assertNotIn("CORRECTING EXECUTION DRIFT", system_prompt)
-        self.assertNotIn("MEASURED INTENSITY DISTRIBUTION", user_content)
+    def test_adapt_refuses_without_a_plan(self, mock_client):
+        """Every judgement adapt makes is relative to the block, so with no plan there is
+        nothing to adapt towards: refuse rather than invent a bare 7-day range
+        (DESIGN_block_boundary.md §6). No LLM call is made."""
+        self._clear_plans()
+        with self.assertRaises(ValueError) as ctx:
+            coach_service.workout_adapt("2026-06-24")
+        self.assertIn("plan generate", str(ctx.exception))
+        mock_client.complete.assert_not_called()
 
     def test_drift_correction_does_not_count_as_an_easing(self):
         """A drift correction rewrites the prescription and holds the load, so it must
