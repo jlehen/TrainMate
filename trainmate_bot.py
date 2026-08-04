@@ -96,6 +96,7 @@ MENU_COMMANDS = [
     ("constraint", "Manage directives the coach works around"),
     ("model", "List/choose the LLM model"),
     ("cancel", "Abort the command awaiting your answer"),
+    ("restart", "Restart the bot process (picks up new code)"),
     ("help", "Show command help"),
 ]
 

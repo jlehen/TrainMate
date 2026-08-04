@@ -203,8 +203,8 @@ logged and stepped over, never allowed to prevent the exit.
     that touches existing `/cancel` behavior, not just new code. Concretely:
     `run_polling()` is replaced by `_serve()`, plus `_pause_polling` /
     `_resume_polling` and the `restarting` latch they honour.
-  - `MENU_COMMANDS` (the `set_my_commands` list) is deliberately **not** touched —
-    `/restart` stays off Telegram's `/` menu, like `/start` (§7).
+  - `MENU_COMMANDS` (the `set_my_commands` list) gains a `restart` entry — it is an
+    ordinary command, not a special one (§7).
 - No config changes — reuses `telegram.allowed_chat_ids`.
 - No DB changes.
 
@@ -241,11 +241,14 @@ logged and stepped over, never allowed to prevent the exit.
   the mirror image: any update fetched in the same batch *behind* `/restart` is
   confirmed and dropped rather than replayed. Losing one queued message beats a
   restart loop, and §5.2's teardown kills that message's subprocess anyway.
-- **`/restart` is not advertised in Telegram's command menu.** `MENU_COMMANDS`
-  (`set_my_commands`) lists the everyday command families and `/cancel`; `/start`
-  and `/restart` are both absent. Deliberate: a one-tap process restart sitting in
-  the `/` popup next to `/status` is an accident waiting to happen, and the two
-  people who need it (the athlete, this doc) already know the word.
+- **`/restart` is advertised in Telegram's command menu**, alongside the everyday
+  command families and `/cancel`. It was briefly kept off the list on the grounds
+  that a one-tap restart next to `/status` invites a mis-tap, but that overstates
+  the damage: restarting is cheap, §5.2's teardown ends any live session and
+  releases the long-poll cleanly, and the supervisor brings the worker straight
+  back. A mis-tap costs a reconnect, not work — so there is no reason to make the
+  command harder to find than any other. (`/start` remains absent, as Telegram
+  sends it automatically on first contact.)
 - **Open:** how is `tm-bot` actually run in production right now (bare
   foreground, `nohup`, `tmux`, a systemd unit)? Determines whether a plain
   `kill <supervisor-pid>` reaches the child automatically (process-group

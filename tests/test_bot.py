@@ -306,11 +306,11 @@ class RestartTeardownTest(unittest.IsolatedAsyncioTestCase):
 
 
 class MenuCommandsTest(unittest.TestCase):
-    def test_restart_is_not_advertised_in_the_command_menu(self):
-        # Deliberate, like /start: a one-tap process restart next to the everyday
-        # commands is an accident waiting to happen (DESIGN_bot_restart.md §7).
+    def test_restart_is_advertised_in_the_command_menu(self):
+        # Not treated as special: the teardown ends any live session cleanly, so a
+        # mis-tap costs a reconnect, not work (DESIGN_bot_restart.md §7).
         names = [name for name, _ in bot.MENU_COMMANDS]
-        self.assertNotIn("restart", names)
+        self.assertIn("restart", names)
         self.assertIn("cancel", names)
 
 
