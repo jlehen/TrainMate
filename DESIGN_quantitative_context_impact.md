@@ -404,6 +404,19 @@ re-pulled load on a bracketing morning, a changed `k`). Conversely a change that
 the block identical costs nothing. The extra work is three unbounded reads plus the
 alignment on the reuse path — local SQLite, negligible against the LLM call it guards.
 
+**Accepted consequence: the two knobs of §5 are now fingerprinted, transitively.**
+`context_days_lookahead` and `context_days_min_signal_days` shape the block, so editing
+either changes the hash and forces a recompute on the next `data bootstrap` /
+`data reflect`. That is a deliberate exception to the project's general stance that
+config values are not hashed into this cache (`_get_config_hash` / `plan_config_hash`
+covers the plan-shaping profile, and gates *plan* staleness, not this reconstruction):
+the stance exists so that fiddling with a setting does not cost an
+LLM call, but here a different knob genuinely produces a different prompt, and reusing an
+answer computed under the old one would be reporting a stale result as current. It is
+narrow — only these two keys, only on the analysis cache — and it is why the knobs are not
+merely display settings. Adding the block to the hash also invalidated whatever was cached
+at the time of the change, once.
+
 The **deliberate baseline-recompute omission** noted in
 `DESIGN_richer_analysis_evidence.md` §5 still applies to the *weekly* evidence
 (`--force` is the escape hatch); inside `context_days` it does not, since the per-morning

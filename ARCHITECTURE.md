@@ -1808,7 +1808,12 @@ Calendar (tagged events) ──► google_calendar.sync_calendar_context
   evidence fingerprint, so an added/edited/deleted signal invalidates the cached
   reconstruction **unconditionally** — in-window rows are hashed as fields, and rows
   outside the window reach the hash through the full-history `context_days` block, which
-  is hashed as computed (§10, step 2/3a).
+  is hashed as computed (§10, step 2/3a). Because that block is hashed as computed,
+  `context_days_lookahead` and `context_days_min_signal_days` are fingerprinted
+  transitively: editing either invalidates the cached reconstruction. That is a
+  deliberate, narrow exception to config values not being hashed here — a different knob
+  produces a different prompt, so the cached answer is not an answer to the current
+  question (DESIGN_quantitative_context_impact.md §8).
 
 **Outbound flow (first-party authoring — `context` command, alias `ctx`):** for
 ad-hoc signals where standing up a syncer is overkill (a heatwave), the user can
