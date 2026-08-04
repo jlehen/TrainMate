@@ -1073,5 +1073,56 @@ class TestPeriodization(unittest.TestCase):
         self.assertIn("RHR=55bpm, HRV=60ms", user_content)
 
 
+class TestStaleAnalysisWarning(unittest.TestCase):
+    """`plan generate` feeds the cached reconstruction to the strategy prompt but never
+    recomputes it, so a stale cache shapes the plan silently unless it says so (§5)."""
+
+    @classmethod
+    def setUpClass(cls):
+        if os.path.exists(TEST_DB_PATH):
+            os.remove(TEST_DB_PATH)
+        global test_db
+        test_db = Database(db_path=TEST_DB_PATH)
+        trainmate.db.db = test_db
+        trainmate.coach.service.db = test_db
+
+    @classmethod
+    def tearDownClass(cls):
+        if os.path.exists(TEST_DB_PATH):
+            try:
+                os.remove(TEST_DB_PATH)
+            except OSError:
+                pass
+
+    def setUp(self):
+        clear_all_tables(test_db)
+
+    def _cache_ending(self, window_end: str) -> None:
+        test_db.save_analysis_cache(
+            horizon="long", fingerprint="fp", window_start="2026-01-01",
+            window_end=window_end, reconstruction={"macrocycle_summary": "Base build."},
+        )
+
+    def _warn(self, today: str) -> str:
+        with patch("builtins.print") as mock_print:
+            coach_service._maybe_warn_stale_analysis(today)
+        return "\n".join(str(c[0][0]) for c in mock_print.call_args_list if c[0])
+
+    def test_warns_once_the_lag_exceeds_the_configured_budget(self):
+        self._cache_ending("2026-06-01")
+        out = self._warn("2026-07-01")          # 30 days > the 14-day default
+        self.assertIn("2026-06-01", out)
+        self.assertIn("30 days ago", out)
+        self.assertIn("data reflect", out)
+
+    def test_quiet_while_the_cache_is_current(self):
+        self._cache_ending("2026-06-25")
+        self.assertEqual(self._warn("2026-07-01"), "")    # 6 days, inside the budget
+
+    def test_quiet_when_there_is_nothing_cached(self):
+        """A cold start is the bootstrap nudge's job, not this one's."""
+        self.assertEqual(self._warn("2026-07-01"), "")
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -246,6 +246,25 @@ class PromptConfigMixin:
             + " to reconstruct your training history and seed evidence-based observations."
         ))
 
+    def _maybe_warn_stale_analysis(self, today_str: str) -> None:
+        """Warns when the cached reconstruction fed to the strategy prompt has fallen
+        behind today. `plan generate` reads it as-is and never recomputes, so without this
+        the plan is shaped by an old picture of the athlete's training in silence
+        (DESIGN_backward_evaluation.md §5)."""
+        cached = self._db.get_analysis_cache("long")
+        window_end = (cached or {}).get("window_end")
+        if not window_end:
+            return
+        lag = (datetime.strptime(today_str, "%Y-%m-%d").date()
+               - datetime.strptime(window_end, "%Y-%m-%d").date()).days
+        if lag <= config.analysis_staleness_days:
+            return
+        print(yellow(
+            f"The training-history reconstruction ends {window_end} ({lag} days ago); "
+            f"sessions since then did not shape this plan. Run " + cmd("data reflect")
+            + " first to bring it up to date."
+        ))
+
     def _get_coach_system_prompt(
         self, objectives: List[Objective], constraints: List[Constraint],
         custom_task: str = "", objective_id: Optional[int] = None

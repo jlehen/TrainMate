@@ -23,6 +23,11 @@ llm:
 #  moderate: 60
 #  established: 180
 
+# Days the cached training-history reconstruction may lag behind today before
+# 'plan generate' warns that it is planning against an out-of-date picture. The cache
+# is only rebuilt by 'data bootstrap' / 'data reflect', so it does not refresh itself.
+#analysis_staleness_days: 14
+
 # Distinct net supporting weeks (supporting minus contradicting) a learning needs to
 # reach each confidence level. Tentative is always >=1 and proposed-retirement <=0 —
 # those are not knobs. Retuning re-levels learnings on the next recompute, no migration.

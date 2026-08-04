@@ -222,6 +222,13 @@ class Config:
             "established": int(raw.get("established", 180)),
         }
 
+    @property
+    def analysis_staleness_days(self) -> int:
+        """Days the cached backward-evaluation reconstruction may lag today before
+        `plan generate` says so (DESIGN_backward_evaluation.md §5). The cache only
+        refreshes on `data bootstrap`/`data reflect`, so nothing else would."""
+        return int(self.get("analysis_staleness_days", 14))
+
     # --- Garmin direct-pull knobs (see DESIGN_garmin_direct_pull.md §13) ---
     @property
     def garmin_email(self) -> Optional[str]:

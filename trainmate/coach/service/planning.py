@@ -306,6 +306,7 @@ class PlanningMixin:
             prior_training_text = self._build_prior_training_context(prev_macro, today_str)
             if prior_training_text:
                 _print_prior_training_review(prior_training_text, width)
+            self._maybe_warn_stale_analysis(today_str)
             macro_data = self.engine._plan_generate_strategy(
                 next_goal=next_goal,
                 objectives=objectives,
