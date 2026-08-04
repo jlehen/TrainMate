@@ -23,8 +23,14 @@ that runs in `_init_db`, with a one-off `constraints_hash` backfill script
 (`scripts/migrate_constraints_drop_binding.py`) so existing plans aren't spuriously
 invalidated (§7). The §7 hard-window floor becomes a rest-window floor
 (`replan_rest_span_days`); message extraction (§8) drops the `sport`/`type` fields
-and can only ever create advisory (`rest = 0`) rows. Sections below still read in
-the old vocabulary where not corrected inline; this preamble governs on conflict.*
+and can only ever create advisory (`rest = 0`) rows. §4 (command surface), §5 (DDL
+and enforcement), §6 (consumption) and §7 (magnitude) have since been corrected
+inline to rev 6, so they can be read as canonical; the rollout (§10) and the
+`lifeevent` migration (§9) deliberately keep the old vocabulary, because they record
+what happened. Where anything else still conflicts, this preamble governs. Two rev-4
+decisions have also been overtaken since: `add` never prompts for a field value
+(project-wide policy, `DESIGN_cli_noargs.md` §a2 — §4), and both plan fingerprint
+columns are renamed in place rather than left as legacy (§7/§9).*
 
 *Rev 5 (2026-07-02, after implementation): migration bindingness corrected to
 **`soft`**, reversing the rev 4 decision. A life event was never code-enforced
@@ -157,28 +163,40 @@ directives; `context` is untouched.
 
 ## 4. Command surface
 
-New top-level **`constraint`** (alias `cons`). The standard CRUD six — no
-seventh verb; the "replan" action is a *flag*, not a verb (§7). Per the
-prompt-over-flags preference (`DESIGN_context_authoring.md` §4), **`add`**
-prompts interactively for any field omitted on the command line. **`edit` does
-not prompt** — every field it changes is passed explicitly on the command line
-(prompting the full field set on an edit would be wrong, and there is no
-`context edit` precedent to mirror); an `edit` with no field flags is a no-op
-that prints guidance.
+New top-level **`constraint`**. The standard CRUD six — no seventh verb; the
+"replan" action is a *flag*, not a verb (§7).
 
-| Subcommand | Alias | Purpose |
+**Nothing in this surface prompts for a field value (corrected).** Rev 4 specified
+an `add` that prompted interactively for anything the command line omitted, on a
+prompt-over-flags reading of `DESIGN_context_authoring.md` §4. Project policy has
+since ruled that out and `add` was never built that way: a prompt is for a
+*decision*, never for an argument the invocation should have carried —
+`DESIGN_cli_noargs.md` §a2, which is the authority on this. `TITLE` is mandatory, so
+it is positional and a missing one is argparse's usage error; every other field is
+an optional flag that simply stays unset when omitted. The only prompts the command
+raises are decisions: the §7 replan proposal and `wipe`'s destructive guard. `edit`
+likewise takes every field on the command line, and an `edit` with no field flags is
+a no-op that prints guidance.
+
+**Short forms are prefixes, not aliases.** `cons a`, `cons l`, `constr ed` all
+resolve because an unambiguous prefix *is* the command; `DESIGN_cli_noargs.md` §d
+defines that distinction and owns it. No `aliases=` is registered for `constraint`
+or any of its sub-commands, and none should be — the column below lists each verb's
+shortest unambiguous prefix, which falls out of the names themselves, not a
+registered second name.
+
+| Subcommand | Shortest prefix | Purpose |
 |---|---|---|
 | `add`  | `a` | Author a directive over a day or range |
-| `list` | `l` | List active/upcoming directives (date/sport/type filtered) |
+| `list` | `l` | List active/upcoming directives (date-windowed) |
 | `show` | `s` | One in detail — incl. whether it is plan-shaping (§7) |
-| `edit` | `e` | Adjust scope / bindingness / text / replan |
+| `edit` | `e` | Adjust scope / rest / text / replan |
 | `rm`   | `r` | Remove by id |
-| `wipe` |     | Remove all (guarded; `-y`/`--yes` for the bot) |
+| `wipe` | `w` | Remove all (guarded; `-y`/`--yes` for the bot) |
 
 ```
-constraint add TITLE [--start YYYY-MM-DD] [--end YYYY-MM-DD] [--sport SPORT]
-                     [--hard | --soft] [--type TYPE] [--desc TEXT]
-                     [--replan | --no-replan]
+constraint add TITLE [--start YYYY-MM-DD] [--end YYYY-MM-DD] [--desc TEXT]
+                     [--rest] [--replan | --no-replan]
 ```
 
 - `TITLE` (positional) is **the directive itself, stated short** — "no run
@@ -189,18 +207,17 @@ constraint add TITLE [--start YYYY-MM-DD] [--end YYYY-MM-DD] [--sport SPORT]
 - `--desc` is **optional richer context** for the coach, only when the one-liner
   isn't enough ("hotel gym only, no pool, long layover on the 14th"). Most
   constraints never set it. (Column name: `description`, §5.)
-- `--type` is an **optional opaque label** ("trip", "injury", …). The `add`
-  interactive prompt shows types already in use (same distinct-values query
-  pattern that powers `context list-metrics`) to discourage "trip" vs "travel"
-  drift. Never required — mandatory classification on the fast path is the
-  friction §1 diagnoses.
 - `--start` defaults to today; `--end` defaults to `--start` (single day).
-- `--hard` / `--soft` bindingness (§5); default `--soft` (advisory — the
-  conservative default, since `hard` can deterministically null out training).
-- `--sport` scopes the directive to one sport; omitted = all sports.
+- `--rest` is the **only structured knob** (rev 6, §5): it forces a full
+  no-training window whose dates skip the LLM. Omitted = advisory, the
+  conservative default, since `rest` deterministically nulls out training. On
+  `edit` the flag is a pair (`--rest` / `--no-rest`) so a directive can be toggled
+  back to advisory; on `add` absence already means advisory. Which sport, "only 45
+  min", injury nuance are prose in `TITLE`/`--desc`, not flags — rev 6 removed
+  `--sport`, `--hard`/`--soft` and `--type`.
 - `--replan` / `--no-replan` pre-answer the plan-shaping proposal (§7); omitted =
-  let the magnitude heuristic decide whether to *ask*. Independent of
-  `--hard`/`--soft` (§5, §7).
+  let the magnitude heuristic decide whether to *ask*. Independent of `--rest`
+  (§5, §7).
 - `constraint list` defaults to directives **from the start of the current
   mesocycle** (`get_active_mesocycle(today)['start_date']` — the training block
   being planned) plus everything upcoming (open-ended into the future). This
@@ -217,18 +234,25 @@ To keep `cons` (constraint) and context from colliding in the head and at the
 prompt, the `context` command's canonical short alias becomes **`ctx`**; the
 single-letter `c` is retired. No data or schema change — parser config only.
 
+`ctx` is the one genuinely *registered* alias in this area — it is not a prefix of
+`context`, so it cannot fall out of the name and has to be declared. A bare `c` is
+now ambiguous between `constraint` and `context` and is refused by name
+(`DESIGN_cli_noargs.md` §d).
+
 ---
 
 ## 5. Data model
+
+This is the **rev-6 schema, inlined** — it is what `db/base.py` creates and what the
+live database holds. (Rev 6 dropped `binding`/`sport`/`type` and added `rest`; the
+migration is pure idempotent DDL in `_init_db`, see the preamble and §9.)
 
 ```sql
 CREATE TABLE IF NOT EXISTS constraints (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     start_date  TEXT NOT NULL,
     end_date    TEXT NOT NULL,          -- == start_date for a single day
-    binding     TEXT NOT NULL,          -- 'hard' | 'soft'
-    sport       TEXT,                   -- NULL = all sports
-    type        TEXT,                   -- opaque user-vocabulary label ('trip', 'injury', …)
+    rest        INTEGER NOT NULL DEFAULT 0, -- 1 <=> full no-training window (skips the LLM)
     title       TEXT NOT NULL,          -- the directive, stated short; list display string
     description TEXT,                   -- optional richer context, read by the LLM
     replan      INTEGER NOT NULL DEFAULT 0, -- 1 <=> plan-shaping (built into the plan, §7)
@@ -241,40 +265,38 @@ CREATE INDEX IF NOT EXISTS idx_constraints_start ON constraints(start_date);
 (`description`, not `desc` — `DESC` is an SQL keyword, and `description` matches
 the `objectives`/`workouts` columns.)
 
-A field earns a column only when deterministic code reads it: the solver
-branches on `start_date`/`end_date` (window queries), `binding` together with
-`sport` (to tell a blanket hard-rest date from a single-sport hard
-restriction — see below) and `replan` (snapshot/hash, §7); display renders
-`title` and `type`. Everything else is prose in `title`/`description`,
-interpreted by the coach. `type` is deliberately **not** an enum — the old
-`event_type` vocabulary (`business_trip`/`vacation`/`party`/`other`) was never
-branched on anywhere in the code and fits none of the short directives this
-object now spans; it is an opaque label exactly like `daily_context.metric`,
-with vocabulary owned by the user (mirrors `DESIGN_context_authoring.md` §1).
-Bindingness has just enough structure to let exactly one edge skip the LLM —
-the rest stays advisory, deliberately: picking a sensible substitute activity
-needs judgement the code doesn't have, and the LLM has been reliable at
-respecting stated constraints, so there is no reason to take that judgement
-away from it:
+A field earns a column only when deterministic code reads it: the solver branches on
+`start_date`/`end_date` (window queries), `rest` (the one path that skips the LLM,
+§6) and `replan` (snapshot/hash, §7); display renders `title`. Everything else is
+prose in `title`/`description`, interpreted by the coach. This is why rev 6 removed
+`type`: the old `event_type` vocabulary
+(`business_trip`/`vacation`/`party`/`other`) was never branched on anywhere in the
+code, so it was carrying no decision — an opaque label that only pushed
+classification back onto the author (§1, Non-Goals). `sport` went the same way: its
+only mechanical role was to *disable* the deterministic path, which is not a role a
+column needs.
 
-| `binding` | `sport` | Meaning | Enforcement |
-|---|---|---|---|
-| `hard` | NULL | No training at all on those dates | **Deterministic** rest — `generate`/`adapt` place an explicit `Rest` entry directly, bypassing the LLM for that date entirely |
-| `hard` | set  | That sport is unavailable | **Advisory** — rendered into the prompt as a hard instruction; the LLM is trusted to honor it and choose any substitute itself |
-| `soft` | any  | Preference / capacity hint | **Advisory** — passed to the LLM to honor via judgement |
+`rest` has just enough structure to let exactly one edge skip the LLM — everything
+else stays advisory, deliberately: picking a sensible substitute activity needs
+judgement the code doesn't have, and the LLM has been reliable at respecting stated
+constraints, so there is no reason to take that judgement away from it:
+
+| `rest` | Meaning | Enforcement |
+|---|---|---|
+| `1` | No training at all on those dates | **Deterministic** — `generate`/`adapt` place an explicit `Rest` entry on every date in the window, bypassing the LLM (§6) |
+| `0` | Anything else: a sport unavailable, a capacity cap, a preference | **Advisory** — prose in the prompt, honored by judgement; the LLM picks any substitute |
 
 `replan` records whether a directive is currently escalated to plan-shaping; it
 is set by the §7 flow, surfaced in `constraint show`, and read by `plan generate`
 (§7). It is **not** an authoring-time category the user picks blind.
 
-**`binding` and `replan` are independent axes.** `binding` answers *how the
-directive is enforced when a plan is built* (code-enforced rest vs advisory
-prose); `replan` answers *whether we rebuild the macrocycle around it now*.
-Neither implies the other, and no flag couples them: "prefer easy this whole
-build block" is `soft` **and** `replan = 1` (reshape the plan, no rest rows);
-"no run Thursday" is `soft` and `replan = 0`; "broke my ankle, out 6 weeks" is
-`hard` **and** `replan = 1`. `--replan` therefore never sets `hard`, and
-`--hard` never sets `replan` (§7).
+**`rest` and `replan` are independent axes.** `rest` answers *how the directive is
+enforced when a plan is built* (code-enforced rest vs advisory prose); `replan`
+answers *whether we rebuild the macrocycle around it now*. Neither implies the
+other, and no flag couples them: "prefer easy this whole build block" is advisory
+**and** `replan = 1` (reshape the plan, no rest rows); "no run Thursday" is advisory
+and `replan = 0`; "broke my ankle, out 6 weeks" is `rest = 1` **and** `replan = 1`.
+`--replan` therefore never sets `rest`, and `--rest` never sets `replan` (§7).
 
 ---
 
@@ -303,18 +325,28 @@ window:
 
 For each directive in the fetched set:
 
-- **`hard` + no sport** over a date → that date is forced to an explicit
-  **`Rest`** entry, deterministically, without asking the LLM. This is a
+- **`rest = 1`** over a date → that date is forced to an explicit **`Rest`**
+  entry, deterministically, without asking the LLM. This is a
   **post-hoc override of the model's output, not a prompt instruction** — the
   model still returns whatever it likes for that date, and the app rewrites it:
-  - `generate` calls the LLM for the whole plan and then saves the returned
-    list (`coach/service.py workout_generate`, the `workouts = plan_data.get(
-    "workouts", [])` → `save_workout` loop). The pre-pass runs **between** those
-    two steps: drop any session the model placed on a hard-rest date and splice
-    in a forced `{sport_type: 'rest', duration_minutes: 0, rpe: 0, tss: 0}` row
-    for that date. `generate` never leaves the date empty — an empty date and an
-    explicit rest day are not the same thing elsewhere in the app (e.g.
-    adherence treats a missing row differently from a planned rest day).
+  - `generate` calls the LLM for the whole plan and then saves the returned list
+    (`coach/service/workouts.py`'s `workout_generate`, the `workouts =
+    plan_data.get("workouts", [])` → `save_workout` loop). The pre-pass
+    (`_enforce_rest_windows_generate`) runs **between** those two steps: drop any
+    session the model placed on a rest date and splice in a forced
+    `{sport_type: 'rest', duration_minutes: 0, rpe: 0, tss: 0}` row for that date.
+    **`generate` never leaves the date empty** — an empty date and an explicit rest
+    day are not the same thing elsewhere in the app (e.g. adherence treats a missing
+    row differently from a planned rest day).
+
+    This means the pre-pass fills **every** rest date in the generated span, not
+    only the ones the model happened to schedule. That distinction is not academic:
+    the prompt renders a rest window as "no training (rest enforced)"
+    (`coach/engine/prompt.py`), so the model routinely returns *nothing at all* for
+    those dates, and a pass that only rewrote what it returned would leave exactly
+    the gap this paragraph forbids. The span is `gen_start` to the last date the
+    model returned — bounded by what was actually generated, so the pass still never
+    invents days past the horizon the model planned to.
   - `adapt` eases whatever is already planned on that date — possibly more than
     one session, if multiple sports were scheduled that day — to the same
     explicit rest entry, with a `change_reason` naming the constraint (the
@@ -324,36 +356,43 @@ For each directive in the fetched set:
     covered by a given day's proposal, so handing it a single synthesized `rest`
     proposal for that date correctly clears all of that day's sessions, not just
     the first one.
-- **`hard` + sport** → rendered into the prompt as a hard instruction that
-  this sport is unavailable for those dates. This is advisory, not
-  code-enforced (§5): the LLM decides what, if anything, to substitute. Other
-  sports flow normally.
-- **`soft`** → rendered into the prompt as a preference the coach should honor
-  but may trade off against readiness, exactly as life-event
-  `impact_description` is fed today.
+- **`rest = 0`** (everything else — a sport unavailable, a capacity cap, a
+  preference) → rendered into the prompt as prose the coach should honor but may
+  trade off against readiness, exactly as life-event `impact_description` was fed
+  before. Advisory, not code-enforced (§5): the LLM decides what, if anything, to
+  substitute, and other sports flow normally.
 
-The rendered block replaces the current life-events section of both prompts,
-field-for-field: `title | dates | binding | sport | type | description` mirrors
-today's `title | dates | type | impact`. No new prompt *structure* is required,
-only a relabel and the deterministic hard-rest pre-pass.
+The rendered block replaces the old life-events section of both prompts:
+`title | dates | enforcement | description`, where enforcement reads either
+"no training (rest enforced)" or "advisory" (`coach/engine/prompt.py`'s
+`_render_constraints`). No new prompt *structure* is required, only a relabel and
+the deterministic rest pre-pass.
 
 **Analysis (third consumer — discounting only).** The weekly backward
-evaluation currently reads life events so the model doesn't misattribute an
-anomalous week to training (illness/travel/work explain a load or recovery
-anomaly; `coach/service.py` window fetch + per-week tagging, and the
-life-events digest inside the analysis-window hash). Constraints **inherit this
-feed unchanged**: overlapping constraints are passed into the analysis input as
-context that may *explain an anomaly away*, with the prompt continuing to
-forbid citing them as supporting evidence for a learning (§2). The
-analysis-window hash swaps its life-events digest for a constraints digest.
+evaluation reads directives so the model doesn't misattribute an anomalous week to
+training (illness/travel/work explain a load or recovery anomaly;
+`coach/service/analysis.py` window fetch + per-week tagging in `_week_constraints`,
+and the constraints digest inside the analysis-window hash,
+`coach/engine/prompt.py`). Constraints **inherit the old life-events feed
+unchanged**: overlapping constraints are passed into the analysis input as context
+that may *explain an anomaly away*, with the prompt continuing to forbid citing them
+as supporting evidence for a learning (§2). The analysis-window hash swapped its
+life-events digest for a constraints digest. `DESIGN_richer_analysis_evidence.md` §5
+states the same rule from the analysis side ("a constraint may only explain an
+anomaly away, never support a learning") and points back here for why — the two must
+stay in step.
 
 **Other consumers repointed in the same change:** the `status` overview's
-life-events section (`cli/status.py`), the **web REST surface**
-(`trainmate_web.py` — `manage_life_events` / `single_life_event`, the
-list/add/update/delete endpoints around lines 145–182: repoint them at
-`get_constraints`/constraint CRUD; the exact shape is left to
-implementation-time judgement), `wipe` plumbing (`db/wipes.py`), and the
-`LifeEvent` TypedDict (`types.py`) get `Constraint` successors. The
+life-events section (`cli/status.py`), the **web surface** (`trainmate_web.py`),
+`wipe` plumbing (`db/wipes.py`), and the `LifeEvent` TypedDict (`types.py`) get
+`Constraint` successors. On the web the repoint landed as `manage_constraints` /
+`single_constraint`; both have since been **removed** by the dashboard's read-only
+demotion (ARCHITECTURE.md §"Web dashboard"), leaving a single
+`GET /api/constraints` (`list_constraints`) that reads through `get_constraints`.
+Authoring is CLI-only, so §4 is the whole mutating surface. That endpoint's window
+is deliberately *not* `constraint list`'s: a rolling `metrics_lookback_days` plus
+everything upcoming, because the dashboard has no block context in which the
+mesocycle anchor would read. The
 `trainmate_bot.py` touch is only a one-line command label
 (`("lifeevent", "Manage life events")`) and is handled by the §9 forwarder — no
 special work.
@@ -379,7 +418,7 @@ Plan-invalidation is **not** a property of a constraint the user declares. Flow:
    becomes (§9); note this means the forwarder gains a regen *proposal* at add
    time where the old command only printed "run `plan generate`" advice —
    intended: it closes the "now remember to regenerate" gap without removing
-   the human confirmation. `--replan` does **not** set `binding = 'hard'` (§5).
+   the human confirmation. `--replan` does **not** set `rest = 1` (§5).
 
 Nothing sets `replan = 1` or regenerates a plan without a human `y`. This is the
 same confirm-before-regen posture `plan generate` / `workout generate` already
@@ -390,25 +429,43 @@ firing proposes a replan. Both thresholds are config knobs (under `coach:`,
 alongside `metrics_lookback_days`), so the policy is tunable without a code
 change:
 
-1. **Displaced-load trigger (relative).** Sum `adherence._planned_load(w)` over
+1. **Displaced-load trigger (relative).** Sum `adherence.planned_load(w)` over
    the active-plan sessions overlapping the constraint's window (the same
    per-session TSS/sRPE the adherence path already computes). Divide by the
-   plan's **trailing weekly planned load** (the natural per-week rollup) to get
-   a self-scaling ratio, and propose when it meets or exceeds
-   `config.replan_displaced_load_pct` (default **50** — i.e. the constraint
-   wipes out ≥ half a typical week of planned training). Relative, not
-   absolute, so no magic TSS number rots as the athlete's fitness changes.
-2. **Hard-window floor.** Independently, propose whenever the constraint is
-   `hard` **and** spans at least `config.replan_hard_span_days` days (default
-   **3**) — a multi-day hard window is intrinsically plan-shaping regardless of
-   how much load it happens to overlap (it may land in a taper week that carries
+   plan's **trailing weekly planned load** to get a self-scaling ratio, and propose
+   when it meets or exceeds `config.replan_displaced_load_pct` (default **50** —
+   i.e. the constraint wipes out ≥ half a typical week of planned training).
+   Relative, not absolute, so no magic TSS number rots as the athlete's fitness
+   changes.
+2. **Rest-window floor.** Independently, propose whenever the constraint has
+   `rest = 1` **and** spans at least `config.replan_rest_span_days` days (default
+   **3**) — a multi-day no-training window is intrinsically plan-shaping regardless
+   of how much load it happens to overlap (it may land in a taper week that carries
    little load yet still reshapes everything after it).
+
+Three choices make that formula reproducible (`coach/service/planning.py`'s
+`constraint_plan_impact`), and each is deliberate:
+
+- **The displaced window is clipped to `max(start_date, today)`.** A constraint
+  back-dated over last week displaces nothing — that training either happened or
+  didn't, and a plan cannot be reshaped around the past. Its `days` span, by
+  contrast, is the constraint's full length, since that is what the rest-window
+  floor is about.
+- **Rest sessions are excluded from both sums.** A planned rest day carries no load
+  to displace, and counting it would inflate the reference week as readily as the
+  displaced one.
+- **The trailing week is the 7 days immediately *before* `start_date`.** The
+  reference point must not itself be affected by the constraint being evaluated. If
+  that week carries no planned load at all, the ratio is defined as **0.0** rather
+  than undefined — so on a fresh athlete with no plan behind them the load trigger
+  simply cannot fire, and only the rest-window floor can propose a replan. That is
+  the conservative direction: no reference week means no honest sense of scale.
 
 There is deliberately **no** per-session "importance" term: TrainMate has no
 per-workout importance/priority field (priority lives on *objectives*, not
 sessions), so a heuristic that leaned on "key sessions" would be inventing data
 the schema doesn't carry. Displaced load is the honest proxy. Start with the
-defaults above (conservative — only multi-day hard windows or half-week-plus
+defaults above (conservative — only multi-day rest windows or half-week-plus
 load displacements trip it) and tune the two knobs from there.
 
 **Snapshotting & staleness.** `plan generate` records the active `replan = 1`
@@ -416,16 +473,22 @@ constraints onto the macrocycle as a new `constraints_snapshot` (the successor
 to `lifeevents_snapshot`), so "inputs this plan was built on" stays inspectable
 (`plans._print_considered_inputs`). The staleness fingerprint moves with it: the
 macrocycle's `lifeevents_hash` (compared on every `plan generate` to decide
-reuse vs regen — `coach/service.py` reuse check) becomes `constraints_hash`,
-computed over the **`replan = 1` constraints only**. Tactical directives ("no
-run Thursday") must *not* flag the plan stale — hashing every constraint would
-make each quick capture trip the "inputs changed" regen proposal and fight the
-magnitude flow above; plan-level staleness is exactly what `replan` escalation
-is for. Existing `lifeevents_snapshot` values are left untouched as legacy; the
-display code already tolerates plans that predate a snapshot key.
+reuse vs regen — the `coach/service/planning.py` reuse check) becomes
+`constraints_hash`, computed over the **`replan = 1` constraints only**. Tactical
+directives ("no run Thursday") must *not* flag the plan stale — hashing every
+constraint would make each quick capture trip the "inputs changed" regen proposal
+and fight the magnitude flow above; plan-level staleness is exactly what `replan`
+escalation is for.
+
+Both columns are **renamed in place** (`lifeevents_hash` → `constraints_hash`,
+`lifeevents_snapshot` → `constraints_snapshot`, `db/base.py`), so legacy snapshot
+*values* survive under the new column name rather than being stranded under the old
+one. An earlier draft said `lifeevents_snapshot` was left untouched; renaming is
+simpler and keeps one read path, and the display code already tolerates both the
+absent key and a pre-rev-6 payload shape.
 
 **Migration must not spuriously invalidate existing plans.** The reuse-vs-regen
-decision (`coach/service.py`) matches three fingerprints — `goals_hash`,
+decision (`coach/service/planning.py`) matches three fingerprints — `goals_hash`,
 `lifeevents_hash`→`constraints_hash`, `config_hash`. This change only disturbs
 the middle one (renamed column, new field shape, `replan = 1` filter), so goals
 and config still match; the only invalidation risk is the *stored* hash no
@@ -440,18 +503,17 @@ limitation below), every active macrocycle gets the **same** value, and the next
 of invalidation; it does not change the pre-existing ambient behavior that the
 `start_after=today` window makes the hash drift naturally as events age out.)
 
-**Known limitation — not scoped by goal or sport.** `constraints_hash` (like
+**Known limitation — not scoped by goal.** `constraints_hash` (like
 `lifeevents_hash` before it) is computed from the *whole* `replan = 1` set,
-regardless of which objective or sport a constraint's `sport` field names.
-With two concurrent objectives in different sports, a plan-shaping constraint
-naming only one sport still flags *every* active macrocycle stale, not just
-the one it actually affects. Properly scoping this would need to match a
-constraint's `sport` against an objective's `sport_type` — which can itself be
-a comma-separated list of sports, not a single value — so it isn't a small
-fix, and it's inherited unchanged from today's `lifeevents_hash` behavior.
-Accepted as-is: a `replan = 1` constraint (an injury layoff, a multi-week
-trip) is usually significant enough that re-confirming across every active
-goal is a reasonable, if occasionally redundant, default.
+regardless of which objective a constraint actually bears on. With two concurrent
+objectives in different sports, a plan-shaping constraint that concerns only one of
+them still flags *every* active macrocycle stale. Since rev 6 there is not even a
+`sport` column to scope by — which sport a directive touches is prose the LLM reads
+(§5) — so scoping would mean asking a model, at hash time, which goals a constraint
+affects: a far bigger change than the fix is worth, and the imprecision is inherited
+unchanged from `lifeevents_hash`. Accepted as-is: a `replan = 1` constraint (an
+injury layoff, a multi-week trip) is usually significant enough that re-confirming
+across every active goal is a reasonable, if occasionally redundant, default.
 
 ---
 
@@ -461,9 +523,9 @@ goal is a reasonable, if occasionally redundant, default.
 channel. It becomes a **fast-capture inbox** classified by the *same* `adapt`
 LLM call that already evaluates the day — no separate classification pass, no
 extra LLM round-trip or cost. The response schema (the same JSON object that
-carries `adapted_workouts`, in `engine.py`'s `_workout_adapt_logic`) gains a
-sibling field with its own formal shape, mirroring what `constraint add`
-itself accepts:
+carries `adapted_workouts`, in `coach/engine/workouts.py`'s
+`_workout_adapt_logic`) gains a sibling field with its own formal shape, mirroring
+what `constraint add` itself accepts:
 
 ```
 "new_constraints": [
@@ -473,8 +535,6 @@ itself accepts:
     "title": "no run Thursday",   // required
     "start_date": "YYYY-MM-DD",   // required
     "end_date": "YYYY-MM-DD",     // required
-    "sport": "running",           // optional — omit/null for "all sports"
-    "type": "injury",             // optional — omit/null
     "description": "..."          // optional — omit/null
   }
 ]
@@ -482,12 +542,13 @@ itself accepts:
 
 - **Constraint-shaped** ("can't train Thursday", "only 45 min today") → the app
   **creates a `constraint` row** from each entry (`source = 'message'`,
-  **always `binding = 'soft'`** — see trust boundary below), reversible and
-  inspectable. Only `title` and dates are required of the classifier; every
-  other field may be left NULL. It is honored this run through the existing
-  athlete-message advisory text (unchanged), *and* persists for every future
-  run via the durable row — so the `change_reason` smuggling hack is no longer
-  needed for these.
+  **always advisory, `rest = 0`** — see trust boundary below), reversible and
+  inspectable. Only `title` and dates are required of the classifier;
+  `description` may be left NULL. (Rev 6 dropped the `sport`/`type` fields from this
+  schema along with their columns — which sport is prose in the title now, §5.) It is
+  honored this run through the existing athlete-message advisory text (unchanged),
+  *and* persists for every future run via the durable row — so the `change_reason`
+  smuggling hack is no longer needed for these.
 - **Ephemeral nudge** ("felt flat, just ease today") → unchanged legacy behavior:
   a one-run hint folded into `change_reason`, no row created.
 
@@ -497,12 +558,12 @@ itself accepts:
 
 1. **Confirm the constraint(s) first.** If `new_constraints` is non-empty, echo
    each one ("Add constraint: *no training Thu* (2026-07-09)?") and ask
-   `[y/N]`. On `y`, the row(s) are created (`source = 'message'`, `soft`). On
+   `[y/N]`. On `y`, the row(s) are created (`source = 'message'`, advisory). On
    `n`, the extraction is **discarded** and the run degrades to a plain
    ephemeral nudge — the message still influenced *this* run's adaptation via
    the advisory text, but nothing durable is written.
 2. **Then confirm the adaptation.** The existing adapt preview + `[y/N]` apply
-   prompt (`cli/workouts.py`) runs as it does today. Declining the constraint in
+   prompt (`cli/workouts/generate.py`) runs as it does today. Declining the constraint in
    step 1 does not block step 2, and vice versa — they are independent
    commits.
 
@@ -513,18 +574,20 @@ not after. `new_constraints` requires a new return channel from `workout_adapt`
 the extracted list out beside those and drive step 1 from it.
 
 **Trust boundary (agreed).** Auto-classification may **create reversible
-state** (a constraint you can `rm`) — but only ever `soft`. The LLM can never
-mark an extracted constraint `hard`: `hard` is code-enforced (§5) and takes
-effect the next time `generate`/`adapt` runs with **no further human
+state** (a constraint you can `rm`) — but only ever advisory. The LLM can never
+set `rest = 1` on an extracted constraint: a rest window is code-enforced (§5) and
+takes effect the next time `generate`/`adapt` runs with **no further human
 confirmation** in the loop, so it must be a deliberate human action
-(`constraint edit <id> --hard`), never an auto-classification outcome.
-Separately, auto-classification may **never** set `replan = 1` or trigger a
-regen. If an extracted constraint is large (e.g. "broke my ankle, out 6
-weeks"), it is still only *created* as a durable, soft constraint
+(`constraint edit <id> --rest`), never an auto-classification outcome. The server
+side enforces this rather than trusting the prompt — `capture_message_constraint`
+(`coach/service/planning.py`) hard-codes `rest=0`, `replan=0`, `source='message'`
+whatever the model returned. Separately, auto-classification may **never** set
+`replan = 1` or trigger a regen. If an extracted constraint is large (e.g. "broke my
+ankle, out 6 weeks"), it is still only *created* as a durable, advisory constraint
 (`replan = 0`); the §7 magnitude check then **surfaces a suggestion** — "this
 looks plan-shaping; run `constraint edit <id> --replan` or `plan generate`" —
 which the human acts on. The model classifies; the human authorizes both the
-`hard` escalation and the expensive `replan` step. The "auto-classify short
+`rest` escalation and the expensive `replan` step. The "auto-classify short
 constraints but not life events" rule thus *falls out* of the design rather
 than needing separate enforcement.
 
@@ -532,13 +595,21 @@ than needing separate enforcement.
 
 ## 9. Folding in & deprecating `lifeevent`
 
-**Command.** `lifeevent` / `le` / `e` are retained for one release as thin
-**forwarders** to `constraint … --replan` (a life event was, by definition,
-plan-shaping), emitting a deprecation notice, then removed. (Behavior change vs
-the old command: the forwarder can now propose a regen at add time, §7 step 3.)
+**Command — done; forwarder removed (§10 step 6 + step 8 are both complete).**
+`lifeevent` / `le` / `e` were retained for one release as thin **forwarders** to
+`constraint … --replan` (a life event was, by definition, plan-shaping), emitting a
+deprecation notice. That release has passed: no `lifeevent` command exists anywhere
+today — `trainmate_cli.py` dispatches only `constraint`, and `trainmate_bot.py`
+lists only `("constraint", …)`. (Behavior change the forwarder carried while it
+lived: it could propose a regen at add time, §7 step 3.)
 
-**Data migration — a one-off operation, not part of `_init_db`.** Every other
-migration in `base.py` is idempotent *by construction*: `CREATE TABLE IF NOT
+**Data migration — a one-off operation, not part of `_init_db`. Historical: this
+script has run and has since been deleted** (`scripts/` holds only
+`migrate_constraints_drop_binding.py` and `migrate_cycling_sport_rename.py`), and
+the `lifeevents` table it read is dropped unconditionally by `_init_db` (§10 step 8,
+`db/base.py`'s `DROP TABLE IF EXISTS lifeevents`). The reasoning is kept because it
+is the standing rule for *any* future row-copy migration here. Every other migration
+in `base.py` is idempotent *by construction*: `CREATE TABLE IF NOT
 EXISTS`, `ADD COLUMN` guarded by `except OperationalError`, and renames
 guarded by column/table presence all self-terminate, because their guard
 condition stops being true after the first run. A *row copy* between two
@@ -554,7 +625,7 @@ its own flag/confirmation) that the operator runs once, by hand. Each
 |---|---|
 | `start_date`, `end_date` | copied verbatim |
 | `title` | `title`, verbatim |
-| `event_type` | `type`, verbatim (opaque label now; no enum) |
+| `event_type` | `type`, verbatim (opaque label; **column since dropped by rev 6**) |
 | `impact_description` | `description`, verbatim |
 | — | `binding = 'soft'` (life events were always advisory; see below) |
 | — | `replan = 1` (life events were always plan-shaping) |
@@ -569,9 +640,15 @@ therefore *strengthen* it past what it ever did, making every migrated life
 event suddenly bypass the LLM and force an explicit `Rest` entry — a behavior
 change, not a faithful carry-over. `soft` preserves continuity: the directive
 still reaches `generate`/`adapt`/analysis exactly as before, honored by
-judgement. Since `event_type` survives verbatim in `type`, any later
-refinement (e.g. escalate a specific `type` to `hard`) can still be run after
-the fact without re-migrating.
+judgement. Since `event_type` survived verbatim in `type`, a later per-`type`
+refinement could still be run after the fact without re-migrating.
+
+(Rev 6 postscript: `binding` and `type` no longer exist. Every migrated life event
+was `soft`, and rev 6 maps `soft` → advisory `rest = 0` — so the carry-over above
+survived the collapse untouched, which is the outcome the `soft` decision was
+protecting. Rev 6's own DDL migration is idempotent and *does* live in `_init_db`;
+only its `constraints_hash` backfill needed the one-off script,
+`scripts/migrate_constraints_drop_binding.py`.)
 
 **Backfill `constraints_hash` on active macrocycles (must run inside the same
 one-off script, after the row copy).** Per §7, recompute each active
@@ -593,8 +670,11 @@ This drops auto-upgrade support for pre-rename databases, which is acceptable at
 this project's age.
 
 **Snapshots.** As §7: stop writing `lifeevents_snapshot`; write
-`constraints_snapshot` going forward; leave old snapshots as legacy. The
-`lifeevents_hash` column is renamed to `constraints_hash` and backfilled per §7.
+`constraints_snapshot` going forward. **Both** columns are renamed in place
+(`lifeevents_hash` → `constraints_hash`, `lifeevents_snapshot` →
+`constraints_snapshot`) and the hash is backfilled per §7 — an earlier draft said the
+snapshot column was left alone, but renaming it keeps the legacy values readable
+through the one current read path rather than stranding them.
 
 ---
 
@@ -602,26 +682,30 @@ this project's age.
 
 1. Schema: create `constraints`; **delete the `base.py` legacy renames** (§9
    hazard); keep `lifeevents` intact.
-2. `constraint` command (CRUD, §4) + `get_constraints` reads. `add` prompts
-   interactively; `edit` is command-line-only (§4).
+2. `constraint` command (CRUD, §4) + `get_constraints` reads. Every field is passed
+   on the command line; nothing prompts for a value (§4, `DESIGN_cli_noargs.md` §a2).
 3. **Migrate `lifeevents` rows (§9)** — as `soft` — **and backfill
    `constraints_hash` on active macrocycles (§7/§9)**, and, in the same release,
    repoint every consumer: `generate`/`adapt` (§6, incl. the deterministic
-   hard-rest post-hoc override), the weekly-analysis discounting feed, `status`,
-   the **web REST surface** (`trainmate_web.py`), wipes, and the
+   rest post-hoc override), the weekly-analysis discounting feed, `status`,
+   the **web surface** (`trainmate_web.py`), wipes, and the
    `constraints_hash`/`constraints_snapshot` successors (§7). The migration must
    land *with* the repoint, not after it — otherwise existing life events are
    silently ignored in between.
 4. §7 magnitude proposal + `--replan` flag + the two config knobs
-   (`replan_displaced_load_pct`, `replan_hard_span_days`).
+   (`replan_displaced_load_pct`, `replan_rest_span_days`).
 5. `--message` classification with the two-confirmation flow (§8).
-6. `lifeevent` → forwarder + deprecation notice.
+6. ~~`lifeevent` → forwarder + deprecation notice.~~ **Done, then undone by step 8** —
+   the forwarder shipped and has since been removed (§9).
 7. `context` alias `c` → `ctx` (§4).
-8. Later release: remove the `lifeevent` forwarder; drop the `lifeevents` table.
+8. ~~Later release: remove the `lifeevent` forwarder; drop the `lifeevents` table.~~
+   **Done** — the forwarder is gone and `_init_db` unconditionally drops `lifeevents`
+   (and its older `life_events` name), `db/base.py`.
 
-Steps 1–3 are shippable on their own (new object usable, existing life events
-migrated and honored, no existing plan spuriously invalidated); 4–6 complete the
-vision; 8 is cleanup.
+**All eight steps have shipped**, plus rev 6's collapse to a single `rest` flag on
+top of them. Steps 1–3 were shippable on their own (new object usable, existing life
+events migrated and honored, no existing plan spuriously invalidated); 4–6 completed
+the vision; 8 was cleanup.
 
 ---
 
@@ -629,24 +713,25 @@ vision; 8 is cleanup.
 
 - **Magnitude thresholds (§7) — resolved as config, defaults to tune.** The
   mechanism is settled (relative displaced-load ≥ `replan_displaced_load_pct`,
-  OR `hard` window ≥ `replan_hard_span_days`). The only remaining work is
+  OR `rest` window ≥ `replan_rest_span_days`). The only remaining work is
   tuning the two defaults (50% / 3 days) against real use; both are config
   knobs, so tuning needs no code change.
-- **Migration bindingness — resolved.** Migrate life events as `soft` (§9) —
-  the faithful carry-over, since a life event was never code-enforced before
-  this refactor either; `event_type` survives in `type`, so a later per-`type`
-  escalation to `hard` needs no re-migration.
-- **Hard-constraint adherence — resolved, no new plumbing needed.** A `hard`
-  date already gets an explicit `Rest` entry (§6), and a planned rest day
-  never counts as a miss today — `analyze_adherence` already treats it as
-  `rest_ok` unless the athlete does something significant on it, which is a
-  separate, already-handled case. So once the rest entry exists, there's
-  nothing left for the adherence path to special-case. The one caveat: this
-  only protects a date once `adapt` has actually run on it and converted
-  whatever was scheduled to rest — `constraint add`/`edit` do nothing
-  synchronously. That's expected, not a gap: `adapt` is meant to run daily,
-  and like everything else in TrainMate, a constraint has no effect until the
-  command that consumes it runs.
+- **Migration bindingness — resolved, then made moot.** Life events were migrated
+  as `soft` (§9) — the faithful carry-over, since a life event was never
+  code-enforced before that refactor either. Rev 6 then removed the axis entirely
+  and mapped `soft` → advisory, so the decision cost nothing to unwind.
+- **Rest-constraint adherence — resolved, no new plumbing needed.** A `rest` date
+  always gets an explicit `Rest` entry (§6) — in `generate` *and* in `adapt`, and in
+  `generate` for every date in the window, including the ones the model returned
+  nothing for. That completeness is the whole point: a planned rest day never counts
+  as a miss (`analyze_adherence` treats it as `rest_ok` unless the athlete does
+  something significant on it, a separate already-handled case), whereas a **missing**
+  row reads as an unplanned gap. So once the rest entry exists there is nothing left
+  for the adherence path to special-case; leave the row out and the guarantee inverts.
+  The one caveat: an already-planned date is only converted once `adapt` actually runs
+  on it — `constraint add`/`edit` do nothing synchronously. That's expected, not a
+  gap: `adapt` is meant to run daily, and like everything else in TrainMate, a
+  constraint has no effect until the command that consumes it runs.
 - **`--message` classifier reliability.** Extraction is easy; the risk is a
   durable-looking sentence mis-filed as ephemeral (or vice versa). Mitigation:
   the two-confirmation flow (§8) echoes each extracted constraint and asks

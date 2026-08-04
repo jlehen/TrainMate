@@ -86,27 +86,38 @@ class WorkoutGenMixin:
 
     @classmethod
     def _enforce_rest_windows_generate(
-        cls, workouts: List[Dict[str, Any]], constraints: List[Constraint]
+        cls, workouts: List[Dict[str, Any]], constraints: List[Constraint], gen_start: str
     ) -> List[Dict[str, Any]]:
-        """Forces `rest` constraints onto a freshly generated workout list (§6): a rest
-        window replaces its dates with a single rest, deterministically, bypassing the LLM
-        for that date entirely. Every other constraint is advisory only — left to the model
-        via the prompt block, not enforced here (§5). Operates only on dates the model
-        actually scheduled, so it never invents days beyond the generated span."""
+        """Forces `rest` constraints onto a freshly generated workout list (§6): every rest
+        date inside the generated span becomes a single rest, deterministically, bypassing
+        the LLM for that date entirely. Every other constraint is advisory only — left to
+        the model via the prompt block, not enforced here (§5).
+
+        Dates the model simply left out are filled too, not only the ones it scheduled: an
+        absent row and an explicit rest day mean different things to adherence (§6). The
+        span is `gen_start` to the last date the model returned, so this still never invents
+        days beyond what was generated."""
         full_rest = cls._hard_rest_windows(constraints)
-        if not full_rest:
+        dated = [w['date'] for w in workouts if w.get('date')]
+        if not full_rest or not dated:
             return workouts
-        out: List[Dict[str, Any]] = []
-        rested: set = set()
-        for w in workouts:
-            day = w.get('date', '')
-            fr = next((t for (s, e, t) in full_rest if s <= day <= e), None)
-            if fr is not None:
-                if day not in rested:
-                    rested.add(day)
-                    out.append(cls._rest_workout(day, f"constraint '{fr}'"))
-                continue
-            out.append(w)
+
+        span_end = max(dated)
+        forced: Dict[str, str] = {}          # date -> constraint title
+        for (s, e, title) in full_rest:
+            day = datetime.strptime(max(s, gen_start), "%Y-%m-%d").date()
+            last = datetime.strptime(min(e, span_end), "%Y-%m-%d").date()
+            while day <= last:
+                forced.setdefault(day.strftime("%Y-%m-%d"), title)
+                day += timedelta(days=1)
+        if not forced:
+            return workouts
+
+        out = [w for w in workouts if w.get('date', '') not in forced]
+        out.extend(
+            cls._rest_workout(day, f"constraint '{title}'")
+            for day, title in sorted(forced.items())
+        )
         return out
 
     @classmethod
@@ -399,7 +410,7 @@ class WorkoutGenMixin:
         # constraint forces its dates to rest regardless of what the LLM produced. Every
         # other constraint is advisory and left to the model. Applied after generation so
         # the guarantee holds even if the model ignores the constraint block it was shown.
-        workouts = self._enforce_rest_windows_generate(workouts, constraints)
+        workouts = self._enforce_rest_windows_generate(workouts, constraints, gen_start_str)
 
         # Boundary-week benchmark post-check (§4.1): warn (don't auto-insert) if a covered
         # block boundary lacks a fitness test. Runs after the rest pass so a rest-covered

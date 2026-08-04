@@ -77,12 +77,39 @@ class TestRestWindowPrePass(unittest.TestCase):
              "duration_minutes": 40, "rpe": 3, "tss": 30},
         ]
         out = coach_service._enforce_rest_windows_generate(
-            workouts, [self._c(rest=1)]
+            workouts, [self._c(rest=1)], "2026-07-02"
         )
         by_date = {w["date"]: w for w in out}
         self.assertEqual(by_date["2026-07-02"]["sport_type"], "rest")
         # Other dates untouched.
         self.assertEqual(by_date["2026-07-03"]["sport_type"], "running")
+
+    def test_generate_fills_rest_dates_the_model_omitted(self):
+        """The §6 guarantee: `generate` never leaves a rest date empty. The model is shown
+        the window as "no training", so it usually returns nothing for those dates — the
+        pre-pass must still emit a Rest row, since adherence reads a missing row as an
+        unplanned gap rather than planned rest (this is what the adapt path already does)."""
+        workouts = [
+            {"date": "2026-07-01", "sport_type": "running", "title": "Easy"},
+            {"date": "2026-07-05", "sport_type": "running", "title": "Long"},
+        ]
+        out = coach_service._enforce_rest_windows_generate(
+            workouts, [self._c(rest=1, start="2026-07-02", end="2026-07-04")], "2026-07-01"
+        )
+        by_date = {w["date"]: w for w in out}
+        for day in ("2026-07-02", "2026-07-03", "2026-07-04"):
+            self.assertEqual(by_date[day]["sport_type"], "rest", day)
+        self.assertEqual(by_date["2026-07-01"]["sport_type"], "running")
+        self.assertEqual(by_date["2026-07-05"]["sport_type"], "running")
+
+    def test_generate_does_not_invent_days_outside_the_span(self):
+        """Filling is bounded by the generated span: dates before `gen_start` or after the
+        last workout the model returned get no row (§6)."""
+        workouts = [{"date": "2026-07-03", "sport_type": "running", "title": "Easy"}]
+        out = coach_service._enforce_rest_windows_generate(
+            workouts, [self._c(rest=1, start="2026-07-01", end="2026-07-10")], "2026-07-02"
+        )
+        self.assertEqual(sorted(w["date"] for w in out), ["2026-07-02", "2026-07-03"])
 
     def test_generate_advisory_is_untouched(self):
         """An advisory constraint (rest=0) — which is every non-rest directive, including
@@ -93,7 +120,7 @@ class TestRestWindowPrePass(unittest.TestCase):
             {"date": "2026-07-02", "sport_type": "strength_training", "title": "Lift"},
         ]
         out = coach_service._enforce_rest_windows_generate(
-            workouts, [self._c(rest=0)]
+            workouts, [self._c(rest=0)], "2026-07-02"
         )
         self.assertEqual(out, workouts)
 

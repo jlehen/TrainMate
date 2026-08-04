@@ -164,9 +164,9 @@ def list_objectives() -> Any:
 
 @app.route("/api/constraints", methods=["GET"])
 def list_constraints() -> Any:
-    """Active + upcoming directives (mirrors `constraint list`,
-    DESIGN_constraints.md §6/§10) — active within the metrics lookback window plus
-    everything upcoming, anchored on the machine-local day."""
+    """Active + upcoming directives — the read-only web view of `constraint list`
+    (DESIGN_constraints.md §6). Its window is a rolling `metrics_lookback_days` plus
+    everything upcoming, not the CLI's active-mesocycle anchor."""
     window = config.metrics_lookback_days
     start = (
         datetime.strptime(today_str(), "%Y-%m-%d").date() - timedelta(days=window - 1)
