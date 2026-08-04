@@ -241,12 +241,14 @@ ACTIVE CONSTRAINTS (athlete-declared directives to work around):
         self, completed_activities: List[CompletedActivity],
         metrics: List[Dict[str, Any]], window_start: str, window_end: str,
         constraints: Optional[List[Constraint]] = None,
-        daily_context: Optional[List[Dict[str, Any]]] = None
+        daily_context: Optional[List[Dict[str, Any]]] = None,
+        context_days: Optional[Dict[str, Any]] = None
     ) -> str:
         """Fingerprints the *evidence* a backward evaluation reconstructs from — the
         completed activities + daily metrics (+ overlapping constraints) within a window —
         so a re-run over unchanged data can be detected (see DESIGN_backward_evaluation.md
-        §5, §8).
+        §5, §8). `context_days` is the *full-history* episode block, hashed as computed
+        because it is built outside the window (DESIGN_quantitative_context_impact.md §8).
 
         We hash the load-bearing fields (not just activity ids) so that a re-pull which
         *corrects* a value also shifts the fingerprint. Hashing the concrete activity-id
@@ -292,7 +294,7 @@ ACTIVE CONSTRAINTS (athlete-declared directives to work around):
         serialized = json.dumps(
             {'window': [window_start, window_end],
              'activities': act_digest, 'metrics': met_digest, 'constraints': evt_digest,
-             'daily_context': ctx_digest},
+             'daily_context': ctx_digest, 'context_days': context_days or {}},
             sort_keys=True
         )
         return hashlib.sha256(serialized.encode('utf-8')).hexdigest()

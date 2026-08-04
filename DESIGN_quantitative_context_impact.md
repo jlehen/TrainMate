@@ -134,7 +134,9 @@ legible: the mornings are explicit and dated, never folded into a weekly bucket.
 
 Signal-days for a category are clustered greedily by date: two consecutive
 signal-days join the same episode when the number of **drink-free days between them
-is `< k`**. The rationale is purely to keep each morning strip un-confounded — if two
+is `< k`**. Several rows of the *same* category on the *same* day are **summed into one
+dose** (a day is one entry in `days`, never two); a row with no `value` leaves that day
+presence-only (§3.1). The rationale is purely to keep each morning strip un-confounded — if two
 runs sit within `k` days, the trailing window of the first and the leading window of
 the second overlap, so the mornings between them are shadowed by *both* and must be
 read as one episode. Interior gap days (drink-free days inside a merged episode) are
@@ -147,18 +149,20 @@ chronic every-other-day pattern merges into one long row); this is correct
 **Recovery is the existing baseline-relative deviation**, not a raw metric.
 `athlete_baselines` already stores rolling `{rhr,hrv,sleep}_baseline_{mean,std}`;
 the per-day z `(value − mean)/std` is already computed inside
-`CoachService._week_response_features` (`coach/service.py:1250`). We **extract that
+`CoachService._week_response_features` (`coach/service/analysis.py`). We **extract that
 into a shared `_day_response_z(metric_row, baseline) -> {rhr,hrv,sleep}` static** so
 the weekly feature and this alignment share one definition of "notches from
 normal." Sign convention is documented as today: **+hrv better, +rhr worse, +sleep
 better**. Showing R vs-normal (not raw "HRV 65") is what lets the LLM compare
 mornings at all.
 
-**Day-of load, not the rolling acute load.** `athlete_metrics_cache.acute_workload`
-is an EWMA — it smears yesterday into today. The stimulus that drives a given
-morning is the *actual training done the day before it*, so every load shown (each
-day's `load_tss` in the dose sequence and each morning's `prev_day_load_tss`) is the
-**sum of that day's `completed_activities.tss`** (0 on a rest day).
+**Day-of load, not the rolling acute load.** The acute load in
+`athlete_metrics_cache` (`atl`) is an EWMA — it smears yesterday into today. The
+stimulus that drives a given morning is the *actual training done the day before it*,
+so every load shown (each day's `load_tss` in the dose sequence and each morning's
+`prev_day_load_tss`) is the **sum of that day's derived load** (`garmin.activity_load`,
+the project-wide single load definition: trustworthy `tss` when available, sRPE
+otherwise, plus the RPE-divergence override), 0 on a rest day.
 
 We surface all recovery channels (hrv, rhr, sleep) per morning and never collapse
 them into a single "worse" score — picking what "worse" means is the LLM's job
@@ -182,7 +186,9 @@ degradation is automatic, no special casing:
 
 So *meal too big* is honestly Tier 2 or 3. The app's behaviour is identical across
 tiers — it shows the value (or its absence); the LLM calibrates how much to read
-into it.
+into it. "Shown raw" means *uninterpreted*, not unformatted: `_norm_signal_value`
+tidies the number for display (`4.0` → `4`, fractional values rounded to 2 dp) and
+leaves a NULL as NULL. No scale, no unit, no meaning is attached.
 
 ### 3.2 External-only, and never explain a channel with itself
 
@@ -268,6 +274,11 @@ each morning's preceding-day **dose** (via `days`) and `prev_day_load_tss`
 after arc to judge how long the effect lasts and whether consecutive days stack; treat
 a missing channel/morning as "no data," never as zero.
 
+**Both the block and its prompt guide are gated on a non-empty `context_days`.** When
+nothing is logged (or every category sits below the floor, §5) neither is rendered, so
+the absence reads as "nothing logged" rather than "logged and unremarkable," and the
+model is never given instructions for a section it wasn't handed.
+
 ---
 
 ## 5. Honesty without app-side gates
@@ -279,9 +290,10 @@ Honesty now rests on **what we show** plus the LLM's instructed caution:
   signal-days) back each category; the prompt tells it that a handful is weak
   evidence. Grouping makes the count coarser — a three-night bender is one episode,
   not three trials — which is the honest direction. (A `min_signal_days` floor —
-  config, default ~5, counting **signal-days** not episodes — may still gate whether
-  a category is worth including at all, to avoid prompting on one stray night. One
-  small knob, not a model parameter.)
+  `context_days_min_signal_days`, counting **signal-days** not episodes — gates whether
+  a category is worth including at all. It ships at **default 1**, i.e. "show whatever
+  exists and let the LLM weigh the visible count"; raise it to suppress prompting on one
+  stray night. One small knob, not a model parameter; §10.)
 - **No false precision.** Because nothing is fitted, the app never emits a slope or
   p-value it can't stand behind; the LLM calibrates from the raw episodes and their
   count. This is *why* the no-statistics choice is honest at small n, not despite it.
@@ -374,40 +386,63 @@ that learning earns confidence over time.**
 
 ## 8. Caching / fingerprint
 
-No fingerprint change needed. `_get_evidence_fingerprint` already folds in
-`completed_activities`, `metrics`, and `daily_context` (`coach/service.py:1335`).
-`context_days` is a pure function of inputs already hashed, so a changed signal,
-metric, or activity invalidates the reused reconstruction exactly as required. The
-**deliberate baseline-recompute omission** noted in
-`DESIGN_richer_analysis_evidence.md` §5 carries over unchanged (`--force` is the
-escape hatch).
+`CoachEngine._get_evidence_fingerprint` (`coach/engine/prompt.py`) hashes the
+`completed_activities`, `metrics`, `constraints` and `daily_context` of the analysis
+**window**. That is not enough for this block: `context_days` is built over **full
+history** (§6), so a signal, activity or metric added, edited or deleted *outside*
+`[from, until]` changes the prompt the LLM sees. Under a window-scoped hash alone the
+fingerprint would not move and `data reflect` would silently reuse a reconstruction
+built from a now-stale block — precisely the case §6 says matters, since an incremental
+window contains almost none of the signal history.
+
+So **the computed `context_days` block is itself folded into the fingerprint**. It is
+built *before* the reuse check and hashed as-is, which keeps the project invariant
+exact — everything rendered into the analysis prompt is hashed — with no field-by-field
+mirror of `_context_days`' inputs to drift out of date: if the block the LLM would see
+differs, the fingerprint differs, whatever moved (a drink logged last spring, a
+re-pulled load on a bracketing morning, a changed `k`). Conversely a change that leaves
+the block identical costs nothing. The extra work is three unbounded reads plus the
+alignment on the reuse path — local SQLite, negligible against the LLM call it guards.
+
+The **deliberate baseline-recompute omission** noted in
+`DESIGN_richer_analysis_evidence.md` §5 still applies to the *weekly* evidence
+(`--force` is the escape hatch); inside `context_days` it does not, since the per-morning
+z values are hashed as computed.
 
 ---
 
 ## 9. Touch points
 
-- `coach/service.py`
+- `coach/service/analysis.py` (`DataAnalysisMixin`)
   - **Extract** `_day_response_z(metric_row, baseline)` from `_week_response_features`
     (shared per-day z; pure, unit-testable). `_week_response_features` then averages
     it over the week's days; the alignment uses it per morning.
-  - **Add** `_context_days(daily_context, metrics, baselines, activities, k) -> dict`
-    — per category: (1) cluster signal-days into **episodes**, merging runs less than
+  - **Add**
+    `_context_days(daily_context, metrics, activities, baseline_for, k, min_signal_days=1)`
+    `-> dict`. `baseline_for` is a **callable**, not a list of rows: `db.get_baseline`,
+    which returns the baseline valid on (or closest prior to) a given morning, so each
+    morning is normalized against the baseline in force *then*.
+    Per category: (1) cluster signal-days into **episodes**, merging runs less than
     `k` drink-free days apart (§3.0); (2) for each episode emit `days` (the dose
     sequence) and `surrounding_mornings` spanning `(first − k + 1) … (last + k)`, each
     morning tagged `prev_day_load_tss` and the existing z (§3, §4); (3) apply the
     value-tier pass-through (§3.1) and the construct→channel exclusion map (§3.2).
     **No statistics** — pure clustering + join + the existing z. No separate
-    reference rows (the leading mornings are the contrast; §4). Optional
-    `min_signal_days` / most-recent-N-episode caps (§5, §6).
-  - Render `context_days` into the analysis payload next to `weekly_summaries`.
-- `coach/engine.py::_data_analyze_logic` — accept a `context_days` argument, render it
-  into the user content beside `weekly_summaries`, and add one TASK paragraph (§4):
+    reference rows (the leading mornings are the contrast; §4). The `min_signal_days`
+    floor is applied here (§5); the most-recent-N-episode cap is not built (§6, §10).
+  - Render `context_days` into the analysis payload next to `weekly_summaries`, and
+    build it **before** the cache-reuse check so it can be hashed (§8).
+- `coach/engine/prompt.py::_get_evidence_fingerprint` — take `context_days` and hash it
+  alongside the windowed evidence (§8).
+- `coach/engine/analysis.py::_data_analyze_logic` — accept a `context_days` argument,
+  render it into the user content beside `weekly_summaries` (both the block and the
+  guide gated on it being non-empty; §4), and add one TASK paragraph (§4):
   read each morning's preceding-day dose (via `days`) and `prev_day_load_tss`
   together; read the before→during→after arc for persistence and the cumulative cost
   of consecutive days; weigh the episode count; missing = no data, not zero.
-- **Config loader** — `context_days_lookahead` (**k**, default 3; §3) and an optional
-  `context_days_min_signal_days` floor, mirroring the `high_intensity_*` / `coach`
-  sub-dict accessors.
+- **Config loader** — `context_days_lookahead` (**k**, default 3; §3) and the
+  `context_days_min_signal_days` floor (default 1; §5), mirroring the
+  `high_intensity_*` / `coach` sub-dict accessors.
 - `ARCHITECTURE.md` (+ this doc's status) — per the standing rule to keep
   ARCHITECTURE.md in sync with behavioural change.
 - **Optional debug surface:** a thin `context report` that prints `context_days`
@@ -434,6 +469,11 @@ need; it's a join plus the z arithmetic already in the codebase.
   removes the back-to-back cross-contamination (a second night's drink is a listed
   dose, not an unlabelled confound in a neighbour's window) and exposes cumulative
   cost. Decided 2026-06-14 (§3, §3.0).
+- **`min_signal_days` floor — shipped as a knob, defaulted open.** Both branches were
+  buildable; the knob won (`context_days_min_signal_days`, counting signal-days) but its
+  **default is 1**, so the shipped behaviour is "always show what exists and let the LLM
+  judge from the visible count." Raising it is a one-line config change if one stray
+  night ever proves distracting (§5).
 - **Reference-day sampling — folded into the episode, not sampled.** The leading `k`
   before-mornings of every episode are the temporally-matched local "normal," and
   `vs_normal` is already baseline-relative, so the separate `value: 0` reference rows
@@ -442,8 +482,6 @@ need; it's a join plus the z arithmetic already in the codebase.
 **Open:**
 - **Volume cap (§6).** If full history grows large, cap to most-recent-N **episodes**?
   What N, and does it bias toward recent behaviour?
-- **`min_signal_days` floor (§5).** Worth a config knob (counting signal-days), or
-  just always show what exists and let the LLM judge from the count?
 - **Default `k` (§3).** 3 is the starting default; it now also sets the *before*
   window and the episode-merge gap, so it is worth revisiting once real blocks are
   inspected — long enough to watch a heavy session clear and to bracket a run,

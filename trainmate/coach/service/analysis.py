@@ -471,10 +471,27 @@ class DataAnalysisMixin:
         # ones (DESIGN_calendar_context_ingest.md §7).
         daily_context = self._db.get_daily_context(start_date=from_str, end_date=until_str)
 
+        # Quantitative context-impact rows (alcohol, big meal, …): episode-aligned dose
+        # sequences + bracketing morning strips. These cover the athlete's FULL history of
+        # signal-days, not just [from,until] — the point is to let the LLM see the whole
+        # pattern, and an incremental reflect window contains almost no drinking history
+        # (DESIGN_quantitative_context_impact.md §6). So they are fetched independently of
+        # the analysis window, and computed before the fingerprint because they are hashed
+        # into it (§8).
+        context_days = self._context_days(
+            daily_context=self._db.get_daily_context(),
+            metrics=self._db.get_metrics_cache(),
+            activities=self._db.get_completed_activities(),
+            baseline_for=self._db.get_baseline,
+            k=config.context_days_lookahead,
+            min_signal_days=config.context_days_min_signal_days,
+        )
+
         # Reuse path: if the evidence is unchanged since the last analysis, return the
         # cached reconstruction instead of paying for another LLM pass (unless --force).
         fingerprint = self.engine._get_evidence_fingerprint(
-            completed_activities, metrics, from_str, until_str, constraints, daily_context
+            completed_activities, metrics, from_str, until_str, constraints, daily_context,
+            context_days
         )
         cached = self._db.get_analysis_cache(horizon)
         evidence_unchanged = bool(cached and cached.get("fingerprint") == fingerprint)
@@ -689,21 +706,6 @@ class DataAnalysisMixin:
 
         guidelines = self._load_science_guidelines()
         profile = self._effective_profile()
-
-        # Quantitative context-impact rows (alcohol, big meal, …): episode-aligned dose
-        # sequences + bracketing morning strips. These cover the athlete's FULL history of
-        # signal-days, not just [from,until] — the point is to let the LLM see the whole
-        # pattern, and an incremental reflect window contains almost no drinking history
-        # (DESIGN_quantitative_context_impact.md §6). So they are fetched independently of
-        # the analysis window.
-        context_days = self._context_days(
-            daily_context=self._db.get_daily_context(),
-            metrics=self._db.get_metrics_cache(),
-            activities=self._db.get_completed_activities(),
-            baseline_for=self._db.get_baseline,
-            k=config.context_days_lookahead,
-            min_signal_days=config.context_days_min_signal_days,
-        )
 
         decision = self.engine._data_analyze_logic(
             objectives=objectives,

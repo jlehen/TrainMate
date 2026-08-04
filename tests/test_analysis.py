@@ -669,6 +669,28 @@ class TestRicherEvidenceIntegration(unittest.TestCase):
             )
         self.assertEqual(mock_client.complete.call_count, 2)  # not reused
 
+    @patch("trainmate.coach.engine.openrouter_client")
+    def test_out_of_window_context_signal_invalidates_the_cache(self, mock_client):
+        """`context_days` is built full-history, so a signal logged OUTSIDE [from,until]
+        still changes the prompt — and must therefore shift the fingerprint
+        (DESIGN_quantitative_context_impact.md §8)."""
+        self._seed_week()
+        mock_client.complete.return_value = {"macrocycle_summary": "s", "learning_updates": []}
+        coach_service.data_bootstrap(
+            from_date_str="2026-06-01", until_date_str="2026-06-07", no_pull=True
+        )
+        # Two months before the analysis window: invisible to the windowed evidence, but
+        # it adds a whole episode to the context_days block the LLM is shown.
+        test_db.upsert_daily_context_by_event(
+            "evt-old", "2026-04-02", "alcohol", value=4.0, text="Alcohol: 4 drinks"
+        )
+        with patch("builtins.input", return_value="y"):
+            coach_service.data_bootstrap(
+                from_date_str="2026-06-01", until_date_str="2026-06-07", no_pull=True
+            )
+        self.assertEqual(mock_client.complete.call_count, 2)  # not reused
+        self.assertIn("2026-04-02", mock_client.complete.call_args[0][1])
+
 
 class TestPriorTrainingContext(unittest.TestCase):
     """The cached reconstruction is fed read-only into the plan-generate strategy prompt
