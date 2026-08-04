@@ -13,18 +13,47 @@ unchanged re-runs); the `--inspect-only`/`--force` CLI flags (§9); `plan feedba
 --edit` (§7); and the planned-vs-inferred review via **Option A** (§6, §7 — see
 the note below).
 
+> **AS BUILT (2026-08-04) — read this before the sections below.** Three things
+> drifted after this document was written, and they change the command surface and
+> the write topology rather than the mechanism:
+>
+> 1. **`data analyze` no longer exists.** It split into **`data bootstrap`** (alias
+>    `b`, horizon `long`, once per onboarding, establishes the reflect watermark)
+>    and **`data reflect`** (horizon `short`, incremental from the watermark).
+>    Both share `CoachService._run_workout_analysis()`. Read every "`data analyze`"
+>    below as "the analysis flow (`data bootstrap` / `data reflect`)"; the
+>    reconstruction that `plan generate` replays is the one `data bootstrap`
+>    caches. See ARCHITECTURE §"data bootstrap / data reflect" and
+>    DESIGN_evidence_based_confidence.md.
+> 2. **`plan generate` never became a learnings writer, nor a feedback writer.**
+>    The only learnings writer is the analysis flow; `workout adapt` was made
+>    read-only too. Every "`plan generate` **Writes**" claim below (§3, §4 table,
+>    §8 opening, §10) is **superseded** — see DESIGN_evidence_based_confidence.md
+>    §6 *AS BUILT*.
+> 3. **§8's `suppress_reinforcement` flag was never shipped and is now
+>    unnecessary.** The soundness invariant it protected — "reinforcement tracks
+>    new evidence, not new invocations" — is instead enforced structurally by the
+>    per-learning **evidence-week basis** (DESIGN_evidence_based_confidence.md
+>    §6/§8): cited weeks are deduped against the learning's existing basis, so
+>    re-citing a counted week neither raises confidence nor refreshes
+>    `last_reinforced_at`. §8 below is retained for its rationale only.
+
 **Option A chosen for §6/§7 (planned-vs-inferred).** During implementation the
-§7 *auto-write into the `feedback` field* collided with the data model:
-`db.save_macrocycle()` deletes-and-recreates the macrocycle (and its mesocycles)
-on every regeneration, so feedback never persists across a replan — there is no
-stable field to overwrite. Resolution (**Option A**): the planned-vs-actual review
-is built read-only by `CoachService._build_prior_training_context()` (anchored on
-the prior plan's elapsed mesocycle windows, augmented with the cached
-reconstruction's insights — reused without a new LLM call), **injected into the
-strategy prompt and displayed**, and writes to *no* `feedback` field. The §7
-auto-write / 4-step-ordering subsection below is therefore **superseded** and
-retained only for rationale. `plan feedback --edit` remains the human's path to
-that field.
+§7 *auto-write into the `feedback` field* collided with the data model: every
+`plan generate` writes a **new** macrocycle version (`db.save_macrocycle()` marks
+the previous one `superseded` and inserts a fresh row — DESIGN_plan_rollback.md),
+and that new active row starts with an empty `feedback`, so feedback never carries
+across a replan — there is no stable field to overwrite. Resolution (**Option A**):
+the planned-vs-actual review is built read-only by
+`CoachService._build_prior_training_context()` (anchored on the elapsed mesocycle
+windows of the prior plan *and* of the currently governing one — see §6 — augmented
+with the cached reconstruction's insights, reused without a new LLM call),
+**injected into the strategy prompt and displayed**, and writes to *no* `feedback`
+field. The §7 auto-write / 4-step-ordering subsection below is therefore
+**superseded** and retained only for rationale — as are the other places that
+assert the auto-write (§2 goal 4, §3 "Owned by `plan generate`", §4 table
+"diff → feedback", §6 closing, §10 second bullet). `plan feedback --edit` remains
+the human's path to that field.
 
 This document captures the design for feeding *backward-looking* analysis of
 past training into *forward-looking* decisions (planning and workout
@@ -39,13 +68,15 @@ generation). It supersedes the relevant TODO items:
 
 ## 1. Motivation
 
-`data analyze` already reverse-engineers past training into a rich result —
+The analysis flow (`data analyze`; as built, `data bootstrap` / `data reflect`)
+already reverse-engineers past training into a rich result —
 `{macrocycle_summary, inferred_macrocycle, inferred_mesocycles[],
 physiological_insights[], learning_updates[]}` (see ARCHITECTURE §3, §10).
 `learning_updates` survives as coach-learnings deltas, and the reconstruction —
 its summary, reverse-engineered macro/mesocycle structure, and physiological
 insights — is cached and replayed read-only into `plan generate`'s strategy
-prompt (Option A, see §5/§6); none of it is discarded.
+prompt (Option A, see §5/§6) and into the progress timeline (§5.1); none of it is
+discarded.
 
 The reconstruction is exactly the context that would ground a *new* plan in the
 athlete's demonstrated reality rather than an idealized template, and would tell
@@ -65,14 +96,23 @@ memory model in the process.
 - Keep coach-learnings reinforcement *sound* under repeated/curiosity runs.
 - Reuse existing machinery (coach-learnings deltas, the `*_hash` reuse idiom,
   the macro/meso `feedback` fields) rather than inventing parallel channels.
+  **Superseded (Option A):** the `feedback` half of this goal was dropped — the
+  review is prompt context, not a stored field. The deltas and the hash idiom
+  were reused as stated.
 
 **Non-Goals**
+- No backward evaluation in `workout generate` (see §4 *AS BUILT*) — it consumes
+  raw recent metrics + PMC directly and runs no LLM backward pass.
 - No backward evaluation in `workout adapt` (see §4) — it runs daily; the cost
   is not justified.
-- No per-learning evidence provenance in v1 (see §7, "Edges") — deferred as
-  YAGNI.
-- The human-facing narrative `macrocycle_summary` is *not* fed to the LLM (it is
-  useful to read, but not decision-relevant for the model).
+- ~~No per-learning evidence provenance in v1 (see §7, "Edges") — deferred as
+  YAGNI.~~ **Superseded (DESIGN_evidence_based_confidence.md):** per-learning
+  evidence provenance *was* built (the evidence-week basis), and it is what now
+  supplies §8's integrity invariant.
+- ~~The human-facing narrative `macrocycle_summary` is *not* fed to the LLM (it is
+  useful to read, but not decision-relevant for the model).~~ **Superseded
+  (Option A):** the summary *is* replayed into the strategy prompt — it is the
+  cheapest carrier of the prior arc's narrative, and §1 always said so.
 
 ---
 
@@ -84,11 +124,14 @@ that must not be conflated:
 
 - **Durable memory formation** — distilling general, cross-block,
   decaying observations into `coach_learnings` ("responds badly to consecutive
-  hard days"). Slow-moving. Owned by `data analyze`.
+  hard days"). Slow-moving. Owned by `data analyze` (as built: `data bootstrap` /
+  `data reflect` — the *only* learnings writers).
 - **Situational assessment** — a point-in-time judgement about a *specific* past
   period ("*this* base block did not build base"), consumed immediately by the
   plan it informs and written to that block's `feedback`. Owned by
-  `plan generate`.
+  `plan generate`. **Superseded (Option A):** the assessment is real and is owned
+  by `plan generate`, but it is *built and shown*, never written — it lands in the
+  strategy prompt instead of in `feedback`.
 
 Both look backward; they produce *different products*. §9 explains why running
 them back-to-back is not redundant double-counting.
@@ -108,11 +151,32 @@ affordable exactly where it is rare and is excluded where it is frequent.
 | `workout generate` | Yes — inline   | Short (~4–6 wk)    | *Recent-response insights only* — no cycle reconstruction            | Read-only  | Occasional |
 | `workout adapt`    | **No**         | —                  | Excluded; already uses raw recent metrics + adherence + learnings    | —          | Daily      |
 
+> **AS BUILT — the table above is the original intent; this is what shipped.**
+>
+> | Command            | Backward eval? | Horizon slot | Product & use                                                        | Learnings  | Frequency  |
+> |--------------------|----------------|--------------|----------------------------------------------------------------------|------------|------------|
+> | `data bootstrap`   | Yes — curator  | `long`       | Full reconstruction (cycles + insights); cached and replayed forward  | **Writes** | Once       |
+> | `data reflect`     | Yes — curator  | `short`      | Same LLM pass, incremental window from the reflect watermark          | **Writes** | Occasional |
+> | `plan generate`    | **No LLM pass**| —            | *Reads* the cached `long` reconstruction + a computed planned-vs-actual review into the prompt (§6) | Read-only | Rare |
+> | `workout generate` | **No**         | —            | Never built. Raw metrics + PMC over `metrics_lookback_days`; no backward pass, no cache access | Read-only | Occasional |
+> | `workout adapt`    | **No**         | —            | Excluded as designed; also made read-only w.r.t. learnings            | Read-only  | Daily      |
+
 **Horizon dictates the product, not just the window size.**
 - Long horizon → cycles + insights + planned-vs-inferred diff.
 - Short horizon → physiological / recent-response read only. *Cycle
   reconstruction is meaningless below the long horizon* — you cannot infer a
   periodization structure from four weeks.
+
+> **AS BUILT — the horizon selects the cache slot, not the product.** Both
+> `bootstrap` and `reflect` run the *identical* prompt through
+> `_run_workout_analysis()`; `horizon` picks which `analysis_cache` row is written
+> and the label is used only for LLM logging. So `data reflect` also emits
+> `inferred_macrocycle` / `inferred_mesocycles` over its short window — the model
+> is simply reconstructing less structure from less evidence, which is a weaker
+> claim rather than a different product. What differs is **consumption**: only the
+> `long` slot is read forward (`_build_prior_training_context`, `timeline.py`), so
+> the short slot is effectively write-only cache. Splitting the prompt by horizon
+> stayed unbuilt because nothing consumes the short reconstruction.
 
 ---
 
@@ -125,13 +189,26 @@ instead of paying for a second backward pass (see §9).
 - **Evidence fingerprint** — a hash of the *inputs* to the analysis: the set of
   completed-activity IDs + metrics within the window (plus the window itself).
   This follows the existing `goals_hash` / `lifeevents_hash` / `config_hash`
-  reuse idiom (ARCHITECTURE §10).
+  reuse idiom (ARCHITECTURE §10). **As built the input list is wider**, because
+  everything the analysis prompt is shown must move the hash: per activity the
+  load-bearing *fields* too (`date`, type, `duration_sec`, `tss`, `rpe`,
+  `zone1..5_sec`) so a corrected re-pull invalidates; the overlapping
+  **constraints** (DESIGN_constraints.md §6); and the ingested **daily-context**
+  signals (DESIGN_calendar_context_ingest.md §7). The deliberate omissions are
+  unchanged — see §11.
 - **Cache key** = (window/horizon, evidence fingerprint). Hashing the concrete
   activity-id set — not merely the date range — narrows the overlapping-window
   edge (see §7).
 - `data analyze` produces/refreshes the artifact and curates learnings.
 - `plan generate` consumes the matching artifact when the fingerprint is current,
-  recomputing only if stale or absent.
+  recomputing only if stale or absent. **Superseded (Option A):** `plan generate`
+  performs no LLM call and therefore *cannot* recompute — it reads whatever sits
+  in the `long` slot, unconditionally. The fingerprint check lives only in the
+  analysis flow that writes the slot. Consequence, accepted: if `data bootstrap`
+  has not been re-run in months, a months-old reconstruction is replayed verbatim.
+  The window it covers is printed alongside it (`INFERRED FROM PAST TRAINING
+  (start..end)`) so the staleness is visible rather than silent, and `plan
+  generate`/`status` nudge toward `data bootstrap` on a cold start.
 
 The fingerprint plays **two independent roles** that must be kept separate:
 
@@ -177,11 +254,22 @@ an old window hits cache) is deferred until missed.
   reconstruction)` — upsert on `horizon`.
 - `get_analysis_cache(horizon)` → row or `None`. Callers compare the stored
   `fingerprint` against the freshly computed one to decide reuse vs recompute.
-- `wipe_analysis_cache()` — for `data wipe` symmetry.
+- `wipe_analysis_cache()` — for `data wipe` symmetry. It is what
+  `wipe_garmin_data()` calls to clear the slots: the reconstructions are derived
+  from exactly the evidence that wipe deletes, so they are meaningless afterwards.
 
 Reuse decision (in `CoachService`): compute the current fingerprint, call
 `get_analysis_cache(horizon)`; reuse when fingerprints match and `--force` is
 absent, else recompute and `save_analysis_cache(...)`.
+
+**Forward consumers of the `long` slot** (both read-only, neither recomputes):
+
+1. `CoachService._build_prior_training_context()` → the strategy prompt (§6).
+2. `trainmate/timeline.py` → `progression.assemble_timeline()`, which draws the
+   inferred mesocycle blocks as `~`-prefixed bands wherever no planned block
+   covers the span (`progress timeline` and the web dashboard's read-only view).
+   Added later by DESIGN_progress_timeline.md §6.1; the sections below that call
+   the strategy prompt the *only* consumer predate it.
 
 ---
 
@@ -212,9 +300,28 @@ then used to flag blocks that *emerged outside* what was planned. Timing fidelit
 Diff output has a natural home in existing fields: macro diff →
 `macrocycle.feedback`, per-block diff → `mesocycle.feedback`.
 
+> **AS BUILT (Option A).** Nothing is written. The review is assembled read-only by
+> `CoachService._build_prior_training_context()`, printed, and injected into the
+> strategy prompt as `PRIOR TRAINING REVIEW`. Two refinements over the text above:
+>
+> - **The anchor is wider than "the prior plan".** Elapsed blocks of the prior
+>   macrocycle *and* of the currently governing one are both walked: drift
+>   diagnosed only one macrocycle late is history, not a finding
+>   (DESIGN_intensity_distribution.md §3, gap 2).
+> - **The per-block comparison is quantitative, not just intent-fidelity.** Each
+>   planned block shows its stated `focus` beside what the athlete's sessions
+>   actually measured — volume, load, and the **per-sport per-zone intensity
+>   distribution as a per-week rate, with the delta against the preceding block**
+>   (DESIGN_intensity_distribution.md §4.1/§9). That delta is the intensity-creep
+>   check: weekly TSS can hold flat while easy volume quietly gives way to tempo.
+>   The cached reconstruction's summary/cycles/insights are appended below it.
+
 ---
 
-## 7. Feedback Auto-Write
+## 7. Feedback Auto-Write — SUPERSEDED (Option A)
+
+*Retained for rationale only: nothing auto-writes `feedback`. `plan feedback
+--edit` (below) shipped and is the only writer besides `plan feedback <text>`.*
 
 The diff/assessment is **auto-written** into the `feedback` fields. The field is
 single-voice, last-write-wins, but **never silently** overwritten.
@@ -242,8 +349,25 @@ to re-add anything shown in step 3, or to curate the auto-written text by hand.
 
 ## 8. Coach Learnings: Sound Reinforcement
 
+> **AS BUILT — the invariant holds, the mechanism changed.** The
+> `suppress_reinforcement` flag described below was never shipped;
+> `apply_learning_deltas(deltas, available_weeks=None, source="reflect")` has no
+> such parameter. Its job was taken over — better — by the per-learning
+> **evidence-week basis** of DESIGN_evidence_based_confidence.md §6/§8: the LLM
+> cites the `week_commencing` weeks an observation rests on, those weeks are
+> validated against the analysed window and deduped against the learning's existing
+> basis, confidence is *recomputed* from the resulting distinct-week count, and
+> `last_reinforced_at` is refreshed only when a genuinely new week lands. So
+> re-reading the same window is a no-op by construction — no flag has to detect it,
+> and the "shrinking/overlapping window" edge admitted below is closed rather than
+> deferred. A `contradict` op (negative evidence) was added alongside. Read the rest
+> of this section as the statement of the *problem* and of the invariant, not of the
+> implementation.
+
 Adding writers (`plan generate` now contributes learnings too) and allowing
-curiosity re-runs surfaces a soundness bug in `reinforce`.
+curiosity re-runs surfaces a soundness bug in `reinforce`. (`plan generate` never
+became a writer — see the AS BUILT note at the top of this document; the
+curiosity-re-run half of the motivation is real and is what the flow still faces.)
 
 **The bug.** Reinforcement must track *new evidence*, not *new invocations*.
 Today `reinforce` fires per call, so re-reading the same window — back-to-back
@@ -292,10 +416,15 @@ valid:
 | **reuse**        | (default)       | `--inspect-only`   |
 | **recompute**    | `--force`       | `--force --inspect-only`|
 
+Both flags are registered on `data bootstrap` and `data reflect` (as built; the
+document says `data analyze` throughout).
+
 **Critical guardrail.** `--force` bypasses the *reuse optimization*, **never the
 integrity invariant** (§8). Forcing a re-run over unchanged data still suppresses
 spurious `reinforce`s; it only lets you *see* a fresh reconstruction and pick up
-genuinely new `add`/`retire`. `--force` is never a license to double-count.
+genuinely new `add`/`retire`. `--force` is never a license to double-count. As
+built this falls out of the evidence-week basis rather than a flag: a forced
+re-run re-cites weeks already in each learning's basis, which dedup to nothing.
 
 The asymmetry to remember: `plan generate -f` is harmless because a plan is
 *replaced* (force = redo). Learnings *ratchet* (force-applying = double-count) —
@@ -311,15 +440,25 @@ twice"? No:
 - They produce **different products**: durable cross-block *memory* (learnings)
   vs. a situational *this-block* assessment (feedback) + a new plan.
 - The earlier worry — "`analyze` creates feedback for `plan generate`" — is moot:
-  `plan generate` now auto-writes its *own* feedback (§7).
+  `plan generate` now auto-writes its *own* feedback (§7). **Superseded
+  (Option A):** the worry is moot for a simpler reason — nothing writes feedback
+  at all, so there is no channel to contend over. `plan generate`'s assessment
+  lives in its own prompt and dies with the run.
 - The **persisted artifact (§5) removes the redundant second pass**: when
   `analyze` has already reconstructed the current evidence, `plan generate`
-  *reuses* that artifact for its diff instead of recomputing.
+  *reuses* that artifact for its diff instead of recomputing. **As built this is
+  absolute**, not opportunistic: `plan generate` has no recompute path, so if the
+  artifact is absent the review simply carries the computed planned-vs-actual
+  tables without a reconstruction (and the CLI nudges toward `data bootstrap`).
 - The fingerprint invariant (§8) makes back-to-back runs harmless regardless.
 
 `data analyze` earns a separate command because you sometimes look backward
 *without* wanting a new plan — to curate memory on its own cadence, or simply out
 of curiosity (especially early on). That is `--inspect-only`'s reason to exist.
+As built the argument got stronger, not weaker: with `plan generate` reduced to a
+pure consumer, the analysis flow is the *only* place a backward pass happens, and
+splitting it into `bootstrap` (once, full backlog) and `reflect` (incremental from
+the watermark) is what keeps repeated curiosity runs from re-counting history.
 
 ---
 
@@ -336,12 +475,24 @@ of curiosity (especially early on). That is `--inspect-only`'s reason to exist.
   (`data analyze`, `plan generate`). Revisit only if generation is empirically
   seen surfacing learnings the others miss.
 
+  **AS BUILT — the decision stands, its justification narrowed.** `workout adapt`
+  was subsequently made read-only w.r.t. learnings as well
+  (DESIGN_evidence_based_confidence.md §2/§11), and `plan generate` never became a
+  writer, so the "authored better elsewhere" argument now resolves to a single
+  place: the analysis flow (`data bootstrap` / `data reflect`) is the *only*
+  learnings writer. That is the stronger form of the same principle — a learning
+  should be attributable to the weeks of evidence it was derived from, and only
+  the flow that walks weekly summaries can cite them (§8 *AS BUILT*).
+
 - **Prompt/science changes do *not* invalidate reuse (for now).** The evidence
   fingerprint hashes only activity/metric inputs, *not* the prompt or science
   files. So editing a prompt or `science/*.txt` reuses a stale reconstruction
   until the underlying data changes; `--force` is the manual escape hatch.
   **Action:** add a code comment at the fingerprint computation making this
-  limitation explicit, so the omission reads as deliberate, not forgotten.
+  limitation explicit, so the omission reads as deliberate, not forgotten. *As
+  built the comment also names a second omission found later: a bare **baseline
+  recomputation** that shifts a deviation without any in-window metric changing
+  (baselines track the metrics, so in practice they move together).*
 
 - **Cache storage → dedicated `analysis_cache` table.** See §5.1 for the schema,
   the `db.py` methods, and the one-row-per-horizon retention policy. Chosen

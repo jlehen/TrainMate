@@ -1,6 +1,7 @@
 import os
 import unittest
 from datetime import datetime, timedelta, timezone
+from unittest import mock
 
 from tests.helpers import clear_all_tables
 
@@ -428,6 +429,23 @@ class TestDatabase(unittest.TestCase):
         test_db.wipe_metrics()
         self.assertIsNone(test_db.get_analysis_cache("long"))
         self.assertIsNone(test_db.get_analysis_cache("short"))
+
+    def test_wipe_analysis_cache_is_the_wipe_path(self):
+        """`wipe_analysis_cache()` clears every horizon slot, and `wipe_garmin_data()`
+        goes through it rather than inlining its own DELETE — including for a windowed
+        wipe, since a reconstruction covers a whole window, not per-day rows
+        (DESIGN_backward_evaluation.md §5.1)."""
+        test_db.save_analysis_cache("long", "fp-l", "2026-01-01", "2026-03-31", {"a": 1})
+        test_db.save_analysis_cache("short", "fp-s", "2026-03-01", "2026-03-31", {"b": 2})
+        test_db.wipe_analysis_cache()
+        self.assertIsNone(test_db.get_analysis_cache("long"))
+        self.assertIsNone(test_db.get_analysis_cache("short"))
+
+        with mock.patch.object(
+            test_db, "wipe_analysis_cache", wraps=test_db.wipe_analysis_cache
+        ) as wiper:
+            test_db.wipe_garmin_data("2026-03-01", "2026-03-31")
+        wiper.assert_called_once_with()
 
     def test_daily_context_upsert_get_delete(self):
         """Context signals upsert by event id (edits replace in place), query by date

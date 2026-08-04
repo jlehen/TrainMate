@@ -69,12 +69,14 @@ class WipesMixin:
         dataset is cleared and every non-calendar sync watermark (garmin/reflect/
         bootstrap) is reset, so the next run is a true cold start.
         """
+        # Own connection, so it runs before the evidence deletion rather than nesting
+        # a second writer inside it (DESIGN_backward_evaluation.md §5.1).
+        self.wipe_analysis_cache()
         with self._get_connection() as conn:
             cursor = conn.cursor()
             self._delete_by_date(cursor, "completed_activities", start, end)
             self._delete_by_date(cursor, "athlete_metrics_cache", start, end)
             self._delete_by_date(cursor, "athlete_baselines", start, end)
-            cursor.execute("DELETE FROM analysis_cache")
             if start is None and end is None:
                 # Full wipe: drop the Garmin watermark and the coach-analysis
                 # watermarks that index this evidence. The calendar token is owned by
