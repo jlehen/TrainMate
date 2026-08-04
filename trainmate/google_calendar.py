@@ -338,10 +338,10 @@ class CalendarSyncer:
 
         Incremental via `syncToken` (edit and delete detection come for free); falls
         back to a full pull of *all* tagged events on first run or when the token has
-        expired (HTTP 410). The server-side `privateExtendedProperty` filter means only
-        context events ever enter the stream — workouts and private appointments don't.
-        Returns the number of rows upserted or deleted
-        (DESIGN_calendar_context_ingest.md §6).
+        expired (HTTP 410). The server-side `privateExtendedProperty` filter applies to
+        the full pull only — the API forbids it alongside `syncToken`, so the incremental
+        stream carries every changed event and is filtered client-side. Returns the number
+        of rows upserted or deleted (DESIGN_calendar_context_ingest.md §3, §6).
         """
         if not self.calendar_id:
             return 0
@@ -401,12 +401,13 @@ class CalendarSyncer:
         if not event_id:
             return 0
         if event.get('status') == 'cancelled':
-            db.delete_daily_context_by_event(event_id)
-            return 1
+            # Cancelled events arrive stripped of extendedProperties, so the tag guard
+            # below can't run: a deleted row is the proof it was ours (§6).
+            return 1 if db.delete_daily_context_by_event(event_id) else 0
 
         private = (event.get('extendedProperties', {}) or {}).get('private', {}) or {}
-        # The server-side filter should guarantee this, but a shared calendar or a
-        # token stream can still surprise us — skip anything not actually ours.
+        # On the incremental path this is the *only* filter (no server-side one is
+        # allowed with a syncToken) — skip anything not actually ours (§3).
         if private.get('source') != config.calendar_context_tag:
             return 0
 

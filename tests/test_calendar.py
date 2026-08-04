@@ -529,6 +529,40 @@ class TestCalendarSync(unittest.TestCase):
         _, kwargs = mock_service.events().list.call_args
         self.assertEqual(kwargs.get("privateExtendedProperty"), "source=trainmate-context")
 
+    def test_sync_context_ignores_cancelled_events_that_are_not_ours(self):
+        """On the incremental path the stream carries every cancelled event, not just
+        tagged ones; a cancellation that deletes no row must not count as a change
+        (DESIGN_calendar_context_ingest.md §6)."""
+        test_db.set_sync_state(
+            through_date=None, last_pull_utc="t0", key="calendar_context",
+            sync_token="tok-prev",
+        )
+        test_db.upsert_daily_context_by_event(
+            google_event_id="evt-ctx", date="2026-06-10", metric="alcohol",
+            value=1.0, text="1 drink", updated=None,
+        )
+
+        mock_service = MagicMock()
+        mock_service.events().list.return_value.execute.return_value = {
+            "items": [
+                {"id": "evt-ctx", "status": "cancelled"},      # ours: deletes a row
+                {"id": "evt-workout", "status": "cancelled"},  # a cancelled workout
+                {"id": "evt-dentist", "status": "cancelled"},  # a private appointment
+            ],
+            "nextSyncToken": "tok-next",
+        }
+
+        with patch.object(calendar_syncer, "service", mock_service), \
+                patch.object(calendar_syncer, "calendar_id", "cal-test"):
+            changed = calendar_syncer.sync_context()
+
+        self.assertEqual(changed, 1)
+        self.assertEqual(test_db.get_daily_context(), [])
+        # The incremental query cannot carry the server-side filter alongside the token.
+        _, kwargs = mock_service.events().list.call_args
+        self.assertEqual(kwargs.get("syncToken"), "tok-prev")
+        self.assertNotIn("privateExtendedProperty", kwargs)
+
     def test_sync_context_expired_token_falls_back_to_full_pull(self):
         """A 410 on the stored syncToken discards it and restarts with a full pull."""
         from googleapiclient.errors import HttpError

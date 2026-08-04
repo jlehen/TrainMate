@@ -32,13 +32,19 @@ class DailyContextMixin:
             )
             conn.commit()
 
-    def delete_daily_context_by_event(self, google_event_id: str) -> None:
-        """Removes the context signal for a (cancelled/deleted) Calendar event id."""
+    def delete_daily_context_by_event(self, google_event_id: str) -> bool:
+        """Removes the context signal for a (cancelled/deleted) Calendar event id.
+
+        Returns True only when a row actually went away: cancelled events reach the
+        ingest path untagged, so "did this delete anything" is the only way to tell
+        one of ours from a cancelled workout (DESIGN_calendar_context_ingest.md §6)."""
         with self._get_connection() as conn:
-            conn.cursor().execute(
+            cursor = conn.cursor()
+            cursor.execute(
                 "DELETE FROM daily_context WHERE google_event_id = ?", (google_event_id,)
             )
             conn.commit()
+            return cursor.rowcount > 0
 
     def get_daily_context(
         self, start_date: Optional[str] = None, end_date: Optional[str] = None,
