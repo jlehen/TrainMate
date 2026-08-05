@@ -1,5 +1,5 @@
 import json
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Any, List, Optional, Tuple, Dict
 from trainmate.config import config
 from trainmate.db import db
@@ -192,6 +192,20 @@ class WorkoutGenMixin:
             out.append(w)
         return out
 
+    def _goal_date_for_macrocycle(self, macrocycle_id: int) -> Optional[date]:
+        """The target date of the objective a macrocycle serves, or None if unresolvable."""
+        macro = self._db.get_macrocycle(macrocycle_id)
+        if not macro:
+            return None
+        objective = self._db.get_objective(macro.get('objective_id'))
+        target = (objective or {}).get('target_date')
+        if not target:
+            return None
+        try:
+            return datetime.strptime(target, "%Y-%m-%d").date()
+        except ValueError:
+            return None
+
     def _warn_missing_boundary_benchmarks(
         self, workouts: List[Dict[str, Any]], constraints: List[Constraint],
         macrocycle_id: int, gen_start: str
@@ -199,12 +213,15 @@ class WorkoutGenMixin:
         """Boundary-week post-check (§4.1): warn — don't auto-insert — when a covered
         mesocycle-boundary week ended up with no benchmark. Same spirit as the rest-window
         pass, but a surfaced warning the athlete can act on (regenerate), not a silent fix.
-        Stays quiet when the boundary week sits under a `rest` constraint — rest wins."""
+        Stays quiet when the boundary week sits under a `rest` constraint — rest wins — and
+        for a boundary week reaching into the goal's own week, where a maximal test would
+        compete with the event it is meant to serve (§4.1)."""
         if not workouts:
             return
         mesocycles = self._db.get_mesocycles_for_macrocycle(macrocycle_id)
         if not mesocycles:
             return
+        goal_obj = self._goal_date_for_macrocycle(macrocycle_id)
         dated = [w for w in workouts if w.get('date')]
         span_end = max(w['date'] for w in dated)
         rest_windows = self._hard_rest_windows(constraints)
@@ -214,6 +231,9 @@ class WorkoutGenMixin:
             if not (gen_start <= end <= span_end):
                 continue
             end_obj = datetime.strptime(end, "%Y-%m-%d").date()
+            # Goal week wins: a boundary week ending inside it gets no test (§4.1).
+            if goal_obj and end_obj > goal_obj - timedelta(days=7):
+                continue
             win_start = (end_obj - timedelta(days=6)).strftime("%Y-%m-%d")
             # Rest wins: a full-rest window overlapping the boundary week silences the check.
             if any(s <= end and e >= win_start for (s, e, _t) in rest_windows):

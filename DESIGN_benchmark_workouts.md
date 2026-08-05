@@ -312,18 +312,50 @@ snapshotted, prompted, trended and displayed like everything else.
 Benchmarks belong at block boundaries and on a ~4–6 week cadence
 (`benchmarks.txt` §1). The split of labor plays to each side's strength:
 
-- **The LLM places.** The generation prompt (`coach/engine/workouts.py:155-164`)
+- **The LLM places.** The generation prompt (`coach/engine/workouts.py:155-167`)
   instructs the coach to schedule one benchmark of the appropriate kind in each
-  mesocycle-boundary week the generated span covers (plus one validation test before
-  the goal), preceded by an opener/easy day so TSB is positive on test day, phrased
+  mesocycle-boundary week the generated span covers — except the terminal block's —
+  preceded by an opener/easy day so TSB is positive on test day, phrased
   venue-neutrally (§5.4), and never in a rest week. Day choice stays with the
   model — it already handles weekly availability, equipment, and rest days, and
   a deterministic pass re-implementing that logic is exactly the machinery we
   do not want.
+
+**Why the boundary is the block's END.** The anchor exists to scale the *next*
+block's targets, and `workout generate` writes a whole span in one shot — so
+everything scheduled after a test in that span was authored before the result
+existed. Testing at the end of block N leaves only the tail of a finishing block
+authored blind, and the next generate run writes all of N+1 from the new anchor;
+testing at the *start* of N+1 leaves N+1 itself — the block the test was meant to
+calibrate — authored blind. The seam placement also lands a >`threshold_replan_pct`
+move before `config_changed()` (§3.3) rewrites the upcoming block, rather than part-way
+into days already begun.
+
+**Why there is no pre-goal validation test.** An earlier revision asked for one in
+the last week before the goal, on top of the boundary tests. It was dropped. A
+maximal test is physiologically the same event as the goal effort, so in a taper it
+spends the freshness it is measuring — and the taper deliberately lifts performance
+above the tested value, making a mid-taper anchor stale in the optimistic direction
+by race day. The final boundary test already sets a current anchor, and
+`benchmarks.txt` §1 puts re-tests inside ~3-4 weeks in the noise. The clause also
+collided with the boundary rule whenever the taper was short enough to make "the
+block's final week" and "the last week before the goal" adjacent.
+
+Removing it is not sufficient on its own, because a goal-directed macrocycle's
+**last block ends ON the goal date** — its boundary week *is* race week, so the
+boundary rule alone would still ask for a test there. Hence the goal-week exemption,
+applied on both sides: the prompt excludes such a week, and
+`_warn_missing_boundary_benchmarks()` skips any boundary ending later than seven days
+before the goal (`_goal_date_for_macrocycle()` resolves the date through the
+macrocycle's objective; an unresolvable goal exempts nothing).
+
+The exemption keys on the **goal date, not the block's ordinal position**: a macrocycle
+whose final block ends months before its target date is an ordinary boundary and still
+gets its test. Only the run-in to the event is protected.
 - **A deterministic post-check verifies.** After generation, if a covered
   boundary week ended up with no `benchmark_type` workout,
-  `_warn_missing_boundary_benchmarks()` (`coach/service/workouts.py:183-218`, called at
-  `:407`) prints a warning — same spirit as the rest-window pass
+  `_warn_missing_boundary_benchmarks()` (`coach/service/workouts.py:195-233`, called at
+  `:426`) prints a warning — same spirit as the rest-window pass
   (`_enforce_rest_windows_generate`), but a warning rather than an insertion: a
   missing test surfaces for the athlete to regenerate, it is not silently
   auto-fixed. The check stays silent when the boundary week sits under a `rest`
@@ -333,8 +365,8 @@ Benchmarks belong at block boundaries and on a ~4–6 week cadence
 
 **Same-day collision.** `save_workout` keys on (date, sport), so a second
 same-sport session on a benchmark date would overwrite the test. Deterministic
-rule, in `_drop_benchmark_collisions()` (`coach/service/workouts.py:152-181`, called at
-`:396`, before the rest pass and before any save): on a date holding a benchmark of
+rule, in `_drop_benchmark_collisions()` (`coach/service/workouts.py:165-193`, called at
+`:413`, before the rest pass and before any save): on a date holding a benchmark of
 sport X, drop any other proposed sport-X session and warn. The benchmark is identified
 by its flag — no guessing needed. Sports are compared canonically, so a `road_biking`
 session cannot slip past a `cycling` benchmark on a spelling.

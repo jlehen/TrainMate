@@ -455,6 +455,34 @@ class TestBenchmarkPlacementGuards(unittest.TestCase):
         )
         self.assertEqual(out, "")
 
+    def test_boundary_week_reaching_the_goal_week_is_not_checked(self):
+        """A goal-directed macrocycle's last block tapers into the event, so its boundary
+        week is the goal's own: no test is asked for there (§4.1)."""
+        obj_id = test_db.add_objective(
+            title="Hill climb", target_date="2026-09-30",
+            sport_type="cycling", priority=1,
+        )
+        macro_id = test_db.save_macrocycle(
+            objective_id=obj_id, strategy="Build", goals_hash="g",
+            constraints_hash="c",
+            mesocycles=[
+                {"name": "Specific", "start_date": "2026-08-31",
+                 "end_date": "2026-09-20", "focus": "Climb"},
+                {"name": "Taper", "start_date": "2026-09-21",
+                 "end_date": "2026-09-30", "focus": "Peak"},
+            ],
+        )
+        # Only the Specific block's boundary (2026-09-20) should be asked about; the Taper
+        # block ends on race day itself.
+        workouts = [{"date": d, "sport_type": "cycling", "title": "Z2"}
+                    for d in ("2026-09-18", "2026-09-25", "2026-09-30")]
+        _, out = self._capture(
+            coach_service._warn_missing_boundary_benchmarks,
+            workouts, [], macro_id, "2026-08-31",
+        )
+        self.assertIn("boundary week of 'Specific'", out)
+        self.assertNotIn("Taper", out)
+
     def test_boundary_outside_the_generated_span_is_not_checked(self):
         macro_id = self._macrocycle_with_boundary()
         # The span stops well before the 2026-08-30 boundary, so there is nothing to warn
