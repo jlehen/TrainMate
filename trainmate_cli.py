@@ -123,6 +123,9 @@ def build_parser():
     build the tree once and reuse it across many lines of input.
     """
     parser = WrapAwareArgumentParser(
+        # Not sys.argv[0]: nobody types 'trainmate_cli.py', and every wrapped usage line
+        # is indented under it (DESIGN_cli_noargs.md §e).
+        prog="tm",
         description="TrainMate - Local Training Coach CLI",
         epilog=PREFIX_HINT,
     )

@@ -128,22 +128,27 @@ after the existing confirm prompt.
 ## §c — Help lists commands by usefulness, not registration order
 
 argparse renders sub-commands in the order they are registered, which is an
-authoring artifact, not a use-frequency ranking. So every help surface — the
-native `-h`/`--help` listing, the recursive `help` tree, and the `{...}` usage
-metavar — used to lead with whatever happened to be added first (e.g. `help`,
-`shell`) rather than the commands an athlete reaches for daily (`status`,
-`workout`).
+authoring artifact, not a use-frequency ranking. So both help surfaces — the
+native `-h`/`--help` listing and the recursive `help` tree — used to lead with
+whatever happened to be added first (e.g. `help`, `shell`) rather than the
+commands an athlete reaches for daily (`status`, `workout`).
 
 `COMMAND_ORDER` (trainmate_cli.py) is the single source of truth: one list per
 command level, keyed by the parent's canonical name (`""` for the top level),
 each listing that level's *visible* sub-commands most-useful first. After the
 tree is assembled, `sort_command_tree` (trainmate/cli/argparse_ext.py) walks it
 once and reorders each sub-parsers action's `_choices_actions` (the listing +
-`help` tree) and `_visible_names` (the usage metavar) to match, keeping each
-command's aliases grouped with it. Names absent from the list sort stably to the
-end; hidden `advanced=True` commands are untouched (they carry no choice action
-and appear only under `--all`, appended after the visible set). Ranking is
-editorial — reorder the lists to change what leads.
+`help` tree) to match, keeping each command's aliases grouped with it. Names
+absent from the list sort stably to the end; hidden `advanced=True` commands are
+untouched (they carry no choice action and appear only under `--all`, appended
+after the visible set). Ranking is editorial — reorder the lists to change what
+leads.
+
+The usage line doesn't repeat the ranking: it spells the sub-command slot
+`<command>` rather than argparse's `{a,b,c,…}`. That brace list is one
+unbreakable token spanning every command *and* alias — it ran well past the
+terminal edge, re-exposed the hidden commands argparse rebuilt it from, and said
+nothing the ranked listing directly below it doesn't.
 
 ## §d — Any unambiguous command prefix is that command
 
@@ -229,3 +234,31 @@ Because resolution emits the **canonical** name, argparse — and therefore
 `args.command` / `args.subcommand` — never sees an alias or a prefix. The
 dispatcher in `trainmate_cli.py` compares one canonical name per branch, so a
 shorthand is now defined in exactly one place: the `aliases=` list.
+
+## §e — Help wraps to the client's width, in every part of the message
+
+argparse is built around an 80-column terminal, and only some of the help obeys
+even that. `WrapAwareHelpFormatter` (trainmate/cli/argparse_ext.py) already
+narrowed the option column for chat width; three other parts of the message still
+ran past the edge, on a real terminal as well as in chat.
+
+**Descriptions.** The formatter inherited `RawDescriptionHelpFormatter`, which
+prints a description verbatim. Ours are single-line prose strings — one command's
+summary reached 500 characters on one line, leaving the terminal to soft-wrap it
+into a ragged block. They are now wrapped one blank-line-separated paragraph at a
+time (`_fill_text`): prose re-flows, and a description that deliberately breaks
+into paragraphs (`benchmark record`'s Garmin warning) keeps those breaks. That
+also retires the one parser that had opted out of the formatter to protect them.
+
+**Flag names.** textwrap treats every hyphen as a break opportunity, so
+`--metrics-only` split across two lines and stopped being copy-pasteable. All
+wrapping here goes through `_fill`, which turns that off.
+
+**The usage line.** Two causes. Its wrapped continuations align under the program
+name, which at chat width leaves a handful of columns per line — narrow mode
+re-flows the whole line at a flat two-space indent instead. And the program name
+itself was `sys.argv[0]`: nobody types `trainmate_cli.py`, so the parser is built
+with `prog="tm"`, the launcher's real name and 14 columns shorter.
+
+`test_help_wraps_to_the_client_width` (tests/test_cli_misc.py) asserts the whole
+message — usage, description, options — fits at both 80 and 48 columns.

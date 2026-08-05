@@ -223,7 +223,6 @@ def add_benchmark_parser(subparsers):
             "For --e1rm, track ONE lift for now: the logbook has no per-exercise field, so "
             "a deadlift PR logged after a squat PR reads as one e1RM value jumping 70%."
         ),
-        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     b_rec.add_argument(
         "sport",

@@ -9,14 +9,24 @@ import re
 import subprocess
 import sys
 import tempfile
+import textwrap
 from typing import Optional
 
 from trainmate.util import (
-    bold, dim, red, yellow, cmd, default_wrap_width, format_labeled_block
+    bold, dim, red, yellow, cmd, default_wrap_width, format_labeled_block, wrap_text
 )
 
 
-class WrapAwareHelpFormatter(argparse.RawDescriptionHelpFormatter):
+def _fill(text: str, width: int, initial: str = "", subsequent: str = "") -> str:
+    """Wrap ``text`` to ``width``, never splitting an option name at a hyphen
+    (DESIGN_cli_noargs.md §e)."""
+    return textwrap.fill(
+        " ".join(text.split()), max(width, 20), initial_indent=initial,
+        subsequent_indent=subsequent, break_on_hyphens=False, break_long_words=False,
+    )
+
+
+class WrapAwareHelpFormatter(argparse.HelpFormatter):
     """argparse help formatter that respects the prose wrap width.
 
     argparse keys its layout off an 80-col terminal: option help is indented to a
@@ -26,7 +36,8 @@ class WrapAwareHelpFormatter(argparse.RawDescriptionHelpFormatter):
     total width to that and, once narrow, collapse the help column so each option's
     help sits on the next line at a shallow indent instead of far to the right.
     On a real terminal (default width) we defer entirely to argparse's familiar
-    two-column layout."""
+    two-column layout. The usage line, descriptions and flag names get wrapping
+    argparse doesn't do for them either — DESIGN_cli_noargs.md §e."""
 
     def __init__(self, prog):
         width = default_wrap_width()
@@ -54,6 +65,32 @@ class WrapAwareHelpFormatter(argparse.RawDescriptionHelpFormatter):
                 self._max_help_position = saved
         return super()._format_action(action)
 
+    def _format_usage(self, usage, actions, groups, prefix):
+        text = super()._format_usage(usage, actions, groups, prefix)
+        if not self._narrow:
+            return text
+        # Aligning continuations under the program name leaves too few columns at chat
+        # width, so re-flow the line at a flat indent (DESIGN_cli_noargs.md §e).
+        head = prefix if prefix is not None else "usage: "
+        body = " ".join(text.split()).removeprefix(head.strip()).strip()
+        return _fill(body, self._width, head, "  ") + "\n\n"
+
+    def _split_lines(self, text, width):
+        # break_on_hyphens would split an option out of its own help ("--out-\nof-date").
+        return _fill(text, width).splitlines()
+
+    def _fill_text(self, text, width, indent):
+        # Wrap a description/epilog one paragraph at a time, so prose re-flows but a
+        # deliberate blank line survives (DESIGN_cli_noargs.md §e). Indented and bulleted
+        # paragraphs are left exactly as authored.
+        blocks = []
+        for para in re.split(r"\n[ \t]*\n", text.strip("\n")):
+            if any(re.match(r"[ \t]|[-*•]\s", line) for line in para.splitlines()):
+                blocks.append(textwrap.indent(para, indent))
+                continue
+            blocks.append(_fill(para, width, indent, indent))
+        return "\n\n".join(blocks)
+
 class _DescFromHelpSubParsersAction(argparse._SubParsersAction):
     """Mirror help into description, and hide ``advanced=True`` sub-commands.
 
@@ -70,7 +107,10 @@ class _DescFromHelpSubParsersAction(argparse._SubParsersAction):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self._visible_names: list = []
+        # Not argparse's ``{a,b,c,…}``: one unbreakable token, past the edge, re-exposing
+        # the hidden commands, saying nothing the listing below doesn't (§c).
+        if self.metavar is None:
+            self.metavar = "<command>"
         self.advanced_choices: list = []  # (name, help) for hidden sub-commands
         # Prefix resolution (DESIGN_cli_noargs.md §d) matches canonical names only;
         # aliases stay exact-match, which is why they survive at all.
@@ -89,12 +129,6 @@ class _DescFromHelpSubParsersAction(argparse._SubParsersAction):
             # description so ``<cmd> <name> -h`` still explains itself.
             self.advanced_choices.append((name, kwargs.get("help", "")))
             kwargs.pop("help", None)
-            return self._with_helpall(super().add_parser(name, aliases=aliases, **kwargs))
-        self._visible_names.append(name)
-        self._visible_names.extend(aliases)
-        # Pin the usage-line ``{...}`` to the visible names only; without this argparse
-        # rebuilds it from *all* choices, re-exposing the hidden commands there.
-        self.metavar = "{" + ",".join(self._visible_names) + "}"
         return self._with_helpall(super().add_parser(name, aliases=aliases, **kwargs))
 
     @staticmethod
@@ -282,27 +316,11 @@ def _reorder_subparsers_action(action: argparse._SubParsersAction, order: list) 
     """Reorder one sub-parsers action's display to match ``order`` (canonical names).
 
     Sorts the help listing (``_choices_actions``, shared by ``-h`` and the ``help``
-    tree) and rebuilds the usage metavar (``_visible_names``) so aliases stay grouped
-    with their command. Names not in ``order`` sort stably to the end.
+    tree). Names not in ``order`` sort stably to the end.
     """
     rank = {name: i for i, name in enumerate(order)}
     end = len(order)
     action._choices_actions.sort(key=lambda ca: rank.get(ca.dest, end))
-    visible = getattr(action, "_visible_names", None)
-    if not visible:
-        return
-    reordered: list = []
-    for ca in action._choices_actions:
-        canonical_parser = action.choices[ca.dest]
-        # An alias shares its command's parser object; keep the group in original order.
-        for name in visible:
-            if action.choices.get(name) is canonical_parser and name not in reordered:
-                reordered.append(name)
-    for name in visible:  # safety: retain any name not tied to a listed command
-        if name not in reordered:
-            reordered.append(name)
-    action._visible_names = reordered
-    action.metavar = "{" + ",".join(reordered) + "}"
 
 
 def sort_command_tree(parser: argparse.ArgumentParser, order_map: dict, path: str = "") -> None:
@@ -348,7 +366,7 @@ class _HelpAllAction(argparse.Action):
         if not has_subcommands:
             parser.print_help()
             parser.exit()
-        print(bold(parser.description))
+        print(bold(wrap_text(parser.description or "")))
         print()
         _print_command_tree(parser, include_advanced=True)
         parser.exit()

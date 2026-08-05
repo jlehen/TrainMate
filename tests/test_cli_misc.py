@@ -3,6 +3,8 @@ import unittest
 from unittest.mock import patch
 
 from tests.helpers import clear_all_tables, run_cli
+from trainmate.cli.argparse_ext import _subparser_choices
+from trainmate.util import strip_ansi
 
 TEST_DB_PATH = os.path.join(os.path.dirname(__file__), "test_trainmate_cli_misc.db")
 
@@ -58,6 +60,33 @@ class TestCliMisc(unittest.TestCase):
         exit_code, stdout, stderr = self.run_cli(["data", "--help"])
         self.assertEqual(exit_code, 0)
         self.assertIn("pull", stdout)
+
+    def test_help_wraps_to_the_client_width(self):
+        # Every help surface — usage, description, option column — has to fit the
+        # width, including the chat client's. The sub-command slot is the one argparse
+        # can't break, which is why it reads `<command>` rather than `{a,b,c,…}`.
+        parser, _ = trainmate_cli.build_parser()
+        for width in (80, 48):
+            with patch.dict(os.environ, {"COLUMNS": str(width),
+                                         "TRAINMATE_WRAP_WIDTH": str(width)}):
+                for argv in ([], ["workout"], ["workout", "generate"]):
+                    sub = parser
+                    for token in argv:
+                        sub = _subparser_choices(sub)[token]
+                    text = strip_ansi(sub.format_help())
+                    over = [line for line in text.splitlines() if len(line) > width]
+                    self.assertEqual(over, [], f"{argv} at {width} cols")
+        self.assertIn("<command>", strip_ansi(parser.format_help()))
+
+    def test_help_description_keeps_its_paragraphs(self):
+        # Wrapping re-flows prose, but a description that deliberately breaks into
+        # paragraphs (benchmark record's Garmin warning) keeps those breaks.
+        exit_code, stdout, stderr = self.run_cli(["benchmark", "record", "--help"])
+        self.assertEqual(exit_code, 0)
+        body = strip_ansi(stdout).split("\n\npositional arguments:")[0]
+        self.assertIn("dated logbook", body)
+        self.assertIn("\n\nIMPORTANT:", body)
+        self.assertIn("\n\nFor --e1rm", body)
 
     def test_missing_argument_prints_help_then_the_missing_line(self):
         # DESIGN_cli_noargs.md §a: on a terminal the error answers itself with the

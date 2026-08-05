@@ -153,9 +153,9 @@ def add_goal_parser(subparsers):
         "--target-date", dest="target_date", help="New target event date (YYYY-MM-DD)"
     )
     g_edit.add_argument(
-        "--sport", nargs="+",
+        "--sport", nargs="+", metavar="SPORT",
         choices=CANONICAL_SPORTS,
-        help="New sport types (one or more)"
+        help="New sport types, one or more: %(choices)s"
     )
     g_edit.add_argument("--desc", help="New description")
     g_edit.add_argument("--priority", type=int, help="New priority (1 = highest)")

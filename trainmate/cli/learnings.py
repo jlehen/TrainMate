@@ -202,8 +202,8 @@ def add_learnings_parser(subparsers):
         help="Filter by sport (substring match)"
     )
     ln_list.add_argument(
-        "--confidence", choices=["tentative", "moderate", "established"],
-        help="Filter by confidence level"
+        "--confidence", choices=["tentative", "moderate", "established"], metavar="LEVEL",
+        help="Filter by confidence level: %(choices)s"
     )
     ln_list.add_argument(
         "-v", "--verbose", action="store_true",
