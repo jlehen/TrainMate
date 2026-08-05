@@ -525,10 +525,11 @@ def _render_analysis_report(result: dict, inspect_only: bool) -> None:
         # Macrocycle Overview
         if "inferred_macrocycle" in result:
             im = result["inferred_macrocycle"]
-            print(
-                f"\n{bold('Macrocycle Focus')}: {cyan(im.get('overall_focus', 'N/A'))} "
-                f"({magenta(im.get('start_date', ''))} to {magenta(im.get('end_date', ''))})"
-            )
+            print("\n" + format_labeled_block(
+                f"{bold('Macrocycle Focus')} "
+                f"({magenta(im.get('start_date', ''))} to {magenta(im.get('end_date', ''))}):",
+                im.get('overall_focus', 'N/A'), color_fn=cyan
+            ))
         
         if "macrocycle_summary" in result:
             print(format_labeled_block(f"{bold('Summary')}:", result["macrocycle_summary"]))
@@ -545,19 +546,22 @@ def _render_analysis_report(result: dict, inspect_only: bool) -> None:
                 else:
                     c_disp = yellow("[Moderate Consistency]")
 
-                print(
-                    f"  - {green(meso.get('name', 'Phase'))} "
+                print(format_labeled_text(
+                    "  - ",
+                    f"{green(meso.get('name', 'Phase'))} "
                     f"({cyan(meso.get('start_date', ''))} to {cyan(meso.get('end_date', ''))}) "
                     f"{c_disp}"
-                )
-                print(f"    * Detected Focus: {meso.get('focus_detected', 'N/A')}")
+                ))
+                print(format_labeled_block(
+                    "    * Detected Focus:", str(meso.get('focus_detected', 'N/A'))
+                ))
                 print(f"    * Avg Weekly TSS: {meso.get('average_weekly_tss', 'N/A')}")
 
         # Physiological Insights
         if "physiological_insights" in result and result["physiological_insights"]:
             print(bold(cyan("\nPhysiological Insights:")))
             for insight in result["physiological_insights"]:
-                print(f"  - {insight}")
+                print(format_labeled_text("  - ", str(insight)))
 
         # Coach learnings (incremental updates applied to learnings)
         updates = result.get("learning_updates")
@@ -588,9 +592,11 @@ def _render_analysis_report(result: dict, inspect_only: bool) -> None:
                     return ""
 
                 if op == "add":
-                    print(f"  + {u.get('text', '')}{suffix}")
+                    print(format_labeled_text("  + ", f"{u.get('text', '')}{suffix}"))
                 elif op == "revise":
-                    print(f"  ~ [{u.get('id')}] {u.get('text', '')}{suffix}")
+                    print(format_labeled_text(
+                        f"  ~ [{u.get('id')}] ", f"{u.get('text', '')}{suffix}"
+                    ))
                 elif op == "reinforce":
                     tag = f"  ↑ reinforced [{u.get('id')}]{suffix}"
                     text = _existing_text(u.get("id"))

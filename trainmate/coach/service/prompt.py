@@ -12,7 +12,7 @@ from trainmate import garmin
 from trainmate.garmin import activity_load
 from trainmate.util import (
     today_str as _today_str, today_date as _today_date,
-    cyan, green, yellow, bold, red, gray, cmd, PMC_TSB_LAG_NOTE,
+    cyan, green, yellow, bold, red, gray, cmd, format_labeled_block, PMC_TSB_LAG_NOTE,
 )
 from trainmate.coach.engine import CoachEngine
 from trainmate.coach.formatting import format_baseline, _load_science_guidelines
@@ -193,9 +193,9 @@ class PromptConfigMixin:
         for l in pending:
             target = l["proposed_confidence"]
             target_disp = "retire" if target == "retire" else target
-            print(
-                f"  [{l['id']}|{l.get('sports') or 'general'}|{l['confidence']}] {l['text']}"
-            )
+            print(format_labeled_block(
+                f"  [{l['id']}|{l.get('sports') or 'general'}|{l['confidence']}]", l['text']
+            ))
             print(yellow(f"    proposed demotion → {target_disp}"))
             import trainmate_cli as cli
             ans = cli.prompt.choose(

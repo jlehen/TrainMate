@@ -1,5 +1,7 @@
+import io
 import os
 import unittest
+from contextlib import redirect_stdout
 from datetime import datetime, timedelta
 from unittest.mock import patch
 
@@ -142,7 +144,8 @@ class TestCliData(unittest.TestCase):
         ])
         self.assertEqual(exit_code, 0)
         self.assertIn("=== HISTORICAL WORKOUT ANALYSIS REPORT ===", stdout)
-        self.assertIn("Macrocycle Focus: aerobic base building", stdout)
+        self.assertIn("Macrocycle Focus (2026-01-01 to 2026-03-31):", stdout)
+        self.assertIn("aerobic base building", stdout)
         self.assertIn("Base Building Phase", stdout)
         self.assertIn("HRV was stable during peak volume", stdout)
         self.assertIn("Coach Observations (Saved to learnings):", stdout)
@@ -177,6 +180,65 @@ class TestCliData(unittest.TestCase):
             force_pull=False,
             auto=False,
         )
+
+    def test_analysis_report_wraps_llm_prose_to_the_client_width(self):
+        # Every prose field in the bootstrap/reflect report comes from the LLM at
+        # unbounded length; none may run past the client's wrap width (AGENTS.md).
+        from trainmate.cli.data import _render_analysis_report
+        from trainmate.util import visible_len
+
+        learning_id = test_db.add_learning(
+            "Long-run durability is the limiter: pace decays sharply beyond 90 minutes "
+            "even at conversational effort, consistently across the last three blocks."
+        )
+        result = {
+            "inferred_macrocycle": {
+                "overall_focus": "Aerobic base rebuild with a late shift toward "
+                                 "threshold-supported marathon specificity",
+                "start_date": "2025-09-01",
+                "end_date": "2026-08-01",
+            },
+            "macrocycle_summary": "Twelve months of steadily rising aerobic volume "
+                                  "interrupted by two illness gaps.",
+            "inferred_mesocycles": [{
+                "name": "Extensive Endurance Accumulation (autumn)",
+                "start_date": "2025-09-01",
+                "end_date": "2025-11-15",
+                "focus_detected": "High-volume low-intensity accumulation with weekly long "
+                                  "runs progressing from 90 to 135 minutes and no structured "
+                                  "threshold work",
+                "average_weekly_tss": 410,
+                "estimated_consistency": "High",
+            }],
+            "physiological_insights": [
+                "Aerobic decoupling on long runs fell from 8% to 4% over the block, which "
+                "points to genuine durability gains rather than pacing discipline alone.",
+            ],
+            "learning_updates": [
+                {"op": "add",
+                 "text": "Responds well to two quality sessions per week but shows elevated "
+                         "fatigue whenever a third is added in the same seven days.",
+                 "sports": "running", "evidence": [3, 4, 5]},
+                {"op": "revise", "id": learning_id,
+                 "text": "Durability limiter has shifted later: decay now appears beyond "
+                         "110 minutes rather than 90.",
+                 "sports": "running"},
+                {"op": "reinforce", "id": learning_id, "evidence": [6]},
+            ],
+        }
+
+        for width in ("48", "80"):
+            os.environ["TRAINMATE_WRAP_WIDTH"] = width
+            try:
+                buf = io.StringIO()
+                with redirect_stdout(buf):
+                    _render_analysis_report(result, False)
+                out = buf.getvalue()
+            finally:
+                del os.environ["TRAINMATE_WRAP_WIDTH"]
+            self.assertNotIn("Error rendering workout analysis", out)
+            for line in out.split("\n"):
+                self.assertLessEqual(visible_len(line), int(width), msg=repr(line))
 
     @patch("trainmate_cli.garmin")
     def test_data_show_metrics_command(self, mock_garmin):
