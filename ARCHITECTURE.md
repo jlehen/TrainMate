@@ -256,7 +256,7 @@ flow for each lives in [§10](#10-key-data-flows).
 | Backward analysis (bootstrap/reflect) | `coach/service/analysis.py:_run_workout_analysis`, `coach/engine/analysis.py:_data_analyze_logic` ([§10](#data-analysis-data-bootstrap--data-reflect)) |
 | Garmin pull / metrics / load model | `trainmate/garmin/sync.py` (`pull`, `ensure_data`), `garmin/load.py` (`activity_load`), `garmin/pmc.py` (PMC + `recompute_derived`), see [§12](#12-sports-science--coaching-mathematics) |
 | Progress timeline / PMC projection | `trainmate/progression.py` (pure math), `trainmate/timeline.py` (shared row-fetch), `trainmate/chart.py` (PNG), `cli/progress.py` (text), `/api/timeline.png` in `trainmate_web.py`, see [§12](#fitnessfatigueform-pmc-model), DESIGN_progress_timeline.md |
-| Intensity distribution / time in zone | `trainmate/intensity.py` (aggregation + prompt-width rendering + which sports qualify and in which currency — `window_sport_stats`/`select_zone_sports`/`zone_currency`, shared by the CLI tables and `/api/zones`), `coach/service/context.py` (`_intensity_block_context` for adapt, `_intensity_history_context` for the strategy prompt, `_planning_zone_currencies` for §9.8), `cli/status.py`, `cli/progress.py` (the weekly grid — it shares the load table's week column and 48-column budget), `progression.weekly_aggregates` (where the rows join the payload), `cli/data.py` (`--zones`), `/api/zones` + the Progress tab's tables in `static/app.js`, DESIGN_intensity_distribution.md. Undercount markers are proportional: `intensity.judgeable` (`config.zone_min_activity_minutes`) withholds a too-short session's vote, and the coverage bar is per sport (`intensity.COVERAGE_MIN_BY_SPORT`, overridable via `config.zone_coverage_display_min_by_sport`) because rest between sets is not a failed recording. Both maps' keys must be **canonical** sports — `coverage_display_min()` canonicalizes before the lookup, so an alias key is dead and silently reverts to the global bar |
+| Intensity distribution / time in zone | `trainmate/intensity.py` (aggregation + prompt-width rendering + which sports qualify and in which currency — `window_sport_stats`/`select_zone_sports`/`zone_currency`, shared by the CLI tables and `/api/zones`), `coach/service/context.py` (`_intensity_block_context` for adapt, `_intensity_history_context` for the strategy prompt, `_block_progress_context` for workout generate — the only consumer passing `block_report`'s `previous=` and `fetch_workouts=`, since block-over-block creep and measured-vs-prescribed attribution are periodization questions (§9.2a), `_planning_zone_currencies` for §9.8), `cli/status.py`, `cli/progress.py` (the weekly grid — it shares the load table's week column and 48-column budget), `progression.weekly_aggregates` (where the rows join the payload), `cli/data.py` (`--zones`), `/api/zones` + the Progress tab's tables in `static/app.js`, DESIGN_intensity_distribution.md. Undercount markers are proportional: `intensity.judgeable` (`config.zone_min_activity_minutes`) withholds a too-short session's vote, and the coverage bar is per sport (`intensity.COVERAGE_MIN_BY_SPORT`, overridable via `config.zone_coverage_display_min_by_sport`) because rest between sets is not a failed recording. Both maps' keys must be **canonical** sports — `coverage_display_min()` canonicalizes before the lookup, so an alias key is dead and silently reverts to the global bar |
 | Planned time in zone (a session's intensity target) | `db/base.py` (`planned_zone_currency`, `planned_zone1..7_sec` on `workouts`), `db/workouts.py:save_workout`, `intensity.parse_planned_zones` / `format_planned_zones`, `coach/engine/workouts.py` (`_planned_zone_task`, `_planned_zone_fields` — both prompts), `google_calendar.py` + `coach/formatting.py` (rendered from the columns, never stored), DESIGN_intensity_distribution.md §9.8 |
 | Calendar push / daily-context ingest | `trainmate/google_calendar.py`, see [§13](#13-daily-context-calendar-ingest) |
 | Workout state (modified/calendar/removed/archived) | `trainmate/modification_state.py`, `trainmate/calendar_state.py`, `db/workouts.py` ([§5](#workout-state--four-orthogonal-axes-not-one-enum)) |
@@ -338,8 +338,14 @@ Module-level function in `formatting.py`. Concatenates all `*.txt` files from
   section, so a mid-block regeneration continues the block's ramp instead of restarting
   it, does not repeat a deload already taken, and does not re-place a fitness test the
   block already ran — that clause **bounds** the otherwise-unconditional BENCHMARK
-  PLACEMENT rule (DESIGN_block_progress.md §4). **Read-only** w.r.t. learnings. Label
-  `workout_generation`.
+  PLACEMENT rule (DESIGN_block_progress.md §4). With `block_has_intensity` it further
+  appends `JUDGING THE BLOCK'S COMPOSITION` (`_block_composition_task`), the other end of
+  DESIGN_intensity_distribution.md §9.4's handoff (§9.2a): composition is generate's, but
+  only after attributing the divergence — measured-vs-prescribed decides whether the plan
+  or the athlete is off, and re-shaping the block around a mis-execution is forbidden by
+  name. The flag rides separately from `block_progress` because that section quotes the
+  zone tables and must not be promised when they have no rows. **Read-only** w.r.t.
+  learnings. Label `workout_generation`.
 - **`_workout_adapt_logic(...)`** — LLM call →
   `{change_needed, reason, adapted_workouts[]}`. **Read-only** w.r.t. learnings.
   Within `config.adapt_terminal_window_days` of the block's end it appends a
@@ -1446,17 +1452,25 @@ event-day TSB over the plan's own workouts — is a deferred Phase 2 follow-up.
    computes `num_days` from `(end_date − today)`.
 3. Fetches metrics history (last `metrics_lookback_days` days) + baseline.
 3b. `_block_progress_context(today, gen_start)` builds the elapsed part of the block whose
-   remainder this run is writing (DESIGN_block_progress.md): each already-trained
-   Monday-week's planned-vs-actual load via `progression.weekly_aggregates` — the same
-   maths `tm progress` renders, so coach and athlete never read different numbers — under
-   an `intensity.format_header` header, plus the fitness tests the block has already run.
-   Threaded as its own `block_progress` argument, deliberately *not* via `meso_text`
-   (DESIGN_intensity_distribution.md §9.3). Anchored on `gen_start`, so the day preserved
-   for an already-completed session counts as history. Nothing is emitted when today falls
-   outside every block, when `gen_start` is on/before the block's first day (generate is
-   writing the whole block), or when the elapsed part holds no rows — the prompt is then
-   byte-identical to before. Volume/adherence/test history only: the measured **intensity**
-   distribution stays with adapt pending a §9.2 amendment (DESIGN_block_progress.md §2).
+   remainder this run is writing (DESIGN_block_progress.md). Two halves in one section:
+   **volume/adherence** — each already-trained Monday-week's planned-vs-actual load via
+   `progression.weekly_aggregates`, the same maths `tm progress` renders, so coach and
+   athlete never read different numbers — plus the fitness tests the block has already run;
+   and **composition** — `intensity.block_report` with two arguments adapt never passes:
+   `previous=` for the block-over-block delta, and `fetch_workouts=` for what the plan
+   PRESCRIBED over the same rate window, from §9.8's `planned_zone_sec`. That pair separates
+   a mis-designed block (measured tracks the prescription but not the focus — generate's to
+   fix) from a mis-executed one (measured diverges — adapt's, and re-shaping the block around
+   it would reward the drift). This is DESIGN_intensity_distribution.md **§9.2a**, the
+   amendment that lands §9.4's handoff; §9.2's line itself is unchanged. Threaded as its own
+   `block_progress` argument, deliberately *not* via `meso_text` (§9.3). Anchored on
+   `gen_start`, so the day preserved for an already-completed session counts as history.
+   Returns `(text, has_intensity)`: the composition prompt section quotes the zone tables, so
+   it is gated on those tables having rows, asked of `intensity.measured_window` — the same
+   window `block_report` builds the table from — so gate and table cannot disagree. Nothing
+   is emitted when today falls outside every block, when `gen_start` is on/before the block's
+   first day (generate is writing the whole block), or when nothing is banked — the prompt is
+   then byte-identical to before.
 4. Calls `CoachEngine._workout_generate_logic(num_days=...)` → LLM →
    `{reasoning, workouts[]}`. **Read-only** w.r.t. coach learnings (see
    [§3](#3-coach-package-architecture)).

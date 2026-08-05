@@ -582,6 +582,87 @@ class TestPlanningCurrency(unittest.TestCase):
         self.assertEqual(intensity.currency_by_sport(acts), {})
 
 
+def planned(date, sport, currency, secs):
+    """A planned-workout row carrying §9.8's intensity target, as `save_workout` stores it."""
+    row = {"date": date, "sport_type": sport, "planned_zone_currency": currency}
+    for i, s in enumerate(secs, start=1):
+        row[f"planned_zone{i}_sec"] = s
+    return row
+
+
+class TestMeasuredWindow(unittest.TestCase):
+    """§4: the window the zone table divides, shared so a caller asking "will this table
+    have rows?" asks about the same window the table is built from."""
+
+    def test_whole_weeks_where_a_rate_window_exists(self):
+        self.assertEqual(
+            intensity.measured_window("2026-06-01", "2026-06-28", "2026-06-17"),
+            ("2026-06-01", "2026-06-14", 2),
+        )
+
+    def test_falls_back_to_the_raw_elapsed_span_with_no_divisor(self):
+        # Six days in: too young for a per-week rate, so weeks is 0 and the span is raw.
+        self.assertEqual(
+            intensity.measured_window("2026-06-01", "2026-06-28", "2026-06-06"),
+            ("2026-06-01", "2026-06-06", 0),
+        )
+
+    def test_never_runs_past_the_block(self):
+        _, end, _ = intensity.measured_window("2026-06-01", "2026-06-28", "2026-09-01")
+        self.assertLessEqual(end, "2026-06-28")
+
+
+class TestPrescribedTable(unittest.TestCase):
+    """§9.2a: what the plan asked, beside what the athlete produced — the pair that tells a
+    mis-designed block from a mis-executed one."""
+
+    ACTS = [
+        act("2026-06-02", "running", 3600, hr=[0, 1200, 2400, 0, 0]),
+        act("2026-06-09", "running", 3600, hr=[0, 1200, 2400, 0, 0]),
+    ]
+    PLAN = [
+        planned("2026-06-02", "running", "hr", [0, 3000, 600, 0, 0]),
+        planned("2026-06-09", "running", "hr", [0, 3000, 600, 0, 0]),
+    ]
+
+    def test_absent_unless_asked_for(self):
+        """Only the periodization consumer passes `fetch_workouts`; adapt must not grow
+        this table, since measured-vs-prescribed divergence is an execution question."""
+        text = intensity.block_report(BLOCK, "2026-06-17", fetch_from(self.ACTS))
+        self.assertNotIn("PRESCRIBED", text)
+
+    def test_rendered_in_the_same_units_as_the_measured_table(self):
+        text = intensity.block_report(
+            BLOCK, "2026-06-17", fetch_from(self.ACTS),
+            fetch_workouts=fetch_from(self.PLAN),
+        )
+        self.assertIn("What the plan PRESCRIBED over the same weeks, per week", flat(text))
+        # Measured 40m of Z3 per week against 10m prescribed — the divergence is legible
+        # because both tables are the same renderer at the same divisor.
+        self.assertIn("Z3 tempo 40m", flat(text))
+        self.assertIn("Z3 tempo 10m", flat(text))
+
+    def test_silent_when_no_session_carries_a_target(self):
+        """Sessions predating §9.8, or a sport with no zone model: an empty table would
+        read as "the plan asked for nothing"."""
+        bare = [{"date": "2026-06-02", "sport_type": "running"}]
+        text = intensity.block_report(
+            BLOCK, "2026-06-17", fetch_from(self.ACTS), fetch_workouts=fetch_from(bare),
+        )
+        self.assertNotIn("PRESCRIBED", text)
+
+    def test_it_divides_the_same_window_the_measured_table_does(self):
+        """A prescription and a recording must divide the same weeks to be comparable, so
+        a session in the excluded partial tail must not inflate the prescribed rate."""
+        tail = self.PLAN + [planned("2026-06-16", "running", "hr", [0, 0, 3600, 0, 0])]
+        text = intensity.block_report(
+            BLOCK, "2026-06-17", fetch_from(self.ACTS), fetch_workouts=fetch_from(tail),
+        )
+        # Still 1200s/2 weeks = 10m, not (1200s + 3600s)/2 = 40m.
+        self.assertIn("Z3 tempo 10m", flat(text))
+        self.assertNotIn("Z3 tempo 40m", flat(text).split("PRESCRIBED")[1])
+
+
 class TestPromptWidthContract(unittest.TestCase):
     def test_block_report_prose_respects_the_width_it_is_given(self):
         # §9.6: `format_header` and the `Change vs` header were bare appends measuring

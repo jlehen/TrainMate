@@ -403,7 +403,9 @@ class WorkoutGenMixin:
         # What the block has already banked, when this run re-plans only its remainder
         # (DESIGN_block_progress.md §3). Anchored on gen_start, so the day preserved for a
         # completed session counts as history rather than as a day still to write.
-        block_progress = self._block_progress_context(today_str, gen_start_str)
+        block_progress, block_has_intensity = self._block_progress_context(
+            today_str, gen_start_str
+        )
         plan_data = self.engine._workout_generate_logic(
             objectives=objectives,
             constraints=constraints,
@@ -421,6 +423,7 @@ class WorkoutGenMixin:
             pmc_warmup_cutoff=pmc_cutoff,
             pmc_context=pmc_context,
             block_progress=block_progress,
+            block_has_intensity=block_has_intensity,
             zone_currencies=self._planning_zone_currencies(today_str)
         )
 

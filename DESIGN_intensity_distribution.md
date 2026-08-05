@@ -458,6 +458,49 @@ not change the block's composition. This resolves the apparent conflict with
 `DESIGN_block_boundary.md` without loosening anything about fatigue-driven cuts, and it gives
 "do not reshape the mesocycle" a definition it currently lacks.
 
+### 9.2a Amendment: the other end of the handoff
+
+§9.4's drift section ends by telling the model that a block genuinely containing too much hard
+work "belongs to the next `workout generate`, not to you". As first shipped, that escalation
+landed nowhere: `workout generate` was given no measured intensity at all. The athlete was
+told to run the one command that could act — and it could not see the evidence.
+
+This section is the amendment. **`generate` now receives the measured distribution too**,
+threaded through the block-progress section (`DESIGN_block_progress.md`). §9.2's line is
+unchanged — adapt still may not alter composition — but the consumer §9.2 assigns composition
+to can finally read the signal it is meant to act on.
+
+Three things travel to `generate` that `adapt` deliberately does not get:
+
+- **The block-over-block delta** (`block_report`'s `previous=`). Its own docstring already
+  said this belongs to plan generation; `_intensity_block_context` withholds it from adapt for
+  exactly that reason. Intensity creeping up every block is periodization by definition.
+- **What the plan PRESCRIBED over the same weeks** (`block_report`'s `fetch_workouts=`), from
+  §9.8's `planned_zone_sec`, rendered by the same `format_table` at the same divisor so the
+  two are compared line for line.
+- **The composition verdict itself** — permission to change how many hard sessions the
+  remaining weeks hold, which is the thing adapt is forbidden to touch.
+
+**Why the prescribed table is load-bearing, not decoration.** A block measuring off its focus
+has two opposite causes and they demand opposite responses:
+
+| measured vs prescribed | measured vs focus | cause | whose |
+| --- | --- | --- | --- |
+| agrees | disagrees | the plan is mis-designed | `generate` — re-shape the remaining weeks |
+| disagrees | disagrees | the athlete is mis-executing | `adapt` — sharpen the prescription |
+| agrees | agrees | nothing wrong | nobody |
+
+Without the prescribed table `generate` sees only the second column, and the failure mode is
+sharp: an athlete running their easy days at Z3 makes a threshold block measure like a tempo
+block, and a coach reading that alone cuts the threshold work. That **rewards the drift** —
+the athlete gets an easier block for ignoring the plan, and the block's intent is lost to the
+very deviation adapt was correcting. The prompt therefore forbids re-shaping around a
+measured-vs-prescribed gap by name.
+
+`adapt` is deliberately not given the prescribed table. Measured diverging from the
+prescription is precisely the execution question adapt already owns via §9.4, and it has the
+sharper instrument for it: a guard rail on the next session.
+
 ### 9.3 What `adapt` sees, and how it gets there
 
 Two blocks, neither of them a rate:
@@ -536,6 +579,10 @@ contains too much hard work — as opposed to easy work being run too hard — t
 is a periodization question, and it belongs to the next `workout generate`, not
 to you.
 ```
+
+That last paragraph hands a decision to `workout generate`. §9.2a is the other end of the
+handoff: generate receives the measured distribution, what was prescribed beside it, and the
+block-over-block delta, so the escalation reaches a prompt that can act on it.
 
 The correction is load-neutral by construction. What the model emits for a drifting Tuesday
 changes only the prose:

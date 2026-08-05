@@ -253,44 +253,89 @@ class PmcContextMixin:
         )
 
     # ----------------------------------------------------------- block progress
-    def _block_progress_context(self, as_of: str, gen_start: str) -> Optional[str]:
+    def _block_progress_context(
+        self, as_of: str, gen_start: str
+    ) -> Tuple[Optional[str], bool]:
         """The elapsed part of the block `generate` is about to re-plan the remainder of
-        (DESIGN_block_progress.md §3): each already-trained week's planned-vs-actual load,
-        plus the fitness tests the block has already run.
+        (DESIGN_block_progress.md §3): its measured intensity distribution beside what the
+        plan prescribed and beside the preceding block, each already-trained week's
+        planned-vs-actual load, and the fitness tests the block has already run.
 
-        Returns None when there is no fulfilled part to report — `as_of` outside every
+        Returns `(text, has_intensity)`, a pair like `_pmc_prompt_context`'s: the
+        composition TASK section quotes the zone tables, so it must be gated on those
+        tables actually having rows rather than on the section merely existing (§5.1).
+
+        `text` is None when there is no fulfilled part to report — `as_of` outside every
         block (`get_active_mesocycle` falls back to a future or first block, which would
         describe training that has not happened), or `gen_start` on/before the block's
         first day, where generate IS writing the whole block and has nothing to continue.
         """
         meso = self._db.get_active_mesocycle(as_of)
         if not meso or not (meso['start_date'] <= as_of <= meso['end_date']):
-            return None
+            return None, False
         elapsed_end = (
             datetime.strptime(gen_start, "%Y-%m-%d").date() - timedelta(days=1)
         ).strftime("%Y-%m-%d")
         if elapsed_end < meso['start_date']:
-            return None
+            return None, False
 
         # Fetched once and handed to both renderers: they read the same rows, and the week
         # lines and the test lines must never disagree about what the block contains.
         workouts = self._db.get_workouts(start_date=meso['start_date'], end_date=elapsed_end)
         weeks = self._block_week_lines(meso, as_of, elapsed_end, workouts)
         benchmarks = self._block_benchmark_lines(meso, elapsed_end, workouts)
+        # Everything is anchored on gen_start, not as_of: history ends the day before the
+        # first day being written, so the header's "N completed weeks", the week lines and
+        # the zone windows all count the same days. The two differ by one on the run that
+        # preserves an already-completed session and starts tomorrow.
+        report = intensity.block_report(
+            meso, gen_start, self._db.get_completed_activities,
+            current_week=True, previous=self._preceding_mesocycle(meso),
+            benchmarks=self._db.get_benchmark_results(),
+            fetch_workouts=self._db.get_workouts, indent="",
+        )
+        # Gated on banked evidence, NOT on `report`: a started block with nothing recorded
+        # still yields a report ("no completed activities in ..."), and pairing that with a
+        # task section about carrying a ramp on from the last completed week describes a
+        # week that does not exist. Generate already sees the empty activity list.
         if not weeks and not benchmarks:
-            return None
+            return None, False
 
-        # Anchored on gen_start, not as_of: the header's "N completed weeks" must count the
-        # same days the week lines below report, and the two differ by one on the run that
-        # preserves a completed session and starts tomorrow.
-        lines = [intensity.format_header(meso, gen_start)]
+        # `block_report` opens with the same `format_header` line, so it stands in for the
+        # header when present rather than being stacked under a second copy of it.
+        lines = [report] if report else [intensity.format_header(meso, gen_start)]
         if weeks:
             lines.append("  Weeks already trained (load the plan asked -> load produced):")
             lines.extend(weeks)
         if benchmarks:
             lines.append("  Fitness tests this block has already run:")
             lines.extend(benchmarks)
-        return "\n".join(lines)
+        return "\n".join(lines), bool(report) and self._block_has_zone_rows(meso, gen_start)
+
+    def _block_has_zone_rows(self, meso: Dict[str, Any], as_of: str) -> bool:
+        """Whether the block's zone table will have rows — asked of the same window
+        `block_report` builds that table from, via `intensity.measured_window`, so the
+        prompt's gate and the table can never disagree (§5.1)."""
+        win_start, win_end, _ = intensity.measured_window(
+            meso['start_date'], meso['end_date'], as_of
+        )
+        return bool(intensity.zone_rows(
+            self._db.get_completed_activities(start_date=win_start, end_date=win_end)
+        ))
+
+    def _preceding_mesocycle(
+        self, meso: Dict[str, Any]
+    ) -> Optional[Dict[str, Any]]:
+        """The block immediately before `meso` in its own macrocycle, for the
+        block-over-block delta — the periodization signal proper (§5).
+
+        Navigated by macrocycle id rather than by a date-ordered mesocycle query, for the
+        reason `_intensity_history_context` gives: a date query drags in superseded
+        rollback versions whose blocks overlap the live ones.
+        """
+        blocks = self._db.get_mesocycles_for_macrocycle(meso['macrocycle_id'])
+        earlier = [b for b in blocks if b['start_date'] < meso['start_date']]
+        return max(earlier, key=lambda b: b['start_date']) if earlier else None
 
     def _block_week_lines(
         self, meso: Dict[str, Any], as_of: str, elapsed_end: str,

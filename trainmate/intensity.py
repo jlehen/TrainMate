@@ -115,6 +115,9 @@ NEVER_SUM_NOTE = (
 )
 
 FetchActivities = Callable[[str, str], List[Dict[str, Any]]]
+# Same shape, planned side: returns the workouts in an inclusive window. Only the
+# periodization consumer passes one (§9.2a).
+FetchWorkouts = Callable[[str, str], List[Dict[str, Any]]]
 
 
 # --------------------------------------------------------------------- dates
@@ -160,6 +163,18 @@ def current_week_window(start: str, end: str, as_of: str) -> Optional[Tuple[str,
         return None
     week_start = _d(start) + timedelta(days=(elapsed // 7) * 7)
     return _s(week_start), as_of, elapsed % 7 + 1
+
+
+def measured_window(start: str, end: str, as_of: str) -> Tuple[str, str, int]:
+    """``(window_start, window_end, weeks)`` — the window a block's zone table divides.
+
+    The whole-week rate window where one exists (§4), else the block's elapsed span raw
+    with ``weeks = 0``, which is how `block_report` labels a block too young to average.
+    Shared so a caller deciding whether a table will HAVE rows asks about the same window
+    the table is built from.
+    """
+    win = rate_window(start, end, as_of)
+    return win if win else (start, min(as_of, end), 0)
 
 
 def block_weeks(start: str, end: str) -> int:
@@ -772,6 +787,7 @@ def block_report(
     current_week: bool = False,
     previous: Optional[Dict[str, Any]] = None,
     benchmarks: Optional[Sequence[Dict[str, Any]]] = None,
+    fetch_workouts: Optional[FetchWorkouts] = None,
     with_focus: bool = True,
     notes: bool = True,
     indent: str = "  ",
@@ -783,6 +799,11 @@ def block_report(
     `current_week` adds the in-progress week as RAW minutes beside the elapsed fraction —
     never extrapolated, which would be a fabrication (§9.3). `previous` adds the
     block-over-block delta, which belongs to plan generation only (§4.1/§9.2).
+
+    `fetch_workouts` adds what the plan PRESCRIBED over the same rate window, in the same
+    units and format as the measured table — the pair that separates a mis-designed block
+    from a mis-executed one (§9.2a). Only the periodization consumer passes it: measured
+    diverging from the prescription is an execution question, and adapt owns those.
 
     `notes` off leaves the measurement caveats to the caller: three blocks in a row would
     otherwise repeat them three times, nine lines saying two things (§9.6). It defaults on
@@ -816,20 +837,16 @@ def block_report(
         f"{sum(activity_load(a) for a in elapsed):.0f} TSS",
         inner, width,
     ))
-    window = rate_window(start, end, as_of)
-
-    if window:
-        win_start, win_end, weeks = window
-        rows = zone_rows(fetch_activities(win_start, win_end))
+    win_start, win_end, weeks = measured_window(start, end, as_of)
+    rows = zone_rows(fetch_activities(win_start, win_end))
+    if weeks:
         lines.extend(_wrap(
             f"Intensity distribution, per week over {weeks} completed "
             f"week{'s' if weeks != 1 else ''} ({win_start}..{win_end})", inner, width
         ))
     else:
-        weeks = 0
-        rows = zone_rows(fetch_activities(start, through))
         lines.extend(_wrap(
-            f"Intensity distribution, RAW minutes ({start}..{through}) — the block is "
+            f"Intensity distribution, RAW minutes ({win_start}..{win_end}) — the block is "
             f"{days} day{'s' if days != 1 else ''} old, too young for a per-week rate",
             inner, width
         ))
@@ -841,6 +858,22 @@ def block_report(
         lines.extend(format_coverage(rows, indent=inner + "  ", width=width))
         if notes:
             lines.extend(format_notes(rows, indent=inner + "  ", width=width))
+
+    # Beside the measured table, never instead of it: same rows, same divisor, same
+    # renderer, so the two are compared line for line (§9.2a). Only over the rate window —
+    # a prescription and a recording must divide the same weeks to be comparable. Silent
+    # when the block's sessions carry no planned zones (nothing prescribed them, or they
+    # predate §9.8): an empty table would read as "the plan asked for nothing".
+    if fetch_workouts is not None and rows:
+        planned = planned_zone_rows(fetch_workouts(win_start, win_end))
+        if planned:
+            lines.extend(_wrap(
+                "What the plan PRESCRIBED over the same "
+                + ("weeks, per week" if weeks else "window (raw)"), inner, width
+            ))
+            lines.extend(format_table(
+                planned, divisor=weeks or 1, indent=inner + "  ", width=width
+            ))
 
     if previous and weeks:
         # A finished block's own last day is over, so measure it one day past its end —

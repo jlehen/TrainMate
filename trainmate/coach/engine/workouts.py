@@ -73,11 +73,11 @@ def _block_progress_task(block_progress: Optional[str]) -> str:
         return ""
     return """
 CONTINUING A BLOCK ALREADY UNDER WAY:
-The user content includes a section titled "BLOCK PROGRESS SO FAR": the weeks of the block
-the athlete is currently in that are already trained, each with the load the plan asked of
-it and the load the athlete actually produced, plus any fitness test the block has already
-run. Those days are history and are not yours to write — you are producing this block's
-REMAINDER, not the block.
+The user content includes a section titled "BLOCK PROGRESS SO FAR": what the block the
+athlete is currently in has already banked — its volume and measured intensity, then each
+already-trained week with the load the plan asked of it beside the load the athlete actually
+produced, then any fitness test it has already run. Those days are history and are not yours
+to write — you are producing this block's REMAINDER, not the block.
 
 Read it as the progression's starting point, not as a fresh block. Carry the ramp on from
 where the last completed week left it instead of restarting at week-one volume, and keep
@@ -94,6 +94,49 @@ with a further jump on top.
 This also BOUNDS the BENCHMARK PLACEMENT rule above: a boundary week whose fitness test
 already appears in that section has had its test, and must not be given a second one.
 Place a benchmark only where this block has not already run it.
+"""
+
+
+def _block_composition_task(block_progress: Optional[str], has_intensity: bool) -> str:
+    """The JUDGING THE BLOCK'S COMPOSITION section — the other end of
+    DESIGN_intensity_distribution.md §9.4's handoff, which tells `adapt` that an over-hard
+    block "belongs to the next `workout generate`" (§9.2a).
+
+    Gated on the zone tables actually having rows, not merely on the block-progress section
+    existing: every paragraph below quotes those tables, and an athlete with no zone
+    recordings would be pointed at a table that says "no zone data".
+    """
+    if not block_progress or not has_intensity:
+        return ""
+    return """
+JUDGING THE BLOCK'S COMPOSITION:
+The block-progress section carries what the athlete's sessions actually MEASURED, per sport
+and zone, beside what the plan PRESCRIBED over the same weeks and beside the block's stated
+focus. Composition is yours: how many hard sessions the block holds, and how its easy and
+hard work divide. `workout adapt` owns the other half — it sharpens how an already-scheduled
+session is prescribed and may not change what the block contains — and it defers exactly
+this question to you.
+
+ATTRIBUTE BEFORE YOU ACT. Read the measured table against the PRESCRIBED table first,
+because the same divergence from the focus has two opposite causes and one wrong answer:
+- Measured tracks the prescription, but neither delivers the focus -> the PLAN is wrong,
+  and fixing it is yours. Re-shape the weeks still ahead so the block's hard/easy split
+  actually produces what its focus asks for.
+- Measured diverges from the prescription -> the athlete is executing something other than
+  what was written. That is adapt's lane and it is already correcting it session by
+  session. Do NOT re-shape the block to match the deviation: cutting hard sessions because
+  easy days were run hard rewards the drift and hands the athlete an easier block for
+  ignoring the plan. Hold the composition and keep the prescription honest.
+- Both track the focus -> there is nothing to correct here. Carry the design on.
+
+Where a change against the preceding block is shown, that is the periodization signal
+proper: intensity creeping up block over block is how a base phase quietly becomes a race
+season, and deciding whether the weeks you are writing continue or arrest that trend is the
+one intensity judgement no other command can make.
+
+Condition all of this on the coverage line and the power table where one exists. An HR-only
+table under-reads a hard session, so a block can measure easy that was not — do not
+conclude a block was too soft from heart rate alone.
 """
 
 
@@ -166,6 +209,7 @@ class WorkoutLogicMixin:
         pmc_warmup_cutoff: Optional[str] = None,
         pmc_context: Optional[str] = None,
         block_progress: Optional[str] = None,
+        block_has_intensity: bool = False,
         zone_currencies: Optional[Dict[str, str]] = None
     ) -> Dict[str, Any]:
         """Queries LLM to generate workouts for a given number of days based on active strategy.
@@ -203,6 +247,7 @@ class WorkoutLogicMixin:
             "rest. If no threshold is on record yet, still schedule the first benchmark early — it is how\n"
             "the athlete's zones get established.\n"
             + _block_progress_task(block_progress)
+            + _block_composition_task(block_progress, block_has_intensity)
             + _planned_zone_task(zone_currencies)
             + "\n"
             "You MUST respond with a JSON object containing:\n"

@@ -41,17 +41,18 @@ Four consequences, in the order they bite:
   identical to one who trained four of four, and the next weeks ramp from a number the
   athlete never reached.
 
-## 2. What this is not
+## 2. Scope, and the §9.2 line
 
-It is **not** the intensity-drift handoff. `DESIGN_intensity_distribution.md` §9.2 draws the
-line — adapt owns execution, generate owns periodization — and §9.4 ends by telling the model
-that a block genuinely containing too much hard work "belongs to the next `workout generate`".
-Closing *that* loop means giving generate the measured per-zone distribution, which is a
-deliberate amendment to §9.2 and is **not done here**. §9.3's warning is respected: nothing
-below travels via `meso_text`, which plan generation also reads.
+Two things ride in this one section, and it is worth keeping them apart:
 
-What is added is volume, adherence and test history — facts about a job §9.2 already assigns
-to generate.
+- **Volume, adherence and test history** (§3, §4) — facts about a job
+  `DESIGN_intensity_distribution.md` §9.2 already assigns to `generate`. No design line moves.
+- **The measured intensity distribution** (§5) — §9.4's handoff, which tells `adapt` that an
+  over-hard block "belongs to the next `workout generate`". Landing that needed a deliberate
+  amendment, recorded as §9.2a of the intensity design.
+
+§9.3's warning is respected throughout: nothing here travels via `meso_text`, which plan
+generation also reads. Both halves are threaded as arguments of their own.
 
 ## 3. The context (data)
 
@@ -62,6 +63,20 @@ elapsed part, threaded exactly as `pmc_context` is: computed in the service laye
 
 ```
 Build 1 — focus "threshold development" (2 completed weeks of 4, plus 2 days)
+  Volume and load (2026-07-06..2026-07-22): 5 sessions, 6h23, 545 TSS
+  Intensity distribution, per week over 2 completed weeks (2026-07-06..2026-07-19)
+    cycling  [HR]   Z1 recovery 13m (9%)    Z2 aerobic 50m (32%)   Z3 tempo 1h00 (39%)
+                    Z4 threshold 30m (19%)  Z5 VO2max+ 2m (1%)
+    Coverage: cycling 100% HR
+  What the plan PRESCRIBED over the same weeks, per week
+    cycling  [HR]   Z1 recovery 25m (14%)   Z2 aerobic 1h30 (51%)  Z3 tempo 12m (7%)
+                    Z4 threshold 48m (27%)  Z5 VO2max+ 2m (1%)
+  Change vs Base 3 (4 completed weeks), per week
+    cycling  [HR]   Z3 tempo +40m (+200%)   Z4 threshold +26m (+650%)  ...
+  Current week so far (2026-07-20..2026-07-22) — day 3 of 7 (43% elapsed) ...
+  Structural work (2026-07-06..2026-07-22)
+    cycling                           5 sessions, 6h23, avg RPE 7.0, 447 sRPE load
+    Functional Threshold Power (FTP)  271 W (first on record)
   Weeks already trained (load the plan asked -> load produced):
     - week of 2026-07-06: planned 200, actual 200 (100%)
     - week of 2026-07-13: planned 200, actual 100 (50%)
@@ -69,6 +84,10 @@ Build 1 — focus "threshold development" (2 completed weeks of 4, plus 2 days)
   Fitness tests this block has already run:
     - 2026-07-15: ftp_20min (cycling) — Functional Threshold Power (FTP) 271 W
 ```
+
+The intensity half is `intensity.block_report`, unchanged except for §5's added table. It
+opens with the same `format_header` line the section would print for itself, so it **stands in
+for** that header rather than being stacked under a second copy.
 
 **Anchored on `gen_start`, not on today.** The elapsed part ends the day before the first day
 being written. On the run that preserves an already-completed session and starts tomorrow,
@@ -137,10 +156,47 @@ athlete has already done. The stored-workout lookup is bounded below `gen_start`
 displaced plan's future rows are still live when the check runs (archival happens further
 down) and must not answer for sessions this run just replaced.
 
-## 5. Deliberately not done
+## 5. The composition half
 
-- **Feeding generate the measured intensity distribution.** See §2. It needs a §9.2
-  amendment, which this change does not make.
+`_block_progress_context` also calls `intensity.block_report` for the block it is reporting,
+with two arguments `adapt` never passes (`DESIGN_intensity_distribution.md` §9.2a):
+`previous=` for the block-over-block delta, and a new `fetch_workouts=` for what the plan
+prescribed over the same rate window. `coach/engine/workouts.py::_block_composition_task` then
+appends a `JUDGING THE BLOCK'S COMPOSITION` section.
+
+Its core is an **attribution rule**, not a licence to cut. A block measuring off its focus has
+two opposite causes: if measured tracks the prescription, the plan is mis-designed and
+re-shaping the remaining weeks is generate's; if measured diverges from the prescription, the
+athlete is mis-executing, which is adapt's, and re-shaping the block around it would reward the
+drift — the athlete gets an easier block for ignoring the plan. §9.2a tabulates the cases.
+
+The section also names adapt's half explicitly, so generate does not start writing HR ceilings
+into descriptions, and repeats §7's coverage caveat: an HR-only table under-reads a hard
+session, so a block must not be judged too soft on heart rate alone.
+
+### 5.1 Gate discipline
+
+`_block_progress_context` returns `(text, has_intensity)` — a pair, like
+`_pmc_prompt_context`'s. Every paragraph of the composition section quotes the zone tables, so
+it is gated on those tables *having rows*, not on the block-progress section merely existing:
+an athlete with no HR or power recordings gets the volume half and none of the composition
+instructions. Otherwise the prompt would point at a table reading "no zone data recorded".
+
+The flag asks `intensity.measured_window` — factored out of `block_report` for this — so the
+gate and the table are decided from the same window. Asking `rate_window` directly instead
+would disagree with the table on a block too young to average, whose data all sits in the
+partial tail the rate window excludes.
+
+The section as a whole is gated on **banked evidence** (week lines or tests), not on
+`block_report` returning something: a started block with nothing recorded still yields a report
+("no completed activities in …"), and pairing that with instructions about carrying a ramp on
+from the last completed week describes a week that does not exist.
+
+## 6. Deliberately not done
+
+- **Giving `adapt` the prescribed table.** Measured diverging from the prescription is the
+  execution question adapt already owns via §9.4, and it has the sharper instrument: a guard
+  rail on the next session (§9.2a).
 - **Dropping a model-proposed duplicate benchmark deterministically.** The rest-window
   pre-pass has that shape, but a date-window heuristic here would also suppress legitimate
   re-tests — a short block whose boundary test falls close behind the previous block's above
