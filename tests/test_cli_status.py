@@ -7,6 +7,15 @@ from tests.helpers import clear_all_tables, run_cli
 
 TEST_DB_PATH = os.path.join(os.path.dirname(__file__), "test_trainmate_cli_status.db")
 
+
+def _days_out(n: int) -> str:
+    return (datetime.now(timezone.utc).date() + timedelta(days=n)).isoformat()
+
+
+# `status` only lists the goal and constraints that are still live, so fixed dates
+# stop appearing once they pass (same rot 2a7cd71 fixed in test_constraints.py).
+GOAL_DATE = _days_out(120)
+
 from trainmate.db import Database
 import trainmate.db
 import trainmate_cli
@@ -40,7 +49,8 @@ class TestCliStatus(unittest.TestCase):
     def run_cli(self, args, input_value="n"):
         return run_cli(args, input_value)
 
-    def test_status_command(self):
+    @patch("trainmate.cli.status.ensure_recent_data")
+    def test_status_command(self, _ens):
         test_db.save_metric_cache(
             date="2026-05-31",
             rhr=48, hrv=82, sleep_score=90, stress=15,
@@ -53,7 +63,7 @@ class TestCliStatus(unittest.TestCase):
             sleep_mean=82.0, sleep_std=3.0,
         )
         test_db.add_objective(
-            title="London Marathon", target_date="2026-09-20",
+            title="London Marathon", target_date=GOAL_DATE,
             sport_type="running", priority=1,
         )
         learning_id = test_db.add_learning("Rest well on Fridays")
@@ -77,8 +87,9 @@ class TestCliStatus(unittest.TestCase):
         self.assertIn(f"[{learning_id}|general|tentative]", ln_stdout)
         self.assertIn("Rest well on Fridays", ln_stdout)
 
+        trip_start, trip_end = _days_out(1), _days_out(39)
         test_db.add_constraint(
-            title="Ibiza Trip", start_date="2026-07-01", end_date="2026-08-08",
+            title="Ibiza Trip", start_date=trip_start, end_date=trip_end,
             description="Rest weeks",
         )
 
@@ -91,12 +102,12 @@ class TestCliStatus(unittest.TestCase):
         self.assertEqual(exit_code_v, 0)
         self.assertIn("Goals:", stdout_v)
         self.assertIn(
-            f"- [ACTIVE] ID: {g_id} | London Marathon (running) on 2026-09-20 (Priority: 1)",
+            f"- [ACTIVE] ID: {g_id} | London Marathon (running) on {GOAL_DATE} (Priority: 1)",
             stdout_v,
         )
         self.assertIn("Active Constraints:", stdout_v)
         self.assertIn(
-            f"- ID: {e_id} | Ibiza Trip: 2026-07-01 to 2026-08-08 | advisory",
+            f"- ID: {e_id} | Ibiza Trip: {trip_start} to {trip_end} | advisory",
             stdout_v,
         )
         self.assertIn("  Details:\n    Rest weeks", stdout_v)
@@ -105,7 +116,7 @@ class TestCliStatus(unittest.TestCase):
         self.assertEqual(exit_code_vv, 0)
         self.assertIn("Goals:", stdout_vv)
         self.assertIn(
-            f"- [ACTIVE] ID: {g_id} | London Marathon (running) on 2026-09-20 (Priority: 1)",
+            f"- [ACTIVE] ID: {g_id} | London Marathon (running) on {GOAL_DATE} (Priority: 1)",
             stdout_vv,
         )
 

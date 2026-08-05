@@ -22,6 +22,16 @@ trainmate.coach.service.db = test_db
 from trainmate.coach import coach_service
 
 
+def tearDownModule():
+    """Four of the five classes here recreate the file without removing it, so the
+    cleanup belongs to the module rather than to any one class."""
+    if os.path.exists(TEST_DB_PATH):
+        try:
+            os.remove(TEST_DB_PATH)
+        except OSError:
+            pass
+
+
 class TestConstraintDB(unittest.TestCase):
     @classmethod
     def setUpClass(cls):

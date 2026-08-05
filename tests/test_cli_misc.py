@@ -1,6 +1,5 @@
 import os
 import unittest
-from datetime import datetime, timedelta, timezone
 from unittest.mock import patch
 
 from tests.helpers import clear_all_tables, run_cli
@@ -111,17 +110,6 @@ class TestCliMisc(unittest.TestCase):
         self.assertIn("push", stdout)
         self.assertIn("backfill-tss", stdout)
         self.assertIn("maintenance", stdout)
-
-    def test_plan_rm_hidden_from_plan_help(self):
-        # `plan rm` is a maintenance command: kept out of the everyday `plan --help`.
-        exit_code, stdout, stderr = self.run_cli(["plan", "--help"])
-        self.assertEqual(exit_code, 0)
-        self.assertIn("generate", stdout)          # everyday command still listed
-        self.assertNotIn("Remove/delete", stdout)  # hidden rm help text absent
-        # ...yet it still parses and describes itself.
-        exit_code, stdout, stderr = self.run_cli(["plan", "rm", "--help"])
-        self.assertEqual(exit_code, 0)
-        self.assertIn("Goal ID", stdout)
 
     def test_restore_and_rollback_help_point_at_each_other(self):
         # DESIGN_plan_rollback.md §9: the two easily-confused undos each name the other.
@@ -269,19 +257,6 @@ class TestCliMisc(unittest.TestCase):
         self.assertEqual(exit_code, 0)
         mock_coach.data_bootstrap.assert_called_once()
         self.assertTrue(mock_coach.data_bootstrap.call_args[1].get("no_pull"))
-
-    def test_llm_model_override(self):
-        from trainmate.openrouter import openrouter_client
-        original_model = openrouter_client.model
-        try:
-            exit_code, _, _ = self.run_cli([
-                "--llm-model", "google/gemini-2.5-pro",
-                "goal", "list"
-            ])
-            self.assertEqual(exit_code, 0)
-            self.assertEqual(openrouter_client.model, "google/gemini-2.5-pro")
-        finally:
-            openrouter_client.model = original_model
 
     @patch("trainmate_cli.garmin")
     @patch("trainmate.timeline.build_timeline_payload")

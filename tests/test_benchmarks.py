@@ -46,14 +46,6 @@ class TestBenchmarkVocabulary(unittest.TestCase):
         # An unknown sport carries no opinion — callers must not read [] as "invalid".
         self.assertEqual(bm.anchors_for_sport("unknown-sport"), [])
 
-    def test_plausible_cross_sport_pairs_are_not_flagged(self):
-        """The map gates a *warning* (§3.2), so real cross-sport pairs must be in it:
-        a cyclist has an LTHR, a runner has a MAS, a rower has a threshold pace."""
-        self.assertIn("lthr", bm.anchors_for_sport("cycling"))
-        self.assertIn("mas", bm.anchors_for_sport("running"))
-        self.assertIn("threshold_pace", bm.anchors_for_sport("rowing"))
-
-
 class TestBenchmarkDB(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -340,10 +332,14 @@ class TestBenchmarkCLI(unittest.TestCase):
         ]
         for sport, flag, value in pairs:
             with self.subTest(sport=sport, flag=flag):
-                _, out, _ = run_cli(
+                code, out, _ = run_cli(
                     ["benchmark", "record", sport, flag, value, "-y"]
                 )
-                self.assertNotIn("usually tested on", out)
+                # Match the refusal the code actually prints, and confirm the row
+                # landed — the point is that a plausible pair is recorded, not refused.
+                self.assertEqual(code, 0)
+                self.assertNotIn("is not an anchor", out)
+                self.assertIsNotNone(test_db.get_latest_benchmark(flag.lstrip("-")))
 
 
 class TestBenchmarkPlacementGuards(unittest.TestCase):

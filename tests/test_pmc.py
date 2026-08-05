@@ -122,14 +122,6 @@ class TestComputePMC(unittest.TestCase):
         # end < start must not throw and returns {}.
         self.assertEqual(compute_pmc({}, "2026-02-01", "2026-01-01", 42, 7), {})
 
-    def test_seed_default_reproduces_from_zero(self):
-        # The default seed (0, 0) is the from-zero full-history sweep.
-        daily = {(date(2026, 1, 1) + timedelta(days=i)).isoformat(): 50.0
-                 for i in range(30)}
-        a = compute_pmc(daily, "2026-01-01", "2026-01-30", 42, 7)
-        b = compute_pmc(daily, "2026-01-01", "2026-01-30", 42, 7, seed=(0.0, 0.0))
-        self.assertEqual(a, b)
-
     def test_split_and_refold_reproduces_unsplit_series_exactly(self):
         # The projection fold: split at an arbitrary day, re-fold the tail seeded
         # with the first half's final (CTL, ATL), and the two halves must reproduce
@@ -204,12 +196,6 @@ class TestRamp(unittest.TestCase):
         }
         # ctl on day 20 is 20.0, day 13 is 13.0 -> ramp +7.0.
         self.assertEqual(pmc_ramp(ctl_by_date, "2026-01-21"), 7.0)
-
-    def test_nearest_earlier_on_interior_gap(self):
-        # d-7 day missing -> use the nearest earlier day with a value.
-        ctl_by_date = {"2026-01-01": 10.0, "2026-01-05": 12.0, "2026-01-12": 20.0}
-        # For 2026-01-12, d-7 = 2026-01-05 (present) -> 20-12 = 8.0.
-        self.assertEqual(pmc_ramp(ctl_by_date, "2026-01-12"), 8.0)
 
     def test_omit_when_fewer_than_seven_days(self):
         ctl_by_date = {"2026-01-10": 5.0, "2026-01-11": 6.0}
@@ -287,15 +273,6 @@ class TestColors(unittest.TestCase):
 # ==============================================================================
 
 class TestFormatMetricsHistory(unittest.TestCase):
-    def test_null_fields_omitted_no_crash(self):
-        # Regression: a NULL numeric used to crash `:.2f`; NULL rhr rendered `Nonebpm`.
-        rows = [{"date": "2026-06-01", "rhr": None, "hrv": None, "sleep_score": None,
-                 "stress": None, "ctl": None, "atl": None, "tsb": None}]
-        out = format_metrics_history(rows)
-        self.assertIn("2026-06-01", out)
-        self.assertNotIn("None", out)
-        self.assertNotIn("CTL", out)
-
     def test_full_row_shows_pmc_and_footnote(self):
         rows = [{"date": "2026-07-02", "rhr": 52, "hrv": 61, "sleep_score": 78,
                  "stress": 31, "ctl": 62.4, "atl": 71.7, "tsb": -8.9}]

@@ -1,6 +1,25 @@
 import io
 import sys
+from datetime import date
 from unittest.mock import patch
+
+# The clock is imported by value (`from trainmate.util import today_str`), so each
+# binding site has to be pinned separately. These are the ones the planning window
+# reads; leaving any of them live lets date-based fixtures expire with the calendar.
+_CLOCK_SITES = [
+    ("trainmate.coach.service._today_str", False),
+    ("trainmate.coach.service._today_date", True),
+    ("trainmate.db.objectives.today_date", True),
+]
+
+
+def pin_clock(testcase, day: str) -> None:
+    """Freezes every clock a plan/goal window consults, for the life of one test."""
+    as_date = date.fromisoformat(day)
+    for target, wants_date in _CLOCK_SITES:
+        patcher = patch(target, return_value=as_date if wants_date else day)
+        patcher.start()
+        testcase.addCleanup(patcher.stop)
 
 # Delete children before parents to satisfy foreign-key constraints.
 _ALL_TABLES = [

@@ -1902,8 +1902,20 @@ Tests inject a fresh in-memory SQLite DB by assigning `test_db` to module-level
 `db` variables *before* importing the singletons. `openrouter_client` is mocked
 via `@patch`.
 
-Integration / manual test scripts (not part of the test suite):
-- `tests/run_integration.py`, `tests/run_calendar.py`
+`tests/__init__.py` installs two suite-wide guards at import time, before any test
+module is collected: the Calendar ride-along inside `garmin.ensure_data` is stubbed
+out, and any non-loopback socket connect raises. Without them the suite reached the
+real account — creating calendar events and consuming the incremental sync token
+that `data pull` depends on. A test needing network behaviour mocks its client. The
+same module sweeps the per-module `tests/*.db` files at exit.
+
+Fixture dates ride on today (`_days_out(...)`/`GOAL_DATE`) rather than on fixed
+dates wherever the code compares them against the clock: a plan window needs its
+goal in the future, so a hardcoded date silently expires the test once it passes.
+
+Integration / manual test scripts (not part of the test suite, and they do reach
+the real Calendar):
+- `scripts/run_integration.py`, `scripts/run_calendar.py`
 
 ---
 

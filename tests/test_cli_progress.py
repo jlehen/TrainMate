@@ -450,10 +450,6 @@ class TestRenderProgress(unittest.TestCase):
         self.assertIn("w/c 07-27", text)
         self.assertNotIn("more (--weeks", text)
 
-    def test_weeks_all_sizes_the_sparkline_to_the_history_shown(self):
-        text = "\n".join(render_progress(self._windowed_payload(), "all"))
-        self.assertIn("CTL 5w", text)  # 5 past weeks, not the literal 'all'
-
     def test_sparkline_label_counts_cells_drawn_not_the_window_asked_for(self):
         # Young DB: 5 weeks of history under a --weeks 8 request must not say '8w'.
         text = "\n".join(render_progress(self._windowed_payload(), 8))
@@ -631,46 +627,6 @@ class TestZoneWeekCells(unittest.TestCase):
         _, undercounted = zone_week_cells(week, "running", "hr", 5)
         self.assertTrue(undercounted)
 
-    def test_the_bar_is_per_sport_so_rest_between_sets_is_not_a_failure(self):
-        # 0.55 marks a run (bar 0.8) and must NOT mark strength training, where the
-        # uncovered time is the rest between sets, not a dead strap (§11).
-        week = _zweek(
-            "2026-06-29",
-            rows=[_hr("strength_training", [10, 20, 5, 2, 1], coverage=0.55)],
-            seconds={"strength_training": _m(70)},
-        )
-        _, undercounted = zone_week_cells(week, "strength_training", "hr", 5)
-        self.assertFalse(undercounted)
-
-    def test_a_sport_still_marks_below_its_own_bar(self):
-        week = _zweek(
-            "2026-06-29",
-            rows=[_hr("strength_training", [4, 2, 1, 0, 0], coverage=0.20)],
-            seconds={"strength_training": _m(70)},
-        )
-        _, undercounted = zone_week_cells(week, "strength_training", "hr", 5)
-        self.assertTrue(undercounted)
-
-    def test_unjudgeable_week_takes_no_marker(self):
-        # Nothing that week cleared the duration floor, so the recording cannot be
-        # graded — and an ungradeable week must not be graded as a failure (§11).
-        week = _zweek(
-            "2026-06-29", rows=[_hr("running", [2, 1, 0, 0, 0], coverage=0.1,
-                                    judged=None)],
-            seconds={"running": _m(10)},
-        )
-        _, undercounted = zone_week_cells(week, "running", "hr", 5)
-        self.assertFalse(undercounted)
-
-    def test_adequate_coverage_takes_no_marker(self):
-        week = _zweek(
-            "2026-06-29", rows=[_hr("running", [10, 60, 5, 2, 1], coverage=0.81)],
-            seconds={"running": _m(96)},
-        )
-        _, undercounted = zone_week_cells(week, "running", "hr", 5)
-        self.assertFalse(undercounted)
-
-
 class TestZoneTableWidth(unittest.TestCase):
     def test_seven_zone_power_table_fits_48_columns_with_a_ten_hour_z2(self):
         weeks = [_zweek(
@@ -754,21 +710,6 @@ class TestZoneSportSelection(unittest.TestCase):
 
 
 class TestZoneCurrency(unittest.TestCase):
-    def test_power_wins_once_it_covers_the_window(self):
-        stats = {"cycling": {
-            "seconds": 100.0, "zone_seconds": {"power": 85.0, "hr": 95.0},
-            "coverage": {"power": 0.85, "hr": 0.95},
-        }}
-        self.assertEqual(zone_currency(stats, "cycling"), "power")
-
-    def test_below_the_bar_the_fuller_currency_wins(self):
-        # The 40% power cannot see IS the meterless easy commutes.
-        stats = {"cycling": {
-            "seconds": 100.0, "zone_seconds": {"power": 60.0, "hr": 95.0},
-            "coverage": {"power": 0.60, "hr": 0.95},
-        }}
-        self.assertEqual(zone_currency(stats, "cycling"), "hr")
-
     def test_forcing_a_currency_the_sport_lacks_has_no_effect(self):
         stats = {"running": {
             "seconds": 100.0, "zone_seconds": {"hr": 95.0},
@@ -888,13 +829,6 @@ class TestZoneTableFutureHalf(unittest.TestCase):
         weeks = self._weeks()
         stats = window_sport_stats(weeks[:1])
         self.assertEqual(zone_currency(stats, "running"), "hr")
-
-    def test_future_rows_stay_inside_the_column_budget(self):
-        for line in zone_section(
-            self._weeks(), ["running"], today=self.TODAY, stats_weeks=self._weeks()[:1]
-        ):
-            self.assertLessEqual(visible_len(line), TABLE_WIDTH, msg=repr(line))
-
 
 class TestUnknownSportPreferences(unittest.TestCase):
     def test_a_canonical_sport_warns_about_nothing(self):

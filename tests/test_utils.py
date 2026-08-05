@@ -2,7 +2,7 @@ import unittest
 from unittest.mock import patch
 from trainmate.util import (
     wrap_text, visible_len, pad_visible, color_load_ratio, format_labeled_text,
-    yellow, red,
+    yellow,
 )
 
 
@@ -46,15 +46,20 @@ class TestUtils(unittest.TestCase):
         self.assertEqual(pad_visible("hi", 5, align_left=False), "   hi")
 
     def test_color_load_ratio(self):
-        # Only the overload end is colored. A LOW ratio is phase-dependent (taper,
-        # deload, intensity block), so it must render bare — see training_load.txt §3/§4.
-        self.assertEqual("0.70", color_load_ratio(0.70))
-        self.assertEqual("1.10", color_load_ratio(1.10))
-        self.assertEqual("1.30", color_load_ratio(1.30))
-        # colorize() is a no-op off a TTY, so compare the overload end against the
-        # colorizer itself rather than asserting raw escape codes.
-        self.assertEqual(yellow("1.40"), color_load_ratio(1.40))
-        self.assertEqual(red("1.60"), color_load_ratio(1.60))
+        # Force colour on: off a TTY colorize() is a no-op, which would make every
+        # band render bare and the assertions below pass without testing anything.
+        with unittest.mock.patch("trainmate.util.is_color_enabled", return_value=True):
+            # Only the overload end is coloured. A LOW ratio is phase-dependent
+            # (taper, deload, intensity block), so it must render bare — see
+            # training_load.txt §3/§4.
+            self.assertEqual("0.70", color_load_ratio(0.70))
+            self.assertEqual("1.10", color_load_ratio(1.10))
+            # Bands are half-open (> 1.3 yellow, > 1.5 red), so both edges belong to
+            # the calmer band and no value is claimed twice.
+            self.assertEqual("1.30", color_load_ratio(1.30))
+            self.assertIn("\033[33m", color_load_ratio(1.40))
+            self.assertIn("\033[33m", color_load_ratio(1.50))
+            self.assertIn("\033[31m", color_load_ratio(1.60))
 
     def test_format_labeled_text(self):
         from trainmate.util import yellow

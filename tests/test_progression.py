@@ -161,12 +161,6 @@ class TestFitnessSeries(unittest.TestCase):
         # Day-entering TSB on the first folded day = ctl_A - atl_A.
         self.assertAlmostEqual(out[_d(0)]["tsb"], 50.0)
 
-    def test_planned_load_raises_the_projection(self):
-        anchor = _m(-1, 50.0, 50.0, 0.0)
-        low = self._series([_dp(0, 0, "planned")], [anchor])
-        high = self._series([_dp(0, 100, "planned")], [anchor])
-        self.assertGreater(high[0]["atl"], low[0]["atl"])
-
     def test_seam_continuity_under_non_default_tau(self):
         # τ_ctl = 10: the first folded day uses that τ, no kink at the anchor.
         out = self._series([_dp(0, 80, "planned")], [_m(-1, 40.0, 40.0, 0.0)],

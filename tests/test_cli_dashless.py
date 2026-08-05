@@ -1,7 +1,6 @@
 import io
 import os
 import unittest
-from datetime import datetime, timedelta, timezone
 from unittest.mock import patch
 
 from tests.helpers import clear_all_tables, run_cli
@@ -15,6 +14,16 @@ import trainmate_cli
 test_db = Database(db_path=TEST_DB_PATH)
 trainmate.db.db = test_db
 trainmate_cli.db = test_db
+
+
+def tearDownModule():
+    """Only TestDashlessEndToEnd needs a database, but the handle above creates the
+    file at import time, so the module has to remove it however the run ends."""
+    if os.path.exists(TEST_DB_PATH):
+        try:
+            os.remove(TEST_DB_PATH)
+        except OSError:
+            pass
 
 
 class TestDashlessOptionTranslator(unittest.TestCase):

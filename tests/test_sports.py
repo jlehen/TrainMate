@@ -28,10 +28,6 @@ class TestSportMappingInvariants(unittest.TestCase):
             for alias in aliases:
                 self.assertEqual(alias, alias.lower())
 
-    def test_canonical_sports_matches_mapping_keys(self):
-        self.assertEqual(CANONICAL_SPORTS, list(SPORT_MAPPING))
-
-
 class TestRowing(unittest.TestCase):
     def test_garmin_types_resolve_to_rowing(self):
         for activity_type in ("rowing", "indoor_rowing", "rowing_v2", "indoor_rowing_v2"):

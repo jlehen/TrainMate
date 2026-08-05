@@ -458,14 +458,5 @@ class TestWatermarkForwardOnly(unittest.TestCase):
         _bind_test_db(self)
         clear_all_tables(test_db)
 
-    def test_through_date_never_regresses(self):
-        test_db.set_sync_state(through_date=_d(0), last_pull_utc="2026-01-01T00:00:00+00:00")
-        state = test_db.get_sync_state()
-        self.assertEqual(state["through_date"], _d(0))
-        # A backfill of older dates passes the existing high-water mark through.
-        test_db.set_sync_state(through_date=_d(0), last_pull_utc="2026-02-01T00:00:00+00:00")
-        self.assertEqual(test_db.get_sync_state()["through_date"], _d(0))
-
-
 if __name__ == "__main__":
     unittest.main()

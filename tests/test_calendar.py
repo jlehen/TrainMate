@@ -1,6 +1,5 @@
 import os
 import unittest
-from datetime import datetime, timedelta, timezone
 from unittest.mock import patch, MagicMock
 
 TEST_DB_PATH = os.path.join(os.path.dirname(__file__), "test_trainmate_calendar.db")

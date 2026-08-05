@@ -3,7 +3,7 @@ from typing import List, Dict, Any, Tuple, Optional
 
 from trainmate.config import config
 from trainmate.garmin import activity_load, _rpe_tss
-from trainmate.sports import SPORT_MAPPING
+from trainmate.sports import canonical_sport, sport_aliases
 
 
 def date_covered(
@@ -100,7 +100,7 @@ def classify_adherence(
         done             non-rest planned, matched within tolerance
         partial          non-rest planned, matched but duration/load off
     """
-    if planned["sport_type"] == "rest":
+    if canonical_sport(planned["sport_type"]) == "rest":
         if completed and activity_load(completed) >= minor_activity_load_threshold:
             return {"status": "rest_violation", "reasons": []}
         return {"status": "rest_ok", "reasons": []}
@@ -167,7 +167,9 @@ def analyze_adherence(
         used_act_ids = set()
 
         for w in day_workouts:
-            w_sport = w["sport_type"]
+            # Canonicalize: a session stored under an alias ("strength", "Running") must
+            # still match its activity, or it reads as a Complete Miss.
+            w_sport = canonical_sport(w["sport_type"])
             matched_act = None
 
             if w_sport == "rest":
@@ -188,7 +190,7 @@ def analyze_adherence(
                     break
             else:
                 # Find a matching completed activity
-                allowed_types = SPORT_MAPPING.get(w_sport, [w_sport])
+                allowed_types = sport_aliases(w_sport)
                 for act in day_acts:
                     if act["activity_id"] in used_act_ids:
                         continue

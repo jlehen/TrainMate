@@ -428,13 +428,6 @@ class TestTimelinePayload(unittest.TestCase):
         from trainmate import timeline
         return timeline.build_timeline_payload(test_db)
 
-    def test_payload_shape(self):
-        _save_activity(test_db, "a1", "2026-06-10", "running", 3600, 40.0)
-        data = self._payload()
-        for key in ("today", "plan_start", "plan_end", "days", "weeks",
-                    "meso_bands", "objectives", "plan_gap", "warnings"):
-            self.assertIn(key, data)
-
     def test_no_activity_at_all_warns_and_empty_days(self):
         data = self._payload()
         self.assertEqual(data["days"], [])

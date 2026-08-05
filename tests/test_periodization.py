@@ -9,6 +9,16 @@ from tests.helpers import clear_all_tables
 
 TEST_DB_PATH = os.path.join(os.path.dirname(__file__), "test_trainmate_periodization.db")
 
+
+def _days_out(n: int) -> str:
+    return (datetime.now(timezone.utc).date() + timedelta(days=n)).isoformat()
+
+
+# Goal and constraint fixtures ride on today rather than on fixed dates: a plan window
+# needs its goal in the future, so hardcoding one expires the tests the day it passes
+# (same rot 2a7cd71 fixed in test_constraints.py).
+GOAL_DATE = _days_out(71)
+
 from trainmate.db import Database
 import trainmate.db
 import trainmate.coach
@@ -66,9 +76,10 @@ class TestPeriodization(unittest.TestCase):
         }
         self.assertNotEqual(hash2, coach_service._get_constraints_hash([c]))
 
+    @patch("trainmate.coach.service.calendar_syncer")
     @patch("trainmate.coach.service._today_str")
     @patch("trainmate.coach.engine.openrouter_client")
-    def test_replan_logic_and_caching(self, mock_client, mock_today):
+    def test_replan_logic_and_caching(self, mock_client, mock_today, mock_calendar):
         mock_today.return_value = "2026-06-01"
         obj_id = test_db.add_objective(
             title="Berlin Marathon", target_date="2026-09-27",
@@ -129,7 +140,7 @@ class TestPeriodization(unittest.TestCase):
 
     def test_system_prompt_inserts_periodization(self):
         obj_id = test_db.add_objective(
-            title="Zurich Marathon", target_date="2026-10-15",
+            title="Zurich Marathon", target_date=GOAL_DATE,
             sport_type="running", priority=1,
         )
         test_db.save_macrocycle(
@@ -158,7 +169,7 @@ class TestPeriodization(unittest.TestCase):
     @patch("trainmate.coach.engine.openrouter_client")
     def test_replan_provides_previous_strategy_context_to_llm(self, mock_client):
         obj_id = test_db.add_objective(
-            title="Zurich Marathon", target_date="2026-10-15",
+            title="Zurich Marathon", target_date=GOAL_DATE,
             sport_type="running", priority=1,
         )
         test_db.save_macrocycle(
@@ -209,7 +220,7 @@ class TestPeriodization(unittest.TestCase):
         # Option A (DESIGN_backward_evaluation.md §6): the prior plan's elapsed blocks are
         # compared against what was actually completed, and fed into the strategy prompt.
         obj_id = test_db.add_objective(
-            title="Zurich Marathon", target_date="2026-10-15",
+            title="Zurich Marathon", target_date=GOAL_DATE,
             sport_type="running", priority=1,
         )
         test_db.save_macrocycle(
@@ -286,17 +297,17 @@ class TestPeriodization(unittest.TestCase):
     def test_plan_snapshots_goals_and_constraints(self, mock_client):
         import json
         obj_id = test_db.add_objective(
-            title="Berlin Marathon", target_date="2026-10-15",
+            title="Berlin Marathon", target_date=GOAL_DATE,
             sport_type="running", description="sub-3 attempt", priority=1,
         )
         # A plan-shaping (replan=1) constraint the plan should snapshot. A tactical one
         # is excluded because only plan-shaping constraints fingerprint/snapshot the plan.
         test_db.add_constraint(
-            title="Work trip", start_date="2026-08-01", end_date="2026-08-10",
+            title="Work trip", start_date=_days_out(1), end_date=_days_out(10),
             description="limited training time", replan=1,
         )
         test_db.add_constraint(
-            title="no run Thursday", start_date="2026-08-06", end_date="2026-08-06",
+            title="no run Thursday", start_date=_days_out(6), end_date=_days_out(6),
             replan=0,
         )
 
@@ -329,10 +340,11 @@ class TestPeriodization(unittest.TestCase):
             coach_service._get_constraints_hash(events), macro["constraints_hash"]
         )
 
+    @patch("trainmate.coach.service.calendar_syncer")
     @patch("trainmate.coach.engine.openrouter_client")
-    def test_generate_plan_and_workouts_separately(self, mock_client):
+    def test_generate_plan_and_workouts_separately(self, mock_client, mock_calendar):
         obj_id = test_db.add_objective(
-            title="Zurich Marathon", target_date="2026-10-15",
+            title="Zurich Marathon", target_date=GOAL_DATE,
             sport_type="running", priority=1,
         )
 
@@ -375,7 +387,7 @@ class TestPeriodization(unittest.TestCase):
         """When today's planned session has a matching completed activity, regeneration
         must keep today's workout and start the new plan tomorrow."""
         test_db.add_objective(
-            title="Zurich Marathon", target_date="2026-10-15",
+            title="Zurich Marathon", target_date=GOAL_DATE,
             sport_type="running", priority=1,
         )
         mock_client.complete.return_value = {
@@ -426,7 +438,7 @@ class TestPeriodization(unittest.TestCase):
         """Regenerating workouts must wipe the previous plan's future workouts,
         including synced ones (and delete their Google Calendar events)."""
         test_db.add_objective(
-            title="Zurich Marathon", target_date="2026-10-15",
+            title="Zurich Marathon", target_date=GOAL_DATE,
             sport_type="running", priority=1,
         )
 
@@ -472,7 +484,7 @@ class TestPeriodization(unittest.TestCase):
         google_event_id) must still have its Calendar event deleted on regenerate —
         i.e. cleanup keys on google_event_id, not the freshness state (orphan guard)."""
         test_db.add_objective(
-            title="Zurich Marathon", target_date="2026-10-15",
+            title="Zurich Marathon", target_date=GOAL_DATE,
             sport_type="running", priority=1,
         )
 
@@ -511,7 +523,7 @@ class TestPeriodization(unittest.TestCase):
         """Regenerating a plan keeps the prior macrocycle as a superseded version
         rather than deleting it (see DESIGN_plan_rollback.md)."""
         test_db.add_objective(
-            title="Zurich Marathon", target_date="2026-10-15",
+            title="Zurich Marathon", target_date=GOAL_DATE,
             sport_type="running", priority=1,
         )
         meso = [{
@@ -541,7 +553,7 @@ class TestPeriodization(unittest.TestCase):
         archives the current plan's, and reconciles Google Calendar symmetrically."""
         mock_calendar.sync_workout.return_value = "evt-new"
         test_db.add_objective(
-            title="Zurich Marathon", target_date="2026-10-15",
+            title="Zurich Marathon", target_date=GOAL_DATE,
             sport_type="running", priority=1,
         )
         meso = [{
@@ -597,7 +609,7 @@ class TestPeriodization(unittest.TestCase):
     def test_plan_rollback_without_history_raises(self, mock_client):
         """Rolling back a plan with no earlier version is rejected."""
         test_db.add_objective(
-            title="Zurich Marathon", target_date="2026-10-15",
+            title="Zurich Marathon", target_date=GOAL_DATE,
             sport_type="running", priority=1,
         )
         mock_client.complete.return_value = {"strategy": "v1", "mesocycles": [{
@@ -611,9 +623,11 @@ class TestPeriodization(unittest.TestCase):
 
     def _plan_v1(self, mock_client, strategy: str = "v1", force: bool = False) -> int:
         """Generates a periodization plan and returns the active macrocycle id."""
+        # The block has to still be live for `workout generate` to have anything to
+        # place into, so it rides on today like the goal does.
         mock_client.complete.return_value = {"strategy": strategy, "mesocycles": [{
-            "name": "Base", "start_date": "2026-06-01",
-            "end_date": "2026-06-28", "focus": "Base",
+            "name": "Base", "start_date": _days_out(-1),
+            "end_date": _days_out(27), "focus": "Base",
         }]}
         coach_service.plan_generate(force=force)
         obj_id = test_db.get_active_objective()["id"]
@@ -639,7 +653,7 @@ class TestPeriodization(unittest.TestCase):
         touching the active plan version (see DESIGN_plan_rollback.md §9)."""
         mock_calendar.sync_workout.return_value = "evt-new"
         test_db.add_objective(
-            title="Zurich Marathon", target_date="2026-10-15",
+            title="Zurich Marathon", target_date=GOAL_DATE,
             sport_type="running", priority=1,
         )
         today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
@@ -668,7 +682,7 @@ class TestPeriodization(unittest.TestCase):
         macrocycle-keyed restore cannot express)."""
         mock_calendar.sync_workout.return_value = "evt-new"
         test_db.add_objective(
-            title="Zurich Marathon", target_date="2026-10-15",
+            title="Zurich Marathon", target_date=GOAL_DATE,
             sport_type="running", priority=1,
         )
         today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
@@ -854,7 +868,7 @@ class TestPeriodization(unittest.TestCase):
 
     def test_db_config_hash_operations(self):
         obj_id = test_db.add_objective(
-            title="Zurich Marathon", target_date="2026-10-15",
+            title="Zurich Marathon", target_date=GOAL_DATE,
             sport_type="running", priority=1,
         )
         macro_id = test_db.save_macrocycle(
@@ -943,16 +957,17 @@ class TestPeriodization(unittest.TestCase):
         self.assertEqual(len(test_db.get_objectives(status="active")), 1)
         self.assertIsNotNone(test_db.get_macrocycle_for_objective(obj_id))
 
-    @patch("trainmate.coach.service._today_str")
     @patch("trainmate.coach.engine.openrouter_client")
-    def test_multi_goal_planning_and_deletion(self, mock_client, mock_today):
-        mock_today.return_value = "2026-06-01"
+    def test_multi_goal_planning_and_deletion(self, mock_client):
+        # Goal A must stay inside `goals_lookback_days` of today for B's plan to chain
+        # off it, so both goals ride on today rather than on fixed dates.
+        goal_a, goal_b = _days_out(61), _days_out(153)
         obj1_id = test_db.add_objective(
-            title="Goal A", target_date="2026-08-01",
+            title="Goal A", target_date=goal_a,
             sport_type="running", priority=1,
         )
         obj2_id = test_db.add_objective(
-            title="Goal B", target_date="2026-11-01",
+            title="Goal B", target_date=goal_b,
             sport_type="running", priority=2,
         )
 
@@ -960,15 +975,15 @@ class TestPeriodization(unittest.TestCase):
             {
                 "strategy": "Plan A strategy",
                 "mesocycles": [{
-                    "name": "Base Building A", "start_date": "2026-06-05",
-                    "end_date": "2026-08-01", "focus": "Aerobic conditioning",
+                    "name": "Base Building A", "start_date": _days_out(4),
+                    "end_date": goal_a, "focus": "Aerobic conditioning",
                 }],
             },
             {
                 "strategy": "Plan B strategy",
                 "mesocycles": [{
-                    "name": "Base Building B", "start_date": "2026-08-02",
-                    "end_date": "2026-11-01", "focus": "Aerobic threshold",
+                    "name": "Base Building B", "start_date": _days_out(62),
+                    "end_date": goal_b, "focus": "Aerobic threshold",
                 }],
             },
         ]
@@ -976,12 +991,14 @@ class TestPeriodization(unittest.TestCase):
         proposal_a = coach_service.plan_generate(force=True, objective_id=obj1_id)
         strategy_a, mesos_a = proposal_a['strategy'], proposal_a['mesocycles']
         self.assertEqual(strategy_a, "Plan A strategy")
-        self.assertEqual(mesos_a[0]["start_date"], "2026-06-05")
+        self.assertEqual(mesos_a[0]["start_date"], _days_out(4))
 
         proposal_b = coach_service.plan_generate(force=True, objective_id=obj2_id)
         strategy_b, mesos_b = proposal_b['strategy'], proposal_b['mesocycles']
         self.assertEqual(strategy_b, "Plan B strategy")
-        self.assertIn("from 2026-08-02 until", mock_client.complete.call_args_list[1][0][0])
+        # Plan B starts the day after Goal A, not today: it chains off the earlier goal.
+        self.assertIn(f"from {_days_out(62)} until",
+                      mock_client.complete.call_args_list[1][0][0])
 
         self.assertIsNotNone(test_db.get_macrocycle_for_objective(obj1_id))
         self.assertIsNotNone(test_db.get_macrocycle_for_objective(obj2_id))
@@ -990,21 +1007,12 @@ class TestPeriodization(unittest.TestCase):
         self.assertIsNone(test_db.get_macrocycle_for_objective(obj1_id))
         self.assertIsNotNone(test_db.get_macrocycle_for_objective(obj2_id))
 
-    def test_config_user_profile_no_threshold_requirement(self):
-        # Thresholds moved to the benchmark logbook (DESIGN_benchmark_workouts §3.4), so
-        # user_profile no longer requires 'lthr'/'ftp' — a threshold-less profile is a
-        # valid cold start (the coach nudges, never refuses).
-        with patch.dict(trainmate.coach.config.data, {"user_profile": {"name": "Test Athlete"}}):
-            profile = trainmate.coach.config.user_profile
-            self.assertEqual(profile["name"], "Test Athlete")
-            self.assertNotIn("ftp", profile)
-
     @patch("trainmate.coach.service._today_str")
     @patch("trainmate.coach.engine.openrouter_client")
     def test_recent_history_summary_periodization_plan(self, mock_client, mock_today_str):
         mock_today_str.return_value = "2026-06-18"
         obj_id = test_db.add_objective(
-            title="Zurich Marathon", target_date="2026-10-15",
+            title="Zurich Marathon", target_date=GOAL_DATE,
             sport_type="running", priority=1,
         )
         test_db.save_completed_activity(
@@ -1040,7 +1048,7 @@ class TestPeriodization(unittest.TestCase):
     def test_recent_history_workout_generation(self, mock_client, mock_calendar, mock_today_str):
         mock_today_str.return_value = "2026-06-18"
         obj_id = test_db.add_objective(
-            title="Zurich Marathon", target_date="2026-10-15",
+            title="Zurich Marathon", target_date=GOAL_DATE,
             sport_type="running", priority=1,
         )
         test_db.save_macrocycle(

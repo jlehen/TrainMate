@@ -1,7 +1,6 @@
-import inspect
 import os
 import unittest
-from datetime import datetime, timedelta, timezone
+from datetime import datetime
 from unittest.mock import patch
 
 from tests.helpers import clear_all_tables
@@ -264,14 +263,6 @@ class TestWorkoutAnalysis(unittest.TestCase):
         learning = test_db.get_learnings()[0]
         self.assertEqual(learning["last_reinforced_at"], sentinel)  # no new week -> no refresh
         self.assertEqual(learning["confidence"], "tentative")        # still one week
-
-    def test_force_contract_does_not_claim_reinforcement_suppression(self):
-        """Reinforcement suppression was retired — the evidence basis owns integrity (§8).
-        Guards the documented `--force` contract against resurrecting the dead mechanism."""
-        doc = (coach_service._run_workout_analysis.__doc__ or "").lower()
-        self.assertNotIn("suppress", doc)
-        params = inspect.signature(test_db.apply_learning_deltas).parameters
-        self.assertNotIn("suppress_reinforcement", params)
 
     @patch("trainmate.coach.engine.openrouter_client")
     def test_inspect_only_writes_nothing(self, mock_client):

@@ -1,9 +1,16 @@
 import requests
 import json
 import os
+import re
 from datetime import datetime, timezone
 from typing import Any, Optional
 from trainmate.config import config
+
+# A fenced reply may be one line (```{"a":1}```) or many, with or without a language
+# tag; the one-line form has no newline to split on.
+_FENCED_JSON = re.compile(r"^```[A-Za-z0-9_+-]*\s*(.*?)\s*```\s*$", re.DOTALL)
+_OPEN_FENCE = re.compile(r"^```[A-Za-z0-9_+-]*[ \t]*\n?")
+
 
 class OpenRouterClient:
     """Client for communicating with the OpenRouter LLM API."""
@@ -122,12 +129,13 @@ class OpenRouterClient:
         append prose or a stray fence don't abort the whole exchange.
         """
         text = content.strip()
-        if text.startswith("```"):
-            # Drop the opening fence (e.g. ```json) and trailing fence.
-            text = text.split("\n", 1)[-1] if "\n" in text else text
-            if text.endswith("```"):
-                text = text[: -len("```")]
-            text = text.strip()
+        fenced = _FENCED_JSON.match(text)
+        if fenced:
+            text = fenced.group(1)
+        elif text.startswith("```"):
+            # Opening fence with no closing one: drop the fence and any language tag.
+            text = _OPEN_FENCE.sub("", text)
+        text = text.strip()
         # raw_decode parses the first JSON value and ignores trailing data.
         obj, _ = json.JSONDecoder().raw_decode(text)
         return obj
@@ -186,6 +194,7 @@ class OpenRouterClient:
 
         response = None
         resp_data = None
+        logged = False
         try:
             print(f"Querying OpenRouter with model: {self.model}")
             response = requests.post(
@@ -203,6 +212,7 @@ class OpenRouterClient:
                     label, system_content, user_content,
                     response_data=resp_data, error_msg=f"OpenRouter Error: {err_msg}"
                 )
+                logged = True
                 raise ValueError(f"OpenRouter API error: {err_msg}")
 
             # Print token usage details for prompt caching verification
@@ -233,10 +243,11 @@ class OpenRouterClient:
             raise he
         except Exception as e:
             print(f"Error calling OpenRouter completions: {e}")
-            self._log_exchange(
-                label, system_content, user_content,
-                response_data=resp_data, error_msg=str(e)
-            )
+            if not logged:
+                self._log_exchange(
+                    label, system_content, user_content,
+                    response_data=resp_data, error_msg=str(e)
+                )
             raise e
 
 # Singleton instance

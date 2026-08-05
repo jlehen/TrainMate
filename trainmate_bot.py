@@ -48,7 +48,7 @@ from typing import Dict, List, Optional, Tuple
 
 from trainmate.config import config
 from trainmate.prompt import PROMPT_SENTINEL, PROMPT_PROTOCOL_VERSION, PHOTO_SENTINEL
-from trainmate.util import ANSI_ESCAPE, cmd
+from trainmate.util import cmd, strip_ansi
 
 # Telegram caps a message at 4096 chars; we wrap replies in <pre>…</pre> (7 chars
 # of overhead) and want headroom, so chunk the body well under the hard limit.
@@ -134,11 +134,6 @@ def parse_message_to_argv(text: str, bot_username: Optional[str] = None) -> Opti
 def is_authorized(chat_id: int, allowed_ids: List[int]) -> bool:
     """True only when chat_id is on the allowlist. Empty allowlist authorizes no one."""
     return chat_id in allowed_ids
-
-
-def strip_ansi(text: str) -> str:
-    """Removes ANSI colour codes (NO_COLOR already disables them, but be defensive)."""
-    return ANSI_ESCAPE.sub("", text)
 
 
 def parse_prompt_request(line: str) -> Optional[dict]:

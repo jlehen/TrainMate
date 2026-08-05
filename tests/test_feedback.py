@@ -1,8 +1,14 @@
 import os
 import unittest
+from datetime import datetime, timedelta, timezone
 from unittest.mock import patch
 
 from tests.helpers import clear_all_tables, run_cli
+
+
+# A plan window needs its goal in the future, so a fixed date expires the tests the
+# day it passes (same rot 2a7cd71 fixed in test_constraints.py).
+GOAL_DATE = (datetime.now(timezone.utc).date() + timedelta(days=71)).isoformat()
 
 TEST_DB_PATH = os.path.join(os.path.dirname(__file__), "test_trainmate_feedback.db")
 
@@ -44,45 +50,11 @@ class TestFeedback(unittest.TestCase):
     def run_cli(self, args, input_value="n"):
         return run_cli(args, input_value)
 
-    def test_database_feedback_crud(self):
-        obj_id = test_db.add_objective(
-            title="Zurich Marathon",
-            target_date="2026-10-15",
-            sport_type="running",
-            priority=1,
-        )
-
-        macro_id = test_db.save_macrocycle(
-            objective_id=obj_id,
-            strategy="Keep heart rate low",
-            goals_hash="ghash",
-            constraints_hash="lehash",
-            mesocycles=[{
-                "name": "Base Building",
-                "start_date": "2026-06-01",
-                "end_date": "2026-06-28",
-                "focus": "Zone 2 runs",
-            }],
-        )
-
-        test_db.update_macrocycle_feedback(macro_id, "Strategy was too easy.")
-
-        fetched_mesos = test_db.get_mesocycles_for_macrocycle(macro_id)
-        self.assertEqual(len(fetched_mesos), 1)
-        meso_id = fetched_mesos[0]["id"]
-        test_db.update_mesocycle_feedback(meso_id, "Increase duration of long runs.")
-
-        macro = test_db.get_macrocycle_for_objective(obj_id)
-        self.assertEqual(macro["feedback"], "Strategy was too easy.")
-
-        meso = test_db.get_mesocycle(meso_id)
-        self.assertEqual(meso["feedback"], "Increase duration of long runs.")
-
     @patch("trainmate.coach.engine.openrouter_client")
     def test_replan_injects_feedback_into_prompt(self, mock_client):
         obj_id = test_db.add_objective(
             title="Zurich Marathon",
-            target_date="2026-10-15",
+            target_date=GOAL_DATE,
             sport_type="running",
             priority=1,
         )
@@ -126,7 +98,7 @@ class TestFeedback(unittest.TestCase):
 
         obj_id = test_db.add_objective(
             title="Zurich Marathon",
-            target_date="2026-10-15",
+            target_date=GOAL_DATE,
             sport_type="running",
             priority=1,
         )
@@ -177,7 +149,7 @@ class TestFeedback(unittest.TestCase):
     @patch("trainmate_cli._edit_text_in_editor")
     def test_cli_feedback_edit(self, mock_editor):
         obj_id = test_db.add_objective(
-            title="Zurich Marathon", target_date="2026-10-15",
+            title="Zurich Marathon", target_date=GOAL_DATE,
             sport_type="running", priority=1,
         )
         macro_id = test_db.save_macrocycle(

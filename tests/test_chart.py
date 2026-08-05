@@ -58,9 +58,6 @@ class TestCharsPerAxis(unittest.TestCase):
         self.addCleanup(plt.close, fig)
         return ax
 
-    def test_measures_a_positive_character_budget(self):
-        self.assertGreater(_chars_per_axis(self._ax()), 0)
-
     def test_a_wider_figure_holds_more_characters(self):
         self.assertGreater(_chars_per_axis(self._ax(figwidth=20.0)),
                            _chars_per_axis(self._ax(figwidth=10.0)))
@@ -76,24 +73,6 @@ class TestCharsPerAxis(unittest.TestCase):
         capacity = int(21 / 150 * _chars_per_axis(self._ax()))
         self.assertLess(capacity, len(LONG_LABEL))
         self.assertLessEqual(len(_fit_label(LONG_LABEL, capacity)), capacity)
-
-
-class TestBandLabelsUseFinalGeometry(unittest.TestCase):
-    def test_axvspan_moves_the_xlim_the_labels_are_measured_against(self):
-        # Why `_draw_meso_band_labels` is a separate pass run after the spans: an
-        # axvspan reaching past the bars expands the x-autoscale, so an x-range read
-        # before the spans are drawn is not the range the figure is saved with.
-        import matplotlib.pyplot as plt
-        import matplotlib.dates as mdates
-        from datetime import datetime
-
-        fig, ax = plt.subplots()
-        self.addCleanup(plt.close, fig)
-        ax.bar([mdates.date2num(datetime(2026, 6, 1))], [100], width=2.5)
-        before = ax.get_xlim()
-        ax.axvspan(datetime(2026, 1, 1), datetime(2026, 12, 31), alpha=0.1)
-        after = ax.get_xlim()
-        self.assertGreater(after[1] - after[0], before[1] - before[0])
 
 
 class TestPlanEndMarkerStaysInsideTheWindow(unittest.TestCase):

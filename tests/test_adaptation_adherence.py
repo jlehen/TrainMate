@@ -1,7 +1,6 @@
 import os
 import unittest
 from datetime import date
-from unittest.mock import Mock, patch
 
 from tests.helpers import clear_all_tables
 from trainmate.adherence import analyze_adherence
@@ -350,3 +349,61 @@ class TestAdaptationAdherence(unittest.TestCase):
         )
         self.assertEqual(len(disc), 1)
         self.assertIn("duration mismatch", disc[0])
+
+
+class TestSportMatching(unittest.TestCase):
+    """Pairing a planned session with its activity across sport-name spellings.
+
+    A workout's `sport_type` is athlete- or LLM-authored, so it arrives in any casing
+    and under any alias. Failing to canonicalize it reports a session the athlete
+    actually completed as a Complete Miss."""
+
+    @staticmethod
+    def _pair(planned_sport: str, activity_type: str):
+        planned = [{
+            "date": "2026-06-01", "sport_type": planned_sport, "title": "Session",
+            "duration_minutes": 60, "tss": 50.0, "rpe": 5,
+        }]
+        completed = [{
+            "date": "2026-06-01", "activity_id": "act1", "activity_name": "Session",
+            "activity_type": activity_type, "duration_sec": 3600, "tss": 50.0, "rpe": 5,
+        }]
+        return analyze_adherence(planned, completed, date(2026, 6, 1), 1)
+
+    def test_exact_sport_matches(self):
+        disc, matching, _ = self._pair("running", "running")
+        self.assertIsNotNone(matching[0]["completed"])
+        self.assertEqual(disc, [])
+
+    def test_capitalized_sport_still_matches(self):
+        # 'Running' is not a SPORT_MAPPING key and the substring fallback is
+        # case-sensitive, so uncanonicalized this read as a Complete Miss.
+        disc, matching, _ = self._pair("Running", "running")
+        self.assertIsNotNone(matching[0]["completed"])
+        self.assertEqual(disc, [])
+
+    def test_alias_sport_matches_its_family(self):
+        disc, matching, _ = self._pair("strength", "strength_training")
+        self.assertIsNotNone(matching[0]["completed"])
+        self.assertEqual(disc, [])
+
+    def test_alias_on_the_activity_side_matches_too(self):
+        # Garmin spells resort skiing several ways; all fold into downhill_skiing.
+        disc, matching, _ = self._pair("downhill_skiing", "resort_skiing")
+        self.assertIsNotNone(matching[0]["completed"])
+        self.assertEqual(disc, [])
+
+    def test_a_genuinely_different_sport_is_still_a_miss(self):
+        # Canonicalizing must not make everything match.
+        disc, matching, _ = self._pair("running", "cycling")
+        self.assertIsNone(matching[0]["completed"])
+        self.assertTrue(any("Complete Miss" in d for d in disc))
+
+    def test_capitalized_rest_is_still_a_rest_day(self):
+        planned = [{"date": "2026-06-01", "sport_type": "Rest", "title": "Rest"}]
+        completed = [{
+            "date": "2026-06-01", "activity_id": "a1", "activity_name": "Big Ride",
+            "activity_type": "cycling", "duration_sec": 7200, "tss": 120.0, "rpe": 7,
+        }]
+        disc, _, _ = analyze_adherence(planned, completed, date(2026, 6, 1), 1)
+        self.assertTrue(any("Rest Day Violation" in d for d in disc))

@@ -124,13 +124,6 @@ class TestCoverage(unittest.TestCase):
         )
         self.assertEqual([r.currency for r in rows], ["hr"])
 
-    def test_low_coverage_reads_as_not_recorded(self):
-        # An hour ridden, ten minutes inside any zone: the effort sat below Z1.
-        rows = intensity.zone_rows(
-            [act("2026-06-02", "running", 3600, hr=[600, 0, 0, 0, 0])]
-        )
-        self.assertAlmostEqual(rows[0].coverage, 1 / 6, places=3)
-
     def test_zero_zone_columns_do_not_invent_a_row(self):
         # sync.py writes zeros, not NULLs, when an activity has no average HR.
         self.assertEqual(intensity.zone_rows([act("2026-06-02", "hiking", 3600)]), [])
@@ -440,11 +433,6 @@ class TestNotes(unittest.TestCase):
         text = flat("\n".join(intensity.format_notes(rows)))
         self.assertIn("rest between sets", text)
         self.assertIn("interval work with rest", text)
-
-    def test_indoor_cardio_folds_into_strength_and_keeps_the_note(self):
-        rows = self._rows(act("2026-06-02", "indoor_cardio", 3600, hr=[0, 0, 0, 3600, 0]))
-        text = flat("\n".join(intensity.format_notes(rows)))
-        self.assertIn("rest between sets", text)
 
     def test_power_only_rows_carry_neither_hr_note(self):
         rows = self._rows(

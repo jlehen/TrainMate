@@ -2,11 +2,9 @@ import io
 import os
 import unittest
 from contextlib import redirect_stdout
-from datetime import date
 from unittest.mock import Mock, patch
 
 from tests.helpers import clear_all_tables
-from trainmate.adherence import analyze_adherence
 
 TEST_DB_PATH = os.path.join(os.path.dirname(__file__), "test_adaptation_adapt.db")
 

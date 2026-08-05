@@ -1,7 +1,5 @@
 import os
 import unittest
-from datetime import datetime, timedelta, timezone
-from unittest.mock import patch
 
 from tests.helpers import clear_all_tables, run_cli
 

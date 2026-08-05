@@ -133,6 +133,29 @@ class TestModificationStatusViaDB(unittest.TestCase):
         self.assertTrue(moved["modification_reason"].startswith(SWAP_REASON_PREFIX))
         self.assertEqual(modification_status(moved), "swapped")
 
+    def test_manual_replace_writer_output_starts_with_prefix(self):
+        # The other half of the drift guard modification_state.py claims to have: the
+        # add-over-an-existing-session writer must keep stamping the replace prefix,
+        # since that is how a legacy row with no `source` is recovered as "replaced".
+        from unittest.mock import MagicMock
+        from trainmate.coach.service import CoachService
+        service = CoachService(
+            db_instance=self.db, calendar_syncer_instance=MagicMock()
+        )
+        self.db.save_workout(
+            date="2026-07-01", sport_type="running", title="Old Run", description="easy",
+        )
+        saved, replaced = service.workout_add(
+            date="2026-07-01", sport_type="running", title="New Run",
+            description="tempo", duration_minutes=60,
+        )
+        self.assertEqual(len(replaced), 1)
+        row = self.db.get_workout_by_id(saved["id"])
+        self.assertTrue(
+            row["modification_reason"].startswith(MANUAL_REPLACE_REASON_PREFIX)
+        )
+        self.assertEqual(modification_status(row), "replaced")
+
     def test_swap_then_swap_back_clears_to_unmodified(self):
         wid = self.db.save_workout(
             date="2026-07-01", sport_type="running", title="Run", description="easy",
