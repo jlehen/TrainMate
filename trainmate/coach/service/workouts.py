@@ -393,7 +393,7 @@ class WorkoutGenMixin:
         self._maybe_nudge_no_threshold()
 
         # We need all objectives for _get_active_strategy_and_meso_text context
-        objectives = self._db.get_objectives(status='active')
+        objectives = self._db.upcoming_objectives()
         strategy, meso_text = self._get_active_strategy_and_meso_text(
             objectives, objective_id=objective_id
         )

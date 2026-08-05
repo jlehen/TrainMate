@@ -146,7 +146,7 @@ class AdaptationMixin:
             for m in matching_results if m["completed"] is not None
         }
 
-        objectives = self._db.get_objectives(status='active')
+        objectives = self._db.upcoming_objectives()
 
         # Determine the fallback next_goal for passing to the prompt generator
         next_goal = None

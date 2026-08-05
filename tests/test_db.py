@@ -3,7 +3,7 @@ import unittest
 from datetime import datetime, timedelta, timezone
 from unittest import mock
 
-from tests.helpers import clear_all_tables
+from tests.helpers import clear_all_tables, pin_clock
 
 TEST_DB_PATH = os.path.join(os.path.dirname(__file__), "test_trainmate_db.db")
 
@@ -12,6 +12,7 @@ from trainmate.db import (
     derive_confidence, confidence_rank, step_down, RETIRE_PROPOSAL,
 )
 import trainmate.db
+from trainmate.db.objectives import goal_state
 
 test_db = Database(db_path=TEST_DB_PATH)
 trainmate.db.db = test_db
@@ -666,6 +667,127 @@ class TestPlannedZoneColumns(unittest.TestCase):
         after = test_db.get_workout("2026-06-10", "running")
         self.assertEqual(after["planned_zone1_sec"], 420)
         self.assertEqual(calendar_signature(after), before)
+
+
+class TestGoalStateIsDerived(unittest.TestCase):
+    """A goal is completed because its date has passed, not because a column says so
+    (DESIGN_backward_evaluation.md §12). The column records only "called off"."""
+
+    TODAY = "2026-08-05"
+
+    @classmethod
+    def setUpClass(cls):
+        if os.path.exists(TEST_DB_PATH):
+            os.remove(TEST_DB_PATH)
+        global test_db
+        test_db = Database(db_path=TEST_DB_PATH)
+        trainmate.db.db = test_db
+
+    @classmethod
+    def tearDownClass(cls):
+        if os.path.exists(TEST_DB_PATH):
+            try:
+                os.remove(TEST_DB_PATH)
+            except OSError:
+                pass
+
+    def setUp(self):
+        clear_all_tables(test_db)
+        pin_clock(self, self.TODAY)
+
+    def _goal(self, title: str, target: str, status: str = "active") -> int:
+        return test_db.add_objective(
+            title=title, target_date=target, sport_type="cycling", priority=1,
+            status=status,
+        )
+
+    # ------------------------------------------------------------------ derivation
+
+    def test_the_three_states(self):
+        past = test_db.get_objective(self._goal("Last month's race", "2026-07-04"))
+        ahead = test_db.get_objective(self._goal("Autumn climb", "2026-09-30"))
+        called_off = test_db.get_objective(
+            self._goal("Cancelled sportive", "2026-09-01", status="archived")
+        )
+
+        self.assertEqual(goal_state(past), "completed")
+        self.assertEqual(goal_state(ahead), "upcoming")
+        # Archived wins over the date in both directions.
+        self.assertEqual(goal_state(called_off), "archived")
+
+    def test_the_target_day_itself_still_counts_as_upcoming(self):
+        """Race day is not history until it is over."""
+        today = test_db.get_objective(self._goal("Race day", self.TODAY))
+        self.assertEqual(goal_state(today), "upcoming")
+
+    # ------------------------------------------------------------------ accessors
+
+    def test_upcoming_objectives_drops_past_and_archived(self):
+        self._goal("Last month's race", "2026-07-04")
+        ahead = self._goal("Autumn climb", "2026-09-30")
+        self._goal("Cancelled sportive", "2026-09-01", status="archived")
+
+        self.assertEqual([o["id"] for o in test_db.upcoming_objectives()], [ahead])
+
+    def test_preceding_objectives_reach_completed_goals(self):
+        """The whole point of the lookup is the season behind the athlete — filtering it
+        to `status = 'active'` hid exactly what it was for (§12)."""
+        done = self._goal("Last month's race", "2026-07-04")
+        self._goal("Cancelled sportive", "2026-07-05", status="archived")
+
+        found = test_db.get_preceding_objectives("2026-09-30")
+
+        self.assertEqual([o["id"] for o in found], [done])
+
+    def test_preceding_objectives_still_bounded_by_the_lookback(self):
+        """`coach.goals_lookback_days` (90) is a separate bound and is left alone."""
+        self._goal("Last season", "2025-09-01")
+        self.assertEqual(test_db.get_preceding_objectives("2026-09-30"), [])
+
+    # ------------------------------------------------- what governs the timeline
+
+    def _planned_goal(self, title: str, target: str) -> int:
+        obj_id = self._goal(title, target)
+        test_db.save_macrocycle(
+            objective_id=obj_id, strategy=title, goals_hash="g", constraints_hash="c",
+            mesocycles=[{"name": f"{title} block", "start_date": "2026-06-01",
+                         "end_date": "2026-06-28", "focus": "base"}],
+        )
+        return obj_id
+
+    def test_governing_plan_is_the_earliest_goal_still_ahead(self):
+        self._planned_goal("Last month's race", "2026-07-04")
+        ahead = self._planned_goal("Autumn climb", "2026-09-30")
+
+        self.assertEqual(
+            test_db.get_governing_macrocycle()["objective_id"], ahead
+        )
+
+    def test_governing_plan_falls_back_to_the_last_completed_goal(self):
+        """The day after an event the workouts behind the athlete still belong to that
+        plan; blanking the timeline's block labels right then would be worse than keeping
+        them (§12)."""
+        self._planned_goal("Spring race", "2026-06-01")
+        latest = self._planned_goal("Last month's race", "2026-07-04")
+
+        self.assertEqual(
+            test_db.get_governing_macrocycle()["objective_id"], latest
+        )
+
+    def test_a_completed_goal_is_no_longer_stored(self):
+        """One-off migration: the state left the column when it became derivable."""
+        with test_db._get_connection() as conn:
+            conn.execute(
+                "INSERT INTO objectives (title, target_date, sport_type, priority, status)"
+                " VALUES ('Legacy', '2026-07-04', 'cycling', 1, 'completed')"
+            )
+            conn.commit()
+
+        Database(db_path=TEST_DB_PATH)          # re-init runs the migration
+
+        row = test_db.get_objectives()[0]
+        self.assertEqual(row["status"], "active")
+        self.assertEqual(goal_state(row), "completed")     # unchanged where it counts
 
 
 if __name__ == "__main__":

@@ -23,12 +23,17 @@ class PlanStrategyMixin:
         profile: Optional[Dict[str, Any]], previous_strategy_text: Optional[str] = None,
         plan_start_str: Optional[str] = None, athlete_feedback: Optional[str] = None,
         history_summary: Optional[str] = None, prior_training_text: Optional[str] = None,
+        learnings: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Queries LLM to determine the overall macrocycle strategy and mesocycle blocks.
 
         The plan always runs from the start date to the goal, however far out that is: how
         a long horizon gets structured is a question for the science guidelines, not for a
-        duration threshold in the app."""
+        duration threshold in the app.
+
+        Builds its own system prompt rather than calling `_build_system_prompt`: that one
+        states the ACTIVE strategy and blocks as settled fact, which is the very thing this
+        call produces (DESIGN_backward_evaluation.md §10.1)."""
         plan_start = plan_start_str or today_str
         custom_task = f"""
 TASK:
@@ -121,6 +126,17 @@ You MUST respond with a JSON object containing:
         # an idealized template (DESIGN_backward_evaluation.md §6, Option A).
         if prior_training_text:
             system_prompt += f"\nPRIOR TRAINING REVIEW:\n{prior_training_text}\n"
+        # The distilled half of what the analysis flow found; the reconstruction above is
+        # its narrative half (DESIGN_backward_evaluation.md §10.1).
+        if learnings:
+            system_prompt += (
+                "\nATHLETE-SPECIFIC OBSERVATIONS (accumulated by the training-history "
+                "analysis, tagged\n[id|sports|confidence]):\n"
+                f"{learnings}\n"
+                "Weigh these when shaping the blocks — a higher confidence means more weeks "
+                "of evidence\nbehind the observation. They are input only here: authoring "
+                "and revising them belongs\nto the analysis flow.\n"
+            )
         system_prompt += (
             f"\nACTIVE ATHLETE GOALS (CHRONOLOGICAL):\n"
             f"{obj_text if obj_text else 'No active goals.'}\n\n"

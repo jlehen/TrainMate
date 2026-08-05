@@ -32,7 +32,7 @@
 
 Original draft preamble follows.
 
-This picks up the item both DESIGN_backward_evaluation.md §8 ("Edges") and §12
+This picks up the item both DESIGN_backward_evaluation.md §8 ("Edges") and §13
 ("Out of Scope") explicitly deferred as YAGNI: **per-learning evidence
 provenance.** It replaces LLM-assigned confidence with confidence the *app*
 computes from a per-learning record of which weeks actually backed each

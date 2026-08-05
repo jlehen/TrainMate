@@ -109,7 +109,7 @@ def _resolve_workout_end_date(
                 print(red("No active goal found for --until-goal."))
                 sys.exit(1)
             return resolved_goal['target_date']
-        goal = next((o for o in cli.db.get_objectives(status='active') if o['id'] == goal_id), None)
+        goal = next((o for o in cli.db.upcoming_objectives() if o['id'] == goal_id), None)
         if goal is None:
             print(red(f"Active goal with ID {goal_id} not found."))
             sys.exit(1)

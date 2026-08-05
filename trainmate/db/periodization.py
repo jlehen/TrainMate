@@ -1,6 +1,8 @@
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
 from trainmate.types import Macrocycle, Mesocycle
+from trainmate.util import today_date
+from trainmate.db.objectives import ARCHIVED
 
 
 class PeriodizationMixin:
@@ -104,15 +106,27 @@ class PeriodizationMixin:
             return dict(row) if row else None  # type: ignore
 
     def get_governing_macrocycle(self) -> Optional[Macrocycle]:
-        """The macrocycle of the *governing objective* — the earliest active objective
+        """The macrocycle of the *governing objective* — the earliest goal still ahead
         that has a plan (i.e. the objective the current workouts implement). Its
         mesocycles label the timeline weeks (DESIGN_progress_timeline.md §6.1).
 
-        Deliberately distinct from `get_active_objective()` (earliest active,
-        plan-or-not) and from Phase 2's priority-ordered event pick: meso labels must
-        follow whichever plan the current workouts implement. Returns None when no
-        active objective has a macrocycle yet."""
-        for obj in self.get_objectives(status='active'):  # ORDER BY target_date ASC
+        Falls back to the most recent *completed* goal's plan when nothing ahead has one:
+        the day after an event, the months of workouts behind the athlete still belong to
+        that plan, and dropping the labels then would blank the timeline exactly when it
+        is being looked at. Advancing used to be a side effect of marking the goal
+        completed by hand; it is now the date's job (DESIGN_backward_evaluation.md §12).
+
+        Deliberately distinct from `get_active_objective()` (next goal, plan-or-not) and
+        from Phase 2's priority-ordered event pick: meso labels must follow whichever plan
+        the current workouts implement. Returns None when no goal has a macrocycle."""
+        live = [o for o in self.get_objectives() if o.get('status') != ARCHIVED]
+        today = today_date().strftime("%Y-%m-%d")
+        ahead = [o for o in live if str(o['target_date']) >= today]   # ORDER BY date ASC
+        for obj in ahead:
+            macro = self.get_macrocycle_for_objective(obj['id'])
+            if macro:
+                return macro
+        for obj in reversed([o for o in live if str(o['target_date']) < today]):
             macro = self.get_macrocycle_for_objective(obj['id'])
             if macro:
                 return macro

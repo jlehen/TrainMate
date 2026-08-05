@@ -10,6 +10,9 @@ _CLOCK_SITES = [
     ("trainmate.coach.service._today_str", False),
     ("trainmate.coach.service._today_date", True),
     ("trainmate.db.objectives.today_date", True),
+    # A goal's completed/upcoming split is now decided by the date, so the accessors that
+    # ask "is this goal behind us?" are clock sites too (DESIGN_backward_evaluation.md §12).
+    ("trainmate.db.periodization.today_date", True),
 ]
 
 

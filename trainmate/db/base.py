@@ -44,9 +44,17 @@ class BaseDB:
                     sport_type TEXT NOT NULL,
                     description TEXT,
                     priority INTEGER DEFAULT 1,
-                    status TEXT DEFAULT 'active' -- 'active', 'completed', 'archived'
+                    status TEXT DEFAULT 'active' -- 'active' | 'archived'; see below
                 )
             """)
+
+            # One-off (single-user app): 'completed' is no longer a stored state. A goal
+            # the athlete has not archived and whose target date has passed IS completed,
+            # derived by `db.objectives.goal_state()` — the column now records only
+            # whether the goal was called off (DESIGN_backward_evaluation.md §12).
+            cursor.execute(
+                "UPDATE objectives SET status = 'active' WHERE status = 'completed'"
+            )
 
             # Drop the legacy `lifeevents` table (and its even older `life_events` name).
             # It was superseded by `constraints` (DESIGN_constraints.md §5) and kept

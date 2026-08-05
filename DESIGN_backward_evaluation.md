@@ -314,7 +314,72 @@ Diff output has a natural home in existing fields: macro diff →
 >   distribution as a per-week rate, with the delta against the preceding block**
 >   (DESIGN_intensity_distribution.md §4.1/§9). That delta is the intensity-creep
 >   check: weekly TSS can hold flat while easy volume quietly gives way to tempo.
+> - **Adherence joins intent fidelity.** The measured half alone cannot say whether
+>   a block was *carried out*: 545 TSS over four weeks reads identically whether it
+>   was 100% or 50% of what the plan asked, so a half-missed block looked exactly
+>   like a completed one and the next macrocycle ramped from a load the athlete
+>   never reached. Each elapsed block therefore also carries **one line per week —
+>   planned load beside produced load** — from `progression.weekly_aggregates`, the
+>   same computation `tm progress` renders, so the coach and the athlete can never
+>   read different numbers for the same week. The in-progress week states raw load
+>   beside its elapsed day count and is never extrapolated
+>   (DESIGN_intensity_distribution.md §9.3).
+> - **What the plan PRESCRIBED sits beside what was measured**
+>   (DESIGN_intensity_distribution.md §9.2a). Which of the two an athlete diverged
+>   from decides whose problem it is, and only the periodization consumer may act
+>   on the mis-designed case.
 >   The cached reconstruction's summary/cycles/insights are appended below it.
+
+### 6.1 Which macrocycles the review walks, and in what order
+
+`_build_prior_training_context` takes a **list** of macrocycles and adds the
+governing one itself. Two things drove that, and the second turned out to matter
+more than the first.
+
+**The list.** `plan_generate` derives two different macrocycles and they are not
+interchangeable:
+
+- `preceding_macro` — the latest goal *before* this one that has a plan. Found by
+  the `get_preceding_objectives` loop.
+- `prev_macro` — the plan this generation *replaces*, which on a re-plan is the
+  goal's own. It feeds the singular `PREVIOUS PERIODIZATION STRATEGY` block, which
+  is about the intent the new plan departs from, so singular is right there.
+
+`prev_macro` used to be assigned over the top of `preceding_macro`, so only one of
+the two ever reached the review. In practice the loss was **narrower than it looks**:
+the review also adds `get_governing_macrocycle()` — the *earliest* active goal with
+a plan — which usually backfills the one that was dropped. It genuinely goes missing
+only with three or more planned goals in the chain, where the middle one is neither
+the earliest nor the one being replanned. The fix is still worth making (the two
+names now mean what they say), but it is not the common case.
+
+**The order.** This is the one that bit. The blocks of every macrocycle are
+flattened into a single list, and `block_report`'s delta baseline is
+`blocks[i - 1]` — the block before it. The list was built in *argument* order, and
+argument order is not chronological: on a re-plan of a later goal the pair is
+`[the replaced plan, the governing plan]`, and the governing plan is the **earlier**
+one. So the flattened list ran later-blocks-then-earlier-blocks, and every delta
+compared a block against one that happened *after* it. The first block of the later
+plan also silently got no delta at all.
+
+Macrocycles are therefore sorted by their first block's start date before
+flattening. Sorting the chosen lineages is not the same as the date-ordered
+mesocycle *query* §6's implementation notes forbid: that query drags in superseded
+rollback versions, whereas this only orders macrocycles the caller already picked.
+
+**Both used to be bounded by goal status, and that was the deeper bug.** Every
+accessor in this paragraph — `get_preceding_objectives`,
+`get_governing_macrocycle` — filtered `status = 'active'`. A goal the athlete had
+marked `completed` therefore took its whole macrocycle out of the review, which is
+exactly backwards: a goal that has been *raced* is the single most informative
+thing the next plan could look at. Getting the macrocycle list right (above) would
+have bought very little while the goals feeding it were being filtered out on the
+way in.
+
+That filter is gone; §12 records why and what replaced it. What still bounds the
+walk is `get_preceding_objectives`' `coach.goals_lookback_days` (90), which is a
+deliberate recency window on the plan-start computation rather than a statement
+about which goals count as history.
 
 ---
 
@@ -460,6 +525,79 @@ pure consumer, the analysis flow is the *only* place a backward pass happens, an
 splitting it into `bootstrap` (once, full backlog) and `reflect` (incremental from
 the watermark) is what keeps repeated curiosity runs from re-counting history.
 
+### 10.1 Both halves of the analysis reach the plan prompt
+
+The analysis flow produces two things, and for a long time `plan generate`
+received only one of them:
+
+| product | where it lands | reached the plan prompt |
+| --- | --- | --- |
+| the reconstruction (`macrocycle_summary`, `inferred_*`, `physiological_insights`) | `analysis_cache`, replayed by `_build_prior_training_context` | yes |
+| `learning_updates` → the `coach_learnings` table | rendered by `_get_learnings_text()` | **no** |
+
+The cause was structural rather than deliberate. Every other coach call composes
+its system prompt through `engine._build_system_prompt`, which carries a
+`COACH LEARNINGS …` section; `_plan_generate_strategy` composes its own and
+simply had no `learnings` parameter. So an established observation like *"responds
+poorly to back-to-back threshold days"* shaped every individual session and never
+the block structure that schedules them — and `plan generate` closed by nudging
+the athlete toward `data bootstrap`, whose durable output it would not read.
+
+**`_plan_generate_strategy` now takes `learnings` and renders it** as
+`ATHLETE-SPECIFIC OBSERVATIONS`, placed directly after `PRIOR TRAINING REVIEW`:
+the two are the distilled and narrative halves of the same evidence, and they read
+better together than apart.
+
+**Why not just call `_build_system_prompt` and delete the duplication?** Because
+that builder states the ACTIVE strategy and mesocycle list as settled fact under
+"Established Training Strategy" — which is the very artifact this call produces.
+The plan prompt deliberately shows the *previous* strategy instead, as context to
+build on or depart from (§6). Feeding it the current one would be circular. The
+divergence is the point, so the docstring says so; the fix is the missing section,
+not a merge.
+
+The section states that the observations are **input only** here. Authoring stays
+with the analysis flow (§11), and the plan response schema has no
+`learning_updates` field — the wording exists to stop the model echoing them back
+into `strategy` prose.
+
+### 10.2 `data reflect`'s reconstruction is replayed too
+
+`data bootstrap` caches under horizon `long`, `data reflect` under `short` — and
+nothing read `short`. Reflect's reconstruction was written and never used; its only
+lasting effect was its learnings deltas, which §10.1 had just established were not
+reaching the plan either.
+
+The staleness warning made this sharp rather than merely wasteful. It read the
+`long` window and said:
+
+> The training-history reconstruction ends 2026-05-01 (96 days ago); sessions
+> since then did not shape this plan. Run `data reflect` first to bring it up to
+> date.
+
+`data reflect` cannot bring `long` up to date. Only `data bootstrap --force` can,
+and bootstrap is deliberately once-per-onboarding and confirmation-gated (§9). An
+athlete following the advice exactly would see the same warning forever. In effect
+the plan prompt's view of "what was figured out" was **frozen at onboarding**.
+
+**`CoachService._cached_reconstructions()` is now the single accessor** for both
+what the prompt replays and how far behind it is. It returns bootstrap's row, then
+reflect's when reflect's window ends *later* than bootstrap's — a reflect window
+that ends no later covers ground bootstrap already described, and replaying it
+would put two accounts of the same weeks in front of the model. Each row carries a
+`label` (`full history reconstruction` / `most recent reflection`) so the prompt
+names which command produced which window rather than presenting one undated
+blur.
+
+`_maybe_warn_stale_analysis` judges the lag over the same rows, taking the latest
+window end. The warning can therefore never name a window the prompt did not read,
+and the command it points at is one that can actually clear it.
+
+The two reconstructions are **complementary, not competing**: bootstrap's is the
+long arc, reflect's is the recent slice, and they are shown as two sections with
+their own date spans rather than merged. Only one `short` row is ever retained
+(one row per horizon, upsert), so "most recent reflection" is literal.
+
 ---
 
 ## 11. Decisions & Open Questions
@@ -509,7 +647,120 @@ the watermark) is what keeps repeated curiosity runs from re-counting history.
 
 ---
 
-## 12. Out of Scope
+## 12. Goal completion is the date's verdict, not a stored state
+
+Everything above assumes the review can see the goals the athlete has already
+trained through. It could not, and the reason turned out to sit one level below
+the review: the `objectives.status` column was being asked to carry two unrelated
+facts at once.
+
+### 12.1 One column, two questions
+
+`status` held `active`, `completed`, or `archived`, and readers filtered on
+`status = 'active'`. But the three values answer two different questions:
+
+- **Is this goal still ahead of the athlete?** A date question. The answer is
+  already written in `target_date`, and it changes on its own every midnight.
+- **Did the athlete call this goal off?** A genuine state. Nothing but an explicit
+  human act can tell you a goal was abandoned, and no amount of staring at dates
+  will reveal it.
+
+Storing the first question's answer in a column meant it had to be *maintained* —
+and nothing maintained it. `completed` was only ever set by the athlete running
+`goal edit --status completed` by hand, so the column drifted out of step with the
+calendar the moment an event was raced.
+
+### 12.2 What the drift actually cost
+
+The two failure modes pull in opposite directions, which is what makes the
+single-column design untenable rather than merely untidy.
+
+**Leaving the goal `active` after its date passed.** `get_active_objective()` took
+the earliest `active` goal with no date filter, so a raced event stayed "the next
+goal" indefinitely. `plan generate` would then try to plan a window that ended in
+the past and refuse — *"there is no window to plan in"* — and the only way out was
+for the athlete to notice that a bookkeeping flag, not the plan, was the problem.
+The app was reporting a data-entry chore as a planning failure.
+
+**Marking the goal `completed`.** This fixed the refusal and broke the review.
+`get_preceding_objectives` and `get_governing_macrocycle` both filtered on
+`active`, so the moment a goal was marked completed its entire macrocycle vanished
+from the prior-training review (§6.1) — and the mesocycle bands vanished from the
+progress timeline with it, blanking the labels on the months of training behind the
+athlete precisely when they had just finished the event and were most likely to
+look. The athlete's reward for correct bookkeeping was a worse coach.
+
+So the athlete was offered a choice between a command that refuses and a review
+that forgets, and neither branch was the one they wanted.
+
+### 12.3 The rule
+
+**`status` records only whether the goal was called off — `active` or `archived`.
+Completion is derived.**
+
+```
+goal_state(goal) =
+    ARCHIVED   if status == 'archived'
+    COMPLETED  if target_date < today      # the date decides, nothing else
+    UPCOMING   otherwise
+```
+
+`db.objectives.goal_state()` is the single implementation, so no two surfaces can
+disagree about what a goal's state is — the CLI's `goal list`, `status`, and the
+web view all route through it. Nothing writes `completed` and nothing reads it off
+a row; the derivation is re-evaluated on every read, which is what makes midnight
+sufficient to advance it.
+
+The accessors follow from the split, and each one now says which of the two
+questions it is asking:
+
+| Accessor | Means |
+| --- | --- |
+| `upcoming_objectives()` | not archived **and** date not yet passed — "the goals that matter" at every planning and picker site |
+| `get_active_objective()` (no ID) | the next goal still ahead; date-filtered, so a raced event can no longer occupy the slot |
+| `get_active_objective(id)` | any goal not archived, past or future — an ID is an explicit request for *that* goal |
+| `get_preceding_objectives()` | goals before a date, **completed ones very much included** — they are the point of the lookup |
+| `get_governing_macrocycle()` | the plan the current workouts implement (below) |
+
+The ID form deliberately stopped filtering by date. When the athlete names a goal
+they mean that goal, and a caller that needs a plannable window checks the window
+itself and gives a better error than a missing row ever could.
+
+### 12.4 The governing macrocycle needs a completed fallback
+
+`get_governing_macrocycle()` picks the earliest goal-with-a-plan still ahead, and
+its mesocycles label the progress timeline (DESIGN_progress_timeline.md §6.1). Once
+completion became automatic, the day after an event there is nothing ahead with a
+plan, and the labels would blank themselves overnight.
+
+It therefore **falls back to the most recently completed goal's plan** when nothing
+ahead has one. The months of training behind the athlete genuinely do belong to
+that plan, and the timeline should keep saying so until a new plan exists to take
+over. Advancing the labels used to be an accidental side effect of the athlete
+marking a goal completed; it is now the date's job, and the fallback is what keeps
+the handover from leaving a hole.
+
+### 12.5 Migration and surface
+
+Single-user app, so the migration is a one-off `UPDATE` in `db/base.py` rather than
+a compatibility shim: any row still reading `completed` is rewritten to `active`,
+after which the column's remaining meaning — called off or not — is true of every
+row. The `objectives` schema comment records the narrowed vocabulary.
+
+`goal edit --status` drops `completed` from its choices, since offering it would be
+offering to write a state the app no longer reads. The remaining pair is described
+in the athlete's terms — call the goal off, or reinstate it — and the help text says
+outright that a goal completes on its own once its target date passes.
+
+One nuance worth stating because the code does not make it obvious:
+`progression.plan_gap()` filters `status != 'archived'` and *not* `upcoming`. It is
+already selecting goals with `target_date > plan_end_date`, so the date question is
+answered by that comparison; adding a second date filter would be redundant rather
+than safer.
+
+---
+
+## 13. Out of Scope
 
 - Backward evaluation in `workout adapt`.
 - Per-learning evidence provenance.

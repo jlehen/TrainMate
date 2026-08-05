@@ -102,7 +102,7 @@ class TestCliStatus(unittest.TestCase):
         self.assertEqual(exit_code_v, 0)
         self.assertIn("Goals:", stdout_v)
         self.assertIn(
-            f"- [ACTIVE] ID: {g_id} | London Marathon (running) on {GOAL_DATE} (Priority: 1)",
+            f"- [UPCOMING] ID: {g_id} | London Marathon (running) on {GOAL_DATE} (Priority: 1)",
             stdout_v,
         )
         self.assertIn("Active Constraints:", stdout_v)
@@ -116,7 +116,7 @@ class TestCliStatus(unittest.TestCase):
         self.assertEqual(exit_code_vv, 0)
         self.assertIn("Goals:", stdout_vv)
         self.assertIn(
-            f"- [ACTIVE] ID: {g_id} | London Marathon (running) on {GOAL_DATE} (Priority: 1)",
+            f"- [UPCOMING] ID: {g_id} | London Marathon (running) on {GOAL_DATE} (Priority: 1)",
             stdout_vv,
         )
 

@@ -12,6 +12,7 @@ from typing import Any, Dict
 
 from trainmate import garmin, progression
 from trainmate.config import config
+from trainmate.db.objectives import ARCHIVED
 from trainmate.util import today_str
 
 
@@ -25,8 +26,9 @@ def build_timeline_payload(dbh) -> Dict[str, Any]:
     workouts = dbh.get_workouts()
     metrics_rows = dbh.get_metrics_cache()
 
-    objectives = dbh.get_objectives(status="active")
-    objectives += dbh.get_objectives(status="completed")
+    # Everything the athlete has not called off: a goal already raced still belongs on the
+    # timeline, and "completed" is now the date's verdict, not a stored one (§12).
+    objectives = [o for o in dbh.get_objectives() if o["status"] != ARCHIVED]
     objectives.sort(key=lambda o: str(o["target_date"]))
 
     macro = dbh.get_governing_macrocycle()

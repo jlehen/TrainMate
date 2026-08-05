@@ -8,7 +8,9 @@ class Objective(TypedDict):
     sport_type: str  # Can be a single sport or comma-separated list of sports
     description: Optional[str]
     priority: int
-    status: str  # 'active', 'completed', 'archived'
+    # Called off or not. 'completed' is derived from target_date, never stored: see
+    # db.objectives.goal_state() and DESIGN_backward_evaluation.md §12.
+    status: str  # 'active' | 'archived'
 
 class Constraint(TypedDict):
     """A single directive — anything the athlete asks the coach to work around, at

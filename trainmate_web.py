@@ -82,7 +82,7 @@ def _resolve_goal_id(raw: Any) -> Any:
     (earliest target date) — mirrors the CLI's plan-command goal resolution."""
     if raw is not None and raw != "":
         return int(raw)
-    objectives = db.get_objectives(status='active')
+    objectives = db.upcoming_objectives()
     if not objectives:
         return None
     objectives.sort(key=lambda x: str(x['target_date']))
@@ -113,7 +113,7 @@ def _weeks_arg(raw: str) -> Any:
 @app.route("/api/status", methods=["GET"])
 def get_status() -> Any:
     """API endpoint to retrieve overall athlete status, learnings, and metrics."""
-    objectives = db.get_objectives(status='active')
+    objectives = db.upcoming_objectives()
     next_goal = None
     if objectives:
         objectives.sort(key=lambda x: str(x['target_date']))

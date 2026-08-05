@@ -193,7 +193,10 @@ class PlanningMixin:
         preceding_objs = self._db.get_preceding_objectives(next_goal['target_date'])
 
         latest_preceding_target = None
-        prev_macro = None
+        # Kept in its own name: `prev_macro` below is whichever plan the new one *replaces*,
+        # and on a re-plan that is this goal's own — which used to overwrite the preceding
+        # goal's season out of the review entirely (DESIGN_backward_evaluation.md §6.1).
+        preceding_macro = None
 
         for po in preceding_objs:
             if po['id'] is not None:
@@ -201,7 +204,7 @@ class PlanningMixin:
                 if po_macro:
                     po_target = datetime.strptime(po['target_date'], "%Y-%m-%d").date()
                     latest_preceding_target = po_target
-                    prev_macro = po_macro
+                    preceding_macro = po_macro
                     break
 
         if latest_preceding_target is not None:
@@ -223,7 +226,7 @@ class PlanningMixin:
 
         # Compute current hashes
         # We need to fetch active objectives for hash computation so the hash covers the whole landscape
-        objectives = self._db.get_objectives(status='active')
+        objectives = self._db.upcoming_objectives()
         # All active constraints feed the plan prompt; only the plan-shaping (replan=1)
         # ones fingerprint the plan and are snapshotted, so a tactical "no run Thursday"
         # never trips the reuse-vs-regen decision (DESIGN_constraints.md §7).
@@ -257,9 +260,10 @@ class PlanningMixin:
                 )))
 
         if not reused:
-            # Get the previous strategy for context
-            if existing_macro:
-                prev_macro = existing_macro
+            # The plan being replaced, for the "PREVIOUS PERIODIZATION STRATEGY" block —
+            # deliberately singular, since that block is about the intent this one departs
+            # from. The *review* below sees both (§6.1).
+            prev_macro = existing_macro or preceding_macro
 
             prev_strategy_text = None
             if prev_macro:
@@ -300,10 +304,14 @@ class PlanningMixin:
             guidelines = self._load_science_guidelines()
             profile = self._effective_profile()
             history_summary = self._get_recent_history_summary(today_str)
-            # Planned-vs-actual review of the prior plan (+ cached reconstruction) fed as
-            # read-only context (Option A). `prev_macro` here is the existing plan being
-            # replaced, or the preceding goal's plan when there is none.
-            prior_training_text = self._build_prior_training_context(prev_macro, today_str)
+            # Read-only here, as everywhere outside the analysis flow
+            # (DESIGN_backward_evaluation.md §10.1).
+            learnings = self._get_learnings_text()
+            # Planned-vs-actual review of every plan the athlete has trained through (+ the
+            # cached reconstructions) fed as read-only context (Option A).
+            prior_training_text = self._build_prior_training_context(
+                [preceding_macro, prev_macro], today_str
+            )
             if prior_training_text:
                 _print_prior_training_review(prior_training_text, width)
             self._maybe_warn_stale_analysis(today_str)
@@ -319,6 +327,7 @@ class PlanningMixin:
                 athlete_feedback=feedback_text,
                 history_summary=history_summary,
                 prior_training_text=prior_training_text,
+                learnings=learnings,
             )
             strategy = macro_data.get("strategy", "Endurance preparation strategy.")
             mesocycles = macro_data.get("mesocycles", [])
@@ -343,7 +352,7 @@ class PlanningMixin:
             return None
 
         today_str = _svc._today_str()
-        objectives = self._db.get_objectives(status='active')
+        objectives = self._db.upcoming_objectives()
         replan_constraints = [
             c for c in self._db.get_constraints(today_str) if c.get('replan')
         ]
@@ -437,7 +446,7 @@ class PlanningMixin:
         self, force: bool = False, objective_id: Optional[int] = None
     ) -> Tuple[str, List[Workout]]:
         """Generates or adapts the training plan from today onwards."""
-        objectives = self._db.get_objectives(status='active')
+        objectives = self._db.upcoming_objectives()
         if not objectives:
             return (
                 "No active goals found. TrainMate needs at least one objective to "

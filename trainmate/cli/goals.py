@@ -11,14 +11,19 @@ from trainmate.util import (
     format_labeled_block, today_str as _today_str, today_date as _today_date,
 )
 from trainmate.cli.common import fmt_date, ensure_recent_data
+from trainmate.db.objectives import goal_state, GOAL_UPCOMING
 from trainmate.sports import CANONICAL_SPORTS
 
 
 def _print_goal(g: dict) -> None:
-    """Prints one goal in the 'goal list' format."""
+    """Prints one goal in the 'goal list' format.
+
+    The state is derived, never read off the row: UPCOMING is the live one, COMPLETED
+    means the date has passed, ARCHIVED means it was called off (§12)."""
     sport_str = g['sport_type']
-    status_tag = g['status'].upper()
-    if g['status'] == 'active':
+    state = goal_state(g)
+    status_tag = state.upper()
+    if state == GOAL_UPCOMING:
         status_disp = green(f"[{status_tag}]")
         title_disp = cyan(g['title'])
     else:
@@ -154,9 +159,12 @@ def add_goal_parser(subparsers):
     )
     g_edit.add_argument("--desc", help="New description")
     g_edit.add_argument("--priority", type=int, help="New priority (1 = highest)")
+    # No 'completed': a goal whose date has passed is completed by that fact (§12). This
+    # flag only says whether the goal was called off.
     g_edit.add_argument(
-        "--status", choices=["active", "completed", "archived"],
-        help="New status ('active', 'completed', 'archived')"
+        "--status", choices=["active", "archived"],
+        help="Call the goal off ('archived') or reinstate it ('active'). A goal completes "
+             "on its own once its target date passes."
     )
     
     # goal rm

@@ -13,6 +13,7 @@ from trainmate.util import (
     PMC_TSB_LAG_NOTE, today_str as _today_str, today_date as _today_date,
 )
 from trainmate.cli.common import fmt_date, ensure_recent_data, pmc_warmup_cutoff
+from trainmate.db.objectives import goal_state, GOAL_UPCOMING
 
 
 def _ago(iso_utc: str) -> str:
@@ -54,7 +55,7 @@ def run_status(
     print(bold(cyan("=== TRAINMATE ATHLETE STATUS ===")))
 
     # Active Goal & Periodization Strategy
-    objectives = cli.db.get_objectives(status='active')
+    objectives = cli.db.upcoming_objectives()
     if objectives:
         objectives.sort(key=lambda x: str(x['target_date']))
         next_goal = objectives[0]
@@ -298,8 +299,9 @@ def run_status(
             print("- None")
         for g in goals:
             sport_str = g['sport_type']
-            status_tag = g['status'].upper()
-            if g['status'] == 'active':
+            state = goal_state(g)          # derived, not stored (§12)
+            status_tag = state.upper()
+            if state == GOAL_UPCOMING:
                 status_disp = green(f"[{status_tag}]")
                 title_disp = cyan(g['title'])
             else:

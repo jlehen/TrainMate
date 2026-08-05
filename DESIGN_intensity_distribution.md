@@ -501,6 +501,16 @@ measured-vs-prescribed gap by name.
 prescription is precisely the execution question adapt already owns via §9.4, and it has the
 sharper instrument for it: a guard rail on the next session.
 
+**`plan generate` gets it too.** The rule is the consumer's job, not one command's: whoever may
+reshape blocks needs both columns of the table above, and `plan generate` reshapes them at the
+coarsest grain there is. It reads the pair per *elapsed* block via
+`_intensity_history_context`, which already passed `previous=` for the block-over-block delta
+and now passes `fetch_workouts=` alongside it. Without the prescribed column the failure mode is
+the same one described above, one level up: a threshold block that measures like a tempo block
+because its easy days were run hard would be *replanned* as a tempo block, writing the drift
+into the periodization instead of correcting it. The consumer list is therefore
+"the two generate paths, never adapt" — see DESIGN_backward_evaluation.md §6 (AS BUILT).
+
 ### 9.3 What `adapt` sees, and how it gets there
 
 Two blocks, neither of them a rate:

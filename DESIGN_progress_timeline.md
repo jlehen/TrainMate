@@ -745,6 +745,18 @@ column and the chart band:
    and `db.get_active_objective()`'s earliest-active-plan-or-not. Meso
    labels must follow whichever plan the current workouts implement; the
    divergence is by design, not a bug.)
+
+   **AS BUILT — "active" here now means "still ahead", and there is a
+   fallback.** Goal completion became a derived property of `target_date`
+   rather than a stored status (DESIGN_backward_evaluation.md §12), so the
+   helper walks goals that are not archived and whose date has not passed.
+   That alone would blank the labels the morning after an event — nothing
+   ahead has a plan yet — so it then **falls back to the most recently
+   completed goal's plan**. The months of training behind the athlete do
+   belong to that plan, and it keeps the labels until a new plan exists to
+   take over. Note this softens the "Removed (rev 7)" consequence below:
+   the *latest* completed objective's plan does label its weeks again; only
+   earlier ones and superseded versions still fall back to `~inferred`.
 2. **Bootstrap reconstruction** — for weeks the active plan doesn't cover: `data
    bootstrap`'s reverse-engineered blocks from `analysis_cache["long"]`,
    nested at `cache["reconstruction"]["inferred_mesocycles"]` (fields

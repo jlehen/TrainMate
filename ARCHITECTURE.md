@@ -330,6 +330,12 @@ Module-level function in `formatting.py`. Concatenates all `*.txt` files from
   (`metrics_lookback_days`) are not fingerprinted at all.
 - **`_plan_generate_strategy(...)`** — LLM call → `{strategy, mesocycles}` covering the
   plan start through the goal date, whatever the horizon. Label `periodization_plan`.
+  Builds its own system prompt rather than calling `_build_system_prompt`, which states
+  the ACTIVE strategy and blocks as settled fact — the very artifact this call produces;
+  the plan prompt shows the *previous* strategy instead. It takes `learnings` explicitly
+  for that reason: the shared builder's `COACH LEARNINGS` section is the one part it does
+  want, and without the argument this was the only coach call blind to the observations
+  the analysis flow authors (DESIGN_backward_evaluation.md §10.1).
 - **`_workout_generate_logic(...)`** — LLM call → `{reasoning, workouts[]}`. Accepts
   `num_days` (default 28) driving the horizon and `start_str` (defaults to today) for
   the first day to schedule — the prompt tells the model to begin there. When
@@ -521,20 +527,29 @@ called by the UIs.
   reflect watermark; `reflect` = incremental since the watermark (horizon `short`),
   advances it. Both reuse `analysis_cache` on unchanged evidence; `force` recomputes;
   `inspect_only` renders without writing. See DESIGN_backward_evaluation.md §5, §8, §9.
-- **`_build_prior_training_context(prior_macro, today)`** — builds the read-only
+- **`_build_prior_training_context(prior_macros, today)`** — builds the read-only
   "planned vs actual" review injected into the `plan generate` strategy prompt
-  (Option A). Anchored on the elapsed mesocycle windows of the prior plan **and of the
-  plan the athlete is currently in** — drift diagnosed only one macrocycle late is
-  history. Each block carries its volume/load line plus the per-sport per-zone intensity
+  (Option A). Anchored on the elapsed mesocycle windows of every plan handed in **and of
+  the plan the athlete is currently in** (it adds `get_governing_macrocycle()` itself) —
+  drift diagnosed only one macrocycle late is
+  history. The caller passes both the *preceding goal's* plan and the one being
+  *replaced*; they are different macrocycles whenever three or more planned goals chain
+  (DESIGN_backward_evaluation.md §6.1). Each block carries its volume/load line plus the per-sport per-zone intensity
   table and the **block-over-block delta**, which is the intensity-creep check and lives
   here only: it is a periodization question, so `adapt` never sees it
-  (DESIGN_intensity_distribution.md §4.1/§9.2). Folds in the cached reconstruction's
-  summary, inferred macro/mesocycle blocks, and physiological insights. Writes no
+  (DESIGN_intensity_distribution.md §4.1/§9.2) — beside **what the plan prescribed** over
+  the same weeks (§9.2a) and **one planned-vs-actual load line per week**, without which a
+  half-missed block reads exactly like a completed one. Folds in every cached
+  reconstruction (`_cached_reconstructions()`): summary, inferred macro/mesocycle blocks,
+  and physiological insights. Writes no
   `feedback` field. The whole review is wrapped **once**, at build time, and printed
   verbatim — the zone tables are column-aligned and a screen-width re-wrap shreds them.
 - **`_intensity_history_context(macros, today)`** — the block walk behind the above.
-  Navigates **macrocycle-first** and flattens the block lists in order, so each block's
-  predecessor is the previous element (including across a plan boundary). Never a
+  Navigates **macrocycle-first**, orders the lineages by their first block's start date,
+  then flattens, so each block's predecessor is the previous element (including across a
+  plan boundary) and the delta baseline is the block that actually preceded it —
+  *argument* order is not chronological, since the plan being replaced can be for a later
+  goal than the governing one. Never a
   date-ordered mesocycle query: every mesocycle accessor filters `mac.status = 'active'`,
   which hides exactly the cross-plan case, and dropping that filter drags in superseded
   rollback versions whose blocks overlap the live ones and describe training that never
@@ -724,9 +739,27 @@ SQLite database at `trainmate.db` (path from `config.db_path`).
 | `title`       | TEXT       |                                                      |
 | `target_date` | TEXT       | YYYY-MM-DD                                           |
 | `sport_type`  | TEXT       | Single or comma-separated (e.g. `running,cycling`) |
-| `status`      | TEXT       | `active`, `completed`, `archived`                    |
+| `status`      | TEXT       | `active` or `archived` **only** — see below           |
 | `priority`    | INTEGER    | 1 = highest                                          |
 | `description` | TEXT       |                                                      |
+
+`status` records one thing: whether the goal was **called off**. Completion is not
+stored — a goal that is not archived and whose `target_date` has passed *is*
+completed, derived on every read by `db.objectives.goal_state()` →
+`upcoming | completed | archived`. That one function is what every surface (`goal
+list`, `status`, the web view) renders, so no two of them can disagree. A one-off
+migration in `db/base.py` rewrites any legacy `completed` row to `active`, and
+`goal edit --status` offers only `active`/`archived`. Rationale — and the two
+opposite failure modes the old three-value column produced — in
+DESIGN_backward_evaluation.md §12.
+
+The accessors name which question they ask: **`upcoming_objectives()`** (not
+archived, date not passed) is "the goals that matter" at every planning and picker
+site; **`get_active_objective()`** with no ID is the next goal still ahead, while
+its ID form resolves any non-archived goal, past or future; and
+**`get_preceding_objectives()`** deliberately includes completed goals, which are
+the point of the lookup. `progression.plan_gap()` filters only `!= archived` — its
+`target_date > plan_end_date` comparison already answers the date question.
 
 ### constraints
 The single directive object — everything the athlete asks the coach to work around,
@@ -1097,13 +1130,19 @@ DESIGN_backward_evaluation.md §5.1.
 
 The `horizon` is a **cache slot, not a different product**: `data bootstrap` and
 `data reflect` run the identical prompt through `_run_workout_analysis()`, and the
-horizon only selects which row is written. Two forward consumers read the `long` slot —
-`plan generate`'s prior-training context and `trainmate/timeline.py`, which feeds the
-reconstruction's `inferred_mesocycles` into `progression.assemble_timeline()` as
-`~`-prefixed bands wherever no planned block covers the span (DESIGN_progress_timeline.md
-§6.1). Nothing reads `short`, so `data reflect`'s row is effectively write-only. Neither
+horizon only selects which row is written. Two forward consumers read it —
+`plan generate`'s prior-training context via `CoachService._cached_reconstructions()`, and
+`trainmate/timeline.py`, which feeds the reconstruction's `inferred_mesocycles` into
+`progression.assemble_timeline()` as `~`-prefixed bands wherever no planned block covers
+the span (DESIGN_progress_timeline.md §6.1). The timeline reads `long` alone; the plan
+prompt replays **both** slots, `short` only when its window ends later than `long`'s —
+otherwise it re-describes weeks bootstrap already covered. Neither
 consumer checks the fingerprint — it is consulted only in the *writing* flow, so a
-months-old reconstruction can be replayed (the covered window is printed alongside it).
+months-old reconstruction can be replayed (the covered window is printed alongside it),
+and `_maybe_warn_stale_analysis()` says so once the latest of the two windows falls
+`coach.analysis_staleness_days` behind. That warning is judged over the same accessor the
+prompt reads, so the `data reflect` it points at is a command that can clear it
+(DESIGN_backward_evaluation.md §10.2).
 
 | Column           | Type       | Notes                                              |
 |------------------|------------|----------------------------------------------------|
@@ -1418,11 +1457,13 @@ threshold-less profile is a valid cold start (the coach nudges, never refuses).
 4. Otherwise: builds a read-only **planned-vs-actual review** via
    `_build_prior_training_context()` (Option A — anchored on the elapsed mesocycle
    windows of the prior plan and of the current one, each with its per-sport per-zone
-   intensity table and block-over-block delta, plus the cached reconstruction's summary,
+   intensity table, block-over-block delta, prescribed-zone table and per-week
+   planned-vs-actual load lines, plus every cached reconstruction's summary,
    reverse-engineered macro/mesocycle blocks, and physiological insights;
    written to no `feedback` field), prints it, and passes it as
    `prior_training_text` into `CoachEngine._plan_generate_strategy()` →
-   LLM → `{strategy, mesocycles}`.  See DESIGN_backward_evaluation.md §6.
+   LLM → `{strategy, mesocycles}`. Active coach learnings ride alongside it as
+   `learnings`, read-only. See DESIGN_backward_evaluation.md §6, §10.1.
 5. The plan window runs from the start date to the goal, with **no minimum or
    maximum length** — how to periodize a three-week run-in or a two-year horizon
    is a question the science guidelines answer, and TrainMate does not pre-empt

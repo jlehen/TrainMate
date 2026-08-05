@@ -25,7 +25,7 @@ def _resolve_goal(goal_id: Optional[int]) -> Optional[dict]:
         if not goal:
             print(red(f"Goal with ID {goal_id} not found."))
         return goal
-    objectives = cli.db.get_objectives(status='active')
+    objectives = cli.db.upcoming_objectives()
     if not objectives:
         print(yellow("No active goals found. TrainMate needs at least one goal."))
         return None
@@ -54,7 +54,7 @@ def run_plan_generate(args: argparse.Namespace) -> None:
                     no_pull=args.no_pull, force_pull=getattr(args, 'force_pull', False)
                 )
 
-        objectives = cli.db.get_objectives(status='active')
+        objectives = cli.db.upcoming_objectives()
         if objectives:
             if args.goal_id is not None:
                 target_goals = [o for o in objectives if o['id'] == args.goal_id]
@@ -670,7 +670,7 @@ def run_plan_rm(args: argparse.Namespace) -> None:
     print(green(f"Periodization plan for goal '{goal['title']}' removed successfully."))
 
     # Warn about subsequent plans
-    objectives = cli.db.get_objectives(status='active')
+    objectives = cli.db.upcoming_objectives()
     subsequent_goals_with_plans = []
     for obj in objectives:
         if str(obj['target_date']) > str(goal['target_date']):
@@ -811,7 +811,7 @@ def run_plan_feedback(args: argparse.Namespace) -> None:
         return
 
     # 2. Handle macrocycle feedback. Find target goal first.
-    objectives = cli.db.get_objectives(status='active')
+    objectives = cli.db.upcoming_objectives()
     if not objectives:
         print(yellow("No active goals found. TrainMate needs at least one goal."))
         sys.exit(1)

@@ -244,7 +244,7 @@ def run_workout_generate(args: argparse.Namespace) -> None:
     )
 
     try:
-        objectives = cli.db.get_objectives(status='active')
+        objectives = cli.db.upcoming_objectives()
         if objectives:
             if args.goal_id is not None:
                 target_goals = [o for o in objectives if o['id'] == args.goal_id]

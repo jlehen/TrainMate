@@ -339,7 +339,7 @@ class PmcContextMixin:
 
     def _block_week_lines(
         self, meso: Dict[str, Any], as_of: str, elapsed_end: str,
-        workouts: List[Workout],
+        workouts: List[Workout], indent: str = "    ",
     ) -> List[str]:
         """One planned-vs-actual line per Monday-week of the block's elapsed part.
 
@@ -348,6 +348,9 @@ class PmcContextMixin:
         for the same week (§3.1). The in-progress week states raw load beside the elapsed
         day count and is never extrapolated, following
         DESIGN_intensity_distribution.md §9.3.
+
+        `indent` only differs because the two prompts nest their blocks differently: the
+        strategy prompt sits each report one level in, since it sends several.
         """
         activities = self._db.get_completed_activities(
             start_date=meso['start_date'], end_date=elapsed_end
@@ -362,9 +365,9 @@ class PmcContextMixin:
             denom = progression.week_plan_denom(w)
             if w['in_progress']:
                 elapsed = min(7, days_between(when, elapsed_end) + 1)
-                head = f"    - week of {when} (in progress, {elapsed} of 7 days)"
+                head = f"{indent}- week of {when} (in progress, {elapsed} of 7 days)"
             else:
-                head = f"    - week of {when}"
+                head = f"{indent}- week of {when}"
             if denom is None:
                 out.append(f"{head}: actual {actual:.0f}, no plan covered this week")
                 continue
@@ -457,39 +460,59 @@ class PmcContextMixin:
         and describe training that never happened. Navigating by macrocycle id fixes the
         lineage before any dates are compared, so neither trap can fire.
         """
-        blocks: List[Dict[str, Any]] = []
+        lineages: List[List[Dict[str, Any]]] = []
         seen_macros = set()
         for macro in macros:
             if not macro or macro['id'] in seen_macros:
                 continue
             seen_macros.add(macro['id'])
-            blocks.extend(self._db.get_mesocycles_for_macrocycle(macro['id']))
+            meso = self._db.get_mesocycles_for_macrocycle(macro['id'])
+            if meso:
+                lineages.append(meso)
+        # Ordered by when the athlete actually trained them, not by argument position: the
+        # plan being replaced can be for a LATER goal than the governing one, and each
+        # block's delta baseline is the block before it in this list.
+        lineages.sort(key=lambda blocks: blocks[0]['start_date'])
+        blocks = [b for lineage in lineages for b in lineage]
         benchmarks = self._db.get_benchmark_results()
         reports = []
         for i, meso in enumerate(blocks):
             text = intensity.block_report(
                 meso, today_str, self._db.get_completed_activities,
                 previous=blocks[i - 1] if i else None, benchmarks=benchmarks,
+                fetch_workouts=self._db.get_workouts,
             )
-            if text:
-                reports.append(text)
+            if not text:
+                continue
+            # Elapsed part only: a finished block ends where it ended, the current one at
+            # today. Both sides of every week line are cut to the same span.
+            elapsed_end = min(today_str, meso['end_date'])
+            weeks = self._block_week_lines(
+                meso, today_str, elapsed_end,
+                self._db.get_workouts(start_date=meso['start_date'], end_date=elapsed_end),
+                indent="      ",
+            )
+            if weeks:
+                text += "\n    Weekly load (what the plan asked -> what was produced)\n"
+                text += "\n".join(weeks)
+            reports.append(text)
         return reports
 
     def _build_prior_training_context(
-        self, prior_macro: Optional[Dict[str, Any]], today_str: str
+        self, prior_macros: List[Optional[Dict[str, Any]]], today_str: str
     ) -> Optional[str]:
         """Builds a read-only "planned vs actual" review for the strategy prompt
         (DESIGN_backward_evaluation.md §6, Option A).
 
-        Anchored on the *elapsed* mesocycle windows of the prior plan AND of the plan the
-        athlete is currently in (§6): each planned block's focus is shown beside what the
-        athlete actually did in that window — volume, load, and the per-sport per-zone
-        intensity distribution with its block-over-block delta
-        (DESIGN_intensity_distribution.md §4.1/§9) — so the model can judge whether the
-        block's intent materialized. If a cached backward-evaluation reconstruction exists
-        (from `data bootstrap`), its summary, reverse-engineered macro/mesocycle structure,
-        and physiological insights are appended — reused without another LLM call (§10).
-        Returns None if there is nothing to report.
+        Anchored on the *elapsed* mesocycle windows of every plan given AND of the plan the
+        athlete is currently in (§6, §6.1): each planned block's focus is shown beside what the
+        athlete actually did in that window — volume, load, the per-sport per-zone
+        intensity distribution against both its block-over-block delta and what the plan
+        prescribed (DESIGN_intensity_distribution.md §4.1/§9/§9.2a), and each week's
+        planned load beside the load produced — so the model can judge whether the block's
+        intent materialized and whether it was actually carried out. Every cached
+        backward-evaluation reconstruction then follows, reused without another LLM call
+        (§10, §10.2). Returns None if there is nothing to report.
 
         This does NOT write to any `feedback` field: under Option A the assessment is
         prompt context only, sidestepping the feedback-lifecycle collision (§11).
@@ -500,10 +523,10 @@ class PmcContextMixin:
         # column-aligned and re-wrapping shreds them (DESIGN_intensity_distribution.md §6).
         width = intensity.PROMPT_WIDTH
 
-        # The current plan's elapsed blocks join the prior plan's: drift diagnosed only
+        # The current plan's elapsed blocks join the prior plans': drift diagnosed only
         # one macrocycle late is history (gap 2 of DESIGN_intensity_distribution.md §3).
         reports = self._intensity_history_context(
-            [prior_macro, self._db.get_governing_macrocycle()], today_str
+            [*prior_macros, self._db.get_governing_macrocycle()], today_str
         )
         if reports:
             sections.append(
@@ -514,50 +537,88 @@ class PmcContextMixin:
                     "per-week rate over the block's completed weeks, plus the change "
                     "against the block before it. Read the delta as the intensity-creep "
                     "check: weekly TSS can hold flat while easy volume quietly gives way "
-                    "to tempo.", width
+                    "to tempo.\n"
+                    "Two more comparisons decide WHOSE problem a divergence is. Against "
+                    "'What the plan PRESCRIBED', a block that measures off its focus but "
+                    "tracks its prescription was MIS-DESIGNED — reshape the blocks still "
+                    "ahead; one that diverges from the prescription was mis-executed, "
+                    "which the daily adaptation owns, so do not reward it by planning "
+                    "the easier block it drifted toward. Against the weekly load lines, "
+                    "a block whose weeks came in far under what was asked was not the "
+                    "block that was planned: build the next one from the load the athlete "
+                    "actually produced, not from the load they were prescribed.", width
                 )
                 + "\n" + "\n".join(reports)
             )
 
-        cached = self._db.get_analysis_cache("long")
-        recon = cached.get("reconstruction") if cached else None
-        if recon:
-            recon_lines = []
-            if recon.get("macrocycle_summary"):
-                recon_lines.append(f"Summary: {recon['macrocycle_summary']}")
-            # Reverse-engineered periodization structure: the overall focus and the
-            # mesocycle blocks the athlete actually moved through. Fed so the new plan can
-            # build on the real prior arc (where base/build/recovery fell, how consistent
-            # each block was) rather than re-deriving it (DESIGN_backward_evaluation.md §10).
-            im = recon.get("inferred_macrocycle") or {}
-            if im.get("overall_focus"):
-                span = ""
-                if im.get("start_date") and im.get("end_date"):
-                    span = f" ({im['start_date']}..{im['end_date']})"
-                recon_lines.append(f"Reconstructed macrocycle focus{span}: {im['overall_focus']}")
-            for meso in (recon.get("inferred_mesocycles") or []):
-                name = meso.get("name", "Phase")
-                m_span = ""
-                if meso.get("start_date") and meso.get("end_date"):
-                    m_span = f" ({meso['start_date']}..{meso['end_date']})"
-                detail = []
-                if meso.get("focus_detected"):
-                    detail.append(f"focus \"{meso['focus_detected']}\"")
-                if meso.get("average_weekly_tss") is not None:
-                    detail.append(f"~{float(meso['average_weekly_tss']):.0f} TSS/wk")
-                if meso.get("estimated_consistency"):
-                    detail.append(f"{meso['estimated_consistency']} consistency")
-                detail_txt = f": {', '.join(detail)}" if detail else ""
-                recon_lines.append(f"- {name}{m_span}{detail_txt}")
-            for ins in (recon.get("physiological_insights") or []):
-                recon_lines.append(f"- {ins}")
-            if recon_lines:
-                window = ""
-                if cached.get("window_start") and cached.get("window_end"):
-                    window = f" ({cached['window_start']}..{cached['window_end']})"
-                sections.append(wrap_text(
-                    f"INFERRED FROM PAST TRAINING{window} (latest data analysis):\n"
-                    + "\n".join(recon_lines), width
-                ))
+        for cached in self._cached_reconstructions():
+            recon_lines = self._reconstruction_lines(cached["reconstruction"])
+            if not recon_lines:
+                continue
+            window = ""
+            if cached.get("window_start") and cached.get("window_end"):
+                window = f" ({cached['window_start']}..{cached['window_end']})"
+            sections.append(wrap_text(
+                f"INFERRED FROM PAST TRAINING{window} — {cached['label']}:\n"
+                + "\n".join(recon_lines), width
+            ))
 
         return "\n\n".join(sections) if sections else None
+
+    def _cached_reconstructions(self) -> List[Dict[str, Any]]:
+        """The cached history analyses the strategy prompt replays, oldest window first:
+        `data bootstrap`'s reconstruction, then `data reflect`'s latest one when it reaches
+        past bootstrap's window (DESIGN_backward_evaluation.md §10.2).
+
+        Each row is its cache row plus a `label` naming the command behind it, and this is
+        the single accessor for both what the prompt gets and how far behind it is — so the
+        staleness warning can never name a window the prompt did not actually read.
+        """
+        out: List[Dict[str, Any]] = []
+        long_row = self._db.get_analysis_cache("long")
+        long_end = (long_row or {}).get("window_end") or ""
+        if long_row and long_row.get("reconstruction"):
+            out.append({**long_row, "label": "full history reconstruction"})
+        short_row = self._db.get_analysis_cache("short")
+        short_end = (short_row or {}).get("window_end") or ""
+        # A reflect window that ends no later than bootstrap's has nothing to add: it is
+        # ground bootstrap already covered, and the two would contradict each other on it.
+        if short_row and short_row.get("reconstruction") and short_end > long_end:
+            out.append({**short_row, "label": "most recent reflection"})
+        return out
+
+    @staticmethod
+    def _reconstruction_lines(recon: Dict[str, Any]) -> List[str]:
+        """One cached reconstruction rendered for the prompt: its summary, the
+        reverse-engineered periodization structure, and the physiological insights.
+
+        The structure is fed so the new plan can build on the real prior arc — where
+        base/build/recovery fell, how consistent each block was — rather than re-deriving
+        it (DESIGN_backward_evaluation.md §10).
+        """
+        lines: List[str] = []
+        if recon.get("macrocycle_summary"):
+            lines.append(f"Summary: {recon['macrocycle_summary']}")
+        im = recon.get("inferred_macrocycle") or {}
+        if im.get("overall_focus"):
+            span = ""
+            if im.get("start_date") and im.get("end_date"):
+                span = f" ({im['start_date']}..{im['end_date']})"
+            lines.append(f"Reconstructed macrocycle focus{span}: {im['overall_focus']}")
+        for meso in (recon.get("inferred_mesocycles") or []):
+            name = meso.get("name", "Phase")
+            m_span = ""
+            if meso.get("start_date") and meso.get("end_date"):
+                m_span = f" ({meso['start_date']}..{meso['end_date']})"
+            detail = []
+            if meso.get("focus_detected"):
+                detail.append(f"focus \"{meso['focus_detected']}\"")
+            if meso.get("average_weekly_tss") is not None:
+                detail.append(f"~{float(meso['average_weekly_tss']):.0f} TSS/wk")
+            if meso.get("estimated_consistency"):
+                detail.append(f"{meso['estimated_consistency']} consistency")
+            detail_txt = f": {', '.join(detail)}" if detail else ""
+            lines.append(f"- {name}{m_span}{detail_txt}")
+        for ins in (recon.get("physiological_insights") or []):
+            lines.append(f"- {ins}")
+        return lines

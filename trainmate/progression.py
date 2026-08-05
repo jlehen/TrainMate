@@ -478,11 +478,13 @@ def plan_gap(
     or *by how much* — the CODE_REVIEW #5 class of drift."""
     if plan_end_date is None:
         return None
-    active = sorted(
-        (o for o in objectives if o.get("status") == "active"),
+    # Not-called-off is the only status question here: the `target_date > plan_end_date`
+    # filter below already excludes everything behind the athlete (§12).
+    live = sorted(
+        (o for o in objectives if o.get("status") != "archived"),
         key=lambda o: str(o["target_date"]),
     )
-    next_obj = next((o for o in active if o["target_date"] > plan_end_date), None)
+    next_obj = next((o for o in live if o["target_date"] > plan_end_date), None)
     if next_obj is None:
         return None
     weeks_before = max(

@@ -5,7 +5,7 @@ import unittest
 from datetime import datetime, timedelta, timezone
 from unittest.mock import patch
 
-from tests.helpers import clear_all_tables
+from tests.helpers import clear_all_tables, pin_clock
 
 TEST_DB_PATH = os.path.join(os.path.dirname(__file__), "test_trainmate_periodization.db")
 
@@ -77,10 +77,12 @@ class TestPeriodization(unittest.TestCase):
         self.assertNotEqual(hash2, coach_service._get_constraints_hash([c]))
 
     @patch("trainmate.coach.service.calendar_syncer")
-    @patch("trainmate.coach.service._today_str")
     @patch("trainmate.coach.engine.openrouter_client")
-    def test_replan_logic_and_caching(self, mock_client, mock_today, mock_calendar):
-        mock_today.return_value = "2026-06-01"
+    def test_replan_logic_and_caching(self, mock_client, mock_calendar):
+        # Every clock, not just the service's: whether a goal is still ahead is now a date
+        # question the DB answers, so a half-pinned clock reads real "today" there and the
+        # fixture's future-dated goals silently become past ones.
+        pin_clock(self, "2026-06-01")
         obj_id = test_db.add_objective(
             title="Berlin Marathon", target_date="2026-09-27",
             sport_type="running", priority=1,
@@ -917,18 +919,36 @@ class TestPeriodization(unittest.TestCase):
         self.assertEqual(proposal["strategy"], "Sharpen and taper")
         self.assertIsNotNone(test_db.get_macrocycle_for_objective(obj_id))
 
-    @patch("trainmate.coach.service._today_str")
-    def test_rejects_goal_on_or_before_plan_start(self, mock_today):
-        # The only remaining window check: a goal dated today or earlier leaves nothing
-        # to plan.
-        mock_today.return_value = "2026-07-31"
-        test_db.add_objective(
+    def test_a_goal_whose_date_has_passed_is_no_longer_the_next_goal(self):
+        """It used to stay "the next goal" forever, so `plan generate` refused with "no
+        window to plan in" until the athlete marked it completed by hand. Completion is
+        now the date's verdict (§12)."""
+        pin_clock(self, "2026-07-31")
+        past = test_db.add_objective(
+            title="Yesterday's Race", target_date="2026-07-30",
+            sport_type="running", priority=1,
+        )
+        ahead = test_db.add_objective(
+            title="Autumn Marathon", target_date="2026-10-30",
+            sport_type="running", priority=1,
+        )
+
+        self.assertEqual(test_db.get_active_objective()['id'], ahead)
+        self.assertEqual([o['id'] for o in test_db.upcoming_objectives()], [ahead])
+        # Still reachable by id — it just is not a planning target any more.
+        self.assertIsNotNone(test_db.get_active_objective(past))
+
+    def test_rejects_goal_on_or_before_plan_start(self):
+        """Targeting the passed goal explicitly still gives the window error rather than a
+        goal-not-found: the row is there, the window is not."""
+        pin_clock(self, "2026-07-31")
+        obj_id = test_db.add_objective(
             title="Yesterday's Race", target_date="2026-07-30",
             sport_type="running", priority=1,
         )
 
         with self.assertRaises(ValueError) as ctx:
-            coach_service.plan_generate()
+            coach_service.plan_generate(objective_id=obj_id)
         self.assertIn("no window to plan in", str(ctx.exception))
 
     @patch("trainmate.coach.service._today_str")
@@ -1081,6 +1101,180 @@ class TestPeriodization(unittest.TestCase):
         self.assertIn("RHR=55bpm, HRV=60ms", user_content)
 
 
+class TestCompletedSeasonsReachTheReview(unittest.TestCase):
+    """A goal whose date has passed keeps contributing its plan to the prior-training
+    review. It used to be marked `completed` by hand — the one action that both unblocked
+    planning and hid the season from it (DESIGN_backward_evaluation.md §12)."""
+
+    TODAY = "2026-08-05"
+
+    @classmethod
+    def setUpClass(cls):
+        if os.path.exists(TEST_DB_PATH):
+            os.remove(TEST_DB_PATH)
+        global test_db
+        test_db = Database(db_path=TEST_DB_PATH)
+        trainmate.db.db = test_db
+        trainmate.coach.service.db = test_db
+
+    @classmethod
+    def tearDownClass(cls):
+        if os.path.exists(TEST_DB_PATH):
+            try:
+                os.remove(TEST_DB_PATH)
+            except OSError:
+                pass
+
+    def setUp(self):
+        clear_all_tables(test_db)
+        pin_clock(self, self.TODAY)
+
+    def _last_season(self) -> None:
+        """A goal raced on 2026-07-04, its plan, and the training that went into it."""
+        obj_id = test_db.add_objective(
+            title="Spring Hill Climb", target_date="2026-07-04",
+            sport_type="cycling", priority=1,
+        )
+        macro_id = test_db.save_macrocycle(
+            objective_id=obj_id, strategy="Spring build", goals_hash="g",
+            constraints_hash="c",
+            mesocycles=[{"name": "Spring Base", "start_date": "2026-06-08",
+                         "end_date": "2026-07-04", "focus": "aerobic volume"}],
+        )
+        for i, day in enumerate(("2026-06-09", "2026-06-16")):
+            test_db.save_workout(
+                date=day, sport_type="cycling", title="Endurance",
+                description="[Endurance]\n2h", duration_minutes=120, rpe=5, tss=100.0,
+                source="generated", macrocycle_id=macro_id,
+            )
+            test_db.save_completed_activity(
+                activity_id=f"s{i}", date=day, start_time=f"{day}T07:00:00",
+                activity_name="Ride", activity_type="cycling", duration_sec=3600,
+                distance_km=30.0, elevation_gain_m=200.0, avg_hr=140, max_hr=170,
+                rpe=5, tss=100.0, zone1_sec=600, zone2_sec=3000,
+            )
+
+    @patch("trainmate.coach.service.calendar_syncer")
+    @patch("trainmate.coach.engine.openrouter_client")
+    def test_last_seasons_blocks_are_in_the_next_plans_prompt(
+        self, mock_client, mock_calendar
+    ):
+        self._last_season()
+        test_db.add_objective(
+            title="Autumn Gran Fondo", target_date="2026-10-15",
+            sport_type="cycling", priority=1,
+        )
+        mock_client.complete.return_value = {
+            "strategy": "Autumn build", "mesocycles": [
+                {"name": "Base", "start_date": "2026-08-05", "end_date": "2026-09-01",
+                 "focus": "volume"},
+            ],
+        }
+
+        proposal = coach_service.plan_generate(force=True)
+
+        self.assertEqual(proposal["goal"]["title"], "Autumn Gran Fondo")
+        prompt = mock_client.complete.call_args_list[0][0][0]
+        self.assertIn("Spring Base", prompt)
+        self.assertIn('focus "aerobic volume"', prompt)
+        self.assertIn("Weekly load", prompt)
+
+    @patch("trainmate.coach.service.calendar_syncer")
+    @patch("trainmate.coach.engine.openrouter_client")
+    def test_an_archived_season_stays_out(self, mock_client, mock_calendar):
+        """`archived` is the athlete saying it did not happen — the one thing the date
+        cannot know, and the only reason the column still exists."""
+        self._last_season()
+        test_db.update_objective(1, status="archived")
+        test_db.add_objective(
+            title="Autumn Gran Fondo", target_date="2026-10-15",
+            sport_type="cycling", priority=1,
+        )
+        mock_client.complete.return_value = {
+            "strategy": "Autumn build", "mesocycles": [
+                {"name": "Base", "start_date": "2026-08-05", "end_date": "2026-09-01",
+                 "focus": "volume"},
+            ],
+        }
+
+        coach_service.plan_generate(force=True)
+
+        self.assertNotIn("Spring Base", mock_client.complete.call_args_list[0][0][0])
+
+
+class TestLearningsReachTheStrategyPrompt(unittest.TestCase):
+    """`plan generate` builds its own system prompt rather than calling
+    `_build_system_prompt`, and so was the one coach call that never saw the observations
+    the analysis flow authors (DESIGN_backward_evaluation.md §10.1)."""
+
+    @classmethod
+    def setUpClass(cls):
+        if os.path.exists(TEST_DB_PATH):
+            os.remove(TEST_DB_PATH)
+        global test_db
+        test_db = Database(db_path=TEST_DB_PATH)
+        trainmate.db.db = test_db
+        trainmate.coach.service.db = test_db
+
+    @classmethod
+    def tearDownClass(cls):
+        if os.path.exists(TEST_DB_PATH):
+            try:
+                os.remove(TEST_DB_PATH)
+            except OSError:
+                pass
+
+    def setUp(self):
+        clear_all_tables(test_db)
+
+    @staticmethod
+    def _strategy_prompt(mock_client) -> str:
+        """The system prompt of the plan call — the first of the two `replan` makes."""
+        return mock_client.complete.call_args_list[0][0][0]
+
+    @patch("trainmate.coach.service.calendar_syncer")
+    @patch("trainmate.coach.service._today_str")
+    @patch("trainmate.coach.engine.openrouter_client")
+    def _generate(self, learning, mock_client, mock_today, mock_calendar):
+        mock_today.return_value = "2026-06-01"
+        test_db.add_objective(
+            title="Berlin Marathon", target_date="2026-09-27", sport_type="running",
+            priority=1,
+        )
+        if learning:
+            test_db.add_learning(**learning)
+        mock_client.complete.return_value = {
+            "strategy": "Simulated", "mesocycles": [
+                {"name": "Base", "start_date": "2026-06-01", "end_date": "2026-06-28",
+                 "focus": "Endurance"},
+            ],
+        }
+        coach_service.plan_generate(force=True)
+        return self._strategy_prompt(mock_client)
+
+    def test_active_observations_are_rendered_with_their_tags(self):
+        prompt = self._generate({
+            "text": "Responds poorly to back-to-back threshold days",
+            "sports": "running", "confidence": "established",
+        })
+        self.assertIn("ATHLETE-SPECIFIC OBSERVATIONS", prompt)
+        self.assertIn("Responds poorly to back-to-back threshold days", prompt)
+        self.assertIn("running", prompt)
+        self.assertIn("established", prompt)
+
+    def test_the_section_says_they_are_input_only(self):
+        """Authoring stays with the analysis flow; nothing here may revise them (§11)."""
+        prompt = self._generate({"text": "Sleeps badly after evening intensity"})
+        self.assertIn("input only", prompt)
+
+    def test_the_cold_start_placeholder_still_reaches_the_prompt(self):
+        """No learnings yet renders the 'observe over time' placeholder, not an empty
+        section — same text every other coach prompt gets."""
+        prompt = self._generate(None)
+        self.assertIn("ATHLETE-SPECIFIC OBSERVATIONS", prompt)
+        self.assertIn("No observations yet", prompt)
+
+
 class TestStaleAnalysisWarning(unittest.TestCase):
     """`plan generate` feeds the cached reconstruction to the strategy prompt but never
     recomputes it, so a stale cache shapes the plan silently unless it says so (§5)."""
@@ -1105,9 +1299,9 @@ class TestStaleAnalysisWarning(unittest.TestCase):
     def setUp(self):
         clear_all_tables(test_db)
 
-    def _cache_ending(self, window_end: str) -> None:
+    def _cache_ending(self, window_end: str, horizon: str = "long") -> None:
         test_db.save_analysis_cache(
-            horizon="long", fingerprint="fp", window_start="2026-01-01",
+            horizon=horizon, fingerprint=f"fp-{horizon}", window_start="2026-01-01",
             window_end=window_end, reconstruction={"macrocycle_summary": "Base build."},
         )
 
@@ -1130,6 +1324,21 @@ class TestStaleAnalysisWarning(unittest.TestCase):
     def test_quiet_when_there_is_nothing_cached(self):
         """A cold start is the bootstrap nudge's job, not this one's."""
         self.assertEqual(self._warn("2026-07-01"), "")
+
+    def test_a_current_reflection_clears_a_stale_bootstrap(self):
+        """The warning names `data reflect`, so it has to be judged over a window that
+        `data reflect` can actually move — otherwise it repeats forever however diligently
+        the athlete runs it (§10.2)."""
+        self._cache_ending("2026-01-31")                     # bootstrap, months behind
+        self._cache_ending("2026-06-25", horizon="short")    # reflect, caught up
+        self.assertEqual(self._warn("2026-07-01"), "")
+
+    def test_a_stale_reflection_still_warns_from_the_later_window(self):
+        self._cache_ending("2026-01-31")
+        self._cache_ending("2026-06-01", horizon="short")
+        out = self._warn("2026-07-01")
+        self.assertIn("2026-06-01", out)                     # the later of the two
+        self.assertNotIn("2026-01-31", out)
 
 
 if __name__ == "__main__":
