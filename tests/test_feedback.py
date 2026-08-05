@@ -140,8 +140,8 @@ class TestFeedback(unittest.TestCase):
 
         exit_code, stdout, stderr = self.run_cli(["plan", "show"])
         self.assertEqual(exit_code, 0)
-        self.assertIn(f"Goal [ID: {obj_id}]", stdout)
-        self.assertIn(f"[ID: {meso_id}]", stdout)
+        self.assertIn(f"[Goal ID: {obj_id}]", stdout)
+        self.assertIn(f"[Mesocycle ID: {meso_id}]", stdout)
         self.assertIn("Macrocycle Feedback:\n  overall too easy", stdout)
         # Mesocycle feedback is indented one step deeper than its own block indent.
         self.assertRegex(stdout, r"Mesocycle Feedback:\n +more speed")

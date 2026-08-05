@@ -177,7 +177,7 @@ def _print_considered_inputs(macrocycle: dict) -> None:
         for g in goals:
             sport = (g.get('sport_type') or '').upper()
             pad = _print_hanging(
-                f"  - [ID: {g.get('id')}] ", g.get('title', ''), width, cyan
+                f"  - [Goal ID: {g.get('id')}] ", g.get('title', ''), width, cyan
             )
             _print_segments(
                 pad,
@@ -213,7 +213,7 @@ def _print_considered_inputs(macrocycle: dict) -> None:
                 ) if t
             )
             pad = _print_hanging(
-                f"  - [ID: {e.get('id')}] ", e.get('title', ''), width, cyan
+                f"  - [Constraint ID: {e.get('id')}] ", e.get('title', ''), width, cyan
             )
             _print_segments(
                 pad,
@@ -354,7 +354,7 @@ def _print_plan(next_goal: dict, macrocycle: dict, args: argparse.Namespace) -> 
     width = default_wrap_width()
     sport_str = next_goal['sport_type'].upper()
     obj_pad = _print_hanging(
-        f"{bold('Goal')} [ID: {next_goal['id']}]: ",
+        f"{bold('Planned for')} [Goal ID: {next_goal['id']}]: ",
         next_goal['title'], width, cyan,
     )
     _print_segments(
@@ -416,7 +416,7 @@ def _print_plan(next_goal: dict, macrocycle: dict, args: argparse.Namespace) -> 
         _print_segments(
             pad,
             [
-                f"[ID: {m['id']}]",
+                f"[Mesocycle ID: {m['id']}]",
                 f"{cyan(fmt_date(m['start_date']))} -> {cyan(fmt_date(m['end_date']))}",
                 duration_desc,
                 (f"phase {m['phase']}" if m.get('phase') else ""),
@@ -445,9 +445,10 @@ def run_plan_versions(args: argparse.Namespace) -> None:
         return
 
     sport_str = goal['sport_type'].upper()
+    goal_tag = bold(f"[Goal ID: {goal['id']}]")
     print(bold(cyan("\n=== PLAN VERSIONS ===")))
     print(
-        f"{bold('Goal')} [ID: {goal['id']}]: "
+        f"{goal_tag}: "
         f"{cyan(goal['title'])} ({magenta(sport_str)}) "
         f"on {cyan(fmt_date(goal['target_date']))}\n"
     )
@@ -540,8 +541,10 @@ def _print_missing_snapshot(missing: str) -> None:
     print(f"  {gray(f'not recorded on {side} — that plan predates the snapshot')}")
 
 
-def _print_records_diff(diff: dict, width: int) -> None:
-    """Renders a `plan_diff.diff_records` result (snapshotted goals or constraints)."""
+def _print_records_diff(diff: dict, width: int, kind: str) -> None:
+    """Renders a `plan_diff.diff_records` result (snapshotted goals or constraints).
+
+    `kind` names the entity in each ID tag — both kinds share one screen."""
     if diff['missing']:
         _print_missing_snapshot(diff['missing'])
         return
@@ -549,11 +552,15 @@ def _print_records_diff(diff: dict, width: int) -> None:
         print(f"  {gray('unchanged')}")
         return
     for rec in diff['removed']:
-        _print_change("-", f"[ID: {rec.get('id')}] {rec.get('title', '')}", width, red)
+        _print_change(
+            "-", f"[{kind} ID: {rec.get('id')}] {rec.get('title', '')}", width, red
+        )
     for rec in diff['added']:
-        _print_change("+", f"[ID: {rec.get('id')}] {rec.get('title', '')}", width, green)
+        _print_change(
+            "+", f"[{kind} ID: {rec.get('id')}] {rec.get('title', '')}", width, green
+        )
     for rec in diff['changed']:
-        _print_change("~", f"[ID: {rec['id']}] {rec['title']}", width, yellow)
+        _print_change("~", f"[{kind} ID: {rec['id']}] {rec['title']}", width, yellow)
         for f in rec['fields']:
             print(f"      {f['field']}: {f['from']!r}  =>  {f['to']!r}")
 
@@ -613,8 +620,9 @@ def run_plan_diff(args: argparse.Namespace) -> None:
 
     width = default_wrap_width()
     print(bold(cyan("\n=== PLAN DIFF ===")))
+    goal_tag = bold(f"[Goal ID: {goal['id']}]")
     obj_pad = _print_hanging(
-        f"{bold('Goal')} [ID: {goal['id']}]: ", goal['title'], width, cyan,
+        f"{goal_tag}: ", goal['title'], width, cyan,
     )
     _print_segments(
         obj_pad,
@@ -637,9 +645,9 @@ def run_plan_diff(args: argparse.Namespace) -> None:
     print(bold("\nMesocycles:"))
     _print_mesocycles_diff(diff['mesocycles'], width, full)
     print(bold("\nGoals considered:"))
-    _print_records_diff(diff['goals'], width)
+    _print_records_diff(diff['goals'], width, "Goal")
     print(bold("\nConstraints considered:"))
-    _print_records_diff(diff['constraints'], width)
+    _print_records_diff(diff['constraints'], width, "Constraint")
     print(bold("\nThresholds considered:"))
     _print_thresholds_diff(diff['thresholds'], width)
     print()
