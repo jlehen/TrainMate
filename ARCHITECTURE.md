@@ -332,8 +332,14 @@ Module-level function in `formatting.py`. Concatenates all `*.txt` files from
   plan start through the goal date, whatever the horizon. Label `periodization_plan`.
 - **`_workout_generate_logic(...)`** — LLM call → `{reasoning, workouts[]}`. Accepts
   `num_days` (default 28) driving the horizon and `start_str` (defaults to today) for
-  the first day to schedule — the prompt tells the model to begin there. **Read-only**
-  w.r.t. learnings. Label `workout_generation`.
+  the first day to schedule — the prompt tells the model to begin there. When
+  `block_progress` is supplied it appends a `CONTINUING A BLOCK ALREADY UNDER WAY`
+  section (`_block_progress_task`) and renders that data as the first user-content
+  section, so a mid-block regeneration continues the block's ramp instead of restarting
+  it, does not repeat a deload already taken, and does not re-place a fitness test the
+  block already ran — that clause **bounds** the otherwise-unconditional BENCHMARK
+  PLACEMENT rule (DESIGN_block_progress.md §4). **Read-only** w.r.t. learnings. Label
+  `workout_generation`.
 - **`_workout_adapt_logic(...)`** — LLM call →
   `{change_needed, reason, adapted_workouts[]}`. **Read-only** w.r.t. learnings.
   Within `config.adapt_terminal_window_days` of the block's end it appends a
@@ -1439,6 +1445,18 @@ event-day TSB over the plan's own workouts — is a deferred Phase 2 follow-up.
 2. `CoachService.workout_generate(end_date=...)` verifies a macrocycle exists,
    computes `num_days` from `(end_date − today)`.
 3. Fetches metrics history (last `metrics_lookback_days` days) + baseline.
+3b. `_block_progress_context(today, gen_start)` builds the elapsed part of the block whose
+   remainder this run is writing (DESIGN_block_progress.md): each already-trained
+   Monday-week's planned-vs-actual load via `progression.weekly_aggregates` — the same
+   maths `tm progress` renders, so coach and athlete never read different numbers — under
+   an `intensity.format_header` header, plus the fitness tests the block has already run.
+   Threaded as its own `block_progress` argument, deliberately *not* via `meso_text`
+   (DESIGN_intensity_distribution.md §9.3). Anchored on `gen_start`, so the day preserved
+   for an already-completed session counts as history. Nothing is emitted when today falls
+   outside every block, when `gen_start` is on/before the block's first day (generate is
+   writing the whole block), or when the elapsed part holds no rows — the prompt is then
+   byte-identical to before. Volume/adherence/test history only: the measured **intensity**
+   distribution stays with adapt pending a §9.2 amendment (DESIGN_block_progress.md §2).
 4. Calls `CoachEngine._workout_generate_logic(num_days=...)` → LLM →
    `{reasoning, workouts[]}`. **Read-only** w.r.t. coach learnings (see
    [§3](#3-coach-package-architecture)).

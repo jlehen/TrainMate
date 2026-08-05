@@ -8,11 +8,12 @@ from trainmate.types import Objective, Constraint, Workout
 from trainmate.adherence import analyze_adherence, planned_load
 from trainmate.sports import canonical_sport
 from trainmate.modification_state import SWAP_REASON_PREFIX, MANUAL_REPLACE_REASON_PREFIX
-from trainmate import garmin, intensity
+from trainmate import garmin, intensity, progression
+from trainmate.benchmarks import ANCHOR_KINDS, format_value
 from trainmate.garmin import activity_load
 from trainmate.util import (
     today_str as _today_str, today_date as _today_date,
-    cyan, green, yellow, bold, red, gray, wrap_text, PMC_TSB_LAG_NOTE,
+    cyan, green, yellow, bold, red, gray, wrap_text, days_between, PMC_TSB_LAG_NOTE,
 )
 from trainmate.coach.engine import CoachEngine
 from trainmate.coach.formatting import format_baseline, _load_science_guidelines
@@ -250,6 +251,132 @@ class PmcContextMixin:
             meso, as_of, self._db.get_completed_activities,
             current_week=True, benchmarks=self._db.get_benchmark_results(),
         )
+
+    # ----------------------------------------------------------- block progress
+    def _block_progress_context(self, as_of: str, gen_start: str) -> Optional[str]:
+        """The elapsed part of the block `generate` is about to re-plan the remainder of
+        (DESIGN_block_progress.md §3): each already-trained week's planned-vs-actual load,
+        plus the fitness tests the block has already run.
+
+        Returns None when there is no fulfilled part to report — `as_of` outside every
+        block (`get_active_mesocycle` falls back to a future or first block, which would
+        describe training that has not happened), or `gen_start` on/before the block's
+        first day, where generate IS writing the whole block and has nothing to continue.
+        """
+        meso = self._db.get_active_mesocycle(as_of)
+        if not meso or not (meso['start_date'] <= as_of <= meso['end_date']):
+            return None
+        elapsed_end = (
+            datetime.strptime(gen_start, "%Y-%m-%d").date() - timedelta(days=1)
+        ).strftime("%Y-%m-%d")
+        if elapsed_end < meso['start_date']:
+            return None
+
+        # Fetched once and handed to both renderers: they read the same rows, and the week
+        # lines and the test lines must never disagree about what the block contains.
+        workouts = self._db.get_workouts(start_date=meso['start_date'], end_date=elapsed_end)
+        weeks = self._block_week_lines(meso, as_of, elapsed_end, workouts)
+        benchmarks = self._block_benchmark_lines(meso, elapsed_end, workouts)
+        if not weeks and not benchmarks:
+            return None
+
+        # Anchored on gen_start, not as_of: the header's "N completed weeks" must count the
+        # same days the week lines below report, and the two differ by one on the run that
+        # preserves a completed session and starts tomorrow.
+        lines = [intensity.format_header(meso, gen_start)]
+        if weeks:
+            lines.append("  Weeks already trained (load the plan asked -> load produced):")
+            lines.extend(weeks)
+        if benchmarks:
+            lines.append("  Fitness tests this block has already run:")
+            lines.extend(benchmarks)
+        return "\n".join(lines)
+
+    def _block_week_lines(
+        self, meso: Dict[str, Any], as_of: str, elapsed_end: str,
+        workouts: List[Workout],
+    ) -> List[str]:
+        """One planned-vs-actual line per Monday-week of the block's elapsed part.
+
+        Reuses `progression.weekly_aggregates`, the same planned-vs-actual weekly maths
+        `tm progress` renders, so the coach and the athlete never read different numbers
+        for the same week (§3.1). The in-progress week states raw load beside the elapsed
+        day count and is never extrapolated, following
+        DESIGN_intensity_distribution.md §9.3.
+        """
+        activities = self._db.get_completed_activities(
+            start_date=meso['start_date'], end_date=elapsed_end
+        )
+        weeks = progression.weekly_aggregates(
+            activities, workouts, as_of, progression.meso_bands([meso], []),
+            window_end=elapsed_end,
+        )
+        out: List[str] = []
+        for w in weeks:
+            when, actual = w['week_commencing'], w['actual_load']
+            denom = progression.week_plan_denom(w)
+            if w['in_progress']:
+                elapsed = min(7, days_between(when, elapsed_end) + 1)
+                head = f"    - week of {when} (in progress, {elapsed} of 7 days)"
+            else:
+                head = f"    - week of {when}"
+            if denom is None:
+                out.append(f"{head}: actual {actual:.0f}, no plan covered this week")
+                continue
+            pct = f" ({actual / denom * 100:.0f}%)" if denom else ""
+            asked = f"planned {denom:.0f}" + (" so far" if w['in_progress'] else "")
+            # Partiality is judged against the BLOCK, not against `partial_plan`: that flag
+            # compares the week to the workout rows handed in, so a Monday the athlete had
+            # no session on would read as "the plan starts mid-week" when it does not. Only
+            # a week the block itself straddles is genuinely incomparable. The in-progress
+            # week is always cut short by design, and its day count already says so.
+            note = (
+                " [block covers only part of this week]"
+                if when < meso['start_date'] and not w['in_progress'] else ""
+            )
+            out.append(f"{head}: {asked}, actual {actual:.0f}{pct}{note}")
+        return out
+
+    def _block_benchmark_lines(
+        self, meso: Dict[str, Any], elapsed_end: str, workouts: List[Workout],
+    ) -> List[str]:
+        """The fitness tests the block's elapsed part already ran — what makes the
+        generate prompt's BENCHMARK PLACEMENT conditional rather than unconditional (§4).
+
+        Keyed on the planned benchmark sessions, not the logbook: a test the athlete
+        performed but never recorded still must not be scheduled twice. A logbook row is
+        matched to its session by `workout_id`, falling back to a same-date reading for a
+        result recorded without the link; unmatched in-block rows are reported as ad-hoc
+        tests.
+        """
+        start = meso['start_date']
+        planned = [w for w in workouts if w.get('benchmark_type')]
+        results = self._db.get_benchmark_results()
+        by_workout = {r['workout_id']: r for r in results if r.get('workout_id')}
+        in_block = [r for r in results if start <= r['date'] <= elapsed_end]
+
+        def measured(r: Dict[str, Any]) -> str:
+            anchor = ANCHOR_KINDS.get(r['anchor_kind'])
+            label = anchor.label if anchor else r['anchor_kind']
+            return f"{label} {format_value(r['anchor_kind'], float(r['value']))}"
+
+        out: List[str] = []
+        claimed = set()
+        for w in sorted(planned, key=lambda w: w['date']):
+            r = by_workout.get(w['id']) or next(
+                (x for x in in_block if x['date'] == w['date']), None
+            )
+            if r:
+                claimed.add(r['id'])
+            out.append(
+                f"    - {w['date']}: {w['benchmark_type']} ({w['sport_type']}) — "
+                + (measured(r) if r else "no result recorded")
+            )
+        for r in sorted(
+            (x for x in in_block if x['id'] not in claimed), key=lambda r: r['date']
+        ):
+            out.append(f"    - {r['date']}: {measured(r)} recorded (no planned test)")
+        return out
 
     def _planning_zone_currencies(self, as_of: str) -> Dict[str, str]:
         """`{sport: 'power'|'hr'}` for the sports the coach may prescribe zone targets in

@@ -361,7 +361,20 @@ gets its test. Only the run-in to the event is protected.
   auto-fixed. The check stays silent when the boundary week sits under a `rest`
   constraint — **rest wins**, and warning about it would be noise. The boundary
   "week" is the seven days ending on the mesocycle's `end_date`, and only boundaries
-  whose end falls inside the generated span are checked.
+  whose end falls inside the generated span are checked. It is likewise silent when a
+  test was **already run** earlier in the boundary week: regenerating mid-boundary-week
+  would otherwise advise regenerating again to recover a benchmark the athlete has
+  already done. That lookup is bounded below `gen_start`, because the displaced plan's
+  future rows are still live when the check runs and must not answer for sessions this
+  run just replaced (DESIGN_block_progress.md §4.1).
+
+**Not placing a test the block already ran.** The placement instruction above is
+unconditional on its own, so a regeneration inside the boundary week re-places a
+completed test. It is bounded at the source rather than post-hoc: when the generate prompt
+carries a block-progress section, that section names the tests the block has already run
+and tells the model a boundary week listed there needs no second test
+(DESIGN_block_progress.md §4.1). De-duplication keys on the planned benchmark *session*,
+not the logbook, so a test performed but never recorded still counts.
 
 **Same-day collision.** `save_workout` keys on (date, sport), so a second
 same-sport session on a benchmark date would overwrite the test. Deterministic

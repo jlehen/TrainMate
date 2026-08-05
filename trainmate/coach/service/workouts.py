@@ -238,7 +238,16 @@ class WorkoutGenMixin:
             # Rest wins: a full-rest window overlapping the boundary week silences the check.
             if any(s <= end and e >= win_start for (s, e, _t) in rest_windows):
                 continue
-            has_benchmark = any(
+            # A test already run earlier in this boundary week counts (§4.1): regenerating
+            # mid-boundary-week would otherwise advise regenerating again to recover a
+            # benchmark the athlete has already done. Bounded below gen_start because the
+            # displaced plan's future rows are still live at this point — they are archived
+            # further down — and would answer for sessions this run has just replaced.
+            already_run = any(
+                w.get('benchmark_type') and win_start <= w['date'] < gen_start
+                for w in self._db.get_workouts(start_date=win_start, end_date=end)
+            )
+            has_benchmark = already_run or any(
                 w.get('benchmark_type') and win_start <= w['date'] <= end
                 for w in dated
             )
@@ -391,6 +400,10 @@ class WorkoutGenMixin:
         learnings = self._get_learnings_text()
 
         pmc_cutoff, pmc_context = self._pmc_prompt_context(today_str)
+        # What the block has already banked, when this run re-plans only its remainder
+        # (DESIGN_block_progress.md §3). Anchored on gen_start, so the day preserved for a
+        # completed session counts as history rather than as a day still to write.
+        block_progress = self._block_progress_context(today_str, gen_start_str)
         plan_data = self.engine._workout_generate_logic(
             objectives=objectives,
             constraints=constraints,
@@ -407,6 +420,7 @@ class WorkoutGenMixin:
             baseline=baseline,
             pmc_warmup_cutoff=pmc_cutoff,
             pmc_context=pmc_context,
+            block_progress=block_progress,
             zone_currencies=self._planning_zone_currencies(today_str)
         )
 

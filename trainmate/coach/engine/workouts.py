@@ -62,6 +62,41 @@ separately, against the athlete's metrics as they stand when it is generated.
 """
 
 
+def _block_progress_task(block_progress: Optional[str]) -> str:
+    """The CONTINUING A BLOCK section (DESIGN_block_progress.md §4).
+
+    Gated on the data being present, so a run that starts a block cleanly produces the
+    prompt it always did. It also conditions BENCHMARK PLACEMENT above, whose "one test per
+    boundary week" is unconditional on its own and would re-place a test already run (§4.1).
+    """
+    if not block_progress:
+        return ""
+    return """
+CONTINUING A BLOCK ALREADY UNDER WAY:
+The user content includes a section titled "BLOCK PROGRESS SO FAR": the weeks of the block
+the athlete is currently in that are already trained, each with the load the plan asked of
+it and the load the athlete actually produced, plus any fitness test the block has already
+run. Those days are history and are not yours to write — you are producing this block's
+REMAINDER, not the block.
+
+Read it as the progression's starting point, not as a fresh block. Carry the ramp on from
+where the last completed week left it instead of restarting at week-one volume, and keep
+the block's remaining weeks pointed at the focus it was given. If one elapsed week's
+planned load dips clearly below the weeks around it, that week WAS this block's deload —
+do not schedule a second one; if no such dip has happened yet and the block's design calls
+for one, it still belongs in the weeks you are writing.
+
+Where a week's actual load fell well short of what was planned, build from the volume the
+athlete actually produced rather than from the plan they did not complete — ramping from an
+unfulfilled number spikes the acute load. Where actual ran above planned, do not reward it
+with a further jump on top.
+
+This also BOUNDS the BENCHMARK PLACEMENT rule above: a boundary week whose fitness test
+already appears in that section has had its test, and must not be given a second one.
+Place a benchmark only where this block has not already run it.
+"""
+
+
 def _planned_zone_task(zone_currencies: Optional[Dict[str, str]]) -> str:
     """The PRESCRIBING INTENSITY section (DESIGN_intensity_distribution.md §9.8).
 
@@ -130,6 +165,7 @@ class WorkoutLogicMixin:
         baseline: Optional[Dict[str, Any]] = None,
         pmc_warmup_cutoff: Optional[str] = None,
         pmc_context: Optional[str] = None,
+        block_progress: Optional[str] = None,
         zone_currencies: Optional[Dict[str, str]] = None
     ) -> Dict[str, Any]:
         """Queries LLM to generate workouts for a given number of days based on active strategy.
@@ -166,6 +202,7 @@ class WorkoutLogicMixin:
             "where they test. Do NOT place a benchmark in a week the athlete's constraints put under full\n"
             "rest. If no threshold is on record yet, still schedule the first benchmark early — it is how\n"
             "the athlete's zones get established.\n"
+            + _block_progress_task(block_progress)
             + _planned_zone_task(zone_currencies)
             + "\n"
             "You MUST respond with a JSON object containing:\n"
@@ -218,6 +255,14 @@ class WorkoutLogicMixin:
             )
 
         history_text_parts = []
+        # First of the history sections: it frames what the metrics and activities below
+        # mean — the same volume reads differently in a block's first week than its last.
+        # Same gate as the task section above, so the two never disagree about its presence.
+        if block_progress:
+            history_text_parts.append(
+                "BLOCK PROGRESS SO FAR (the part of the current block already trained — "
+                f"see CONTINUING A BLOCK ALREADY UNDER WAY):\n{block_progress}"
+            )
         if metrics:
             metrics_text = format_metrics_history(metrics, pmc_warmup_cutoff)
             # The single CTL ramp line + warm-up flag ride beside the per-day block (not

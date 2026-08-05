@@ -483,6 +483,47 @@ class TestBenchmarkPlacementGuards(unittest.TestCase):
         self.assertIn("boundary week of 'Specific'", out)
         self.assertNotIn("Taper", out)
 
+    def test_boundary_week_with_an_already_completed_benchmark_is_silent(self):
+        """Regenerating mid-boundary-week must not advise regenerating to recover a test
+        the athlete has already done (DESIGN_block_progress.md §4.1)."""
+        macro_id = self._macrocycle_with_boundary()
+        test_db.save_workout(
+            date="2026-08-25", sport_type="cycling", title="FTP Test",
+            description="[FTP Test]\n20-min test", benchmark_type="ftp_20min",
+            macrocycle_id=macro_id,
+        )
+        # Regenerating on the 27th: the freshly generated span reaches the block's end (so
+        # the boundary week IS checked) but holds no benchmark, the test being two days
+        # behind it.
+        workouts = [
+            {"date": "2026-08-28", "sport_type": "cycling", "title": "Z2"},
+            {"date": "2026-08-30", "sport_type": "running", "title": "Long run"},
+        ]
+        _, out = self._capture(
+            coach_service._warn_missing_boundary_benchmarks,
+            workouts, [], macro_id, "2026-08-27",
+        )
+        self.assertEqual(out, "")
+
+    def test_a_displaced_future_benchmark_does_not_satisfy_the_boundary_week(self):
+        """The stored-workout lookup is bounded below gen_start: the previous plan's future
+        rows are still live when this check runs and must not answer for the new plan."""
+        macro_id = self._macrocycle_with_boundary()
+        test_db.save_workout(
+            date="2026-08-28", sport_type="cycling", title="FTP Test",
+            description="[FTP Test]\n20-min test", benchmark_type="ftp_20min",
+            macrocycle_id=macro_id,
+        )
+        workouts = [
+            {"date": "2026-08-28", "sport_type": "cycling", "title": "Z2"},
+            {"date": "2026-08-30", "sport_type": "running", "title": "Long run"},
+        ]
+        _, out = self._capture(
+            coach_service._warn_missing_boundary_benchmarks,
+            workouts, [], macro_id, "2026-08-27",
+        )
+        self.assertIn("No benchmark scheduled in the boundary week of 'Base 1'", out)
+
     def test_boundary_outside_the_generated_span_is_not_checked(self):
         macro_id = self._macrocycle_with_boundary()
         # The span stops well before the 2026-08-30 boundary, so there is nothing to warn
