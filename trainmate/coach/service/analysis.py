@@ -78,7 +78,6 @@ class DataAnalysisMixin:
 
     def data_bootstrap(
         self, from_date_str: Optional[str] = None, until_date_str: Optional[str] = None,
-        days: Optional[int] = None, weeks: Optional[int] = None,
         context: Optional[str] = None, force: bool = False, inspect_only: bool = False,
         no_pull: bool = False, force_pull: bool = False, auto: bool = False
     ) -> Dict[str, Any]:
@@ -102,10 +101,6 @@ class DataAnalysisMixin:
         from_date = None
         if from_date_str:
             from_date = datetime.strptime(from_date_str, "%Y-%m-%d").date()
-        elif days:
-            from_date = until_date - timedelta(days=days - 1)
-        elif weeks:
-            from_date = until_date - timedelta(weeks=weeks) + timedelta(days=1)
         else:
             # Auto-timeline detection based on active goals
             earliest_goal = self._db.get_active_objective()
@@ -179,14 +174,10 @@ class DataAnalysisMixin:
         """
         until_date = self._resolve_until(until_date_str)
 
-        explicit = bool(from_date_str or days or weeks)
+        explicit = bool(from_date_str)
         watermark = self._db.get_sync_state("reflect")
         if from_date_str:
             from_date = datetime.strptime(from_date_str, "%Y-%m-%d").date()
-        elif days:
-            from_date = until_date - timedelta(days=days - 1)
-        elif weeks:
-            from_date = until_date - timedelta(weeks=weeks) + timedelta(days=1)
         elif watermark and watermark.get("through_date"):
             from_date = (
                 datetime.strptime(watermark["through_date"], "%Y-%m-%d").date()

@@ -300,7 +300,7 @@ CLI — the leading `/` Telegram requires is optional:
 
 ```
 /status
-/workout list --weeks 1
+/workout list -d 1w
 /workout adapt -m "tired today"
 /help workout
 ```

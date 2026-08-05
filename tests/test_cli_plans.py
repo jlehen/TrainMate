@@ -133,7 +133,7 @@ class TestCliPlans(unittest.TestCase):
 
         exit_code, stdout, stderr = self.run_cli(["plan", "show"])
         self.assertEqual(exit_code, 0)
-        self.assertIn("=== ACTIVE MACROCYCLE STRATEGY ===", stdout)
+        self.assertIn("=== ACTIVE MACROCYCLE STRATEGY [Macrocycle ID:", stdout)
         self.assertIn("Build base then taper", stdout)
         self.assertIn("Base Building", stdout)
 
@@ -200,13 +200,13 @@ class TestCliPlans(unittest.TestCase):
 
         exit_code, stdout, _ = self.run_cli(["plan", "versions"])
         self.assertEqual(exit_code, 0)
-        self.assertIn(f"ID {v1}", stdout)
-        self.assertIn(f"ID {v2}", stdout)
+        self.assertIn(f"Macrocycle {v1}", stdout)
+        self.assertIn(f"Macrocycle {v2}", stdout)
         self.assertIn("active", stdout)
         self.assertIn("superseded", stdout)
 
         # Showing the superseded version renders its strategy under a superseded header.
-        exit_code, stdout, _ = self.run_cli(["plan", "show", "--version", str(v1)])
+        exit_code, stdout, _ = self.run_cli(["plan", "show", "--macrocycle", str(v1)])
         self.assertEqual(exit_code, 0)
         self.assertIn("SUPERSEDED", stdout)
         self.assertIn("First strategy alpha", stdout)
@@ -217,7 +217,7 @@ class TestCliPlans(unittest.TestCase):
             sport_type="running", priority=1,
         )
         exit_code, stdout, _ = self.run_cli(
-            ["plan", "show", "--goal", str(other), "--version", str(v1)]
+            ["plan", "show", "--goal", str(other), "--macrocycle", str(v1)]
         )
         self.assertIn("does not belong", stdout)
 
@@ -261,8 +261,8 @@ class TestCliPlans(unittest.TestCase):
         # No version given: previous vs active.
         exit_code, stdout, _ = self.run_cli(["plan", "diff", "--goal", str(oid)])
         self.assertEqual(exit_code, 0)
-        self.assertIn(f"ID {v1}", stdout)
-        self.assertIn(f"ID {v2}", stdout)
+        self.assertIn(f"Macrocycle {v1}", stdout)
+        self.assertIn(f"Macrocycle {v2}", stdout)
         # Identical strategy text is reported as such, not re-printed.
         self.assertIn("unchanged", stdout)
         # Mesocycle end date moved; the second block disappeared.

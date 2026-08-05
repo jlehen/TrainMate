@@ -8,6 +8,7 @@ from trainmate.util import (
     format_labeled_block, today_str as _today_str,
 )
 from trainmate.cli.common import fmt_date
+from trainmate.cli.selectors import add_single_date_arg
 from trainmate.sports import canonical_sport
 from trainmate import benchmarks
 from trainmate.benchmarks import (
@@ -234,7 +235,9 @@ def add_benchmark_parser(subparsers):
             _KIND_FLAGS[kind], dest=kind,
             help=f"{anchor.label} value ({anchor.unit})",
         )
-    b_rec.add_argument("--date", help="Test date (YYYY-MM-DD; default today)")
+    add_single_date_arg(
+        b_rec, "Test date: YYYY-MM-DD, 'today' (the default) or an offset like -2d"
+    )
     b_rec.add_argument("--note", help="Protocol/conditions note")
     b_rec.add_argument(
         "--source", choices=["test", "manual", "modeled"], default="test",

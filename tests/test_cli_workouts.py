@@ -165,7 +165,7 @@ class TestCliWorkouts(unittest.TestCase):
         self.assertEqual(exit_code, 0)
         self.assertIn("1 workout before", stdout)
         self.assertIn("[STALE]", stdout)
-        self.assertIn(f"workout push --from {past}", stdout)
+        self.assertIn(f"workout push -d {past}..", stdout)
         # Warning only — the past row stays outside the pushed window.
         mock_calendar.sync_multiple.assert_not_called()
 
@@ -377,13 +377,13 @@ class TestCliWorkouts(unittest.TestCase):
 
         # Verify CLI list command excludes or includes the removed workout depending on --removed.
         exit_code, stdout, _ = self.run_cli(
-            ["workout", "list", "--from", "2026-06-02", "--until", "2026-06-02"]
+            ["workout", "list", "-d", "2026-06-02"]
         )
         self.assertEqual(exit_code, 0)
         self.assertNotIn("Interval Session", stdout)
 
         exit_code, stdout, _ = self.run_cli(
-            ["workout", "list", "--from", "2026-06-02", "--until", "2026-06-02", "--removed"]
+            ["workout", "list", "-d", "2026-06-02", "--removed"]
         )
         self.assertEqual(exit_code, 0)
         self.assertIn("Interval Session", stdout)
@@ -461,7 +461,7 @@ class TestCliWorkouts(unittest.TestCase):
 
         # A date window bounds which orphans go.
         exit_code, stdout, _ = self.run_cli(
-            ["workout", "prune-calendar", "--from", "2026-06-01", "-y"]
+            ["workout", "prune-calendar", "-d", "2026-06-01..", "-y"]
         )
         self.assertEqual(exit_code, 0)
         self.assertIn("Pruned 1 orphaned Calendar event.", stdout)
@@ -577,7 +577,7 @@ class TestCliWorkouts(unittest.TestCase):
         self.assertNotIn("Tomorrow Ride", stdout)
         self.assertNotIn("Past Yoga", stdout)
 
-        exit_code, stdout, stderr = self.run_cli(["workout", "list", "--days", "2"])
+        exit_code, stdout, stderr = self.run_cli(["workout", "list", "-d", "2d"])
         self.assertEqual(exit_code, 0)
         self.assertIn("Today Run", stdout)
         self.assertIn("Tomorrow Ride", stdout)
@@ -585,7 +585,7 @@ class TestCliWorkouts(unittest.TestCase):
         self.assertNotIn("Future Lift", stdout)
 
         exit_code, stdout, stderr = self.run_cli([
-            "workout", "list", "--from", tomorrow_str, "--until", tomorrow_str
+            "workout", "list", "-d", tomorrow_str
         ])
         self.assertEqual(exit_code, 0)
         self.assertNotIn("Today Run", stdout)
@@ -594,7 +594,7 @@ class TestCliWorkouts(unittest.TestCase):
         self.assertNotIn("Future Lift", stdout)
 
         exit_code, stdout, stderr = self.run_cli([
-            "workout", "list", "--mesocycle", str(meso_id)
+            "workout", "list", "-m", str(meso_id)
         ])
         self.assertEqual(exit_code, 0)
         self.assertNotIn("Past Yoga", stdout)
@@ -603,7 +603,7 @@ class TestCliWorkouts(unittest.TestCase):
         self.assertNotIn("Future Lift", stdout)
 
         exit_code, stdout, stderr = self.run_cli([
-            "workout", "list", "--until-mesocycle", str(meso_id)
+            "workout", "list", "-m", f"..{meso_id}"
         ])
         self.assertEqual(exit_code, 0)
         self.assertNotIn("Past Yoga", stdout)
@@ -612,7 +612,7 @@ class TestCliWorkouts(unittest.TestCase):
         self.assertNotIn("Future Lift", stdout)
 
         exit_code, stdout, stderr = self.run_cli([
-            "workout", "list", "--goal", str(goal_id)
+            "workout", "list", "-g", str(goal_id)
         ])
         self.assertEqual(exit_code, 0)
         self.assertNotIn("Past Yoga", stdout)
@@ -620,7 +620,17 @@ class TestCliWorkouts(unittest.TestCase):
         self.assertIn("Tomorrow Ride", stdout)
         self.assertIn("Future Lift", stdout)
 
-        exit_code, stdout, stderr = self.run_cli(["workout", "list", "--from-mesocycle"])
+        # Bare -m is the current block, bounded both ends; -m ID.. keeps the end open.
+        exit_code, stdout, stderr = self.run_cli(["workout", "list", "-m"])
+        self.assertEqual(exit_code, 0)
+        self.assertNotIn("Past Yoga", stdout)
+        self.assertIn("Today Run", stdout)
+        self.assertIn("Tomorrow Ride", stdout)
+        self.assertNotIn("Future Lift", stdout)
+
+        exit_code, stdout, stderr = self.run_cli([
+            "workout", "list", "-m", f"{meso_id}.."
+        ])
         self.assertEqual(exit_code, 0)
         self.assertNotIn("Past Yoga", stdout)
         self.assertIn("Today Run", stdout)
@@ -689,7 +699,7 @@ class TestCliWorkouts(unittest.TestCase):
             tss=20.0,
         )
 
-        exit_code, stdout, stderr = self.run_cli(["workout", "compare", "--days", "2"])
+        exit_code, stdout, stderr = self.run_cli(["workout", "compare", "-d", "2d"])
         self.assertEqual(exit_code, 0)
         self.assertIn("=== WORKOUT COMPARE ===", stdout)
         self.assertIn("Easy Run", stdout)
@@ -701,7 +711,7 @@ class TestCliWorkouts(unittest.TestCase):
 
         # Date range with no data → empty message
         exit_code, stdout, stderr = self.run_cli([
-            "workout", "compare", "--from", "2020-01-01", "--until", "2020-01-02"
+            "workout", "compare", "-d", "2020-01-01..2020-01-02"
         ])
         self.assertEqual(exit_code, 0)
         self.assertIn("No planned workouts or completed activities found", stdout)
@@ -733,7 +743,7 @@ class TestCliWorkouts(unittest.TestCase):
             tss=60.0,
         )
 
-        exit_code, stdout, _ = self.run_cli(["workout", "compare", "--days", "2"])
+        exit_code, stdout, _ = self.run_cli(["workout", "compare", "-d", "2d"])
         self.assertEqual(exit_code, 0)
         self.assertIn("=== OUTSIDE ANY PLAN (informational) ===", stdout)
         self.assertIn(f"- {yesterday_str}: [road_biking] Off-Season Ride", stdout)

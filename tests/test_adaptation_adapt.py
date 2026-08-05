@@ -305,7 +305,7 @@ class TestAdaptationAdapt(unittest.TestCase):
         self.assertIn("Base Building", out)
         self.assertIn("in 1 day(s), on 2026-06-30", out)
         self.assertIn("Peak & Taper", out)
-        self.assertIn(f"workout generate --until-mesocycle {next_meso['id']}", out)
+        self.assertIn(f"workout generate -m ..{next_meso['id']}", out)
 
         # Mid-block -> nothing printed.
         self.assertEqual(hint_output("2026-06-10"), "")

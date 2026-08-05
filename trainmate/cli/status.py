@@ -67,7 +67,7 @@ def run_status(
         days_rem_str = f" ({days_rem} days remaining)" if days_rem >= 0 else ""
         
         print(
-            f"\n{bold('Next Objective')}: {cyan(next_goal['title'])} "
+            f"\n{bold('Next Goal')}: {cyan(next_goal['title'])} "
             f"({magenta(sport_str)})"
         )
         print(f"{bold('Target Date')}: {cyan(next_goal['target_date'])}{gray(days_rem_str)}")
@@ -122,7 +122,7 @@ def run_status(
             )
     else:
         print(
-            f"\n{bold('Next Objective')}: None (TrainMate needs at least one goal to start planning)"
+            f"\n{bold('Next Goal')}: None (TrainMate needs at least one goal to start planning)"
         )
 
     # Fitness thresholds (the effective anchors the coach prescribes from). Each is the
@@ -345,7 +345,7 @@ def add_status_parser(subparsers, pull_bypass_parser):
     )
     status_parser.add_argument(
         "-v", "--verbose", action="store_true",
-        help="Show all training objectives/goals and life events"
+        help="Show all goals and life events"
     )
 
     return status_parser

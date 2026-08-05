@@ -41,7 +41,7 @@ class TestCliGoals(unittest.TestCase):
     def test_goal_commands(self):
         exit_code, stdout, stderr = self.run_cli(["goal", "list"])
         self.assertEqual(exit_code, 0)
-        self.assertIn("=== TRAINING OBJECTIVES / GOALS ===", stdout)
+        self.assertIn("=== GOALS ===", stdout)
         self.assertNotIn("ID:", stdout)
 
         exit_code, stdout, stderr = self.run_cli([
@@ -152,7 +152,7 @@ class TestCliGoals(unittest.TestCase):
         exit_code, stdout, stderr = self.run_cli([
             "goal", "edit", str(g_id),
             "--title", "Berlin Marathon Elite",
-            "--date", "2026-09-28",
+            "--target-date", "2026-09-28",
             "--sport", "running", "strength_training",
             "--desc", "Sub 3:10 elite goal",
             "--priority", "1",

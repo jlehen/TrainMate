@@ -16,10 +16,11 @@ from trainmate.util import (
     today_date as _today_date,
 )
 from trainmate.cli.common import fmt_date, ensure_recent_data, mark_adherence_from_results
+from trainmate.cli.selectors import add_selector_args, add_single_date_arg, parse_target
 
 
 
-def add_workout_parser(subparsers, pull_bypass_parser, llm_debug_parser, plan_date_parser, sport_type_parser):
+def add_workout_parser(subparsers, pull_bypass_parser, llm_debug_parser):
     # workout command & subparsers
     workout_parser = subparsers.add_parser(
         "workout",
@@ -28,17 +29,25 @@ def add_workout_parser(subparsers, pull_bypass_parser, llm_debug_parser, plan_da
     workout_subparsers = workout_parser.add_subparsers(
         dest="subcommand", help="Workout sub-commands"
     )
-    
+
     # workout list
     w_list = workout_subparsers.add_parser(
         "list",
-        parents=[plan_date_parser, sport_type_parser],
         help="Show all planned workouts",
         description=(
-            "List planned workouts chronologically. With no date filter, shows today "
-            "through the next 7 days; with only --type, shows today onward. Reads the "
-            "local database only (no Garmin pull)."
+            "List planned workouts chronologically. With no filter at all, shows a 7-day "
+            "window from today; with only --type, shows today onward. Name workout IDs or "
+            "dates as arguments to show just those (handy with -v). Reads the local "
+            "database only (no Garmin pull)."
         )
+    )
+    w_list.add_argument(
+        "targets", nargs="*", metavar="TARGET", type=parse_target,
+        help="Workout IDs and/or date selectors to show (e.g. '12 15', '2026-06-01..')"
+    )
+    add_selector_args(
+        w_list, meso=True, macro=True, goal=True, sport=True,
+        direction="forward", default="7d",
     )
     w_list.add_argument(
         "--removed", action="store_true",
@@ -57,18 +66,22 @@ def add_workout_parser(subparsers, pull_bypass_parser, llm_debug_parser, plan_da
     # workout compare
     w_cmp = workout_subparsers.add_parser(
         "compare",
-        parents=[pull_bypass_parser, plan_date_parser, sport_type_parser],
+        parents=[pull_bypass_parser],
         help="Compare planned workouts against completed activities",
         description=(
             "Compare planned workouts against completed Garmin activities, flagging "
             "missed sessions, rest-day violations, and unplanned high-load efforts. "
-            "With no date filter, looks back 14 days; here --days/--weeks look "
+            "With no date filter, looks back 14 days; here a bare span like -d 7d looks "
             "backward (not forward) and the end date is always capped at today. "
             "Freshens Garmin data for the range first unless --no-pull is given. "
             "Each past event's Calendar entry is stamped with the adherence verdict "
             "(a [Done]/[Missed]/[Partial]/... title tag and an 'Adherence' description "
             "header) unless --no-mark is given."
         )
+    )
+    add_selector_args(
+        w_cmp, meso=True, macro=True, goal=True, sport=True,
+        direction="backward", default="14d", span_days=14,
     )
     w_cmp.add_argument(
         "--no-mark", action="store_true", dest="no_mark",
@@ -85,7 +98,8 @@ def add_workout_parser(subparsers, pull_bypass_parser, llm_debug_parser, plan_da
         help="Generate workouts (microcycles) based on the active strategy",
         description=(
             "Generate workouts (microcycles) from today, driven by the active "
-            "periodization strategy. With no horizon flag, generates "
+            "periodization strategy. The horizon is the END of whatever -d/-m selects "
+            "(e.g. -d 4w, -d ..2026-09-01, -m 5). With no horizon flag, generates "
             "config.workout_generation_span_days days ahead (28 by default). The new plan "
             "is pushed to Google Calendar straight away (the previous plan's upcoming "
             f"workouts are archived first); use '{green('plan rollback')}' to undo a "
@@ -102,28 +116,18 @@ def add_workout_parser(subparsers, pull_bypass_parser, llm_debug_parser, plan_da
         help="Skip the confirmation prompts (replacing the upcoming plan, and the "
              "out-of-date-plan warning)"
     )
+    # Generation always starts today, so only the END of the resolved window is used as the
+    # horizon; the selectors are grouped because a horizon is one choice, not several.
     p_w_gen_horizon = p_w_gen.add_mutually_exclusive_group()
-    p_w_gen_horizon.add_argument(
-        "-d", "--days", type=int, dest="horizon_days", metavar="N",
-        help="Generate workouts for N days from today"
-    )
-    p_w_gen_horizon.add_argument(
-        "-w", "--weeks", type=float, dest="horizon_weeks", metavar="N",
-        help="Generate workouts for N weeks from today"
-    )
-    p_w_gen_horizon.add_argument(
-        "--until", dest="horizon_until", metavar="DATE",
-        help="Generate workouts until DATE (YYYY-MM-DD)"
+    add_selector_args(
+        p_w_gen, meso=True, direction="forward", default=None, group=p_w_gen_horizon,
     )
     p_w_gen_horizon.add_argument(
         "--until-goal", type=int, nargs="?", const=-1, dest="horizon_goal_id", metavar="ID",
         help="Generate workouts until the target date of a goal (uses current goal if ID omitted)"
     )
-    p_w_gen_horizon.add_argument(
-        "--until-mesocycle", type=int, dest="horizon_meso_id", metavar="ID",
-        help="Generate workouts until the end date of a mesocycle"
-    )
-    
+
+
     # workout rollback
     w_rollback = workout_subparsers.add_parser(
         "rollback", aliases=["rb"],
@@ -229,7 +233,10 @@ def add_workout_parser(subparsers, pull_bypass_parser, llm_debug_parser, plan_da
             "is given, then synced to Google Calendar."
         )
     )
-    w_adapt.add_argument("--date", help="Date in YYYY-MM-DD format (defaults to UTC today)")
+    add_single_date_arg(
+        w_adapt,
+        "Day to adapt: YYYY-MM-DD, 'today' (the default) or an offset like -1d"
+    )
     w_adapt.add_argument(
         "--lookback", type=int, metavar="DAYS",
         help="Days of recovery-metrics trajectory to summarize (default: config metrics_lookback_days)"
@@ -254,7 +261,6 @@ def add_workout_parser(subparsers, pull_bypass_parser, llm_debug_parser, plan_da
     # workout push
     w_push = workout_subparsers.add_parser(
         "push", aliases=["p"], advanced=True,
-        parents=[plan_date_parser, sport_type_parser],
         help="Commit local planned workouts to Google Calendar",
         description=(
             "Push planned workouts to Google Calendar. With no date filter, pushes "
@@ -262,6 +268,10 @@ def add_workout_parser(subparsers, pull_bypass_parser, llm_debug_parser, plan_da
             "are sent; use -f/--force to re-push already-synced workouts, overwriting "
             "their calendar entries."
         )
+    )
+    add_selector_args(
+        w_push, meso=True, macro=True, goal=True, sport=True, direction="forward",
+        default="today..",
     )
     w_push.add_argument(
         "-f", "--force", action="store_true",
@@ -320,23 +330,11 @@ def add_workout_parser(subparsers, pull_bypass_parser, llm_debug_parser, plan_da
             "the database points at, and delete them. These orphans are what a fresh "
             "database, a restored backup, or a wipe that never reached Calendar leaves "
             "behind. Events belonging to soft-removed workouts are kept (the row still "
-            "claims them). With no date filter the whole calendar is swept; "
-            "--from/--until/--days restrict it to a window, as on 'data wipe'. Use "
-            "--dry-run to preview."
+            "claims them). With no date filter the whole calendar is swept; -d restricts "
+            "it to a window, as on 'data wipe'. Use --dry-run to preview."
         )
     )
-    w_prune.add_argument(
-        "-d", "--days", type=int, metavar="N",
-        help="Restrict to the trailing N days (ending --until, default today)"
-    )
-    w_prune.add_argument(
-        "--from", "--from-date", dest="from_date", metavar="YYYY-MM-DD",
-        help="Restrict to events on or after this date"
-    )
-    w_prune.add_argument(
-        "--until", "--until-date", dest="until_date", metavar="YYYY-MM-DD",
-        help="Restrict to events on or before this date"
-    )
+    add_selector_args(w_prune, direction="none")
     w_prune.add_argument(
         "-n", "--dry-run", action="store_true", dest="dry_run",
         help="List the orphaned events without deleting anything"

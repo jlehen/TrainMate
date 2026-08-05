@@ -27,7 +27,7 @@ def _resolve_goal(goal_id: Optional[int]) -> Optional[dict]:
         return goal
     objectives = cli.db.get_objectives(status='active')
     if not objectives:
-        print(yellow("No active goals found. TrainMate needs at least one objective."))
+        print(yellow("No active goals found. TrainMate needs at least one goal."))
         return None
     objectives.sort(key=lambda x: str(x['target_date']))
     return objectives[0]
@@ -289,8 +289,8 @@ def _print_mesocycle_workouts(
 def run_plan_show(args: argparse.Namespace) -> None:
     """Displays the training macrocycle(s) and mesocycles periodization timeline."""
     if getattr(args, 'all', False):
-        if args.goal_id is not None or getattr(args, 'version', None) is not None:
-            print(red("Error: --all cannot be combined with --goal or --version."))
+        if args.goal_id is not None or getattr(args, 'macrocycle_id', None) is not None:
+            print(red("Error: --all cannot be combined with --goal or --macrocycle."))
             return
         goals = sorted(cli.db.get_objectives(), key=lambda g: str(g['target_date']))
         planned = [(g, cli.db.get_macrocycle_for_objective(g['id'])) for g in goals]
@@ -307,7 +307,7 @@ def run_plan_show(args: argparse.Namespace) -> None:
     if not next_goal:
         return
 
-    version_id = getattr(args, 'version', None)
+    version_id = getattr(args, 'macrocycle_id', None)
     if version_id is not None:
         macrocycle = cli.db.get_macrocycle(version_id)
         if not macrocycle or macrocycle.get('objective_id') != next_goal['id']:
@@ -338,21 +338,23 @@ def _print_plan(next_goal: dict, macrocycle: dict, args: argparse.Namespace) -> 
     if is_superseded:
         superseded_on = str(macrocycle.get('superseded_at', ''))[:10]
         header = (
-            f"=== SUPERSEDED MACROCYCLE STRATEGY (plan ID {macrocycle['id']}"
-            + (f", superseded {superseded_on}" if superseded_on else "")
-            + ") ==="
+            f"=== SUPERSEDED MACROCYCLE STRATEGY [Macrocycle ID: {macrocycle['id']}]"
+            + (f" superseded {superseded_on}" if superseded_on else "")
+            + " ==="
         )
         print(bold(yellow("\n" + header)))
         print(yellow(
             "This is a past version, kept for rollback. Run "
-            + cmd(f"plan rollback --version {macrocycle['id']}") + " to restore it."
+            + cmd(f"plan rollback --macrocycle {macrocycle['id']}") + " to restore it."
         ))
     else:
-        print(bold(cyan("\n=== ACTIVE MACROCYCLE STRATEGY ===")))
+        print(bold(cyan(
+            f"\n=== ACTIVE MACROCYCLE STRATEGY [Macrocycle ID: {macrocycle['id']}] ==="
+        )))
     width = default_wrap_width()
     sport_str = next_goal['sport_type'].upper()
     obj_pad = _print_hanging(
-        f"{bold('Objective')} [ID: {next_goal['id']}]: ",
+        f"{bold('Goal')} [ID: {next_goal['id']}]: ",
         next_goal['title'], width, cyan,
     )
     _print_segments(
@@ -445,7 +447,7 @@ def run_plan_versions(args: argparse.Namespace) -> None:
     sport_str = goal['sport_type'].upper()
     print(bold(cyan("\n=== PLAN VERSIONS ===")))
     print(
-        f"{bold('Objective')} [ID: {goal['id']}]: "
+        f"{bold('Goal')} [ID: {goal['id']}]: "
         f"{cyan(goal['title'])} ({magenta(sport_str)}) "
         f"on {cyan(fmt_date(goal['target_date']))}\n"
     )
@@ -456,7 +458,7 @@ def run_plan_versions(args: argparse.Namespace) -> None:
         if len(excerpt) > 70:
             excerpt = excerpt[:69] + "…"
         marker = green("●") if active else " "
-        id_str = (green if active else str)(f"ID {v['id']}")
+        id_str = (green if active else str)(f"Macrocycle {v['id']}")
         if active:
             status = green("active")
         else:
@@ -464,14 +466,14 @@ def run_plan_versions(args: argparse.Namespace) -> None:
             status = gray("superseded" + (f" {superseded}" if superseded else ""))
         gen = f"generated {fmt_date(created)}" if created else ""
         print(
-            f"{marker} {pad_visible(id_str, 8)} {pad_visible(status, 24)} {gray(gen)}"
+            f"{marker} {pad_visible(id_str, 16)} {pad_visible(status, 24)} {gray(gen)}"
         )
         if excerpt:
             print(f"    {gray(excerpt)}")
     print()
     print(gray(
-        "Restore a version with " + cmd("plan rollback --version <ID>")
-        + ", inspect one with " + cmd("plan show --version <ID>")
+        "Restore a version with " + cmd("plan rollback --macrocycle <ID>")
+        + ", inspect one with " + cmd("plan show --macrocycle <ID>")
         + ", or compare two with " + cmd("plan diff <ID> <ID>") + "."
     ))
 
@@ -574,7 +576,7 @@ def _print_thresholds_diff(diff: dict, width: int) -> None:
 
 
 def _version_line(tag: str, macro: dict) -> str:
-    """'A  ID 12  generated 2026-07-29  superseded 2026-07-31' for a diff header."""
+    """'A  Macrocycle 12  generated 2026-07-29  superseded 2026-07-31' for a diff header."""
     created = str(macro.get('created_at', ''))[:10]
     if macro.get('status') == 'superseded':
         superseded = str(macro.get('superseded_at', ''))[:10]
@@ -582,7 +584,8 @@ def _version_line(tag: str, macro: dict) -> str:
     else:
         state = green("active")
     gen = f"generated {fmt_date(created)}" if created else ""
-    return f"  {bold(tag)}  {pad_visible('ID ' + str(macro['id']), 8)} {gray(gen)}  {state}"
+    label = pad_visible('Macrocycle ' + str(macro['id']), 16)
+    return f"  {bold(tag)}  {label} {gray(gen)}  {state}"
 
 
 # The command that gets the athlete unstuck, per failure the version resolver reports.
@@ -611,7 +614,7 @@ def run_plan_diff(args: argparse.Namespace) -> None:
     width = default_wrap_width()
     print(bold(cyan("\n=== PLAN DIFF ===")))
     obj_pad = _print_hanging(
-        f"{bold('Objective')} [ID: {goal['id']}]: ", goal['title'], width, cyan,
+        f"{bold('Goal')} [ID: {goal['id']}]: ", goal['title'], width, cyan,
     )
     _print_segments(
         obj_pad,
@@ -706,7 +709,7 @@ def run_plan_rollback(args: argparse.Namespace) -> None:
         return
 
     # Determine the target version (default: chronologically previous).
-    target_id = getattr(args, 'version', None)
+    target_id = getattr(args, 'macrocycle_id', None)
     if target_id is None:
         prev = cli.db.get_previous_macrocycle(goal['id'])
         target_id = prev['id'] if prev else None
@@ -802,7 +805,7 @@ def run_plan_feedback(args: argparse.Namespace) -> None:
     # 2. Handle macrocycle feedback. Find target goal first.
     objectives = cli.db.get_objectives(status='active')
     if not objectives:
-        print(yellow("No active goals found. TrainMate needs at least one objective."))
+        print(yellow("No active goals found. TrainMate needs at least one goal."))
         sys.exit(1)
 
     if args.goal_id is not None:
@@ -867,12 +870,12 @@ def add_plan_parser(subparsers, pull_bypass_parser, llm_debug_parser):
     p_show = plan_subparsers.add_parser(
         "show",
         help="Show a macrocycle and its mesocycles periodization strategy "
-             "(--goal/--version/--all, -w for workouts)",
+             "(--goal/--macrocycle/--all, -w for workouts)",
         description=(
             "Show a periodization plan: the macrocycle strategy, the inputs it was "
             "generated from (goals, constraints, threshold anchors) and its mesocycle "
             "timeline. Defaults to the active plan of the next active goal; --goal reaches "
-            "any goal including completed/archived ones, --version an earlier plan version, "
+            "any goal including completed/archived ones, --macrocycle an earlier plan version, "
             "and --all every goal that has a plan."
         )
     )
@@ -882,8 +885,9 @@ def add_plan_parser(subparsers, pull_bypass_parser, llm_debug_parser):
              "active goal)"
     )
     p_show.add_argument(
-        "--version", type=int, dest="version", metavar="PLAN_ID",
-        help="Show a specific (e.g. superseded) plan version by ID instead of the active one"
+        "-M", "--macrocycle", type=int, dest="macrocycle_id", metavar="MACROCYCLE_ID",
+        help="Show one macrocycle by ID — each plan version IS a macrocycle, so this is "
+             "how you reach a superseded one ('plan versions' lists the IDs)"
     )
     p_show.add_argument(
         "-a", "--all", action="store_true",
@@ -932,8 +936,8 @@ def add_plan_parser(subparsers, pull_bypass_parser, llm_debug_parser):
         description=(
             "List every periodization plan version kept for a goal — the active one and "
             "any superseded by later regenerations — with their IDs and dates, so you can "
-            "inspect one ('plan show --version <ID>') or restore one "
-            "('plan rollback --version <ID>')."
+            "inspect one ('plan show --macrocycle <ID>') or restore one "
+            "('plan rollback --macrocycle <ID>')."
         )
     )
     p_versions.add_argument(
@@ -959,7 +963,7 @@ def add_plan_parser(subparsers, pull_bypass_parser, llm_debug_parser):
             "Undo a plan regeneration: restore an earlier periodization plan version "
             "and the workouts that were live under it. Defaults to the chronologically "
             "previous version of the next active goal's plan; repeat to walk further "
-            "back, or target a specific version with --version. The current plan's "
+            "back, or target a specific version with --macrocycle. The current plan's "
             "upcoming workouts are archived and the restored version's are re-pushed to "
             "Google Calendar (the symmetric inverse of generation)."
         )
@@ -969,7 +973,7 @@ def add_plan_parser(subparsers, pull_bypass_parser, llm_debug_parser):
         help="Target goal ID whose plan to roll back (defaults to the next active goal)"
     )
     p_rollback.add_argument(
-        "--version", type=int, dest="version", metavar="PLAN_ID",
+        "-M", "--macrocycle", type=int, dest="macrocycle_id", metavar="MACROCYCLE_ID",
         help="Roll back to a specific plan version (macrocycle) ID instead of the previous one"
     )
     p_rollback.add_argument(

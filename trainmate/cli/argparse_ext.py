@@ -5,6 +5,7 @@ Extracted from trainmate_cli.py; those names are re-imported there so existing
 ``trainmate_cli.<name>`` patch seams keep working."""
 import argparse
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -173,6 +174,16 @@ def _weeks_arg(raw: str):
     if n < 1:
         raise argparse.ArgumentTypeError("must be >= 1")
     return n
+
+# A selector endpoint reaching back from today (`-7d`, `-2w..+1w`) starts with a dash, so
+# argparse reads it as an option and reports a missing value. It is glued to its flag as
+# `--date=-7d..` instead — the one form argparse takes verbatim (DESIGN_cli_selectors.md §6).
+_NEGATIVE_SELECTOR_RE = re.compile(r"-\d+(\.\d+)?[dw](\.\.|$)")
+
+
+def _needs_equals(value: Optional[str]) -> bool:
+    return bool(value) and value.startswith("-") and bool(_NEGATIVE_SELECTOR_RE.match(value))
+
 
 def _canonical_option(action: argparse.Action) -> str:
     """The most explicit spelling of an option (argparse accepts any registered one)."""
@@ -389,6 +400,11 @@ def translate_dashless_argv(parser: argparse.ArgumentParser, tokens: list) -> li
         tok = tokens[i]
         tok_lower = tok.lower()
         if tok.startswith("-"):
+            nxt = tokens[i + 1] if i + 1 < n else None
+            if tok in parser._option_string_actions and _needs_equals(nxt):
+                out.append(f"{tok}={nxt}")
+                i += 2
+                continue
             out.append(tok)
             i += 1
             continue
@@ -426,7 +442,10 @@ def translate_dashless_argv(parser: argparse.ArgumentParser, tokens: list) -> li
                 else:
                     i += 1
             else:
-                if nxt is not None:
+                if nxt is not None and _needs_equals(nxt):
+                    out[-1] = f"{out[-1]}={nxt}"
+                    i += 2
+                elif nxt is not None:
                     out.append(nxt)
                     i += 2
                 else:

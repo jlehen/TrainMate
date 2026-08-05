@@ -52,7 +52,7 @@ class TestCliData(unittest.TestCase):
         # A successful pull rides along into the adherence Calendar marking over
         # the pulled range, and reports how many past events were marked.
         mock_mark.return_value = 2
-        exit_code, stdout, stderr = self.run_cli(["data", "pull", "--days", "7"])
+        exit_code, stdout, stderr = self.run_cli(["data", "pull", "-d", "7d"])
         self.assertEqual(exit_code, 0)
         mock_garmin.pull.assert_called_once()
         mock_mark.assert_called_once()
@@ -137,7 +137,7 @@ class TestCliData(unittest.TestCase):
         }
 
         exit_code, stdout, stderr = self.run_cli([
-            "data", "bootstrap", "--from", "2026-01-01", "--until", "2026-03-31",
+            "data", "bootstrap", "-d", "2026-01-01..2026-03-31",
             "--context", "Felt good"
         ])
         self.assertEqual(exit_code, 0)
@@ -152,8 +152,6 @@ class TestCliData(unittest.TestCase):
         mock_coach.data_bootstrap.assert_called_once_with(
             from_date_str="2026-01-01",
             until_date_str="2026-03-31",
-            days=None,
-            weeks=None,
             context="Felt good",
             force=False,
             inspect_only=False,
@@ -164,7 +162,7 @@ class TestCliData(unittest.TestCase):
 
         mock_coach.data_bootstrap.reset_mock()
         exit_code, stdout, stderr = self.run_cli([
-            "data", "bootstrap", "--from", "2026-01-01", "--until", "2026-03-31",
+            "data", "bootstrap", "-d", "2026-01-01..2026-03-31",
             "--inspect-only"
         ])
         self.assertEqual(exit_code, 0)
@@ -172,8 +170,6 @@ class TestCliData(unittest.TestCase):
         mock_coach.data_bootstrap.assert_called_once_with(
             from_date_str="2026-01-01",
             until_date_str="2026-03-31",
-            days=None,
-            weeks=None,
             context=None,
             force=False,
             inspect_only=True,
@@ -202,7 +198,7 @@ class TestCliData(unittest.TestCase):
         )
 
         exit_code, stdout, stderr = self.run_cli([
-            "data", "show-metrics", "--from", "2026-06-01", "--until", "2026-06-05"
+            "data", "show-metrics", "-d", "2026-06-01..2026-06-05"
         ])
         self.assertEqual(exit_code, 0)
         self.assertIn("=== ATHLETE METRICS", stdout)
@@ -213,7 +209,7 @@ class TestCliData(unittest.TestCase):
 
         mock_garmin.ensure_data.reset_mock()
         exit_code, stdout, stderr = self.run_cli([
-            "data", "show-metrics", "--days", "3", "--no-pull"
+            "data", "show-metrics", "-d", "3d", "--no-pull"
         ])
         self.assertEqual(exit_code, 0)
         mock_garmin.ensure_data.assert_not_called()
@@ -252,8 +248,7 @@ class TestCliData(unittest.TestCase):
 
         exit_code, stdout, stderr = self.run_cli([
             "data", "wipe", "--garmin",
-            "--from", base.isoformat(),
-            "--until", (base + timedelta(days=20)).isoformat(),
+            "-d", f"{base.isoformat()}..{(base + timedelta(days=20)).isoformat()}",
             "-y",
         ])
         self.assertEqual(exit_code, 0)
@@ -281,7 +276,7 @@ class TestCliData(unittest.TestCase):
         )
 
         exit_code, stdout, stderr = self.run_cli([
-            "data", "show-activities", "--from", "2026-06-01", "--until", "2026-06-05"
+            "data", "show-activities", "-d", "2026-06-01..2026-06-05"
         ])
         self.assertEqual(exit_code, 0)
         self.assertIn("=== COMPLETED ACTIVITIES", stdout)
@@ -291,7 +286,7 @@ class TestCliData(unittest.TestCase):
                       "Elevation: 130 m | TSS: 70.0", stdout)
 
         exit_code, stdout, stderr = self.run_cli([
-            "data", "show-activities", "--from", "2026-06-01", "--until", "2026-06-05",
+            "data", "show-activities", "-d", "2026-06-01..2026-06-05",
             "--type", "running"
         ])
         self.assertEqual(exit_code, 0)

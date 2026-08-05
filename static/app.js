@@ -105,7 +105,7 @@ window.switchTab = function(tabId) {
 
     document.getElementById(tabId).classList.add("active");
     const btn = Array.from(document.querySelectorAll(".accordion-card .tab-btn")).find(
-        b => (tabId === "tab-goals" && b.innerText.includes("Objectives")) ||
+        b => (tabId === "tab-goals" && b.innerText.includes("Goals")) ||
              (tabId === "tab-events" && b.innerText.includes("Constraints"))
     );
     if (btn) btn.classList.add("active");

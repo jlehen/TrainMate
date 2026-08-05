@@ -18,7 +18,8 @@ from trainmate.cli.common import (
     fmt_date, ensure_recent_data, mark_adherence_from_results,
 )
 
-from trainmate.cli.workouts._helpers import (_fmt_ts, _resolve_workout_date_range,
+from trainmate.cli.selectors import has_selector as _has_selector, resolve_window, split_targets
+from trainmate.cli.workouts._helpers import (_fmt_ts,
     _resolve_workout_end_date, workout_line)
 
 
@@ -45,8 +46,7 @@ def _print_block_boundary_hint(date_str: str) -> None:
         f"Sessions in the next block ({next_meso['name']}) are outside this adaptation's "
         f"reach. To re-plan them against current metrics:"
     )))
-    print(gray("    " + cmd(f"workout generate --until-mesocycle {next_meso['id']}",
-                            quote=False)))
+    print(gray("    " + cmd(f"workout generate -m ..{next_meso['id']}", quote=False)))
     print()
 
 
@@ -410,30 +410,54 @@ def run_workout_rollback(args: argparse.Namespace) -> None:
         f"{result['archived_workouts']}; Google Calendar updated."
     ))
     print(green(f"Run {cmd('workout list')} to review the restored sessions."))
+def _workouts_by_id(ids: list, sport_type: Optional[str], include_removed: bool) -> list:
+    """Looks up the workout IDs named as positional targets, reporting the ones it can't."""
+    found = []
+    for workout_id in ids:
+        w = cli.db.get_workout_by_id(workout_id)
+        if not w:
+            print(yellow(f"No workout with ID {workout_id}."))
+            continue
+        if w.get('removed') and not include_removed:
+            print(yellow(f"Workout {workout_id} is removed; pass --removed to show it."))
+            continue
+        if sport_type and w['sport_type'].lower() != sport_type.lower():
+            continue
+        found.append(w)
+    return found
+
+
 def run_workout_list(args: argparse.Namespace) -> None:
-    """Lists stored workouts chronologically, with optional date, goal, or type filters."""
-    start_date, end_date = _resolve_workout_date_range(args)
+    """Lists stored workouts chronologically, by ID, date range, block, plan or sport."""
+    ids, date_targets = split_targets(getattr(args, "targets", None))
+    # Named dates narrow like any other selector; named IDs are looked up directly, since
+    # an ID the athlete typed is not a window (DESIGN_cli_selectors.md §4).
+    args._extra_windows = [(r.start, r.end) for r in date_targets]
+    windowed = bool(date_targets) or _has_selector(args)
 
-    # If no date options were provided...
-    if start_date is None and end_date is None:
-        today = _today_date()
-        start_date = today.strftime("%Y-%m-%d")
-        if getattr(args, "sport_type", None):
-            # Only sport_type provided: from today onwards
-            end_date = None
-        else:
-            # No options at all: from today for the next 7 days
-            end_date = (today + timedelta(days=7)).strftime("%Y-%m-%d")
+    include_removed = getattr(args, "removed", False)
+    workouts = []
+    if windowed or not ids:
+        start_date, end_date = resolve_window(args)
+        workouts = cli.db.get_workouts(
+            start_date=start_date,
+            end_date=end_date,
+            sport_type=args.sport_type,
+            include_removed=include_removed,
+        )
+    else:
+        start_date = end_date = None
+    if ids:
+        workouts += _workouts_by_id(ids, args.sport_type, include_removed)
+        seen = set()
+        workouts = [
+            w for w in sorted(workouts, key=lambda w: (w['date'], w['id']))
+            if not (w['id'] in seen or seen.add(w['id']))
+        ]
 
-    # Fetch workouts using our extended cli.db.get_workouts
-    workouts = cli.db.get_workouts(
-        start_date=start_date,
-        end_date=end_date,
-        sport_type=args.sport_type,
-        include_removed=getattr(args, "removed", False)
-    )
-    
     print(bold(cyan("=== WORKOUT SCHEDULE ===")))
+    if ids:
+        print(gray(f"Filters: IDs {', '.join(str(i) for i in ids)}"))
     if start_date or end_date or args.sport_type:
         filter_parts = []
         if start_date:
@@ -483,27 +507,9 @@ def run_workout_compare(args: argparse.Namespace) -> None:
     today_str = _today_str()
     today_obj = _today_date()
 
-    start_date, end_date = _resolve_workout_date_range(args)
-
-    # For compare, --days/--weeks mean "look back N days" instead of "look forward N days".
-    # An explicit --from/--mesocycle/--goal already sets start_date to the right anchor.
-    has_explicit_start = (
-        getattr(args, 'from_date', None) is not None
-        or getattr(args, 'from_meso', False)
-        or getattr(args, 'meso_id', None) is not None
-        or getattr(args, 'goal_id', None) is not None
-    )
-    if not has_explicit_start:
-        days = getattr(args, 'days', None)
-        weeks = getattr(args, 'weeks', None)
-        if days is not None:
-            start_date = (today_obj - timedelta(days=days - 1)).strftime("%Y-%m-%d")
-        elif weeks is not None:
-            ndays = max(1, round(weeks * 7))
-            start_date = (today_obj - timedelta(days=ndays - 1)).strftime("%Y-%m-%d")
-        else:
-            # Default or --until-only: 14-day lookback
-            start_date = (today_obj - timedelta(days=13)).strftime("%Y-%m-%d")
+    # The 14-day lookback and the backward reading of a bare span are declared on the
+    # parser (direction="backward"), so this handler only caps the far end.
+    start_date, end_date = resolve_window(args)
 
     # Cap end_date at today — we can only compare past/present activities
     if end_date is None or end_date > today_str:

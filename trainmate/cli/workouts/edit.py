@@ -16,10 +16,11 @@ from trainmate.util import (
     today_date as _today_date,
 )
 from trainmate.cli.common import (
-    fmt_date, ensure_recent_data, mark_adherence_from_results, resolve_cleanup_range,
+    fmt_date, ensure_recent_data, mark_adherence_from_results,
 )
+from trainmate.cli.selectors import resolve_window
 
-from trainmate.cli.workouts._helpers import (_resolve_workout_date_range, _resolve_swap_ops,
+from trainmate.cli.workouts._helpers import (_resolve_swap_ops,
     workout_line, warn_stale_before)
 
 
@@ -28,10 +29,7 @@ def run_workout_push(args: argparse.Namespace) -> None:
     today_str = _today_str()
     force = getattr(args, 'force', False)
 
-    start_date, end_date = _resolve_workout_date_range(args)
-    # Default to today onwards when no date filter is given
-    if start_date is None:
-        start_date = today_str
+    start_date, end_date = resolve_window(args)
 
     all_workouts = cli.db.get_workouts(
         start_date=start_date,
@@ -230,7 +228,7 @@ def run_workout_prune_calendar(args: argparse.Namespace) -> None:
     orphans this cleans up are exactly the ones the database can no longer name — a
     fresh DB, a restored backup, or a wipe that never reached Calendar.
     """
-    start_date, end_date = resolve_cleanup_range(args)
+    start_date, end_date = resolve_window(args)
 
     try:
         events = cli.calendar_syncer.list_workout_events()

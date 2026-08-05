@@ -223,7 +223,8 @@ constraint add TITLE [--start YYYY-MM-DD] [--end YYYY-MM-DD] [--desc TEXT]
   being planned) plus everything upcoming (open-ended into the future). This
   anchors the list on the block the coach is actively reasoning over rather than
   a rolling calendar window. `--all`/`-a` drops the lower bound (past directives
-  included); `--from`/`--until` override the bounds explicitly. When no active
+  included); a selector (`-d`/`-m`/`-M`/`-g`, DESIGN_cli_selectors.md) overrides the
+  bounds explicitly. When no active
   mesocycle exists to anchor on (no plan yet), the lower bound is dropped and
   **every** constraint is shown — a fresh user has only a handful, and there is
   no block to scope to.
@@ -345,7 +346,7 @@ For each directive in the fetched set:
     (`coach/engine/prompt.py`), so the model routinely returns *nothing at all* for
     those dates, and a pass that only rewrote what it returned would leave exactly
     the gap this paragraph forbids. The span is the **requested** range —
-    `gen_start` to `gen_end`, i.e. the `--days`/`--until` horizon the athlete asked
+    `gen_start` to `gen_end`, i.e. the `-d`/`-m` horizon the athlete asked
     for — not the last date the model happened to return. Bounding by the model's
     last date would reopen the gap at the tail: a rest window covering the final
     days of the range is precisely the case the model answers with silence, so

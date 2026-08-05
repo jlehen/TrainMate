@@ -39,7 +39,8 @@ Two product decisions (asked and locked with the athlete):
 - **Forward sync = fully eager auto-push** (not DB-only-then-`workout push`).
 - **History = full** — every superseded version is kept; `plan rollback` undoes the
   last regeneration by default and walks further back via repeated calls or
-  `--version`.
+  `-M/--macrocycle` (a plan version IS a macrocycle, so it is
+  named after the thing it identifies — DESIGN_cli_selectors.md §5).
 
 ## 3. Data model
 
@@ -119,7 +120,7 @@ then inserts the new version as `active`. No deletion.
 
 Navigation is **monotonic by creation id**: default rollback restores the newest
 version older than the active one, so repeated calls walk steadily backward.
-`--version <id>` jumps to any version (forward or backward), since rollback is just an
+`--macrocycle <id>` jumps to any version (forward or backward), since rollback is just an
 active↔superseded swap and is therefore itself reversible.
 
 ## 6. Reader audit (active-version filtering)
@@ -136,7 +137,7 @@ These were updated to ignore superseded versions:
 
 ## 7. CLI & Web
 
-`plan rollback [--goal ID] [--version PLAN_ID] [-y]` (registered alias `rb`). Interactive
+`plan rollback [-g/--goal ID] [-M/--macrocycle ID] [-y]` (registered alias `rb`). Interactive
 confirmation by default (shows the target version's generation date). Reports how many
 workouts were restored/archived. `workout generate`'s help and output now reflect the
 eager push and point at `workout rollback` first (the same-version undo, §9), then at
@@ -149,7 +150,7 @@ doesn't require guessing ids):
   id, generated-on date, status, and a one-line strategy excerpt. `plan v` works, but as
   an unambiguous **prefix** (DESIGN_cli_noargs.md §d), not a registered alias: it would
   break silently if another `plan v…` sub-command were added.
-- **`plan show --version <PLAN_ID>`** — renders a specific version in full (strategy +
+- **`plan show -M/--macrocycle <ID>`** — renders a specific version in full (strategy +
   mesocycle timeline) under a "superseded" header when it isn't the active one.
 - **`plan diff [PLAN_ID_A] [PLAN_ID_B] [-g ID] [--full]`** (registered alias `df`) —
   compares two versions field by field (strategy/feedback prose, mesocycles added,
@@ -161,14 +162,14 @@ doesn't require guessing ids):
 active↔superseded in either direction, and the target version's workouts were archived
 as one batch when it was last superseded, so restoring its `MAX(archived_at)` batch
 resurrects exactly that set. `plan versions` surfaces the ids; the default (no
-`--version`) always steps to the chronologically previous version.
+`--macrocycle`) always steps to the chronologically previous version.
 
 **Web** shows the version axis but no longer drives it: the dashboard has since become
 read-only (ARCHITECTURE.md §8) and 405s every mutating verb, so the `POST /api/plan/rollback`
 this design originally shipped is gone — rolling back is a CLI action. What remains is
 `GET /api/plan/versions` and `GET /api/plan/diff`, behind a "Plan versions & compare" panel
 on the strategy card: each kept version with a per-version **Compare** button, and a footer
-pointing at `tm plan rollback --version <id>`.
+pointing at `tm plan rollback --macrocycle <id>`.
 
 ## 8. Limitations / non-goals
 
@@ -176,7 +177,7 @@ pointing at `tm plan rollback --version <id>`.
   rollback operate over *all* future workouts (not per-goal), matching how the tool is
   used in practice. A workout outside any mesocycle's coverage gets a NULL
   `macrocycle_id` and so is archived-but-not-restored by a plan rollback.
-- **No "redo" verb.** Rolling forward again is done with `--version`, not a dedicated
+- **No "redo" verb.** Rolling forward again is done with `--macrocycle`, not a dedicated
   command.
 - **`plan rm` / `plan wipe`** delete *all* versions for the objective — rollback is
   for undoing regenerations, not for resurrecting a deleted plan.

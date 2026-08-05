@@ -176,51 +176,9 @@ def build_parser():
         help="Print the prompt that would be sent to the LLM and exit without sending"
     )
 
-    # Basic date parser containing base date-filtering options
-    basic_date_parser = argparse.ArgumentParser(add_help=False)
-    basic_date_parser.add_argument(
-        "-d", "--days", type=int, dest="days", metavar="N",
-        help="Show/process data for N days"
-    )
-    basic_date_parser.add_argument(
-        "-w", "--weeks", type=float, dest="weeks", metavar="N",
-        help="Show/process data for N weeks"
-    )
-    basic_date_parser.add_argument(
-        "--from", "--from-date", dest="from_date",
-        help="Start from DATE (YYYY-MM-DD)"
-    )
-    basic_date_parser.add_argument(
-        "--until", "--until-date", dest="until_date",
-        help="End at DATE (YYYY-MM-DD)"
-    )
-
-    # Extended plan date parser that includes goal and mesocycle level filters
-    plan_date_parser = argparse.ArgumentParser(add_help=False, parents=[basic_date_parser])
-    plan_date_parser.add_argument(
-        "--from-mesocycle", action="store_true", dest="from_meso",
-        help="Start from the beginning of the current mesocycle"
-    )
-    plan_date_parser.add_argument(
-        "--until-mesocycle", type=int, nargs="?", const=-1, dest="until_meso_id",
-        metavar="ID", help="End at the end of a mesocycle (uses current if ID omitted)"
-    )
-    plan_date_parser.add_argument(
-        "--mesocycle", type=int, nargs="?", const=-1, dest="meso_id", metavar="ID",
-        help="Filter within a mesocycle (uses current if ID omitted)"
-    )
-    plan_date_parser.add_argument(
-        "-g", "--goal", "--goal-id", type=int, nargs="?", const=-1, dest="goal_id", metavar="ID",
-        help="Filter by a specific goal's plan duration (uses active goal if ID omitted)"
-    )
-
-    # Common parser for sport type filtering
-    sport_type_parser = argparse.ArgumentParser(add_help=False)
-    sport_type_parser.add_argument(
-        "-t", "--type", "--sport-type", dest="sport_type",
-        help="Filter by sport type"
-    )
-
+    # Date/mesocycle/macrocycle/goal filtering is no longer a shared parent parser: each
+    # command calls trainmate.cli.selectors.add_selector_args with its own default window
+    # and direction (DESIGN_cli_selectors.md §3).
     add_status_parser(subparsers, pull_bypass_parser)
     add_progress_parser(subparsers, pull_bypass_parser)
     goal_parser = add_goal_parser(subparsers)
@@ -229,8 +187,8 @@ def build_parser():
     context_parser = add_context_parser(subparsers)
     learnings_parser = add_learnings_parser(subparsers)
     plan_parser = add_plan_parser(subparsers, pull_bypass_parser, llm_debug_parser)
-    workout_parser = add_workout_parser(subparsers, pull_bypass_parser, llm_debug_parser, plan_date_parser, sport_type_parser)
-    data_parser = add_data_parser(subparsers, pull_bypass_parser, llm_debug_parser, basic_date_parser, plan_date_parser, sport_type_parser)
+    workout_parser = add_workout_parser(subparsers, pull_bypass_parser, llm_debug_parser)
+    data_parser = add_data_parser(subparsers, pull_bypass_parser, llm_debug_parser)
     add_model_parser(subparsers)
 
     named_subparsers = {

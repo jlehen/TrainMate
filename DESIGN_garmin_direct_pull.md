@@ -137,7 +137,7 @@ from `trainmate/garmin/__init__.py` so `from trainmate import garmin`,
   `through_date`.
 - `backfill_tss(start_date=None, end_date=None, verbose=False) -> int` — recomputes the
   measured `tss` for stored activities from their saved zone seconds (no Garmin calls) and
-  returns the number of rows that changed; CLI: `data backfill-tss [--from] [--until] [-v]`.
+  returns the number of rows that changed; CLI: `data backfill-tss [-d RANGE] [-v]`.
 
 **Removed:** `trainmate/google_sheets.py` (the `GarminSheetsReader` /
 `sheets_reader` singleton). Its derived-metric logic (acute/chronic workload,
@@ -307,7 +307,7 @@ asked for by the user: it exists only to warm the derivation pad (§7), and it i
 by the pad, so its size is ours to choose rather than the user's to be nagged about. Those
 regions get `limit = max(prompt_days, pad_days)` and therefore auto-pull up to 63 days,
 above the 30-day prompt cutoff. Without it, the day the pad widened from 28 to 63 every
-pre-existing install would have started printing "run `data pull --from …`" on *every*
+pre-existing install would have started printing "run `data pull -d …`" on *every*
 command instead of quietly healing itself. Regions that overlap the requested window keep
 the plain `prompt_days` limit. Covered by
 `tests/test_garmin.py::…test_pad_only_gap_auto_pulls`.
@@ -320,7 +320,7 @@ computed dates, e.g.:
 
 ```
 This view needs data back to 2026-02-10, but the database starts at 2026-05-01.
-Run:  python trainmate_cli.py data pull --from 2026-02-10 --until 2026-04-30
+Run:  python trainmate_cli.py data pull -d 2026-02-10..2026-04-30
 ```
 
 Cold start uses `garmin_initial_backfill_days` (default 90) to compute the
@@ -337,9 +337,9 @@ Mirrors GarminScraper's interface so manual pulls are unbounded and explicit, an
 skips the watermark/auto-ensure logic (it does exactly what is asked, then updates
 the watermark on success):
 
-- `--days N` — last N days (default 2, matching GarminScraper).
-- `--from YYYY-MM-DD` / `--until YYYY-MM-DD` — explicit range (overrides
-  `--days`; `--until` defaults to today).
+- `-d RANGE` — the shared selector (DESIGN_cli_selectors.md), read backward: `-d 7d` is
+  the last 7 days, `-d A..B` an explicit range, `-d ..B` the 2 days ending B. Defaults to
+  `2d`, matching GarminScraper.
 - `--metrics-only` / `--activities-only` — mutually exclusive, bypass the other
   stream.
 - `--sleep SECONDS` — throttle between Garmin calls (overrides

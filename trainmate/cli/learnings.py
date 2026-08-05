@@ -197,7 +197,10 @@ def add_learnings_parser(subparsers):
     ln_list.add_argument(
         "--dormant", action="store_true", help="Show only dormant (decayed) learnings"
     )
-    ln_list.add_argument("--sport", help="Filter by sport (substring match)")
+    ln_list.add_argument(
+        "-t", "--type", "--sport-type", "--sport", dest="sport",
+        help="Filter by sport (substring match)"
+    )
     ln_list.add_argument(
         "--confidence", choices=["tentative", "moderate", "established"],
         help="Filter by confidence level"

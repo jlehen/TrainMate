@@ -66,10 +66,11 @@ prompt to before.
 
 `cli/workouts/generate.py::_print_block_boundary_hint` (called by `run_workout_adapt`) prints
 a hint whenever the evaluation date is in the terminal window and a next block exists: which
-block is ending, when, and the exact `workout generate --until-mesocycle <id>` invocation that
+block is ending, when, and the exact `workout generate -m ..<id>` invocation that
 re-plans the next block against current metrics.
 
-`--until-mesocycle` sets only the end date; generate starts from today, so that command also
+`-m ..<id>` sets only the end date (DESIGN_cli_selectors.md §5); generate starts from today,
+so that command also
 rewrites the ending block's remaining sessions. That is the intent — inside the terminal
 window the tail is a few days, and they are re-planned against the same current metrics — but
 it is a wider rewrite than the phrasing suggests.

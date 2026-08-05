@@ -63,10 +63,12 @@ unambiguous prefixes, which resolve to the canonical name for free
 
 ### `context add` (`a`)
 ```
-context add METRIC [TEXT] [--from YYYY-MM-DD] [--until YYYY-MM-DD] [--value N] [-l LABEL]
+context add METRIC [TEXT] [-d RANGE] [--value N] [-l LABEL]
 ```
-- Date range defaults to **today** (single day) when neither bound is given;
-  `--until` defaults to `--from`. One **all-day event per day** in the range —
+- `-d` takes the shared selector grammar (DESIGN_cli_selectors.md), defaulting to
+  **today**; it must stay bounded, since an open-ended range has no last day to
+  write. No `-m`/`-M` here: a signal spans days, not blocks. One **all-day event
+  per day** in the range —
   one event ⇒ one `daily_context` row, so it round-trips through the existing
   per-day ingest with zero schema change.
 - `METRIC` (positional): opaque category, mandatory. `list-metrics` shows the
@@ -97,7 +99,7 @@ context add METRIC [TEXT] [--from YYYY-MM-DD] [--until YYYY-MM-DD] [--value N] [
 ### `context rm` (`r`)
 ```
 context rm <id> [<id> ...]
-context rm --from YYYY-MM-DD [--until ...] [-m METRIC] [-y]
+context rm [METRIC] [-d RANGE] [-m|-M|-g RANGE] [--metric M] [-y]
 ```
 - Deleting must remove the **calendar event** too, not just the local row:
   otherwise the event sits visible on the calendar and a token-reset recovery
@@ -105,18 +107,18 @@ context rm --from YYYY-MM-DD [--until ...] [-m METRIC] [-y]
   then the row (mirrors the ingest's cancelled-event → delete path).
 - Range/metric form deletes all matches; confirm `[y/N]` when >1 row matches,
   which `-y/--yes` skips for scripted use.
-- A bare `context rm` — no ids **and** no `--from/--until/--metric` — is
+- A bare `context rm` — no ids, no metric **and** no selector — is
   **refused** (exit 1) rather than treated as "everything": the destructive
   default has to be typed, not fallen into.
 
 ### `context list` (`l`)
 ```
-context list [--from ...] [--until ...] [-m METRIC]
+context list [METRIC] [-d RANGE] [-m|-M|-g RANGE]
 ```
 - Defaults to the last `config.metrics_lookback_days` days when unbounded (15
   by default) — the **same window the coach reads context over** in the analysis
-  path, so `list` shows what the coach sees, from one config knob. `--metric`
-  filters. Prints `id · date · metric · value · text`.
+  path, so `list` shows what the coach sees, from one config knob. The positional
+  `METRIC` (or `--metric`) filters. Prints `id · date · metric · value · text`.
 
 ### `context list-metrics` (`lm`)
 - Distinct `metric`s in `daily_context` with **count** and **first/last date**,
@@ -128,8 +130,8 @@ context list [--from ...] [--until ...] [-m METRIC]
 
 **`trainmate/cli/context.py`** (new, modeled on `cli/constraints.py`):
 `run_context_add/_rm/_list/_list_metrics`. Subparsers + dispatch wired into
-`trainmate_cli.py` next to the other top-level commands; reuse the existing
-`--from/--until` date-arg idiom.
+`trainmate_cli.py` next to the other top-level commands; range filtering comes from
+the shared `add_selector_args`/`resolve_window` pair (DESIGN_cli_selectors.md).
 
 **`trainmate/google_calendar.py`** — two methods on `CalendarSyncer`:
 - `add_context_event(date, metric, value, text, existing_event_id=None) -> str`
@@ -166,4 +168,4 @@ bullet it qualifies, rather than in the resolved-decisions section.
 3. **`list` default window** → `config.metrics_lookback_days` (15), matching the
    coach's context-read window.
 4. **Multi-day `rm`** → range + metric form only; **no** logical-signal grouping.
-   A multi-day signal is just N per-day rows; remove them by `--from/--until -m`.
+   A multi-day signal is just N per-day rows; remove them by `METRIC -d A..B`.

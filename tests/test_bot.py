@@ -19,8 +19,8 @@ class ParseMessageTest(unittest.TestCase):
 
     def test_subcommand_and_flags(self):
         self.assertEqual(
-            bot.parse_message_to_argv("/workout list --weeks 1"),
-            ["workout", "list", "--weeks", "1"],
+            bot.parse_message_to_argv("/workout list -d 1w"),
+            ["workout", "list", "-d", "1w"],
         )
 
     def test_quoted_argument_kept_whole(self):

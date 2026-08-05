@@ -68,20 +68,26 @@ class TestWorkoutAnalysis(unittest.TestCase):
 
     @patch("builtins.input", return_value="y")
     @patch("trainmate.coach.engine.openrouter_client")
-    def test_date_resolution_relative_days_and_weeks(self, mock_client, _mock_input):
+    def test_date_resolution_explicit_window(self, mock_client, _mock_input):
+        """The service takes a resolved window; turning '10d'/'4w' into one is the CLI
+        selector's job (tests/test_cli_selectors.py)."""
         mock_client.complete.return_value = {
             "macrocycle_summary": "Analysis summary"
         }
 
-        # Last 10 days relative to 2026-06-15
-        coach_service.data_bootstrap(until_date_str="2026-06-15", days=10)
-        # Start date should be 2026-06-06. The Monday of that week is 2026-06-01.
+        # The window a `-d 10d` ending 2026-06-15 resolves to.
+        coach_service.data_bootstrap(
+            from_date_str="2026-06-06", until_date_str="2026-06-15"
+        )
+        # The Monday of the start week is 2026-06-01.
         summaries = mock_client.complete.call_args[0][1]
         self.assertIn("2026-06-01", summaries)
 
-        # Last 4 weeks relative to 2026-06-15
-        coach_service.data_bootstrap(until_date_str="2026-06-15", weeks=4)
-        # Start date should be 2026-05-19. The Monday of that week is 2026-05-18.
+        # The window a `-d 4w` ending 2026-06-15 resolves to.
+        coach_service.data_bootstrap(
+            from_date_str="2026-05-19", until_date_str="2026-06-15"
+        )
+        # The Monday of the start week is 2026-05-18.
         summaries = mock_client.complete.call_args[0][1]
         self.assertIn("2026-05-18", summaries)
 

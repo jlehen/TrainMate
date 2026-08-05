@@ -171,7 +171,7 @@ def _sync_calendar_context(force: bool) -> None:
         return  # Calendar not importable/configured — nothing to sync.
     google_calendar.sync_calendar_context(force=force)
 def _pull_command(start: str, end: str) -> str:
-    return f"python trainmate_cli.py data pull --from {start} --until {end}"
+    return f"python trainmate_cli.py data pull -d {start}..{end}"
 def _contiguous_regions(missing: List[str]) -> List[Tuple[str, str]]:
     """Groups a sorted list of YYYY-MM-DD dates into contiguous [start, end] regions."""
     regions: List[Tuple[str, str]] = []
@@ -272,7 +272,7 @@ def ensure_data(start_date: str, end_date: str, force: bool = False) -> None:
         # derivation pad — they are bounded by the pad itself and were never asked
         # for by the user, so they always auto-pull: without this, widening the pad
         # (28 -> 63 days for CTL) would leave every pre-existing install nagging
-        # "run data pull --from ..." on each command instead of healing itself.
+        # "run data pull -d ..." on each command instead of healing itself.
         limit = max(prompt_days, pad_days) if region[1] < start_date else prompt_days
         if span <= limit:
             auto_regions.append(region)

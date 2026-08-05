@@ -613,7 +613,7 @@ connection + schema setup), `objectives.py`, `constraints.py`,
   pre-filter** — Garmin reports `avgPower` for running too, and running watts scored
   against a cycling FTP are meaningless. Matching is exact, not substring: an
   unrecognised type surfaces as its own row so you can see which alias to add, and
-  `data pull --from/--until` re-fills the window once you have.
+  `data pull -d START..END` re-fills the window once you have.
 - **Canonicalize on read, not on write.** `completed_activities.activity_type` keeps
   Garmin's raw string; every read path goes through `canonical_sport()`. Overwriting
   `gravel_cycling` with `cycling` in the column would be a lossy write undoable only by
@@ -823,7 +823,7 @@ kind flag. Checked **in order**:
     the durable record that Calendar owes an update, which a boolean reset at write
     time could not survive. `workout push` defaults to **today onward**, so a row
     stranded stale in the past would never be re-pushed; `warn_stale_before` (in
-    `cli/workouts/_helpers.py`) reports the count and the `--from` date to recover it
+    `cli/workouts/_helpers.py`) reports the count and the `-d START..` window to recover it
     rather than silently widening the window.
   - **Orphans** are the reverse direction: an event whose row is gone (fresh DB,
     restored backup, a wipe that skipped Calendar) can no longer be named locally, so
@@ -1163,7 +1163,8 @@ patchable singletons; the handler functions, named
 `run_<command>_<subcommand>()`, live in the `trainmate/cli/` package
 (one module per command family: `status`, `progress`, `goals`, `constraints`,
 `benchmarks`, `context`, `learnings`, `plans`, `data`, `models`, plus the
-`workouts/` **package** — `parser`/`generate`/`edit`/`_helpers`). `help` is the one
+`workouts/` **package** — `parser`/`generate`/`edit`/`_helpers`; `selectors.py` holds the
+shared range grammar and `argparse_ext.py` the parser/help extensions). `help` is the one
 exception — it just introspects the parser tree (`_print_command_tree` in
 `trainmate_cli.py`), so it has no handler of its own.
 
@@ -1179,6 +1180,15 @@ ambiguous set (`s` → `status`, `workout a` → `adapt`, `workout p` → `push`
 destructive command. Anything in the column that is *not* in those two registered
 sets is a prefix, and a prefix silently breaks the day a sibling with the same first
 letters lands; DESIGN_cli_noargs.md §d is the canonical authority on the distinction.
+
+**Range filters** (DESIGN_cli_selectors.md): every command that filters by span takes the
+same four selectors — `-d/--date`, `-m/--mesocycle`, `-M/--macrocycle`, `-g/--goal` — over
+one grammar (`A..B`, either side optional; a bare span carries its unit, `7d`/`2w`). They
+intersect, and `resolve_window` (`cli/selectors.py`) turns them into one (start, end).
+Each command declares its own default window and direction (`forward`/`backward`/`none`)
+when it registers the flags via `add_selector_args`, so no handler carries a private
+"no filter means…" rule. Those five letters (plus `-t/--type`) mean the same thing at every
+level of the tree; `TestSelectorVocabularyInvariants` walks the real parser and pins it.
 
 **A bare command group** (`goal`, `constraint`, `benchmark`, `context`, `learnings`,
 `workout`, `data`, `plan`, and the root) prints that level's full help and exits 1. This
@@ -1200,14 +1210,14 @@ single read-only view that is its whole state (`model`), which acts bare instead
 | `constraint` | `add`        | `cons a` | Author a directive (positional `TITLE`, `--start`, `--end`, `--desc`, `--rest`, `--replan`/`--no-replan`; never prompts — see DESIGN_cli_noargs.md §a2) |
 | `constraint` | `edit`       | `cons e` | Adjust scope / rest / text / replan by ID (`--rest`/`--no-rest`)        |
 | `constraint` | `rm`         | `cons r` | Remove a directive by ID                                                |
-| `constraint` | `list`       | `cons l` | List directives from the current mesocycle onward (`-a`/`--all`, `-v`, `--from`, `--until`; default anchor: active mesocycle start, else show all) |
+| `constraint` | `list`       | `cons l` | List directives from the current mesocycle onward (`-a`/`--all`, `-v`, selectors `-d`/`-m`/`-M`/`-g`; default anchor: active mesocycle start, else show all) |
 | `constraint` | `show`       | `cons s` | Show a directive in detail (incl. plan-shaping status)                  |
 | `constraint` | `wipe`       | —        | Delete all constraints                                                  |
-| `context`    | `add`        | `ctx a`  | Author daily-context signal(s) (positional `METRIC [TEXT…]` or `-l/--label`, `--value N`, `--from`, `--until`; one tagged all-day event per day) |
-| `context`    | `rm`         | `ctx r`  | Remove signal(s) by ID(s), or by `--from`/`--until`/`-m` (deletes calendar event + local row) |
-| `context`    | `list`       | `ctx l`  | List signals (`-m METRIC`, `--from`, `--until`; default window `metrics_lookback_days`) |
+| `context`    | `add`        | `ctx a`  | Author daily-context signal(s) (positional `METRIC [TEXT…]` or `-l/--label`, `--value N`, `-d RANGE` — no `-m`/`-M`, a signal spans days not blocks; one tagged all-day event per day) |
+| `context`    | `rm`         | `ctx r`  | Remove signal(s) by positional ID(s) or metric, and/or selectors `-d`/`-m`/`-M`/`-g` (deletes calendar event + local row) |
+| `context`    | `list`       | `ctx l`  | List signals (positional `METRIC` or `--metric`, selectors `-d`/`-m`/`-M`/`-g`; default window `metrics_lookback_days`) |
 | `context`    | `list-metrics` | `ctx lm` | Show distinct metrics in use with counts and date span                   |
-| `learnings`  | `list`       | `l`      | Show coach learnings (`--sport`, `--confidence`, `--dormant`)            |
+| `learnings`  | `list`       | `l`      | Show coach learnings (`-t/--type/--sport`, `--confidence`, `--dormant`)            |
 | `learnings`  | `show`       | —        | Show a learning's full text + per-week evidence basis by ID             |
 | `learnings`  | `edit`       | —        | Edit a learning's text (`ID TEXT`, both positional)                     |
 | `learnings`  | `rm`         | `r`      | Delete a learning by ID                                                 |
@@ -1215,33 +1225,33 @@ single read-only view that is its whole state (`model`), which acts bare instead
 | `learnings`  | `keep`       | —        | Dismiss + affirm a pending downgrade by ID                             |
 | `learnings`  | `wipe`       | —        | Delete all coach learnings                                             |
 | `plan`       | `generate`   | `pl g`   | Generate/reuse macrocycle+mesocycles (`-f` to force, `-g/--goal ID`)        |
-| `plan`       | `show`       | `pl s`   | Show a periodization plan: strategy, snapshotted inputs (goals, constraints, threshold anchors), mesocycle timeline with each block's workout count/duration/load. Flags: `-g/--goal ID` (any status, not just active), `--version PLAN_ID` for a superseded one, `-a/--all` for every goal that has a plan, `-w/--workouts` to list each mesocycle's sessions |
+| `plan`       | `show`       | `pl s`   | Show a periodization plan: strategy, snapshotted inputs (goals, constraints, threshold anchors), mesocycle timeline with each block's workout count/duration/load. Flags: `-g/--goal ID` (any status, not just active), `-M/--macrocycle ID` for a superseded version — each plan version IS a macrocycle, `-a/--all` for every goal that has a plan, `-w/--workouts` to list each mesocycle's sessions |
 | `plan`       | `versions`   | `pl v`   | List a goal's kept plan versions — active + superseded — with IDs and dates (`-g/--goal ID`) |
 | `plan`       | `diff`       | `pl df`  | Compare two plan versions (`[PLAN_ID_A] [PLAN_ID_B]`, `-g/--goal ID`): strategy + feedback prose, mesocycles added/removed/renamed/re-dated, and snapshotted input deltas. No ID → previous vs active; one ID → that vs active. Prose rewritten wholesale collapses to a note unless `--full`. Comparison logic in `trainmate/plan_diff.py`, shared with `/api/plan/diff` |
-| `plan`       | `rollback`   | `pl rb`  | Restore a superseded plan version + its workouts (`-g/--goal ID`, `--version PLAN_ID`, `-y`); defaults to the chronologically previous version. The inverse of eager generation (DESIGN_plan_rollback.md) |
+| `plan`       | `rollback`   | `pl rb`  | Restore a superseded plan version + its workouts (`-g/--goal ID`, `-M/--macrocycle ID`, `-y`); defaults to the chronologically previous version. The inverse of eager generation (DESIGN_plan_rollback.md) |
 | `plan`       | `rm`         | `pl rm`  | Delete plan for a goal ID. The old `pl d` alias is gone — `d` now prefixes `diff` |
 | `plan`       | `feedback`   | `pl f`   | Add feedback (`--macro` or `--meso ID`, `-g/--goal ID`, text; `--edit` opens `$EDITOR` seeded with current feedback) |
 | `plan`       | `wipe`       | —        | Delete all plans                                                         |
 | `progress`   | `[SPORT ...]` | `pr`    | Show the progress timeline: measured load to date, plan-projected forward (CTL/ATL/TSB), weekly planned-vs-actual bars (`-w/--weeks N`, `--chart [PATH]` for a PNG; DESIGN_progress_timeline.md). `-z`/`--zones` (implied by naming a sport) adds one weekly time-in-zone table per sport — measured behind today, prescribed ahead of it (`--blocks` for block grain, `--power`/`--hr` to force the currency; DESIGN_intensity_distribution.md §9.6/§9.8). The sport argument scopes the **zone tables only**: CTL/ATL/TSB, the projection and the load table stay whole-athlete |
-| `workout`    | `list`       | `w l`    | Show planned workouts. Defaults to today for 7 days. Flags: `-t/--type TYPE`, `-d/--days N`, `-w/--weeks N`, `--from DATE`, `--until DATE`, `--from-mesocycle`, `--until-mesocycle [ID]`, `--mesocycle [ID]`, `-g/--goal [ID]`, `--removed`. |
-| `workout`    | `compare`    | `w c`    | Compare planned vs completed (`analyze_adherence()`): prints PLANNED/ACTUAL per day, flags misses (red), rest violations (red), unplanned high-load (yellow), then a discrepancy summary. Same date flags as `workout list`; default 14-day lookback; `-d/--days`/`-w/--weeks` look *back*; end capped at today. |
-| `workout`    | `generate`   | `w g`    | Generate workouts from active strategy. No horizon flag → `config.workout_generation_span_days` ahead (28 default). Flags: `-g/--goal ID`, `-d/--days N`, `-w/--weeks N`, `--until DATE`, `--until-goal [ID]`, `--until-mesocycle ID`. Eager: archives the previous plan's future workouts and pushes the new ones to Calendar immediately. |
+| `workout`    | `list`       | `w l`    | Show planned workouts. Defaults to a 7-day window from today. Positional `TARGET…` (workout IDs and/or date selectors, e.g. `wo li 12 15 -v`) plus the shared selectors `-d`/`-m`/`-M`/`-g` and `-t/--type TYPE`, `--removed` (DESIGN_cli_selectors.md). |
+| `workout`    | `compare`    | `w c`    | Compare planned vs completed (`analyze_adherence()`): prints PLANNED/ACTUAL per day, flags misses (red), rest violations (red), unplanned high-load (yellow), then a discrepancy summary. Same selectors as `workout list`; default 14-day lookback; a bare span (`-d 7d`) looks *back*; end capped at today. |
+| `workout`    | `generate`   | `w g`    | Generate workouts from active strategy. No horizon flag → `config.workout_generation_span_days` ahead (28 default). Flags: `-g/--goal ID` (the goal to plan for, not a filter), `-d`/`-m` (only the END of the resolved window is used as the horizon), `--until-goal [ID]`. Eager: archives the previous plan's future workouts and pushes the new ones to Calendar immediately. |
 | `workout`    | `rm`         | `w rm`   | Soft-remove by ID (`ID REASON`, both positional): marks `removed`, marks the Calendar event deleted; kept in DB, hidden from list/compare, shown to coach as a cancellation. |
 | `workout`    | `restore`    | `w res`  | Restore soft-removed workout by ID. Clears `removed` flags and syncs to Calendar to remove the `[Deleted]` mark. Unrelated to `workout rollback`, which restores a whole archived batch. |
 | `workout`    | `rollback`   | `w rb`   | Undo a regeneration: archive the upcoming sessions and restore a previously archived batch, re-pushing it to Calendar (`--batch N` per `workout batches`, default the most recent; `-y`). Leaves the active plan version alone — unlike `plan rollback`, so it also undoes a regeneration made under one plan (DESIGN_plan_rollback.md §9). Unrelated to `workout restore`. |
 | `workout`    | `batches`    | `w b`    | List the archived workout batches a rollback can restore, newest first: positional `#N`, archive time, total/restorable counts, date span, plan version |
-| `workout`    | `adapt`      | `w a`    | Run daily adaptation check (`--date YYYY-MM-DD`, `-m` athlete note, `-y` auto-apply) |
+| `workout`    | `adapt`      | `w a`    | Run daily adaptation check (`-d/--date` one day: `YYYY-MM-DD`, `today`, `-1d`; `-m` athlete note — kept, since adapt takes no block selector; `-y` auto-apply) |
 | `workout`    | `push`       | `w p`    | Sync planned workouts to Google Calendar. Defaults to today onward; pushes only unsynced unless `-f`/`--force` re-pushes already-synced ones. |
 | `workout`    | `swap`       | `w s`    | Swap two workouts by dates (`<date> <date>`) or IDs (`<id> <id>`), same kind on both sides, plus a mandatory positional `REASON`. Runs recovery checks (consecutive hard days, load spikes, mesocycle crossings), prompts on warnings unless `-f`; syncs unless `--no-sync`; the reason is folded into `modification_reason`. |
 | `workout`    | `wipe`       | —        | Delete all workouts                                                      |
-| `workout`    | `prune-calendar` | —    | Delete Calendar workout events that no local row references — the orphans a fresh DB, a restored backup, or a wipe that never reached Calendar leaves behind. Ownership read from the `source=TrainMate` tag, not from stored ids; events of soft-removed workouts are kept. `--from`/`--until`/`-d/--days` window it (as on `data wipe`), `-n`/`--dry-run` previews, `-y` skips the prompt |
-| `data`       | `pull`       | `d p`    | Fetch Garmin activities/metrics and Google Calendar context (`-d/--days`/`--from`/`--until`/`--metrics-only`/`--activities-only`/`--sleep`). Defaults to the last 2 days ending today. |
-| `data`       | `bootstrap`  | `d b`    | Cold-start reconstruction over the full backlog; seeds evidence-based learnings, sets the reflect watermark. Flags: `--from`, `--until`, `-d/--days`, `-w/--weeks`, `--context`, `--force`, `--inspect-only`, `--auto`. No date filter → window auto-detected (since previous goal, else 12 wk). |
+| `workout`    | `prune-calendar` | —    | Delete Calendar workout events that no local row references — the orphans a fresh DB, a restored backup, or a wipe that never reached Calendar leaves behind. Ownership read from the `source=TrainMate` tag, not from stored ids; events of soft-removed workouts are kept. `-d RANGE` windows it (as on `data wipe`), `-n`/`--dry-run` previews, `-y` skips the prompt |
+| `data`       | `pull`       | `d p`    | Fetch Garmin activities/metrics and Google Calendar context (`-d RANGE`/`--metrics-only`/`--activities-only`/`--sleep`). Defaults to the last 2 days ending today. |
+| `data`       | `bootstrap`  | `d b`    | Cold-start reconstruction over the full backlog; seeds evidence-based learnings, sets the reflect watermark. Flags: `-d RANGE`, `--context`, `--force`, `--inspect-only`, `--auto`. No date filter → window auto-detected (since previous goal, else 12 wk). |
 | `data`       | `reflect`    | `d r`    | Incremental analysis since the reflect watermark; updates learnings + resolves pending demotions (same flags as `bootstrap`). `--auto`: unattended — staleness demotions auto-apply, contradiction ones stay queued. |
-| `data`       | `show-metrics` | `d sm` | Show athlete metrics over a date range (default 7-day lookback). Standard date-range options plus `-a`/`--all`, `--no-pull`, `--csv`. |
-| `data`       | `show-activities` | `d sa` | Show completed activities over a date range (default 7-day lookback). Date options plus `-a`/`--all`, `-t/--type` filter, `--no-pull`, `--csv`. |
+| `data`       | `show-metrics` | `d sm` | Show athlete metrics over a date range (default 7-day lookback). Selectors `-d`/`-m`/`-M`/`-g` plus `-a`/`--all`, `--no-pull`, `--csv`. |
+| `data`       | `show-activities` | `d sa` | Show completed activities over a date range (default 7-day lookback). Selectors `-d`/`-m`/`-M`/`-g` plus `-a`/`--all`, `-t/--type` filter, `--no-pull`, `--csv`. |
 | `data`       | `backfill-tss` | —      | Recompute the measured `tss` for all stored activities under the current zone model (no Garmin calls), then refresh derived workload |
-| `data`       | `wipe`       | `--garmin`, `--calendar`, `--from/--until/-d/--days`, `-y` | Delete cached data. No scope flag = everything (Garmin evidence + daily context) and reset watermarks; `--garmin`/`--calendar` narrow the scope; date flags restrict to a window |
+| `data`       | `wipe`       | `--garmin`, `--calendar`, `-d RANGE`, `-y` | Delete cached data. No scope flag = everything (Garmin evidence + daily context) and reset watermarks; `--garmin`/`--calendar` narrow the scope; date flags restrict to a window |
 | `model`      | `list`       | `model l` | List the models configured under `llm.models`, numbered, active one marked. A bare `model` does the same — the documented exception to the bare-group rule (DESIGN_cli_noargs.md §a3, applied by DESIGN_model_selection.md §4) |
 | `model`      | `set`        | `model s`, `model use` | Choose the model, by list number (`model set 3`) or full identifier. Stored in `settings.llm_model`; survives restarts |
 | `model`      | `reset`      | —        | Forget the stored choice and fall back to the first `llm.models` entry |
@@ -1417,9 +1427,10 @@ flag (DESIGN_pmc_fitness_fatigue.md §5.2). Forward taper projection — project
 event-day TSB over the plan's own workouts — is a deferred Phase 2 follow-up.
 
 ### Workout Generation (`workout generate`)
-1. CLI resolves the generation horizon (end date) from flags in priority order:
-   `--days` / `--weeks` → `--until DATE` → `--until-goal [ID]` →
-   `--until-mesocycle ID` → `config.workout_generation_span_days` (default 28).
+1. CLI resolves the generation horizon (end date): `--until-goal [ID]` if given, else the
+   END of whatever `-d`/`-m` select (`-d 4w`, `-d ..2026-09-01`, `-m 5` — generation always
+   starts today, so a selector's start is ignored), else
+   `config.workout_generation_span_days` (default 28). See DESIGN_cli_selectors.md §5.
 1b. Before spending the LLM call, the CLI confirms the replacement when live
    workouts already exist from today onward — a regen is archive-and-rebuild, not
    fill-in, so a repeat run would otherwise silently archive manual edits. The
@@ -1606,7 +1617,7 @@ The shared core then:
 - **Plan** = periodization strategy: one *active* macrocycle (per objective, with
   superseded versions kept) + mesocycle blocks.  Commands:
   `plan generate/show/versions/diff/rm/rollback/feedback`. `plan versions` lists every
-  kept version; `plan show --version <id>` renders a specific (e.g. superseded) one,
+  kept version; `plan show --macrocycle <id>` renders a specific (e.g. superseded) one,
   `--all` every goal's, `--workouts` each mesocycle's sessions; `plan diff` compares two
   versions.
 - **Workouts** = daily microcycle activities implementing the mesocycle focus.
@@ -1936,7 +1947,7 @@ date, so its runway shrinks to nothing as that block ends. Widening the range in
 next block would let a daily, lag-prone recovery signal rewrite periodization that
 `plan`/`workout generate` own. Instead both sides are made aware of the boundary: the
 prompt gains a terminal-window section, and the CLI points at
-`workout generate --until-mesocycle <id>` (`_print_block_boundary_hint` in
+`workout generate -m ..<id>` (`_print_block_boundary_hint` in
 `cli/workouts/generate.py`), which already re-reads the same recent-metrics window. Note
 that flag sets only an *end* date — generate still starts from today, so it also rewrites
 the ending block's remaining days.

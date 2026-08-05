@@ -17,6 +17,7 @@ from trainmate.util import (
     today_date as _today_date,
 )
 from trainmate.cli.common import fmt_date, ensure_recent_data, mark_adherence_from_results
+from trainmate.cli.selectors import resolve_window
 
 
 
@@ -93,28 +94,13 @@ def warn_stale_before(start_date: str) -> None:
     print(yellow(
         f"Note: {len(stale)} {label} before {start_date} still read [STALE] — their "
         f"calendar events are out of date and this push did not cover them. "
-        f"Run {cmd(f'workout push --from {earliest}')} to update them."
+        f"Run {cmd(f'workout push -d {earliest}..')} to update them."
     ))
 def _resolve_workout_end_date(
     args: argparse.Namespace, resolved_goal: dict | None
 ) -> str | None:
-    """Returns the end date string for workout generation based on CLI horizon flags."""
-    today = _today_date()
-
-    if getattr(args, 'horizon_days', None) is not None:
-        return (today + timedelta(days=args.horizon_days)).strftime("%Y-%m-%d")
-
-    if getattr(args, 'horizon_weeks', None) is not None:
-        return (today + timedelta(days=round(args.horizon_weeks * 7))).strftime("%Y-%m-%d")
-
-    if getattr(args, 'horizon_until', None) is not None:
-        try:
-            datetime.strptime(args.horizon_until, "%Y-%m-%d")
-        except ValueError:
-            print(red(f"Invalid date format for --until: '{args.horizon_until}'. Use YYYY-MM-DD."))
-            sys.exit(1)
-        return args.horizon_until
-
+    """The horizon for `workout generate`: a goal's target date, or the END of whatever the
+    selectors cover. Generation always starts today, so a selector's start is not used."""
     if getattr(args, 'horizon_goal_id', None) is not None:
         goal_id = args.horizon_goal_id
         if goal_id == -1:
@@ -129,120 +115,9 @@ def _resolve_workout_end_date(
             sys.exit(1)
         return goal['target_date']
 
-    if getattr(args, 'horizon_meso_id', None) is not None:
-        meso = cli.db.get_mesocycle(args.horizon_meso_id)
-        if meso is None:
-            print(red(f"Mesocycle with ID {args.horizon_meso_id} not found."))
-            sys.exit(1)
-        return meso['end_date']
+    return resolve_window(args)[1]  # None falls back to the config default span
 
-    return None  # fall back to config default in workout_generate()
-def _resolve_workout_date_range(
-    args: argparse.Namespace,
-) -> tuple[str | None, str | None]:
-    """Resolves (start_date, end_date) from the shared date-filter CLI args."""
-    today_str = _today_str()
 
-    # Resolve start_date
-    start_date = None
-    if getattr(args, 'from_date', None) is not None:
-        start_date = args.from_date
-    elif getattr(args, 'from_meso', False):
-        active_meso = cli.db.get_active_mesocycle(today_str)
-        if not active_meso:
-            print(red("Error: No active mesocycle found to start from."))
-            sys.exit(1)
-        start_date = active_meso['start_date']
-    elif getattr(args, 'meso_id', None) is not None:
-        meso_id = args.meso_id
-        if meso_id == -1:
-            active_meso = cli.db.get_active_mesocycle(today_str)
-            if not active_meso:
-                print(red("Error: No active mesocycle found."))
-                sys.exit(1)
-            meso = active_meso
-        else:
-            meso = cli.db.get_mesocycle(meso_id)
-            if not meso:
-                print(red(f"Error: Mesocycle with ID {meso_id} not found."))
-                sys.exit(1)
-        start_date = meso['start_date']
-    elif getattr(args, 'until_meso_id', None) is not None:
-        meso_id = args.until_meso_id
-        if meso_id == -1:
-            active_meso = cli.db.get_active_mesocycle(today_str)
-            if not active_meso:
-                print(red("Error: No active mesocycle found."))
-                sys.exit(1)
-            meso = active_meso
-        else:
-            meso = cli.db.get_mesocycle(meso_id)
-            if not meso:
-                print(red(f"Error: Mesocycle with ID {meso_id} not found."))
-                sys.exit(1)
-        # --until-mesocycle starts from today by default
-        start_date = today_str
-    elif getattr(args, 'goal_id', None) is not None:
-        goal_id = args.goal_id
-        if goal_id == -1:
-            active_goal = cli.db.get_active_objective()
-            if not active_goal:
-                print(red("Error: No active goal found."))
-                sys.exit(1)
-            goal_id = active_goal['id']
-        macro = cli.db.get_macrocycle_for_objective(goal_id)
-        if not macro:
-            print(red(f"Error: No plan exists for Goal ID {goal_id}."))
-            sys.exit(1)
-        mesos = cli.db.get_mesocycles_for_macrocycle(macro['id'])
-        if not mesos:
-            print(red(f"Error: No mesocycles found for Goal ID {goal_id}."))
-            sys.exit(1)
-        start_date = min(m['start_date'] for m in mesos)
-    elif (
-        getattr(args, 'days', None) is not None
-        or getattr(args, 'weeks', None) is not None
-        or getattr(args, 'until_date', None) is not None
-    ):
-        start_date = today_str
-
-    # Resolve end_date — map list/push args to the horizon_* namespace expected
-    # by _resolve_workout_end_date()
-    target_meso_id = None
-    if getattr(args, 'until_meso_id', None) is not None:
-        target_meso_id = args.until_meso_id
-    elif getattr(args, 'meso_id', None) is not None:
-        target_meso_id = args.meso_id
-
-    if target_meso_id == -1:
-        active_meso = cli.db.get_active_mesocycle(today_str)
-        if not active_meso:
-            print(red("Error: No active mesocycle found."))
-            sys.exit(1)
-        target_meso_id = active_meso['id']
-
-    target_goal_id = None
-    if getattr(args, 'goal_id', None) is not None:
-        target_goal_id = args.goal_id
-        if target_goal_id == -1:
-            active_goal = cli.db.get_active_objective()
-            if not active_goal:
-                print(red("Error: No active goal found."))
-                sys.exit(1)
-            target_goal_id = active_goal['id']
-
-    horizon_args = argparse.Namespace(
-        horizon_days=getattr(args, 'days', None),
-        horizon_weeks=getattr(args, 'weeks', None),
-        horizon_until=getattr(args, 'until_date', None),
-        horizon_goal_id=target_goal_id,
-        horizon_meso_id=target_meso_id,
-    )
-
-    next_goal = cli.db.get_active_objective()
-    end_date = _resolve_workout_end_date(horizon_args, next_goal)
-
-    return start_date, end_date
 def _classify_swap_target(value: str) -> str | None:
     """Classifies a swap positional as 'date' (YYYY-MM-DD) or 'id' (bare integer)."""
     if re.fullmatch(r"\d{4}-\d{2}-\d{2}", value):

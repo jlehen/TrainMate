@@ -14,6 +14,7 @@ import trainmate_cli as cli
 from trainmate.config import config
 from trainmate.util import bold, dim, green, red, yellow, cyan, magenta
 from trainmate.util import today_str as _today_str
+from trainmate.cli.selectors import add_selector_args, has_selector, resolve_window
 
 
 def _date_range(start: str, end: str) -> Iterator[str]:
@@ -52,10 +53,10 @@ def run_context_add(args: argparse.Namespace) -> None:
         print(red("No Google Calendar configured; cannot author context events."))
         sys.exit(1)
 
-    start = args.from_date or _today_str()
-    end = args.until_date or start
-    if end < start:
-        print(red("--until is before --from."))
+    start, end = resolve_window(args)
+    start = start or _today_str()
+    if end is None:
+        print(red("A context signal needs a bounded range: -d DATE or -d A..B."))
         sys.exit(1)
 
     metric = args.metric
@@ -89,19 +90,13 @@ def run_context_add(args: argparse.Namespace) -> None:
 def run_context_list(args: argparse.Namespace) -> None:
     """Lists context signals within a date window (default: the coach's metrics
     lookback), optionally filtered by metric."""
-    end = args.until_date or _today_str()
-    if args.from_date:
-        start = args.from_date
-    else:
-        window = config.metrics_lookback_days
-        start = (
-            datetime.strptime(end, "%Y-%m-%d").date() - timedelta(days=window - 1)
-        ).strftime("%Y-%m-%d")
+    start, end = resolve_window(args)
+    metric = args.metric or args.metric_target
 
-    rows = cli.db.get_daily_context(start, end, metric=args.metric)
+    rows = cli.db.get_daily_context(start, end, metric=metric)
     title = f"=== DAILY CONTEXT {start}..{end}"
-    if args.metric:
-        title += f" [{args.metric}]"
+    if metric:
+        title += f" [{metric}]"
     print(bold(cyan(title + " ===")))
     if not rows:
         print(dim("(none)"))
@@ -131,22 +126,25 @@ def run_context_list_metrics(args: argparse.Namespace) -> None:
 def run_context_rm(args: argparse.Namespace) -> None:
     """Removes context signal(s) by id, or by date range + metric. Deletes the
     calendar event before the local row so a full re-pull can't resurrect it."""
-    if args.ids:
+    ids = [t for t in (args.targets or []) if t.isdigit()]
+    metric = args.metric or next((t for t in (args.targets or []) if not t.isdigit()), None)
+    if ids:
         rows = []
-        for cid in args.ids:
-            row = cli.db.get_daily_context_by_id(cid)
+        for cid in ids:
+            row = cli.db.get_daily_context_by_id(int(cid))
             if row:
                 rows.append(row)
             else:
                 print(yellow(f"No context signal with ID {cid}."))
     else:
-        if not (args.from_date or args.until_date or args.metric):
+        if not (has_selector(args) or metric):
             print(red(
-                "Refusing to remove everything: give IDs, or narrow with "
-                "--from/--until/--metric."
+                "Refusing to remove everything: give IDs, a metric, or narrow with "
+                "-d/-m/-M/-g."
             ))
             sys.exit(1)
-        rows = cli.db.get_daily_context(args.from_date, args.until_date, args.metric)
+        start, end = resolve_window(args)
+        rows = cli.db.get_daily_context(start, end, metric)
         if not rows:
             print(yellow("No matching context signals."))
             return
@@ -211,35 +209,26 @@ def add_context_parser(subparsers):
         "--value", type=float, metavar="N",
         help="Optional free numeric magnitude (severity, °C, count — uninterpreted)"
     )
-    ctx_add.add_argument(
-        "--from", "--from-date", dest="from_date", metavar="YYYY-MM-DD",
-        help="Start date (default: today)"
-    )
-    ctx_add.add_argument(
-        "--until", "--until-date", dest="until_date", metavar="YYYY-MM-DD",
-        help="End date (default: --from)"
-    )
+    # No -m/-M here: a signal is written over days, and a block is not a day the athlete
+    # can hand to the calendar. -d must stay bounded for the same reason.
+    add_selector_args(ctx_add, direction="none", default="today")
 
     # context rm
     ctx_rm = context_subparsers.add_parser(
         "rm",
         help="Remove signal(s) by ID, or by date range + metric",
         description=(
-            "Delete context signal(s). Pass row IDs, or narrow with "
-            "--from/--until/--metric. The calendar event is deleted too, so a full "
-            "re-pull cannot resurrect it."
+            "Delete context signal(s). Name row IDs or a metric, and/or narrow with "
+            "-d/-m/-M/-g. The calendar event is deleted too, so a full re-pull cannot "
+            "resurrect it."
         )
     )
-    ctx_rm.add_argument("ids", nargs="*", type=int, help="Context row IDs to remove")
-    ctx_rm.add_argument("-m", "--metric", help="Restrict range removal to this metric")
     ctx_rm.add_argument(
-        "--from", "--from-date", dest="from_date", metavar="YYYY-MM-DD",
-        help="Start date for range removal"
+        "targets", nargs="*", metavar="TARGET",
+        help="Context row IDs to remove, or a metric name to remove within the window"
     )
-    ctx_rm.add_argument(
-        "--until", "--until-date", dest="until_date", metavar="YYYY-MM-DD",
-        help="End date for range removal"
-    )
+    ctx_rm.add_argument("--metric", help="Restrict range removal to this metric")
+    add_selector_args(ctx_rm, meso=True, macro=True, goal=True, direction="none")
     ctx_rm.add_argument(
         "-y", "--yes", action="store_true", help="Skip confirmation for multi-row removal"
     )
@@ -249,14 +238,13 @@ def add_context_parser(subparsers):
         "list", aliases=["l"],
         help="List context signals (default window: the coach's metrics lookback)"
     )
-    ctx_list.add_argument("-m", "--metric", help="Filter to a single metric")
     ctx_list.add_argument(
-        "--from", "--from-date", dest="from_date", metavar="YYYY-MM-DD",
-        help="Start date (default: metrics_lookback_days before --until)"
+        "metric_target", nargs="?", metavar="METRIC", help="Filter to a single metric"
     )
-    ctx_list.add_argument(
-        "--until", "--until-date", dest="until_date", metavar="YYYY-MM-DD",
-        help="End date (default: today)"
+    ctx_list.add_argument("--metric", help="Filter to a single metric (same as the positional)")
+    add_selector_args(
+        ctx_list, meso=True, macro=True, goal=True, direction="backward",
+        default=f"{config.metrics_lookback_days}d", span_days=config.metrics_lookback_days,
     )
 
     # context list-metrics

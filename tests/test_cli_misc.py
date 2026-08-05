@@ -188,7 +188,7 @@ class TestCliMisc(unittest.TestCase):
 
         cases = [
             (["goal", "wipe"], seed_goal, count_goal,
-             "All training objectives wiped successfully."),
+             "All goals wiped successfully."),
             (["constraint", "wipe"], seed_constraint, count_constraint,
              "All constraints wiped successfully."),
             (["plan", "wipe"], seed_plan, count_plan,
@@ -225,14 +225,14 @@ class TestCliMisc(unittest.TestCase):
     @patch("trainmate_cli.coach_service")
     def test_no_pull_behavior_across_commands(self, mock_coach, mock_garmin):
         # 1. workout compare without --no-pull
-        exit_code, stdout, stderr = self.run_cli(["workout", "compare", "--days", "3"])
+        exit_code, stdout, stderr = self.run_cli(["workout", "compare", "-d", "3d"])
         self.assertEqual(exit_code, 0)
         mock_garmin.ensure_data.assert_called_once()
 
         # 2. workout compare with --no-pull
         mock_garmin.ensure_data.reset_mock()
         exit_code, stdout, stderr = self.run_cli(
-            ["workout", "compare", "--days", "3", "--no-pull"]
+            ["workout", "compare", "-d", "3d", "--no-pull"]
         )
         self.assertEqual(exit_code, 0)
         mock_garmin.ensure_data.assert_not_called()
@@ -252,7 +252,7 @@ class TestCliMisc(unittest.TestCase):
         # 5. data bootstrap with --no-pull
         mock_garmin.ensure_data.reset_mock()
         exit_code, stdout, stderr = self.run_cli(
-            ["data", "bootstrap", "--from", "2026-06-01", "--no-pull"]
+            ["data", "bootstrap", "-d", "2026-06-01..", "--no-pull"]
         )
         self.assertEqual(exit_code, 0)
         mock_coach.data_bootstrap.assert_called_once()

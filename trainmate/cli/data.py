@@ -1,7 +1,7 @@
 import csv as csv_mod
 import argparse
 import sys
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Optional
 import trainmate_cli as cli
 from trainmate import intensity
@@ -16,8 +16,8 @@ from trainmate.util import (
 )
 from trainmate.cli.common import (
     fmt_date, ensure_recent_data, mark_adherence_range, pmc_warmup_cutoff,
-    resolve_cleanup_range,
 )
+from trainmate.cli.selectors import add_selector_args, has_selector, resolve_window
 
 
 def run_data_pull(args: argparse.Namespace) -> None:
@@ -27,14 +27,7 @@ def run_data_pull(args: argparse.Namespace) -> None:
     options) and advances the watermark. The watermark/auto-ensure logic lives in
     cli.garmin.ensure_data, which commands call when reading.
     """
-    end_date = args.until_date or _today_str()
-    if args.from_date:
-        start_date = args.from_date
-    else:
-        days = max(1, args.days)
-        start_date = (
-            datetime.strptime(end_date, "%Y-%m-%d").date() - timedelta(days=days - 1)
-        ).strftime("%Y-%m-%d")
+    start_date, end_date = resolve_window(args)
 
     pulled = False
     try:
@@ -66,9 +59,10 @@ def run_data_pull(args: argparse.Namespace) -> None:
 def run_data_backfill_tss(args: argparse.Namespace) -> None:
     """Recomputes stored TSS for all cached activities under the current
     zone-based hierarchy, then refreshes the derived PMC."""
+    start_date, end_date = resolve_window(args)
     changed = cli.garmin.backfill_tss(
-        start_date=args.from_date,
-        end_date=args.until_date,
+        start_date=start_date,
+        end_date=end_date,
         verbose=getattr(args, "verbose", False),
     )
     print(green(f"Backfill complete. {changed} activities updated."))
@@ -77,14 +71,14 @@ def run_data_backfill_tss(args: argparse.Namespace) -> None:
 def run_data_wipe(args: argparse.Namespace) -> None:
     """Wipes locally cached data after confirmation. --garmin / --calendar scope the
     wipe to Garmin evidence or ingested daily context respectively (neither flag = both);
-    --from/--until/--days restrict it to a date window."""
+    -d restricts it to a date window."""
     garmin = getattr(args, "garmin", False)
     calendar = getattr(args, "calendar", False)
     # No scope flag means "everything" — keep the historical full-wipe behaviour.
     if not garmin and not calendar:
         garmin = calendar = True
 
-    start, end = resolve_cleanup_range(args)
+    start, end = resolve_window(args)
 
     scope_parts = []
     if garmin:
@@ -121,113 +115,9 @@ def run_data_wipe(args: argparse.Namespace) -> None:
     print(green(f"Wiped {scope}{window}."))
 
 
-def _resolve_historical_date_range(
-    args: argparse.Namespace, default_days: int = 7
-) -> tuple[Optional[str], Optional[str]]:
-    """Resolves (start_date, end_date) for historical queries, looking back by default."""
-    if getattr(args, 'all', False):
-        return None, None
-
-    today_str = _today_str()
-
-    # Determine end_date (default is today_str, capped/anchored by until/mesocycle/goal)
-    end_date = today_str
-    if getattr(args, 'until_date', None) is not None:
-        end_date = args.until_date
-    elif getattr(args, 'until_meso_id', None) is not None:
-        meso_id = args.until_meso_id
-        if meso_id == -1:
-            active_meso = cli.db.get_active_mesocycle(today_str)
-            if not active_meso:
-                print(red("Error: No active mesocycle found."))
-                sys.exit(1)
-            meso = active_meso
-        else:
-            meso = cli.db.get_mesocycle(meso_id)
-            if not meso:
-                print(red(f"Error: Mesocycle with ID {meso_id} not found."))
-                sys.exit(1)
-        end_date = meso['end_date']
-    elif getattr(args, 'meso_id', None) is not None:
-        meso_id = args.meso_id
-        if meso_id == -1:
-            active_meso = cli.db.get_active_mesocycle(today_str)
-            if not active_meso:
-                print(red("Error: No active mesocycle found."))
-                sys.exit(1)
-            meso = active_meso
-        else:
-            meso = cli.db.get_mesocycle(meso_id)
-            if not meso:
-                print(red(f"Error: Mesocycle with ID {meso_id} not found."))
-                sys.exit(1)
-        end_date = meso['end_date']
-    elif getattr(args, 'goal_id', None) is not None:
-        goal_id = args.goal_id
-        if goal_id == -1:
-            active_goal = cli.db.get_active_objective()
-            if not active_goal:
-                print(red("Error: No active goal found."))
-                sys.exit(1)
-            goal_id = active_goal['id']
-        macro = cli.db.get_macrocycle_for_objective(goal_id)
-        if not macro:
-            print(red(f"Error: No plan exists for Goal ID {goal_id}."))
-            sys.exit(1)
-        mesos = cli.db.get_mesocycles_for_macrocycle(macro['id'])
-        if not mesos:
-            print(red(f"Error: No mesocycles found for Goal ID {goal_id}."))
-            sys.exit(1)
-        end_date = max(m['end_date'] for m in mesos)
-
-    # Validate end_date format
-    try:
-        end_date_obj = datetime.strptime(end_date, "%Y-%m-%d").date()
-    except ValueError:
-        print(red(f"Invalid date format for end date: '{end_date}'. Use YYYY-MM-DD."))
-        sys.exit(1)
-
-    # Determine start_date
-    start_date = None
-    if getattr(args, 'from_date', None) is not None:
-        start_date = args.from_date
-    elif getattr(args, 'from_meso', False):
-        active_meso = cli.db.get_active_mesocycle(today_str)
-        if not active_meso:
-            print(red("Error: No active mesocycle found to start from."))
-            sys.exit(1)
-        start_date = active_meso['start_date']
-    elif getattr(args, 'meso_id', None) is not None:
-        start_date = meso['start_date']
-    elif getattr(args, 'goal_id', None) is not None:
-        start_date = min(m['start_date'] for m in mesos)
-
-    # If start_date is still not resolved, resolve it via days/weeks lookback from end_date
-    if start_date is None:
-        days = getattr(args, 'days', None)
-        weeks = getattr(args, 'weeks', None)
-        if days is not None:
-            start_date_obj = end_date_obj - timedelta(days=days - 1)
-        elif weeks is not None:
-            ndays = max(1, round(weeks * 7))
-            start_date_obj = end_date_obj - timedelta(days=ndays - 1)
-        else:
-            start_date_obj = end_date_obj - timedelta(days=default_days - 1)
-        start_date = start_date_obj.strftime("%Y-%m-%d")
-
-    # Validate start_date format
-    try:
-        datetime.strptime(start_date, "%Y-%m-%d")
-    except ValueError:
-        print(red(f"Invalid date format for start date: '{start_date}'. Use YYYY-MM-DD."))
-        sys.exit(1)
-
-    return start_date, end_date
-
-
 def run_data_show_metrics(args: argparse.Namespace) -> None:
     """Displays athlete metrics over the resolved date range."""
-    start_date, end_date = _resolve_historical_date_range(args, default_days=7)
+    start_date, end_date = (None, None) if args.all else resolve_window(args)
 
     if not getattr(args, 'no_pull', False) and not getattr(args, 'all', False):
         try:
@@ -421,7 +311,7 @@ def _show_activities_zones(activities: list) -> None:
 
 def run_data_show_activities(args: argparse.Namespace) -> None:
     """Displays completed activities over the resolved date range."""
-    start_date, end_date = _resolve_historical_date_range(args, default_days=7)
+    start_date, end_date = (None, None) if args.all else resolve_window(args)
 
     if not getattr(args, 'no_pull', False) and not getattr(args, 'all', False):
         try:
@@ -589,12 +479,11 @@ def _show_activities_csv(activities: list) -> None:
 def run_data_bootstrap(args: argparse.Namespace) -> None:
     """Cold-start reconstruction over the full training backlog (seeds learnings,
     establishes the reflect watermark)."""
+    window = resolve_window(args)
     try:
         result = cli.coach_service.data_bootstrap(
-            from_date_str=args.from_date,
-            until_date_str=args.until_date,
-            days=args.days,
-            weeks=args.weeks,
+            from_date_str=window[0],
+            until_date_str=window[1],
             context=args.context,
             force=args.force,
             inspect_only=args.inspect_only,
@@ -609,12 +498,11 @@ def run_data_bootstrap(args: argparse.Namespace) -> None:
 
 def run_data_reflect(args: argparse.Namespace) -> None:
     """Incremental reflection over evidence accrued since the last reflect watermark."""
+    window = resolve_window(args)
     try:
         result = cli.coach_service.data_reflect(
-            from_date_str=args.from_date,
-            until_date_str=args.until_date,
-            days=args.days,
-            weeks=args.weeks,
+            from_date_str=window[0],
+            until_date_str=window[1],
             context=args.context,
             force=args.force,
             inspect_only=args.inspect_only,
@@ -720,7 +608,7 @@ def _render_analysis_report(result: dict, inspect_only: bool) -> None:
         print(red(f"Error rendering workout analysis: {e}"))
 
 
-def add_data_parser(subparsers, pull_bypass_parser, llm_debug_parser, basic_date_parser, plan_date_parser, sport_type_parser):
+def add_data_parser(subparsers, pull_bypass_parser, llm_debug_parser):
     # data command & subparsers
     data_parser = subparsers.add_parser(
         "data",
@@ -737,29 +625,18 @@ def add_data_parser(subparsers, pull_bypass_parser, llm_debug_parser, basic_date
         description=(
             "Fetch activities and daily metrics directly from Garmin Connect into the "
             "local cache, advancing the sync watermark. With no range, pulls the last "
-            "2 days ending today (--days N for a different window, or --from/--until "
-            "for an explicit range). Pulls both metrics and activities unless "
+            "2 days ending today (-d 7d for a different window, or -d A..B for an "
+            "explicit range). Pulls both metrics and activities unless "
             "--metrics-only/--activities-only is given. Also syncs tagged daily-context "
             "events (alcohol, sleep, stress, …) from Google Calendar into the local cache. "
             "Past Calendar events in the pulled range are stamped with the adherence "
             "verdict unless --no-mark is given."
         )
     )
-    d_pull.add_argument(
-        "-d", "--days", type=int, default=2, metavar="N",
-        help="Number of days to pull, ending today (default: 2)"
-    )
+    add_selector_args(d_pull, direction="backward", default="2d", span_days=2)
     d_pull.add_argument(
         "--no-mark", action="store_true", dest="no_mark",
         help="Skip stamping past Calendar events with the adherence verdict"
-    )
-    d_pull.add_argument(
-        "--from", "--from-date", dest="from_date", metavar="YYYY-MM-DD",
-        help="Start date for an explicit range (overrides --days)"
-    )
-    d_pull.add_argument(
-        "--until", "--until-date", dest="until_date", metavar="YYYY-MM-DD",
-        help="End date for an explicit range (defaults to today)"
     )
     d_pull.add_argument(
         "--sleep", type=float, dest="sleep", metavar="SECONDS",
@@ -776,7 +653,7 @@ def add_data_parser(subparsers, pull_bypass_parser, llm_debug_parser, basic_date
     # data bootstrap — cold-start backward reconstruction over the full backlog
     d_boot = data_subparsers.add_parser(
         "bootstrap", aliases=["b"], advanced=True,
-        parents=[pull_bypass_parser, basic_date_parser, llm_debug_parser],
+        parents=[pull_bypass_parser, llm_debug_parser],
         help="Reconstruct macro/mesocycles from your full backlog (run once): "
              "seeds coach learnings + a cached reconstruction fed to 'plan generate'",
         description=(
@@ -795,7 +672,7 @@ def add_data_parser(subparsers, pull_bypass_parser, llm_debug_parser, basic_date
     # data reflect — incremental reflection over evidence since the last reflect
     d_reflect = data_subparsers.add_parser(
         "reflect",
-        parents=[pull_bypass_parser, basic_date_parser, llm_debug_parser],
+        parents=[pull_bypass_parser, llm_debug_parser],
         help="Update coach learnings from how the athlete responded to training "
              "since the last reflect (incremental; no reconstruction)",
         description=(
@@ -810,6 +687,9 @@ def add_data_parser(subparsers, pull_bypass_parser, llm_debug_parser, basic_date
         )
     )
     for d_an in (d_boot, d_reflect):
+        # direction="none": an unbounded side stays unbounded, so the service keeps
+        # auto-detecting the window it was never told (a bare span still looks back).
+        add_selector_args(d_an, direction="none")
         d_an.add_argument(
             "--context", dest="context",
             help="Optional text context detailing subjective athlete notes (travel, illness, etc.)"
@@ -834,14 +714,7 @@ def add_data_parser(subparsers, pull_bypass_parser, llm_debug_parser, basic_date
         help="Recompute TSS for all stored activities using the current "
              "zone-based model (no Garmin calls needed)"
     )
-    d_btss.add_argument(
-        "--from", "--from-date", dest="from_date", metavar="YYYY-MM-DD",
-        help="Only process activities on or after this date"
-    )
-    d_btss.add_argument(
-        "--until", "--until-date", dest="until_date", metavar="YYYY-MM-DD",
-        help="Only process activities on or before this date"
-    )
+    add_selector_args(d_btss, direction="none")
     d_btss.add_argument(
         "-v", "--verbose", action="store_true",
         help="List activities with low HR-zone coverage that need an RPE"
@@ -850,7 +723,7 @@ def add_data_parser(subparsers, pull_bypass_parser, llm_debug_parser, basic_date
     # data show-metrics
     d_sm = data_subparsers.add_parser(
         "show-metrics", aliases=["sm"],
-        parents=[pull_bypass_parser, plan_date_parser],
+        parents=[pull_bypass_parser],
         help="Show athlete metrics over a date range",
         description=(
             "Show cached daily athlete metrics (RHR, HRV, sleep, stress) over a date "
@@ -859,6 +732,8 @@ def add_data_parser(subparsers, pull_bypass_parser, llm_debug_parser, basic_date
             "--no-pull or --all is given. Use --csv for machine-readable output."
         )
     )
+    add_selector_args(d_sm, meso=True, macro=True, goal=True, direction="backward",
+                      default="7d")
     d_sm.add_argument(
         "--csv", action="store_true", dest="csv",
         help="Output data as CSV for script consumption"
@@ -871,7 +746,7 @@ def add_data_parser(subparsers, pull_bypass_parser, llm_debug_parser, basic_date
     # data show-activities
     d_sa = data_subparsers.add_parser(
         "show-activities", aliases=["sa"],
-        parents=[pull_bypass_parser, plan_date_parser, sport_type_parser],
+        parents=[pull_bypass_parser],
         help="Show completed activities over a date range",
         description=(
             "Show cached completed activities over a date range. With no date filter, "
@@ -884,6 +759,8 @@ def add_data_parser(subparsers, pull_bypass_parser, llm_debug_parser, basic_date
             "no RPE was entered."
         )
     )
+    add_selector_args(d_sa, meso=True, macro=True, goal=True, sport=True,
+                      direction="backward", default="7d")
     d_sa.add_argument(
          "--csv", action="store_true", dest="csv",
          help="Output data as CSV for script consumption (every zone column, both "
@@ -909,9 +786,9 @@ def add_data_parser(subparsers, pull_bypass_parser, llm_debug_parser, basic_date
         description=(
             "Delete locally cached data. With no scope flag, wipes everything (Garmin "
             "metrics, baselines, activities, and ingested daily-context signals) and "
-            "resets the sync watermarks. --garmin or --calendar narrow the scope; "
-            "--from/--until/--days restrict it to a date window (the next 'data pull' "
-            "re-fetches what was removed)."
+            "resets the sync watermarks. --garmin or --calendar narrow the scope; -d "
+            "restricts it to a date window (the next 'data pull' re-fetches what was "
+            "removed)."
         ),
     )
     d_wipe.add_argument(
@@ -922,18 +799,7 @@ def add_data_parser(subparsers, pull_bypass_parser, llm_debug_parser, basic_date
         "--calendar", "--context", action="store_true", dest="calendar",
         help="Wipe only ingested daily-context signals and reset the Calendar sync token"
     )
-    d_wipe.add_argument(
-        "-d", "--days", type=int, metavar="N",
-        help="Restrict to the trailing N days (ending --until, default today)"
-    )
-    d_wipe.add_argument(
-        "--from", "--from-date", dest="from_date", metavar="YYYY-MM-DD",
-        help="Restrict to rows on or after this date"
-    )
-    d_wipe.add_argument(
-        "--until", "--until-date", dest="until_date", metavar="YYYY-MM-DD",
-        help="Restrict to rows on or before this date"
-    )
+    add_selector_args(d_wipe, direction="none")
     d_wipe.add_argument("-y", "--yes", action="store_true", help="Skip confirmation prompt")
     
 

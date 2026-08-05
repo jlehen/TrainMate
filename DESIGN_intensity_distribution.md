@@ -270,7 +270,7 @@ watts land in `bike_avg_watts` and its zones get scored against a cycling FTP.
 **Exact over substring, because a miss is visible and repairable.** An unrecognised type
 falls through `canonical_sport` unchanged and appears as its own row with an HR row and no
 power row — you see `e_bike_ride` sitting in the table and know what alias to add. And
-`data pull --from/--until` re-pulls any window while `save_completed_activity` upserts every
+`data pull -d A..B` re-pulls any window while `save_completed_activity` upserts every
 zone column explicitly, so adding the alias and re-pulling that range fills the data back in.
 Nothing is lost permanently, which is what would otherwise have argued for keeping the
 permissive substring net.

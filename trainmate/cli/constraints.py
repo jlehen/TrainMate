@@ -17,6 +17,7 @@ from trainmate.util import (
     today_str as _today_str,
 )
 from trainmate.cli.common import fmt_date
+from trainmate.cli.selectors import add_selector_args, has_selector, resolve_window
 
 
 def _resolve_dates(args: argparse.Namespace) -> tuple:
@@ -150,19 +151,19 @@ def run_constraint_edit(args: argparse.Namespace) -> None:
 def run_constraint_list(args: argparse.Namespace) -> None:
     """Lists directives from the start of the current mesocycle onward — the training block
     being planned — plus everything upcoming (open-ended). --all drops the lower bound and
-    shows every directive, past included; --from overrides the lower bound explicitly and
-    --until caps the upper end (§4). With no active mesocycle to anchor on (no plan yet),
-    every constraint is shown."""
+    shows every directive, past included; a selector (-d/-m/-M/-g) sets the window
+    explicitly (§4). With no active mesocycle to anchor on (no plan yet), every constraint
+    is shown."""
     if getattr(args, 'all', False):
-        start = None
-    elif args.from_date:
-        start = args.from_date
+        start = end = None
+    elif has_selector(args):
+        start, end = resolve_window(args)
     else:
         # Anchor on the current training block; with no plan yet, there is nothing to
         # anchor on, so show everything (a fresh user has only a handful of constraints).
         active_meso = cli.db.get_active_mesocycle(_today_str())
         start = active_meso['start_date'] if active_meso else None
-    end = args.until_date
+        end = None
     constraints = cli.db.get_constraints(start, end)
 
     print(bold(cyan("=== ATHLETE CONSTRAINTS ===")))
@@ -296,7 +297,7 @@ def add_constraint_parser(subparsers):
             "start of the current mesocycle (the training block being planned) onward, plus "
             "all upcoming directives. With no active mesocycle to anchor on (no plan yet), "
             "shows every constraint. Use --all to include past directives too, or "
-            "--from/--until to set the window explicitly."
+            "-d/-m/-M/-g to set the window explicitly."
         ),
     )
     cons_list.add_argument("-v", "--verbose", action="store_true",
@@ -304,14 +305,9 @@ def add_constraint_parser(subparsers):
     cons_list.add_argument("-a", "--all", action="store_true",
                            help="Show every directive, past ones included (drop the "
                                 "mesocycle lower bound)")
-    cons_list.add_argument(
-        "--from", "--from-date", dest="from_date", metavar="YYYY-MM-DD",
-        help="Override the default lower bound (the current mesocycle's start)"
-    )
-    cons_list.add_argument(
-        "--until", "--until-date", dest="until_date", metavar="YYYY-MM-DD",
-        help="Bound the upper end too (default: open-ended/upcoming)"
-    )
+    # No default window here: with no selector at all the handler anchors on the current
+    # block, which is not a date the parser could name (DESIGN_constraints.md §4).
+    add_selector_args(cons_list, meso=True, macro=True, goal=True, direction="forward")
 
     # constraint show
     cons_show = constraint_subparsers.add_parser(
