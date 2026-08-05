@@ -53,6 +53,8 @@
           do_something(filename)
         except Exception as e:
           print(f"Error reading science guideline {filename}: {e}")
+- When displaying prose from the LLM, always run it through the formatter,
+  so the words wrap nicely.
 
 # Test
 - Use "unittest" module.
