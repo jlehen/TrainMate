@@ -14,10 +14,7 @@ from trainmate.db import Database
 import trainmate.db
 import trainmate.garmin as garmin
 from trainmate.garmin import compute_pmc, pmc_warmup_cutoff_for, pmc_ramp
-from trainmate.coach.formatting import format_metrics_history
-from trainmate.util import (
-    color_tsb, color_ramp, pmc_cells, pmc_warming_note, PMC_TSB_LAG_NOTE,
-)
+from trainmate.util import color_tsb, color_ramp, pmc_cells, pmc_warming_note
 
 
 TEST_DB_PATH = os.path.join(os.path.dirname(__file__), "test_trainmate_pmc.db")
@@ -266,56 +263,6 @@ class TestColors(unittest.TestCase):
         self.assertTrue(self._has_color(color_ramp(6.0), "33"))
         self.assertFalse(self._has_color(color_ramp(4.0), "31"))
         self.assertFalse(self._has_color(color_ramp(4.0), "33"))
-
-
-# ==============================================================================
-# format_metrics_history — None omission + warm-up suppression (§5.1)
-# ==============================================================================
-
-class TestFormatMetricsHistory(unittest.TestCase):
-    def test_full_row_shows_pmc_and_footnote(self):
-        rows = [{"date": "2026-07-02", "rhr": 52, "hrv": 61, "sleep_score": 78,
-                 "stress": 31, "ctl": 62.4, "atl": 71.7, "tsb": -8.9}]
-        out = format_metrics_history(rows)
-        self.assertIn("CTL=62.4", out)
-        self.assertIn("ATL=71.7", out)
-        self.assertIn("TSB=-8.9", out)
-        self.assertIn("ATL:CTL=1.15", out)
-        self.assertIn(PMC_TSB_LAG_NOTE, out)
-
-    def test_warmup_rows_suppress_pmc(self):
-        rows = [{"date": "2026-01-05", "rhr": 50, "hrv": 60, "sleep_score": 80,
-                 "stress": 20, "ctl": 20.0, "atl": 55.0, "tsb": -30.0}]
-        out = format_metrics_history(rows, warmup_cutoff="2026-02-12")
-        self.assertIn("RHR=50bpm", out)
-        # "CTL" also catches a leaked ATL:CTL ratio, which rides inside the same gate.
-        self.assertNotIn("CTL", out)
-        self.assertNotIn(PMC_TSB_LAG_NOTE, out)
-
-    def test_all_null_row_marked_no_data(self):
-        # A pulled-but-empty day must not render a dangling "- 2026-06-01: " line.
-        rows = [{"date": "2026-06-01", "rhr": None, "hrv": None, "sleep_score": None,
-                 "stress": None, "ctl": None, "atl": None, "tsb": None}]
-        out = format_metrics_history(rows)
-        self.assertIn("- 2026-06-01: (no data)", out)
-
-    def test_partial_pmc_row_still_gets_lag_footnote(self):
-        # The footnote explains the TSB lag; it must appear whenever TSB is shown,
-        # even when CTL happens to be NULL.
-        rows = [{"date": "2026-07-02", "rhr": 52, "hrv": 61, "sleep_score": 78,
-                 "stress": 31, "ctl": None, "atl": 71.7, "tsb": -8.9}]
-        out = format_metrics_history(rows)
-        self.assertIn("TSB=-8.9", out)
-        self.assertIn(PMC_TSB_LAG_NOTE, out)
-
-    def test_no_tsb_no_lag_footnote(self):
-        # ...and conversely: a CTL/ATL-only block shows no TSB, so there is no lag
-        # on display to explain and the footnote must be omitted.
-        rows = [{"date": "2026-07-02", "rhr": 52, "hrv": 61, "sleep_score": 78,
-                 "stress": 31, "ctl": 62.4, "atl": 71.7, "tsb": None}]
-        out = format_metrics_history(rows)
-        self.assertIn("CTL=62.4", out)
-        self.assertNotIn(PMC_TSB_LAG_NOTE, out)
 
 
 class TestDisplayValues(unittest.TestCase):

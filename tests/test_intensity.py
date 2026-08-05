@@ -8,7 +8,9 @@ changed sport mix from reading as a -100% swing (§4.1).
 """
 import unittest
 
+from tests.helpers import _hr, _m, _pwr, _zweek
 from trainmate import intensity
+from trainmate.intensity import select_zone_sports, window_sport_stats, zone_currency
 from trainmate.sports import canonical_sport
 
 
@@ -600,3 +602,66 @@ class TestPromptWidthContract(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestZoneSportSelection(unittest.TestCase):
+    def _stats(self):
+        weeks = [_zweek(
+            "2026-06-29",
+            rows=[_hr("running", [50, 300, 35, 15, 5]),
+                  _pwr("cycling", [40, 130, 25, 12, 6, 2, 1]),
+                  _hr("cycling", [45, 140, 30, 14, 7])],
+            seconds={"running": _m(405), "cycling": _m(216), "yoga": _m(30)},
+        )]
+        return window_sport_stats(weeks), weeks
+
+    def test_coverage_shares_one_denominator_across_currencies(self):
+        stats, _ = self._stats()
+        cycling = stats["cycling"]
+        self.assertAlmostEqual(
+            cycling["coverage"]["power"], _m(216) / _m(216), places=6
+        )
+        self.assertAlmostEqual(
+            cycling["coverage"]["hr"], _m(236) / _m(216), places=6
+        )
+
+    def test_default_keeps_config_order_not_volume_order(self):
+        stats, _ = self._stats()
+        sports, _, _ = select_zone_sports(None, ["cycling", "running"], stats)
+        self.assertEqual(sports, ["cycling", "running"])
+
+    def test_low_volume_sport_is_named_never_silently_dropped(self):
+        stats, _ = self._stats()
+        sports, low, no_data = select_zone_sports(
+            None, ["running", "cycling", "yoga"], stats
+        )
+        self.assertEqual(sports, ["running", "cycling"])
+        self.assertEqual(no_data, ["yoga"])  # 30 min and no zone rows at all
+        self.assertEqual(low, [])
+
+    def test_naming_a_sport_overrides_every_filter(self):
+        stats, _ = self._stats()
+        sports, low, no_data = select_zone_sports(["yoga"], ["running"], stats)
+        self.assertEqual(sports, ["yoga"])
+        self.assertEqual((low, no_data), ([], []))
+
+    def test_explicit_names_are_canonicalised(self):
+        stats, _ = self._stats()
+        sports, _, _ = select_zone_sports(["Road_Biking"], [], stats)
+        self.assertEqual(sports, ["cycling"])
+
+
+class TestZoneCurrency(unittest.TestCase):
+    def test_forcing_a_currency_the_sport_lacks_has_no_effect(self):
+        stats = {"running": {
+            "seconds": 100.0, "zone_seconds": {"hr": 95.0},
+            "coverage": {"hr": 0.95},
+        }}
+        self.assertEqual(zone_currency(stats, "running", forced="power"), "hr")
+
+    def test_forcing_a_currency_the_sport_has_wins_over_coverage(self):
+        stats = {"cycling": {
+            "seconds": 100.0, "zone_seconds": {"power": 60.0, "hr": 95.0},
+            "coverage": {"power": 0.60, "hr": 0.95},
+        }}
+        self.assertEqual(zone_currency(stats, "cycling", forced="power"), "power")

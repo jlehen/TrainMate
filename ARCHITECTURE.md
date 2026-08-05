@@ -1852,7 +1852,9 @@ venv/bin/python -m unittest discover -s tests -p "test_*.py"
 | `tests/test_constraints.py`    | constraint DB windowing, hard-rest pre-pass, §7 magnitude, §8 message capture |
 | `tests/test_cli.py`            | CLI command dispatch + output                                   |
 | `tests/test_calendar.py`       | `calendar_syncer.sync_workout` event description formatting      |
-| `tests/test_coach_format.py`   | `format_completed_activities` (HR/power-zone rendering)          |
+| `tests/test_coach_format.py`   | `coach/formatting.py` — the coach-prompt renderers:              |
+|                                | `format_completed_activities` (HR/power-zone rendering) and      |
+|                                | `format_metrics_history` (None omission, warm-up suppression)    |
 | `tests/test_db.py`             | `Database` CRUD, evidence-based confidence (derivation, dedup,   |
 |                                | week validation, contradiction/demote/keep, staleness,          |
 |                                | grandfather migration), decay, `analysis_cache`                 |
@@ -1896,7 +1898,10 @@ venv/bin/python -m unittest discover -s tests -p "test_*.py"
 |                                | (benchmarks, context vocabulary, models, plan show, zones), and  |
 |                                | `GET /api/timeline.png`: PNG magic bytes, `?weeks` validation,   |
 |                                | matplotlib-absent 503, payload shape via the shared builder      |
-| `tests/test_utils.py`          | `util.py` helpers (text wrapping, ANSI width, `color_load_ratio`) |
+| `tests/test_utils.py`          | `util.py` helpers (text wrapping, ANSI width, `color_load_ratio`,|
+|                                | `default_wrap_width` and the TRAINMATE_WRAP_WIDTH override)      |
+| `tests/test_cli_models.py`     | the `model` command: config list vs stored choice vs             |
+|                                | `--llm-model` override (DESIGN_model_selection.md §3)            |
 
 Tests inject a fresh in-memory SQLite DB by assigning `test_db` to module-level
 `db` variables *before* importing the singletons. `openrouter_client` is mocked

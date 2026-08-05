@@ -165,23 +165,3 @@ class TestCliStatus(unittest.TestCase):
         self.assertIn("TSB is CTL(yesterday)", stdout)     # lag footnote rides with TSB
         self.assertIn("PMC still warming", stdout)
         self.assertNotIn("CTL 0.0", stdout)
-
-    @patch("trainmate_cli.garmin")
-    def test_show_metrics_csv_empty_cells_for_null_pmc(self, mock_garmin):
-        # §6.2: NULL/suppressed PMC values emit EMPTY CSV cells, never 0, so downstream
-        # parsing can't read a zero as data.
-        from trainmate import garmin as real_garmin
-        mock_garmin.pmc_history_start.return_value = None
-        mock_garmin.pmc_warmup_cutoff_for.side_effect = real_garmin.pmc_warmup_cutoff_for
-        mock_garmin.pmc_display_values.side_effect = real_garmin.pmc_display_values
-        mock_garmin.load_ratio.side_effect = real_garmin.load_ratio
-        test_db.save_metric_cache(
-            date="2026-06-03", rhr=50, hrv=75, sleep_score=80, stress=20,
-        )
-        exit_code, stdout, stderr = self.run_cli(["data", "show-metrics", "--all", "--csv"])
-        self.assertEqual(exit_code, 0)
-        header = stdout.splitlines()[0]
-        self.assertTrue(header.endswith("ctl,atl,tsb,atl_ctl_ratio"))
-        row = next(l for l in stdout.splitlines() if l.startswith("2026-06-03"))
-        # Four empty cells, not zeros — the ratio is NULL whenever its inputs are.
-        self.assertTrue(row.endswith(",,,,"), row)

@@ -6,14 +6,15 @@ import unittest
 
 os.environ.setdefault("NO_COLOR", "1")  # keep assertions ANSI-free
 
+from tests.helpers import _hr, _m, _pwr, _zweek
+
 from trainmate.util import visible_len, wrap_text, pmc_cells
-from trainmate.intensity import ZoneRow
 from trainmate import garmin, progression
 from trainmate.garmin import pmc_display_values
 from trainmate.cli.progress import (
     sparkline, render_bar, truncate_label, band_header, format_form_line,
     render_progress, format_weekly_table, table_rows, _week_row,
-    fmt_zone_cell, window_sport_stats, select_zone_sports, zone_currency,
+    fmt_zone_cell, window_sport_stats, zone_currency,
     zone_week_cells, zone_table, zone_section, unknown_sport_preferences,
     _orphan_week_note, render_block_section, _warning_line,
     BAND_LABEL_WIDTH, BAR_WIDTH, TABLE_WIDTH, WEEK_COL_WIDTH,
@@ -542,35 +543,6 @@ class TestStatusConsistencyContract(unittest.TestCase):
 # DESIGN_intensity_distribution.md §9.6.
 
 
-def _m(minutes):
-    return minutes * 60.0
-
-
-def _hr(sport, mins, coverage=0.95, judged="same"):
-    # `judged=None` is the unjudgeable row: every session that week was under the
-    # `zone_min_activity_minutes` floor, so the recording can't be graded (§11).
-    jc = coverage if judged == "same" else judged
-    return ZoneRow(sport, "hr", tuple(_m(v) for v in mins), coverage, jc)
-
-
-def _pwr(sport, mins, coverage=0.9, judged="same"):
-    jc = coverage if judged == "same" else judged
-    return ZoneRow(sport, "power", tuple(_m(v) for v in mins), coverage, jc)
-
-
-def _zweek(mon, rows=(), seconds=None, label="Base 1", in_progress=False, judged="same"):
-    # `judged` is the duration over sessions that cleared the floor (§11); it defaults to
-    # the whole of `seconds`, the ordinary case where every session is a real workout.
-    return {
-        "week_commencing": mon, "meso_label": label, "meso_source": "plan",
-        "in_progress": in_progress, "actual_load": 0.0, "planned_load": None,
-        "zone_rows": list(rows), "sport_seconds": dict(seconds or {}),
-        "judged_sport_seconds": dict(
-            (seconds or {}) if judged == "same" else (judged or {})
-        ),
-    }
-
-
 class TestZoneCell(unittest.TestCase):
     def test_under_an_hour_is_three_characters(self):
         self.assertEqual(fmt_zone_cell(_m(55)), "55m")
@@ -660,69 +632,6 @@ class TestZoneTableWidth(unittest.TestCase):
         self.assertTrue(row.startswith("w/c 07-06*!"))
         self.assertEqual(len("w/c 07-06*!"), WEEK_COL_WIDTH)
         self.assertIn("!", markers)
-
-
-class TestZoneSportSelection(unittest.TestCase):
-    def _stats(self):
-        weeks = [_zweek(
-            "2026-06-29",
-            rows=[_hr("running", [50, 300, 35, 15, 5]),
-                  _pwr("cycling", [40, 130, 25, 12, 6, 2, 1]),
-                  _hr("cycling", [45, 140, 30, 14, 7])],
-            seconds={"running": _m(405), "cycling": _m(216), "yoga": _m(30)},
-        )]
-        return window_sport_stats(weeks), weeks
-
-    def test_coverage_shares_one_denominator_across_currencies(self):
-        stats, _ = self._stats()
-        cycling = stats["cycling"]
-        self.assertAlmostEqual(
-            cycling["coverage"]["power"], _m(216) / _m(216), places=6
-        )
-        self.assertAlmostEqual(
-            cycling["coverage"]["hr"], _m(236) / _m(216), places=6
-        )
-
-    def test_default_keeps_config_order_not_volume_order(self):
-        stats, _ = self._stats()
-        sports, _, _ = select_zone_sports(None, ["cycling", "running"], stats)
-        self.assertEqual(sports, ["cycling", "running"])
-
-    def test_low_volume_sport_is_named_never_silently_dropped(self):
-        stats, _ = self._stats()
-        sports, low, no_data = select_zone_sports(
-            None, ["running", "cycling", "yoga"], stats
-        )
-        self.assertEqual(sports, ["running", "cycling"])
-        self.assertEqual(no_data, ["yoga"])  # 30 min and no zone rows at all
-        self.assertEqual(low, [])
-
-    def test_naming_a_sport_overrides_every_filter(self):
-        stats, _ = self._stats()
-        sports, low, no_data = select_zone_sports(["yoga"], ["running"], stats)
-        self.assertEqual(sports, ["yoga"])
-        self.assertEqual((low, no_data), ([], []))
-
-    def test_explicit_names_are_canonicalised(self):
-        stats, _ = self._stats()
-        sports, _, _ = select_zone_sports(["Road_Biking"], [], stats)
-        self.assertEqual(sports, ["cycling"])
-
-
-class TestZoneCurrency(unittest.TestCase):
-    def test_forcing_a_currency_the_sport_lacks_has_no_effect(self):
-        stats = {"running": {
-            "seconds": 100.0, "zone_seconds": {"hr": 95.0},
-            "coverage": {"hr": 0.95},
-        }}
-        self.assertEqual(zone_currency(stats, "running", forced="power"), "hr")
-
-    def test_forcing_a_currency_the_sport_has_wins_over_coverage(self):
-        stats = {"cycling": {
-            "seconds": 100.0, "zone_seconds": {"power": 60.0, "hr": 95.0},
-            "coverage": {"power": 0.60, "hr": 0.95},
-        }}
-        self.assertEqual(zone_currency(stats, "cycling", forced="power"), "power")
 
 
 class TestZoneSection(unittest.TestCase):

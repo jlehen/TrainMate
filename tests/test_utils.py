@@ -1,3 +1,4 @@
+import os
 import unittest
 from unittest.mock import patch
 from trainmate.util import (
@@ -48,7 +49,7 @@ class TestUtils(unittest.TestCase):
     def test_color_load_ratio(self):
         # Force colour on: off a TTY colorize() is a no-op, which would make every
         # band render bare and the assertions below pass without testing anything.
-        with unittest.mock.patch("trainmate.util.is_color_enabled", return_value=True):
+        with patch("trainmate.util.is_color_enabled", return_value=True):
             # Only the overload end is coloured. A LOW ratio is phase-dependent
             # (taper, deload, intensity block), so it must render bare — see
             # training_load.txt §3/§4.
@@ -78,6 +79,53 @@ class TestUtils(unittest.TestCase):
             formatted_colored = format_labeled_text(label, text, width=40, color_fn=yellow)
         self.assertIn("\033[33mThis is a daily adaptation", formatted_colored)
         self.assertIn("values are drop.\033[0m", formatted_colored)
+
+
+class TestWrapWidth(unittest.TestCase):
+    """`default_wrap_width()` and the TRAINMATE_WRAP_WIDTH override the Telegram
+    front-end sets so output fits a chat bubble."""
+
+    def setUp(self):
+        self._saved = os.environ.pop("TRAINMATE_WRAP_WIDTH", None)
+        from trainmate import util
+        self.util = util
+
+    def tearDown(self):
+        if self._saved is None:
+            os.environ.pop("TRAINMATE_WRAP_WIDTH", None)
+        else:
+            os.environ["TRAINMATE_WRAP_WIDTH"] = self._saved
+
+    def test_default_is_80(self):
+        self.assertEqual(self.util.default_wrap_width(), 80)
+
+    def test_env_override(self):
+        os.environ["TRAINMATE_WRAP_WIDTH"] = "40"
+        self.assertEqual(self.util.default_wrap_width(), 40)
+
+    def test_invalid_env_falls_back_to_80(self):
+        os.environ["TRAINMATE_WRAP_WIDTH"] = "not-a-number"
+        self.assertEqual(self.util.default_wrap_width(), 80)
+
+    def test_env_is_floored_at_20(self):
+        os.environ["TRAINMATE_WRAP_WIDTH"] = "5"
+        self.assertEqual(self.util.default_wrap_width(), 20)
+
+    def test_wrap_text_honors_env_when_width_unset(self):
+        os.environ["TRAINMATE_WRAP_WIDTH"] = "30"
+        long = "word " * 40
+        wrapped = self.util.wrap_text(long)
+        self.assertTrue(all(len(line) <= 30 for line in wrapped.splitlines()))
+
+    def test_explicit_width_still_wins_over_env(self):
+        os.environ["TRAINMATE_WRAP_WIDTH"] = "30"
+        long = "word " * 40
+        wrapped = self.util.wrap_text(long, width=60)
+        lines = wrapped.splitlines()
+        # Both halves matter: wider than the env value, but still actually wrapped —
+        # an unwrapped single line would satisfy the first check alone.
+        self.assertTrue(any(len(line) > 30 for line in lines))
+        self.assertTrue(all(len(line) <= 60 for line in lines))
 
 
 if __name__ == "__main__":

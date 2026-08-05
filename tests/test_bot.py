@@ -180,46 +180,6 @@ class PhotoProtocolTest(unittest.TestCase):
         self.assertTrue(line.startswith(bot._SENTINEL_PREFIX))
 
 
-class WrapWidthTest(unittest.TestCase):
-    def setUp(self):
-        self._saved = os.environ.pop("TRAINMATE_WRAP_WIDTH", None)
-        from trainmate import util
-        self.util = util
-
-    def tearDown(self):
-        if self._saved is None:
-            os.environ.pop("TRAINMATE_WRAP_WIDTH", None)
-        else:
-            os.environ["TRAINMATE_WRAP_WIDTH"] = self._saved
-
-    def test_default_is_80(self):
-        self.assertEqual(self.util.default_wrap_width(), 80)
-
-    def test_env_override(self):
-        os.environ["TRAINMATE_WRAP_WIDTH"] = "40"
-        self.assertEqual(self.util.default_wrap_width(), 40)
-
-    def test_invalid_env_falls_back_to_80(self):
-        os.environ["TRAINMATE_WRAP_WIDTH"] = "not-a-number"
-        self.assertEqual(self.util.default_wrap_width(), 80)
-
-    def test_env_is_floored_at_20(self):
-        os.environ["TRAINMATE_WRAP_WIDTH"] = "5"
-        self.assertEqual(self.util.default_wrap_width(), 20)
-
-    def test_wrap_text_honors_env_when_width_unset(self):
-        os.environ["TRAINMATE_WRAP_WIDTH"] = "30"
-        long = "word " * 40
-        wrapped = self.util.wrap_text(long)
-        self.assertTrue(all(len(line) <= 30 for line in wrapped.splitlines()))
-
-    def test_explicit_width_still_wins_over_env(self):
-        os.environ["TRAINMATE_WRAP_WIDTH"] = "30"
-        long = "word " * 40
-        wrapped = self.util.wrap_text(long, width=60)
-        self.assertTrue(any(len(line) > 30 for line in wrapped.splitlines()))
-
-
 class _FakeProc:
     """Stand-in for the CLI subprocess: exits on its own only if told to."""
 

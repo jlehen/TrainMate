@@ -13,6 +13,38 @@ _CLOCK_SITES = [
 ]
 
 
+def _m(minutes):
+    """Minutes as seconds — zone fixtures are written in minutes, stored in seconds."""
+    return minutes * 60.0
+
+
+def _hr(sport, mins, coverage=0.95, judged="same"):
+    # `judged=None` is the unjudgeable row: every session that week was under the
+    # `zone_min_activity_minutes` floor, so the recording can't be graded (§11).
+    from trainmate.intensity import ZoneRow
+    jc = coverage if judged == "same" else judged
+    return ZoneRow(sport, "hr", tuple(_m(v) for v in mins), coverage, jc)
+
+
+def _pwr(sport, mins, coverage=0.9, judged="same"):
+    from trainmate.intensity import ZoneRow
+    jc = coverage if judged == "same" else judged
+    return ZoneRow(sport, "power", tuple(_m(v) for v in mins), coverage, jc)
+
+
+def _zweek(mon, rows=(), seconds=None, label="Base 1", in_progress=False, judged="same"):
+    # `judged` is the duration over sessions that cleared the floor (§11); it defaults to
+    # the whole of `seconds`, the ordinary case where every session is a real workout.
+    return {
+        "week_commencing": mon, "meso_label": label, "meso_source": "plan",
+        "in_progress": in_progress, "actual_load": 0.0, "planned_load": None,
+        "zone_rows": list(rows), "sport_seconds": dict(seconds or {}),
+        "judged_sport_seconds": dict(
+            (seconds or {}) if judged == "same" else (judged or {})
+        ),
+    }
+
+
 def pin_clock(testcase, day: str) -> None:
     """Freezes every clock a plan/goal window consults, for the life of one test."""
     as_date = date.fromisoformat(day)
