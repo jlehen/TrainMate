@@ -15,7 +15,7 @@ from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from trainmate import progression, chart, intensity
-from trainmate.plan_lineage import plan_lineage
+from trainmate.plan_lineage import delta_baseline, plan_lineage
 # Which sports get a table, and in which currency: aggregation, not layout, so it lives
 # in `intensity` where the web dashboard reads it from too (ARCHITECTURE.md §8).
 from trainmate.intensity import (
@@ -839,7 +839,7 @@ def render_block_section(
         text = intensity.block_report(
             meso, today, fetch,
             current_week=meso["start_date"] <= today <= meso["end_date"],
-            previous=blocks[i - 1] if i else None,
+            previous=delta_baseline(blocks, i),
             benchmarks=benchmarks, notes=False, indent="", width=TABLE_WIDTH,
         )
         if text:

@@ -27,3 +27,22 @@ def plan_lineage(
             lineages.append(blocks)
     lineages.sort(key=lambda blocks: blocks[0]['start_date'])
     return [block for lineage in lineages for block in lineage]
+
+
+def delta_baseline(
+    blocks: Sequence[Dict[str, Any]], i: int
+) -> Optional[Dict[str, Any]]:
+    """What `blocks[i]` measures its change against: the block before it, unless that
+    one belongs to a different plan.
+
+    A delta across a plan boundary compares last season's taper with this season's base,
+    which is not the intensity-creep signal the delta carries — so the boundary block
+    simply reports no change. `tm progress --blocks` only: the strategy prompt wants the
+    cross-season comparison and indexes the list itself (DESIGN_plan_rollback.md §6.1).
+    """
+    if not i:
+        return None
+    previous = blocks[i - 1]
+    if previous.get('macrocycle_id') != blocks[i].get('macrocycle_id'):
+        return None
+    return previous

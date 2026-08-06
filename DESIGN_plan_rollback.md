@@ -157,6 +157,26 @@ macrocycle id first, then compare dates.** `trainmate/plan_lineage.py`'s `plan_l
 is that walk, shared by `tm progress --blocks` (`cli/progress.py`) and the strategy
 prompt's planned-vs-actual review (`coach/service/context.py`).
 
+**`tm progress --blocks` stops the delta at the plan boundary; the strategy prompt does
+not.** Each block reports its change against the block before it, which within one plan is
+the periodization signal proper (DESIGN_intensity_distribution.md §4.1). Across a boundary
+the block before is the *previous goal's* last one, so the comparison spans a taper, a race
+and whatever off-season followed.
+
+The two consumers want opposite things there, and the split is deliberate:
+
+- **`--blocks` suppresses it** (`plan_lineage.delta_baseline()`). The athlete is asking
+  how the current training is going; a "change" that is really a season transition reads
+  as a collapse in load and says nothing about intensity creep. The block is still
+  *reported* — the coverage is what a long window asked for — it just reports no change.
+- **The strategy prompt keeps it.** Reviewing one season against the last is the whole
+  point of the planned-vs-actual review (DESIGN_backward_evaluation.md §6.1), which is why
+  its blocks are ordered by when they were trained rather than by argument position. Pinned
+  by `test_blocks_are_ordered_by_when_they_were_trained`.
+
+So this is one case where the athlete's view and the coach's prompt legitimately differ,
+against the usual rule that they must not (§3.1): they are answering different questions.
+
 Which makes the name of the "previous plan" accessor load-bearing, because there are two
 of them and they mean opposite things:
 

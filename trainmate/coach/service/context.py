@@ -453,8 +453,9 @@ class PmcContextMixin:
         """One intensity report per elapsed block across `macros`, each carrying the
         delta against the block before it (§4.1) — the strategy prompt's view.
 
-        Each block's delta baseline is the block before it in the flattened lineage
-        (DESIGN_plan_rollback.md §6.1).
+        Each block's delta baseline is the block before it in the flattened lineage —
+        across plan boundaries too, unlike `tm progress --blocks`: reviewing one season
+        against the last is what this prompt is for (DESIGN_plan_rollback.md §6.1).
         """
         blocks = plan_lineage(self._db, macros)
         benchmarks = self._db.get_benchmark_results()

@@ -8,6 +8,7 @@ os.environ.setdefault("NO_COLOR", "1")  # keep assertions ANSI-free
 
 from tests.helpers import _hr, _m, _pwr, _zweek
 
+from trainmate.plan_lineage import delta_baseline
 from trainmate.util import visible_len, wrap_text, pmc_cells
 from trainmate import garmin, progression
 from trainmate.garmin import pmc_display_values
@@ -793,12 +794,13 @@ class _StubDb:
     lineage the walk pulls in; there is deliberately no way to hand it a superseded
     version of the governing plan (DESIGN_plan_rollback.md §6.1)."""
 
-    def __init__(self, mesos, activities, preceding=None):
+    def __init__(self, mesos, activities, preceding=None, governing_id=1):
         self._mesos, self._activities = mesos, activities
+        self._governing_id = governing_id
         self._preceding_macro, self._preceding_mesos = preceding or (None, [])
 
     def get_governing_macrocycle(self):
-        return {"id": 1, "objective_id": 1}
+        return {"id": self._governing_id, "objective_id": 1}
 
     def get_preceding_macrocycle(self, objective_id):
         return self._preceding_macro
@@ -831,9 +833,10 @@ class TestBlockSection(unittest.TestCase):
 
     TODAY = "2026-07-09"
     MESOS = [
-        {"id": 1, "name": "Base 1", "focus": "aerobic volume",
+        {"id": 1, "macrocycle_id": 1, "name": "Base 1", "focus": "aerobic volume",
          "start_date": "2026-05-25", "end_date": "2026-06-14"},
-        {"id": 2, "name": "Base 2", "focus": "aerobic consolidation",
+        {"id": 2, "macrocycle_id": 1, "name": "Base 2",
+         "focus": "aerobic consolidation",
          "start_date": "2026-06-29", "end_date": "2026-07-26"},
     ]
 
@@ -876,6 +879,74 @@ class TestBlockSection(unittest.TestCase):
     def test_every_line_stays_inside_the_column_budget(self):
         for line in self._section():
             self.assertLessEqual(visible_len(line), TABLE_WIDTH, msg=repr(line))
+
+
+class TestDeltaStopsAtThePlanBoundary(unittest.TestCase):
+    """A long window reaches back into the previous goal's plan. Those blocks are worth
+    reporting; the change *against* them is not — it spans a taper, a race and an
+    off-season (DESIGN_plan_rollback.md §6.1)."""
+
+    TODAY = "2026-07-09"
+    # The governing plan (macro 2), and last season's (macro 1) before it.
+    THIS_SEASON = [
+        {"id": 3, "macrocycle_id": 2, "name": "Base 1", "focus": "aerobic volume",
+         "start_date": "2026-05-25", "end_date": "2026-06-21"},
+        {"id": 4, "macrocycle_id": 2, "name": "Base 2",
+         "focus": "aerobic consolidation",
+         "start_date": "2026-06-22", "end_date": "2026-07-19"},
+    ]
+    LAST_SEASON = [
+        {"id": 1, "macrocycle_id": 1, "name": "Spring Peak", "focus": "race sharpening",
+         "start_date": "2026-04-06", "end_date": "2026-05-03"},
+    ]
+
+    def _section(self):
+        mondays = ["2026-04-06", "2026-04-13", "2026-04-20", "2026-04-27",
+                   "2026-05-25", "2026-06-01", "2026-06-08", "2026-06-15",
+                   "2026-06-22", "2026-06-29", "2026-07-06"]
+        weeks = [_zweek(m, seconds={"running": _m(300)},
+                        rows=[_hr("running", [10, 250, 30, 8, 2])]) for m in mondays]
+        acts = [_run_act(f"{m[:8]}{int(m[8:]) + 1:02d}", 300, 250) for m in mondays]
+        db = _StubDb(self.THIS_SEASON, acts, governing_id=2,
+                     preceding=({"id": 1, "objective_id": 1}, self.LAST_SEASON))
+        return "\n".join(render_block_section(
+            db, {"weeks": weeks}, "all", self.TODAY, [], ["running"],
+        ))
+
+    def test_last_seasons_block_is_still_reported(self):
+        self.assertIn("Spring Peak", self._section())
+
+    def test_no_delta_is_drawn_across_the_boundary(self):
+        self.assertNotIn("Change vs Spring Peak", self._section())
+
+    def test_the_within_plan_delta_survives(self):
+        self.assertIn("Change vs Base 1", self._section())
+
+
+class TestDeltaBaseline(unittest.TestCase):
+    """`delta_baseline` on its own — the rule both the CLI section and the strategy
+    prompt read it from."""
+
+    BLOCKS = [
+        {"name": "Spring Peak", "macrocycle_id": 1},
+        {"name": "Base 1", "macrocycle_id": 2},
+        {"name": "Base 2", "macrocycle_id": 2},
+    ]
+
+    def test_the_first_block_has_no_baseline(self):
+        self.assertIsNone(delta_baseline(self.BLOCKS, 0))
+
+    def test_a_plan_boundary_has_no_baseline(self):
+        self.assertIsNone(delta_baseline(self.BLOCKS, 1))
+
+    def test_within_a_plan_the_baseline_is_the_block_before(self):
+        self.assertEqual(delta_baseline(self.BLOCKS, 2)["name"], "Base 1")
+
+    def test_blocks_predating_the_column_still_compare(self):
+        """Legacy rows carry no `macrocycle_id`; None == None, so they keep their delta
+        rather than silently losing it."""
+        legacy = [{"name": "A"}, {"name": "B"}]
+        self.assertEqual(delta_baseline(legacy, 1)["name"], "A")
 
 
 class TestLoadSparseWeek(unittest.TestCase):

@@ -195,10 +195,14 @@ classes themselves.
 |                      |                      | threshold JSON columns), which `plan show` reads. |
 | `plan_lineage.py`    | —                    | `plan_lineage(dbh, macros)` — the blocks of a set |
 |                      |                      | of plans, flattened in the order they were        |
-|                      |                      | trained. The one place the "walk by macrocycle    |
-|                      |                      | id, never by date" rule lives, shared by          |
-|                      |                      | `tm progress --blocks` and the strategy prompt's  |
-|                      |                      | planned-vs-actual review. DESIGN_plan_rollback §6.1|
+|                      |                      | trained; `delta_baseline(blocks, i)` — what block |
+|                      |                      | `i` reports its change against, and nothing       |
+|                      |                      | across a plan boundary (`--blocks` only; the      |
+|                      |                      | strategy prompt wants the cross-season delta).    |
+|                      |                      | The one place the "walk by macrocycle id, never   |
+|                      |                      | by date" rule lives, shared by `tm progress       |
+|                      |                      | --blocks` and the strategy prompt's planned-vs-   |
+|                      |                      | actual review. DESIGN_plan_rollback.md §6.1       |
 | `progression.py`     | —                    | Pure functions merging past (measured) + future  |
 |                      |                      | (planned) load into one series and folding the   |
 |                      |                      | stored CTL/ATL/TSB series forward across the seam |
