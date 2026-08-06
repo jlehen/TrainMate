@@ -69,10 +69,12 @@ class WipesMixin:
         dataset is cleared and every non-calendar sync watermark (garmin/reflect/
         bootstrap) is reset, so the next run is a true cold start.
         """
-        # Own connection, so it runs before the evidence deletion rather than nesting
-        # a second writer inside it (DESIGN_backward_evaluation.md §5.1).
-        self.wipe_analysis_cache()
-        with self._get_connection() as conn:
+        # One unit of work: the cache purge used to need its own connection so it ran
+        # before the evidence deletion rather than nesting a second writer inside it
+        # (DESIGN_backward_evaluation.md §5.1). Joining one transaction gives the same
+        # ordering and makes the whole wipe atomic.
+        with self.transaction() as conn:
+            self.wipe_analysis_cache()
             cursor = conn.cursor()
             self._delete_by_date(cursor, "completed_activities", start, end)
             self._delete_by_date(cursor, "athlete_metrics_cache", start, end)
@@ -82,7 +84,14 @@ class WipesMixin:
                 # watermarks that index this evidence. The calendar token is owned by
                 # wipe_calendar_context and left alone here.
                 cursor.execute("DELETE FROM sync_state WHERE key != 'calendar_context'")
-            conn.commit()
+
+        # Deleted load stays baked into later days' CTL/ATL until the EWMAs are walked
+        # again, so the sweep belongs to the wipe rather than to whoever remembers to
+        # call it. It lived in cli/data.py to dodge a garmin<->db import cycle; the
+        # lazy runtime singletons dissolved that, so it can live here now, where every
+        # caller gets it. Imported inside the method to keep module import order free.
+        from trainmate.garmin.pmc import recompute_derived
+        recompute_derived(dbh=self)
 
     def wipe_calendar_context(
         self, start: Optional[str] = None, end: Optional[str] = None

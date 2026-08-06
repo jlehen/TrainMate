@@ -477,9 +477,14 @@ called by the UIs.
     `macrocycle_id`, and pushes them to Calendar immediately — calendar always mirrors
     the active plan. Archive (not delete) makes regeneration undoable via
     `plan_rollback` (DESIGN_plan_rollback.md).
-- **`plan_apply(objective_id, strategy, mesocycles)`** — persists an already-generated
-  strategy + mesocycles to the DB (recomputes the goals/constraints/config hashes and
-  snapshots), returning the goal id it saved under.
+- **`plan_apply(objective_id, strategy, mesocycles, fingerprints=None)`** — persists an
+  already-generated strategy + mesocycles, returning the goal id it saved under.
+  `fingerprints` are the goals/constraints/config hashes and snapshots taken when the
+  strategy was generated (`PlanFingerprints`, `coach/proposals.py`) and are stored
+  verbatim. Omitting them re-reads the inputs as they are *now*, which records an edit
+  made between generating and accepting as though the strategy had been built from it —
+  exactly the drift the staleness detector exists to catch. Only callers applying a plan
+  they did not just generate should leave it unset.
 - **`replan(force, objective_id)`** — convenience: `plan_generate` then
   `workout_generate`.
 - **`workout_adapt(target_date_str, message=None)`** — fetches metrics + workouts in
@@ -709,10 +714,12 @@ methods whose behavior is *not* obvious from that convention are called out belo
   leaves them, since re-pull detects gaps by row presence);
   `wipe_calendar_context(start, end)` always resets the Calendar sync token (the
   incremental sync otherwise can't backfill deleted rows); `wipe_metrics()` = both.
-  A dated `wipe_garmin_data` is followed by `garmin.recompute_derived()` **at the
-  command layer** (`cli/data.py`, not inside the db method — that would be a circular
-  import / uncommitted-read): deleted load stays baked into every later day's CTL/ATL
-  EWMA until a sweep re-derives it, so the wipe must trigger one (DESIGN_pmc_fitness_fatigue.md §4).
+  `wipe_garmin_data` runs `garmin.recompute_derived()` **itself**, after its own
+  transaction commits: deleted load stays baked into every later day's CTL/ATL EWMA
+  until a sweep re-derives it (DESIGN_pmc_fitness_fatigue.md §4). It used to sit at the
+  command layer (`cli/data.py`) to dodge a garmin↔db import cycle, which meant any
+  other caller silently corrupted the derived metrics; the lazy `runtime` singletons
+  removed the cycle, so the invariant now belongs to the operation.
 - **Coach Learnings** (`learnings.py`) — `get_learnings()` annotates each record with
   a computed `dormant` flag and its `proposed_confidence`; `add_learning` seeds a
   synthetic basis sustaining the level; plus the evidence/decay mutators
@@ -745,7 +752,24 @@ methods whose behavior is *not* obvious from that convention are called out belo
 
 ## 5. Database Schema
 
-SQLite database at `trainmate.db` (path from `config.db_path`).
+SQLite database at `trainmate.db` (path from `config.db_path`), in **WAL** mode with a
+5-second busy timeout — CLI, web app and bot are concurrent surfaces over one file, so a
+pull overlapping a dashboard refresh is ordinary rather than exceptional.
+
+`_init_db` brings a database up to `SCHEMA_VERSION` (`db/base.py`) and records that in a
+`schema_version` table. Later starts see the stamp and do nothing, so `tm --help`
+performs no I/O; the DDL used to run in full — around 630 lines, writes included — on
+every process start. The migrations stay idempotent (`CREATE TABLE IF NOT EXISTS`,
+`_add_column` guarded by `PRAGMA table_info`), so the stamp is a way to skip work rather
+than a ledger to replay: clearing it re-runs everything. Bump `SCHEMA_VERSION` when the
+DDL changes. Guarded ALTERs replaced `try: ALTER … except OperationalError: pass`,
+which also swallowed "database is locked" and let a locked database half-migrate in
+silence.
+
+`db.transaction()` runs several writes as one connection and one commit, and rolls the
+lot back on an exception. Methods called inside it join automatically — their own
+`conn.commit()` is deferred to the end — so a PMC recompute over a long history costs
+one connection instead of one per day.
 
 ### objectives
 | Column        | Type       | Notes                                                |

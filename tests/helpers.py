@@ -120,6 +120,19 @@ def rebind_test_db(test_db) -> None:
             setattr(module, attr, test_db)
 
 
+def unstamp_schema(db) -> None:
+    """Makes `db` look un-migrated, so the next _init_db() runs the migrations.
+
+    `_init_db` skips its work when the database is already stamped at the current
+    SCHEMA_VERSION. A test that hand-installs a legacy table has produced exactly the
+    state a real pre-stamp database is in — no version row — so clearing the stamp is
+    what makes the fixture faithful rather than a way around the check.
+    """
+    with db._get_connection() as conn:
+        conn.execute("DROP TABLE IF EXISTS schema_version")
+        conn.commit()
+
+
 def bind_test_db(db_path: str, fresh: bool = True):
     """Builds an isolated Database at `db_path` and binds it everywhere."""
     from trainmate.db import Database

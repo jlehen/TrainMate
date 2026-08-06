@@ -190,6 +190,16 @@ def recompute_derived(dbh=None) -> None:
             config.pmc_ctl_days, config.pmc_atl_days,
         )
 
+    # One connection and one commit for the whole sweep. Each per-day write used to
+    # open, commit and close its own — roughly one such cycle per day of history, after
+    # every pull. The sweep is also all-or-nothing now, so an interruption cannot leave
+    # half the history carrying refreshed CTL/ATL and half the old values.
+    with dbh.transaction():
+        _write_derived(dbh, metrics, by_date, pmc)
+
+
+def _write_derived(dbh, metrics, by_date, pmc) -> None:
+    """Upserts the PMC triple and the 28-day baselines for every cached day."""
     for m in metrics:
         date_str = m["date"]
         date_obj = _to_date(date_str)

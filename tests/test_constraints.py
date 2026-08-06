@@ -7,7 +7,7 @@ import os
 import unittest
 from unittest.mock import patch
 
-from tests.helpers import clear_all_tables, rebind_test_db
+from tests.helpers import clear_all_tables, rebind_test_db, unstamp_schema
 
 TEST_DB_PATH = os.path.join(os.path.dirname(__file__), "test_trainmate_constraints.db")
 
@@ -391,6 +391,9 @@ class TestConstraintMigration(unittest.TestCase):
                     r
                 )
             conn.commit()
+        # A real pre-rev-6 database carries no schema stamp, so clear it here too —
+        # otherwise _init_db correctly skips the migrations it has already applied.
+        unstamp_schema(test_db)
 
     def test_migration_maps_binding_sport_to_rest_and_drops_columns(self):
         # (start, end, binding, sport, type, title, replan)

@@ -100,12 +100,9 @@ def run_data_wipe(args: argparse.Namespace) -> None:
             return
 
     if garmin:
+        # The post-wipe PMC sweep is part of wiping now, not something the caller has
+        # to remember (see db/wipes.py).
         runtime.db.wipe_garmin_data(start, end)
-        # A ranged wipe leaves deleted load baked into later days' CTL/ATL EWMAs, so
-        # recompute after the wipe commits. Done here at the command layer (not the db
-        # method) to avoid a garmin<->db circular import, and pinned to runtime.db so it
-        # sweeps the same database the wipe ran against. See DESIGN_pmc_fitness_fatigue.md §4.
-        runtime.garmin.recompute_derived(dbh=runtime.db)
     if calendar:
         runtime.db.wipe_calendar_context(start, end)
     print(green(f"Wiped {scope}{window}."))

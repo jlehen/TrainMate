@@ -1,7 +1,46 @@
 import sqlite3
 from contextlib import contextmanager
+from datetime import datetime, timezone
 from typing import Generator, Optional
 from trainmate.config import config
+
+# Bump when the DDL below changes, so existing databases pick the change up once. The
+# migrations are idempotent, so this is a "skip the work" marker rather than a ledger of
+# steps to replay — TrainMate has one user and one database, and the alternative (a
+# numbered migration framework) would be more machinery than that warrants.
+SCHEMA_VERSION = 1
+
+
+# How long a connection waits for a writer to finish before raising "database is
+# locked". The CLI, the web app and the Telegram bot are concurrent surfaces against one
+# file, so a pull that overlaps a dashboard refresh is ordinary, not exceptional.
+BUSY_TIMEOUT_SECONDS = 5.0
+
+
+class _JoinedConnection:
+    """A connection borrowed from an open `transaction()`.
+
+    Methods are written `with db._get_connection() as conn: ...; conn.commit()`, which
+    is right when each call owns its connection. Inside a transaction those commits
+    would end it early — one fsync per row, which is the cost the transaction exists to
+    avoid — so they are deferred to the single commit at the end. Everything else
+    forwards to the real connection untouched.
+    """
+
+    def __init__(self, conn: sqlite3.Connection):
+        self._conn = conn
+
+    def commit(self) -> None:
+        """Deferred: the enclosing transaction commits once, at the end."""
+
+    def __getattr__(self, name):
+        return getattr(self._conn, name)
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
 
 
 class BaseDB:
@@ -10,18 +49,56 @@ class BaseDB:
     def __init__(self, db_path: Optional[str] = None) -> None:
         """Initializes database path and sets up tables."""
         self.db_path: str = db_path or config.db_path
+        self._joined: Optional[_JoinedConnection] = None
         self._init_db()
+
+    def _connect(self) -> sqlite3.Connection:
+        conn = sqlite3.connect(self.db_path, timeout=BUSY_TIMEOUT_SECONDS)
+        conn.execute("PRAGMA foreign_keys = ON")
+        # WAL lets a reader carry on while a writer commits, which is the normal case
+        # here: the dashboard polls while `data pull` writes. It is a property of the
+        # database file, so this takes effect once and persists.
+        conn.execute("PRAGMA journal_mode = WAL")
+        conn.row_factory = sqlite3.Row
+        return conn
 
     @contextmanager
     def _get_connection(self) -> Generator[sqlite3.Connection, None, None]:
         """Creates and returns a connection to SQLite database with constraints enabled."""
-        conn = sqlite3.connect(self.db_path)
-        conn.execute("PRAGMA foreign_keys = ON")
-        conn.row_factory = sqlite3.Row
+        if self._joined is not None:
+            yield self._joined
+            return
+        conn = self._connect()
         try:
             with conn:
                 yield conn
         finally:
+            conn.close()
+
+    @contextmanager
+    def transaction(self) -> Generator[sqlite3.Connection, None, None]:
+        """Runs everything inside as one unit of work: one connection, one commit.
+
+        Without it, each write opens, commits and closes its own connection — a PMC
+        recompute over a long history did that around fifteen hundred times, after
+        every pull. It also makes multi-step work atomic: regenerating a plan archives,
+        supersedes, inserts and pushes, and a crash between those steps used to leave
+        archived workouts with no active plan.
+
+        Nesting joins the outer transaction rather than starting a second one, so a
+        method that opens one is safe to call from inside another.
+        """
+        if self._joined is not None:
+            yield self._joined
+            return
+        conn = self._connect()
+        joined = _JoinedConnection(conn)
+        self._joined = joined
+        try:
+            with conn:          # commits once here, or rolls back if the body raises
+                yield joined
+        finally:
+            self._joined = None
             conn.close()
 
     @staticmethod
@@ -30,8 +107,56 @@ class BaseDB:
         cursor.execute(f"PRAGMA table_info({table})")
         return any(row[1] == column for row in cursor.fetchall())
 
+    @classmethod
+    def _add_column(
+        cls, cursor: sqlite3.Cursor, table: str, column: str, ddl: str
+    ) -> None:
+        """Adds `column` to `table` if it is missing.
+
+        Migrations used to be written `try: ALTER ... except OperationalError: pass`,
+        reading "the column is already there". But OperationalError is also how SQLite
+        reports "database is locked" and "disk I/O error", so a locked database at
+        startup half-migrated in silence and left no way to tell afterwards. Asking
+        first means the only errors that reach here are real ones.
+        """
+        if cls._table_has_column(cursor, table, column):
+            return
+        cursor.execute(ddl)
+
+    def _schema_version(self, conn: sqlite3.Connection) -> int:
+        """The version this database has been brought up to, 0 if never stamped."""
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS schema_version ("
+            "  version INTEGER NOT NULL,"
+            "  applied_at TEXT NOT NULL"
+            ")"
+        )
+        row = conn.execute("SELECT MAX(version) FROM schema_version").fetchone()
+        return int(row[0]) if row and row[0] is not None else 0
+
+    def _stamp_schema_version(self, conn: sqlite3.Connection, version: int) -> None:
+        conn.execute(
+            "INSERT INTO schema_version (version, applied_at) VALUES (?, ?)",
+            (version, datetime.now(timezone.utc).isoformat()),
+        )
+
     def _init_db(self) -> None:
-        """Initializes tables in database if they do not exist."""
+        """Brings the database up to SCHEMA_VERSION, then does nothing on later starts.
+
+        This used to run unconditionally: ~630 lines of DDL and roughly thirty in-place
+        migrations, on every process start, including `tm --help`. It also *wrote* to the
+        file to do it. Now the work happens once and the result is stamped, so a startup
+        against a current database is a single SELECT.
+
+        The migrations themselves are unchanged and remain idempotent (CREATE TABLE IF
+        NOT EXISTS, guarded ALTERs), so stamping is a shortcut rather than a new contract
+        — a database that somehow misses a column is still repaired by clearing its
+        schema_version row.
+        """
+        with self._get_connection() as conn:
+            if self._schema_version(conn) >= SCHEMA_VERSION:
+                return
+
         with self._get_connection() as conn:
             cursor = conn.cursor()
 
@@ -137,39 +262,37 @@ class BaseDB:
             """)
 
             # Add new columns to workouts table if they don't exist
-            try:
-                cursor.execute(
-                    "ALTER TABLE workouts ADD COLUMN duration_minutes INTEGER DEFAULT NULL"
-                )
-            except sqlite3.OperationalError:
-                pass
-            try:
-                cursor.execute("ALTER TABLE workouts ADD COLUMN rpe INTEGER DEFAULT NULL")
-            except sqlite3.OperationalError:
-                pass
-            try:
-                cursor.execute("ALTER TABLE workouts ADD COLUMN tss INTEGER DEFAULT NULL")
-            except sqlite3.OperationalError:
-                pass
+            self._add_column(
+                cursor, "workouts", "duration_minutes",
+                "ALTER TABLE workouts ADD COLUMN duration_minutes INTEGER DEFAULT NULL"
+            )
+            self._add_column(
+                cursor, "workouts", "rpe",
+                "ALTER TABLE workouts ADD COLUMN rpe INTEGER DEFAULT NULL"
+            )
+            self._add_column(
+                cursor, "workouts", "tss",
+                "ALTER TABLE workouts ADD COLUMN tss INTEGER DEFAULT NULL"
+            )
             # Soft-delete axis: a workout removed via `workout rm` is marked rather
             # than deleted, so it can be excluded from reads yet still surfaced to the
             # coach as a deliberate cancellation (distinct from a miss).
-            try:
-                cursor.execute("ALTER TABLE workouts ADD COLUMN removed INTEGER DEFAULT 0")
-            except sqlite3.OperationalError:
-                pass
-            try:
-                cursor.execute("ALTER TABLE workouts ADD COLUMN removed_reason TEXT")
-            except sqlite3.OperationalError:
-                pass
+            self._add_column(
+                cursor, "workouts", "removed",
+                "ALTER TABLE workouts ADD COLUMN removed INTEGER DEFAULT 0"
+            )
+            self._add_column(
+                cursor, "workouts", "removed_reason",
+                "ALTER TABLE workouts ADD COLUMN removed_reason TEXT"
+            )
             # Split the adaptation rationale into two axes: modification_reason holds a
             # short per-workout note, while adaptation_summary holds the long batch-level
             # reason shared across every session in one `workout adapt` run (deduplicated
             # at display). NULL on swaps/manual edits and on legacy adapted rows.
-            try:
-                cursor.execute("ALTER TABLE workouts ADD COLUMN adaptation_summary TEXT")
-            except sqlite3.OperationalError:
-                pass
+            self._add_column(
+                cursor, "workouts", "adaptation_summary",
+                "ALTER TABLE workouts ADD COLUMN adaptation_summary TEXT"
+            )
             # Origin axis: who authored the session, fixed at creation and never
             # overwritten — 'generated' (plan/workout generate, or a session adapt
             # newly introduces) or 'manual' (workout add). NULL on legacy rows
@@ -177,10 +300,10 @@ class BaseDB:
             # athlete-scheduled sessions distinctly from AI-authored ones; orthogonal
             # to the synced/adaptation/removed axes (adapting a session keeps its
             # origin — the change lands on modification_reason instead).
-            try:
-                cursor.execute("ALTER TABLE workouts ADD COLUMN source TEXT")
-            except sqlite3.OperationalError:
-                pass
+            self._add_column(
+                cursor, "workouts", "source",
+                "ALTER TABLE workouts ADD COLUMN source TEXT"
+            )
             # Plan-version axis (see DESIGN_plan_rollback.md): macrocycle_id tags the
             # plan version a workout was created under, and archived_at marks workouts
             # that belonged to a superseded plan version (set when a regeneration or a
@@ -189,22 +312,22 @@ class BaseDB:
             # rolling back to their plan version can resurrect them. Distinct from
             # `removed` (a deliberate athlete cancellation that still surfaces to the
             # coach). NULL on legacy rows.
-            try:
-                cursor.execute("ALTER TABLE workouts ADD COLUMN macrocycle_id INTEGER")
-            except sqlite3.OperationalError:
-                pass
-            try:
-                cursor.execute("ALTER TABLE workouts ADD COLUMN archived_at TEXT")
-            except sqlite3.OperationalError:
-                pass
+            self._add_column(
+                cursor, "workouts", "macrocycle_id",
+                "ALTER TABLE workouts ADD COLUMN macrocycle_id INTEGER"
+            )
+            self._add_column(
+                cursor, "workouts", "archived_at",
+                "ALTER TABLE workouts ADD COLUMN archived_at TEXT"
+            )
             # Migrate the very old conflated `status` enum into an orthogonal `synced`
             # flag. Only relevant for DBs predating the `synced` column; guarded on the
             # `status` column so it doesn't re-add `synced` after we drop it below.
             if self._table_has_column(cursor, "workouts", "status"):
-                try:
-                    cursor.execute("ALTER TABLE workouts ADD COLUMN synced INTEGER DEFAULT 0")
-                except sqlite3.OperationalError:
-                    pass
+                self._add_column(
+                    cursor, "workouts", "synced",
+                    "ALTER TABLE workouts ADD COLUMN synced INTEGER DEFAULT 0"
+                )
                 cursor.execute("UPDATE workouts SET synced = 1 WHERE status = 'synced'")
             # Replace the hand-maintained `synced` flag with a derived freshness signal:
             # store `pushed_signature` (hash of calendar-relevant fields) on each push and
@@ -212,10 +335,10 @@ class BaseDB:
             # trainmate.calendar_state). Backfill: a row that was `synced=1` matched the
             # calendar at push time, so its current content is its signature; everything
             # else stays NULL (reads as unpushed/stale). Then drop the now-dead column.
-            try:
-                cursor.execute("ALTER TABLE workouts ADD COLUMN pushed_signature TEXT")
-            except sqlite3.OperationalError:
-                pass
+            self._add_column(
+                cursor, "workouts", "pushed_signature",
+                "ALTER TABLE workouts ADD COLUMN pushed_signature TEXT"
+            )
             if self._table_has_column(cursor, "workouts", "synced"):
                 from trainmate.calendar_state import calendar_signature
                 cursor.execute("SELECT * FROM workouts WHERE synced = 1")
@@ -227,16 +350,12 @@ class BaseDB:
                 cursor.execute("ALTER TABLE workouts DROP COLUMN synced")
             # Original date: remembers where a workout was first placed so that
             # swapping it back clears the modification flag.
-            try:
-                cursor.execute(
-                    "ALTER TABLE workouts ADD COLUMN original_date TEXT"
-                )
+            if not self._table_has_column(cursor, "workouts", "original_date"):
+                cursor.execute("ALTER TABLE workouts ADD COLUMN original_date TEXT")
                 cursor.execute(
                     "UPDATE workouts SET original_date = date "
                     "WHERE original_date IS NULL"
                 )
-            except sqlite3.OperationalError:
-                pass
             # Adaptation recency axis: `adapted_at` is the UTC ISO timestamp of the most
             # recent `workout adapt` run that touched this row (NULL = never adapted), and
             # `adaptation_count` counts how many distinct adapt runs have eased it. Unlike
@@ -250,20 +369,18 @@ class BaseDB:
             # session is scheduled for) and `original_date` (its first scheduled day) —
             # this is WHEN it was authored, the natural counterpart to `adapted_at` for
             # showing a session's plan→adapt lifecycle. NULL on legacy rows.
-            try:
-                cursor.execute("ALTER TABLE workouts ADD COLUMN created_at TEXT")
-            except sqlite3.OperationalError:
-                pass
-            try:
-                cursor.execute("ALTER TABLE workouts ADD COLUMN adapted_at TEXT")
-            except sqlite3.OperationalError:
-                pass
-            try:
-                cursor.execute(
-                    "ALTER TABLE workouts ADD COLUMN adaptation_count INTEGER DEFAULT 0"
-                )
-            except sqlite3.OperationalError:
-                pass
+            self._add_column(
+                cursor, "workouts", "created_at",
+                "ALTER TABLE workouts ADD COLUMN created_at TEXT"
+            )
+            self._add_column(
+                cursor, "workouts", "adapted_at",
+                "ALTER TABLE workouts ADD COLUMN adapted_at TEXT"
+            )
+            self._add_column(
+                cursor, "workouts", "adaptation_count",
+                "ALTER TABLE workouts ADD COLUMN adaptation_count INTEGER DEFAULT 0"
+            )
             # Original load snapshot: the duration / TSS / RPE the session carried when it
             # first entered the plan, captured once (set to the live value on INSERT, then
             # COALESCE-preserved across every later UPDATE — the same once-only treatment as
@@ -275,22 +392,20 @@ class BaseDB:
                 "original_tss",
                 "original_rpe",
             ):
-                try:
-                    cursor.execute(
-                        f"ALTER TABLE workouts ADD COLUMN {col} INTEGER DEFAULT NULL"
-                    )
-                except sqlite3.OperationalError:
-                    pass
+                self._add_column(
+                    cursor, "workouts", col,
+                    f"ALTER TABLE workouts ADD COLUMN {col} INTEGER DEFAULT NULL"
+                )
             # Adherence-mark freshness axis: hash of the calendar fields plus the
             # backward-looking adherence verdict at the last `workout compare --mark`
             # push. Lets compare skip a no-op Calendar update when the event already
             # carries the same verdict (see trainmate.calendar_state.adherence_signature).
             # Kept separate from `pushed_signature` on purpose: folding adherence into
             # that hash would make every marked past row read `stale`. NULL = never marked.
-            try:
-                cursor.execute("ALTER TABLE workouts ADD COLUMN marked_signature TEXT")
-            except sqlite3.OperationalError:
-                pass
+            self._add_column(
+                cursor, "workouts", "marked_signature",
+                "ALTER TABLE workouts ADD COLUMN marked_signature TEXT"
+            )
             # Benchmark identity: a session whose PURPOSE is measurement, not stimulus
             # (DESIGN_benchmark_workouts.md §3.1). Holds an anchor-kind slug
             # (ftp_20min | run_5k_tt | e1rm | …) when the session is a fitness test, NULL
@@ -298,10 +413,10 @@ class BaseDB:
             # created), NOT a derived kind-column — so it is a stored column, threaded
             # through every save path and the model's generate/adapt output contracts so
             # protecting a test never strips its identity.
-            try:
-                cursor.execute("ALTER TABLE workouts ADD COLUMN benchmark_type TEXT")
-            except sqlite3.OperationalError:
-                pass
+            self._add_column(
+                cursor, "workouts", "benchmark_type",
+                "ALTER TABLE workouts ADD COLUMN benchmark_type TEXT"
+            )
 
             # Planned time in zone (DESIGN_intensity_distribution.md §9.8): the intensity
             # target of a session, stated by the coach as structured data at authoring
@@ -317,10 +432,10 @@ class BaseDB:
                 ["planned_zone_currency TEXT"]
                 + [f"planned_zone{i}_sec INTEGER DEFAULT NULL" for i in range(1, 8)]
             ):
-                try:
-                    cursor.execute(f"ALTER TABLE workouts ADD COLUMN {col}")
-                except sqlite3.OperationalError:
-                    pass
+                self._add_column(
+                    cursor, "workouts", col.split()[0],
+                    f"ALTER TABLE workouts ADD COLUMN {col}"
+                )
 
             # Benchmark results logbook (DESIGN_benchmark_workouts.md §3.2): a dated log of
             # fitness-test outcomes, one row per measurement. With config's `ftp`/`lthr`
@@ -384,10 +499,10 @@ class BaseDB:
                 "power_zone6_sec INTEGER DEFAULT NULL",
                 "power_zone7_sec INTEGER DEFAULT NULL",
             ]:
-                try:
-                    cursor.execute(f"ALTER TABLE completed_activities ADD COLUMN {col}")
-                except sqlite3.OperationalError:
-                    pass
+                self._add_column(
+                    cursor, "completed_activities", col.split()[0],
+                    f"ALTER TABLE completed_activities ADD COLUMN {col}"
+                )
 
             # Athlete metrics cache table
             cursor.execute("""
@@ -416,12 +531,10 @@ class BaseDB:
             # CTL/ATL/TSB, back-populated for the whole history by the next
             # recompute_derived() sweep. NULL-tolerant on existing rows; no migration.
             for col in ("ctl", "atl", "tsb"):
-                try:
-                    cursor.execute(
-                        f"ALTER TABLE athlete_metrics_cache ADD COLUMN {col} REAL"
-                    )
-                except sqlite3.OperationalError:
-                    pass
+                self._add_column(
+                    cursor, "athlete_metrics_cache", col,
+                    f"ALTER TABLE athlete_metrics_cache ADD COLUMN {col} REAL"
+                )
 
             # Athlete baselines table
             cursor.execute("""
@@ -464,10 +577,10 @@ class BaseDB:
                 "proposed_confidence TEXT",
                 "last_reinforced_at TEXT",
             ]:
-                try:
-                    cursor.execute(f"ALTER TABLE coach_learnings ADD COLUMN {col}")
-                except sqlite3.OperationalError:
-                    pass  # Column already exists.
+                self._add_column(
+                    cursor, "coach_learnings", col.split()[0],
+                    f"ALTER TABLE coach_learnings ADD COLUMN {col}"
+                )  # Column already exists.
             # Backfill recency for migrated rows: treat creation as the last reinforcement.
             cursor.execute(
                 "UPDATE coach_learnings SET last_reinforced_at = created_at "
@@ -654,6 +767,7 @@ class BaseDB:
                 )
             """)
 
+            self._stamp_schema_version(conn, SCHEMA_VERSION)
             conn.commit()
 
         # Grandfather pre-evidence learnings with a synthetic basis that sustains their

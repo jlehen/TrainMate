@@ -3,7 +3,7 @@ import unittest
 from datetime import datetime, timedelta, timezone
 from unittest import mock
 
-from tests.helpers import clear_all_tables, pin_clock, rebind_test_db
+from tests.helpers import clear_all_tables, pin_clock, unstamp_schema, rebind_test_db
 
 TEST_DB_PATH = os.path.join(os.path.dirname(__file__), "test_trainmate_db.db")
 
@@ -783,6 +783,9 @@ class TestGoalStateIsDerived(unittest.TestCase):
             )
             conn.commit()
 
+        # A database still holding this state predates the stamp, so clear it: an
+        # already-migrated database legitimately skips the migration.
+        unstamp_schema(test_db)
         Database(db_path=TEST_DB_PATH)          # re-init runs the migration
 
         row = test_db.get_objectives()[0]
