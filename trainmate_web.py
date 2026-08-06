@@ -307,7 +307,9 @@ def compare_workouts() -> Any:
             "sport": sport_filter,
         },
         "days": days,
-        "discrepancies": discrepancies,
+        # Structured facts plus the rendered sentence, rather than CLI-voiced prose the
+        # dashboard would have to parse to filter or restyle by kind.
+        "discrepancies": [d.to_dict() for d in discrepancies],
         "informational": informational,
     })
 
@@ -404,35 +406,20 @@ def get_zones() -> Any:
         weeks_out = []
         for week in weeks:
             is_future = week["week_commencing"] > today
-            rows_key = "planned_zone_rows" if is_future else "zone_rows"
-            row = next(
-                (r for r in (week.get(rows_key) or [])
-                 if r.sport == sport and r.currency == currency),
-                None,
-            )
-            # Three states, not two (§9.6): a week with no duration in this sport was not
-            # trained; a week with duration but nothing recorded in this currency is
-            # undercounted, and saying "not trained" there would invert §7's meaning.
-            trained = bool((week.get("sport_seconds") or {}).get(sport))
-            # `undercounted` reads the JUDGEABLE duration instead: a week whose only
-            # unrecorded session was 5 minutes long cannot carry the claim (§11).
-            judged = bool((week.get("judged_sport_seconds") or {}).get(sport))
+            # One derivation of the three-state rule, shared with the CLI table.
+            state = intensity.week_zone_state(week, sport, currency, is_future=is_future)
             entry: Dict[str, Any] = {
                 "week_commencing": week["week_commencing"],
                 "meso_label": week.get("meso_label"),
                 "in_progress": bool(week.get("in_progress")),
                 "future": is_future,
-                "seconds": list(row.seconds) if row else None,
-                "trained": trained,
-                "undercounted": bool(row.undercounted) if row else (
-                    judged and not is_future
-                ),
+                "seconds": list(state.seconds) if state.seconds is not None else None,
+                "trained": state.trained,
+                "undercounted": state.undercounted,
             }
-            if is_future and row is None:
+            if is_future and state.seconds is None:
                 # Planned in the other currency: offered as a fact, never converted (§9.8).
-                entry["currency_mismatch"] = any(
-                    r.sport == sport for r in (week.get("planned_zone_rows") or [])
-                )
+                entry["currency_mismatch"] = state.currency_mismatch
             weeks_out.append(entry)
 
         sports_out.append({

@@ -95,10 +95,14 @@ class TestCompareEndpoint(unittest.TestCase):
         self.assertEqual(res.status_code, 200)
         self.assertEqual(len(data["days"]), 1)
         self.assertIsNone(data["days"][0]["results"][0]["completed"])
+        # Structured, so the dashboard filters on `kind` rather than parsing English.
         self.assertTrue(
-            any("Complete Miss" in d for d in data["discrepancies"]),
+            any(d["kind"] == "missed" for d in data["discrepancies"]),
             data["discrepancies"],
         )
+        missed = next(d for d in data["discrepancies"] if d["kind"] == "missed")
+        self.assertEqual(missed["planned_title"], "Long Run")
+        self.assertIn("Complete Miss", missed["text"])
 
     def test_unplanned_activity_is_flagged(self):
         # An activity on a day with no planned workout, inside a planned block

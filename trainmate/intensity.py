@@ -493,6 +493,60 @@ def planned_zone_rows(workouts: Sequence[Dict[str, Any]]) -> List[ZoneRow]:
     ]
 
 
+class WeekZoneState(NamedTuple):
+    """What one week says about one sport in one currency.
+
+    Three states, not two (DESIGN_intensity_distribution.md §9.6): a week with no
+    duration in this sport was *not trained* and is unmarked; a week with duration but
+    nothing recorded in this currency is *undercounted*, and calling that "not trained"
+    would turn §7's meaning exactly backwards; a week with a row reports its seconds. `undercounted` reads the JUDGEABLE duration, so a single five-minute
+    unrecorded session cannot light the week (§11).
+
+    `currency_mismatch` applies to future weeks only: work planned in the other
+    currency is offered as a fact and never converted, because Power Z6/Z7 have no HR
+    equivalent and collapsing seven zones onto five would be banding by the back door
+    (§5, §9.8).
+    """
+    seconds: Optional[Tuple[float, ...]]
+    trained: bool
+    undercounted: bool
+    currency_mismatch: bool
+
+
+def week_zone_state(
+    week: Dict[str, Any], sport: str, currency: str, is_future: bool = False
+) -> WeekZoneState:
+    """The one derivation of a week's zone state, for every surface that shows it.
+
+    The CLI table and /api/zones each used to derive this, citing the same design
+    sections — and had already drifted on which duration answers "trained".
+    """
+    rows_key = "planned_zone_rows" if is_future else "zone_rows"
+    rows = week.get(rows_key) or []
+    row = next((r for r in rows if r.sport == sport and r.currency == currency), None)
+
+    trained = bool((week.get("sport_seconds") or {}).get(sport))
+    judged = bool((week.get("judged_sport_seconds") or {}).get(sport))
+
+    if row is not None:
+        undercounted = bool(row.undercounted)
+    else:
+        # No row in this currency: the week is undercounted only if it holds enough
+        # judgeable duration to support the claim, and only in the measured past.
+        undercounted = judged and not is_future
+
+    mismatch = False
+    if is_future and row is None:
+        mismatch = any(r.sport == sport for r in (week.get("planned_zone_rows") or []))
+
+    return WeekZoneState(
+        seconds=tuple(row.seconds) if row is not None else None,
+        trained=trained,
+        undercounted=undercounted,
+        currency_mismatch=mismatch,
+    )
+
+
 # ------------------------------------------------------------------ render
 
 def fmt_duration(seconds: float) -> str:

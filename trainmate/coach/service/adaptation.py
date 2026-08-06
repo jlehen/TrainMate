@@ -2,7 +2,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, List, Optional, Tuple, Dict
 from trainmate.config import config
 from trainmate.types import Workout
-from trainmate.adherence import analyze_adherence
+from trainmate.adherence import analyze_adherence, format_discrepancies
 from trainmate.sports import canonical_sport
 from trainmate import intensity
 from trainmate.util import yellow, red, cmd
@@ -189,7 +189,7 @@ class AdaptationMixin:
             strategy=strategy,
             meso_text=meso_text,
             learnings=learnings,
-            discrepancies=discrepancies,
+            discrepancies=format_discrepancies(discrepancies),
             informational=informational,
             removed_workouts=removed_workouts,
             daily_context=daily_context,

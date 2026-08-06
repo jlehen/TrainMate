@@ -1,9 +1,86 @@
+from dataclasses import dataclass, field
 from datetime import timedelta
 from typing import List, Dict, Any, Tuple, Optional
 
 from trainmate.config import config
 from trainmate.garmin import activity_load, _rpe_tss
 from trainmate.sports import canonical_sport, sport_aliases
+
+REST_VIOLATION = "rest_violation"
+MISSED = "missed"
+PARTIAL = "partial"
+UNPLANNED = "unplanned"
+
+
+@dataclass(frozen=True)
+class Discrepancy:
+    """One way the week departed from the plan.
+
+    Analysis returns these rather than sentences. The prose used to be built in here
+    and shipped verbatim as JSON, so the dashboard spoke in the CLI's voice ("Complete
+    Miss!") and no consumer could filter, count or restyle by kind without parsing
+    English. `format_discrepancy` composes the wording at the edge that needs it.
+    """
+    kind: str
+    date: str
+    planned: Optional[Dict[str, Any]] = None
+    completed: Optional[Dict[str, Any]] = None
+    reasons: Tuple[str, ...] = ()
+    load: Optional[float] = None
+
+    def to_dict(self) -> Dict[str, Any]:
+        """JSON-safe form, with the rendered sentence alongside the facts."""
+        return {
+            "kind": self.kind,
+            "date": self.date,
+            "planned_title": (self.planned or {}).get("title"),
+            "planned_sport": (self.planned or {}).get("sport_type"),
+            "activity_name": (self.completed or {}).get("activity_name"),
+            "activity_type": (self.completed or {}).get("activity_type"),
+            "reasons": list(self.reasons),
+            "load": self.load,
+            "text": format_discrepancy(self),
+        }
+
+
+def format_discrepancy(d: "Discrepancy") -> str:
+    """The athlete-facing sentence for one discrepancy.
+
+    Kept identical to the wording analysis used to bake in, because it also reaches the
+    coaching prompt — the LLM reads these lines as the week's evidence.
+    """
+    if d.kind == REST_VIOLATION:
+        act = d.completed or {}
+        return (
+            f"- {d.date}: Rest Day Violation! Performed "
+            f"'{act.get('activity_name')}' ({act.get('activity_type')}) with "
+            f"workload {d.load:.1f} when Rest was planned."
+        )
+    if d.kind == MISSED:
+        planned = d.planned or {}
+        return (
+            f"- {d.date}: Complete Miss! Missed planned workout "
+            f"'{planned.get('title')}' ({planned.get('sport_type')})."
+        )
+    if d.kind == PARTIAL:
+        planned, act = d.planned or {}, d.completed or {}
+        return (
+            f"- {d.date}: Discrepancy in '{planned.get('title')}' vs "
+            f"'{act.get('activity_name')}': {', '.join(d.reasons)}."
+        )
+    if d.kind == UNPLANNED:
+        act = d.completed or {}
+        return (
+            f"- {d.date}: Unplanned Activity! Performed "
+            f"'{act.get('activity_name')}' ({act.get('activity_type')}) with "
+            f"workload {d.load:.1f} on a day with no planned workouts."
+        )
+    raise ValueError(f"unknown discrepancy kind: {d.kind!r}")
+
+
+def format_discrepancies(discrepancies: List["Discrepancy"]) -> List[str]:
+    """The rendered lines, in order — for the CLI and the coaching prompt."""
+    return [format_discrepancy(d) for d in discrepancies]
 
 
 def date_covered(
@@ -182,11 +259,10 @@ def analyze_adherence(
                         continue
                     matched_act = act
                     used_act_ids.add(act["activity_id"])
-                    discrepancies.append(
-                        f"- {date_curr}: Rest Day Violation! Performed "
-                        f"'{act['activity_name']}' ({act['activity_type']}) with "
-                        f"workload {act_load:.1f} when Rest was planned."
-                    )
+                    discrepancies.append(Discrepancy(
+                        kind=REST_VIOLATION, date=date_curr, planned=w,
+                        completed=act, load=act_load,
+                    ))
                     break
             else:
                 # Find a matching completed activity
@@ -203,17 +279,16 @@ def analyze_adherence(
                 if not matched_act:
                     # Complete miss
                     discrepancies.append(
-                        f"- {date_curr}: Complete Miss! Missed planned workout '{w['title']}' "
-                        f"({w['sport_type']})."
+                        Discrepancy(kind=MISSED, date=date_curr, planned=w)
                     )
                 else:
                     disc_reasons = _discrepancy_reasons(w, matched_act)
 
                     if disc_reasons:
-                        discrepancies.append(
-                            f"- {date_curr}: Discrepancy in '{w['title']}' vs "
-                            f"'{matched_act['activity_name']}': {', '.join(disc_reasons)}."
-                        )
+                        discrepancies.append(Discrepancy(
+                            kind=PARTIAL, date=date_curr, planned=w,
+                            completed=matched_act, reasons=tuple(disc_reasons),
+                        ))
 
             matching_results.append({
                 "date": date_curr,
@@ -229,11 +304,9 @@ def analyze_adherence(
             if act_load < minor_activity_load_threshold:
                 continue
             if date_covered(date_curr, covered_ranges):
-                discrepancies.append(
-                    f"- {date_curr}: Unplanned Activity! Performed "
-                    f"'{act['activity_name']}' ({act['activity_type']}) with "
-                    f"workload {act_load:.1f} on a day with no planned workouts."
-                )
+                discrepancies.append(Discrepancy(
+                    kind=UNPLANNED, date=date_curr, completed=act, load=act_load,
+                ))
             else:
                 # No plan governs this date (e.g. before tool adoption, or an
                 # unplanned off-season stretch). The load still feeds the PMC

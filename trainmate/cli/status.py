@@ -1,6 +1,7 @@
 from datetime import datetime, timezone
 from trainmate import runtime
 from trainmate import intensity
+from trainmate.baselines import classify_metric, is_anomalous, UNKNOWN
 from trainmate.config import config
 from trainmate.util import (
     bold, dim, green, red, yellow, cyan, magenta, gray, cmd, color_load_ratio, color_ramp,
@@ -170,23 +171,24 @@ def run_status(
         stress_display = str(stress_val)
         
         if baseline:
-            if rhr_val is not None and baseline['rhr_baseline_mean'] is not None:
-                sd = baseline['rhr_baseline_std'] or 1.0
-                if rhr_val > (baseline['rhr_baseline_mean'] + max(3.0, sd)):
-                    rhr_display = red(f"{rhr_val} bpm (^)")
-                else:
-                    rhr_display = green(f"{rhr_val} bpm")
-            if hrv_val is not None and baseline['hrv_baseline_mean'] is not None:
-                sd = baseline['hrv_baseline_std'] or 1.0
-                if hrv_val < (baseline['hrv_baseline_mean'] - sd):
-                    hrv_display = red(f"{hrv_val} ms (v)")
-                else:
-                    hrv_display = green(f"{hrv_val} ms")
-            if sleep_val is not None:
-                if sleep_val < 60:
-                    sleep_display = red(f"{sleep_val} (v)")
-                else:
-                    sleep_display = green(str(sleep_val))
+            rhr_verdict = classify_metric('rhr', rhr_val, baseline)
+            if rhr_verdict != UNKNOWN:
+                rhr_display = (
+                    red(f"{rhr_val} bpm (^)") if is_anomalous(rhr_verdict)
+                    else green(f"{rhr_val} bpm")
+                )
+            hrv_verdict = classify_metric('hrv', hrv_val, baseline)
+            if hrv_verdict != UNKNOWN:
+                hrv_display = (
+                    red(f"{hrv_val} ms (v)") if is_anomalous(hrv_verdict)
+                    else green(f"{hrv_val} ms")
+                )
+            sleep_verdict = classify_metric('sleep', sleep_val)
+            if sleep_verdict != UNKNOWN:
+                sleep_display = (
+                    red(f"{sleep_val} (v)") if is_anomalous(sleep_verdict)
+                    else green(str(sleep_val))
+                )
                     
         print(f"- Resting HR : {rhr_display}")
         print(f"- Overnight HRV: {hrv_display}")

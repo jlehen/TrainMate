@@ -3,7 +3,7 @@ import unittest
 from datetime import date
 
 from tests.helpers import clear_all_tables, rebind_test_db
-from trainmate.adherence import analyze_adherence
+from trainmate.adherence import analyze_adherence, format_discrepancies
 
 TEST_DB_PATH = os.path.join(os.path.dirname(__file__), "test_adaptation_adherence.db")
 
@@ -107,16 +107,21 @@ class TestAdaptationAdherence(unittest.TestCase):
         )
 
         self.assertEqual(len(discrepancies), 4)
-        self.assertTrue(any("workload mismatch" in d for d in discrepancies))
+        # The facts, by kind — no sentence parsing needed.
+        by_kind = {d.kind: d for d in discrepancies}
+        self.assertEqual(set(by_kind), {"partial", "rest_violation", "missed", "unplanned"})
+        self.assertIn("workload mismatch", " ".join(by_kind["partial"].reasons))
+        self.assertEqual(by_kind["rest_violation"].completed["activity_name"], "Lawn Mowing")
+        self.assertEqual(by_kind["missed"].planned["title"], "Ride")
+        self.assertEqual(by_kind["unplanned"].completed["activity_name"], "Extra Run")
+
+        # The wording the athlete and the coaching prompt still see.
+        lines = format_discrepancies(discrepancies)
+        self.assertTrue(any("Rest Day Violation! Performed 'Lawn Mowing'" in l for l in lines))
         self.assertTrue(
-            any("Rest Day Violation! Performed 'Lawn Mowing'" in d for d in discrepancies)
+            any("Complete Miss! Missed planned workout 'Ride'" in l for l in lines)
         )
-        self.assertTrue(
-            any("Complete Miss! Missed planned workout 'Ride'" in d for d in discrepancies)
-        )
-        self.assertTrue(
-            any("Unplanned Activity! Performed 'Extra Run'" in d for d in discrepancies)
-        )
+        self.assertTrue(any("Unplanned Activity! Performed 'Extra Run'" in l for l in lines))
 
     def test_classify_adherence_statuses(self):
         from trainmate.adherence import classify_adherence
@@ -174,7 +179,8 @@ class TestAdaptationAdherence(unittest.TestCase):
             minor_activity_load_threshold=10.0,
             covered_ranges=[("2026-06-01", "2026-06-30")],
         )
-        self.assertTrue(any("Unplanned Activity! Performed 'Extra Run'" in d for d in disc))
+        self.assertTrue(any(d.kind == "unplanned" and
+                            d.completed["activity_name"] == "Extra Run" for d in disc))
         self.assertEqual(info, [])
 
         # Uncovered: the block starts after the activity -> informational, not a deviation.
@@ -241,7 +247,7 @@ class TestAdaptationAdherence(unittest.TestCase):
             planned_low, completed_low_err, date(2026, 6, 1), 1
         )
         self.assertEqual(len(disc), 1)
-        self.assertIn("duration mismatch", disc[0])
+        self.assertIn("duration mismatch", " ".join(disc[0].reasons))
 
         # 2. High expected load (exp_load = 110.0 >= 100.0, tolerance = 15%)
         planned_high = [{
@@ -266,7 +272,7 @@ class TestAdaptationAdherence(unittest.TestCase):
             planned_high, completed_high_err, date(2026, 6, 1), 1
         )
         self.assertEqual(len(disc), 1)
-        self.assertIn("duration mismatch", disc[0])
+        self.assertIn("duration mismatch", " ".join(disc[0].reasons))
 
         # 3. Intermediate expected load (exp_load = 60.0, tolerance = 32.5%)
         planned_mid = [{
@@ -306,7 +312,7 @@ class TestAdaptationAdherence(unittest.TestCase):
             planned_mid, completed_mid_err, date(2026, 6, 1), 1
         )
         self.assertEqual(len(disc), 1)
-        self.assertIn("duration mismatch", disc[0])
+        self.assertIn("duration mismatch", " ".join(disc[0].reasons))
 
         # 4. Zero expected load (exp_load = 0.0, tolerance = 50%)
         planned_zero = [{
@@ -346,7 +352,7 @@ class TestAdaptationAdherence(unittest.TestCase):
             planned_zero, completed_zero_err, date(2026, 6, 1), 1
         )
         self.assertEqual(len(disc), 1)
-        self.assertIn("duration mismatch", disc[0])
+        self.assertIn("duration mismatch", " ".join(disc[0].reasons))
 
 
 class TestSportMatching(unittest.TestCase):
@@ -395,7 +401,7 @@ class TestSportMatching(unittest.TestCase):
         # Canonicalizing must not make everything match.
         disc, matching, _ = self._pair("running", "cycling")
         self.assertIsNone(matching[0]["completed"])
-        self.assertTrue(any("Complete Miss" in d for d in disc))
+        self.assertTrue(any(d.kind == "missed" for d in disc))
 
     def test_capitalized_rest_is_still_a_rest_day(self):
         planned = [{"date": "2026-06-01", "sport_type": "Rest", "title": "Rest"}]
@@ -404,4 +410,4 @@ class TestSportMatching(unittest.TestCase):
             "activity_type": "cycling", "duration_sec": 7200, "tss": 120.0, "rpe": 7,
         }]
         disc, _, _ = analyze_adherence(planned, completed, date(2026, 6, 1), 1)
-        self.assertTrue(any("Rest Day Violation" in d for d in disc))
+        self.assertTrue(any(d.kind == "rest_violation" for d in disc))

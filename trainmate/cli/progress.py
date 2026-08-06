@@ -386,15 +386,10 @@ def zone_week_cells(
     The unrecorded branch reads the JUDGEABLE duration, so one 5-minute unrecorded
     session does not light the week — §11's floor, applied to both `!` paths.
     """
-    row = next(
-        (r for r in (week.get("zone_rows") or [])
-         if r.sport == sport and r.currency == currency),
-        None,
-    )
-    if row is None:
-        trained = bool((week.get("judged_sport_seconds") or {}).get(sport))
-        return [NOT_TRAINED] * n_zones, trained
-    return [fmt_zone_cell(s) for s in row.seconds], row.undercounted
+    state = intensity.week_zone_state(week, sport, currency)
+    if state.seconds is None:
+        return [NOT_TRAINED] * n_zones, state.undercounted
+    return [fmt_zone_cell(s) for s in state.seconds], state.undercounted
 
 
 def planned_week_cells(
@@ -407,12 +402,10 @@ def planned_week_cells(
     seven onto five would be banding by the back door and §5 forbids it. A mismatch
     therefore renders `—` and says why in the footer rather than converting.
     """
-    rows = week.get("planned_zone_rows") or []
-    row = next((r for r in rows if r.sport == sport and r.currency == currency), None)
-    if row is not None:
-        return [fmt_zone_cell(s) for s in row.seconds], False
-    other = any(r.sport == sport for r in rows)
-    return [NOT_TRAINED] * n_zones, other
+    state = intensity.week_zone_state(week, sport, currency, is_future=True)
+    if state.seconds is not None:
+        return [fmt_zone_cell(s) for s in state.seconds], False
+    return [NOT_TRAINED] * n_zones, state.currency_mismatch
 
 
 def _legend(text: str) -> List[str]:

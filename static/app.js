@@ -704,7 +704,11 @@ function renderCompare(data) {
     summary.className = "compare-summary";
     if (data.discrepancies.length) {
         summary.innerHTML = `<div class="compare-disc-head">${data.discrepancies.length} discrepanc${data.discrepancies.length !== 1 ? "ies" : "y"} found</div>` +
-            data.discrepancies.map(d => `<div class="actual-warn">${escapeHtml(d)}</div>`).join("");
+            // Each entry carries its facts plus a rendered `text`; the kind is exposed
+            // as a data attribute so styling never has to read the sentence.
+            data.discrepancies.map(d =>
+                `<div class="actual-warn" data-kind="${escapeHtml(d.kind)}">${escapeHtml(d.text)}</div>`
+            ).join("");
     } else {
         summary.innerHTML = `<div class="actual-good">No discrepancies found. Great adherence!</div>`;
     }

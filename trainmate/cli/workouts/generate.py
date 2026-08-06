@@ -4,7 +4,7 @@ from datetime import datetime, timedelta
 from typing import Optional
 from trainmate import runtime
 from trainmate.config import config
-from trainmate.adherence import analyze_adherence, date_covered
+from trainmate.adherence import analyze_adherence, date_covered, format_discrepancies
 from trainmate.google_calendar import event_url
 from trainmate.sports import canonical_sport
 from trainmate.util import (
@@ -603,8 +603,8 @@ def run_workout_compare(args: argparse.Namespace) -> None:
     print()
     if discrepancies:
         print(bold(yellow("=== DISCREPANCIES ===")))
-        for disc in discrepancies:
-            print(yellow(disc))
+        for line in format_discrepancies(discrepancies):
+            print(yellow(line))
         print()
         n = len(discrepancies)
         print(bold(yellow(f"{n} discrepanc{'ies' if n != 1 else 'y'} found.")))

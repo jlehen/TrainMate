@@ -6,6 +6,7 @@ from trainmate import runtime
 from trainmate import intensity
 from trainmate.garmin.load import activity_load, load_method
 from trainmate.sports import sport_aliases
+from trainmate.baselines import classify_metric, is_anomalous, UNKNOWN
 from trainmate.util import (
     bold, green, red, yellow, cyan, magenta, gray, color_load_ratio, pmc_cells, visible_len,
     wrap_text, format_labeled_text, format_labeled_block, render_table, is_narrow_client,
@@ -167,29 +168,30 @@ def run_data_show_metrics(args: argparse.Namespace) -> None:
         sleep_base_str = "N/A"
 
         if base:
-            if hrv_val is not None and base['hrv_baseline_mean'] is not None:
-                sd = base['hrv_baseline_std'] or 1.0
-                if hrv_val < (base['hrv_baseline_mean'] - sd):
-                    hrv_str = red(f"{hrv_val} (v)")
-                else:
-                    hrv_str = green(str(hrv_val))
+            hrv_verdict = classify_metric('hrv', hrv_val, base)
+            if hrv_verdict != UNKNOWN:
+                hrv_str = (
+                    red(f"{hrv_val} (v)") if is_anomalous(hrv_verdict)
+                    else green(str(hrv_val))
+                )
             if base['hrv_baseline_mean'] is not None:
                 hrv_base_str = f"{base['hrv_baseline_mean']:.1f}"
 
-            if rhr_val is not None and base['rhr_baseline_mean'] is not None:
-                sd = base['rhr_baseline_std'] or 1.0
-                if rhr_val > (base['rhr_baseline_mean'] + max(3.0, sd)):
-                    rhr_str = red(f"{rhr_val} (^)")
-                else:
-                    rhr_str = green(str(rhr_val))
+            rhr_verdict = classify_metric('rhr', rhr_val, base)
+            if rhr_verdict != UNKNOWN:
+                rhr_str = (
+                    red(f"{rhr_val} (^)") if is_anomalous(rhr_verdict)
+                    else green(str(rhr_val))
+                )
             if base['rhr_baseline_mean'] is not None:
                 rhr_base_str = f"{base['rhr_baseline_mean']:.1f}"
 
-            if sleep_val is not None:
-                if sleep_val < 60:
-                    sleep_str = red(f"{sleep_val} (v)")
-                else:
-                    sleep_str = green(str(sleep_val))
+            sleep_verdict = classify_metric('sleep', sleep_val)
+            if sleep_verdict != UNKNOWN:
+                sleep_str = (
+                    red(f"{sleep_val} (v)") if is_anomalous(sleep_verdict)
+                    else green(str(sleep_val))
+                )
             if base['sleep_baseline_mean'] is not None:
                 sleep_base_str = f"{base['sleep_baseline_mean']:.1f}"
 
