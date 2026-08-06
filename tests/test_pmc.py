@@ -9,7 +9,7 @@ import unittest
 import unittest.mock
 from datetime import date, timedelta
 
-from tests.helpers import clear_all_tables
+from tests.helpers import clear_all_tables, rebind_test_db
 from trainmate.db import Database
 import trainmate.db
 import trainmate.garmin as garmin
@@ -32,8 +32,7 @@ class _DBBackedTest(unittest.TestCase):
 
     def _use_test_db(self):
         prev_gdb, prev_tdb = garmin.db, trainmate.db.db
-        garmin.db = test_db
-        trainmate.db.db = test_db
+        rebind_test_db(test_db)
 
         def _restore():
             garmin.db = prev_gdb

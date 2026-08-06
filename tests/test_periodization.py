@@ -5,7 +5,7 @@ import unittest
 from datetime import datetime, timedelta, timezone
 from unittest.mock import patch
 
-from tests.helpers import clear_all_tables, pin_clock
+from tests.helpers import clear_all_tables, pin_clock, rebind_test_db
 
 TEST_DB_PATH = os.path.join(os.path.dirname(__file__), "test_trainmate_periodization.db")
 
@@ -24,7 +24,7 @@ import trainmate.db
 import trainmate.coach
 
 test_db = Database(db_path=TEST_DB_PATH)
-trainmate.db.db = test_db
+rebind_test_db(test_db)
 trainmate.coach.service.db = test_db
 
 from trainmate.coach import coach_service
@@ -37,7 +37,7 @@ class TestPeriodization(unittest.TestCase):
             os.remove(TEST_DB_PATH)
         global test_db
         test_db = Database(db_path=TEST_DB_PATH)
-        trainmate.db.db = test_db
+        rebind_test_db(test_db)
         trainmate.coach.service.db = test_db
 
     @classmethod
@@ -1114,7 +1114,7 @@ class TestCompletedSeasonsReachTheReview(unittest.TestCase):
             os.remove(TEST_DB_PATH)
         global test_db
         test_db = Database(db_path=TEST_DB_PATH)
-        trainmate.db.db = test_db
+        rebind_test_db(test_db)
         trainmate.coach.service.db = test_db
 
     @classmethod
@@ -1213,7 +1213,7 @@ class TestLearningsReachTheStrategyPrompt(unittest.TestCase):
             os.remove(TEST_DB_PATH)
         global test_db
         test_db = Database(db_path=TEST_DB_PATH)
-        trainmate.db.db = test_db
+        rebind_test_db(test_db)
         trainmate.coach.service.db = test_db
 
     @classmethod
@@ -1285,7 +1285,7 @@ class TestStaleAnalysisWarning(unittest.TestCase):
             os.remove(TEST_DB_PATH)
         global test_db
         test_db = Database(db_path=TEST_DB_PATH)
-        trainmate.db.db = test_db
+        rebind_test_db(test_db)
         trainmate.coach.service.db = test_db
 
     @classmethod

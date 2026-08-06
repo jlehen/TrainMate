@@ -2,6 +2,8 @@ import os
 import unittest
 from unittest.mock import patch, MagicMock
 
+from tests.helpers import rebind_test_db
+
 TEST_DB_PATH = os.path.join(os.path.dirname(__file__), "test_trainmate_calendar.db")
 
 from trainmate.db import Database
@@ -10,8 +12,7 @@ import trainmate.google_calendar
 from trainmate.google_calendar import calendar_syncer
 
 test_db = Database(db_path=TEST_DB_PATH)
-trainmate.db.db = test_db
-trainmate.google_calendar.db = test_db
+rebind_test_db(test_db)
 
 class TestCalendarSync(unittest.TestCase):
     @classmethod
@@ -20,8 +21,7 @@ class TestCalendarSync(unittest.TestCase):
             os.remove(TEST_DB_PATH)
         global test_db
         test_db = Database(db_path=TEST_DB_PATH)
-        trainmate.db.db = test_db
-        trainmate.google_calendar.db = test_db
+        rebind_test_db(test_db)
 
     @classmethod
     def tearDownClass(cls):
@@ -32,7 +32,7 @@ class TestCalendarSync(unittest.TestCase):
                 pass
 
     def setUp(self):
-        from tests.helpers import clear_all_tables
+        from tests.helpers import clear_all_tables, rebind_test_db
         clear_all_tables(test_db)
 
     def test_sync_workout_adapted_description_order(self):

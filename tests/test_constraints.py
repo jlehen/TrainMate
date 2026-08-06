@@ -7,7 +7,7 @@ import os
 import unittest
 from unittest.mock import patch
 
-from tests.helpers import clear_all_tables
+from tests.helpers import clear_all_tables, rebind_test_db
 
 TEST_DB_PATH = os.path.join(os.path.dirname(__file__), "test_trainmate_constraints.db")
 
@@ -16,7 +16,7 @@ import trainmate.db
 import trainmate.coach
 
 test_db = Database(db_path=TEST_DB_PATH)
-trainmate.db.db = test_db
+rebind_test_db(test_db)
 trainmate.coach.service.db = test_db
 
 from trainmate.coach import coach_service
@@ -39,7 +39,7 @@ class TestConstraintDB(unittest.TestCase):
             os.remove(TEST_DB_PATH)
         global test_db
         test_db = Database(db_path=TEST_DB_PATH)
-        trainmate.db.db = test_db
+        rebind_test_db(test_db)
         trainmate.coach.service.db = test_db
 
     @classmethod
@@ -196,7 +196,7 @@ class TestConstraintPlanImpact(unittest.TestCase):
     def setUpClass(cls):
         global test_db
         test_db = Database(db_path=TEST_DB_PATH)
-        trainmate.db.db = test_db
+        rebind_test_db(test_db)
         trainmate.coach.service.db = test_db
 
     def setUp(self):
@@ -268,7 +268,7 @@ class TestMessageCapture(unittest.TestCase):
     def setUpClass(cls):
         global test_db
         test_db = Database(db_path=TEST_DB_PATH)
-        trainmate.db.db = test_db
+        rebind_test_db(test_db)
         trainmate.coach.service.db = test_db
 
     def setUp(self):
@@ -367,7 +367,7 @@ class TestConstraintMigration(unittest.TestCase):
     def setUpClass(cls):
         global test_db
         test_db = Database(db_path=TEST_DB_PATH)
-        trainmate.db.db = test_db
+        rebind_test_db(test_db)
         trainmate.coach.service.db = test_db
 
     def setUp(self):

@@ -3,7 +3,7 @@ import unittest
 from datetime import datetime, timedelta, timezone
 from unittest.mock import patch
 
-from tests.helpers import clear_all_tables, run_cli
+from tests.helpers import clear_all_tables, run_cli, rebind_test_db
 
 
 # A plan window needs its goal in the future, so a fixed date expires the tests the
@@ -18,9 +18,9 @@ import trainmate.coach
 import trainmate_cli
 
 test_db = Database(db_path=TEST_DB_PATH)
-trainmate.db.db = test_db
+rebind_test_db(test_db)
 trainmate.coach.service.db = test_db
-trainmate_cli.db = test_db
+rebind_test_db(test_db)
 
 from trainmate.coach import coach_service
 
@@ -32,9 +32,9 @@ class TestFeedback(unittest.TestCase):
             os.remove(TEST_DB_PATH)
         global test_db
         test_db = Database(db_path=TEST_DB_PATH)
-        trainmate.db.db = test_db
+        rebind_test_db(test_db)
         trainmate.coach.service.db = test_db
-        trainmate_cli.db = test_db
+        rebind_test_db(test_db)
 
     @classmethod
     def tearDownClass(cls):

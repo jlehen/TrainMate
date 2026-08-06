@@ -2,7 +2,7 @@ import os
 import unittest
 from unittest.mock import patch
 
-from tests.helpers import clear_all_tables, run_cli
+from tests.helpers import clear_all_tables, run_cli, rebind_test_db
 from trainmate.cli.argparse_ext import _subparser_choices
 from trainmate.util import strip_ansi
 
@@ -13,8 +13,7 @@ import trainmate.db
 import trainmate_cli
 
 test_db = Database(db_path=TEST_DB_PATH)
-trainmate.db.db = test_db
-trainmate_cli.db = test_db
+rebind_test_db(test_db)
 
 
 class TestCliMisc(unittest.TestCase):
@@ -24,8 +23,7 @@ class TestCliMisc(unittest.TestCase):
             os.remove(TEST_DB_PATH)
         global test_db
         test_db = Database(db_path=TEST_DB_PATH)
-        trainmate.db.db = test_db
-        trainmate_cli.db = test_db
+        rebind_test_db(test_db)
 
     @classmethod
     def tearDownClass(cls):

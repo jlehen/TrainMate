@@ -1,4 +1,5 @@
 import io
+import os
 import sys
 from datetime import date
 from unittest.mock import patch
@@ -80,6 +81,47 @@ def clear_all_tables(db) -> None:
         for table in _ALL_TABLES:
             conn.execute(f"DELETE FROM {table}")
         conn.commit()
+
+
+# Every module that binds the database handle by value at import time. There is one
+# entry per convention the app currently uses; a test that rebinds only some of them
+# leaves the rest pointing at the real database, so they are bound together or not at
+# all. Modules absent from sys.modules are skipped — a CLI test should not have to
+# import the web app to isolate itself.
+_DB_BINDING_SITES = (
+    ("trainmate.db", "db"),
+    ("trainmate_cli", "db"),
+    ("trainmate_web", "db"),
+    ("trainmate.garmin", "db"),
+    ("trainmate.garmin.sync", "db"),
+    ("trainmate.garmin.pmc", "db"),
+    ("trainmate.garmin.load", "db"),
+    ("trainmate.garmin.client", "db"),
+    ("trainmate.google_calendar", "db"),
+)
+
+
+def rebind_test_db(test_db) -> None:
+    """Points every imported handle at `test_db`.
+
+    Call after replacing the Database instance (setUpClass), not only at import: a
+    module imported later in the run would otherwise keep the handle it captured.
+    """
+    for module_name, attr in _DB_BINDING_SITES:
+        module = sys.modules.get(module_name)
+        if module is not None and hasattr(module, attr):
+            setattr(module, attr, test_db)
+
+
+def bind_test_db(db_path: str, fresh: bool = True):
+    """Builds an isolated Database at `db_path` and binds it everywhere."""
+    from trainmate.db import Database
+
+    if fresh and os.path.exists(db_path):
+        os.remove(db_path)
+    test_db = Database(db_path=db_path)
+    rebind_test_db(test_db)
+    return test_db
 
 
 def run_cli(args: list, input_value: str = "n"):

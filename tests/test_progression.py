@@ -2,14 +2,14 @@ import os
 import unittest
 from datetime import date, timedelta
 
+from tests.helpers import rebind_test_db
 from trainmate.db import Database
 import trainmate.db
 import trainmate.garmin as garmin
 
 TEST_DB_PATH = os.path.join(os.path.dirname(__file__), "test_trainmate_progression.db")
 test_db = Database(db_path=TEST_DB_PATH)
-trainmate.db.db = test_db
-garmin.db = test_db
+rebind_test_db(test_db)
 
 from trainmate import progression  # noqa: E402  (must follow the db patch above)
 

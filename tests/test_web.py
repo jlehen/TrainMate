@@ -4,7 +4,7 @@ import unittest
 import unittest.mock
 from datetime import date, timedelta
 
-from tests.helpers import clear_all_tables
+from tests.helpers import clear_all_tables, rebind_test_db
 
 TEST_DB_PATH = os.path.join(os.path.dirname(__file__), "test_trainmate_web.db")
 
@@ -18,7 +18,7 @@ import trainmate_web
 # for the read-only endpoints exercised below (the web app never pulls from
 # Garmin — it is a pure reader, ARCHITECTURE.md §8).
 test_db = Database(db_path=TEST_DB_PATH)
-trainmate_web.db = test_db
+rebind_test_db(test_db)
 
 
 def _save_activity(db, activity_id, date, activity_type, duration_sec, tss):
@@ -45,7 +45,7 @@ class TestCompareEndpoint(unittest.TestCase):
             os.remove(TEST_DB_PATH)
         global test_db
         test_db = Database(db_path=TEST_DB_PATH)
-        trainmate_web.db = test_db
+        rebind_test_db(test_db)
         cls.client = trainmate_web.app.test_client()
 
     @classmethod
@@ -168,7 +168,7 @@ class TestPlanVersionsEndpoint(unittest.TestCase):
             os.remove(TEST_DB_PATH)
         global test_db
         test_db = Database(db_path=TEST_DB_PATH)
-        trainmate_web.db = test_db
+        rebind_test_db(test_db)
         cls.client = trainmate_web.app.test_client()
 
     @classmethod
@@ -220,7 +220,7 @@ class TestWorkoutBatchesEndpoint(unittest.TestCase):
             os.remove(TEST_DB_PATH)
         global test_db
         test_db = Database(db_path=TEST_DB_PATH)
-        trainmate_web.db = test_db
+        rebind_test_db(test_db)
         cls.client = trainmate_web.app.test_client()
 
     @classmethod
@@ -270,7 +270,7 @@ class TestPlanDiffEndpoint(unittest.TestCase):
             os.remove(TEST_DB_PATH)
         global test_db
         test_db = Database(db_path=TEST_DB_PATH)
-        trainmate_web.db = test_db
+        rebind_test_db(test_db)
         cls.client = trainmate_web.app.test_client()
 
     @classmethod
@@ -382,7 +382,7 @@ class TestTimelinePngEndpoint(unittest.TestCase):
             os.remove(TEST_DB_PATH)
         global test_db
         test_db = Database(db_path=TEST_DB_PATH)
-        trainmate_web.db = test_db
+        rebind_test_db(test_db)
         cls.client = trainmate_web.app.test_client()
 
     @classmethod
@@ -438,7 +438,7 @@ class TestTimelinePayload(unittest.TestCase):
     def setUpClass(cls):
         global test_db
         test_db = Database(db_path=TEST_DB_PATH)
-        trainmate_web.db = test_db
+        rebind_test_db(test_db)
 
     @classmethod
     def tearDownClass(cls):
@@ -552,13 +552,13 @@ class TestNewReadEndpoints(unittest.TestCase):
             os.remove(TEST_DB_PATH)
         global test_db
         test_db = Database(db_path=TEST_DB_PATH)
-        trainmate_web.db = test_db
+        rebind_test_db(test_db)
         # `/api/models` delegates to `llm_models`, which resolves `trainmate.db.db`
         # lazily rather than taking the web app's handle — so that one has to be bound
         # too, and restored afterwards so it does not leak into later test modules.
         import trainmate.db
         cls._saved_db = trainmate.db.db
-        trainmate.db.db = test_db
+        rebind_test_db(test_db)
         cls.client = trainmate_web.app.test_client()
 
     @classmethod

@@ -5,7 +5,7 @@ from contextlib import redirect_stdout
 from datetime import datetime, timedelta
 from unittest.mock import patch
 
-from tests.helpers import clear_all_tables, run_cli
+from tests.helpers import clear_all_tables, run_cli, rebind_test_db
 
 TEST_DB_PATH = os.path.join(os.path.dirname(__file__), "test_trainmate_cli_data.db")
 
@@ -14,8 +14,7 @@ import trainmate.db
 import trainmate_cli
 
 test_db = Database(db_path=TEST_DB_PATH)
-trainmate.db.db = test_db
-trainmate_cli.db = test_db
+rebind_test_db(test_db)
 
 
 class TestCliData(unittest.TestCase):
@@ -25,8 +24,7 @@ class TestCliData(unittest.TestCase):
             os.remove(TEST_DB_PATH)
         global test_db
         test_db = Database(db_path=TEST_DB_PATH)
-        trainmate.db.db = test_db
-        trainmate_cli.db = test_db
+        rebind_test_db(test_db)
 
     @classmethod
     def tearDownClass(cls):

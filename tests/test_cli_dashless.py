@@ -3,7 +3,7 @@ import os
 import unittest
 from unittest.mock import patch
 
-from tests.helpers import clear_all_tables, run_cli
+from tests.helpers import clear_all_tables, run_cli, rebind_test_db
 
 TEST_DB_PATH = os.path.join(os.path.dirname(__file__), "test_trainmate_cli_dashless.db")
 
@@ -12,8 +12,7 @@ import trainmate.db
 import trainmate_cli
 
 test_db = Database(db_path=TEST_DB_PATH)
-trainmate.db.db = test_db
-trainmate_cli.db = test_db
+rebind_test_db(test_db)
 
 
 def tearDownModule():
@@ -261,8 +260,7 @@ class TestDashlessEndToEnd(unittest.TestCase):
     def setUpClass(cls):
         global test_db
         test_db = Database(db_path=TEST_DB_PATH)
-        trainmate.db.db = test_db
-        trainmate_cli.db = test_db
+        rebind_test_db(test_db)
 
     def setUp(self):
         clear_all_tables(test_db)

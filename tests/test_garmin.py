@@ -3,15 +3,14 @@ import unittest
 from datetime import date, datetime, timedelta, timezone
 from unittest.mock import patch
 
-from tests.helpers import clear_all_tables
+from tests.helpers import clear_all_tables, rebind_test_db
 from trainmate.db import Database
 import trainmate.db
 import trainmate.garmin as garmin
 
 TEST_DB_PATH = os.path.join(os.path.dirname(__file__), "test_trainmate_garmin.db")
 test_db = Database(db_path=TEST_DB_PATH)
-trainmate.db.db = test_db
-garmin.db = test_db
+rebind_test_db(test_db)
 
 
 def _bind_test_db(tc):
@@ -25,8 +24,7 @@ def _bind_test_db(tc):
     enough; bind per-test and restore so we neither read a stale db nor clobber theirs.
     """
     prev_db, prev_gdb = trainmate.db.db, garmin.db
-    trainmate.db.db = test_db
-    garmin.db = test_db
+    rebind_test_db(test_db)
 
     def _restore():
         trainmate.db.db = prev_db
