@@ -90,16 +90,20 @@ def add_model_parser(subparsers):
             "invocation without storing anything."
         )
     )
+    # Read-only at the top level, so a bare `model` lists rather than printing help
+    # (DESIGN_cli_noargs.md §a3).
+    model_parser.set_defaults(func=run_model_list)
     model_subparsers = model_parser.add_subparsers(
         dest="subcommand", help="Model sub-commands"
     )
 
     # model list
-    model_subparsers.add_parser(
+    _list_parser = model_subparsers.add_parser(
         "list",
         help="List the configured models, active one marked",
         description="Numbered list of the configured models. Same as a bare 'model'."
     )
+    _list_parser.set_defaults(func=run_model_list)
 
     # model set
     model_set = model_subparsers.add_parser(
@@ -110,17 +114,19 @@ def add_model_parser(subparsers):
             "in 'model list' or by its full OpenRouter identifier."
         )
     )
+    model_set.set_defaults(func=run_model_set)
     model_set.add_argument(
         "model", metavar="NUMBER|ID",
         help="List number (e.g. 3) or full identifier (e.g. openai/gpt-5.5)"
     )
 
     # model reset
-    model_subparsers.add_parser(
+    _reset_parser = model_subparsers.add_parser(
         "reset",
         help="Forget the stored choice and fall back to the config default",
         description=(
             "Delete the stored choice so the first entry of 'llm.models' is used again."
         )
     )
+    _reset_parser.set_defaults(func=run_model_reset)
     return model_parser

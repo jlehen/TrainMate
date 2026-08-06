@@ -621,6 +621,7 @@ def add_data_parser(subparsers, pull_bypass_parser, llm_debug_parser):
             "verdict unless --no-mark is given."
         )
     )
+    d_pull.set_defaults(func=run_data_pull)
     add_selector_args(d_pull, direction="backward", default="2d", span_days=2)
     d_pull.add_argument(
         "--no-mark", action="store_true", dest="no_mark",
@@ -657,6 +658,7 @@ def add_data_parser(subparsers, pull_bypass_parser, llm_debug_parser):
             "--inspect-only renders the analysis without writing learnings or the cache."
         )
     )
+    d_boot.set_defaults(func=run_data_bootstrap)
     # data reflect — incremental reflection over evidence since the last reflect
     d_reflect = data_subparsers.add_parser(
         "reflect",
@@ -674,6 +676,7 @@ def add_data_parser(subparsers, pull_bypass_parser, llm_debug_parser):
             "the per-window cache."
         )
     )
+    d_reflect.set_defaults(func=run_data_reflect)
     for d_an in (d_boot, d_reflect):
         # direction="none": an unbounded side stays unbounded, so the service keeps
         # auto-detecting the window it was never told (a bare span still looks back).
@@ -702,6 +705,7 @@ def add_data_parser(subparsers, pull_bypass_parser, llm_debug_parser):
         help="Recompute TSS for all stored activities using the current "
              "zone-based model (no Garmin calls needed)"
     )
+    d_btss.set_defaults(func=run_data_backfill_tss)
     add_selector_args(d_btss, direction="none")
     d_btss.add_argument(
         "-v", "--verbose", action="store_true",
@@ -720,6 +724,7 @@ def add_data_parser(subparsers, pull_bypass_parser, llm_debug_parser):
             "--no-pull or --all is given. Use --csv for machine-readable output."
         )
     )
+    d_sm.set_defaults(func=run_data_show_metrics)
     add_selector_args(d_sm, meso=True, macro=True, goal=True, direction="backward",
                       default="7d")
     d_sm.add_argument(
@@ -747,6 +752,7 @@ def add_data_parser(subparsers, pull_bypass_parser, llm_debug_parser):
             "no RPE was entered."
         )
     )
+    d_sa.set_defaults(func=run_data_show_activities)
     add_selector_args(d_sa, meso=True, macro=True, goal=True, sport=True,
                       direction="backward", default="7d")
     d_sa.add_argument(
@@ -779,6 +785,7 @@ def add_data_parser(subparsers, pull_bypass_parser, llm_debug_parser):
             "removed)."
         ),
     )
+    d_wipe.set_defaults(func=run_data_wipe)
     d_wipe.add_argument(
         "--garmin", action="store_true",
         help="Wipe only Garmin evidence (metrics, baselines, activities, analysis cache)"

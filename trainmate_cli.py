@@ -211,192 +211,34 @@ def run_once(argv, parser, named_subparsers) -> None:
         parser.print_help()
         sys.exit(1)
 
-    goal_parser = named_subparsers["goal"]
-    constraint_parser = named_subparsers["constraint"]
-    benchmark_parser = named_subparsers["benchmark"]
-    context_parser = named_subparsers["context"]
-    learnings_parser = named_subparsers["learnings"]
-    plan_parser = named_subparsers["plan"]
-    workout_parser = named_subparsers["workout"]
-    data_parser = named_subparsers["data"]
-
     # Aliases and prefixes are resolved to canonical names before argparse sees them
-    # (DESIGN_cli_noargs.md §d), so every branch below tests one canonical name.
+    # (DESIGN_cli_noargs.md §d), so `cmd` is always canonical.
     cmd = args.command.lower()
 
+    # Two commands need the parser tree itself rather than the database, so they are
+    # answered here instead of through a handler.
     if cmd == "help":
         print(bold(parser.description))
         print()
         _print_command_tree(parser, include_advanced=getattr(args, "show_all", False))
         print(dim(PREFIX_HINT))
-    elif cmd == "shell":
+        return
+    if cmd == "shell":
         _repl(parser, named_subparsers)
-    elif cmd == "status":
-        run_status(verbose=args.verbose, no_pull=args.no_pull, force_pull=args.force_pull)
-    elif cmd == "progress":
-        run_progress(args)
-    elif cmd == "goal":
-        if not args.subcommand:
-            goal_parser.print_help()
-            sys.exit(1)
-        sub = args.subcommand.lower()
-        if sub == "add":
-            run_goal_add(args)
-        elif sub == "edit":
-            run_goal_edit(args)
-        elif sub == "rm":
-            run_goal_rm(args)
-        elif sub == "list":
-            run_goal_list()
-        elif sub == "wipe":
-            run_goal_wipe(args)
-    elif cmd == "constraint":
-        if not args.subcommand:
-            constraint_parser.print_help()
-            sys.exit(1)
-        sub = args.subcommand.lower()
-        if sub == "add":
-            run_constraint_add(args)
-        elif sub == "edit":
-            run_constraint_edit(args)
-        elif sub == "rm":
-            run_constraint_rm(args)
-        elif sub == "list":
-            run_constraint_list(args)
-        elif sub == "show":
-            run_constraint_show(args)
-        elif sub == "wipe":
-            run_constraint_wipe(args)
-    elif cmd == "benchmark":
-        if not args.subcommand:
-            benchmark_parser.print_help()
-            sys.exit(1)
-        sub = args.subcommand.lower()
-        if sub == "record":
-            run_benchmark_record(args)
-        elif sub == "list":
-            run_benchmark_list(args)
-        elif sub == "rm":
-            run_benchmark_rm(args)
-        elif sub == "wipe":
-            run_benchmark_wipe(args)
-    elif cmd == "context":
-        if not args.subcommand:
-            context_parser.print_help()
-            sys.exit(1)
-        sub = args.subcommand.lower()
-        if sub == "add":
-            run_context_add(args)
-        elif sub == "rm":
-            run_context_rm(args)
-        elif sub == "list":
-            run_context_list(args)
-        elif sub == "list-metrics":
-            run_context_list_metrics(args)
-    elif cmd == "learnings":
-        if not args.subcommand:
-            learnings_parser.print_help()
-            sys.exit(1)
-        sub = args.subcommand.lower()
-        if sub == "list":
-            run_learning_list(args)
-        elif sub == "show":
-            run_learning_show(args)
-        elif sub == "edit":
-            run_learning_edit(args)
-        elif sub == "rm":
-            run_learning_rm(args)
-        elif sub == "demote":
-            run_learning_demote(args)
-        elif sub == "keep":
-            run_learning_keep(args)
-        elif sub == "wipe":
-            run_learning_wipe(args)
-    elif cmd == "workout":
-        if not args.subcommand:
-            workout_parser.print_help()
-            sys.exit(1)
-        sub = args.subcommand.lower()
-        if sub == "list":
-            run_workout_list(args)
-        elif sub == "compare":
-            run_workout_compare(args)
-        elif sub == "generate":
-            run_workout_generate(args)
-        elif sub == "rm":
-            run_workout_rm(args)
-        elif sub == "restore":
-            run_workout_restore(args)
-        elif sub == "rollback":
-            run_workout_rollback(args)
-        elif sub == "batches":
-            run_workout_batches(args)
-        elif sub == "adapt":
-            run_workout_adapt(args)
-        elif sub == "push":
-            run_workout_push(args)
-        elif sub == "swap":
-            run_workout_swap(args)
-        elif sub == "add":
-            run_workout_add(args)
-        elif sub == "wipe":
-            run_workout_wipe(args)
-        elif sub == "prune-calendar":
-            run_workout_prune_calendar(args)
-    elif cmd == "data":
-        if not args.subcommand:
-            data_parser.print_help()
-            sys.exit(1)
-        sub = args.subcommand.lower()
-        if sub == "pull":
-            run_data_pull(args)
-        elif sub == "bootstrap":
-            run_data_bootstrap(args)
-        elif sub == "reflect":
-            run_data_reflect(args)
-        elif sub == "backfill-tss":
-            run_data_backfill_tss(args)
-        elif sub == "show-metrics":
-            run_data_show_metrics(args)
-        elif sub == "show-activities":
-            run_data_show_activities(args)
-        elif sub == "wipe":
-            run_data_wipe(args)
-    elif cmd == "model":
-        # Read-only at the top level, so a bare 'model' lists rather than printing help
-        # (DESIGN_cli_noargs.md §a3).
-        sub = (args.subcommand or "list").lower()
-        if sub == "list":
-            run_model_list(args)
-        elif sub == "set":
-            run_model_set(args)
-        elif sub == "reset":
-            run_model_reset(args)
-    elif cmd == "plan":
-        if not args.subcommand:
-            plan_parser.print_help()
-            sys.exit(1)
-        sub = args.subcommand.lower()
-        if sub == "generate":
-            run_plan_generate(args)
-        elif sub == "show":
-            run_plan_show(args)
-        elif sub == "versions":
-            run_plan_versions(args)
-        elif sub == "diff":
-            run_plan_diff(args)
-        elif sub == "rm":
-            run_plan_rm(args)
-        elif sub == "rollback":
-            run_plan_rollback(args)
-        elif sub == "feedback":
-            run_plan_feedback(args)
-        elif sub == "wipe":
-            run_plan_wipe(args)
-    else:
-        print(f"Unknown command: '{cmd}'")
-        parser.print_help()
+        return
+
+    # Every other command carries its handler, bound with set_defaults() next to the
+    # sub-parser that defines its flags. The 200-line elif ladder this replaces had to
+    # be edited in step with the parser definitions, and a branch that fell through
+    # simply did nothing.
+    handler = getattr(args, "func", None)
+    if handler is None:
+        # A command group invoked bare (`tm goal`): show what it offers.
+        group = named_subparsers.get(cmd)
+        (group or parser).print_help()
         sys.exit(1)
+
+    handler(args)
 
 
 def _repl(parser, named_subparsers) -> None:

@@ -265,6 +265,7 @@ def add_constraint_parser(subparsers):
     cons_add = constraint_subparsers.add_parser(
         "add", help="Author a directive over a day or range"
     )
+    cons_add.set_defaults(func=run_constraint_add)
     cons_add.add_argument("title", help="The directive, stated short "
                           "(e.g. 'no run Thursday')")
     cons_add.add_argument("--start", help="Start date (YYYY-MM-DD; default: today)")
@@ -278,6 +279,7 @@ def add_constraint_parser(subparsers):
     cons_edit = constraint_subparsers.add_parser(
         "edit", help="Adjust scope / rest / text / replan"
     )
+    cons_edit.set_defaults(func=run_constraint_edit)
     cons_edit.add_argument("id", type=int, help="Constraint ID to edit")
     cons_edit.add_argument("--title", help="New directive title")
     cons_edit.add_argument("--start", help="New start date (YYYY-MM-DD)")
@@ -299,6 +301,7 @@ def add_constraint_parser(subparsers):
             "-d/-m/-M/-g to set the window explicitly."
         ),
     )
+    cons_list.set_defaults(func=run_constraint_list)
     cons_list.add_argument("-v", "--verbose", action="store_true",
                            help="Show details for each directive")
     cons_list.add_argument("-a", "--all", action="store_true",
@@ -312,17 +315,20 @@ def add_constraint_parser(subparsers):
     cons_show = constraint_subparsers.add_parser(
         "show", help="Show one directive in detail (incl. plan-shaping)"
     )
+    cons_show.set_defaults(func=run_constraint_show)
     cons_show.add_argument("id", type=int, help="Constraint ID to display")
 
     # constraint rm
     cons_rm = constraint_subparsers.add_parser(
         "rm", help="Remove a directive by ID"
     )
+    cons_rm.set_defaults(func=run_constraint_rm)
     cons_rm.add_argument("id", type=int, help="Constraint ID to remove")
 
     # constraint wipe
     cons_wipe = constraint_subparsers.add_parser(
         "wipe", advanced=True, help="Wipe all constraints")
+    cons_wipe.set_defaults(func=run_constraint_wipe)
     cons_wipe.add_argument("-y", "--yes", action="store_true",
                            help="Skip confirmation prompt")
 

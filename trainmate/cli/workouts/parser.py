@@ -1,7 +1,19 @@
-"""Argparse wiring for the `workout` command group."""
+"""Argparse wiring for the `workout` command group.
+
+Each sub-parser binds its handler with set_defaults(func=...), so the flags and the
+function that reads them are defined together.
+"""
 from trainmate.config import config
 from trainmate.util import green
 from trainmate.cli.selectors import add_selector_args, add_single_date_arg, parse_target
+from trainmate.cli.workouts.edit import (
+    run_workout_add, run_workout_prune_calendar, run_workout_push,
+    run_workout_restore, run_workout_rm, run_workout_swap, run_workout_wipe,
+)
+from trainmate.cli.workouts.generate import (
+    run_workout_adapt, run_workout_batches, run_workout_compare,
+    run_workout_generate, run_workout_list, run_workout_rollback,
+)
 
 
 
@@ -26,6 +38,7 @@ def add_workout_parser(subparsers, pull_bypass_parser, llm_debug_parser):
             "database only (no Garmin pull)."
         )
     )
+    w_list.set_defaults(func=run_workout_list)
     w_list.add_argument(
         "targets", nargs="*", metavar="TARGET", type=parse_target,
         help="Workout IDs and/or date selectors to show (e.g. '12 15', '2026-06-01..')"
@@ -64,6 +77,7 @@ def add_workout_parser(subparsers, pull_bypass_parser, llm_debug_parser):
             "header) unless --no-mark is given."
         )
     )
+    w_cmp.set_defaults(func=run_workout_compare)
     add_selector_args(
         w_cmp, meso=True, macro=True, goal=True, sport=True,
         direction="backward", default="14d", span_days=14,
@@ -92,6 +106,7 @@ def add_workout_parser(subparsers, pull_bypass_parser, llm_debug_parser):
             "already exist it asks before replacing them (-f skips the prompt)."
         )
     )
+    p_w_gen.set_defaults(func=run_workout_generate)
     p_w_gen.add_argument(
         "-g", "--goal", "--goal-id", type=int, dest="goal_id",
         help="Target goal ID to generate workouts for"
@@ -129,6 +144,7 @@ def add_workout_parser(subparsers, pull_bypass_parser, llm_debug_parser):
             "soft-removed session."
         )
     )
+    w_rollback.set_defaults(func=run_workout_rollback)
     w_rollback.add_argument(
         "--batch", type=int, metavar="N",
         help="Which archived batch to restore, as numbered by 'workout batches' "
@@ -139,7 +155,7 @@ def add_workout_parser(subparsers, pull_bypass_parser, llm_debug_parser):
     )
 
     # workout batches
-    workout_subparsers.add_parser(
+    _batches_parser = workout_subparsers.add_parser(
         "batches",
         help="List archived workout batches that 'workout rollback' can restore",
         description=(
@@ -148,6 +164,7 @@ def add_workout_parser(subparsers, pull_bypass_parser, llm_debug_parser):
             f"it; '{green('workout rollback --batch N')}' restores one."
         )
     )
+    _batches_parser.set_defaults(func=run_workout_batches)
 
     # workout add
     w_add = workout_subparsers.add_parser(
@@ -163,6 +180,7 @@ def add_workout_parser(subparsers, pull_bypass_parser, llm_debug_parser):
             f"have the coach re-balance surrounding load afterward, run '{green('workout adapt')}'."
         )
     )
+    w_add.set_defaults(func=run_workout_add)
     w_add.add_argument("date", help="Workout date (YYYY-MM-DD)")
     w_add.add_argument("sport_type", help="Sport type (e.g. running, cycling)")
     w_add.add_argument("title", help="Workout title")
@@ -188,6 +206,7 @@ def add_workout_parser(subparsers, pull_bypass_parser, llm_debug_parser):
     w_rm = workout_subparsers.add_parser(
         "rm", help="Remove a workout by ID"
     )
+    w_rm.set_defaults(func=run_workout_rm)
     w_rm.add_argument("id", type=int, help="Workout ID to remove")
     w_rm.add_argument(
         "reason",
@@ -204,6 +223,7 @@ def add_workout_parser(subparsers, pull_bypass_parser, llm_debug_parser):
             "archived batch of workouts (DESIGN_plan_rollback.md §9)."
         )
     )
+    w_restore.set_defaults(func=run_workout_restore)
     w_restore.add_argument("id", type=int, help="Workout ID to restore")
     
     # workout adapt
@@ -218,6 +238,7 @@ def add_workout_parser(subparsers, pull_bypass_parser, llm_debug_parser):
             "is given, then synced to Google Calendar."
         )
     )
+    w_adapt.set_defaults(func=run_workout_adapt)
     add_single_date_arg(
         w_adapt,
         "Day to adapt: YYYY-MM-DD, 'today' (the default) or an offset like -1d"
@@ -254,6 +275,7 @@ def add_workout_parser(subparsers, pull_bypass_parser, llm_debug_parser):
             "their calendar entries."
         )
     )
+    w_push.set_defaults(func=run_workout_push)
     add_selector_args(
         w_push, meso=True, macro=True, goal=True, sport=True, direction="forward",
         default="today..",
@@ -276,6 +298,7 @@ def add_workout_parser(subparsers, pull_bypass_parser, llm_debug_parser):
             "The swap is synced to Google Calendar unless --no-sync is given."
         )
     )
+    w_swap.set_defaults(func=run_workout_swap)
     w_swap.add_argument(
         "target1",
         help="First workout to swap: a date (YYYY-MM-DD) or a workout ID"
@@ -304,6 +327,7 @@ def add_workout_parser(subparsers, pull_bypass_parser, llm_debug_parser):
         "wipe", advanced=True,
         help="Wipe all workouts from the database and Google Calendar"
     )
+    w_wipe.set_defaults(func=run_workout_wipe)
     w_wipe.add_argument("-y", "--yes", action="store_true", help="Skip confirmation prompt")
 
     # workout prune-calendar
@@ -319,6 +343,7 @@ def add_workout_parser(subparsers, pull_bypass_parser, llm_debug_parser):
             "it to a window, as on 'data wipe'. Use --dry-run to preview."
         )
     )
+    w_prune.set_defaults(func=run_workout_prune_calendar)
     add_selector_args(w_prune, direction="none")
     w_prune.add_argument(
         "-n", "--dry-run", action="store_true", dest="dry_run",

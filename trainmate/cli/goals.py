@@ -83,7 +83,7 @@ def run_goal_edit(args: argparse.Namespace) -> None:
     )
 
 
-def run_goal_list() -> None:
+def run_goal_list(args=None) -> None:
     """Lists all active and past training objective goals."""
     goals = runtime.db.get_objectives()
     print(bold(cyan("=== GOALS ===")))
@@ -122,6 +122,7 @@ def add_goal_parser(subparsers):
     g_add = goal_subparsers.add_parser(
         "add", help="Add a new goal"
     )
+    g_add.set_defaults(func=run_goal_add)
     g_add.add_argument("title", help="Goal title (e.g. Marathon)")
     g_add.add_argument("date", help="Target event date (YYYY-MM-DD)")
     g_add.add_argument(
@@ -136,6 +137,7 @@ def add_goal_parser(subparsers):
     g_edit = goal_subparsers.add_parser(
         "edit", help="Edit an existing goal"
     )
+    g_edit.set_defaults(func=run_goal_edit)
     g_edit.add_argument("id", type=int, help="Goal ID to edit")
     g_edit.add_argument("--title", help="New goal title")
     # --target-date, not --date: -d/--date is the selector vocabulary everywhere else, and
@@ -160,14 +162,17 @@ def add_goal_parser(subparsers):
     
     # goal rm
     g_rm = goal_subparsers.add_parser("rm", help="Remove a goal by ID")
+    g_rm.set_defaults(func=run_goal_rm)
     g_rm.add_argument("id", type=int, help="Goal ID to remove")
     
     # goal list
-    goal_subparsers.add_parser("list", help="Show all goals")
+    _list_parser = goal_subparsers.add_parser("list", help="Show all goals")
+    _list_parser.set_defaults(func=run_goal_list)
 
     # goal wipe
     g_wipe = goal_subparsers.add_parser(
         "wipe", advanced=True, help="Wipe all goals")
+    g_wipe.set_defaults(func=run_goal_wipe)
     g_wipe.add_argument("-y", "--yes", action="store_true", help="Skip confirmation prompt")
     
 

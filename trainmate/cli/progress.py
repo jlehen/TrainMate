@@ -1017,4 +1017,6 @@ def add_progress_parser(subparsers, pull_bypass_parser):
              "text output above still prints."
     )
 
+    progress_parser.set_defaults(func=run_progress)
+
     return progress_parser

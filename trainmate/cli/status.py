@@ -43,11 +43,16 @@ def _days_ago_str(date_str: str) -> str:
     return f", {days}d ago"
 
 
-def run_status(
-    verbose: bool = False, no_pull: bool = False, force_pull: bool = False
-) -> None:
-    """Displays current athlete goals, Garmin metrics, baselines, and memories."""
-    ensure_recent_data(no_pull=no_pull, force_pull=force_pull)
+def run_status(args) -> None:
+    """Displays current athlete goals, Garmin metrics, baselines, and memories.
+
+    Takes `args` like every other handler, so the dispatcher can call them uniformly.
+    """
+    verbose = getattr(args, "verbose", False)
+    ensure_recent_data(
+        no_pull=getattr(args, "no_pull", False),
+        force_pull=getattr(args, "force_pull", False),
+    )
     print(bold(cyan("=== TRAINMATE ATHLETE STATUS ===")))
 
     # Active Goal & Periodization Strategy
@@ -346,5 +351,6 @@ def add_status_parser(subparsers, pull_bypass_parser):
         "-v", "--verbose", action="store_true",
         help="Show all goals and life events"
     )
+    status_parser.set_defaults(func=run_status)
 
     return status_parser

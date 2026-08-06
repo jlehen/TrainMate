@@ -194,6 +194,7 @@ def add_context_parser(subparsers):
             "the same (date, metric) updates in place rather than duplicating."
         )
     )
+    ctx_add.set_defaults(func=run_context_add)
     ctx_add.add_argument(
         "metric", help="Opaque category, e.g. heat, sleep, stress"
     )
@@ -223,6 +224,7 @@ def add_context_parser(subparsers):
             "resurrect it."
         )
     )
+    ctx_rm.set_defaults(func=run_context_rm)
     ctx_rm.add_argument(
         "targets", nargs="*", metavar="TARGET",
         help="Context row IDs to remove, or a metric name to remove within the window"
@@ -238,6 +240,7 @@ def add_context_parser(subparsers):
         "list", aliases=["l"],
         help="List context signals (default window: the coach's metrics lookback)"
     )
+    ctx_list.set_defaults(func=run_context_list)
     ctx_list.add_argument(
         "metric_target", nargs="?", metavar="METRIC", help="Filter to a single metric"
     )
@@ -248,9 +251,10 @@ def add_context_parser(subparsers):
     )
 
     # context list-metrics
-    context_subparsers.add_parser(
+    _list_metrics_parser = context_subparsers.add_parser(
         "list-metrics", aliases=["lm"],
         help="Show distinct metrics in use with counts and date span"
     )
+    _list_metrics_parser.set_defaults(func=run_context_list_metrics)
 
     return context_parser

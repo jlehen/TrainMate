@@ -223,6 +223,7 @@ def add_benchmark_parser(subparsers):
             "a deadlift PR logged after a squat PR reads as one e1RM value jumping 70%."
         ),
     )
+    b_rec.set_defaults(func=run_benchmark_record)
     b_rec.add_argument(
         "sport",
         help="Sport the test belongs to (e.g. cycling, running, swimming, strength)",
@@ -246,20 +247,23 @@ def add_benchmark_parser(subparsers):
     )
 
     # benchmark list
-    b_subparsers.add_parser(
+    _list_parser = b_subparsers.add_parser(
         "list", help="Show the benchmark logbook, newest first"
     )
+    _list_parser.set_defaults(func=run_benchmark_list)
 
     # benchmark rm
     b_rm = b_subparsers.add_parser(
         "rm", help="Remove a benchmark result by ID"
     )
+    b_rm.set_defaults(func=run_benchmark_rm)
     b_rm.add_argument("id", type=int, help="Benchmark result ID to remove")
 
     # benchmark wipe
     b_wipe = b_subparsers.add_parser(
         "wipe", advanced=True, help="Wipe all benchmark results"
     )
+    b_wipe.set_defaults(func=run_benchmark_wipe)
     b_wipe.add_argument(
         "-y", "--yes", action="store_true", help="Skip confirmation prompt"
     )

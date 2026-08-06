@@ -194,6 +194,7 @@ def add_learnings_parser(subparsers):
     ln_list = learnings_subparsers.add_parser(
         "list", help="Show coach learnings"
     )
+    ln_list.set_defaults(func=run_learning_list)
     ln_list.add_argument(
         "--dormant", action="store_true", help="Show only dormant (decayed) learnings"
     )
@@ -214,34 +215,40 @@ def add_learnings_parser(subparsers):
     ln_show = learnings_subparsers.add_parser(
         "show", help="Show a learning and its evidence basis by ID"
     )
+    ln_show.set_defaults(func=run_learning_show)
     ln_show.add_argument("id", type=int, help="Learning ID to display")
 
     # learnings edit
     ln_edit = learnings_subparsers.add_parser(
         "edit", help="Revise the text of a learning"
     )
+    ln_edit.set_defaults(func=run_learning_edit)
     ln_edit.add_argument("id", type=int, help="Learning ID to edit")
     ln_edit.add_argument("text", help="New learning text")
 
     # learnings rm
     ln_rm = learnings_subparsers.add_parser("rm", help="Remove a learning by ID")
+    ln_rm.set_defaults(func=run_learning_rm)
     ln_rm.add_argument("id", type=int, help="Learning ID to remove")
 
     # learnings demote
     ln_demote = learnings_subparsers.add_parser(
         "demote", help="Accept a pending confidence demotion"
     )
+    ln_demote.set_defaults(func=run_learning_demote)
     ln_demote.add_argument("id", type=int, help="Learning ID to demote")
 
     # learnings keep
     ln_keep = learnings_subparsers.add_parser(
         "keep", help="Dismiss a pending demotion (affirms the learning)"
     )
+    ln_keep.set_defaults(func=run_learning_keep)
     ln_keep.add_argument("id", type=int, help="Learning ID to keep")
 
     # learnings wipe
     ln_wipe = learnings_subparsers.add_parser(
         "wipe", advanced=True, help="Wipe all coach learnings")
+    ln_wipe.set_defaults(func=run_learning_wipe)
     ln_wipe.add_argument("-y", "--yes", action="store_true", help="Skip confirmation prompt")
 
     return learnings_parser

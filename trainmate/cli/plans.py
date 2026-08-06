@@ -869,6 +869,7 @@ def add_plan_parser(subparsers, pull_bypass_parser, llm_debug_parser):
             "(macrocycles & mesocycles)"
         )
     )
+    p_gen.set_defaults(func=run_plan_generate)
     p_gen.add_argument(
         "-f", "--force", action="store_true",
         help="Force regeneration of the macrocycle/mesocycle strategy"
@@ -895,6 +896,7 @@ def add_plan_parser(subparsers, pull_bypass_parser, llm_debug_parser):
             "and --all every goal that has a plan."
         )
     )
+    p_show.set_defaults(func=run_plan_show)
     p_show.add_argument(
         "-g", "--goal", "--goal-id", type=int, dest="goal_id",
         help="Target goal ID to show the periodization plan for (defaults to the next "
@@ -927,6 +929,7 @@ def add_plan_parser(subparsers, pull_bypass_parser, llm_debug_parser):
             "version against the active one; with one, that version against the active one."
         )
     )
+    p_diff.set_defaults(func=run_plan_diff)
     p_diff.add_argument(
         "version_a", type=int, nargs="?", metavar="PLAN_ID_A",
         help="Older plan version to compare from (defaults to the previous version)"
@@ -956,6 +959,7 @@ def add_plan_parser(subparsers, pull_bypass_parser, llm_debug_parser):
             "('plan rollback --macrocycle <ID>')."
         )
     )
+    p_versions.set_defaults(func=run_plan_versions)
     p_versions.add_argument(
         "-g", "--goal", "--goal-id", type=int, dest="goal_id",
         help="Target goal ID whose plan versions to list (defaults to the next active goal)"
@@ -966,6 +970,7 @@ def add_plan_parser(subparsers, pull_bypass_parser, llm_debug_parser):
         "rm", advanced=True,
         help="Remove/delete a specific periodization plan by Goal ID"
     )
+    p_rm.set_defaults(func=run_plan_rm)
     p_rm.add_argument(
         "id", type=int,
         help="Goal ID whose periodization plan should be removed"
@@ -984,6 +989,7 @@ def add_plan_parser(subparsers, pull_bypass_parser, llm_debug_parser):
             "Google Calendar (the symmetric inverse of generation)."
         )
     )
+    p_rollback.set_defaults(func=run_plan_rollback)
     p_rollback.add_argument(
         "-g", "--goal", "--goal-id", type=int, dest="goal_id",
         help="Target goal ID whose plan to roll back (defaults to the next active goal)"
@@ -1002,6 +1008,7 @@ def add_plan_parser(subparsers, pull_bypass_parser, llm_debug_parser):
         description="Add athlete feedback (either --macro or --meso is mandatory).",
         help="Add athlete feedback (either --macro or --meso is mandatory)"
     )
+    p_fb.set_defaults(func=run_plan_feedback)
     p_fb.add_argument(
         "--macro", action="store_true",
         help="Provide general feedback on the overall macrocycle strategy"
@@ -1029,6 +1036,7 @@ def add_plan_parser(subparsers, pull_bypass_parser, llm_debug_parser):
     # plan wipe
     p_wipe = plan_subparsers.add_parser(
         "wipe", advanced=True, help="Wipe all periodization plans")
+    p_wipe.set_defaults(func=run_plan_wipe)
     p_wipe.add_argument("-y", "--yes", action="store_true", help="Skip confirmation prompt")
     
 
