@@ -117,6 +117,10 @@ def build_parser():
         "--helpall", action=_HelpAllAction,
         help="Show every command including hidden maintenance ones (same as 'help --all')"
     )
+    parser.add_argument(
+        "--debug", action="store_true",
+        help="Re-raise on failure instead of printing a one-line error"
+    )
 
     subparsers = parser.add_subparsers(dest="command", help="Available commands")
 
@@ -446,11 +450,33 @@ def _repl(parser, named_subparsers) -> None:
 
 
 def main(argv=None) -> None:
-    """Entry point. With no arguments, print help; use `shell` for the REPL."""
+    """Entry point. With no arguments, print help; use `shell` for the REPL.
+
+    The single error boundary for a command run. Handlers used to wrap themselves in
+    `except Exception` and print the message, which discarded the traceback, returned
+    exit code 0 for a failed command, and hid real bugs behind a one-line summary — the
+    `next_goal` NameError read as "Error during plan generation: name 'next_goal' is
+    not defined" for as long as it existed. Failures now reach here, print in red, and
+    exit non-zero; `--debug` re-raises so the traceback survives.
+    """
     if argv is None:
         argv = sys.argv[1:]
     parser, named_subparsers = build_parser()
-    run_once(argv, parser, named_subparsers)
+    debug = "--debug" in argv
+    try:
+        run_once(argv, parser, named_subparsers)
+    except SystemExit:
+        raise
+    except PromptCancelled:
+        # A deliberate abort (front-end /cancel or idle timeout), not a failure.
+        print("Cancelled.")
+        sys.exit(130)
+    except Exception as e:
+        if debug:
+            raise
+        print(red(f"Error: {e}"))
+        print(dim("Re-run with --debug for the full traceback."))
+        sys.exit(1)
 
 
 if __name__ == "__main__":

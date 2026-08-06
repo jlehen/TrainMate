@@ -477,139 +477,124 @@ def run_data_bootstrap(args: argparse.Namespace) -> None:
     """Cold-start reconstruction over the full training backlog (seeds learnings,
     establishes the reflect watermark)."""
     window = resolve_window(args)
-    try:
-        result = runtime.coach_service.data_bootstrap(
-            from_date_str=window[0],
-            until_date_str=window[1],
-            context=args.context,
-            force=args.force,
-            inspect_only=args.inspect_only,
-            no_pull=args.no_pull,
-            force_pull=args.force_pull,
-            auto=getattr(args, "auto", False),
-        )
-        _render_analysis_report(result, args.inspect_only)
-    except Exception as e:
-        print(red(f"Error running training history bootstrap: {e}"))
-
-
+    result = runtime.coach_service.data_bootstrap(
+        from_date_str=window[0],
+        until_date_str=window[1],
+        context=args.context,
+        force=args.force,
+        inspect_only=args.inspect_only,
+        no_pull=args.no_pull,
+        force_pull=args.force_pull,
+        auto=getattr(args, "auto", False),
+    )
+    _render_analysis_report(result, args.inspect_only)
 def run_data_reflect(args: argparse.Namespace) -> None:
     """Incremental reflection over evidence accrued since the last reflect watermark."""
     window = resolve_window(args)
-    try:
-        result = runtime.coach_service.data_reflect(
-            from_date_str=window[0],
-            until_date_str=window[1],
-            context=args.context,
-            force=args.force,
-            inspect_only=args.inspect_only,
-            no_pull=args.no_pull,
-            force_pull=args.force_pull,
-            auto=getattr(args, "auto", False),
-        )
-        if not result:
-            return  # Nothing new to reflect on; service already printed why.
-        _render_analysis_report(result, args.inspect_only)
-    except Exception as e:
-        print(red(f"Error running training reflection: {e}"))
-
-
+    result = runtime.coach_service.data_reflect(
+        from_date_str=window[0],
+        until_date_str=window[1],
+        context=args.context,
+        force=args.force,
+        inspect_only=args.inspect_only,
+        no_pull=args.no_pull,
+        force_pull=args.force_pull,
+        auto=getattr(args, "auto", False),
+    )
+    if not result:
+        return  # Nothing new to reflect on; service already printed why.
+    _render_analysis_report(result, args.inspect_only)
 def _render_analysis_report(result: dict, inspect_only: bool) -> None:
     """Renders a bootstrap/reflect reconstruction + applied coach learning deltas."""
-    try:
-        print(bold(cyan("\n=== HISTORICAL WORKOUT ANALYSIS REPORT ===")))
-        
-        # Macrocycle Overview
-        if "inferred_macrocycle" in result:
-            im = result["inferred_macrocycle"]
-            print("\n" + format_labeled_block(
-                f"{bold('Macrocycle Focus')} "
-                f"({magenta(im.get('start_date', ''))} to {magenta(im.get('end_date', ''))}):",
-                im.get('overall_focus', 'N/A'), color_fn=cyan
+    print(bold(cyan("\n=== HISTORICAL WORKOUT ANALYSIS REPORT ===")))
+    
+    # Macrocycle Overview
+    if "inferred_macrocycle" in result:
+        im = result["inferred_macrocycle"]
+        print("\n" + format_labeled_block(
+            f"{bold('Macrocycle Focus')} "
+            f"({magenta(im.get('start_date', ''))} to {magenta(im.get('end_date', ''))}):",
+            im.get('overall_focus', 'N/A'), color_fn=cyan
+        ))
+    
+    if "macrocycle_summary" in result:
+        print(format_labeled_block(f"{bold('Summary')}:", result["macrocycle_summary"]))
+
+    # Inferred Mesocycles
+    if "inferred_mesocycles" in result and result["inferred_mesocycles"]:
+        print(bold(cyan("\nDetected Mesocycle Blocks:")))
+        for meso in result["inferred_mesocycles"]:
+            c_tag = meso.get("estimated_consistency", "Moderate")
+            if c_tag == "High":
+                c_disp = green("[High Consistency]")
+            elif c_tag == "Low":
+                c_disp = red("[Low Consistency]")
+            else:
+                c_disp = yellow("[Moderate Consistency]")
+
+            print(format_labeled_text(
+                "  - ",
+                f"{green(meso.get('name', 'Phase'))} "
+                f"({cyan(meso.get('start_date', ''))} to {cyan(meso.get('end_date', ''))}) "
+                f"{c_disp}"
             ))
-        
-        if "macrocycle_summary" in result:
-            print(format_labeled_block(f"{bold('Summary')}:", result["macrocycle_summary"]))
+            print(format_labeled_block(
+                "    * Detected Focus:", str(meso.get('focus_detected', 'N/A'))
+            ))
+            print(f"    * Avg Weekly TSS: {meso.get('average_weekly_tss', 'N/A')}")
 
-        # Inferred Mesocycles
-        if "inferred_mesocycles" in result and result["inferred_mesocycles"]:
-            print(bold(cyan("\nDetected Mesocycle Blocks:")))
-            for meso in result["inferred_mesocycles"]:
-                c_tag = meso.get("estimated_consistency", "Moderate")
-                if c_tag == "High":
-                    c_disp = green("[High Consistency]")
-                elif c_tag == "Low":
-                    c_disp = red("[Low Consistency]")
-                else:
-                    c_disp = yellow("[Moderate Consistency]")
+    # Physiological Insights
+    if "physiological_insights" in result and result["physiological_insights"]:
+        print(bold(cyan("\nPhysiological Insights:")))
+        for insight in result["physiological_insights"]:
+            print(format_labeled_text("  - ", str(insight)))
 
+    # Coach learnings (incremental updates applied to learnings)
+    updates = result.get("learning_updates")
+    if updates:
+        header = (
+            "Coach Observations (NOT saved — inspect mode):"
+            if inspect_only
+            else "Coach Observations (Saved to learnings):"
+        )
+        print(bold(cyan("\n" + header)))
+        try:
+            learnings_map = {l['id']: l for l in runtime.db.get_learnings()}
+        except Exception:
+            learnings_map = {}
+        for u in updates:
+            op = u.get("op")
+            meta = []
+            if u.get("sports"):
+                meta.append(u["sports"])
+            ev = u.get("evidence")
+            if isinstance(ev, (list, tuple)) and ev:
+                meta.append(f"weeks: {', '.join(str(w) for w in ev)}")
+            suffix = f" ({'; '.join(meta)})" if meta else ""
+
+            def _existing_text(uid):
+                if uid is not None and uid in learnings_map:
+                    return learnings_map[uid]['text']
+                return ""
+
+            if op == "add":
+                print(format_labeled_text("  + ", f"{u.get('text', '')}{suffix}"))
+            elif op == "revise":
                 print(format_labeled_text(
-                    "  - ",
-                    f"{green(meso.get('name', 'Phase'))} "
-                    f"({cyan(meso.get('start_date', ''))} to {cyan(meso.get('end_date', ''))}) "
-                    f"{c_disp}"
+                    f"  ~ [{u.get('id')}] ", f"{u.get('text', '')}{suffix}"
                 ))
-                print(format_labeled_block(
-                    "    * Detected Focus:", str(meso.get('focus_detected', 'N/A'))
-                ))
-                print(f"    * Avg Weekly TSS: {meso.get('average_weekly_tss', 'N/A')}")
+            elif op == "reinforce":
+                tag = f"  ↑ reinforced [{u.get('id')}]{suffix}"
+                text = _existing_text(u.get("id"))
+                print(format_labeled_block(tag, text) if text else tag)
+            elif op == "contradict":
+                tag = f"  ↓ contradicted [{u.get('id')}]{suffix}"
+                text = _existing_text(u.get("id"))
+                print(format_labeled_block(tag, text) if text else tag)
+            elif op == "retire":
+                print(f"  - retired [{u.get('id')}]")
 
-        # Physiological Insights
-        if "physiological_insights" in result and result["physiological_insights"]:
-            print(bold(cyan("\nPhysiological Insights:")))
-            for insight in result["physiological_insights"]:
-                print(format_labeled_text("  - ", str(insight)))
-
-        # Coach learnings (incremental updates applied to learnings)
-        updates = result.get("learning_updates")
-        if updates:
-            header = (
-                "Coach Observations (NOT saved — inspect mode):"
-                if inspect_only
-                else "Coach Observations (Saved to learnings):"
-            )
-            print(bold(cyan("\n" + header)))
-            try:
-                learnings_map = {l['id']: l for l in runtime.db.get_learnings()}
-            except Exception:
-                learnings_map = {}
-            for u in updates:
-                op = u.get("op")
-                meta = []
-                if u.get("sports"):
-                    meta.append(u["sports"])
-                ev = u.get("evidence")
-                if isinstance(ev, (list, tuple)) and ev:
-                    meta.append(f"weeks: {', '.join(str(w) for w in ev)}")
-                suffix = f" ({'; '.join(meta)})" if meta else ""
-
-                def _existing_text(uid):
-                    if uid is not None and uid in learnings_map:
-                        return learnings_map[uid]['text']
-                    return ""
-
-                if op == "add":
-                    print(format_labeled_text("  + ", f"{u.get('text', '')}{suffix}"))
-                elif op == "revise":
-                    print(format_labeled_text(
-                        f"  ~ [{u.get('id')}] ", f"{u.get('text', '')}{suffix}"
-                    ))
-                elif op == "reinforce":
-                    tag = f"  ↑ reinforced [{u.get('id')}]{suffix}"
-                    text = _existing_text(u.get("id"))
-                    print(format_labeled_block(tag, text) if text else tag)
-                elif op == "contradict":
-                    tag = f"  ↓ contradicted [{u.get('id')}]{suffix}"
-                    text = _existing_text(u.get("id"))
-                    print(format_labeled_block(tag, text) if text else tag)
-                elif op == "retire":
-                    print(f"  - retired [{u.get('id')}]")
-
-        print(bold(cyan("\n==========================================")))
-
-    except Exception as e:
-        print(red(f"Error rendering workout analysis: {e}"))
-
+    print(bold(cyan("\n==========================================")))
 
 def add_data_parser(subparsers, pull_bypass_parser, llm_debug_parser):
     # data command & subparsers

@@ -166,9 +166,9 @@ def run_workout_adapt(args: argparse.Namespace) -> None:
             print("\nAdaptations discarded.")
 
     except ValueError as e:
+        # A domain refusal (no active plan to adapt towards), not a failure: say it
+        # plainly. Anything else belongs to the entry point's error boundary.
         print(red(str(e)))
-    except Exception as e:
-        print(red(f"Error executing daily adaptation: {e}"))
 
 
 def _confirm_regeneration(end_date: Optional[str]) -> bool:
@@ -201,76 +201,71 @@ def run_workout_generate(args: argparse.Namespace) -> None:
         no_pull=args.no_pull, force_pull=getattr(args, 'force_pull', False)
     )
 
-    try:
-        next_goal = None
-        objectives = runtime.db.upcoming_objectives()
-        if objectives:
-            if args.goal_id is not None:
-                target_goals = [o for o in objectives if o['id'] == args.goal_id]
-                next_goal = target_goals[0] if target_goals else None
-            else:
-                objectives.sort(key=lambda x: str(x['target_date']))
-                next_goal = objectives[0]
-
-            if next_goal:
-                macro = runtime.db.get_macrocycle_for_objective(next_goal['id'])
-                if macro:
-                    change_reason = runtime.coach_service.config_changed(macro)
-                    if change_reason:
-                        warning = (
-                            "Warning: a plan-shaping input has "
-                            "changed since the active periodization plan was "
-                            f"generated ({change_reason}).\n"
-                            "Generating workouts using the out-of-date plan might "
-                            "result in incorrect training targets.\n"
-                            "It is highly recommended to run "
-                            + cmd("plan generate") + " first."
-                        )
-                        if force:
-                            print(yellow(warning + " Proceeding anyway (--force)."))
-                        elif not runtime.prompt.confirm(yellow(warning + " Proceed anyway?")):
-                            print(yellow(
-                                "Workout generation cancelled. Please run "
-                                + cmd("plan generate") + " first."
-                            ))
-                            return
-                        else:
-                            # Confirming accepts the out-of-date plan, so stamp the
-                            # current config; --force only skips the question and leaves
-                            # the warning live for the next run.
-                            print("Proceeding. Updating configuration hash in database.")
-                            runtime.db.update_macrocycle_config_hash(
-                                macro['id'], runtime.coach_service._get_config_hash(),
-                                runtime.coach_service._get_config_snapshot()
-                            )
-
-        workout_kwargs = {}
+    next_goal = None
+    objectives = runtime.db.upcoming_objectives()
+    if objectives:
         if args.goal_id is not None:
-            workout_kwargs['objective_id'] = args.goal_id
+            target_goals = [o for o in objectives if o['id'] == args.goal_id]
+            next_goal = target_goals[0] if target_goals else None
+        else:
+            objectives.sort(key=lambda x: str(x['target_date']))
+            next_goal = objectives[0]
 
-        end_date = _resolve_workout_end_date(args, next_goal)
-        if end_date is not None:
-            workout_kwargs['end_date'] = end_date
+        if next_goal:
+            macro = runtime.db.get_macrocycle_for_objective(next_goal['id'])
+            if macro:
+                change_reason = runtime.coach_service.config_changed(macro)
+                if change_reason:
+                    warning = (
+                        "Warning: a plan-shaping input has "
+                        "changed since the active periodization plan was "
+                        f"generated ({change_reason}).\n"
+                        "Generating workouts using the out-of-date plan might "
+                        "result in incorrect training targets.\n"
+                        "It is highly recommended to run "
+                        + cmd("plan generate") + " first."
+                    )
+                    if force:
+                        print(yellow(warning + " Proceeding anyway (--force)."))
+                    elif not runtime.prompt.confirm(yellow(warning + " Proceed anyway?")):
+                        print(yellow(
+                            "Workout generation cancelled. Please run "
+                            + cmd("plan generate") + " first."
+                        ))
+                        return
+                    else:
+                        # Confirming accepts the out-of-date plan, so stamp the
+                        # current config; --force only skips the question and leaves
+                        # the warning live for the next run.
+                        print("Proceeding. Updating configuration hash in database.")
+                        runtime.db.update_macrocycle_config_hash(
+                            macro['id'], runtime.coach_service._get_config_hash(),
+                            runtime.coach_service._get_config_snapshot()
+                        )
 
-        if not force and not _confirm_regeneration(end_date):
-            print(yellow("Workout generation cancelled — your current plan is unchanged."))
-            return
+    workout_kwargs = {}
+    if args.goal_id is not None:
+        workout_kwargs['objective_id'] = args.goal_id
 
-        reasoning, workouts = runtime.coach_service.workout_generate(**workout_kwargs)
-        print(bold(cyan("\n=== WORKOUTS GENERATED BY COACH ===")))
-        print(f"{bold('Reasoning')}:\n{wrap_text(reasoning)}\n")
-        print(green(
-            f"Generated {len(workouts)} workouts starting from today and pushed them "
-            "to Google Calendar."
-        ))
-        print(green(
-            f"Run {cmd('workout rollback')} to undo this regeneration, or "
-            f"{cmd('plan rollback')} to step the strategy back with it."
-        ))
-    except Exception as e:
-        print(red(f"Error during workout generation: {e}"))
+    end_date = _resolve_workout_end_date(args, next_goal)
+    if end_date is not None:
+        workout_kwargs['end_date'] = end_date
 
+    if not force and not _confirm_regeneration(end_date):
+        print(yellow("Workout generation cancelled — your current plan is unchanged."))
+        return
 
+    reasoning, workouts = runtime.coach_service.workout_generate(**workout_kwargs)
+    print(bold(cyan("\n=== WORKOUTS GENERATED BY COACH ===")))
+    print(f"{bold('Reasoning')}:\n{wrap_text(reasoning)}\n")
+    print(green(
+        f"Generated {len(workouts)} workouts starting from today and pushed them "
+        "to Google Calendar."
+    ))
+    print(green(
+        f"Run {cmd('workout rollback')} to undo this regeneration, or "
+        f"{cmd('plan rollback')} to step the strategy back with it."
+    ))
 def _batch_line(index: int, batch: dict) -> str:
     """One `workout batches` row: '#N  <when>  <n> workouts · <span>  plan ID …'."""
     count = f"{batch['workouts']} workout(s)"

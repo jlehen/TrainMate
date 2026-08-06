@@ -58,12 +58,15 @@ def emit_photo(path: str, caption: Optional[str] = None, out=None) -> None:
     out.flush()
 
 
-class PromptCancelled(BaseException):
+class PromptCancelled(Exception):
     """Raised when the front-end cancels an in-flight prompt (``/cancel`` or idle
-    timeout), or when the answer channel closes. Inherits ``BaseException`` (like
-    ``KeyboardInterrupt``) so the handlers' broad ``except Exception`` blocks don't
-    mistake a deliberate abort for a command error; the CLI entry point catches it
-    and reports a clean cancellation."""
+    timeout), or when the answer channel closes.
+
+    An ordinary exception. It inherited ``BaseException`` only so the handlers' broad
+    ``except Exception`` nets could not mistake a deliberate abort for a command error;
+    those nets are gone, and `trainmate_cli.main` catches this before its own boundary
+    and reports a clean cancellation. A test asserts no `except Exception` block
+    encloses a prompt call, which is the condition that made this safe."""
 
 
 @dataclass(frozen=True)

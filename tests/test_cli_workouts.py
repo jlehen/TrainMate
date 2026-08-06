@@ -115,7 +115,10 @@ class TestCliWorkouts(unittest.TestCase):
     def test_adapt_reports_metric_day_count_not_values(self, mock_coach, _mock_ensure):
         # The coach still reads the full trajectory; the CLI only tells the athlete how
         # many days fed the decision and never prints the raw per-day numbers.
-        mock_coach.workout_adapt.return_value = ("Metrics are green", [], [])
+        mock_coach.workout_adapt.return_value = AdaptProposal(
+            reason="Metrics are green", workouts=[], new_constraints=[],
+            range_start="2026-06-01", range_end="2026-06-30",
+        )
         self._seed_pmc_metrics(90)
 
         exit_code, stdout, stderr = self.run_cli(["workout", "adapt", "--lookback", "3"])

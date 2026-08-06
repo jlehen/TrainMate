@@ -39,97 +39,94 @@ def run_plan_generate(args: argparse.Namespace) -> None:
     if not metrics:
         print(yellow("Warning: Metrics cache is empty. Proceeding without Garmin metrics."))
         
-    try:
-        # First-run nudge: no reflect watermark means `data bootstrap` has never run, so
-        # there are no history-derived coach learnings to inform the plan. Offer to seed
-        # them before generating (skipped in non-interactive --auto mode).
-        if runtime.db.get_sync_state("reflect") is None and not getattr(args, 'auto', False):
-            if runtime.prompt.confirm(wrap_text(
-                f"No training-history analysis found. Run {cmd('data bootstrap')} first "
-                "to reconstruct past cycles and seed coach learnings?"
-            )):
-                runtime.coach_service.data_bootstrap(
-                    no_pull=args.no_pull, force_pull=getattr(args, 'force_pull', False)
-                )
-
-        # Bound before the branch: with no upcoming objectives the accept path below
-        # still reads it, and an unbound name surfaced only as a NameError string.
-        next_goal = None
-        objectives = runtime.db.upcoming_objectives()
-        if objectives:
-            if args.goal_id is not None:
-                target_goals = [o for o in objectives if o['id'] == args.goal_id]
-                next_goal = target_goals[0] if target_goals else None
-            else:
-                objectives.sort(key=lambda x: str(x['target_date']))
-                next_goal = objectives[0]
-                # Name the defaulted goal so a bare `plan generate` isn't silent
-                # about which objective it planned for (DESIGN_cli_noargs.md §b).
-                print(dim(wrap_text(
-                    f"No goal given — planning for your next goal: "
-                    f"{next_goal.get('title', '')} on {fmt_date(next_goal['target_date'])}."
-                )))
-
-            if next_goal:
-                macro = runtime.db.get_macrocycle_for_objective(next_goal['id'])
-                if macro:
-                    change_reason = runtime.coach_service.config_changed(macro)
-                    if change_reason and not args.force:
-                        if runtime.prompt.confirm(wrap_text(
-                            "A plan-shaping input has changed since the last plan "
-                            f"generation ({change_reason}).\n"
-                            "Would you like to regenerate the periodization strategy?"
-                        )):
-                            args.force = True
-                        else:
-                            print(wrap_text(
-                                "Keeping current periodization strategy. "
-                                "Updating configuration hash in database."
-                            ))
-                            runtime.db.update_macrocycle_config_hash(
-                                macro['id'], runtime.coach_service._get_config_hash(),
-                                runtime.coach_service._get_config_snapshot()
-                            )
-
-        plan_kwargs = {'auto_apply': False}
-        if args.goal_id is not None:
-            plan_kwargs['objective_id'] = args.goal_id
-        proposal = runtime.coach_service.plan_generate(
-            force=bool(args.force), **plan_kwargs
-        )
-        mesocycles = proposal['mesocycles']
-
-        if proposal['reused']:
-            print(green(f"\nActive plan is up to date ({len(mesocycles)} mesocycles)."))
-            return
-
-        if getattr(args, 'auto', False):
-            apply = True
-        else:
-            apply = runtime.prompt.confirm("Apply this new periodization strategy?")
-
-        if apply:
-            goal = proposal['goal'] or next_goal
-            # plan_apply already no-ops on a missing goal, so let it own that decision
-            # rather than re-deciding here, and report what it actually saved.
-            # Pass the fingerprints taken when the strategy was generated: the athlete
-            # may have edited a goal while reading the proposal, and recording that edit
-            # as part of this plan would mark a stale plan current.
-            saved_id = runtime.coach_service.plan_apply(
-                goal['id'] if goal else None, proposal['strategy'], mesocycles,
-                fingerprints=proposal.get('fingerprints'),
+    # First-run nudge: no reflect watermark means `data bootstrap` has never run, so
+    # there are no history-derived coach learnings to inform the plan. Offer to seed
+    # them before generating (skipped in non-interactive --auto mode).
+    if runtime.db.get_sync_state("reflect") is None and not getattr(args, 'auto', False):
+        if runtime.prompt.confirm(wrap_text(
+            f"No training-history analysis found. Run {cmd('data bootstrap')} first "
+            "to reconstruct past cycles and seed coach learnings?"
+        )):
+            runtime.coach_service.data_bootstrap(
+                no_pull=args.no_pull, force_pull=getattr(args, 'force_pull', False)
             )
-            if saved_id is None:
-                print(yellow("\nNo goal to attach this plan to — nothing was saved."))
-                return
-            print(green(f"\nGenerated {len(mesocycles)} mesocycles. Save complete."))
-            print(green(f"Run {cmd('workout generate')} to schedule workouts "
-                        "based on this plan."))
-        else:
-            print(yellow("\nPlan discarded."))
 
-    except Exception as e:
-        print(red(f"Error during plan generation: {e}"))
+    # Bound before the branch: with no upcoming objectives the accept path below
+    # still reads it, and an unbound name surfaced only as a NameError string.
+    next_goal = None
+    objectives = runtime.db.upcoming_objectives()
+    if objectives:
+        if args.goal_id is not None:
+            target_goals = [o for o in objectives if o['id'] == args.goal_id]
+            next_goal = target_goals[0] if target_goals else None
+        else:
+            objectives.sort(key=lambda x: str(x['target_date']))
+            next_goal = objectives[0]
+            # Name the defaulted goal so a bare `plan generate` isn't silent
+            # about which objective it planned for (DESIGN_cli_noargs.md §b).
+            print(dim(wrap_text(
+                f"No goal given — planning for your next goal: "
+                f"{next_goal.get('title', '')} on {fmt_date(next_goal['target_date'])}."
+            )))
+
+        if next_goal:
+            macro = runtime.db.get_macrocycle_for_objective(next_goal['id'])
+            if macro:
+                change_reason = runtime.coach_service.config_changed(macro)
+                if change_reason and not args.force:
+                    if runtime.prompt.confirm(wrap_text(
+                        "A plan-shaping input has changed since the last plan "
+                        f"generation ({change_reason}).\n"
+                        "Would you like to regenerate the periodization strategy?"
+                    )):
+                        args.force = True
+                    else:
+                        print(wrap_text(
+                            "Keeping current periodization strategy. "
+                            "Updating configuration hash in database."
+                        ))
+                        runtime.db.update_macrocycle_config_hash(
+                            macro['id'], runtime.coach_service._get_config_hash(),
+                            runtime.coach_service._get_config_snapshot()
+                        )
+
+    plan_kwargs = {'auto_apply': False}
+    if args.goal_id is not None:
+        plan_kwargs['objective_id'] = args.goal_id
+    proposal = runtime.coach_service.plan_generate(
+        force=bool(args.force), **plan_kwargs
+    )
+    mesocycles = proposal['mesocycles']
+
+    if proposal['reused']:
+        print(green(f"\nActive plan is up to date ({len(mesocycles)} mesocycles)."))
+        return
+
+    if getattr(args, 'auto', False):
+        apply = True
+    else:
+        apply = runtime.prompt.confirm("Apply this new periodization strategy?")
+
+    if apply:
+        goal = proposal['goal'] or next_goal
+        # plan_apply already no-ops on a missing goal, so let it own that decision
+        # rather than re-deciding here, and report what it actually saved.
+        # Pass the fingerprints taken when the strategy was generated: the athlete
+        # may have edited a goal while reading the proposal, and recording that edit
+        # as part of this plan would mark a stale plan current.
+        saved_id = runtime.coach_service.plan_apply(
+            goal['id'] if goal else None, proposal['strategy'], mesocycles,
+            fingerprints=proposal.get('fingerprints'),
+        )
+        if saved_id is None:
+            print(yellow("\nNo goal to attach this plan to — nothing was saved."))
+            return
+        print(green(f"\nGenerated {len(mesocycles)} mesocycles. Save complete."))
+        print(green(f"Run {cmd('workout generate')} to schedule workouts "
+                    "based on this plan."))
+    else:
+        print(yellow("\nPlan discarded."))
+
 
 
 def _print_hanging(head: str, text: str, width: int, color_fn=None) -> str:

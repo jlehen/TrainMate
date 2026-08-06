@@ -7,6 +7,7 @@ from tests.helpers import clear_all_tables, run_cli, rebind_test_db
 
 TEST_DB_PATH = os.path.join(os.path.dirname(__file__), "test_trainmate_cli_dashless.db")
 
+from trainmate.coach.proposals import AdaptProposal
 from trainmate.db import Database
 import trainmate.db
 import trainmate_cli
@@ -271,7 +272,10 @@ class TestDashlessEndToEnd(unittest.TestCase):
     @patch("trainmate.runtime.garmin")
     @patch("trainmate.runtime.coach_service")
     def test_workout_adapt_message_and_no_pull(self, mock_coach, mock_garmin):
-        mock_coach.workout_adapt.return_value = ("ok", [], [])
+        mock_coach.workout_adapt.return_value = AdaptProposal(
+            reason="ok", workouts=[], new_constraints=[],
+            range_start="2026-06-01", range_end="2026-06-30",
+        )
         exit_code, _, _ = self.run_cli(
             ["w", "a", "auto", "message", "feeling sluggish lately", "no-pull"]
         )
