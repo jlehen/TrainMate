@@ -152,17 +152,15 @@ class AdaptationMixin:
             objectives.sort(key=lambda x: str(x['target_date']))
             next_goal = objectives[0]
 
-        guidelines = self._load_science_guidelines()
-        profile = self._effective_profile()
-        objective_id = next_goal['id'] if next_goal else None
-        strategy, meso_text = self._get_active_strategy_and_meso_text(
-            objectives, objective_id=objective_id
-        )
-        learnings = self._get_learnings_text()
-
         # Active constraints overlapping the adaptation window (target date → mesocycle
         # end), the single directive read path shared with generate (§6).
         constraints = self._db.get_constraints(target_date_str, meso_end_date_str)
+        ctx = self._coach_context(
+            constraints, objectives=objectives,
+            objective_id=next_goal['id'] if next_goal else None,
+        )
+        guidelines, profile = ctx.guidelines, ctx.profile
+        strategy, meso_text, learnings = ctx.strategy, ctx.meso_text, ctx.learnings
 
         # §8: the athlete's note is passed straight through as advisory intent — no
         # separate classification pass. The same LLM call also extracts any

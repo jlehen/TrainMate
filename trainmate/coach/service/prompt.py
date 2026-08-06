@@ -7,6 +7,7 @@ from trainmate.prompt import Choice
 from trainmate.types import Objective, Constraint
 from trainmate.util import cyan, green, yellow, bold, red, gray, cmd, format_labeled_block
 from trainmate.coach.formatting import _load_science_guidelines
+from trainmate.coach.proposals import CoachContext
 import trainmate.coach.service as _svc
 
 
@@ -106,6 +107,34 @@ class PromptConfigMixin:
     def _load_science_guidelines(self) -> str:
         return _load_science_guidelines(
             runtime.config.app_science_dir, runtime.config.science_dir
+        )
+
+    def _coach_context(
+        self,
+        constraints: List[Dict[str, Any]],
+        objectives: Optional[List[Objective]] = None,
+        objective_id: Optional[int] = None,
+    ) -> CoachContext:
+        """Assembles the shared context every prompt builder needs.
+
+        Planning, generation and adaptation each built this by hand from the same four
+        calls. `constraints` stays a parameter because the window each command reads
+        differs — adaptation asks for the adaptation range, generation for the
+        generation window — and that difference is deliberate.
+        """
+        if objectives is None:
+            objectives = self._db.upcoming_objectives()
+        strategy, meso_text = self._get_active_strategy_and_meso_text(
+            objectives, objective_id=objective_id
+        )
+        return CoachContext(
+            objectives=objectives,
+            constraints=constraints,
+            guidelines=self._load_science_guidelines(),
+            profile=self._effective_profile(),
+            strategy=strategy,
+            meso_text=meso_text,
+            learnings=self._get_learnings_text(),
         )
 
     def _get_active_strategy_and_meso_text(

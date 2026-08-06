@@ -378,16 +378,12 @@ class WorkoutGenMixin:
             gen_end_str = (gen_start_obj + timedelta(days=num_days - 1)).strftime("%Y-%m-%d")
 
         constraints = self._db.get_constraints(gen_start_str)
-        guidelines = self._load_science_guidelines()
-        profile = self._effective_profile()
         self._maybe_nudge_no_threshold()
 
-        # We need all objectives for _get_active_strategy_and_meso_text context
-        objectives = self._db.upcoming_objectives()
-        strategy, meso_text = self._get_active_strategy_and_meso_text(
-            objectives, objective_id=objective_id
-        )
-        learnings = self._get_learnings_text()
+        ctx = self._coach_context(constraints, objective_id=objective_id)
+        objectives = ctx.objectives
+        guidelines, profile = ctx.guidelines, ctx.profile
+        strategy, meso_text, learnings = ctx.strategy, ctx.meso_text, ctx.learnings
 
         pmc_cutoff, pmc_context = self._pmc_prompt_context(today_str)
         # What the block has already banked, when this run re-plans only its remainder

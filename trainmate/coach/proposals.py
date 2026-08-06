@@ -117,6 +117,28 @@ def pair_adaptations(
 
 
 @dataclass(frozen=True)
+class CoachContext:
+    """What the coach knows before it is asked anything in particular.
+
+    These seven travel together into every prompt builder — planning, generation and
+    adaptation — and were assembled by the same four calls copy-pasted into each of the
+    three service methods. Threading them as one value means a new shared input is added
+    in one place rather than three, and a call site cannot quietly omit one.
+
+    Everything here is *shared* context. Per-command inputs (the target date, the
+    athlete's note, the window being planned) stay as arguments, because they are what
+    distinguishes one command from another.
+    """
+    objectives: List[Dict[str, Any]]
+    constraints: List[Dict[str, Any]]
+    guidelines: str
+    profile: Optional[Dict[str, Any]]
+    strategy: str
+    meso_text: str
+    learnings: str
+
+
+@dataclass(frozen=True)
 class PlanFingerprints:
     """The inputs a strategy was generated against, hashed once at prompt time.
 

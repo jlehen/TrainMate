@@ -357,12 +357,14 @@ class WorkoutLogicMixin:
         model is told to weigh it as today's intent without treating it as a durable
         signal about the block.
         """
-        # has_message gates BOTH the note-handling instructions here and the note DATA
-        # section further down; they must move together, or the model gets told about a
-        # section that isn't present. Computed once and reused in both places.
+        # has_message gates FOUR regions that sit hundreds of lines apart: the clause
+        # spliced into the change_reason wording, the note-handling instructions, the
+        # "new_constraints" schema member, and the note DATA section. They must appear
+        # together or the model is told about a section that isn't present.
+        # tests/test_prompt_gates.py asserts that, so the invariant survives edits here.
         has_message = bool(athlete_message and athlete_message.strip())
-        # Same gate discipline as has_message: the drift instructions and the drift DATA
-        # section move together, or the model is told about a section that isn't there.
+        # Same gate discipline: the drift branch, the CORRECTING EXECUTION DRIFT
+        # instructions and the drift DATA section move together.
         has_intensity = bool(intensity_context and intensity_context.strip())
         # Shared change_reason wording, with the note-footprint clause spliced in only when
         # a note could actually have driven the change.
