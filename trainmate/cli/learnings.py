@@ -1,7 +1,7 @@
 import argparse
 import sys
 
-import trainmate_cli as cli
+from trainmate import runtime
 from trainmate.util import (
     bold, green, red, yellow, cyan, magenta, gray, cmd,
     format_labeled_block,
@@ -45,7 +45,7 @@ def _print_learning(l: dict) -> None:
 
 def _echo_learning(learning_id: int) -> None:
     """Re-reads a just-mutated learning and echoes it in the `learnings list` format."""
-    learning = next((l for l in cli.db.get_learnings() if l['id'] == learning_id), None)
+    learning = next((l for l in runtime.db.get_learnings() if l['id'] == learning_id), None)
     if learning:
         _print_learning(learning)
 
@@ -59,7 +59,7 @@ def _print_learning_dates(l: dict) -> None:
 
 def run_learning_list(args: argparse.Namespace) -> None:
     """Lists coach learnings, optionally filtered by sport, confidence, or dormancy."""
-    learnings = cli.db.get_learnings()
+    learnings = runtime.db.get_learnings()
 
     if getattr(args, "dormant", False):
         learnings = [l for l in learnings if l.get("dormant")]
@@ -75,7 +75,7 @@ def run_learning_list(args: argparse.Namespace) -> None:
             getattr(args, "dormant", False) or getattr(args, "sport", None)
             or getattr(args, "confidence", None)
         ) else "None yet."))
-        if not cli.db.get_learnings():
+        if not runtime.db.get_learnings():
             print(
                 yellow("Run " + cmd("data bootstrap")
                        + " to reconstruct your training history and seed observations.")
@@ -91,7 +91,7 @@ def run_learning_list(args: argparse.Namespace) -> None:
 
 def run_learning_show(args: argparse.Namespace) -> None:
     """Displays one learning with its full evidence basis (the 'why' behind its confidence)."""
-    learning = next((l for l in cli.db.get_learnings() if l['id'] == args.id), None)
+    learning = next((l for l in runtime.db.get_learnings() if l['id'] == args.id), None)
     if not learning:
         print(red(f"Learning with ID {args.id} not found."))
         sys.exit(1)
@@ -99,7 +99,7 @@ def run_learning_show(args: argparse.Namespace) -> None:
     _print_learning(learning)
     _print_learning_dates(learning)
 
-    evidence = cli.db.get_learning_evidence(args.id)
+    evidence = runtime.db.get_learning_evidence(args.id)
     sup = [e for e in evidence if e['polarity'] >= 0]
     con = [e for e in evidence if e['polarity'] < 0]
     print(bold("\n  Evidence basis:"))
@@ -117,30 +117,30 @@ def run_learning_show(args: argparse.Namespace) -> None:
 
 def run_learning_edit(args: argparse.Namespace) -> None:
     """Revises the text of an existing learning."""
-    learning = next((l for l in cli.db.get_learnings() if l['id'] == args.id), None)
+    learning = next((l for l in runtime.db.get_learnings() if l['id'] == args.id), None)
     if not learning:
         print(red(f"Learning with ID {args.id} not found."))
         sys.exit(1)
 
-    cli.db.update_learning(args.id, args.text)
+    runtime.db.update_learning(args.id, args.text)
     _echo_learning(args.id)
     print(green("Learning updated successfully."))
 
 
 def run_learning_rm(args: argparse.Namespace) -> None:
     """Deletes a learning by ID (its evidence basis cascades)."""
-    learning = next((l for l in cli.db.get_learnings() if l['id'] == args.id), None)
+    learning = next((l for l in runtime.db.get_learnings() if l['id'] == args.id), None)
     if not learning:
         print(red(f"Learning with ID {args.id} not found."))
         sys.exit(1)
 
-    cli.db.delete_learning(args.id)
+    runtime.db.delete_learning(args.id)
     print(green(f"Learning with ID {args.id} removed successfully."))
 
 
 def run_learning_demote(args: argparse.Namespace) -> None:
     """Accepts a pending confidence downgrade for a learning."""
-    result = cli.db.demote_learning(args.id)
+    result = runtime.db.demote_learning(args.id)
     if result is None:
         print(yellow(f"Learning with ID {args.id} has no pending demotion."))
         return
@@ -154,7 +154,7 @@ def run_learning_demote(args: argparse.Namespace) -> None:
 
 def run_learning_keep(args: argparse.Namespace) -> None:
     """Dismisses + affirms a pending downgrade (the affirmation counts as reinforcement)."""
-    learning = next((l for l in cli.db.get_learnings() if l['id'] == args.id), None)
+    learning = next((l for l in runtime.db.get_learnings() if l['id'] == args.id), None)
     if not learning:
         print(red(f"Learning with ID {args.id} not found."))
         sys.exit(1)
@@ -162,7 +162,7 @@ def run_learning_keep(args: argparse.Namespace) -> None:
         print(yellow(f"Learning with ID {args.id} has no pending demotion to dismiss."))
         return
 
-    cli.db.keep_learning(args.id)
+    runtime.db.keep_learning(args.id)
     _echo_learning(args.id)
     print(green("Learning kept; pending demotion dismissed."))
 
@@ -170,13 +170,13 @@ def run_learning_keep(args: argparse.Namespace) -> None:
 def run_learning_wipe(args: argparse.Namespace) -> None:
     """Wipes all coach learnings from the database after confirmation."""
     if not args.yes:
-        if not cli.prompt.confirm(
+        if not runtime.prompt.confirm(
             "Are you sure you want to wipe all coach learnings?", danger=True
         ):
             print("Wipe cancelled.")
             return
 
-    cli.db.wipe_learnings()
+    runtime.db.wipe_learnings()
     print(green("All coach learnings wiped successfully."))
 
 

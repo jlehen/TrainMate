@@ -127,8 +127,7 @@ class DataAnalysisMixin:
             if auto:
                 print(cyan("Skipping bootstrap (pass --force to re-run)."))
                 return {}
-            import trainmate_cli as cli
-            if not cli.prompt.confirm("Re-run the full bootstrap anyway?"):
+            if not self._prompt.confirm("Re-run the full bootstrap anyway?"):
                 print(cyan("Bootstrap skipped."))
                 return {}
 

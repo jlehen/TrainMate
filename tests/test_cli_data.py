@@ -40,14 +40,14 @@ class TestCliData(unittest.TestCase):
     def run_cli(self, args, input_value="n"):
         return run_cli(args, input_value)
 
-    @patch("trainmate_cli.garmin")
+    @patch("trainmate.runtime.garmin")
     def test_data_pull_command(self, mock_garmin):
         exit_code, stdout, stderr = self.run_cli(["data", "pull"])
         self.assertEqual(exit_code, 0)
         mock_garmin.pull.assert_called_once()
 
     @patch("trainmate.cli.data.mark_adherence_range")
-    @patch("trainmate_cli.garmin")
+    @patch("trainmate.runtime.garmin")
     def test_data_pull_marks_adherence(self, mock_garmin, mock_mark):
         # A successful pull rides along into the adherence Calendar marking over
         # the pulled range, and reports how many past events were marked.
@@ -59,7 +59,7 @@ class TestCliData(unittest.TestCase):
         self.assertIn("Marked 2 past Calendar event(s)", stdout)
 
     @patch("trainmate.cli.data.mark_adherence_range")
-    @patch("trainmate_cli.garmin")
+    @patch("trainmate.runtime.garmin")
     def test_data_pull_no_mark_skips_marking(self, mock_garmin, mock_mark):
         # --no-mark suppresses the ride-along even on a successful pull.
         exit_code, stdout, stderr = self.run_cli(["data", "pull", "--no-mark"])
@@ -68,7 +68,7 @@ class TestCliData(unittest.TestCase):
         mock_mark.assert_not_called()
 
     @patch("trainmate.cli.data.mark_adherence_range")
-    @patch("trainmate_cli.garmin")
+    @patch("trainmate.runtime.garmin")
     def test_data_pull_skips_marking_on_failure(self, mock_garmin, mock_mark):
         # If the Garmin pull fails, the ride-along marking is not attempted.
         from trainmate.garmin import GarminAuthRequired
@@ -102,7 +102,7 @@ class TestCliData(unittest.TestCase):
         self.assertIsNone(test_db.get_baseline("2026-05-31"))
         self.assertEqual(len(test_db.get_completed_activities()), 0)
 
-    @patch("trainmate_cli.coach_service")
+    @patch("trainmate.runtime.coach_service")
     def test_data_bootstrap_command(self, mock_coach):
         learning_id = test_db.add_learning("Athlete responds well to high sleep score")
 
@@ -238,7 +238,7 @@ class TestCliData(unittest.TestCase):
             for line in out.split("\n"):
                 self.assertLessEqual(visible_len(line), int(width), msg=repr(line))
 
-    @patch("trainmate_cli.garmin")
+    @patch("trainmate.runtime.garmin")
     def test_data_show_metrics_command(self, mock_garmin):
         # garmin is mocked (to stub ensure_data); the PMC read helpers are pure DB reads,
         # so give them real behavior (None history start = no warm-up suppression)
@@ -320,7 +320,7 @@ class TestCliData(unittest.TestCase):
         self.assertIsNotNone(row["ctl"])
         self.assertLess(row["ctl"], ctl_before)
 
-    @patch("trainmate_cli.garmin")
+    @patch("trainmate.runtime.garmin")
     def test_data_show_activities_command(self, mock_garmin):
         test_db.save_completed_activity(
             activity_id="act_show_1", date="2026-06-03", start_time="09:00",
@@ -385,7 +385,7 @@ class TestCliData(unittest.TestCase):
             zone1_sec=200, zone2_sec=1300, zone3_sec=200, zone4_sec=0, zone5_sec=0,
         )
 
-    @patch("trainmate_cli.garmin")
+    @patch("trainmate.runtime.garmin")
     def test_load_column_carries_its_provenance(self, mock_garmin):
         """The highest-value fact missing from this view was not the breakdown, it was
         where the TSS came from — §9.6's `!` explained at source."""
@@ -394,7 +394,7 @@ class TestCliData(unittest.TestCase):
         self.assertIn("(pwr)", stdout)   # the ride: power zones win
         self.assertIn("(hr)", stdout)    # the run: hrTSS, coverage adequate
 
-    @patch("trainmate_cli.garmin")
+    @patch("trainmate.runtime.garmin")
     def test_type_filter_is_alias_aware(self, mock_garmin):
         """`--type cycling` used to miss every alias, so the athlete filtered for their
         cycling and saw a fraction of it."""
@@ -405,7 +405,7 @@ class TestCliData(unittest.TestCase):
         self.assertIn("Gravel Ride", stdout)
         self.assertNotIn("Morning Run", stdout)
 
-    @patch("trainmate_cli.garmin")
+    @patch("trainmate.runtime.garmin")
     def test_zones_renders_one_row_per_activity_and_currency(self, mock_garmin):
         """§6's prohibition kept structural: the two views of the same time are separate
         rows, never adjacent columns inviting addition."""
@@ -419,7 +419,7 @@ class TestCliData(unittest.TestCase):
         self.assertIn("two views of the SAME time", stdout)  # NEVER_SUM_NOTE
         self.assertNotIn("Avg Watts", stdout)                # swapped, not widened
 
-    @patch("trainmate_cli.garmin")
+    @patch("trainmate.runtime.garmin")
     def test_csv_carries_every_zone_column_with_no_flag(self, mock_garmin):
         self._zoned_activities()
         _, stdout, _ = self.run_cli(["data", "show-activities", "-a", "--csv"])
@@ -428,7 +428,7 @@ class TestCliData(unittest.TestCase):
                     "hr_coverage", "power_coverage", "load", "load_method", "tss"]:
             self.assertIn(col, header)
 
-    @patch("trainmate_cli.garmin")
+    @patch("trainmate.runtime.garmin")
     def test_show_metrics_csv_empty_cells_for_null_pmc(self, mock_garmin):
         # §6.2: NULL/suppressed PMC values emit EMPTY CSV cells, never 0, so downstream
         # parsing can't read a zero as data.

@@ -4,6 +4,7 @@ from datetime import date, datetime, timedelta, timezone
 from unittest.mock import patch
 
 from tests.helpers import clear_all_tables, rebind_test_db
+from trainmate import runtime
 from trainmate.db import Database
 import trainmate.db
 import trainmate.garmin as garmin
@@ -14,21 +15,23 @@ rebind_test_db(test_db)
 
 
 def _bind_test_db(tc):
-    """(Re)bind the shared db singletons to this module's test_db for one test, then
-    restore the prior bindings on cleanup.
+    """Point the handle at this module's test_db for one test, restoring it after.
 
-    The garmin functions resolve the db live through ``garmin.db`` (``_g.db``) and
-    ``trainmate.db.db``. Other test modules clobber those globals — ``test_progression``
-    assigns ``garmin.db`` at import, ``test_modification_state`` rebinds
-    ``trainmate.db.db`` in its setUp — so the once-at-import assignment above isn't
-    enough; bind per-test and restore so we neither read a stale db nor clobber theirs.
+    Other test modules rebind the same singleton, so a once-at-import assignment is not
+    enough — bind per-test and restore, so we neither read a stale handle nor clobber
+    theirs. There is now one place to save and restore: the garmin functions resolve
+    the handle through ``runtime.db`` rather than their own package attribute.
     """
-    prev_db, prev_gdb = trainmate.db.db, garmin.db
+    import trainmate.runtime as runtime
+
+    prev_db = vars(runtime).get("db")
     rebind_test_db(test_db)
 
     def _restore():
-        trainmate.db.db = prev_db
-        garmin.db = prev_gdb
+        if prev_db is None:
+            vars(runtime).pop("db", None)
+        else:
+            runtime.db = prev_db
 
     tc.addCleanup(_restore)
 
@@ -405,7 +408,7 @@ class TestEnsureData(unittest.TestCase):
         # Data only for the last few days; a read far back needs a large backfill.
         for i in range(3, -1, -1):
             test_db.save_metric_cache(date=_d(-i), rhr=50, hrv=70, sleep_score=80, stress=20)
-        garmin.db.set_sync_state(through_date=_d(0), last_pull_utc=datetime.now(timezone.utc).isoformat())
+        runtime.db.set_sync_state(through_date=_d(0), last_pull_utc=datetime.now(timezone.utc).isoformat())
         with patch.object(garmin, "pull") as mock_pull:
             with patch("builtins.print") as mock_print:
                 garmin.ensure_data(_d(-120), _d(0))
@@ -421,7 +424,7 @@ class TestEnsureData(unittest.TestCase):
         # on every command.
         for i in range(33, -1, -1):   # covers window + the old 28-day pad
             test_db.save_metric_cache(date=_d(-i), rhr=50, hrv=70, sleep_score=80, stress=20)
-        garmin.db.set_sync_state(through_date=_d(0), last_pull_utc=datetime.now(timezone.utc).isoformat())
+        runtime.db.set_sync_state(through_date=_d(0), last_pull_utc=datetime.now(timezone.utc).isoformat())
         with patch.object(garmin, "pull") as mock_pull:
             with patch("builtins.print") as mock_print:
                 garmin.ensure_data(_d(-5), _d(0))
@@ -435,7 +438,7 @@ class TestEnsureData(unittest.TestCase):
         for i in range(75, -1, -1):
             test_db.save_metric_cache(date=_d(-i), rhr=50, hrv=70, sleep_score=80, stress=20)
         # Recent watermark -> mutable zone considered fresh, nothing to fetch.
-        garmin.db.set_sync_state(through_date=_d(0), last_pull_utc=datetime.now(timezone.utc).isoformat())
+        runtime.db.set_sync_state(through_date=_d(0), last_pull_utc=datetime.now(timezone.utc).isoformat())
         with patch.object(garmin, "pull") as mock_pull:
             garmin.ensure_data(_d(-5), _d(0))
         mock_pull.assert_not_called()
@@ -445,7 +448,7 @@ class TestEnsureData(unittest.TestCase):
         # Cover the full 63-day derivation pad so the padded window has no real hole.
         for i in range(75, -1, -1):
             test_db.save_metric_cache(date=_d(-i), rhr=None, hrv=None, sleep_score=None, stress=None)
-        garmin.db.set_sync_state(through_date=_d(0), last_pull_utc=datetime.now(timezone.utc).isoformat())
+        runtime.db.set_sync_state(through_date=_d(0), last_pull_utc=datetime.now(timezone.utc).isoformat())
         with patch.object(garmin, "pull") as mock_pull:
             garmin.ensure_data(_d(-5), _d(0))
         mock_pull.assert_not_called()

@@ -3,8 +3,8 @@ import math
 from datetime import timedelta
 from typing import Any, Dict, List, Optional, Tuple
 
+from trainmate import runtime
 from trainmate.config import config
-from trainmate.db import db
 from trainmate.util import today_str, yellow
 import trainmate.garmin as _g
 from trainmate.garmin.client import _to_date
@@ -120,7 +120,7 @@ def pmc_history_start(dbh=None) -> Optional[str]:
     `dbh` defaults to the module db; callers holding their own handle (CoachService's
     injected db, the CLI's rebindable one) pass it so the cutoff is derived from the
     same database as the metrics it gates."""
-    dbh = dbh or _g.db
+    dbh = dbh or runtime.db
     firsts = [
         d for d in (dbh.get_first_activity_date(), dbh.get_first_metric_date()) if d
     ]
@@ -166,7 +166,7 @@ def recompute_derived(dbh=None) -> None:
     `dbh` defaults to the module db; the post-wipe recompute (cli/data.py) passes the
     CLI's own handle so it sweeps the same database the wipe just ran against, even
     when the singleton has been rebound (tests, embeddings that inject a db)."""
-    dbh = dbh or _g.db
+    dbh = dbh or runtime.db
     # One unified load per activity via the fallback hierarchy (power TSS ->
     # hrTSS -> sRPE), not the old `tss + rpe*hours` blend.
     daily_load: Dict[str, float] = {}
@@ -233,7 +233,7 @@ def backfill_tss(
     and rewrites the stored value. Activities keep their raw zone seconds, so
     this needs no Garmin calls. Returns the number of rows whose TSS changed, and
     refreshes the derived PMC (which runs off the on-the-fly load)."""
-    activities = _g.db.get_completed_activities(start_date=start_date, end_date=end_date)
+    activities = runtime.db.get_completed_activities(start_date=start_date, end_date=end_date)
     changed = 0
     sparse: List[Dict[str, Any]] = []
     for act in activities:
@@ -243,7 +243,7 @@ def backfill_tss(
             old_tss is not None and new_tss is not None
             and abs(float(old_tss) - new_tss) > 1e-6
         ):
-            _g.db.update_activity_tss(act["activity_id"], new_tss)
+            runtime.db.update_activity_tss(act["activity_id"], new_tss)
             changed += 1
         _load, _method, warning = compute_load(
             act, act, act.get("rpe"), act.get("duration_sec") or 0.0

@@ -82,9 +82,10 @@ classes themselves.
 
 ### Entry Points
 
-- **`trainmate_cli.py`** — thin shim: argparse dispatcher (`main()`), the patchable
-  singletons/helpers handlers reference via `import trainmate_cli as cli`, and a
-  `__main__` alias. No business logic.
+- **`trainmate_cli.py`** — thin entry point: argparse dispatcher (`main()`) and its
+  helpers. No business logic. Singletons live in `trainmate/runtime.py`
+  ([§6](#6-singletons)), which handlers read directly, so nothing under `trainmate/`
+  imports this module.
 - **`trainmate/cli/`** — per-command-family handler modules (`run_*()`): `status`,
   `progress`, `goals`, `constraints`, `benchmarks`, `context`, `learnings`,
   `plans`, `data`, `models`, the `workouts/` package, plus shared `common`.
@@ -1172,17 +1173,35 @@ prompt reads, so the `data reflect` it points at is a command that can clear it
 
 ## 6. Singletons
 
-All modules export a singleton at the bottom. Import these, never instantiate
-the classes:
+`trainmate/runtime.py` owns the process-wide singletons. Read them off the module at
+use time — never instantiate the classes, and never bind the value at import:
 
 ```python
-from trainmate.config import config          # Config
-from trainmate.db import db                  # Database
-from trainmate.coach import coach_service    # CoachService
-from trainmate.openrouter import openrouter_client  # OpenRouterClient
-from trainmate.google_calendar import calendar_syncer  # CalendarSyncer
-from trainmate import garmin                     # module functions (pull, ensure_data, …)
+from trainmate import runtime
+
+runtime.config           # Config
+runtime.db               # Database
+runtime.coach_service    # CoachService
+runtime.calendar_syncer  # CalendarSyncer
+runtime.garmin           # module functions (pull, ensure_data, …)
+runtime.prompt           # the prompt broker (see below)
 ```
+
+`runtime` resolves each name on first access and caches it, so **importing a module
+never builds a Database or opens the file**; `--help` does no I/O. Assigning
+(`runtime.db = fake`) shadows the accessor for the process, which is the single
+override point for tests.
+
+Reading at use time is what makes one assignment authoritative. Binding by value
+(`from trainmate.db import db`) captures whatever existed at import and is invisible to
+a later override — that mismatch is why replacements used to "take" for some modules
+and not others. `from trainmate.db import db` still works for callers that want their
+own handle, but prefer `runtime.db`.
+
+`trainmate_cli.py` is a plain entry point: it holds `main()` and its helpers, and
+nothing under `trainmate/` imports it. Handlers reach singletons through `runtime`, so
+the import cycle that forced the old `sys.modules.setdefault("trainmate_cli", …)`
+self-alias no longer exists.
 
 `openrouter_client.model` is a lazily-resolved property, not a plain attribute: it reads
 the stored choice from the database on first use, so importing the module never opens the
@@ -1196,9 +1215,11 @@ re-exported from its `__init__.py`: `pull()`, `ensure_data()`, `reset_memo()` (t
 `activity_load()` / `load_method()` / `rpe_divergence()`, plus the `GarminClient` class
 and `GarminAuthRequired`.
 
-The **prompt broker** is a patchable singleton on the CLI entry module rather than
-in `trainmate/prompt.py` itself: `trainmate_cli.py` does `prompt = make_prompt()`,
-and handlers reach it as `cli.prompt`. `make_prompt()` selects the transport from
+The **prompt broker** is `runtime.prompt`. `CoachService` takes it as a constructor
+argument (`prompt_instance=`, defaulting to `runtime.prompt`) so the service can ask a
+question without importing a frontend — it used to do `import trainmate_cli as cli`
+mid-method, which meant any non-terminal caller got a terminal conversation.
+`make_prompt()` selects the transport from
 `TRAINMATE_FRONTEND`: `TtyPrompt` (the default — `input()` with `[y/N]`, EOF→default)
 or `JsonPrompt` (`json` — the Telegram bot). Every interactive `input()` site routes
 through `cli.prompt.confirm(message, danger=…)` / `cli.prompt.choose(message, [Choice…],
@@ -1211,12 +1232,16 @@ abort for a command error; `trainmate_cli.main`'s `__main__` guard catches it an
 `Cancelled.`. Garmin MFA (`garmin/client.py`) stays outside the broker: it's gated by
 `sys.stdin.isatty()` and raises `GarminAuthRequired` off a TTY, so it never hangs the bot.
 
-For tests, the DB singleton can be overridden by patching the module-level `db`
-variable in affected modules (see `tests/test_adaptation.py` for the pattern:
-assign `test_db` to `trainmate.coach.service.db`, `trainmate.garmin.db`, etc.
-before importing the singletons). Because the logic now lives in submodules,
-patch the name where it is *used* — e.g. `trainmate.coach.engine.openrouter_client`,
-`trainmate.coach.service.db`.
+For tests, call `tests.helpers.rebind_test_db(test_db)`: it sets `runtime.db` plus the
+remaining by-value sites in one call, so a module cannot be left reading a different
+handle than its neighbours. `tests/__init__.py` installs two backstops before anything
+imports the app — `sqlite3.connect` refuses the production database and `socket.connect`
+refuses remote hosts — because both seams otherwise fail silently and leave a green
+test that measured nothing. `tests/test_isolation_guards.py` asserts they still fire.
+
+Names still patched where they are *used* rather than through `runtime`:
+`trainmate.coach.engine.openrouter_client` (the LLM seam) and the clock sites listed in
+`tests/helpers._CLOCK_SITES`.
 
 ---
 

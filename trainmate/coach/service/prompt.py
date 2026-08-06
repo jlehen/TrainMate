@@ -1,8 +1,9 @@
 import json
 from datetime import datetime
 from typing import Any, List, Optional, Tuple, Dict
+from trainmate import runtime
 from trainmate.config import config
-from trainmate.db import db
+from trainmate.prompt import Choice
 from trainmate.types import Objective, Constraint
 from trainmate.util import cyan, green, yellow, bold, red, gray, cmd, format_labeled_block
 from trainmate.coach.formatting import _load_science_guidelines
@@ -103,7 +104,9 @@ class PromptConfigMixin:
         return self.engine._get_constraints_hash(constraints)
 
     def _load_science_guidelines(self) -> str:
-        return _load_science_guidelines(_svc.config.app_science_dir, _svc.config.science_dir)
+        return _load_science_guidelines(
+            runtime.config.app_science_dir, runtime.config.science_dir
+        )
 
     def _get_active_strategy_and_meso_text(
         self, objectives: List[Objective], objective_id: Optional[int] = None
@@ -187,13 +190,12 @@ class PromptConfigMixin:
                 f"  [{l['id']}|{l.get('sports') or 'general'}|{l['confidence']}]", l['text']
             ))
             print(yellow(f"    proposed demotion → {target_disp}"))
-            import trainmate_cli as cli
-            ans = cli.prompt.choose(
+            ans = self._prompt.choose(
                 f"Apply proposed demotion of learning [{l['id']}] → {target_disp}?",
                 [
-                    cli.Choice("demote", f"Demote → {target_disp}"),
-                    cli.Choice("keep", "Keep (dismiss + affirm)"),
-                    cli.Choice("skip", "Skip (leave pending)"),
+                    Choice("demote", f"Demote → {target_disp}"),
+                    Choice("keep", "Keep (dismiss + affirm)"),
+                    Choice("skip", "Skip (leave pending)"),
                 ],
                 default="skip",
             )

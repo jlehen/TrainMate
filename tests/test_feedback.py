@@ -19,7 +19,6 @@ import trainmate_cli
 
 test_db = Database(db_path=TEST_DB_PATH)
 rebind_test_db(test_db)
-trainmate.coach.service.db = test_db
 rebind_test_db(test_db)
 
 from trainmate.coach import coach_service
@@ -33,7 +32,6 @@ class TestFeedback(unittest.TestCase):
         global test_db
         test_db = Database(db_path=TEST_DB_PATH)
         rebind_test_db(test_db)
-        trainmate.coach.service.db = test_db
         rebind_test_db(test_db)
 
     @classmethod
@@ -146,7 +144,7 @@ class TestFeedback(unittest.TestCase):
         # Mesocycle feedback is indented one step deeper than its own block indent.
         self.assertRegex(stdout, r"Mesocycle Feedback:\n +more speed")
 
-    @patch("trainmate_cli._edit_text_in_editor")
+    @patch("trainmate.cli.plans._edit_text_in_editor")
     def test_cli_feedback_edit(self, mock_editor):
         obj_id = test_db.add_objective(
             title="Zurich Marathon", target_date=GOAL_DATE,

@@ -37,7 +37,7 @@ class TestCliContext(unittest.TestCase):
     def run_cli(self, args, input_value="n"):
         return run_cli(args, input_value)
 
-    @patch("trainmate_cli.calendar_syncer")
+    @patch("trainmate.runtime.calendar_syncer")
     def test_context_add_and_list(self, mock_calendar):
         mock_calendar.calendar_id = "cal-1"
         ids = iter(["evt-1", "evt-2", "evt-3"])
@@ -73,7 +73,7 @@ class TestCliContext(unittest.TestCase):
         self.assertEqual(exit_code, 0)
         self.assertIn("heat: 3 days", stdout)
 
-    @patch("trainmate_cli.calendar_syncer")
+    @patch("trainmate.runtime.calendar_syncer")
     def test_context_add_no_label_uses_metric_value_form(self, mock_calendar):
         mock_calendar.calendar_id = "cal-1"
         mock_calendar.add_context_event.return_value = "evt-1"
@@ -87,7 +87,7 @@ class TestCliContext(unittest.TestCase):
             mock_calendar.add_context_event.call_args.args[3], "Alcohol: 2.0"
         )
 
-    @patch("trainmate_cli.calendar_syncer")
+    @patch("trainmate.runtime.calendar_syncer")
     def test_context_add_label_flag(self, mock_calendar):
         mock_calendar.calendar_id = "cal-1"
         mock_calendar.add_context_event.return_value = "evt-1"
@@ -100,7 +100,7 @@ class TestCliContext(unittest.TestCase):
         rows = test_db.get_daily_context("2026-06-25", "2026-06-25", metric="heat")
         self.assertEqual(rows[0]["text"], "severe heatwave, poor sleep")
 
-    @patch("trainmate_cli.calendar_syncer")
+    @patch("trainmate.runtime.calendar_syncer")
     def test_context_add_idempotent_by_date_metric(self, mock_calendar):
         mock_calendar.calendar_id = "cal-1"
         mock_calendar.add_context_event.return_value = "evt-1"
@@ -115,7 +115,7 @@ class TestCliContext(unittest.TestCase):
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0]["text"], "second")
 
-    @patch("trainmate_cli.calendar_syncer")
+    @patch("trainmate.runtime.calendar_syncer")
     def test_context_rm_deletes_calendar_event(self, mock_calendar):
         mock_calendar.calendar_id = "cal-1"
         test_db.upsert_daily_context_by_event("evt-9", "2026-06-25", "heat", None, "hot")
@@ -126,7 +126,7 @@ class TestCliContext(unittest.TestCase):
         mock_calendar.delete_event.assert_called_once_with("evt-9")
         self.assertEqual(test_db.get_daily_context("2026-06-25", "2026-06-25"), [])
 
-    @patch("trainmate_cli.calendar_syncer")
+    @patch("trainmate.runtime.calendar_syncer")
     def test_context_rm_refuses_unscoped(self, mock_calendar):
         mock_calendar.calendar_id = "cal-1"
         test_db.upsert_daily_context_by_event("evt-9", "2026-06-25", "heat", None, "hot")

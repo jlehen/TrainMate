@@ -11,7 +11,6 @@ import trainmate.coach
 TEST_DB_PATH = os.path.join(os.path.dirname(__file__), "test_trainmate_analysis.db")
 test_db = Database(db_path=TEST_DB_PATH)
 rebind_test_db(test_db)
-trainmate.coach.service.db = test_db
 
 from trainmate.coach import coach_service
 
@@ -24,7 +23,6 @@ class TestWorkoutAnalysis(unittest.TestCase):
         global test_db
         test_db = Database(db_path=TEST_DB_PATH)
         rebind_test_db(test_db)
-        trainmate.coach.service.db = test_db
 
     @classmethod
     def tearDownClass(cls):
@@ -314,7 +312,6 @@ class TestReflectWatermark(unittest.TestCase):
         global test_db
         test_db = Database(db_path=TEST_DB_PATH)
         rebind_test_db(test_db)
-        trainmate.coach.service.db = test_db
 
     @classmethod
     def tearDownClass(cls):
@@ -588,7 +585,6 @@ class TestRicherEvidenceIntegration(unittest.TestCase):
         global test_db
         test_db = Database(db_path=TEST_DB_PATH)
         rebind_test_db(test_db)
-        trainmate.coach.service.db = test_db
 
     @classmethod
     def tearDownClass(cls):
@@ -720,7 +716,6 @@ class TestPriorTrainingContext(unittest.TestCase):
         global test_db
         test_db = Database(db_path=TEST_DB_PATH)
         rebind_test_db(test_db)
-        trainmate.coach.service.db = test_db
 
     @classmethod
     def tearDownClass(cls):

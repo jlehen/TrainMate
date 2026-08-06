@@ -17,7 +17,6 @@ import trainmate.coach
 
 test_db = Database(db_path=TEST_DB_PATH)
 rebind_test_db(test_db)
-trainmate.coach.service.db = test_db
 
 from trainmate.coach import coach_service
 
@@ -40,7 +39,6 @@ class TestConstraintDB(unittest.TestCase):
         global test_db
         test_db = Database(db_path=TEST_DB_PATH)
         rebind_test_db(test_db)
-        trainmate.coach.service.db = test_db
 
     @classmethod
     def tearDownClass(cls):
@@ -197,7 +195,6 @@ class TestConstraintPlanImpact(unittest.TestCase):
         global test_db
         test_db = Database(db_path=TEST_DB_PATH)
         rebind_test_db(test_db)
-        trainmate.coach.service.db = test_db
 
     def setUp(self):
         clear_all_tables(test_db)
@@ -269,7 +266,6 @@ class TestMessageCapture(unittest.TestCase):
         global test_db
         test_db = Database(db_path=TEST_DB_PATH)
         rebind_test_db(test_db)
-        trainmate.coach.service.db = test_db
 
     def setUp(self):
         clear_all_tables(test_db)
@@ -368,7 +364,6 @@ class TestConstraintMigration(unittest.TestCase):
         global test_db
         test_db = Database(db_path=TEST_DB_PATH)
         rebind_test_db(test_db)
-        trainmate.coach.service.db = test_db
 
     def setUp(self):
         clear_all_tables(test_db)

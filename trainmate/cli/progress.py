@@ -901,7 +901,7 @@ def run_progress(args: argparse.Namespace) -> None:
     load through plan end, and the weekly planned-vs-actual bars (§7.1). Auto-ensures
     fresh Garmin data first (the seam would otherwise read yesterday's un-synced ride
     as a 0-load day)."""
-    import trainmate_cli as cli
+    from trainmate import runtime
     from trainmate import timeline
     from trainmate.config import config
     ensure_recent_data(
@@ -910,7 +910,7 @@ def run_progress(args: argparse.Namespace) -> None:
     today = _today_str()
     weeks_window = getattr(args, "weeks", None) or 8
 
-    payload = timeline.build_timeline_payload(cli.db)
+    payload = timeline.build_timeline_payload(runtime.db)
 
     sports = list(getattr(args, "sports", None) or [])
     blocks = getattr(args, "blocks", False)
@@ -941,7 +941,7 @@ def run_progress(args: argparse.Namespace) -> None:
         # Printed outside the loop above: `block_report` lays one zone cell per line at
         # phone width, and a screen-width re-wrap would shred those columns (§9.6).
         for line in render_block_section(
-            cli.db, payload, weeks_window, today, sports, preferences
+            runtime.db, payload, weeks_window, today, sports, preferences
         ):
             print(line)
 

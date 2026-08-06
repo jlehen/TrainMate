@@ -2,7 +2,7 @@ import csv as csv_mod
 import argparse
 import sys
 from typing import Optional
-import trainmate_cli as cli
+from trainmate import runtime
 from trainmate import intensity
 from trainmate.garmin.load import activity_load, load_method
 from trainmate.sports import sport_aliases
@@ -20,20 +20,20 @@ def run_data_pull(args: argparse.Namespace) -> None:
 
     Explicit/manual pull: does exactly the range asked for (mirrors GarminScraper's
     options) and advances the watermark. The watermark/auto-ensure logic lives in
-    cli.garmin.ensure_data, which commands call when reading.
+    runtime.garmin.ensure_data, which commands call when reading.
     """
     start_date, end_date = resolve_window(args)
 
     pulled = False
     try:
-        cli.garmin.pull(
+        runtime.garmin.pull(
             start_date, end_date,
             metrics=not args.activities_only,
             activities=not args.metrics_only,
             throttle=args.sleep,
         )
         pulled = True
-    except cli.garmin.GarminAuthRequired as e:
+    except runtime.garmin.GarminAuthRequired as e:
         print(red(f"Garmin authentication required: {e}"))
         print(yellow("Run this command in an interactive terminal to complete MFA."))
     except Exception as e:
@@ -55,7 +55,7 @@ def run_data_backfill_tss(args: argparse.Namespace) -> None:
     """Recomputes stored TSS for all cached activities under the current
     zone-based hierarchy, then refreshes the derived PMC."""
     start_date, end_date = resolve_window(args)
-    changed = cli.garmin.backfill_tss(
+    changed = runtime.garmin.backfill_tss(
         start_date=start_date,
         end_date=end_date,
         verbose=getattr(args, "verbose", False),
@@ -92,21 +92,21 @@ def run_data_wipe(args: argparse.Namespace) -> None:
         window = ""
 
     if not args.yes:
-        if not cli.prompt.confirm(
+        if not runtime.prompt.confirm(
             f"Are you sure you want to wipe {scope}{window}?", danger=True
         ):
             print("Wipe cancelled.")
             return
 
     if garmin:
-        cli.db.wipe_garmin_data(start, end)
+        runtime.db.wipe_garmin_data(start, end)
         # A ranged wipe leaves deleted load baked into later days' CTL/ATL EWMAs, so
         # recompute after the wipe commits. Done here at the command layer (not the db
-        # method) to avoid a garmin<->db circular import, and pinned to cli.db so it
+        # method) to avoid a garmin<->db circular import, and pinned to runtime.db so it
         # sweeps the same database the wipe ran against. See DESIGN_pmc_fitness_fatigue.md §4.
-        cli.garmin.recompute_derived(dbh=cli.db)
+        runtime.garmin.recompute_derived(dbh=runtime.db)
     if calendar:
-        cli.db.wipe_calendar_context(start, end)
+        runtime.db.wipe_calendar_context(start, end)
     print(green(f"Wiped {scope}{window}."))
 
 
@@ -116,13 +116,13 @@ def run_data_show_metrics(args: argparse.Namespace) -> None:
 
     if not getattr(args, 'no_pull', False) and not getattr(args, 'all', False):
         try:
-            cli.garmin.ensure_data(
+            runtime.garmin.ensure_data(
                 start_date, end_date, force=getattr(args, 'force_pull', False)
             )
         except Exception as e:
             print(yellow(f"Warning: Could not ensure recent data: {e}"))
 
-    metrics_history = cli.db.get_metrics_cache(start_date=start_date, end_date=end_date)
+    metrics_history = runtime.db.get_metrics_cache(start_date=start_date, end_date=end_date)
 
     if getattr(args, 'csv', False):
         _show_metrics_csv(metrics_history)
@@ -143,7 +143,7 @@ def run_data_show_metrics(args: argparse.Namespace) -> None:
     warmup_cutoff = pmc_warmup_cutoff()
 
     for m in metrics_history:
-        base = cli.db.get_baseline(m['date'])
+        base = runtime.db.get_baseline(m['date'])
 
         hrv_val = m['hrv']
         rhr_val = m['rhr']
@@ -157,9 +157,9 @@ def run_data_show_metrics(args: argparse.Namespace) -> None:
 
         # Ratio off the *display* values, so a warm-up-suppressed CTL can't surface as a
         # spurious spike (DESIGN_pmc_fitness_fatigue.md §6.2).
-        ctl_v, atl_v, tsb_v = cli.garmin.pmc_display_values(m, warmup_cutoff)
+        ctl_v, atl_v, tsb_v = runtime.garmin.pmc_display_values(m, warmup_cutoff)
         ctl_str, atl_str, tsb_str = pmc_cells(ctl_v, atl_v, tsb_v)
-        ratio_val = cli.garmin.load_ratio(atl_v, ctl_v)
+        ratio_val = runtime.garmin.load_ratio(atl_v, ctl_v)
         ratio_str = color_load_ratio(ratio_val) if ratio_val is not None else "N/A"
 
         hrv_base_str = "N/A"
@@ -215,7 +215,7 @@ def _show_metrics_csv(metrics_history: list) -> None:
     # downstream parsing can't read a zero as data (DESIGN_pmc_fitness_fatigue.md §6.2).
     warmup_cutoff = pmc_warmup_cutoff()
     for m in metrics_history:
-        base = cli.db.get_baseline(m['date'])
+        base = runtime.db.get_baseline(m['date'])
         hrv_base = None
         rhr_base = None
         sleep_base = None
@@ -223,8 +223,8 @@ def _show_metrics_csv(metrics_history: list) -> None:
             hrv_base = base.get('hrv_baseline_mean')
             rhr_base = base.get('rhr_baseline_mean')
             sleep_base = base.get('sleep_baseline_mean')
-        ctl_v, atl_v, tsb_v = cli.garmin.pmc_display_values(m, warmup_cutoff)
-        ratio_v = cli.garmin.load_ratio(atl_v, ctl_v)
+        ctl_v, atl_v, tsb_v = runtime.garmin.pmc_display_values(m, warmup_cutoff)
+        ratio_v = runtime.garmin.load_ratio(atl_v, ctl_v)
         writer.writerow([
             m['date'], m['hrv'], hrv_base, m['rhr'], rhr_base,
             m['sleep_score'], sleep_base, m['stress'],
@@ -310,13 +310,13 @@ def run_data_show_activities(args: argparse.Namespace) -> None:
 
     if not getattr(args, 'no_pull', False) and not getattr(args, 'all', False):
         try:
-            cli.garmin.ensure_data(
+            runtime.garmin.ensure_data(
                 start_date, end_date, force=getattr(args, 'force_pull', False)
             )
         except Exception as e:
             print(yellow(f"Warning: Could not ensure recent data: {e}"))
 
-    activities = cli.db.get_completed_activities(
+    activities = runtime.db.get_completed_activities(
         start_date=start_date, end_date=end_date
     )
 
@@ -476,7 +476,7 @@ def run_data_bootstrap(args: argparse.Namespace) -> None:
     establishes the reflect watermark)."""
     window = resolve_window(args)
     try:
-        result = cli.coach_service.data_bootstrap(
+        result = runtime.coach_service.data_bootstrap(
             from_date_str=window[0],
             until_date_str=window[1],
             context=args.context,
@@ -495,7 +495,7 @@ def run_data_reflect(args: argparse.Namespace) -> None:
     """Incremental reflection over evidence accrued since the last reflect watermark."""
     window = resolve_window(args)
     try:
-        result = cli.coach_service.data_reflect(
+        result = runtime.coach_service.data_reflect(
             from_date_str=window[0],
             until_date_str=window[1],
             context=args.context,
@@ -568,7 +568,7 @@ def _render_analysis_report(result: dict, inspect_only: bool) -> None:
             )
             print(bold(cyan("\n" + header)))
             try:
-                learnings_map = {l['id']: l for l in cli.db.get_learnings()}
+                learnings_map = {l['id']: l for l in runtime.db.get_learnings()}
             except Exception:
                 learnings_map = {}
             for u in updates:

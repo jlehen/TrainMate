@@ -10,6 +10,7 @@ import unittest.mock
 from datetime import date, timedelta
 
 from tests.helpers import clear_all_tables, rebind_test_db
+from trainmate import runtime
 from trainmate.db import Database
 import trainmate.db
 import trainmate.garmin as garmin
@@ -26,16 +27,16 @@ class _DBBackedTest(unittest.TestCase):
     file's test DB for the duration of each test, then restore them.
 
     Done per-test with restore (not at import) so this module never leaves the shared
-    `garmin.db` / `trainmate.db.db` singletons rebound for whatever test module runs next
+    `runtime.db` / `trainmate.db.db` singletons rebound for whatever test module runs next
     — the suite rebinds them per file at import (see test_garmin.py), and a lingering
     rebind here would break another file regardless of collection order."""
 
     def _use_test_db(self):
-        prev_gdb, prev_tdb = garmin.db, trainmate.db.db
+        prev_gdb, prev_tdb = runtime.db, trainmate.db.db
         rebind_test_db(test_db)
 
         def _restore():
-            garmin.db = prev_gdb
+            runtime.db = prev_gdb
             trainmate.db.db = prev_tdb
         self.addCleanup(_restore)
 

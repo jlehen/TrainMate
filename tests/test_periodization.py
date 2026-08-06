@@ -25,7 +25,6 @@ import trainmate.coach
 
 test_db = Database(db_path=TEST_DB_PATH)
 rebind_test_db(test_db)
-trainmate.coach.service.db = test_db
 
 from trainmate.coach import coach_service
 
@@ -38,7 +37,6 @@ class TestPeriodization(unittest.TestCase):
         global test_db
         test_db = Database(db_path=TEST_DB_PATH)
         rebind_test_db(test_db)
-        trainmate.coach.service.db = test_db
 
     @classmethod
     def tearDownClass(cls):
@@ -76,7 +74,7 @@ class TestPeriodization(unittest.TestCase):
         }
         self.assertNotEqual(hash2, coach_service._get_constraints_hash([c]))
 
-    @patch("trainmate.coach.service.calendar_syncer")
+    @patch("trainmate.runtime.calendar_syncer")
     @patch("trainmate.coach.engine.openrouter_client")
     def test_replan_logic_and_caching(self, mock_client, mock_calendar):
         # Every clock, not just the service's: whether a goal is still ahead is now a date
@@ -342,7 +340,7 @@ class TestPeriodization(unittest.TestCase):
             coach_service._get_constraints_hash(events), macro["constraints_hash"]
         )
 
-    @patch("trainmate.coach.service.calendar_syncer")
+    @patch("trainmate.runtime.calendar_syncer")
     @patch("trainmate.coach.engine.openrouter_client")
     def test_generate_plan_and_workouts_separately(self, mock_client, mock_calendar):
         obj_id = test_db.add_objective(
@@ -381,7 +379,7 @@ class TestPeriodization(unittest.TestCase):
         self.assertEqual(workouts[0]["title"], "Base Run")
         mock_client.complete.assert_called_once()
 
-    @patch("trainmate.coach.service.calendar_syncer")
+    @patch("trainmate.runtime.calendar_syncer")
     @patch("trainmate.coach.engine.openrouter_client")
     def test_generate_preserves_completed_today_workout(
         self, mock_client, mock_calendar
@@ -432,7 +430,7 @@ class TestPeriodization(unittest.TestCase):
         for call in mock_calendar.delete_workout_event.call_args_list:
             self.assertNotEqual(call.args[0], "evt-today")
 
-    @patch("trainmate.coach.service.calendar_syncer")
+    @patch("trainmate.runtime.calendar_syncer")
     @patch("trainmate.coach.engine.openrouter_client")
     def test_generate_workouts_clears_stale_synced_workouts(
         self, mock_client, mock_calendar
@@ -477,7 +475,7 @@ class TestPeriodization(unittest.TestCase):
         # Its Google Calendar event was deleted.
         mock_calendar.delete_workout_event.assert_called_once_with("evt-old-123")
 
-    @patch("trainmate.coach.service.calendar_syncer")
+    @patch("trainmate.runtime.calendar_syncer")
     @patch("trainmate.coach.engine.openrouter_client")
     def test_generate_workouts_clears_stale_unsynced_calendar_workouts(
         self, mock_client, mock_calendar
@@ -548,7 +546,7 @@ class TestPeriodization(unittest.TestCase):
         superseded = [v for v in versions if v["status"] == "superseded"]
         self.assertEqual([v["id"] for v in superseded], [v1["id"]])
 
-    @patch("trainmate.coach.service.calendar_syncer")
+    @patch("trainmate.runtime.calendar_syncer")
     @patch("trainmate.coach.engine.openrouter_client")
     def test_plan_rollback_restores_plan_and_workouts(self, mock_client, mock_calendar):
         """`plan rollback` restores the previous plan version, resurrects its workouts,
@@ -646,7 +644,7 @@ class TestPeriodization(unittest.TestCase):
         }
         coach_service.workout_generate()
 
-    @patch("trainmate.coach.service.calendar_syncer")
+    @patch("trainmate.runtime.calendar_syncer")
     @patch("trainmate.coach.engine.openrouter_client")
     def test_workout_rollback_restores_batch_leaving_plan_active(
         self, mock_client, mock_calendar
@@ -676,7 +674,7 @@ class TestPeriodization(unittest.TestCase):
         self.assertEqual(result["archived_workouts"], 1)
         self.assertTrue(mock_calendar.sync_multiple.called)
 
-    @patch("trainmate.coach.service.calendar_syncer")
+    @patch("trainmate.runtime.calendar_syncer")
     @patch("trainmate.coach.engine.openrouter_client")
     def test_workout_rollback_within_one_plan_version(self, mock_client, mock_calendar):
         """Two regenerations under the same plan are distinguished by their archive
@@ -739,7 +737,7 @@ class TestPeriodization(unittest.TestCase):
             ["New Mon", "Old Fri"],
         )
 
-    @patch("trainmate.coach.service.config")
+    @patch("trainmate.runtime.config")
     def test_load_science_guidelines(self, mock_config):
         temp_app_dir = tempfile.mkdtemp()
         temp_user_dir = tempfile.mkdtemp()
@@ -1063,7 +1061,7 @@ class TestPeriodization(unittest.TestCase):
         self.assertIn("Resting Heart Rate: 55.0 bpm", system_prompt)
 
     @patch("trainmate.coach.service._today_str")
-    @patch("trainmate.coach.service.calendar_syncer")
+    @patch("trainmate.runtime.calendar_syncer")
     @patch("trainmate.coach.engine.openrouter_client")
     def test_recent_history_workout_generation(self, mock_client, mock_calendar, mock_today_str):
         mock_today_str.return_value = "2026-06-18"
@@ -1115,7 +1113,6 @@ class TestCompletedSeasonsReachTheReview(unittest.TestCase):
         global test_db
         test_db = Database(db_path=TEST_DB_PATH)
         rebind_test_db(test_db)
-        trainmate.coach.service.db = test_db
 
     @classmethod
     def tearDownClass(cls):
@@ -1154,7 +1151,7 @@ class TestCompletedSeasonsReachTheReview(unittest.TestCase):
                 rpe=5, tss=100.0, zone1_sec=600, zone2_sec=3000,
             )
 
-    @patch("trainmate.coach.service.calendar_syncer")
+    @patch("trainmate.runtime.calendar_syncer")
     @patch("trainmate.coach.engine.openrouter_client")
     def test_last_seasons_blocks_are_in_the_next_plans_prompt(
         self, mock_client, mock_calendar
@@ -1179,7 +1176,7 @@ class TestCompletedSeasonsReachTheReview(unittest.TestCase):
         self.assertIn('focus "aerobic volume"', prompt)
         self.assertIn("Weekly load", prompt)
 
-    @patch("trainmate.coach.service.calendar_syncer")
+    @patch("trainmate.runtime.calendar_syncer")
     @patch("trainmate.coach.engine.openrouter_client")
     def test_an_archived_season_stays_out(self, mock_client, mock_calendar):
         """`archived` is the athlete saying it did not happen — the one thing the date
@@ -1214,7 +1211,6 @@ class TestLearningsReachTheStrategyPrompt(unittest.TestCase):
         global test_db
         test_db = Database(db_path=TEST_DB_PATH)
         rebind_test_db(test_db)
-        trainmate.coach.service.db = test_db
 
     @classmethod
     def tearDownClass(cls):
@@ -1232,7 +1228,7 @@ class TestLearningsReachTheStrategyPrompt(unittest.TestCase):
         """The system prompt of the plan call — the first of the two `replan` makes."""
         return mock_client.complete.call_args_list[0][0][0]
 
-    @patch("trainmate.coach.service.calendar_syncer")
+    @patch("trainmate.runtime.calendar_syncer")
     @patch("trainmate.coach.service._today_str")
     @patch("trainmate.coach.engine.openrouter_client")
     def _generate(self, learning, mock_client, mock_today, mock_calendar):
@@ -1286,7 +1282,6 @@ class TestStaleAnalysisWarning(unittest.TestCase):
         global test_db
         test_db = Database(db_path=TEST_DB_PATH)
         rebind_test_db(test_db)
-        trainmate.coach.service.db = test_db
 
     @classmethod
     def tearDownClass(cls):

@@ -15,8 +15,8 @@ race the CLI or the bot over a workout row.
 from datetime import datetime, timedelta
 from flask import Flask, jsonify, request, send_from_directory
 from typing import Any, Dict, List
+from trainmate import runtime
 from trainmate import benchmarks, garmin, intensity, llm_models, plan_diff, progression
-from trainmate.db import db
 from trainmate.adherence import analyze_adherence, classify_adherence, date_covered
 from trainmate.calendar_state import calendar_status
 from trainmate.modification_state import modification_status
@@ -82,7 +82,7 @@ def _resolve_goal_id(raw: Any) -> Any:
     (earliest target date) — mirrors the CLI's plan-command goal resolution."""
     if raw is not None and raw != "":
         return int(raw)
-    objectives = db.upcoming_objectives()
+    objectives = runtime.db.upcoming_objectives()
     if not objectives:
         return None
     objectives.sort(key=lambda x: str(x['target_date']))
@@ -113,33 +113,33 @@ def _weeks_arg(raw: str) -> Any:
 @app.route("/api/status", methods=["GET"])
 def get_status() -> Any:
     """API endpoint to retrieve overall athlete status, learnings, and metrics."""
-    objectives = db.upcoming_objectives()
+    objectives = runtime.db.upcoming_objectives()
     next_goal = None
     if objectives:
         objectives.sort(key=lambda x: str(x['target_date']))
         next_goal = objectives[0]
 
-    metrics = db.get_metrics_cache()
+    metrics = runtime.db.get_metrics_cache()
     last_metrics = metrics[-1] if metrics else None
 
     # Get last baseline
-    last_baseline = db.get_baseline(last_metrics['date']) if last_metrics else None
+    last_baseline = runtime.db.get_baseline(last_metrics['date']) if last_metrics else None
 
-    learnings = db.get_learnings()
+    learnings = runtime.db.get_learnings()
 
     macrocycle = None
     mesocycles = []
     config_mismatch = False
     if next_goal and next_goal['id'] is not None:
-        macrocycle = db.get_macrocycle_for_objective(next_goal['id'])
+        macrocycle = runtime.db.get_macrocycle_for_objective(next_goal['id'])
         if macrocycle:
-            mesocycles = db.get_mesocycles_for_macrocycle(macrocycle['id'])
+            mesocycles = runtime.db.get_mesocycles_for_macrocycle(macrocycle['id'])
             config_mismatch = macrocycle.get('config_hash') != plan_config_hash()
 
     # The web app is a pure reader — it never pulls from Garmin (see
     # DESIGN_garmin_direct_pull.md §11). Surface the watermark so the UI can show
     # how fresh the cached data is; the CLI (or a cron `data pull`) owns syncing.
-    sync_state = db.get_sync_state()
+    sync_state = runtime.db.get_sync_state()
 
     return jsonify({
         "next_goal": next_goal,
@@ -159,7 +159,7 @@ def get_status() -> Any:
 @app.route("/api/objectives", methods=["GET"])
 def list_objectives() -> Any:
     """Every objective (mirrors `goal list`)."""
-    return jsonify(db.get_objectives())
+    return jsonify(runtime.db.get_objectives())
 
 
 @app.route("/api/constraints", methods=["GET"])
@@ -171,7 +171,7 @@ def list_constraints() -> Any:
     start = (
         datetime.strptime(today_str(), "%Y-%m-%d").date() - timedelta(days=window - 1)
     ).strftime("%Y-%m-%d")
-    return jsonify(db.get_constraints(start))
+    return jsonify(runtime.db.get_constraints(start))
 
 
 # --- Workouts ---
@@ -184,7 +184,7 @@ def list_workouts() -> Any:
     end_date = request.args.get("end_date")
     include_removed = request.args.get("include_removed", "").lower() in ("1", "true", "yes")
     sport_type = request.args.get("sport_type") or None
-    workouts = db.get_workouts(
+    workouts = runtime.db.get_workouts(
         start_date=start_date, end_date=end_date,
         sport_type=sport_type, include_removed=include_removed,
     )
@@ -219,9 +219,9 @@ def compare_workouts() -> Any:
         return jsonify({"error": "end_date is before start_date."}), 400
     history_days = (end_obj - start_obj).days + 1
 
-    all_workouts = db.get_workouts(start_date=start_date, end_date=end_date)
-    activities = db.get_completed_activities(start_date=start_date, end_date=end_date)
-    covered_ranges = db.get_mesocycle_ranges(start_date, end_date)
+    all_workouts = runtime.db.get_workouts(start_date=start_date, end_date=end_date)
+    activities = runtime.db.get_completed_activities(start_date=start_date, end_date=end_date)
+    covered_ranges = runtime.db.get_mesocycle_ranges(start_date, end_date)
     threshold = config.minor_activity_load_threshold
 
     discrepancies, matching_results, informational = analyze_adherence(
@@ -334,7 +334,7 @@ def get_timeline_png() -> Any:
         return jsonify({"error": str(e)}), 400
 
     from trainmate import timeline
-    payload = timeline.build_timeline_payload(db)
+    payload = timeline.build_timeline_payload(runtime.db)
     clipped = progression.clip_payload_for_weeks(payload, weeks_arg, today)
 
     try:
@@ -383,7 +383,7 @@ def get_zones() -> Any:
     explicit = [s for s in request.args.getlist("sport") if s]
 
     from trainmate import timeline
-    payload = timeline.build_timeline_payload(db)
+    payload = timeline.build_timeline_payload(runtime.db)
     past, future, hidden = progression.select_weeks(payload["weeks"], weeks_arg, today)
     weeks = past + future
 
@@ -470,12 +470,12 @@ def get_plan() -> Any:
     goal_id = _resolve_goal_id(request.args.get("goal_id"))
     if goal_id is None:
         return jsonify({"goal": None, "macrocycle": None, "mesocycles": []})
-    goal = db.get_objective(goal_id)
+    goal = runtime.db.get_objective(goal_id)
     if not goal:
         return jsonify({"error": f"Goal with ID {goal_id} not found."}), 404
-    macrocycle = db.get_macrocycle_for_objective(goal_id)
+    macrocycle = runtime.db.get_macrocycle_for_objective(goal_id)
     mesocycles = (
-        db.get_mesocycles_for_macrocycle(macrocycle['id']) if macrocycle else []
+        runtime.db.get_mesocycles_for_macrocycle(macrocycle['id']) if macrocycle else []
     )
     return jsonify({
         "goal": goal,
@@ -491,8 +491,8 @@ def plan_versions() -> Any:
     goal_id = _resolve_goal_id(request.args.get("goal_id"))
     if goal_id is None:
         return jsonify({"goal": None, "versions": []})
-    goal = db.get_objective(goal_id)
-    versions = db.get_macrocycle_versions(goal_id)
+    goal = runtime.db.get_objective(goal_id)
+    versions = runtime.db.get_macrocycle_versions(goal_id)
     return jsonify({"goal": goal, "versions": versions})
 
 
@@ -506,11 +506,11 @@ def plan_diff_versions() -> Any:
     goal_id = _resolve_goal_id(request.args.get("goal_id"))
     if goal_id is None:
         return jsonify({"error": "No goal to compare plan versions for."}), 400
-    goal = db.get_objective(goal_id)
+    goal = runtime.db.get_objective(goal_id)
     if not goal:
         return jsonify({"error": f"Goal with ID {goal_id} not found."}), 404
     old, new, error = plan_diff.resolve_versions(
-        db, goal,
+        runtime.db, goal,
         _version_arg(request.args.get("from_version")),
         _version_arg(request.args.get("to_version")),
     )
@@ -519,8 +519,8 @@ def plan_diff_versions() -> Any:
         return jsonify({"error": message, "code": code}), 404 if code == "not_found" else 400
     diff = plan_diff.diff_plans(
         old, new,
-        db.get_mesocycles_for_macrocycle(old['id']),
-        db.get_mesocycles_for_macrocycle(new['id']),
+        runtime.db.get_mesocycles_for_macrocycle(old['id']),
+        runtime.db.get_mesocycles_for_macrocycle(new['id']),
     )
     return jsonify({"goal": goal, "diff": diff})
 
@@ -530,7 +530,7 @@ def workout_batches() -> Any:
     """Lists the archived workout batches a `workout rollback` could restore (web
     equivalent of `workout batches`, see DESIGN_plan_rollback.md §9). Restoring one is a
     CLI action."""
-    return jsonify({"batches": db.get_archived_batches(from_date=today_str())})
+    return jsonify({"batches": runtime.db.get_archived_batches(from_date=today_str())})
 
 
 # --- Coach Learnings ---
@@ -540,7 +540,7 @@ def get_learnings() -> Any:
     """Lists coach learnings (mirrors `learnings list`). Each carries its computed
     `dormant` flag, `sports`/`confidence`, and any `proposed_confidence` downgrade.
     Optional filters: ?sport=&confidence=&dormant=1."""
-    learnings = db.get_learnings()
+    learnings = runtime.db.get_learnings()
 
     if request.args.get("dormant", "").lower() in ("1", "true", "yes"):
         learnings = [l for l in learnings if l.get("dormant")]
@@ -554,7 +554,7 @@ def get_learnings() -> Any:
 
     return jsonify({
         "learnings": learnings,
-        "summary": _learnings_summary(db.get_learnings()),
+        "summary": _learnings_summary(runtime.db.get_learnings()),
     })
 
 
@@ -562,10 +562,10 @@ def get_learnings() -> Any:
 def get_learning_evidence(learning_id: int) -> Any:
     """Returns the per-week evidence basis behind a learning's confidence
     (mirrors `learnings show`)."""
-    learning = next((l for l in db.get_learnings() if l['id'] == learning_id), None)
+    learning = next((l for l in runtime.db.get_learnings() if l['id'] == learning_id), None)
     if not learning:
         return jsonify({"error": f"Learning {learning_id} not found."}), 404
-    evidence = db.get_learning_evidence(learning_id)
+    evidence = runtime.db.get_learning_evidence(learning_id)
     return jsonify({
         "learning": learning,
         "supporting": [e for e in evidence if e['polarity'] >= 0],
@@ -585,7 +585,7 @@ def get_benchmarks() -> Any:
     and `format_delta`, so a quickened pace reads positive here exactly as it does in the
     terminal (§3.2). Optional filters: ?sport=&kind=."""
     sport = request.args.get("sport")
-    rows = db.get_benchmark_results(
+    rows = runtime.db.get_benchmark_results(
         sport_type=canonical_sport(sport) if sport else None,
         anchor_kind=request.args.get("kind") or None,
     )
@@ -605,7 +605,7 @@ def get_benchmarks() -> Any:
             ),
         })
 
-    thresholds = db.latest_thresholds()
+    thresholds = runtime.db.latest_thresholds()
     return jsonify({
         "results": out,
         "thresholds": [
@@ -631,7 +631,7 @@ def get_activities() -> Any:
     """Completed activities over a date range (mirrors `data show-activities`)."""
     start_date = request.args.get("start_date")
     end_date = request.args.get("end_date")
-    return jsonify(db.get_completed_activities(start_date=start_date, end_date=end_date))
+    return jsonify(runtime.db.get_completed_activities(start_date=start_date, end_date=end_date))
 
 
 @app.route("/api/daily-context", methods=["GET"])
@@ -641,7 +641,7 @@ def get_daily_context() -> Any:
     ARCHITECTURE.md §13. Optional ?metric= restricts to one category."""
     start_date = request.args.get("start_date")
     end_date = request.args.get("end_date")
-    return jsonify(db.get_daily_context(
+    return jsonify(runtime.db.get_daily_context(
         start_date=start_date, end_date=end_date,
         metric=request.args.get("metric") or None,
     ))
@@ -651,7 +651,7 @@ def get_daily_context() -> Any:
 def get_context_metrics() -> Any:
     """The distinct context metrics in use, with row counts and first/last dates
     (mirrors `context list-metrics`) — the vocabulary behind the context charts."""
-    return jsonify({"metrics": db.list_context_metrics()})
+    return jsonify({"metrics": runtime.db.list_context_metrics()})
 
 
 @app.route("/api/metrics", methods=["GET"])
@@ -660,8 +660,8 @@ def get_metrics() -> Any:
     start_date = request.args.get("start_date")
     end_date = request.args.get("end_date")
     if start_date or end_date:
-        return jsonify(db.get_metrics_cache(start_date=start_date, end_date=end_date))
-    metrics = db.get_metrics_cache()
+        return jsonify(runtime.db.get_metrics_cache(start_date=start_date, end_date=end_date))
+    metrics = runtime.db.get_metrics_cache()
     return jsonify(metrics[-30:] if metrics else [])
 
 

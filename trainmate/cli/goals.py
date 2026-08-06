@@ -1,6 +1,6 @@
 import argparse
 import sys
-import trainmate_cli as cli
+from trainmate import runtime
 from trainmate.util import bold, green, red, yellow, cyan, gray, cmd, format_labeled_block
 from trainmate.db.objectives import goal_state, GOAL_UPCOMING
 from trainmate.sports import CANONICAL_SPORTS
@@ -31,7 +31,7 @@ def _print_goal(g: dict) -> None:
 def run_goal_add(args: argparse.Namespace) -> None:
     """Creates a new objective goal via command line."""
     sports_str = ",".join(args.sport)
-    goal_id = cli.db.add_objective(
+    goal_id = runtime.db.add_objective(
         title=args.title,
         target_date=args.date,
         sport_type=sports_str,
@@ -39,7 +39,7 @@ def run_goal_add(args: argparse.Namespace) -> None:
         priority=args.priority,
         status='active'
     )
-    goal = cli.db.get_objective(goal_id)
+    goal = runtime.db.get_objective(goal_id)
     if goal:
         _print_goal(goal)
     print(
@@ -50,7 +50,7 @@ def run_goal_add(args: argparse.Namespace) -> None:
 
 def run_goal_edit(args: argparse.Namespace) -> None:
     """Edits an existing goal/objective."""
-    goal = cli.db.get_objective(args.id)
+    goal = runtime.db.get_objective(args.id)
     if not goal:
         print(red(f"Goal with ID {args.id} not found."))
         sys.exit(1)
@@ -73,8 +73,8 @@ def run_goal_edit(args: argparse.Namespace) -> None:
         print(yellow("No fields to update. Provide at least one field to change."))
         return
 
-    cli.db.update_objective(args.id, **kwargs)
-    updated = cli.db.get_objective(args.id)
+    runtime.db.update_objective(args.id, **kwargs)
+    updated = runtime.db.get_objective(args.id)
     if updated:
         _print_goal(updated)
     print(
@@ -85,7 +85,7 @@ def run_goal_edit(args: argparse.Namespace) -> None:
 
 def run_goal_list() -> None:
     """Lists all active and past training objective goals."""
-    goals = cli.db.get_objectives()
+    goals = runtime.db.get_objectives()
     print(bold(cyan("=== GOALS ===")))
     for g in goals:
         _print_goal(g)
@@ -93,20 +93,20 @@ def run_goal_list() -> None:
 
 def run_goal_rm(args: argparse.Namespace) -> None:
     """Deletes an objective goal by ID."""
-    cli.db.delete_objective(args.id)
+    runtime.db.delete_objective(args.id)
     print(green(f"Goal with ID {args.id} removed successfully."))
 
 
 def run_goal_wipe(args: argparse.Namespace) -> None:
     """Wipes all goals from the database after confirmation."""
     if not args.yes:
-        if not cli.prompt.confirm(
+        if not runtime.prompt.confirm(
             "Are you sure you want to wipe all goals?", danger=True
         ):
             print("Wipe cancelled.")
             return
 
-    cli.db.wipe_objectives()
+    runtime.db.wipe_objectives()
     print(green("All goals wiped successfully."))
 
 

@@ -3,7 +3,7 @@ import argparse
 import sys
 from datetime import datetime
 from typing import Optional
-import trainmate_cli as cli
+from trainmate import runtime
 from trainmate.calendar_state import calendar_status
 from trainmate.sports import canonical_sport
 from trainmate.util import bold, dim, green, red, yellow, cyan, gray, cmd, today_str as _today_str
@@ -20,7 +20,7 @@ def run_workout_push(args: argparse.Namespace) -> None:
 
     start_date, end_date = resolve_window(args)
 
-    all_workouts = cli.db.get_workouts(
+    all_workouts = runtime.db.get_workouts(
         start_date=start_date,
         end_date=end_date,
         sport_type=getattr(args, 'sport_type', None),
@@ -52,7 +52,7 @@ def run_workout_push(args: argparse.Namespace) -> None:
 
     print(f"Syncing {len(to_push)} workouts to Google Calendar...")
     try:
-        cli.calendar_syncer.sync_multiple(to_push)
+        runtime.calendar_syncer.sync_multiple(to_push)
         print(green("Google Calendar synchronization completed."))
     except Exception as e:
         print(red(f"Error syncing to Google Calendar: {e}"))
@@ -62,7 +62,7 @@ def run_workout_rm(args: argparse.Namespace) -> None:
     Calendar event to be marked as deleted. Removed workouts are excluded from listings,
     comparisons, and the calendar push, but are still surfaced to the coach as a deliberate
     cancellation."""
-    workout = cli.db.get_workout_by_id(args.id)
+    workout = runtime.db.get_workout_by_id(args.id)
     if not workout:
         print(red(f"Workout with ID {args.id} not found."))
         return
@@ -71,14 +71,14 @@ def run_workout_rm(args: argparse.Namespace) -> None:
         print(yellow(f"Workout with ID {args.id} ('{workout['title']}') is already removed."))
         return
 
-    cli.db.mark_workout_removed(args.id, reason=args.reason)
+    runtime.db.mark_workout_removed(args.id, reason=args.reason)
 
     if workout.get('google_event_id'):
         print("Workout is synced to Google Calendar. Updating calendar event...")
-        updated_workout = cli.db.get_workout_by_id(args.id)
+        updated_workout = runtime.db.get_workout_by_id(args.id)
         if updated_workout is not None:
             try:
-                cli.calendar_syncer.sync_workout(updated_workout)
+                runtime.calendar_syncer.sync_workout(updated_workout)
             except Exception as e:
                 print(red(f"Error updating Google Calendar event: {e}"))
 
@@ -90,7 +90,7 @@ def run_workout_rm(args: argparse.Namespace) -> None:
 def run_workout_restore(args: argparse.Namespace) -> None:
     """Restores a soft-removed workout and updates its Calendar event to remove the
     deleted mark."""
-    workout = cli.db.get_workout_by_id(args.id)
+    workout = runtime.db.get_workout_by_id(args.id)
     if not workout:
         print(red(f"Workout with ID {args.id} not found."))
         return
@@ -99,14 +99,14 @@ def run_workout_restore(args: argparse.Namespace) -> None:
         print(yellow(f"Workout with ID {args.id} ('{workout['title']}') is not removed."))
         return
 
-    cli.db.restore_workout(args.id)
+    runtime.db.restore_workout(args.id)
 
     if workout.get('google_event_id'):
         print("Workout is synced to Google Calendar. Updating calendar event...")
-        updated_workout = cli.db.get_workout_by_id(args.id)
+        updated_workout = runtime.db.get_workout_by_id(args.id)
         if updated_workout is not None:
             try:
-                cli.calendar_syncer.sync_workout(updated_workout)
+                runtime.calendar_syncer.sync_workout(updated_workout)
             except Exception as e:
                 print(red(f"Warning: Failed to update Google Calendar: {e}"))
                 print(yellow("The workout was restored locally but might still appear deleted on your calendar."))
@@ -119,17 +119,17 @@ def run_workout_swap(args: argparse.Namespace) -> None:
     if not ops:
         return
 
-    warnings = cli.coach_service.workout_swap_validate(ops)
+    warnings = runtime.coach_service.workout_swap_validate(ops)
     if warnings:
         print(bold(yellow("\nSwap warnings:")))
         for msg in warnings:
             print(yellow(f"  - {msg}"))
         if not args.force:
-            if not cli.prompt.confirm("Proceed with the swap anyway?"):
+            if not runtime.prompt.confirm("Proceed with the swap anyway?"):
                 print("\nSwap cancelled.")
                 return
 
-    updated = cli.coach_service.workout_swap_apply(ops, args.no_sync, reason=args.reason)
+    updated = runtime.coach_service.workout_swap_apply(ops, args.no_sync, reason=args.reason)
     print()
     for w in updated:
         print(workout_line(w))
@@ -151,9 +151,9 @@ def run_workout_add(args: argparse.Namespace) -> None:
     args.sport_type = canonical_sport(args.sport_type)
 
     if args.replace_day:
-        to_replace = cli.db.get_workouts(start_date=args.date, end_date=args.date)
+        to_replace = runtime.db.get_workouts(start_date=args.date, end_date=args.date)
     else:
-        same = cli.db.get_workout(args.date, args.sport_type)
+        same = runtime.db.get_workout(args.date, args.sport_type)
         to_replace = [same] if same else []
     for w in to_replace:
         print(yellow(
@@ -161,7 +161,7 @@ def run_workout_add(args: argparse.Namespace) -> None:
             f"{w['title']}"
         ))
 
-    saved, replaced = cli.coach_service.workout_add(
+    saved, replaced = runtime.coach_service.workout_add(
         date=args.date,
         sport_type=args.sport_type,
         title=args.title,
@@ -183,23 +183,23 @@ def run_workout_add(args: argparse.Namespace) -> None:
 def run_workout_wipe(args: argparse.Namespace) -> None:
     """Wipes all workouts from the database and Google Calendar after confirmation."""
     if not args.yes:
-        if not cli.prompt.confirm(
+        if not runtime.prompt.confirm(
             "Are you sure you want to wipe all workouts "
             "(including Google Calendar events)?", danger=True
         ):
             print("Wipe cancelled.")
             return
 
-    workouts = cli.db.get_workouts()
+    workouts = runtime.db.get_workouts()
     synced_workouts = [w for w in workouts if w.get('google_event_id')]
     if synced_workouts:
         print(f"Deleting {len(synced_workouts)} events from Google Calendar...")
         for w in synced_workouts:
             ge_id = w['google_event_id']
             if ge_id:
-                cli.calendar_syncer.delete_workout_event(ge_id)
+                runtime.calendar_syncer.delete_workout_event(ge_id)
 
-    cli.db.wipe_workouts()
+    runtime.db.wipe_workouts()
     print(green("All workouts wiped successfully."))
 
 
@@ -220,7 +220,7 @@ def run_workout_prune_calendar(args: argparse.Namespace) -> None:
     start_date, end_date = resolve_window(args)
 
     try:
-        events = cli.calendar_syncer.list_workout_events()
+        events = runtime.calendar_syncer.list_workout_events()
     except Exception as e:
         print(red(f"Error reading Google Calendar: {e}"))
         sys.exit(1)
@@ -231,7 +231,7 @@ def run_workout_prune_calendar(args: argparse.Namespace) -> None:
     # rather than in a stale event list — the race then errs towards keeping.
     known = {
         w['google_event_id']
-        for w in cli.db.get_workouts(include_removed=True)
+        for w in runtime.db.get_workouts(include_removed=True)
         if w.get('google_event_id')
     }
 
@@ -275,14 +275,14 @@ def run_workout_prune_calendar(args: argparse.Namespace) -> None:
         return
 
     if not args.yes:
-        if not cli.prompt.confirm(
+        if not runtime.prompt.confirm(
             f"Delete these {len(orphans)} Google Calendar event(s)?", danger=True
         ):
             print("Prune cancelled.")
             return
 
     deleted = sum(
-        1 for _, event in orphans if cli.calendar_syncer.delete_event(event['id'])
+        1 for _, event in orphans if runtime.calendar_syncer.delete_event(event['id'])
     )
     print(green(f"Pruned {deleted} orphaned Calendar event{'s' if deleted != 1 else ''}."))
     if deleted != len(orphans):

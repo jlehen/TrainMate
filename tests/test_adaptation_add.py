@@ -12,7 +12,6 @@ import trainmate.coach
 
 test_db = Database(db_path=TEST_DB_PATH)
 rebind_test_db(test_db)
-trainmate.coach.service.db = test_db
 
 from trainmate.coach import coach_service
 
@@ -25,7 +24,6 @@ class TestAdaptationAdd(unittest.TestCase):
         global test_db
         test_db = Database(db_path=TEST_DB_PATH)
         rebind_test_db(test_db)
-        trainmate.coach.service.db = test_db
 
     @classmethod
     def tearDownClass(cls):

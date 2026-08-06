@@ -212,27 +212,27 @@ def _fail(message: str) -> None:
 
 
 def _meso_bounds(meso_id: int) -> tuple[str, str]:
-    import trainmate_cli as cli
-    meso = cli.db.get_mesocycle(meso_id)
+    from trainmate import runtime
+    meso = runtime.db.get_mesocycle(meso_id)
     if not meso:
         _fail(f"Mesocycle with ID {meso_id} not found.")
     return meso['start_date'], meso['end_date']
 
 
 def _current_meso_bounds() -> tuple[str, str]:
-    import trainmate_cli as cli
-    meso = cli.db.get_active_mesocycle(_today_str())
+    from trainmate import runtime
+    meso = runtime.db.get_active_mesocycle(_today_str())
     if not meso:
         _fail("No active mesocycle found.")
     return meso['start_date'], meso['end_date']
 
 
 def _macro_bounds(macro_id: int) -> tuple[str, str]:
-    import trainmate_cli as cli
-    macro = cli.db.get_macrocycle(macro_id)
+    from trainmate import runtime
+    macro = runtime.db.get_macrocycle(macro_id)
     if not macro:
         _fail(f"Macrocycle with ID {macro_id} not found. Run 'plan versions' to list them.")
-    mesos = cli.db.get_mesocycles_for_macrocycle(macro_id)
+    mesos = runtime.db.get_mesocycles_for_macrocycle(macro_id)
     if not mesos:
         _fail(f"Macrocycle {macro_id} has no mesocycles.")
     return min(m['start_date'] for m in mesos), max(m['end_date'] for m in mesos)
@@ -241,24 +241,24 @@ def _macro_bounds(macro_id: int) -> tuple[str, str]:
 def _goal_bounds(goal_id: int) -> tuple[str, str]:
     """A goal's span: from the start of its plan to the goal's own target date — which is
     past the last mesocycle when the plan doesn't reach the event yet."""
-    import trainmate_cli as cli
-    goal = cli.db.get_objective(goal_id)
+    from trainmate import runtime
+    goal = runtime.db.get_objective(goal_id)
     if not goal:
         _fail(f"Goal with ID {goal_id} not found.")
     return _macro_bounds(_goal_macro_id(goal_id))[0], goal['target_date']
 
 
 def _goal_macro_id(goal_id: int) -> int:
-    import trainmate_cli as cli
-    macro = cli.db.get_macrocycle_for_objective(goal_id)
+    from trainmate import runtime
+    macro = runtime.db.get_macrocycle_for_objective(goal_id)
     if not macro:
         _fail(f"No plan exists for goal ID {goal_id}.")
     return macro['id']
 
 
 def _active_goal_id() -> int:
-    import trainmate_cli as cli
-    goal = cli.db.get_active_objective()
+    from trainmate import runtime
+    goal = runtime.db.get_active_objective()
     if not goal:
         _fail("No active goal found.")
     return goal['id']

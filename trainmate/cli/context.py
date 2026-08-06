@@ -10,7 +10,7 @@ import argparse
 import sys
 from datetime import datetime, timedelta
 from typing import Iterator, Optional
-import trainmate_cli as cli
+from trainmate import runtime
 from trainmate.config import config
 from trainmate.util import bold, dim, green, red, yellow, cyan, magenta
 from trainmate.util import today_str as _today_str
@@ -49,7 +49,7 @@ def _context_line(row: dict) -> str:
 def run_context_add(args: argparse.Namespace) -> None:
     """Authors a daily-context signal over a day or date range, writing one tagged
     all-day event per day and mirroring the rows locally."""
-    if not cli.calendar_syncer.calendar_id:
+    if not runtime.calendar_syncer.calendar_id:
         print(red("No Google Calendar configured; cannot author context events."))
         sys.exit(1)
 
@@ -67,16 +67,16 @@ def run_context_add(args: argparse.Namespace) -> None:
 
     written = []
     for day in _date_range(start, end):
-        existing = cli.db.get_daily_context(day, day, metric=metric)
+        existing = runtime.db.get_daily_context(day, day, metric=metric)
         existing_id = existing[0]["google_event_id"] if existing else None
-        event_id = cli.calendar_syncer.add_context_event(
+        event_id = runtime.calendar_syncer.add_context_event(
             day, metric, value, text, existing_id
         )
         if not event_id:
             print(red(f"Failed to write context event for {day}."))
             continue
-        cli.db.upsert_daily_context_by_event(event_id, day, metric, value, text)
-        written.extend(cli.db.get_daily_context(day, day, metric=metric))
+        runtime.db.upsert_daily_context_by_event(event_id, day, metric, value, text)
+        written.extend(runtime.db.get_daily_context(day, day, metric=metric))
 
     for row in written:
         print(_context_line(row))
@@ -93,7 +93,7 @@ def run_context_list(args: argparse.Namespace) -> None:
     start, end = resolve_window(args)
     metric = args.metric or args.metric_target
 
-    rows = cli.db.get_daily_context(start, end, metric=metric)
+    rows = runtime.db.get_daily_context(start, end, metric=metric)
     title = f"=== DAILY CONTEXT {start}..{end}"
     if metric:
         title += f" [{metric}]"
@@ -107,7 +107,7 @@ def run_context_list(args: argparse.Namespace) -> None:
 
 def run_context_list_metrics(args: argparse.Namespace) -> None:
     """Shows the distinct metrics in use with counts and date span."""
-    metrics = cli.db.list_context_metrics()
+    metrics = runtime.db.list_context_metrics()
     print(bold(cyan("=== CONTEXT METRICS ===")))
     if not metrics:
         print(dim("(none)"))
@@ -131,7 +131,7 @@ def run_context_rm(args: argparse.Namespace) -> None:
     if ids:
         rows = []
         for cid in ids:
-            row = cli.db.get_daily_context_by_id(int(cid))
+            row = runtime.db.get_daily_context_by_id(int(cid))
             if row:
                 rows.append(row)
             else:
@@ -144,14 +144,14 @@ def run_context_rm(args: argparse.Namespace) -> None:
             ))
             sys.exit(1)
         start, end = resolve_window(args)
-        rows = cli.db.get_daily_context(start, end, metric)
+        rows = runtime.db.get_daily_context(start, end, metric)
         if not rows:
             print(yellow("No matching context signals."))
             return
         if len(rows) > 1 and not args.yes:
             for row in rows:
                 print(_context_line(row))
-            if not cli.prompt.confirm(
+            if not runtime.prompt.confirm(
                 f"Remove these {len(rows)} signals?", danger=True
             ):
                 print("Removal cancelled.")
@@ -160,8 +160,8 @@ def run_context_rm(args: argparse.Namespace) -> None:
     removed = 0
     for row in rows:
         if row.get("google_event_id"):
-            cli.calendar_syncer.delete_event(row["google_event_id"])
-        cli.db.delete_daily_context(row["id"])
+            runtime.calendar_syncer.delete_event(row["google_event_id"])
+        runtime.db.delete_daily_context(row["id"])
         removed += 1
     print(green(f"Removed {removed} context signal{'s' if removed != 1 else ''}."))
 

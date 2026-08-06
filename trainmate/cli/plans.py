@@ -3,7 +3,7 @@ import argparse
 import sys
 from datetime import datetime
 from typing import List, Optional
-import trainmate_cli as cli
+from trainmate import runtime
 from trainmate import plan_diff
 from trainmate.adherence import planned_load
 from trainmate.util import (
@@ -11,6 +11,7 @@ from trainmate.util import (
     wrap_text, format_labeled_block, default_wrap_width, today_date as _today_date,
 )
 from trainmate.cli.common import fmt_date, ensure_recent_data
+from trainmate.cli.argparse_ext import _edit_text_in_editor
 
 
 def _resolve_goal(goal_id: Optional[int]) -> Optional[dict]:
@@ -18,11 +19,11 @@ def _resolve_goal(goal_id: Optional[int]) -> Optional[dict]:
     and completed goals stay reachable), else the next active goal by target date.
     Prints the reason and returns None when there is none."""
     if goal_id is not None:
-        goal = cli.db.get_objective(goal_id)
+        goal = runtime.db.get_objective(goal_id)
         if not goal:
             print(red(f"Goal with ID {goal_id} not found."))
         return goal
-    objectives = cli.db.upcoming_objectives()
+    objectives = runtime.db.upcoming_objectives()
     if not objectives:
         print(yellow("No active goals found. TrainMate needs at least one goal."))
         return None
@@ -34,7 +35,7 @@ def run_plan_generate(args: argparse.Namespace) -> None:
     """Executes the AI periodization strategy plan generation command."""
     # Make sure we have latest metrics cached
     ensure_recent_data(no_pull=args.no_pull, force_pull=getattr(args, 'force_pull', False))
-    metrics = cli.db.get_metrics_cache()
+    metrics = runtime.db.get_metrics_cache()
     if not metrics:
         print(yellow("Warning: Metrics cache is empty. Proceeding without Garmin metrics."))
         
@@ -42,19 +43,19 @@ def run_plan_generate(args: argparse.Namespace) -> None:
         # First-run nudge: no reflect watermark means `data bootstrap` has never run, so
         # there are no history-derived coach learnings to inform the plan. Offer to seed
         # them before generating (skipped in non-interactive --auto mode).
-        if cli.db.get_sync_state("reflect") is None and not getattr(args, 'auto', False):
-            if cli.prompt.confirm(wrap_text(
+        if runtime.db.get_sync_state("reflect") is None and not getattr(args, 'auto', False):
+            if runtime.prompt.confirm(wrap_text(
                 f"No training-history analysis found. Run {cmd('data bootstrap')} first "
                 "to reconstruct past cycles and seed coach learnings?"
             )):
-                cli.coach_service.data_bootstrap(
+                runtime.coach_service.data_bootstrap(
                     no_pull=args.no_pull, force_pull=getattr(args, 'force_pull', False)
                 )
 
         # Bound before the branch: with no upcoming objectives the accept path below
         # still reads it, and an unbound name surfaced only as a NameError string.
         next_goal = None
-        objectives = cli.db.upcoming_objectives()
+        objectives = runtime.db.upcoming_objectives()
         if objectives:
             if args.goal_id is not None:
                 target_goals = [o for o in objectives if o['id'] == args.goal_id]
@@ -70,11 +71,11 @@ def run_plan_generate(args: argparse.Namespace) -> None:
                 )))
 
             if next_goal:
-                macro = cli.db.get_macrocycle_for_objective(next_goal['id'])
+                macro = runtime.db.get_macrocycle_for_objective(next_goal['id'])
                 if macro:
-                    change_reason = cli.coach_service.config_changed(macro)
+                    change_reason = runtime.coach_service.config_changed(macro)
                     if change_reason and not args.force:
-                        if cli.prompt.confirm(wrap_text(
+                        if runtime.prompt.confirm(wrap_text(
                             "A plan-shaping input has changed since the last plan "
                             f"generation ({change_reason}).\n"
                             "Would you like to regenerate the periodization strategy?"
@@ -85,15 +86,15 @@ def run_plan_generate(args: argparse.Namespace) -> None:
                                 "Keeping current periodization strategy. "
                                 "Updating configuration hash in database."
                             ))
-                            cli.db.update_macrocycle_config_hash(
-                                macro['id'], cli.coach_service._get_config_hash(),
-                                cli.coach_service._get_config_snapshot()
+                            runtime.db.update_macrocycle_config_hash(
+                                macro['id'], runtime.coach_service._get_config_hash(),
+                                runtime.coach_service._get_config_snapshot()
                             )
 
         plan_kwargs = {'auto_apply': False}
         if args.goal_id is not None:
             plan_kwargs['objective_id'] = args.goal_id
-        proposal = cli.coach_service.plan_generate(
+        proposal = runtime.coach_service.plan_generate(
             force=bool(args.force), **plan_kwargs
         )
         mesocycles = proposal['mesocycles']
@@ -105,13 +106,13 @@ def run_plan_generate(args: argparse.Namespace) -> None:
         if getattr(args, 'auto', False):
             apply = True
         else:
-            apply = cli.prompt.confirm("Apply this new periodization strategy?")
+            apply = runtime.prompt.confirm("Apply this new periodization strategy?")
 
         if apply:
             goal = proposal['goal'] or next_goal
             # plan_apply already no-ops on a missing goal, so let it own that decision
             # rather than re-deciding here, and report what it actually saved.
-            saved_id = cli.coach_service.plan_apply(
+            saved_id = runtime.coach_service.plan_apply(
                 goal['id'] if goal else None, proposal['strategy'], mesocycles
             )
             if saved_id is None:
@@ -261,7 +262,7 @@ def _plan_workouts(macrocycle: dict) -> List[dict]:
     Rows carry the `macrocycle_id` of the version that created them. A database wholly
     predating that column has none, so its rows are matched on dates alone; once any row
     is stamped, an unstamped one is nobody's rather than everybody's."""
-    rows = cli.db.get_workouts(include_archived=True)
+    rows = runtime.db.get_workouts(include_archived=True)
     if any(w.get('macrocycle_id') is not None for w in rows):
         return [w for w in rows if w.get('macrocycle_id') == macrocycle['id']]
     return rows
@@ -298,8 +299,8 @@ def run_plan_show(args: argparse.Namespace) -> None:
         if args.goal_id is not None or getattr(args, 'macrocycle_id', None) is not None:
             print(red("Error: --all cannot be combined with --goal or --macrocycle."))
             return
-        goals = sorted(cli.db.get_objectives(), key=lambda g: str(g['target_date']))
-        planned = [(g, cli.db.get_macrocycle_for_objective(g['id'])) for g in goals]
+        goals = sorted(runtime.db.get_objectives(), key=lambda g: str(g['target_date']))
+        planned = [(g, runtime.db.get_macrocycle_for_objective(g['id'])) for g in goals]
         planned = [(g, m) for g, m in planned if m]
         if not planned:
             print(yellow("No goal has a periodization plan yet."))
@@ -315,7 +316,7 @@ def run_plan_show(args: argparse.Namespace) -> None:
 
     version_id = getattr(args, 'macrocycle_id', None)
     if version_id is not None:
-        macrocycle = cli.db.get_macrocycle(version_id)
+        macrocycle = runtime.db.get_macrocycle(version_id)
         if not macrocycle or macrocycle.get('objective_id') != next_goal['id']:
             print(red(
                 f"Plan version {version_id} does not belong to goal '{next_goal['title']}'."
@@ -323,7 +324,7 @@ def run_plan_show(args: argparse.Namespace) -> None:
             print(green(f"Run {cmd('plan versions')} to list this goal's plan versions."))
             return
     else:
-        macrocycle = cli.db.get_macrocycle_for_objective(next_goal['id'])
+        macrocycle = runtime.db.get_macrocycle_for_objective(next_goal['id'])
     if not macrocycle:
         print(yellow(
             f"No active macrocycle strategy found for goal '{next_goal['title']}'."
@@ -336,7 +337,7 @@ def run_plan_show(args: argparse.Namespace) -> None:
 
 def _print_plan(next_goal: dict, macrocycle: dict, args: argparse.Namespace) -> None:
     """Renders one plan version: header, strategy, snapshotted inputs, mesocycle timeline."""
-    mesocycles = cli.db.get_mesocycles_for_macrocycle(macrocycle['id'])
+    mesocycles = runtime.db.get_mesocycles_for_macrocycle(macrocycle['id'])
     show_workouts = getattr(args, 'workouts', False)
     workouts = _plan_workouts(macrocycle)
 
@@ -444,7 +445,7 @@ def run_plan_versions(args: argparse.Namespace) -> None:
     if not goal:
         return
 
-    versions = cli.db.get_macrocycle_versions(goal['id'])
+    versions = runtime.db.get_macrocycle_versions(goal['id'])
     if not versions:
         print(yellow(f"No periodization plan exists for goal '{goal['title']}'."))
         print(green(f"Run {cmd('plan generate')} to create one."))
@@ -614,7 +615,7 @@ def run_plan_diff(args: argparse.Namespace) -> None:
     if not goal:
         return
     old, new, error = plan_diff.resolve_versions(
-        cli.db, goal, args.version_a, args.version_b
+        runtime.db, goal, args.version_a, args.version_b
     )
     if error:
         code, message = error
@@ -640,8 +641,8 @@ def run_plan_diff(args: argparse.Namespace) -> None:
 
     diff = plan_diff.diff_plans(
         old, new,
-        cli.db.get_mesocycles_for_macrocycle(old['id']),
-        cli.db.get_mesocycles_for_macrocycle(new['id']),
+        runtime.db.get_mesocycles_for_macrocycle(old['id']),
+        runtime.db.get_mesocycles_for_macrocycle(new['id']),
     )
     full = getattr(args, 'full', False)
     print(bold("\nStrategy:"))
@@ -661,27 +662,27 @@ def run_plan_diff(args: argparse.Namespace) -> None:
 
 def run_plan_rm(args: argparse.Namespace) -> None:
     """Deletes the periodization plan for a specific goal."""
-    goal = cli.db.get_objective(args.id)
+    goal = runtime.db.get_objective(args.id)
     if not goal:
         print(red(f"Goal with ID {args.id} not found."))
         return
 
-    macro = cli.db.get_macrocycle_for_objective(args.id)
+    macro = runtime.db.get_macrocycle_for_objective(args.id)
     if not macro:
         print(yellow(f"No periodization plan exists for goal '{goal['title']}' (ID {args.id})."))
         return
 
     # Delete the plan
-    cli.coach_service.plan_rm(args.id)
+    runtime.coach_service.plan_rm(args.id)
     print(green(f"Periodization plan for goal '{goal['title']}' removed successfully."))
 
     # Warn about subsequent plans
-    objectives = cli.db.upcoming_objectives()
+    objectives = runtime.db.upcoming_objectives()
     subsequent_goals_with_plans = []
     for obj in objectives:
         if str(obj['target_date']) > str(goal['target_date']):
             if obj['id'] is not None:
-                sub_macro = cli.db.get_macrocycle_for_objective(obj['id'])
+                sub_macro = runtime.db.get_macrocycle_for_objective(obj['id'])
                 if sub_macro:
                     subsequent_goals_with_plans.append(obj)
 
@@ -698,13 +699,13 @@ def run_plan_rm(args: argparse.Namespace) -> None:
 def run_plan_wipe(args: argparse.Namespace) -> None:
     """Wipes all plans from the database after confirmation."""
     if not args.yes:
-        if not cli.prompt.confirm(
+        if not runtime.prompt.confirm(
             "Are you sure you want to wipe all periodization plans?", danger=True
         ):
             print("Wipe cancelled.")
             return
 
-    cli.db.wipe_plans()
+    runtime.db.wipe_plans()
     print(green("All periodization plans wiped successfully."))
 
 
@@ -714,7 +715,7 @@ def run_plan_rollback(args: argparse.Namespace) -> None:
     if not goal:
         return
 
-    versions = cli.db.get_macrocycle_versions(goal['id'])
+    versions = runtime.db.get_macrocycle_versions(goal['id'])
     superseded = [v for v in versions if v.get('status') == 'superseded']
     if not superseded:
         print(yellow(
@@ -725,20 +726,20 @@ def run_plan_rollback(args: argparse.Namespace) -> None:
     # Determine the target version (default: chronologically previous).
     target_id = getattr(args, 'macrocycle_id', None)
     if target_id is None:
-        prev = cli.db.get_previous_macrocycle_version(goal['id'])
+        prev = runtime.db.get_previous_macrocycle_version(goal['id'])
         target_id = prev['id'] if prev else None
     if target_id is None:
         print(yellow(f"Goal '{goal['title']}' has no earlier plan version to roll back to."))
         return
 
-    target = cli.db.get_macrocycle(target_id)
+    target = runtime.db.get_macrocycle(target_id)
     if not target or target.get('objective_id') != goal['id']:
         print(red(f"Plan version {target_id} does not belong to goal '{goal['title']}'."))
         return
 
     if not getattr(args, 'yes', False):
         created = fmt_date(str(target.get('created_at', ''))[:10]) if target.get('created_at') else '?'
-        if not cli.prompt.confirm(
+        if not runtime.prompt.confirm(
             f"Roll back the plan for '{goal['title']}' to the version generated "
             f"{created} (plan ID {target_id})?\nThis archives the current plan's "
             f"upcoming workouts and restores that version's on Google Calendar.",
@@ -748,7 +749,7 @@ def run_plan_rollback(args: argparse.Namespace) -> None:
             return
 
     try:
-        result = cli.coach_service.plan_rollback(
+        result = runtime.coach_service.plan_rollback(
             objective_id=goal['id'], target_macrocycle_id=target_id
         )
     except ValueError as e:
@@ -771,7 +772,7 @@ def _resolve_feedback_text(args: argparse.Namespace, current: Optional[str]) -> 
     current value) or the positional `text`. Returns None to signal 'do not save' (aborted
     edit or empty input)."""
     if args.edit:
-        new_text = cli._edit_text_in_editor(current or "")
+        new_text = _edit_text_in_editor(current or "")
         if new_text is None:
             return None
         if not new_text.strip():
@@ -802,14 +803,14 @@ def run_plan_feedback(args: argparse.Namespace) -> None:
 
     # 1. Handle mesocycle feedback directly if specified
     if args.meso:
-        meso = cli.db.get_mesocycle(args.meso)
+        meso = runtime.db.get_mesocycle(args.meso)
         if not meso:
             print(red(f"Mesocycle with ID {args.meso} not found."))
             sys.exit(1)
         text = _resolve_feedback_text(args, meso.get('feedback'))
         if text is None:
             return
-        cli.db.update_mesocycle_feedback(args.meso, text)
+        runtime.db.update_mesocycle_feedback(args.meso, text)
         print(green(
             f"Feedback successfully saved for Mesocycle ID {args.meso} ('{meso['name']}')."
         ))
@@ -817,7 +818,7 @@ def run_plan_feedback(args: argparse.Namespace) -> None:
         return
 
     # 2. Handle macrocycle feedback. Find target goal first.
-    objectives = cli.db.upcoming_objectives()
+    objectives = runtime.db.upcoming_objectives()
     if not objectives:
         print(yellow("No active goals found. TrainMate needs at least one goal."))
         sys.exit(1)
@@ -832,7 +833,7 @@ def run_plan_feedback(args: argparse.Namespace) -> None:
         objectives.sort(key=lambda x: str(x['target_date']))
         next_goal = objectives[0]
 
-    macro = cli.db.get_macrocycle_for_objective(next_goal['id'])
+    macro = runtime.db.get_macrocycle_for_objective(next_goal['id'])
     if not macro:
         print(yellow(f"No active periodization plan exists for goal '{next_goal['title']}'."))
         sys.exit(1)
@@ -840,7 +841,7 @@ def run_plan_feedback(args: argparse.Namespace) -> None:
     text = _resolve_feedback_text(args, macro.get('feedback'))
     if text is None:
         return
-    cli.db.update_macrocycle_feedback(macro['id'], text)
+    runtime.db.update_macrocycle_feedback(macro['id'], text)
     print(green(
         f"Feedback successfully saved for Macrocycle ID {macro['id']} "
         f"(Goal: '{next_goal['title']}')."

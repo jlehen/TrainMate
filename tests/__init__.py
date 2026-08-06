@@ -12,6 +12,33 @@ import sqlite3
 from unittest import mock
 
 
+_PRODUCTION_DB = os.path.join(os.path.dirname(os.path.dirname(__file__)), "trainmate.db")
+_real_sqlite_connect = sqlite3.connect
+
+
+def _guarded_sqlite_connect(database, *args, **kwargs):
+    """Backstop for the database seam, mirroring the network guard below.
+
+    A test whose handle-rebinding misses a site falls through to the real training
+    database — which, unlike a stray network call, otherwise succeeds silently and
+    leaves the test passing while measuring nothing (or worse, writing to it).
+
+    Installed before anything imports the app, so it also covers connections opened at
+    import time. That ordering only became possible once the singletons went lazy: the
+    package used to build a Database — running the schema migrations against the real
+    file — merely because something imported it.
+    """
+    if os.path.abspath(str(database)) == os.path.abspath(_PRODUCTION_DB):
+        raise RuntimeError(
+            f"tests must not open the production database ({_PRODUCTION_DB}); "
+            "bind an isolated one with tests.helpers.bind_test_db()"
+        )
+    return _real_sqlite_connect(database, *args, **kwargs)
+
+
+sqlite3.connect = _guarded_sqlite_connect
+
+
 @atexit.register
 def _remove_test_databases() -> None:
     """Sweep the per-module SQLite files at the very end of the run.
@@ -30,27 +57,6 @@ def _remove_test_databases() -> None:
 # events and consumed the incremental sync token that `data pull` needs
 # (DESIGN_calendar_context_ingest.md §6). Stub the bridge, not the callers.
 mock.patch("trainmate.garmin.sync._sync_calendar_context", lambda *a, **k: None).start()
-
-_PRODUCTION_DB = os.path.join(os.path.dirname(os.path.dirname(__file__)), "trainmate.db")
-_real_sqlite_connect = sqlite3.connect
-
-
-def _guarded_sqlite_connect(database, *args, **kwargs):
-    """Backstop for the database seam, mirroring the network guard below.
-
-    A test whose handle-rebinding misses a site falls through to the real training
-    database — which, unlike a stray network call, otherwise succeeds silently and
-    leaves the test passing while measuring nothing (or worse, writing to it).
-    """
-    if os.path.abspath(str(database)) == os.path.abspath(_PRODUCTION_DB):
-        raise RuntimeError(
-            f"tests must not open the production database ({_PRODUCTION_DB}); "
-            "bind an isolated one with tests.helpers.bind_test_db()"
-        )
-    return _real_sqlite_connect(database, *args, **kwargs)
-
-
-sqlite3.connect = _guarded_sqlite_connect
 
 _LOOPBACK = {"127.0.0.1", "::1", "localhost", ""}
 _real_connect = socket.socket.connect

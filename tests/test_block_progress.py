@@ -15,7 +15,6 @@ import trainmate_cli
 
 test_db = Database(db_path=TEST_DB_PATH)
 rebind_test_db(test_db)
-trainmate.coach.service.db = test_db
 rebind_test_db(test_db)
 
 from trainmate import intensity
@@ -37,7 +36,6 @@ class TestBlockProgressContext(unittest.TestCase):
         global test_db
         test_db = Database(db_path=TEST_DB_PATH)
         rebind_test_db(test_db)
-        trainmate.coach.service.db = test_db
         rebind_test_db(test_db)
 
     @classmethod

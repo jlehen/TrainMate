@@ -1,5 +1,5 @@
 from datetime import datetime, timezone
-import trainmate_cli as cli
+from trainmate import runtime
 from trainmate import intensity
 from trainmate.config import config
 from trainmate.util import (
@@ -50,7 +50,7 @@ def run_status(
     print(bold(cyan("=== TRAINMATE ATHLETE STATUS ===")))
 
     # Active Goal & Periodization Strategy
-    objectives = cli.db.upcoming_objectives()
+    objectives = runtime.db.upcoming_objectives()
     if objectives:
         objectives.sort(key=lambda x: str(x['target_date']))
         next_goal = objectives[0]
@@ -71,16 +71,16 @@ def run_status(
         print(format_labeled_block(f"{bold('Description')}:", next_goal.get('description', '')))
         
         # Query active mesocycle
-        macro = cli.db.get_macrocycle_for_objective(next_goal['id'])
+        macro = runtime.db.get_macrocycle_for_objective(next_goal['id'])
         if macro:
-            change_reason = cli.coach_service.config_changed(macro)
+            change_reason = runtime.coach_service.config_changed(macro)
             if change_reason:
                 print(yellow(
                     "\nWarning: a plan-shaping input has changed since the "
                     f"active periodization plan was generated ({change_reason}).\nRun "
                     + cmd("plan generate") + " to regenerate."))
             
-            mesos = cli.db.get_mesocycles_for_macrocycle(macro['id'])
+            mesos = runtime.db.get_mesocycles_for_macrocycle(macro['id'])
             active_meso = None
             for m in mesos:
                 start = datetime.strptime(m['start_date'], "%Y-%m-%d").date()
@@ -99,8 +99,8 @@ def run_status(
                 # (DESIGN_intensity_distribution.md §9). Already wrapped to the target
                 # width — never re-wrap it, the zone table is column-aligned.
                 report = intensity.block_report(
-                    active_meso, _today_str(), cli.db.get_completed_activities,
-                    current_week=True, benchmarks=cli.db.get_benchmark_results(),
+                    active_meso, _today_str(), runtime.db.get_completed_activities,
+                    current_week=True, benchmarks=runtime.db.get_benchmark_results(),
                     with_focus=False, indent="", width=default_wrap_width(),
                 )
                 if report:
@@ -127,7 +127,7 @@ def run_status(
     from trainmate.benchmarks import ANCHOR_KINDS, LOGBOOK_KINDS, format_value
     threshold_lines = []
     for kind in LOGBOOK_KINDS:
-        latest = cli.db.get_latest_benchmark(kind)
+        latest = runtime.db.get_latest_benchmark(kind)
         if not latest:
             continue
         anchor = ANCHOR_KINDS[kind]
@@ -153,12 +153,12 @@ def run_status(
         )
 
     # Recent Garmin metrics
-    metrics = cli.db.get_metrics_cache()
+    metrics = runtime.db.get_metrics_cache()
     if metrics:
         last_metrics = metrics[-1]
         print(f"\nRecent Garmin Metrics ({cyan(last_metrics['date'])}):")
         
-        baseline = cli.db.get_baseline(last_metrics['date'])
+        baseline = runtime.db.get_baseline(last_metrics['date'])
         rhr_val = last_metrics['rhr']
         hrv_val = last_metrics['hrv']
         sleep_val = last_metrics['sleep_score']
@@ -195,19 +195,19 @@ def run_status(
         
         # Fitness/Fatigue/Form (CTL/ATL/TSB) + ramp. The whole line is dropped when all
         # three are absent (DESIGN_pmc_fitness_fatigue.md §6.1); ramp comes from the full
-        # stored CTL series. All garmin helpers read cli.db (dbh=), the same database the
+        # stored CTL series. All garmin helpers read runtime.db (dbh=), the same database the
         # metrics above came from.
-        history_start = cli.garmin.pmc_history_start(dbh=cli.db)
+        history_start = runtime.garmin.pmc_history_start(dbh=runtime.db)
         warmup_cutoff = pmc_warmup_cutoff(history_start)
-        ctl_v, atl_v, tsb_v = cli.garmin.pmc_display_values(last_metrics, warmup_cutoff)
+        ctl_v, atl_v, tsb_v = runtime.garmin.pmc_display_values(last_metrics, warmup_cutoff)
         if ctl_v is not None or atl_v is not None or tsb_v is not None:
             ctl_s, atl_s, tsb_s = pmc_cells(ctl_v, atl_v, tsb_v)
             ctl_by_date = {m['date']: m.get('ctl') for m in metrics}
-            ramp_v = cli.garmin.pmc_ramp(
+            ramp_v = runtime.garmin.pmc_ramp(
                 ctl_by_date, last_metrics['date'], warmup_cutoff=warmup_cutoff
             )
             ramp_s = color_ramp(ramp_v) + "/wk" if ramp_v is not None else "—"
-            ratio_v = cli.garmin.load_ratio(atl_v, ctl_v)
+            ratio_v = runtime.garmin.load_ratio(atl_v, ctl_v)
             ratio_s = color_load_ratio(ratio_v) if ratio_v is not None else "—"
             print(
                 f"- Fitness    : CTL {ctl_s} | ATL {atl_s} | TSB {tsb_s} | "
@@ -217,7 +217,7 @@ def run_status(
                 print(dim(f"  {PMC_TSB_LAG_NOTE}"))
         # Young/warming DB (§3.3b): say WHY freshness reads low — shown even while the
         # values themselves are warm-up-suppressed above (the suppression is the reason).
-        caveat = cli.garmin.pmc_data_caveat(history_start)
+        caveat = runtime.garmin.pmc_data_caveat(history_start)
         if caveat:
             print(dim("  " + pmc_warming_note(caveat['n_days'], config.pmc_ctl_days)))
         
@@ -243,7 +243,7 @@ def run_status(
         )
 
     # Coach Learnings — one-line summary; the full list lives under 'learnings list'.
-    learnings = cli.db.get_learnings()
+    learnings = runtime.db.get_learnings()
     print(bold("\nCoach Learnings:"))
     if learnings:
         active = [l for l in learnings if not l.get("dormant")]
@@ -263,8 +263,8 @@ def run_status(
         )
 
     # When the learnings were last updated — reflect/bootstrap run watermarks.
-    reflect_state = cli.db.get_sync_state("reflect")
-    bootstrap_state = cli.db.get_sync_state("bootstrap")
+    reflect_state = runtime.db.get_sync_state("reflect")
+    bootstrap_state = runtime.db.get_sync_state("bootstrap")
     if reflect_state and reflect_state.get("last_pull_utc"):
         line = f"  Last reflect: {fmt_date(reflect_state['last_pull_utc'][:10])}"
         ago = _ago(reflect_state["last_pull_utc"])
@@ -288,7 +288,7 @@ def run_status(
                + cmd("model")))
 
     if verbose:
-        goals = cli.db.get_objectives()
+        goals = runtime.db.get_objectives()
         print(bold(cyan("\nGoals:")))
         if not goals:
             print("- None")
@@ -309,7 +309,7 @@ def run_status(
             if g.get('description'):
                 print(format_labeled_block("  Description:", g['description']))
 
-        constraints = cli.db.get_constraints(_today_str())
+        constraints = runtime.db.get_constraints(_today_str())
         print(bold(cyan("\nActive Constraints:")))
         if not constraints:
             print("- None")

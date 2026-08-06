@@ -14,7 +14,6 @@ import trainmate.coach
 
 test_db = Database(db_path=TEST_DB_PATH)
 rebind_test_db(test_db)
-trainmate.coach.service.db = test_db
 
 from trainmate.coach import coach_service
 
@@ -31,7 +30,6 @@ class TestAdaptationAdapt(unittest.TestCase):
         global test_db
         test_db = Database(db_path=TEST_DB_PATH)
         rebind_test_db(test_db)
-        trainmate.coach.service.db = test_db
 
     @classmethod
     def tearDownClass(cls):
@@ -295,7 +293,7 @@ class TestAdaptationAdapt(unittest.TestCase):
 
         def hint_output(date_str: str) -> str:
             buf = io.StringIO()
-            with patch("trainmate.cli.workouts.generate.cli") as mock_cli, redirect_stdout(buf):
+            with patch("trainmate.cli.workouts.generate.runtime") as mock_cli, redirect_stdout(buf):
                 mock_cli.db = test_db
                 workouts_cli._print_block_boundary_hint(date_str)
             return buf.getvalue()
@@ -314,7 +312,7 @@ class TestAdaptationAdapt(unittest.TestCase):
         """The final block of a plan has nothing to regenerate, so the hint stays silent."""
         self._save_two_block_plan()
         buf = io.StringIO()
-        with patch("trainmate.cli.workouts.generate.cli") as mock_cli, redirect_stdout(buf):
+        with patch("trainmate.cli.workouts.generate.runtime") as mock_cli, redirect_stdout(buf):
             mock_cli.db = test_db
             # 2026-07-20 is one day before the LAST block ends; get_next_mesocycle -> None.
             workouts_cli._print_block_boundary_hint("2026-07-20")

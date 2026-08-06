@@ -248,8 +248,8 @@ class TestCliMisc(unittest.TestCase):
                 self.assertEqual(exit_code, 0)
                 self.assertEqual(count(token), 0)
 
-    @patch("trainmate_cli.garmin")
-    @patch("trainmate_cli.coach_service")
+    @patch("trainmate.runtime.garmin")
+    @patch("trainmate.runtime.coach_service")
     def test_no_pull_behavior_across_commands(self, mock_coach, mock_garmin):
         # 1. workout compare without --no-pull
         exit_code, stdout, stderr = self.run_cli(["workout", "compare", "-d", "3d"])
@@ -285,7 +285,7 @@ class TestCliMisc(unittest.TestCase):
         mock_coach.data_bootstrap.assert_called_once()
         self.assertTrue(mock_coach.data_bootstrap.call_args[1].get("no_pull"))
 
-    @patch("trainmate_cli.garmin")
+    @patch("trainmate.runtime.garmin")
     @patch("trainmate.timeline.build_timeline_payload")
     def test_progress_renders_end_to_end_from_the_payload(self, mock_build, mock_garmin):
         # Not an alias test — `pr` is prefix resolution, covered in test_cli_dashless.

@@ -378,7 +378,7 @@ class TestCalendarSync(unittest.TestCase):
             },
         ]
 
-        with patch("trainmate_cli.calendar_syncer") as mock_syncer:
+        with patch("trainmate.runtime.calendar_syncer") as mock_syncer:
             marked = mark_adherence_from_results(results, today_str=today)
 
         self.assertEqual(marked, 1)
@@ -411,8 +411,8 @@ class TestCalendarSync(unittest.TestCase):
             }]
 
         # First pass: nothing recorded yet -> pushes and stamps the signature.
-        with patch("trainmate_cli.calendar_syncer") as mock_syncer, \
-                patch("trainmate_cli.db") as mock_db:
+        with patch("trainmate.runtime.calendar_syncer") as mock_syncer, \
+                patch("trainmate.runtime.db") as mock_db:
             first = make_results()
             marked = mark_adherence_from_results(first, today_str=today)
             self.assertEqual(marked, 1)
@@ -422,8 +422,8 @@ class TestCalendarSync(unittest.TestCase):
             self.assertEqual(wid, 7)
 
         # Second pass: the row now carries that signature -> skipped, no write.
-        with patch("trainmate_cli.calendar_syncer") as mock_syncer, \
-                patch("trainmate_cli.db") as mock_db:
+        with patch("trainmate.runtime.calendar_syncer") as mock_syncer, \
+                patch("trainmate.runtime.db") as mock_db:
             second = make_results()
             second[0]["planned"]["marked_signature"] = signature
             marked = mark_adherence_from_results(second, today_str=today)

@@ -38,8 +38,8 @@ class TestCliPlans(unittest.TestCase):
     def run_cli(self, args, input_value="n"):
         return run_cli(args, input_value)
 
-    @patch("trainmate_cli.garmin")
-    @patch("trainmate_cli.coach_service")
+    @patch("trainmate.runtime.garmin")
+    @patch("trainmate.runtime.coach_service")
     def test_plan_generate_applies_to_the_goal_the_service_planned_for(
         self, mock_coach, mock_garmin
     ):
@@ -63,8 +63,8 @@ class TestCliPlans(unittest.TestCase):
         args, kwargs = mock_coach.plan_apply.call_args
         self.assertEqual(args[0], far_id)
 
-    @patch("trainmate_cli.garmin")
-    @patch("trainmate_cli.coach_service")
+    @patch("trainmate.runtime.garmin")
+    @patch("trainmate.runtime.coach_service")
     def test_plan_commands(self, mock_coach, mock_garmin):
         mock_coach.plan_generate.return_value = {
             "strategy": "Mock Strategy",
@@ -153,7 +153,7 @@ class TestCliPlans(unittest.TestCase):
         self.assertIn("removed successfully", stdout)
         mock_coach.plan_rm.assert_called_once_with(obj_to_rm)
 
-    @patch("trainmate_cli.garmin")
+    @patch("trainmate.runtime.garmin")
     def test_plan_show_never_pulls(self, mock_garmin):
         # `plan show` is a pure read: it must never prompt or trigger a Garmin pull,
         # whether or not metrics exist (auto-ensure lives on the generating/adapting
@@ -371,8 +371,8 @@ class TestCliPlans(unittest.TestCase):
         self.assertIn("ftp: 220", stdout)
         self.assertIn("max_hr: 185", stdout)
 
-    @patch("trainmate_cli.garmin")
-    @patch("trainmate_cli.coach_service")
+    @patch("trainmate.runtime.garmin")
+    @patch("trainmate.runtime.coach_service")
     def test_accepting_a_plan_with_no_goal_reports_instead_of_crashing(
         self, mock_coach, mock_garmin
     ):

@@ -3,6 +3,7 @@ import time
 from datetime import datetime, timedelta, timezone
 from typing import Any, List, Optional, Tuple
 
+from trainmate import runtime
 from trainmate.config import config
 from trainmate.util import today_str, yellow, red, dim, cmd
 import trainmate.garmin as _g
@@ -68,7 +69,7 @@ def _ingest_activities(client: GarminClient, start: str, end: str, throttle: flo
             act_name = act.get("activityName", "Unknown Activity")
             underestimated_activities.append(f"{date_str} {act_name}")
 
-        _g.db.save_completed_activity(
+        runtime.db.save_completed_activity(
             activity_id=activity_id, date=date_str, start_time=start_time,
             activity_name=act.get("activityName", "Unknown Activity"),
             activity_type=type_key, duration_sec=float(duration_sec),
@@ -93,7 +94,7 @@ def _ingest_activities(client: GarminClient, start: str, end: str, throttle: flo
     # Reconcile deletions: drop local rows in this range that Garmin no longer
     # returns (e.g. a duplicate Zwift auto-upload the user deleted in Garmin
     # Connect). Without this they linger and surface as unplanned activities.
-    pruned = _g.db.prune_completed_activities(start, end, fetched_ids)
+    pruned = runtime.db.prune_completed_activities(start, end, fetched_ids)
     if pruned:
         print(f"  Removed {pruned} activit{'y' if pruned == 1 else 'ies'} "
               "deleted in Garmin since the last sync.")
@@ -105,7 +106,7 @@ def _ingest_metrics(client: GarminClient, start: str, end: str, throttle: float)
         # Write a row for EVERY day in range, even all-null, so the metrics-cache
         # date coverage records what has been pulled (gap detection). Derived
         # fields are left None here; recompute fills them via COALESCE.
-        _g.db.save_metric_cache(
+        runtime.db.save_metric_cache(
             date=date_str,
             rhr=_int_or_none(m["rhr"]), hrv=_int_or_none(m["hrv"]),
             sleep_score=_int_or_none(m["sleep_score"]), stress=_int_or_none(m["stress"]),
@@ -142,11 +143,11 @@ def pull(
     recompute_derived()
 
     if advance_watermark:
-        state = _g.db.get_sync_state()
+        state = runtime.db.get_sync_state()
         prev_through = state["through_date"] if state else None
         # through_date is a forward high-water mark; backfills never regress it.
         new_through = max([d for d in (prev_through, end_date) if d], default=end_date)
-        _g.db.set_sync_state(
+        runtime.db.set_sync_state(
             through_date=new_through,
             last_pull_utc=datetime.now(timezone.utc).isoformat(),
         )
@@ -210,8 +211,8 @@ def ensure_data(start_date: str, end_date: str, force: bool = False) -> None:
     if not force and _ensured and _ensured[0] <= pad_start and req_end <= _ensured[1]:
         return
 
-    state = _g.db.get_sync_state()
-    present = set(_g.db.get_metric_dates())
+    state = runtime.db.get_sync_state()
+    present = set(runtime.db.get_metric_dates())
     refresh_minutes = config.data_refresh_minutes
     mutable_days = config.garmin_mutable_days
     prompt_days = config.garmin_backfill_prompt_days

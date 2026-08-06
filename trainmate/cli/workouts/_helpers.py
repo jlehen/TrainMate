@@ -4,7 +4,7 @@ import re
 import sys
 from datetime import datetime, timedelta
 from typing import Optional
-import trainmate_cli as cli
+from trainmate import runtime
 from trainmate.calendar_state import calendar_status
 from trainmate.modification_state import modification_status
 from trainmate.util import (
@@ -79,7 +79,7 @@ def warn_stale_before(start_date: str) -> None:
         ).strftime("%Y-%m-%d")
     except ValueError:
         return
-    earlier = cli.db.get_workouts(end_date=cutoff, include_removed=True)
+    earlier = runtime.db.get_workouts(end_date=cutoff, include_removed=True)
     stale = [w for w in earlier if calendar_status(w) == 'stale']
     if not stale:
         return
@@ -103,7 +103,7 @@ def _resolve_workout_end_date(
                 print(red("No active goal found for --until-goal."))
                 sys.exit(1)
             return resolved_goal['target_date']
-        goal = next((o for o in cli.db.upcoming_objectives() if o['id'] == goal_id), None)
+        goal = next((o for o in runtime.db.upcoming_objectives() if o['id'] == goal_id), None)
         if goal is None:
             print(red(f"Active goal with ID {goal_id} not found."))
             sys.exit(1)
@@ -141,8 +141,8 @@ def _resolve_swap_ops(args: argparse.Namespace) -> list | None:
 
     if kind1 == "id":
         id1, id2 = int(args.target1), int(args.target2)
-        w1 = cli.db.get_workout_by_id(id1)
-        w2 = cli.db.get_workout_by_id(id2)
+        w1 = runtime.db.get_workout_by_id(id1)
+        w2 = runtime.db.get_workout_by_id(id2)
         if not w1:
             print(red(f"Workout with ID {id1} not found."))
             return None
@@ -184,8 +184,8 @@ def _resolve_swap_ops(args: argparse.Namespace) -> list | None:
         if d < today:
             print(red(f"Cannot swap {d}: it is in the past."))
             return None
-    on_1 = cli.db.get_workouts(start_date=date1, end_date=date1)
-    on_2 = cli.db.get_workouts(start_date=date2, end_date=date2)
+    on_1 = runtime.db.get_workouts(start_date=date1, end_date=date1)
+    on_2 = runtime.db.get_workouts(start_date=date2, end_date=date2)
     if not on_1 and not on_2:
         print(yellow(
             f"No workouts on either {date1} or {date2}; nothing to swap."

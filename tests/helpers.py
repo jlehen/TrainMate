@@ -89,6 +89,7 @@ def clear_all_tables(db) -> None:
 # all. Modules absent from sys.modules are skipped — a CLI test should not have to
 # import the web app to isolate itself.
 _DB_BINDING_SITES = (
+    ("trainmate.runtime", "db"),
     ("trainmate.db", "db"),
     ("trainmate_cli", "db"),
     ("trainmate_web", "db"),
@@ -109,7 +110,13 @@ def rebind_test_db(test_db) -> None:
     """
     for module_name, attr in _DB_BINDING_SITES:
         module = sys.modules.get(module_name)
-        if module is not None and hasattr(module, attr):
+        if module is None:
+            continue
+        # `vars()`, not hasattr(): trainmate.runtime resolves singletons through a
+        # module __getattr__, so asking whether it "has" db would build the real one
+        # against the production file — the very thing being avoided here. Assigning
+        # shadows the accessor, which is what we want in either case.
+        if module_name == "trainmate.runtime" or attr in vars(module):
             setattr(module, attr, test_db)
 
 

@@ -48,8 +48,20 @@ class Database(
     """Handles all database schema setups and operations using SQLite."""
 
 
-# Singleton instance
-db = Database()
+def __getattr__(name):
+    """Builds the module-level ``db`` singleton on first use, not on import.
+
+    Constructing a Database runs the schema migrations and writes to the file, so
+    binding it at import meant that merely importing this package — for ``--help``, for
+    a unit test of a pure function — opened and mutated the athlete's real database.
+    Prefer ``trainmate.runtime.db``, which owns the process-wide handle; this accessor
+    keeps ``from trainmate.db import db`` working for callers that still want one.
+    """
+    if name != "db":
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    from trainmate import runtime
+    globals()["db"] = runtime.db
+    return globals()["db"]
 
 __all__ = [
     "Database",

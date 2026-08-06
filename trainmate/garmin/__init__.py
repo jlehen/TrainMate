@@ -4,7 +4,6 @@ Split into submodules — client/load/pmc/sync — all re-exported here so
 ``from trainmate.garmin import ...`` and ``patch.object(garmin, ...)`` keep working.
 """
 from trainmate.config import config
-from trainmate.db import db
 from trainmate.garmin.client import (
     _derivation_pad_days, GarminAuthRequired, _to_date, _date_range, _shift, GarminClient
 )

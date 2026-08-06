@@ -11,7 +11,7 @@ a human-confirmed replan (§7). Nothing here regenerates a plan without a `y`.
 import argparse
 import sys
 from typing import Optional
-import trainmate_cli as cli
+from trainmate import runtime
 from trainmate.util import (
     bold, dim, green, red, yellow, cyan, gray, cmd, format_labeled_block,
     today_str as _today_str,
@@ -48,32 +48,32 @@ def _maybe_replan(constraint_id: int, title: str, replan_flag: Optional[bool]) -
     against the active plan decides whether to *ask*; only a human `y` sets replan = 1 and
     regenerates."""
     if replan_flag is False:
-        cli.db.update_constraint(constraint_id, replan=0)
+        runtime.db.update_constraint(constraint_id, replan=0)
         return
 
     if replan_flag is True:
-        cli.db.update_constraint(constraint_id, replan=1)
+        runtime.db.update_constraint(constraint_id, replan=1)
         _run_replan_flow(title)
         return
 
     # Undecided: derive magnitude and, if plan-shaping, propose.
-    constraint = cli.db.get_constraint(constraint_id)
+    constraint = runtime.db.get_constraint(constraint_id)
     if not constraint:
         return
     try:
-        impact = cli.coach_service.constraint_plan_impact(constraint)
+        impact = runtime.coach_service.constraint_plan_impact(constraint)
     except Exception:
         return
-    if not cli.coach_service.constraint_is_plan_shaping(constraint, impact):
+    if not runtime.coach_service.constraint_is_plan_shaping(constraint, impact):
         return
 
     detail = f"displaces ~{impact['displaced_pct']:.0f}% of a typical week's planned load"
     print(yellow(f"This {impact['days']}-day constraint {detail}."))
-    if cli.prompt.confirm("Replan around it?"):
-        cli.db.update_constraint(constraint_id, replan=1)
+    if runtime.prompt.confirm("Replan around it?"):
+        runtime.db.update_constraint(constraint_id, replan=1)
         _run_replan_flow(title)
     else:
-        cli.db.update_constraint(constraint_id, replan=0)
+        runtime.db.update_constraint(constraint_id, replan=0)
         print(dim("Left out of the plan; still honored by daily 'workout adapt'."))
 
 
@@ -96,13 +96,13 @@ def run_constraint_add(args: argparse.Namespace) -> None:
     title = args.title
     start, end = _resolve_dates(args)
 
-    cid = cli.db.add_constraint(
+    cid = runtime.db.add_constraint(
         title=title, start_date=start, end_date=end,
         rest=1 if args.rest else 0,
         description=args.desc, replan=1 if args.replan is True else 0,
         source='manual',
     )
-    constraint = cli.db.get_constraint(cid)
+    constraint = runtime.db.get_constraint(cid)
     if constraint:
         print(_constraint_line(constraint))
     print(green("Constraint added successfully."))
@@ -111,7 +111,7 @@ def run_constraint_add(args: argparse.Namespace) -> None:
 
 def run_constraint_edit(args: argparse.Namespace) -> None:
     """Adjusts scope / rest / text / replan of an existing directive."""
-    constraint = cli.db.get_constraint(args.id)
+    constraint = runtime.db.get_constraint(args.id)
     if not constraint:
         print(red(f"Constraint with ID {args.id} not found."))
         sys.exit(1)
@@ -137,8 +137,8 @@ def run_constraint_edit(args: argparse.Namespace) -> None:
     if args.replan is not None:
         kwargs['replan'] = 1 if args.replan else 0
 
-    cli.db.update_constraint(args.id, **kwargs)
-    updated = cli.db.get_constraint(args.id)
+    runtime.db.update_constraint(args.id, **kwargs)
+    updated = runtime.db.get_constraint(args.id)
     if updated:
         print(_constraint_line(updated))
     print(green("Constraint updated successfully."))
@@ -160,10 +160,10 @@ def run_constraint_list(args: argparse.Namespace) -> None:
     else:
         # Anchor on the current training block; with no plan yet, there is nothing to
         # anchor on, so show everything (a fresh user has only a handful of constraints).
-        active_meso = cli.db.get_active_mesocycle(_today_str())
+        active_meso = runtime.db.get_active_mesocycle(_today_str())
         start = active_meso['start_date'] if active_meso else None
         end = None
-    constraints = cli.db.get_constraints(start, end)
+    constraints = runtime.db.get_constraints(start, end)
 
     print(bold(cyan("=== ATHLETE CONSTRAINTS ===")))
     if not constraints:
@@ -177,7 +177,7 @@ def run_constraint_list(args: argparse.Namespace) -> None:
 
 def run_constraint_show(args: argparse.Namespace) -> None:
     """Displays a directive in detail, including whether it is plan-shaping (§7)."""
-    constraint = cli.db.get_constraint(args.id)
+    constraint = runtime.db.get_constraint(args.id)
     if not constraint:
         print(red(f"Constraint with ID {args.id} not found."))
         return
@@ -195,22 +195,22 @@ def run_constraint_show(args: argparse.Namespace) -> None:
 
 def run_constraint_rm(args: argparse.Namespace) -> None:
     """Removes a directive by ID."""
-    if not cli.db.get_constraint(args.id):
+    if not runtime.db.get_constraint(args.id):
         print(yellow(f"No constraint with ID {args.id}."))
         return
-    cli.db.delete_constraint(args.id)
+    runtime.db.delete_constraint(args.id)
     print(green(f"Constraint [{args.id}] removed."))
 
 
 def run_constraint_wipe(args: argparse.Namespace) -> None:
     """Wipes all constraints after confirmation."""
     if not args.yes:
-        if not cli.prompt.confirm(
+        if not runtime.prompt.confirm(
             "Are you sure you want to wipe all constraints?", danger=True
         ):
             print("Wipe cancelled.")
             return
-    cli.db.wipe_constraints()
+    runtime.db.wipe_constraints()
     print(green("All constraints wiped successfully."))
 
 

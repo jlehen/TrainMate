@@ -39,8 +39,8 @@ class TestCliWorkouts(unittest.TestCase):
     def run_cli(self, args, input_value="n"):
         return run_cli(args, input_value)
 
-    @patch("trainmate_cli.garmin")
-    @patch("trainmate_cli.coach_service")
+    @patch("trainmate.runtime.garmin")
+    @patch("trainmate.runtime.coach_service")
     def test_workout_commands(self, mock_coach, mock_garmin):
         mock_coach.workout_adapt.return_value = (
             "Metrics are green",
@@ -106,7 +106,7 @@ class TestCliWorkouts(unittest.TestCase):
             )
 
     @patch("trainmate.cli.workouts.generate.ensure_recent_data")
-    @patch("trainmate_cli.coach_service")
+    @patch("trainmate.runtime.coach_service")
     def test_adapt_reports_metric_day_count_not_values(self, mock_coach, _mock_ensure):
         # The coach still reads the full trajectory; the CLI only tells the athlete how
         # many days fed the decision and never prints the raw per-day numbers.
@@ -122,7 +122,7 @@ class TestCliWorkouts(unittest.TestCase):
         for value in ("62.4", "71.7", "-8.9"):
             self.assertNotIn(value, stdout)
 
-    @patch("trainmate_cli.calendar_syncer")
+    @patch("trainmate.runtime.calendar_syncer")
     def test_workout_push_command(self, mock_calendar):
         exit_code, stdout, stderr = self.run_cli(["workout", "push"])
         self.assertEqual(exit_code, 0)
@@ -140,7 +140,7 @@ class TestCliWorkouts(unittest.TestCase):
         self.assertIn("Syncing 1 workouts to Google Calendar", stdout)
         mock_calendar.sync_multiple.assert_called_once()
 
-    @patch("trainmate_cli.calendar_syncer")
+    @patch("trainmate.runtime.calendar_syncer")
     def test_workout_push_warns_about_stale_past_workouts(self, mock_calendar):
         """`push` defaults to today onward, so a past row left stale by a failed push
         has nothing that would re-push it. It must at least be surfaced."""
@@ -167,7 +167,7 @@ class TestCliWorkouts(unittest.TestCase):
         # Warning only — the past row stays outside the pushed window.
         mock_calendar.sync_multiple.assert_not_called()
 
-    @patch("trainmate_cli.calendar_syncer")
+    @patch("trainmate.runtime.calendar_syncer")
     def test_workout_push_no_warning_when_past_is_clean(self, mock_calendar):
         """A past workout that is synced (or was never pushed) must not warn."""
         today = datetime.now(timezone.utc).date()
@@ -179,7 +179,7 @@ class TestCliWorkouts(unittest.TestCase):
         self.assertEqual(exit_code, 0)
         self.assertNotIn("still read [STALE]", stdout)
 
-    @patch("trainmate_cli.coach_service")
+    @patch("trainmate.runtime.coach_service")
     def test_workout_swap_by_date(self, mock_coach):
         today = datetime.now(timezone.utc).date()
         d1 = (today + timedelta(days=1)).strftime("%Y-%m-%d")
@@ -217,7 +217,7 @@ class TestCliWorkouts(unittest.TestCase):
         ])
         self.assertFalse(no_sync)
 
-    @patch("trainmate_cli.coach_service")
+    @patch("trainmate.runtime.coach_service")
     def test_workout_swap_by_id_no_sync(self, mock_coach):
         today = datetime.now(timezone.utc).date()
         d1 = (today + timedelta(days=1)).strftime("%Y-%m-%d")
@@ -244,7 +244,7 @@ class TestCliWorkouts(unittest.TestCase):
         ])
         self.assertTrue(no_sync)
 
-    @patch("trainmate_cli.coach_service")
+    @patch("trainmate.runtime.coach_service")
     def test_workout_swap_warning_declined(self, mock_coach):
         today = datetime.now(timezone.utc).date()
         d1 = (today + timedelta(days=1)).strftime("%Y-%m-%d")
@@ -267,7 +267,7 @@ class TestCliWorkouts(unittest.TestCase):
         self.assertIn("Swap cancelled", stdout)
         mock_coach.workout_swap_apply.assert_not_called()
 
-    @patch("trainmate_cli.coach_service")
+    @patch("trainmate.runtime.coach_service")
     def test_workout_swap_past_date_rejected(self, mock_coach):
         today = datetime.now(timezone.utc).date()
         past = (today - timedelta(days=2)).strftime("%Y-%m-%d")
@@ -314,7 +314,7 @@ class TestCliWorkouts(unittest.TestCase):
         self.assertEqual(exit_code, 0)
         self.assertIn("neither a date", stdout)
 
-    @patch("trainmate_cli.calendar_syncer")
+    @patch("trainmate.runtime.calendar_syncer")
     def test_workout_rm_synced(self, mock_calendar):
         w_id = test_db.save_workout(
             date="2026-06-02", sport_type="running", title="Synced Run",
@@ -334,7 +334,7 @@ class TestCliWorkouts(unittest.TestCase):
         self.assertEqual(synced_workout['id'], w_id)
         self.assertTrue(synced_workout['removed'])
 
-    @patch("trainmate_cli.calendar_syncer")
+    @patch("trainmate.runtime.calendar_syncer")
     def test_workout_rm_soft_deletes(self, mock_calendar):
         """`workout rm` marks the row removed (kept in DB), hides it from reads, and
         updates its calendar event — but it stays retrievable for the coach."""
@@ -387,7 +387,7 @@ class TestCliWorkouts(unittest.TestCase):
         self.assertIn("Interval Session", stdout)
         self.assertIn("[REMOVED]", stdout)
 
-    @patch("trainmate_cli.calendar_syncer")
+    @patch("trainmate.runtime.calendar_syncer")
     def test_workout_wipe(self, mock_calendar):
         test_db.save_workout(
             date="2026-06-02", sport_type="running", title="Run 1",
@@ -420,7 +420,7 @@ class TestCliWorkouts(unittest.TestCase):
         self.assertEqual(len(test_db.get_workouts()), 0)
         mock_calendar.delete_workout_event.assert_called_once_with("ge_2")
 
-    @patch("trainmate_cli.calendar_syncer")
+    @patch("trainmate.runtime.calendar_syncer")
     def test_workout_prune_calendar(self, mock_calendar):
         # One live workout, one soft-removed (keeps its event), and two calendar
         # events no row claims — the fresh-database case.
@@ -476,7 +476,7 @@ class TestCliWorkouts(unittest.TestCase):
             ["ge_orphan_a", "ge_orphan_b"],
         )
 
-    @patch("trainmate_cli.calendar_syncer")
+    @patch("trainmate.runtime.calendar_syncer")
     def test_workout_prune_calendar_nothing_to_do(self, mock_calendar):
         test_db.save_workout(
             date="2026-06-02", sport_type="running", title="Run 1",
@@ -490,7 +490,7 @@ class TestCliWorkouts(unittest.TestCase):
         self.assertIn("No orphaned Calendar events", stdout)
         mock_calendar.delete_event.assert_not_called()
 
-    @patch("trainmate_cli.coach_service")
+    @patch("trainmate.runtime.coach_service")
     def test_workout_add_echoes_list_line(self, mock_coach):
         """`add` echoes the new session in the exact 'workout list' rendering."""
         saved = {
@@ -747,7 +747,7 @@ class TestCliWorkouts(unittest.TestCase):
         self.assertIn(f"- {yesterday_str}: [road_biking] Off-Season Ride", stdout)
         self.assertNotIn("'activity_id'", stdout)
 
-    @patch("trainmate_cli.coach_service")
+    @patch("trainmate.runtime.coach_service")
     def test_workout_batches_and_rollback(self, mock_coach):
         """`workout batches` lists archived batches and `workout rollback` picks one
         (see DESIGN_plan_rollback.md §9)."""
@@ -794,8 +794,8 @@ class TestCliWorkouts(unittest.TestCase):
         )
 
     @patch("trainmate.cli.workouts.generate.ensure_recent_data")
-    @patch("trainmate_cli.prompt")
-    @patch("trainmate_cli.coach_service")
+    @patch("trainmate.runtime.prompt")
+    @patch("trainmate.runtime.coach_service")
     def test_generate_confirms_before_replacing_live_plan(
         self, mock_coach, mock_prompt, _ensure
     ):
@@ -851,8 +851,8 @@ class TestCliWorkouts(unittest.TestCase):
         mock_coach.workout_generate.assert_called_once()
 
     @patch("trainmate.cli.workouts.generate.ensure_recent_data")
-    @patch("trainmate_cli.prompt")
-    @patch("trainmate_cli.coach_service")
+    @patch("trainmate.runtime.prompt")
+    @patch("trainmate.runtime.coach_service")
     def test_generate_force_keeps_out_of_date_plan_warning(
         self, mock_coach, mock_prompt, _ensure
     ):

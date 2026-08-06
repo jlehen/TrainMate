@@ -4,8 +4,8 @@ from typing import Any, List, Optional
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
+from trainmate import runtime
 from trainmate.config import config
-from trainmate.db import db
 from trainmate.types import Workout
 from trainmate.calendar_state import calendar_signature
 from trainmate import intensity
@@ -207,7 +207,7 @@ class CalendarSyncer:
         # that produced it: goal/macro/meso are resolved from the workout's date, the
         # workout id comes from the row itself.
         id_parts = []
-        ids = db.get_periodization_ids_for_date(date_str)
+        ids = runtime.db.get_periodization_ids_for_date(date_str)
         if ids:
             objective_id, macrocycle_id, mesocycle_id = ids
             id_parts.append(f"Goal: {objective_id}")
@@ -274,7 +274,7 @@ class CalendarSyncer:
                 # Record the push: store the event handle + the signature of what we
                 # just pushed, so the row derives as `synced` until edited again.
                 if workout.get('id') is not None:
-                    db.mark_workout_pushed(
+                    runtime.db.mark_workout_pushed(
                         workout['id'], google_event_id, calendar_signature(workout)
                     )
                 return google_event_id
@@ -306,7 +306,7 @@ class CalendarSyncer:
             # Record the push: store the new event handle + the signature of what we
             # just pushed, so the row derives as `synced` until edited again.
             if workout.get('id') is not None:
-                db.mark_workout_pushed(
+                runtime.db.mark_workout_pushed(
                     workout['id'], new_event_id, calendar_signature(workout)
                 )
             return str(new_event_id)
@@ -345,7 +345,7 @@ class CalendarSyncer:
         if not self.calendar_id:
             return 0
 
-        state = db.get_sync_state(key="calendar_context")
+        state = runtime.db.get_sync_state(key="calendar_context")
         use_token: Optional[str] = state.get("sync_token") if state else None
 
         changed = 0
@@ -384,7 +384,7 @@ class CalendarSyncer:
                 next_sync_token = resp.get('nextSyncToken')
                 break
 
-        db.set_sync_state(
+        runtime.db.set_sync_state(
             through_date=None,
             last_pull_utc=datetime.now(timezone.utc).isoformat(),
             key="calendar_context",
@@ -402,7 +402,7 @@ class CalendarSyncer:
         if event.get('status') == 'cancelled':
             # Cancelled events arrive stripped of extendedProperties, so the tag guard
             # below can't run: a deleted row is the proof it was ours (§6).
-            return 1 if db.delete_daily_context_by_event(event_id) else 0
+            return 1 if runtime.db.delete_daily_context_by_event(event_id) else 0
 
         private = (event.get('extendedProperties', {}) or {}).get('private', {}) or {}
         # On the incremental path this is the *only* filter (no server-side one is
@@ -415,7 +415,7 @@ class CalendarSyncer:
         if not date:
             return 0
 
-        db.upsert_daily_context_by_event(
+        runtime.db.upsert_daily_context_by_event(
             google_event_id=event_id,
             date=date,
             metric=private.get('metric') or 'context',
@@ -559,7 +559,7 @@ def sync_calendar_context(force: bool = False) -> None:
             return
         # Skip if a recent sync already covers the freshness window (shared with the
         # Garmin metric-refresh cadence — "how fresh is fresh enough").
-        state = db.get_sync_state(key="calendar_context")
+        state = runtime.db.get_sync_state(key="calendar_context")
         if state and state.get("last_pull_utc"):
             try:
                 age = datetime.now(timezone.utc) - datetime.fromisoformat(

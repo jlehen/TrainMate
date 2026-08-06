@@ -1,36 +1,16 @@
-"""TrainMate CLI entry point.
+"""TrainMate CLI entry point: the argparse dispatcher (``main``) and its helpers.
 
-The argparse dispatcher (``main``) and the patchable singletons/helpers live here;
-the per-command handlers live in the ``trainmate.cli`` package and reference these
-names via ``import trainmate_cli as cli`` so that test seams patching
-``trainmate_cli.<name>`` continue to take effect.
+The process-wide singletons live in ``trainmate.runtime`` and handlers read them as
+``runtime.<name>`` at use time. Nothing under ``trainmate/`` imports this module any
+more, so the self-alias into ``sys.modules`` that used to break the resulting import
+cycle is gone with it.
 """
 import argparse
-import os
-import subprocess
 import sys
-import tempfile
 from typing import Optional
-from datetime import datetime, timedelta
 
-# When launched as a script (``python trainmate_cli.py``) this module is named
-# ``__main__``; the trainmate.cli.* handlers, however, ``import trainmate_cli`` to reach
-# the singletons/helpers below. Alias the two names to one module object so that import
-# resolves to *this* module instead of re-executing the file (which would deadlock on a
-# circular import) and so both see the same — patchable — bindings.
-sys.modules.setdefault("trainmate_cli", sys.modules[__name__])
-
-from trainmate.db import db
-from trainmate import garmin
-from trainmate.google_calendar import calendar_syncer
-from trainmate.coach import coach_service
-from trainmate.config import config
-from trainmate.prompt import make_prompt, Choice, PromptCancelled
-
-# The active prompt transport (TtyPrompt on a terminal, JsonPrompt under the bot,
-# selected via TRAINMATE_FRONTEND). A patchable singleton like db/coach_service:
-# handlers reach it as ``cli.prompt`` to ask yes/no, one-of-N, or text questions.
-prompt = make_prompt()
+from trainmate import runtime
+from trainmate.prompt import PromptCancelled
 from trainmate.util import (
     bold, dim, green, red, yellow, cyan, blue, magenta, gray,
     visible_len, pad_visible, wrap_text, format_labeled_text,

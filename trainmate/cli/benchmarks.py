@@ -2,7 +2,7 @@ import argparse
 import sys
 from typing import Optional, Tuple
 
-import trainmate_cli as cli
+from trainmate import runtime
 from trainmate.util import (
     bold, dim, green, red, yellow, cyan, gray, cmd, format_labeled_block, today_str as _today_str,
 )
@@ -103,7 +103,7 @@ def run_benchmark_record(args: argparse.Namespace) -> None:
         sys.exit(1)
 
     # Show the change against the current latest of this kind before touching anything.
-    prev = cli.db.get_latest_benchmark(kind)
+    prev = runtime.db.get_latest_benchmark(kind)
     new_disp = format_value(kind, value)
     if prev:
         old_val = float(prev["value"])
@@ -122,15 +122,15 @@ def run_benchmark_record(args: argparse.Namespace) -> None:
             " — record and suggest replanning the next block?"
             if crosses else " — record?"
         )
-        if not cli.prompt.confirm(f"New {label} {new_disp}{change}{tail}"):
+        if not runtime.prompt.confirm(f"New {label} {new_disp}{change}{tail}"):
             print(gray("Not recorded."))
             return
 
-    rid = cli.db.add_benchmark_result(
+    rid = runtime.db.add_benchmark_result(
         date=date, sport_type=sport, anchor_kind=kind, value=value,
         unit=unit, source=args.source, note=args.note,
     )
-    row = cli.db.get_benchmark_result(rid)
+    row = runtime.db.get_benchmark_result(rid)
     if row:
         # `prev` is this kind's previous latest — exactly the predecessor `list` would
         # measure the new row's delta against.
@@ -153,13 +153,13 @@ def _crosses_replan_band(kind: str, value: float, prev: Optional[dict]) -> bool:
     old_val = float(prev["value"])
     if not old_val:
         return False
-    tolerance = cli.config.threshold_replan_pct / 100.0
+    tolerance = runtime.config.threshold_replan_pct / 100.0
     return abs(value - old_val) / abs(old_val) > tolerance
 
 
 def run_benchmark_list(args: argparse.Namespace) -> None:
     """Lists the benchmark logbook, newest first, with per-kind signed deltas (§3.2/§6)."""
-    rows = cli.db.get_benchmark_results()
+    rows = runtime.db.get_benchmark_results()
     print(bold(cyan("=== BENCHMARK LOGBOOK ===")))
     if not rows:
         print(dim("(no results recorded yet)"))
@@ -177,23 +177,23 @@ def run_benchmark_list(args: argparse.Namespace) -> None:
 
 def run_benchmark_rm(args: argparse.Namespace) -> None:
     """Removes a logbook row by ID — the correction path (delete-and-re-record, §6)."""
-    row = cli.db.get_benchmark_result(args.id)
+    row = runtime.db.get_benchmark_result(args.id)
     if not row:
         print(red(f"Benchmark result with ID {args.id} not found."))
         sys.exit(1)
-    cli.db.delete_benchmark_result(args.id)
+    runtime.db.delete_benchmark_result(args.id)
     print(green(f"Removed benchmark result ID {args.id}."))
 
 
 def run_benchmark_wipe(args: argparse.Namespace) -> None:
     """Wipes the entire benchmark logbook after confirmation."""
     if not args.yes:
-        if not cli.prompt.confirm(
+        if not runtime.prompt.confirm(
             "Are you sure you want to wipe all benchmark results?", danger=True
         ):
             print("Wipe cancelled.")
             return
-    cli.db.wipe_benchmarks()
+    runtime.db.wipe_benchmarks()
     print(green("All benchmark results wiped successfully."))
 
 

@@ -43,10 +43,10 @@ def pmc_warmup_cutoff(history_start: Optional[str] = None) -> Optional[str]:
 
     Pass `history_start` when the caller already fetched it (it needs a DB hit),
     otherwise it is looked up here."""
-    import trainmate_cli as cli
+    from trainmate import runtime
     if history_start is None:
-        history_start = cli.garmin.pmc_history_start(dbh=cli.db)
-    return cli.garmin.pmc_warmup_cutoff_for(history_start, config.pmc_ctl_days)
+        history_start = runtime.garmin.pmc_history_start(dbh=runtime.db)
+    return runtime.garmin.pmc_warmup_cutoff_for(history_start, config.pmc_ctl_days)
 
 
 def ensure_recent_data(
@@ -56,7 +56,7 @@ def ensure_recent_data(
     auto-pulling small/recent gaps and surfacing large backfills as a command. Warns
     if today's metrics are still unavailable afterward. `force_pull` bypasses the
     refresh-minutes throttle."""
-    import trainmate_cli as cli
+    from trainmate import runtime
     if no_pull:
         return
     end_date = end_date or _today_str()
@@ -64,11 +64,11 @@ def ensure_recent_data(
     start_date = (
         datetime.strptime(end_date, "%Y-%m-%d").date() - timedelta(days=history_days - 1)
     ).strftime("%Y-%m-%d")
-    cli.garmin.ensure_data(start_date, end_date, force=force_pull)
+    runtime.garmin.ensure_data(start_date, end_date, force=force_pull)
 
     today = _today_str()
     if end_date == today:
-        rows = cli.db.get_metrics_cache(start_date=today, end_date=today)
+        rows = runtime.db.get_metrics_cache(start_date=today, end_date=today)
         present = bool(rows) and not (
             rows[0].get('rhr') is None and rows[0].get('hrv') is None
             and rows[0].get('sleep_score') is None and rows[0].get('stress') is None
@@ -80,8 +80,8 @@ def ensure_recent_data(
 def _format_actual(act: Dict[str, Any]) -> str:
     """Compact 'actual effort' line for a Calendar adherence header, e.g.
     '[running] Morning Run (48min, load 62, TSS 58)'."""
-    import trainmate_cli as cli
-    parts = [f"{act['duration_sec'] / 60:.0f}min", f"load {cli.garmin.activity_load(act):.0f}"]
+    from trainmate import runtime
+    parts = [f"{act['duration_sec'] / 60:.0f}min", f"load {runtime.garmin.activity_load(act):.0f}"]
     if act.get('tss'):
         parts.append(f"TSS {act['tss']:.0f}")
     if act.get('rpe'):
@@ -102,7 +102,7 @@ def mark_adherence_from_results(
     Best-effort per event: a Calendar failure degrades to a warning. Returns the
     number of events actually (re)marked; the caller owns any summary line."""
     from trainmate.calendar_state import adherence_signature
-    import trainmate_cli as cli
+    from trainmate import runtime
     today_str = today_str or _today_str()
     threshold = config.minor_activity_load_threshold
     marked = 0
@@ -131,9 +131,9 @@ def mark_adherence_from_results(
         if w.get('marked_signature') == signature:
             continue
         try:
-            cli.calendar_syncer.sync_workout(w, adherence=adherence)
+            runtime.calendar_syncer.sync_workout(w, adherence=adherence)
             if w.get('id') is not None:
-                cli.db.mark_workout_adherence_pushed(w['id'], signature)
+                runtime.db.mark_workout_adherence_pushed(w['id'], signature)
             marked += 1
         except Exception as e:
             print(yellow(f"Warning: could not mark {w['date']} on Calendar: {e}"))
@@ -145,15 +145,15 @@ def mark_adherence_range(start_date: str, end_date: str) -> int:
     Calendar events with the verdict. No-op (returns 0) when no calendar is
     configured. Reuses `analyze_adherence`'s pairing; the `data pull` ride-along
     calls this once fresh activity data has landed."""
-    import trainmate_cli as cli
+    from trainmate import runtime
     if not config.google_calendar_id:
         return 0
-    workouts = cli.db.get_workouts(start_date=start_date, end_date=end_date)
-    activities = cli.db.get_completed_activities(start_date=start_date, end_date=end_date)
+    workouts = runtime.db.get_workouts(start_date=start_date, end_date=end_date)
+    activities = runtime.db.get_completed_activities(start_date=start_date, end_date=end_date)
     start_obj = datetime.strptime(start_date, "%Y-%m-%d").date()
     end_obj = datetime.strptime(end_date, "%Y-%m-%d").date()
     history_days = (end_obj - start_obj).days + 1
-    covered_ranges = cli.db.get_mesocycle_ranges(start_date, end_date)
+    covered_ranges = runtime.db.get_mesocycle_ranges(start_date, end_date)
     _, matching_results, _ = analyze_adherence(
         planned_workouts=workouts,
         completed_activities=activities,

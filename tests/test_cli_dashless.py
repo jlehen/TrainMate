@@ -268,8 +268,8 @@ class TestDashlessEndToEnd(unittest.TestCase):
     def run_cli(self, args, input_value="n"):
         return run_cli(args, input_value)
 
-    @patch("trainmate_cli.garmin")
-    @patch("trainmate_cli.coach_service")
+    @patch("trainmate.runtime.garmin")
+    @patch("trainmate.runtime.coach_service")
     def test_workout_adapt_message_and_no_pull(self, mock_coach, mock_garmin):
         mock_coach.workout_adapt.return_value = ("ok", [], [])
         exit_code, _, _ = self.run_cli(

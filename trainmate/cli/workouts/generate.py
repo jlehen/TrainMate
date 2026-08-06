@@ -2,7 +2,7 @@
 import argparse
 from datetime import datetime, timedelta
 from typing import Optional
-import trainmate_cli as cli
+from trainmate import runtime
 from trainmate.config import config
 from trainmate.adherence import analyze_adherence, date_covered
 from trainmate.google_calendar import event_url
@@ -28,13 +28,13 @@ def _print_block_boundary_hint(date_str: str) -> None:
     stale metrics. Prints on every run in the terminal window, not only when adaptations are
     proposed (DESIGN_block_boundary.md §4).
     """
-    meso = cli.db.get_active_mesocycle(date_str)
+    meso = runtime.db.get_active_mesocycle(date_str)
     if not meso:
         return
     days_left = days_between(date_str, meso['end_date'])
     if not 0 <= days_left <= config.adapt_terminal_window_days:
         return
-    next_meso = cli.db.get_next_mesocycle(meso['end_date'])
+    next_meso = runtime.db.get_next_mesocycle(meso['end_date'])
     if not next_meso:
         return
 
@@ -65,7 +65,7 @@ def run_workout_adapt(args: argparse.Namespace) -> None:
         history_days = getattr(args, "lookback", None) or config.metrics_lookback_days
         date_obj = datetime.strptime(date_str, "%Y-%m-%d").date()
         start_date = (date_obj - timedelta(days=history_days - 1)).strftime("%Y-%m-%d")
-        metrics_history = cli.db.get_metrics_cache(start_date=start_date, end_date=date_str)
+        metrics_history = runtime.db.get_metrics_cache(start_date=start_date, end_date=date_str)
         print(dim(f"\nUsing {len(metrics_history)} days of recovery metrics "
                   f"(past {history_days}-day window)."))
     except Exception as e:
@@ -75,7 +75,7 @@ def run_workout_adapt(args: argparse.Namespace) -> None:
 
     print(f"Evaluating daily Garmin metrics adaptation for {date_str}...")
     try:
-        reason, proposed_workouts, new_constraints = cli.coach_service.workout_adapt(
+        reason, proposed_workouts, new_constraints = runtime.coach_service.workout_adapt(
             date_str, message=getattr(args, 'message', None)
         )
 
@@ -91,8 +91,8 @@ def run_workout_adapt(args: argparse.Namespace) -> None:
             start = candidate.get('start_date') or date_str
             end = candidate.get('end_date') or start
             span = start if start == end else f"{start}..{end}"
-            if cli.prompt.confirm(f"Add constraint: {title} ({span})?"):
-                cid = cli.coach_service.capture_message_constraint(candidate, date_str)
+            if runtime.prompt.confirm(f"Add constraint: {title} ({span})?"):
+                cid = runtime.coach_service.capture_message_constraint(candidate, date_str)
                 if cid is not None:
                     print(green(f"Captured constraint [{cid}]: {title} ({span})"))
             else:
@@ -127,7 +127,7 @@ def run_workout_adapt(args: argparse.Namespace) -> None:
         swap_original: dict[int, dict] = {}
         leftover_removed: list[dict] = []
         for date, proposals in proposed_by_date.items():
-            existing_list = cli.db.get_workouts(start_date=date, end_date=date)
+            existing_list = runtime.db.get_workouts(start_date=date, end_date=date)
             proposed_canons = {canonical_sport(p['sport_type']) for p in proposals}
             existing_canons = {canonical_sport(e['sport_type']) for e in existing_list}
             overridden = [
@@ -154,7 +154,7 @@ def run_workout_adapt(args: argparse.Namespace) -> None:
             )
 
         for pw in proposed_workouts:
-            existing = cli.db.get_workout(pw['date'], pw['sport_type'])
+            existing = runtime.db.get_workout(pw['date'], pw['sport_type'])
             if existing is None:
                 existing = swap_original.get(id(pw))
             is_swap = existing is not None and (
@@ -189,7 +189,7 @@ def run_workout_adapt(args: argparse.Namespace) -> None:
         if args.auto:
             apply = True
         else:
-            apply = cli.prompt.confirm(
+            apply = runtime.prompt.confirm(
                 "Apply these adaptations to your training plan and sync to Calendar?"
             )
 
@@ -198,7 +198,7 @@ def run_workout_adapt(args: argparse.Namespace) -> None:
             all_dates = [pw['date'] for pw in proposed_workouts]
             start_date_adapt = min(all_dates)
             end_date_adapt = max(all_dates)
-            cli.coach_service.workout_adapt_apply(
+            runtime.coach_service.workout_adapt_apply(
                 proposed_workouts, reason, start_date_adapt, end_date_adapt
             )
             print(green("Adaptations applied and synced to calendar successfully."))
@@ -216,14 +216,14 @@ def _confirm_regeneration(end_date: Optional[str]) -> bool:
     included, so name what is at stake before the LLM call (README §"Steering the plan").
 
     Returns True when there is nothing live to lose or the athlete confirmed."""
-    live = cli.db.get_workouts(start_date=_today_str())
+    live = runtime.db.get_workouts(start_date=_today_str())
     if not live:
         return True
 
     manual = sum(1 for w in live if w.get('source') == 'manual')
     hand_edited = f", {manual} added by hand" if manual else ""
     horizon = f" through {fmt_date(end_date)}" if end_date else ""
-    return cli.prompt.confirm(
+    return runtime.prompt.confirm(
         wrap_text(
             f"You already have {len(live)} upcoming workout(s) planned "
             f"({fmt_date(live[0]['date'])} → {fmt_date(live[-1]['date'])}{hand_edited}). "
@@ -243,7 +243,7 @@ def run_workout_generate(args: argparse.Namespace) -> None:
 
     try:
         next_goal = None
-        objectives = cli.db.upcoming_objectives()
+        objectives = runtime.db.upcoming_objectives()
         if objectives:
             if args.goal_id is not None:
                 target_goals = [o for o in objectives if o['id'] == args.goal_id]
@@ -253,9 +253,9 @@ def run_workout_generate(args: argparse.Namespace) -> None:
                 next_goal = objectives[0]
 
             if next_goal:
-                macro = cli.db.get_macrocycle_for_objective(next_goal['id'])
+                macro = runtime.db.get_macrocycle_for_objective(next_goal['id'])
                 if macro:
-                    change_reason = cli.coach_service.config_changed(macro)
+                    change_reason = runtime.coach_service.config_changed(macro)
                     if change_reason:
                         warning = (
                             "Warning: a plan-shaping input has "
@@ -268,7 +268,7 @@ def run_workout_generate(args: argparse.Namespace) -> None:
                         )
                         if force:
                             print(yellow(warning + " Proceeding anyway (--force)."))
-                        elif not cli.prompt.confirm(yellow(warning + " Proceed anyway?")):
+                        elif not runtime.prompt.confirm(yellow(warning + " Proceed anyway?")):
                             print(yellow(
                                 "Workout generation cancelled. Please run "
                                 + cmd("plan generate") + " first."
@@ -279,9 +279,9 @@ def run_workout_generate(args: argparse.Namespace) -> None:
                             # current config; --force only skips the question and leaves
                             # the warning live for the next run.
                             print("Proceeding. Updating configuration hash in database.")
-                            cli.db.update_macrocycle_config_hash(
-                                macro['id'], cli.coach_service._get_config_hash(),
-                                cli.coach_service._get_config_snapshot()
+                            runtime.db.update_macrocycle_config_hash(
+                                macro['id'], runtime.coach_service._get_config_hash(),
+                                runtime.coach_service._get_config_snapshot()
                             )
 
         workout_kwargs = {}
@@ -296,7 +296,7 @@ def run_workout_generate(args: argparse.Namespace) -> None:
             print(yellow("Workout generation cancelled — your current plan is unchanged."))
             return
 
-        reasoning, workouts = cli.coach_service.workout_generate(**workout_kwargs)
+        reasoning, workouts = runtime.coach_service.workout_generate(**workout_kwargs)
         print(bold(cyan("\n=== WORKOUTS GENERATED BY COACH ===")))
         print(f"{bold('Reasoning')}:\n{wrap_text(reasoning)}\n")
         print(green(
@@ -332,7 +332,7 @@ def _batch_line(index: int, batch: dict) -> str:
 def run_workout_batches(args: argparse.Namespace) -> None:
     """Lists the archived workout batches a `workout rollback` can restore."""
     today = _today_str()
-    batches = cli.db.get_archived_batches(from_date=today)
+    batches = runtime.db.get_archived_batches(from_date=today)
 
     print(bold(cyan("\n=== ARCHIVED WORKOUT BATCHES ===")))
     if not batches:
@@ -355,7 +355,7 @@ def run_workout_batches(args: argparse.Namespace) -> None:
 def run_workout_rollback(args: argparse.Namespace) -> None:
     """Restores an archived batch of workouts, undoing a `workout generate`."""
     today = _today_str()
-    batches = cli.db.get_archived_batches(from_date=today)
+    batches = runtime.db.get_archived_batches(from_date=today)
     if not batches:
         print(yellow(
             "No archived workouts to roll back to — nothing has displaced the current "
@@ -383,8 +383,8 @@ def run_workout_rollback(args: argparse.Namespace) -> None:
         return
 
     if not getattr(args, 'yes', False):
-        live = len(cli.db.get_workouts(start_date=today))
-        if not cli.prompt.confirm(
+        live = len(runtime.db.get_workouts(start_date=today))
+        if not runtime.prompt.confirm(
             f"Restore the {target['restorable']} upcoming workout(s) archived "
             f"{_fmt_ts(target['archived_at'])}?\nThis archives the {live} currently "
             "planned session(s) from today onward and updates Google Calendar. The "
@@ -395,7 +395,7 @@ def run_workout_rollback(args: argparse.Namespace) -> None:
             return
 
     try:
-        result = cli.coach_service.workout_rollback(batch=target['archived_at'])
+        result = runtime.coach_service.workout_rollback(batch=target['archived_at'])
     except ValueError as e:
         print(red(str(e)))
         return
@@ -413,7 +413,7 @@ def _workouts_by_id(ids: list, sport_type: Optional[str], include_removed: bool)
     """Looks up the workout IDs named as positional targets, reporting the ones it can't."""
     found = []
     for workout_id in ids:
-        w = cli.db.get_workout_by_id(workout_id)
+        w = runtime.db.get_workout_by_id(workout_id)
         if not w:
             print(yellow(f"No workout with ID {workout_id}."))
             continue
@@ -438,7 +438,7 @@ def run_workout_list(args: argparse.Namespace) -> None:
     workouts = []
     if windowed or not ids:
         start_date, end_date = resolve_window(args)
-        workouts = cli.db.get_workouts(
+        workouts = runtime.db.get_workouts(
             start_date=start_date,
             end_date=end_date,
             sport_type=args.sport_type,
@@ -516,14 +516,14 @@ def run_workout_compare(args: argparse.Namespace) -> None:
 
     if not getattr(args, 'no_pull', False):
         try:
-            cli.garmin.ensure_data(
+            runtime.garmin.ensure_data(
                 start_date, end_date, force=getattr(args, 'force_pull', False)
             )
         except Exception as e:
             print(yellow(f"Warning: Could not ensure recent data: {e}"))
 
-    all_workouts = cli.db.get_workouts(start_date=start_date, end_date=end_date)
-    activities = cli.db.get_completed_activities(start_date=start_date, end_date=end_date)
+    all_workouts = runtime.db.get_workouts(start_date=start_date, end_date=end_date)
+    activities = runtime.db.get_completed_activities(start_date=start_date, end_date=end_date)
 
     start_date_obj = datetime.strptime(start_date, "%Y-%m-%d").date()
     end_date_obj = datetime.strptime(end_date, "%Y-%m-%d").date()
@@ -531,7 +531,7 @@ def run_workout_compare(args: argparse.Namespace) -> None:
 
     # Planned blocks overlapping the window: an activity on a date outside every block
     # is history no plan governed, shown as informational rather than "unplanned".
-    covered_ranges = cli.db.get_mesocycle_ranges(start_date, end_date)
+    covered_ranges = runtime.db.get_mesocycle_ranges(start_date, end_date)
 
     discrepancies, matching_results, informational = analyze_adherence(
         planned_workouts=all_workouts,
@@ -565,13 +565,13 @@ def run_workout_compare(args: argparse.Namespace) -> None:
 
     def _fmt_act(act: dict) -> str:
         dur = f"{act['duration_sec'] / 60:.0f}min"
-        parts: list[str] = [dur, f"load {cli.garmin.activity_load(act):.0f}"]
+        parts: list[str] = [dur, f"load {runtime.garmin.activity_load(act):.0f}"]
         if act.get('tss'):
             parts.append(f"TSS {act['tss']:.0f}")
         if act.get('rpe'):
             parts.append(f"RPE {act['rpe']}")
         s = f"[{act['activity_type']}] {act['activity_name']} ({', '.join(parts)})"
-        div = cli.garmin.rpe_divergence(act)
+        div = runtime.garmin.rpe_divergence(act)
         if div is not None:
             s += f" [load from RPE: HR under-counted {div:.1f}x]"
         return s
@@ -625,7 +625,7 @@ def run_workout_compare(args: argparse.Namespace) -> None:
                 print(f"  ACTUAL:     {red('(none — missed)')}")
 
         for act in unplanned:
-            act_load = cli.garmin.activity_load(act)
+            act_load = runtime.garmin.activity_load(act)
             act_str = _fmt_act(act)
             if act_load < config.minor_activity_load_threshold:
                 print(gray(f"  (minor):    {act_str}"))
