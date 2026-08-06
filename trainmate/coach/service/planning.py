@@ -411,7 +411,7 @@ class PlanningMixin:
             if target_macrocycle_id == current['id']:
                 raise ValueError("That plan version is already active.")
         else:
-            target = self._db.get_previous_macrocycle(objective['id'])
+            target = self._db.get_previous_macrocycle_version(objective['id'])
             if not target:
                 raise ValueError(
                     f"Goal '{objective['title']}' has no earlier plan version to roll "

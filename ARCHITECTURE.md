@@ -61,6 +61,7 @@ Calendar.
   |  trainmate/openrouter.py  (OpenRouter LLM client) |
   |  trainmate/adherence.py   (plan vs actual diff)   |
   |  trainmate/plan_diff.py   (plan version vs version)|
+  |  trainmate/plan_lineage.py (blocks, in trained order)|
   +---------------------------+----------------------+
                               |
   +---------------------------v----------------------+
@@ -192,6 +193,12 @@ classes themselves.
 |                      |                      | and `/api/plan/diff` returns it as JSON. Also     |
 |                      |                      | owns `input_snapshots()` (the goals/constraints/  |
 |                      |                      | threshold JSON columns), which `plan show` reads. |
+| `plan_lineage.py`    | —                    | `plan_lineage(dbh, macros)` — the blocks of a set |
+|                      |                      | of plans, flattened in the order they were        |
+|                      |                      | trained. The one place the "walk by macrocycle    |
+|                      |                      | id, never by date" rule lives, shared by          |
+|                      |                      | `tm progress --blocks` and the strategy prompt's  |
+|                      |                      | planned-vs-actual review. DESIGN_plan_rollback §6.1|
 | `progression.py`     | —                    | Pure functions merging past (measured) + future  |
 |                      |                      | (planned) load into one series and folding the   |
 |                      |                      | stored CTL/ATL/TSB series forward across the seam |
@@ -722,9 +729,12 @@ methods whose behavior is *not* obvious from that convention are called out belo
   **supersedes** the objective's existing active version (marks it `superseded`, keeps
   it) and inserts the new active one; `set_active_macrocycle(id)` promotes a version
   and supersedes the rest. `get_macrocycle_for_objective` returns the active version
-  only, while `get_macrocycle(id)` / `get_macrocycle_versions` / `get_previous_macrocycle`
-  reach any version for walk-back navigation. Plan versioning + rollback:
-  DESIGN_plan_rollback.md.
+  only, while `get_macrocycle(id)` / `get_macrocycle_versions` /
+  `get_previous_macrocycle_version` reach any version for walk-back navigation.
+  `get_preceding_macrocycle` is the other "previous plan" — the previous *goal's* active
+  one, for retrospective views that must not walk superseded versions; `plan_lineage.py`
+  is the shared walk. Plan versioning + rollback: DESIGN_plan_rollback.md (§6.1 for the
+  two accessors).
 
 ---
 

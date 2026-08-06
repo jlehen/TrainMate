@@ -66,7 +66,7 @@ def resolve_versions(
             )
         b = active['id']
     if a is None:
-        prev = dbh.get_previous_macrocycle(goal['id'])
+        prev = dbh.get_previous_macrocycle_version(goal['id'])
         if not prev:
             return None, None, (
                 "single_version",

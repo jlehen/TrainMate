@@ -719,7 +719,7 @@ def run_plan_rollback(args: argparse.Namespace) -> None:
     # Determine the target version (default: chronologically previous).
     target_id = getattr(args, 'macrocycle_id', None)
     if target_id is None:
-        prev = cli.db.get_previous_macrocycle(goal['id'])
+        prev = cli.db.get_previous_macrocycle_version(goal['id'])
         target_id = prev['id'] if prev else None
     if target_id is None:
         print(yellow(f"Goal '{goal['title']}' has no earlier plan version to roll back to."))

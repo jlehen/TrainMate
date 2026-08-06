@@ -786,19 +786,26 @@ class TestOrphanWeekNote(unittest.TestCase):
 
 
 class _StubDb:
-    """The four accessors `render_block_section` reads, and nothing else — it takes a
-    `dbh` precisely so the block walk stays testable without a database."""
+    """The five accessors `render_block_section` reads, and nothing else — it takes a
+    `dbh` precisely so the block walk stays testable without a database.
 
-    def __init__(self, mesos, activities):
+    `preceding` is `(macro, blocks)` for the previous *goal's* plan, the only other
+    lineage the walk pulls in; there is deliberately no way to hand it a superseded
+    version of the governing plan (DESIGN_plan_rollback.md §6.1)."""
+
+    def __init__(self, mesos, activities, preceding=None):
         self._mesos, self._activities = mesos, activities
+        self._preceding_macro, self._preceding_mesos = preceding or (None, [])
 
     def get_governing_macrocycle(self):
         return {"id": 1, "objective_id": 1}
 
-    def get_previous_macrocycle(self, objective_id, before_id=None):
-        return None
+    def get_preceding_macrocycle(self, objective_id):
+        return self._preceding_macro
 
     def get_mesocycles_for_macrocycle(self, macrocycle_id):
+        if self._preceding_macro and macrocycle_id == self._preceding_macro["id"]:
+            return self._preceding_mesos
         return self._mesos
 
     def get_benchmark_results(self):

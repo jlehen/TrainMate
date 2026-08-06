@@ -9,6 +9,7 @@ from trainmate.adherence import analyze_adherence, planned_load
 from trainmate.sports import canonical_sport
 from trainmate.modification_state import SWAP_REASON_PREFIX, MANUAL_REPLACE_REASON_PREFIX
 from trainmate import garmin, intensity, progression
+from trainmate.plan_lineage import plan_lineage
 from trainmate.benchmarks import ANCHOR_KINDS, format_value
 from trainmate.garmin import activity_load
 from trainmate.util import (
@@ -329,9 +330,8 @@ class PmcContextMixin:
         """The block immediately before `meso` in its own macrocycle, for the
         block-over-block delta — the periodization signal proper (§5).
 
-        Navigated by macrocycle id rather than by a date-ordered mesocycle query, for the
-        reason `_intensity_history_context` gives: a date query drags in superseded
-        rollback versions whose blocks overlap the live ones.
+        Navigated by macrocycle id rather than by a date-ordered mesocycle query
+        (DESIGN_plan_rollback.md §6.1).
         """
         blocks = self._db.get_mesocycles_for_macrocycle(meso['macrocycle_id'])
         earlier = [b for b in blocks if b['start_date'] < meso['start_date']]
@@ -453,27 +453,10 @@ class PmcContextMixin:
         """One intensity report per elapsed block across `macros`, each carrying the
         delta against the block before it (§4.1) — the strategy prompt's view.
 
-        Blocks are walked macrocycle-first and then flattened in order, never fetched by
-        a date-ordered mesocycle query: every mesocycle accessor filters
-        ``mac.status = 'active'``, which hides the cross-plan case, and dropping that
-        filter drags in superseded rollback versions whose blocks overlap the live ones
-        and describe training that never happened. Navigating by macrocycle id fixes the
-        lineage before any dates are compared, so neither trap can fire.
+        Each block's delta baseline is the block before it in the flattened lineage
+        (DESIGN_plan_rollback.md §6.1).
         """
-        lineages: List[List[Dict[str, Any]]] = []
-        seen_macros = set()
-        for macro in macros:
-            if not macro or macro['id'] in seen_macros:
-                continue
-            seen_macros.add(macro['id'])
-            meso = self._db.get_mesocycles_for_macrocycle(macro['id'])
-            if meso:
-                lineages.append(meso)
-        # Ordered by when the athlete actually trained them, not by argument position: the
-        # plan being replaced can be for a LATER goal than the governing one, and each
-        # block's delta baseline is the block before it in this list.
-        lineages.sort(key=lambda blocks: blocks[0]['start_date'])
-        blocks = [b for lineage in lineages for b in lineage]
+        blocks = plan_lineage(self._db, macros)
         benchmarks = self._db.get_benchmark_results()
         reports = []
         for i, meso in enumerate(blocks):

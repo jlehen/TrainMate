@@ -15,6 +15,7 @@ from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from trainmate import progression, chart, intensity
+from trainmate.plan_lineage import plan_lineage
 # Which sports get a table, and in which currency: aggregation, not layout, so it lives
 # in `intensity` where the web dashboard reads it from too (ARCHITECTURE.md §8).
 from trainmate.intensity import (
@@ -752,24 +753,15 @@ def _blocks_in_window(dbh, start: str, end: str) -> List[Dict[str, Any]]:
     """Every mesocycle overlapping `start..end`, plus the block preceding the first of
     them so §4.1's delta has a left-hand side.
 
-    Walked macrocycle-first, never by a date-ordered mesocycle query: every mesocycle
-    accessor filters `mac.status = 'active'`, which hides the cross-plan case, and
-    dropping that filter drags in superseded rollback versions whose blocks overlap the
-    live ones and describe training that never happened (§4.1).
+    The preceding plan is the previous *goal's* — the one that governed the window's
+    earlier dates — never an earlier version of this goal's own, which was superseded
+    before it was ever trained (DESIGN_plan_rollback.md §6.1).
     """
-    blocks: List[Dict[str, Any]] = []
-    seen = set()
     governing = dbh.get_governing_macrocycle()
-    previous = (
-        dbh.get_previous_macrocycle(governing["objective_id"]) if governing else None
+    preceding = (
+        dbh.get_preceding_macrocycle(governing["objective_id"]) if governing else None
     )
-    macros = [previous, governing]
-    for macro in macros:
-        if not macro or macro["id"] in seen:
-            continue
-        seen.add(macro["id"])
-        blocks.extend(dbh.get_mesocycles_for_macrocycle(macro["id"]))
-    return blocks
+    return plan_lineage(dbh, [preceding, governing])
 
 
 def _orphan_week_note(

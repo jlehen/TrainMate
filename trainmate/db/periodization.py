@@ -38,14 +38,19 @@ class PeriodizationMixin:
             )
             return [dict(row) for row in cursor.fetchall()]  # type: ignore
 
-    def get_previous_macrocycle(
+    def get_previous_macrocycle_version(
         self, objective_id: int, before_id: Optional[int] = None
     ) -> Optional[Macrocycle]:
         """Returns the macrocycle version chronologically prior to the active one.
 
         With `before_id` given, returns the newest version older than that id instead.
         Used by `plan rollback` to walk backwards through plan history one step at a
-        time (see DESIGN_plan_rollback.md). Returns None when there is no earlier version."""
+        time (see DESIGN_plan_rollback.md). Returns None when there is no earlier version.
+
+        Named for the *version* axis on purpose: what comes back is superseded, and its
+        blocks sit on the same calendar dates as the active version's while describing
+        training that never happened. A retrospective view wants `get_preceding_macrocycle`
+        (DESIGN_plan_rollback.md §6.1)."""
         if before_id is None:
             active = self.get_macrocycle_for_objective(objective_id)
             if not active:
@@ -97,11 +102,29 @@ class PeriodizationMixin:
             row = cursor.fetchone()
             return dict(row) if row else None  # type: ignore
 
-    def get_last_macrocycle(self) -> Optional[Macrocycle]:
-        """Fetches the absolute latest macrocycle created."""
+    def get_preceding_macrocycle(self, objective_id: int) -> Optional[Macrocycle]:
+        """The active plan of the goal whose target date immediately precedes this one's.
+
+        The other sense of "the previous plan", and the one a retrospective view wants:
+        which plan governed the calendar dates *before* this goal's plan did. A window
+        reaching further back than the current plan's first block runs into it, and
+        nothing else supplies those blocks.
+
+        Deliberately distinct from `get_previous_macrocycle_version`, which returns an
+        earlier *version* of this same goal's plan — superseded, never trained, and
+        overlapping the active one's dates (DESIGN_plan_rollback.md §6.1). Only active
+        versions are considered here, for the same reason. Returns None when no earlier
+        goal has a plan."""
         with self._get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute("SELECT * FROM macrocycles ORDER BY id DESC LIMIT 1")
+            cursor.execute("""
+                SELECT mac.* FROM macrocycles mac
+                JOIN objectives o ON mac.objective_id = o.id
+                WHERE COALESCE(mac.status, 'active') = 'active'
+                  AND o.target_date < (SELECT target_date FROM objectives WHERE id = ?)
+                ORDER BY o.target_date DESC, mac.id DESC
+                LIMIT 1
+            """, (objective_id,))
             row = cursor.fetchone()
             return dict(row) if row else None  # type: ignore
 

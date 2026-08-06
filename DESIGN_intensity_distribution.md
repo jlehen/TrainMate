@@ -138,7 +138,8 @@ plus the current week (§9.3); it never needs a preceding block.
   `get_mesocycles_for_macrocycle` returns a block list in order, so the preceding block is
   the preceding element. `_build_prior_training_context` already walks the prior
   macrocycle's list exactly this way, and `planning.py` already holds `prev_macro` for the
-  cross-plan case (`get_previous_macrocycle` exists). The one thing to avoid is the obvious
+  cross-plan case (`get_preceding_macrocycle` exists — the previous *goal's* plan, not
+  `get_previous_macrocycle_version`; DESIGN_plan_rollback.md §6.1). The one thing to avoid is the obvious
   query — `SELECT … FROM mesocycles WHERE end_date < ? ORDER BY end_date DESC`. Every
   existing mesocycle accessor filters `mac.status = 'active'`, and `set_active_macrocycle`
   marks the outgoing plan `superseded`, so that filter hides precisely the cross-plan case;
