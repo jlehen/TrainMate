@@ -90,6 +90,51 @@ class TestCompletedWeeksDivisor(unittest.TestCase):
             intensity.block_report(BLOCK, "2026-05-20", fetch_from([]))
         )
 
+    def test_a_block_is_fetched_once_not_once_per_window(self):
+        """The report asks for elapsed, the rate window and the current week — all
+        sub-ranges of the block. Against the database each was its own query, and
+        `progress --blocks` multiplied that by the number of blocks."""
+        acts = [
+            act("2026-06-03", "running", 7200, hr=[0, 7200, 0, 0, 0]),
+            act("2026-06-10", "running", 7200, hr=[0, 7200, 0, 0, 0]),
+            act("2026-06-16", "running", 7200, hr=[0, 7200, 0, 0, 0]),
+        ]
+        calls = []
+
+        def counting_fetch(start, end):
+            calls.append((start, end))
+            return [a for a in acts if start <= a["date"] <= end]
+
+        text = intensity.block_report(
+            BLOCK, "2026-06-17", counting_fetch, current_week=True
+        )
+        self.assertIsNotNone(text)
+        self.assertEqual(len(calls), 1, calls)
+
+        # Same numbers as the uncached path, so this is caching and not a shortcut.
+        self.assertEqual(
+            text, intensity.block_report(
+                BLOCK, "2026-06-17", fetch_from(acts), current_week=True
+            )
+        )
+
+    def test_a_window_outside_the_block_still_reaches_the_fetcher(self):
+        """The previous block sits before this one's span, so it cannot be served from
+        the cached rows."""
+        acts = [act("2026-06-03", "running", 7200, hr=[0, 7200, 0, 0, 0])]
+        calls = []
+
+        def counting_fetch(start, end):
+            calls.append((start, end))
+            return [a for a in acts if start <= a["date"] <= end]
+
+        intensity.block_report(
+            BLOCK, "2026-06-29", counting_fetch,
+            previous={"name": "Prep", "start_date": "2026-05-01",
+                      "end_date": "2026-05-28"},
+        )
+        self.assertTrue(any(start < BLOCK["start_date"] for start, _ in calls), calls)
+
     def test_rate_divides_by_completed_weeks_only(self):
         # 4h of Z2 inside the first two complete weeks, plus 2h in the partial tail that
         # must not enter the numerator: the rate is 2h/wk, not 3h/wk.

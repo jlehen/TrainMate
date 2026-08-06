@@ -833,6 +833,33 @@ def format_header(meso: Dict[str, Any], as_of: str, with_focus: bool = True) -> 
     return f"{meso['name']} — focus \"{focus}\" ({', '.join(parts)})"
 
 
+class _WindowCache:
+    """Serves overlapping sub-windows of one span from a single fetch.
+
+    `block_report` asks its fetcher for up to four windows per block — elapsed, the
+    rate window, the current week, the previous block — and all but the last are
+    sub-ranges of the block itself. Against the database that was four queries per
+    block, which `progress --blocks` multiplied by the number of blocks. Dates are
+    ISO strings, so slicing by comparison is chronological.
+    """
+
+    def __init__(self, fetch: "FetchActivities", span_start: str, span_end: str):
+        self._fetch = fetch
+        self._start, self._end = span_start, span_end
+        self._rows: Optional[List[Dict[str, Any]]] = None
+        self.calls = 0
+
+    def __call__(self, start: str, end: str) -> Sequence[Dict[str, Any]]:
+        if start < self._start or end > self._end:
+            # Outside the span we cached (the previous block); ask directly.
+            self.calls += 1
+            return self._fetch(start, end)
+        if self._rows is None:
+            self.calls += 1
+            self._rows = list(self._fetch(self._start, self._end))
+        return [a for a in self._rows if start <= str(a.get("date") or "") <= end]
+
+
 def block_report(
     meso: Dict[str, Any],
     as_of: str,
@@ -870,6 +897,9 @@ def block_report(
     days = counted_days(start, end, as_of)
     if days <= 0:
         return None
+
+    # One fetch covers every window inside this block; see _WindowCache.
+    fetch_activities = _WindowCache(fetch_activities, start, max(end, as_of))
 
     inner = indent + "  "
     # Prose, so it wraps: at width=48 the header runs 57 characters and would break the
