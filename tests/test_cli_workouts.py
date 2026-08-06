@@ -5,6 +5,7 @@ from unittest.mock import patch
 
 from tests.helpers import clear_all_tables, run_cli, rebind_test_db
 from trainmate.cli.common import fmt_date
+from trainmate.coach.proposals import AdaptPair, AdaptProposal
 
 TEST_DB_PATH = os.path.join(os.path.dirname(__file__), "test_trainmate_cli_workouts.db")
 
@@ -42,17 +43,21 @@ class TestCliWorkouts(unittest.TestCase):
     @patch("trainmate.runtime.garmin")
     @patch("trainmate.runtime.coach_service")
     def test_workout_commands(self, mock_coach, mock_garmin):
-        mock_coach.workout_adapt.return_value = (
-            "Metrics are green",
-            [{
-                "date": "2026-06-03",
-                "sport_type": "running",
-                "title": "Steady Ride",
-                "duration_minutes": 60,
-                "rpe": 5,
-                "tss": 40.0,
-            }],
-            [],
+        adapted = {
+            "date": "2026-06-03",
+            "sport_type": "running",
+            "title": "Steady Ride",
+            "duration_minutes": 60,
+            "rpe": 5,
+            "tss": 40.0,
+        }
+        mock_coach.workout_adapt.return_value = AdaptProposal(
+            reason="Metrics are green",
+            workouts=[adapted],
+            new_constraints=[],
+            range_start="2026-06-03",
+            range_end="2026-06-30",
+            pairs=(AdaptPair(proposal=adapted, original=None, is_swap=False),),
         )
 
         exit_code, stdout, stderr = self.run_cli(["workout", "list"])

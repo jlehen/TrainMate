@@ -112,8 +112,12 @@ def run_plan_generate(args: argparse.Namespace) -> None:
             goal = proposal['goal'] or next_goal
             # plan_apply already no-ops on a missing goal, so let it own that decision
             # rather than re-deciding here, and report what it actually saved.
+            # Pass the fingerprints taken when the strategy was generated: the athlete
+            # may have edited a goal while reading the proposal, and recording that edit
+            # as part of this plan would mark a stale plan current.
             saved_id = runtime.coach_service.plan_apply(
-                goal['id'] if goal else None, proposal['strategy'], mesocycles
+                goal['id'] if goal else None, proposal['strategy'], mesocycles,
+                fingerprints=proposal.get('fingerprints'),
             )
             if saved_id is None:
                 print(yellow("\nNo goal to attach this plan to — nothing was saved."))

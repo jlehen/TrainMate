@@ -16,6 +16,7 @@ test_db = Database(db_path=TEST_DB_PATH)
 rebind_test_db(test_db)
 
 from trainmate.coach import coach_service
+from trainmate.coach.proposals import AdaptProposal
 
 # trainmate_cli re-exports names from trainmate.cli.workouts, so it must be imported first.
 import trainmate_cli  # noqa: F401
@@ -123,7 +124,8 @@ class TestAdaptationAdapt(unittest.TestCase):
                 "cycling", 1800.0, 12.0, 100.0, 132, 150, 4, 20.0,
             )
 
-            reason, proposed, _new_constraints = coach_service.workout_adapt("2026-06-03")
+            _p = coach_service.workout_adapt("2026-06-03")
+            reason, proposed, _new_constraints = _p.reason, _p.workouts, _p.new_constraints
 
             self.assertTrue(mock_client.complete.called)
             self.assertEqual(reason, "Fatigue detected, RHR is elevated and HRV is suppressed.")
@@ -169,7 +171,8 @@ class TestAdaptationAdapt(unittest.TestCase):
             test_db.save_metric_cache("2026-06-03", 56, 42, 60, 35, 14.0, 8.0, 1.75)
             test_db.save_baseline("2026-06-03", 50.0, 2.0, 60.0, 5.0, 80.0, 5.0)
 
-            reason, proposed, _new_constraints = coach_service.workout_adapt("2026-06-03")
+            _p = coach_service.workout_adapt("2026-06-03")
+            reason, proposed, _new_constraints = _p.reason, _p.workouts, _p.new_constraints
             self.assertEqual(reason, "On track.")
             self.assertEqual(proposed, [])
 
@@ -353,7 +356,8 @@ class TestAdaptationAdapt(unittest.TestCase):
             test_db.save_metric_cache("2026-06-28", 56, 42, 60, 35, 14.0, 8.0, 1.75)
             test_db.save_baseline("2026-06-28", 50.0, 2.0, 60.0, 5.0, 80.0, 5.0)
 
-            _reason, proposed, _new_constraints = coach_service.workout_adapt("2026-06-28")
+            _p = coach_service.workout_adapt("2026-06-28")
+            _reason, proposed, _new_constraints = _p.reason, _p.workouts, _p.new_constraints
 
             self.assertEqual([p["date"] for p in proposed], ["2026-06-29"])
 
@@ -416,7 +420,8 @@ class TestAdaptationAdapt(unittest.TestCase):
                 "cycling", 4920.0, 30.0, 250.0, 132, 150, 4, 52.0,
             )
 
-            reason, proposed, _new_constraints = coach_service.workout_adapt("2026-06-03")
+            _p = coach_service.workout_adapt("2026-06-03")
+            reason, proposed, _new_constraints = _p.reason, _p.workouts, _p.new_constraints
 
             dates = {p["date"] for p in proposed}
             self.assertNotIn("2026-06-03", dates)  # completed session dropped
@@ -500,7 +505,8 @@ class TestAdaptationAdapt(unittest.TestCase):
                 duration_minutes=45, rpe=7, tss=55,
             )
 
-            reason, proposed, _new_constraints = coach_service.workout_adapt("2026-06-03")
+            _p = coach_service.workout_adapt("2026-06-03")
+            reason, proposed, _new_constraints = _p.reason, _p.workouts, _p.new_constraints
 
             dates = {p["date"] for p in proposed}
             self.assertEqual(dates, {"2026-06-06"})
@@ -528,7 +534,10 @@ class TestAdaptationAdapt(unittest.TestCase):
             "description": "Cut to Z2", "modification_reason": "Eased for fatigue",
             "duration_minutes": 35, "rpe": 5, "tss": 30,
         }]
-        service.workout_adapt_apply(proposed, "Block too hard", "2026-06-20", "2026-06-20")
+        service.workout_adapt_apply(AdaptProposal(
+            reason="Block too hard", workouts=proposed, new_constraints=[],
+            range_start="2026-06-20", range_end="2026-06-20",
+        ))
         row = test_db.get_workout("2026-06-20", "running")
         self.assertIsNotNone(row["adapted_at"])
         self.assertEqual(row["adaptation_count"], 1)
@@ -536,7 +545,10 @@ class TestAdaptationAdapt(unittest.TestCase):
         proposed[0]["description"] = "Cut further to easy walk"
         proposed[0]["duration_minutes"] = 25
         proposed[0]["tss"] = 18
-        service.workout_adapt_apply(proposed, "Still fatigued", "2026-06-20", "2026-06-20")
+        service.workout_adapt_apply(AdaptProposal(
+            reason="Still fatigued", workouts=proposed, new_constraints=[],
+            range_start="2026-06-20", range_end="2026-06-20",
+        ))
         row = test_db.get_workout("2026-06-20", "running")
         self.assertEqual(row["adaptation_count"], 2)
 
@@ -619,9 +631,10 @@ class TestAdaptationAdapt(unittest.TestCase):
             "modification_reason": "Third block week where 'easy' runs averaged Z3.",
             "duration_minutes": 60, "rpe": 4, "tss": 40.0,
         }]
-        service.workout_adapt_apply(
-            proposed, "Correcting execution drift", "2026-06-21", "2026-06-21"
-        )
+        service.workout_adapt_apply(AdaptProposal(
+            reason="Correcting execution drift", workouts=proposed, new_constraints=[],
+            range_start="2026-06-21", range_end="2026-06-21",
+        ))
         row = test_db.get_workout("2026-06-21", "running")
         self.assertIsNone(row["adapted_at"])
         self.assertEqual(row["adaptation_count"], 0)
@@ -630,9 +643,10 @@ class TestAdaptationAdapt(unittest.TestCase):
         # A genuine cut on the same session still stamps normally.
         proposed[0]["duration_minutes"] = 40
         proposed[0]["tss"] = 25
-        service.workout_adapt_apply(
-            proposed, "Fatigued", "2026-06-21", "2026-06-21"
-        )
+        service.workout_adapt_apply(AdaptProposal(
+            reason="Fatigued", workouts=proposed, new_constraints=[],
+            range_start="2026-06-21", range_end="2026-06-21",
+        ))
         row = test_db.get_workout("2026-06-21", "running")
         self.assertIsNotNone(row["adapted_at"])
         self.assertEqual(row["adaptation_count"], 1)
@@ -657,9 +671,10 @@ class TestAdaptationAdapt(unittest.TestCase):
             "modification_reason": "Swapped from strength after a workload spike.",
             "duration_minutes": 30, "rpe": 1, "tss": 4,
         }]
-        service.workout_adapt_apply(
-            proposed, "Reduce load", "2026-07-02", "2026-07-02"
-        )
+        service.workout_adapt_apply(AdaptProposal(
+            reason="Reduce load", workouts=proposed, new_constraints=[],
+            range_start="2026-07-02", range_end="2026-07-02",
+        ))
 
         # The strength row is gone; the yoga row carries the strength session's
         # planned description and load as its original snapshot.

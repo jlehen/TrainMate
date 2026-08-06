@@ -75,9 +75,12 @@ def run_workout_adapt(args: argparse.Namespace) -> None:
 
     print(f"Evaluating daily Garmin metrics adaptation for {date_str}...")
     try:
-        reason, proposed_workouts, new_constraints = runtime.coach_service.workout_adapt(
+        proposal = runtime.coach_service.workout_adapt(
             date_str, message=getattr(args, 'message', None)
         )
+        reason = proposal.reason
+        proposed_workouts = proposal.workouts
+        new_constraints = proposal.new_constraints
 
         # §8 two-confirmation flow, step 1: confirm any constraint(s) extracted from the
         # athlete's note BEFORE the adaptation preview below — an independent commit that
@@ -113,39 +116,6 @@ def run_workout_adapt(args: argparse.Namespace) -> None:
         ]
         rows = []
 
-        # Pair each proposal with the session it adapts. An in-place adapt matches by
-        # (date, sport) — get_workout is alias-aware, so it always finds the original.
-        # A sport SWAP (e.g. a strength session converted to REST) carries a new
-        # sport_type with no same-sport original, so get_workout returns None and the row
-        # would otherwise show "[None]", hiding the replaced session's data. Mirror the
-        # apply-time rule (workout_adapt_apply): on a proposed date, an existing session
-        # whose canonical sport isn't among that date's proposals is the one being
-        # overridden, so pair it with that date's new-sport proposal.
-        proposed_by_date: dict[str, list] = {}
-        for pw in proposed_workouts:
-            proposed_by_date.setdefault(pw['date'], []).append(pw)
-        swap_original: dict[int, dict] = {}
-        leftover_removed: list[dict] = []
-        for date, proposals in proposed_by_date.items():
-            existing_list = runtime.db.get_workouts(start_date=date, end_date=date)
-            proposed_canons = {canonical_sport(p['sport_type']) for p in proposals}
-            existing_canons = {canonical_sport(e['sport_type']) for e in existing_list}
-            overridden = [
-                e for e in existing_list
-                if canonical_sport(e['sport_type']) not in proposed_canons
-            ]
-            new_proposals = [
-                p for p in proposals
-                if canonical_sport(p['sport_type']) not in existing_canons
-            ]
-            # Common case: exactly one overridden session and one new-sport proposal (a
-            # clean swap). Pair positionally; any overridden session left without a
-            # new-sport proposal is a plain deletion — surface it as a "[Removed]" row so
-            # the apply step never silently drops a session the preview didn't show.
-            for p, orig in zip(new_proposals, overridden):
-                swap_original[id(p)] = orig
-            leftover_removed.extend(overridden[len(new_proposals):])
-
         def _stats(w: dict) -> str:
             return (
                 f"{w.get('duration_minutes') or 0}m/"
@@ -153,22 +123,17 @@ def run_workout_adapt(args: argparse.Namespace) -> None:
                 f"TSS{w.get('tss') or 0}"
             )
 
-        for pw in proposed_workouts:
-            existing = runtime.db.get_workout(pw['date'], pw['sport_type'])
-            if existing is None:
-                existing = swap_original.get(id(pw))
-            is_swap = existing is not None and (
-                canonical_sport(existing['sport_type'])
-                != canonical_sport(pw['sport_type'])
-            )
-
+        # The proposal already says which planned session each change replaces; render
+        # that rather than re-deriving it, so the preview cannot disagree with apply.
+        for pair in proposal.pairs:
+            pw, existing = pair.proposal, pair.original
             orig_title = existing['title'] if existing else "[None]"
             stats_diff = (
                 f"{_stats(existing)} -> {_stats(pw)}" if existing else _stats(pw)
             )
             sport_label = (
                 f"{existing['sport_type'].upper()}->{pw['sport_type'].upper()}"
-                if is_swap else pw['sport_type'].upper()
+                if pair.is_swap else pw['sport_type'].upper()
             )
 
             rows.append([
@@ -177,7 +142,7 @@ def run_workout_adapt(args: argparse.Namespace) -> None:
             ])
 
         # Sessions being deleted outright (overridden with no replacement proposal).
-        for ew in sorted(leftover_removed, key=lambda w: w['date']):
+        for ew in sorted(proposal.removals, key=lambda w: w['date']):
             rows.append([
                 cyan(ew['date']), magenta(ew['sport_type'].upper()),
                 gray(ew['title']), red("[Removed]"),
@@ -195,12 +160,7 @@ def run_workout_adapt(args: argparse.Namespace) -> None:
 
         if apply:
             print("\nApplying adaptations...")
-            all_dates = [pw['date'] for pw in proposed_workouts]
-            start_date_adapt = min(all_dates)
-            end_date_adapt = max(all_dates)
-            runtime.coach_service.workout_adapt_apply(
-                proposed_workouts, reason, start_date_adapt, end_date_adapt
-            )
+            runtime.coach_service.workout_adapt_apply(proposal)
             print(green("Adaptations applied and synced to calendar successfully."))
         else:
             print("\nAdaptations discarded.")

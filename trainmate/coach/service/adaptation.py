@@ -7,6 +7,7 @@ from trainmate.sports import canonical_sport
 from trainmate import intensity
 from trainmate.util import yellow, red, cmd
 from trainmate.coach.formatting import format_baseline
+from trainmate.coach.proposals import AdaptProposal, pair_adaptations
 import trainmate.coach.service as _svc
 
 
@@ -47,7 +48,7 @@ class AdaptationMixin:
 
     def workout_adapt(
         self, target_date_str: Optional[str] = None, message: Optional[str] = None
-    ) -> Tuple[str, List[Workout], List[Dict[str, Any]]]:
+    ) -> AdaptProposal:
         """Evaluates metrics/activities over a rolling window and adapts mesocycle if needed.
 
         `message` is an optional free-text note from the athlete, passed to the SAME LLM
@@ -249,7 +250,7 @@ class AdaptationMixin:
         new_constraints = (decision.get("new_constraints") or []) if message else []
 
         # Filter and structure returned workouts
-        return reason, [
+        structured = [
             {
                 'id': None,
                 'date': w['date'],
@@ -274,13 +275,36 @@ class AdaptationMixin:
                 # stored value. It is dropped only on a genuine sport swap, which is correct.
                 'benchmark_type': w.get('benchmark_type')
             } for w in adapted
-        ], new_constraints
+        ]
+
+        # Pair here, once, against the same range apply will act on — the CLI used to
+        # re-derive this rule for its preview and rebuild a narrower range from the
+        # proposal dates, so the two could disagree about which sessions disappear.
+        pairs, removals = pair_adaptations(
+            structured,
+            self._db.get_workouts(start_date=target_date_str, end_date=meso_end_date_str),
+        )
+        return AdaptProposal(
+            reason=reason,
+            workouts=structured,
+            new_constraints=new_constraints,
+            range_start=target_date_str,
+            range_end=meso_end_date_str,
+            pairs=pairs,
+            removals=removals,
+        )
 
     def workout_adapt_apply(
-        self, proposed_workouts: List[Dict[str, Any]], reason: str,
-        start_date: str, end_date: str
+        self, proposal: AdaptProposal
     ) -> None:
-        """Saves proposed adapted workouts, cleans up overridden ones, and syncs to Calendar."""
+        """Saves proposed adapted workouts, cleans up overridden ones, and syncs to Calendar.
+
+        Takes the whole proposal so the range and the displacement decisions are the
+        ones the coach actually made, not a reconstruction.
+        """
+        proposed_workouts = proposal.workouts
+        reason = proposal.reason
+        start_date, end_date = proposal.range_start, proposal.range_end
         # 1. Fetch all existing workouts in the adaptation range
         existing_workouts = self._db.get_workouts(
             start_date=start_date, end_date=end_date

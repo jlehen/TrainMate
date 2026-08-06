@@ -3,6 +3,7 @@ from datetime import datetime, timedelta
 from typing import Any, List, Optional, Tuple, Dict
 from trainmate.config import config
 from trainmate.types import PlanProposal, Workout
+from trainmate.coach.proposals import PlanFingerprints
 from trainmate.adherence import planned_load
 from trainmate.sports import canonical_sport
 from trainmate.util import (
@@ -223,10 +224,22 @@ class PlanningMixin:
         # never trips the reuse-vs-regen decision (DESIGN_constraints.md §7).
         constraints = self._db.get_constraints(today_str)
         replan_constraints = [c for c in constraints if c.get('replan')]
-        # Fingerprints for the reuse-vs-regenerate decision only; `plan_apply` recomputes
-        # them at accept time.
+        # Fingerprint the inputs the strategy is about to be generated against, and carry
+        # them to `plan_apply` verbatim. Re-deriving at accept time meant an edit made
+        # between generating and accepting was recorded as if the strategy had seen it,
+        # which silently defeats the staleness detector (see coach/proposals.py).
         goals_hash = self.engine._get_goals_hash(objectives)
         constraints_hash = self.engine._get_constraints_hash(replan_constraints)
+        fingerprints = PlanFingerprints(
+            goals_hash=goals_hash,
+            constraints_hash=constraints_hash,
+            config_hash=self.engine._get_config_hash(),
+            config_snapshot=self._get_config_snapshot(),
+            goals_snapshot=json.dumps(self.engine._clean_goals(objectives)),
+            constraints_snapshot=json.dumps(
+                self.engine._clean_constraints(replan_constraints)
+            ),
+        )
 
         # Try to retrieve existing macrocycle
         strategy = ""
@@ -326,40 +339,58 @@ class PlanningMixin:
             _print_new_strategy(strategy, mesocycles, width)
 
             if auto_apply:
-                self.plan_apply(next_goal['id'], strategy, mesocycles)
+                self.plan_apply(
+                    next_goal['id'], strategy, mesocycles, fingerprints=fingerprints
+                )
 
         self._maybe_nudge_bootstrap()
         return {
             'strategy': strategy, 'mesocycles': mesocycles, 'reused': reused,
-            'goal': next_goal,
+            'goal': next_goal, 'fingerprints': fingerprints,
         }
 
     def plan_apply(
-        self, objective_id: Optional[int], strategy: str, mesocycles: List[Dict[str, Any]]
+        self, objective_id: Optional[int], strategy: str, mesocycles: List[Dict[str, Any]],
+        fingerprints: Optional[PlanFingerprints] = None
     ) -> Optional[int]:
         """Saves a generated periodization plan to the database, and returns the id of the
-        goal it was saved under."""
+        goal it was saved under.
+
+        `fingerprints` are the ones computed when the strategy was generated. Pass them:
+        recomputing here reads whatever the database holds at accept time, so a goal
+        edited between generating and accepting is fingerprinted as though the strategy
+        had been built from it. They are optional only for callers that apply a plan
+        they did not just generate.
+        """
         if objective_id is None:
             return None
 
-        today_str = _svc._today_str()
-        objectives = self._db.upcoming_objectives()
-        replan_constraints = [
-            c for c in self._db.get_constraints(today_str) if c.get('replan')
-        ]
-        goals_hash = self.engine._get_goals_hash(objectives)
-        constraints_hash = self.engine._get_constraints_hash(replan_constraints)
-        config_hash = self.engine._get_config_hash()
+        if fingerprints is None:
+            today_str = _svc._today_str()
+            objectives = self._db.upcoming_objectives()
+            replan_constraints = [
+                c for c in self._db.get_constraints(today_str) if c.get('replan')
+            ]
+            fingerprints = PlanFingerprints(
+                goals_hash=self.engine._get_goals_hash(objectives),
+                constraints_hash=self.engine._get_constraints_hash(replan_constraints),
+                config_hash=self.engine._get_config_hash(),
+                config_snapshot=self._get_config_snapshot(),
+                goals_snapshot=json.dumps(self.engine._clean_goals(objectives)),
+                constraints_snapshot=json.dumps(
+                    self.engine._clean_constraints(replan_constraints)
+                ),
+            )
 
         self._db.save_macrocycle(
             objective_id=objective_id,
             strategy=strategy,
-            goals_hash=goals_hash,
-            constraints_hash=constraints_hash,
-            config_hash=config_hash,
-            config_snapshot=self._get_config_snapshot(),
-            goals_snapshot=json.dumps(self.engine._clean_goals(objectives)),
-            constraints_snapshot=json.dumps(self.engine._clean_constraints(replan_constraints)),
+            goals_hash=fingerprints.goals_hash,
+            constraints_hash=fingerprints.constraints_hash,
+            config_hash=fingerprints.config_hash,
+            config_snapshot=fingerprints.config_snapshot,
+            goals_snapshot=fingerprints.goals_snapshot,
+            constraints_snapshot=fingerprints.constraints_snapshot,
             mesocycles=mesocycles
         )
         return objective_id

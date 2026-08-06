@@ -300,9 +300,10 @@ class TestMessageCapture(unittest.TestCase):
         test_db.save_metric_cache("2026-07-02", 56, 42, 60, 35, 14.0, 8.0, 1.0)
         test_db.save_baseline("2026-07-02", 50.0, 2.0, 60.0, 5.0, 80.0, 5.0)
 
-        reason, proposed, new_constraints = coach_service.workout_adapt(
+        _p = coach_service.workout_adapt(
             "2026-07-02", message="can't train Thursday"
         )
+        reason, proposed, new_constraints = _p.reason, _p.workouts, _p.new_constraints
         self.assertEqual(len(new_constraints), 1)
         self.assertEqual(new_constraints[0]["title"], "can't train Thursday")
         # Nothing was persisted yet — that's the CLI's job after confirming with the
@@ -321,7 +322,8 @@ class TestMessageCapture(unittest.TestCase):
         test_db.save_metric_cache("2026-07-02", 56, 42, 60, 35, 14.0, 8.0, 1.0)
         test_db.save_baseline("2026-07-02", 50.0, 2.0, 60.0, 5.0, 80.0, 5.0)
 
-        _reason, _proposed, new_constraints = coach_service.workout_adapt("2026-07-02")
+        _p = coach_service.workout_adapt("2026-07-02")
+        _reason, _proposed, new_constraints = _p.reason, _p.workouts, _p.new_constraints
         self.assertEqual(new_constraints, [])
 
     def test_capture_creates_row_and_always_advisory(self):
