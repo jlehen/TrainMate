@@ -1,13 +1,11 @@
 """PMC (fitness/fatigue) and derived-metric computation. See DESIGN_pmc_fitness_fatigue.md."""
 import math
-import sys
-import time
-from datetime import datetime, timedelta, timezone
+from datetime import timedelta
 from typing import Any, Dict, List, Optional, Tuple
 
 from trainmate.config import config
 from trainmate.db import db
-from trainmate.util import today_date, today_str, yellow, red, dim
+from trainmate.util import today_str, yellow
 import trainmate.garmin as _g
 from trainmate.garmin.client import _to_date
 from trainmate.garmin.load import _hr_zone_coverage, activity_load, compute_load, measured_tss

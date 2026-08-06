@@ -1,13 +1,9 @@
 """Training-load math: measured/HR/RPE TSS, per-activity load, RPE divergence."""
 import math
-import sys
 import time
-from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, Optional, Tuple
 
 from trainmate.config import config
-from trainmate.db import db
-from trainmate.util import today_date, today_str, yellow, red, dim
 
 # --- Power-zone TSS weights (TSS per second in each zone) -------------------
 # Derived from Dr. Andrew Coggan's power-zone model (Allen & Coggan, "Training

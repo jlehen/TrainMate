@@ -103,7 +103,7 @@ class ObjectivesMixin:
             history_days = config.goals_lookback_days
 
         # Calculate the lower bound date
-        from datetime import datetime, timedelta, timezone # imported locally to avoid modifying imports block
+        from datetime import datetime, timedelta
         target_date_obj = datetime.strptime(target_date, "%Y-%m-%d").date()
         today = today_date()
         reference_date = min(today, target_date_obj)

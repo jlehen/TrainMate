@@ -1,22 +1,13 @@
 import json
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from typing import Any, List, Optional, Tuple, Dict
 from trainmate.config import config
-from trainmate.db import db
-from trainmate.google_calendar import calendar_syncer
-from trainmate.types import Constraint, PlanProposal, Workout
-from trainmate.adherence import analyze_adherence, planned_load
+from trainmate.types import PlanProposal, Workout
+from trainmate.adherence import planned_load
 from trainmate.sports import canonical_sport
-from trainmate.modification_state import SWAP_REASON_PREFIX, MANUAL_REPLACE_REASON_PREFIX
-from trainmate import garmin
-from trainmate.garmin import activity_load
 from trainmate.util import (
-    today_str as _today_str, today_date as _today_date,
-    cyan, green, yellow, bold, red, gray, cmd, PMC_TSB_LAG_NOTE,
-    wrap_text, format_labeled_block, default_wrap_width,
+    cyan, yellow, bold, red, cmd, wrap_text, format_labeled_block, default_wrap_width,
 )
-from trainmate.coach.engine import CoachEngine
-from trainmate.coach.formatting import format_baseline, _load_science_guidelines
 import trainmate.coach.service as _svc
 
 

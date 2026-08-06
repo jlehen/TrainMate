@@ -372,3 +372,29 @@ class TestCliPlans(unittest.TestCase):
         self.assertIn("Thresholds considered:", stdout)
         self.assertIn("ftp: 220", stdout)
         self.assertIn("max_hr: 185", stdout)
+
+    @patch("trainmate_cli.garmin")
+    @patch("trainmate_cli.coach_service")
+    def test_accepting_a_plan_with_no_goal_reports_instead_of_crashing(
+        self, mock_coach, mock_garmin
+    ):
+        """Accepting a proposal that names no goal, with nothing upcoming to fall back on,
+        used to raise NameError — swallowed by the handler's blanket except and surfaced
+        only as an error string."""
+        mock_coach.plan_generate.return_value = {
+            "strategy": "Unattached strategy",
+            "mesocycles": [{"name": "Base", "start_date": "2026-08-01",
+                            "end_date": "2026-08-28", "focus": "Aerobic"}],
+            "reused": False,
+            "goal": None,
+        }
+        mock_coach.plan_apply.return_value = None
+
+        exit_code, stdout, _ = self.run_cli(["plan", "generate"], input_value="y")
+
+        self.assertEqual(exit_code, 0)
+        self.assertNotIn("next_goal", stdout)
+        self.assertNotIn("Error during plan generation", stdout)
+        self.assertIn("No goal to attach", stdout)
+        mock_coach.plan_apply.assert_called_once()
+        self.assertIsNone(mock_coach.plan_apply.call_args[0][0])

@@ -5,18 +5,12 @@ import sys
 from datetime import datetime, timedelta
 from typing import Optional
 import trainmate_cli as cli
-from trainmate.config import config
-from trainmate.adherence import analyze_adherence, date_covered
 from trainmate.calendar_state import calendar_status
 from trainmate.modification_state import modification_status
-from trainmate.sports import canonical_sport
 from trainmate.util import (
-    bold, dim, green, red, yellow, cyan, blue, magenta, gray, cmd,
-    visible_len, pad_visible, wrap_text, format_labeled_text,
-    format_labeled_block, render_table, today_str as _today_str,
-    today_date as _today_date,
+    bold, green, red, yellow, cyan, blue, magenta, cmd, today_str as _today_str,
 )
-from trainmate.cli.common import fmt_date, ensure_recent_data, mark_adherence_from_results
+from trainmate.cli.common import fmt_date
 from trainmate.cli.selectors import resolve_window
 
 

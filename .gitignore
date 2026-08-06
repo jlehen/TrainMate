@@ -10,8 +10,13 @@ venv/
 config.yaml
 service_account.json
 
-# Local database
+# Local database, and the hand-made snapshots taken before risky migrations
 trainmate.db
+trainmate.db.bak*
+trainmate.db.freshstart
+trainmate.db-journal
+trainmate.db-wal
+trainmate.db-shm
 
 # Logs
 logs

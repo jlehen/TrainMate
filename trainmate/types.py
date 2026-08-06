@@ -47,7 +47,11 @@ class DailyContext(TypedDict):
     updated: Optional[str]
 
 class Workout(TypedDict):
-    """Represents a single planned or synced workout."""
+    """Represents a single planned or synced workout.
+
+    Field order follows the `workouts` table; test_types.py asserts the two stay in
+    step, so a new column must be declared here in the same commit that adds it.
+    """
     id: Optional[int]
     date: str
     sport_type: str
@@ -55,17 +59,37 @@ class Workout(TypedDict):
     description: Optional[str]
     original_description: Optional[str]
     pushed_signature: Optional[str]  # hash of calendar fields at last push; freshness derived (trainmate.calendar_state)
+    marked_signature: Optional[str]  # calendar fields when adherence was last marked
     modification_reason: Optional[str]  # non-None <=> modified; short per-workout note. Kind derived via trainmate.modification_state
     adaptation_summary: Optional[str]  # set <=> from `workout adapt`; long batch rationale
     google_event_id: Optional[str]  # set <=> a Calendar event exists (may be stale)
-    duration_minutes: Optional[int]
-    rpe: Optional[int]
-    tss: Optional[int]
-    original_date: Optional[str]
     removed: Optional[bool]
     removed_reason: Optional[str]
     source: Optional[str]  # origin, fixed at creation: 'generated'|'manual' (None = legacy)
+    duration_minutes: Optional[int]
+    rpe: Optional[int]
+    tss: Optional[int]
+    macrocycle_id: Optional[int]  # plan version this session belongs to
+    archived_at: Optional[str]  # set <=> superseded by a regenerated plan (DESIGN_plan_rollback.md)
+    original_date: Optional[str]
+    created_at: Optional[str]
+    adapted_at: Optional[str]  # last `workout adapt` touch
+    adaptation_count: Optional[int]
+    original_duration_minutes: Optional[int]  # pre-adaptation values, kept for rollback
+    original_tss: Optional[int]
+    original_rpe: Optional[int]
     benchmark_type: Optional[str]  # set <=> a fitness test; creation-time intent (DESIGN_benchmark_workouts.md §3.1)
+    # Planned intensity distribution, authored with the session and graded against the
+    # activity's recorded zones (DESIGN_intensity_distribution.md). `currency` names the
+    # scale the seconds are expressed in ('hr' | 'power').
+    planned_zone_currency: Optional[str]
+    planned_zone1_sec: Optional[int]
+    planned_zone2_sec: Optional[int]
+    planned_zone3_sec: Optional[int]
+    planned_zone4_sec: Optional[int]
+    planned_zone5_sec: Optional[int]
+    planned_zone6_sec: Optional[int]
+    planned_zone7_sec: Optional[int]
 
 class CompletedActivity(TypedDict):
     """Represents a completed Garmin activity synced from Sheets."""
@@ -122,15 +146,26 @@ class AthleteBaseline(TypedDict):
     sleep_baseline_std: float
 
 class Macrocycle(TypedDict):
-    """Represents a high-level periodized training macrocycle."""
+    """Represents a high-level periodized training macrocycle.
+
+    The `*_hash` fields fingerprint the inputs the strategy was generated from, and the
+    matching `*_snapshot` fields keep the inputs themselves so a stale plan can say what
+    actually changed. `status`/`superseded_at` carry the rollback axis: regenerating
+    supersedes the previous version rather than deleting it (DESIGN_plan_rollback.md).
+    """
     id: Optional[int]
     objective_id: int
     strategy: str
     goals_hash: str
     constraints_hash: str
     config_hash: Optional[str]
+    config_snapshot: Optional[str]
+    goals_snapshot: Optional[str]
+    constraints_snapshot: Optional[str]
     created_at: str
     feedback: Optional[str]
+    status: Optional[str]  # 'active' | 'superseded'
+    superseded_at: Optional[str]
 
 class Mesocycle(TypedDict):
     """Represents a specific block/phase of training within a macrocycle."""

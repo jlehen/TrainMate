@@ -1,23 +1,18 @@
 import csv as csv_mod
 import argparse
 import sys
-from datetime import datetime
 from typing import Optional
 import trainmate_cli as cli
 from trainmate import intensity
-from trainmate.adherence import analyze_adherence, date_covered
 from trainmate.garmin.load import activity_load, load_method
 from trainmate.sports import sport_aliases
 from trainmate.util import (
-    bold, dim, green, red, yellow, cyan, blue, magenta, gray,
-    color_load_ratio, pmc_cells, visible_len, pad_visible, wrap_text, format_labeled_text,
-    format_labeled_block, render_table, is_narrow_client, default_wrap_width,
-    today_str as _today_str, today_date as _today_date,
+    bold, green, red, yellow, cyan, magenta, gray, color_load_ratio, pmc_cells, visible_len,
+    wrap_text, format_labeled_text, format_labeled_block, render_table, is_narrow_client,
+    default_wrap_width,
 )
-from trainmate.cli.common import (
-    fmt_date, ensure_recent_data, mark_adherence_range, pmc_warmup_cutoff,
-)
-from trainmate.cli.selectors import add_selector_args, has_selector, resolve_window
+from trainmate.cli.common import mark_adherence_range, pmc_warmup_cutoff
+from trainmate.cli.selectors import add_selector_args, resolve_window
 
 
 def run_data_pull(args: argparse.Namespace) -> None:

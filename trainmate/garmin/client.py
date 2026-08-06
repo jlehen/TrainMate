@@ -1,13 +1,11 @@
 """Garmin Connect client: login, metric/activity fetch, and date helpers."""
 import math
 import sys
-import time
-from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, List, Optional, Tuple
+from datetime import datetime, timedelta
+from typing import Any, Dict, List, Optional
 
 from trainmate.config import config
-from trainmate.db import db
-from trainmate.util import today_date, today_str, yellow, red, dim
+from trainmate.util import dim
 
 def _derivation_pad_days() -> int:
     """Raw history needed *before* a displayed window so the baselines and the CTL EWMA

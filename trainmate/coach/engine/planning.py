@@ -1,17 +1,7 @@
-import json
-import hashlib
 from typing import Any, List, Optional, Dict
-from trainmate.config import config
-from trainmate.openrouter import openrouter_client
-from trainmate.types import Objective, Constraint, Workout, CompletedActivity
-from trainmate.util import today_date as _today_date, cyan, wrap_text
-from trainmate.coach.formatting import (
-    format_metrics_history, format_completed_activities, format_baseline,
-    format_planned_workouts, format_planned_workouts_detailed,
-    format_removed_workouts, format_daily_context,
-)
+from trainmate.types import Objective, Constraint
+from trainmate.util import cyan, wrap_text
 import trainmate.coach.engine as _eng
-from trainmate.coach.engine import LEARNING_UPDATES_FIELD
 
 
 class PlanStrategyMixin:

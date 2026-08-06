@@ -1,6 +1,5 @@
 """Workout CLI: adapt / generate / list / compare (LLM- and read-heavy)."""
 import argparse
-import sys
 from datetime import datetime, timedelta
 from typing import Optional
 import trainmate_cli as cli
@@ -9,10 +8,9 @@ from trainmate.adherence import analyze_adherence, date_covered
 from trainmate.google_calendar import event_url
 from trainmate.sports import canonical_sport
 from trainmate.util import (
-    bold, dim, green, red, yellow, cyan, magenta, gray, cmd,
-    visible_len, pad_visible, wrap_text,
-    format_labeled_text, format_labeled_block, render_table,
-    today_str as _today_str, today_date as _today_date, days_between,
+    bold, dim, green, red, yellow, cyan, magenta, gray, cmd, pad_visible, wrap_text,
+    format_labeled_block, render_table, today_str as _today_str, today_date as _today_date,
+    days_between,
 )
 from trainmate.cli.common import (
     fmt_date, ensure_recent_data, mark_adherence_from_results,
@@ -244,6 +242,7 @@ def run_workout_generate(args: argparse.Namespace) -> None:
     )
 
     try:
+        next_goal = None
         objectives = cli.db.upcoming_objectives()
         if objectives:
             if args.goal_id is not None:
@@ -289,7 +288,7 @@ def run_workout_generate(args: argparse.Namespace) -> None:
         if args.goal_id is not None:
             workout_kwargs['objective_id'] = args.goal_id
 
-        end_date = _resolve_workout_end_date(args, next_goal if objectives else None)
+        end_date = _resolve_workout_end_date(args, next_goal)
         if end_date is not None:
             workout_kwargs['end_date'] = end_date
 

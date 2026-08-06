@@ -125,6 +125,33 @@ class TestCompareEndpoint(unittest.TestCase):
         self.assertEqual(len(unplanned), 1)
         self.assertEqual(unplanned[0]["kind"], "unplanned")
 
+    def test_rest_day_verdict_matches_the_shared_classifier(self):
+        """The endpoint used to re-derive rest/violation inline, skipping
+        canonical_sport() and the load threshold — so a "Rest" workout read as a normal
+        sport and a light stroll read as a violation on the dashboard only."""
+        test_db.save_workout(
+            date="2026-06-11", sport_type="Rest", title="Rest Day",
+            description="full rest", duration_minutes=0, tss=0,
+        )
+        _save_activity(test_db, "a3", "2026-06-11", "running", 55 * 60, 70.0)
+
+        result = self._get("2026-06-11", "2026-06-11").get_json()["days"][0]["results"][0]
+        self.assertTrue(result["is_rest"])
+        self.assertTrue(result["rest_violation"])
+        self.assertEqual(result["status"], "rest_violation")
+
+    def test_light_activity_on_a_rest_day_is_not_a_violation(self):
+        test_db.save_workout(
+            date="2026-06-12", sport_type="rest", title="Rest Day",
+            description="full rest", duration_minutes=0, tss=0,
+        )
+        _save_activity(test_db, "a4", "2026-06-12", "walking", 12 * 60, 5.0)
+
+        result = self._get("2026-06-12", "2026-06-12").get_json()["days"][0]["results"][0]
+        self.assertTrue(result["is_rest"])
+        self.assertFalse(result["rest_violation"])
+        self.assertEqual(result["status"], "rest_ok")
+
     def test_end_date_capped_and_default_range(self):
         # No params -> defaults to a 14-day lookback ending today; valid empty result.
         res = self.client.get("/api/workouts/compare")

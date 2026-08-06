@@ -1,17 +1,14 @@
 import textwrap
 import argparse
 import sys
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import List, Optional
 import trainmate_cli as cli
 from trainmate import plan_diff
-from trainmate.config import config
-from trainmate.adherence import analyze_adherence, date_covered, planned_load
+from trainmate.adherence import planned_load
 from trainmate.util import (
-    bold, dim, green, red, yellow, cyan, blue, magenta, gray, cmd,
-    visible_len, pad_visible, wrap_text, format_labeled_text,
-    format_labeled_block, default_wrap_width, today_str as _today_str,
-    today_date as _today_date,
+    bold, dim, green, red, yellow, cyan, blue, magenta, gray, cmd, visible_len, pad_visible,
+    wrap_text, format_labeled_block, default_wrap_width, today_date as _today_date,
 )
 from trainmate.cli.common import fmt_date, ensure_recent_data
 
@@ -54,6 +51,9 @@ def run_plan_generate(args: argparse.Namespace) -> None:
                     no_pull=args.no_pull, force_pull=getattr(args, 'force_pull', False)
                 )
 
+        # Bound before the branch: with no upcoming objectives the accept path below
+        # still reads it, and an unbound name surfaced only as a NameError string.
+        next_goal = None
         objectives = cli.db.upcoming_objectives()
         if objectives:
             if args.goal_id is not None:
@@ -108,9 +108,15 @@ def run_plan_generate(args: argparse.Namespace) -> None:
             apply = cli.prompt.confirm("Apply this new periodization strategy?")
 
         if apply:
-            cli.coach_service.plan_apply(
-                (proposal['goal'] or next_goal)['id'], proposal['strategy'], mesocycles
+            goal = proposal['goal'] or next_goal
+            # plan_apply already no-ops on a missing goal, so let it own that decision
+            # rather than re-deciding here, and report what it actually saved.
+            saved_id = cli.coach_service.plan_apply(
+                goal['id'] if goal else None, proposal['strategy'], mesocycles
             )
+            if saved_id is None:
+                print(yellow("\nNo goal to attach this plan to — nothing was saved."))
+                return
             print(green(f"\nGenerated {len(mesocycles)} mesocycles. Save complete."))
             print(green(f"Run {cmd('workout generate')} to schedule workouts "
                         "based on this plan."))

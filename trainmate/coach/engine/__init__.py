@@ -1,15 +1,5 @@
-import json
-import hashlib
-from typing import Any, List, Optional, Dict
-from trainmate.config import config
+from typing import Optional
 from trainmate.openrouter import openrouter_client
-from trainmate.types import Objective, Constraint, Workout, CompletedActivity
-from trainmate.util import today_date as _today_date, cyan
-from trainmate.coach.formatting import (
-    format_metrics_history, format_completed_activities, format_baseline,
-    format_planned_workouts, format_planned_workouts_detailed,
-    format_removed_workouts, format_daily_context,
-)
 
 # Shared JSON-output instruction for incrementally updating coach learnings. The LLM emits
 # only deltas; the app owns the merge so unchanged observations are never lost. The model

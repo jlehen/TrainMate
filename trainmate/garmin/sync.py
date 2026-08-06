@@ -1,13 +1,10 @@
 """Ingestion + orchestration: pull, ensure_data, and the process-level ensure memo."""
-import math
-import sys
 import time
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, List, Optional, Tuple
 
 from trainmate.config import config
-from trainmate.db import db
-from trainmate.util import today_date, today_str, yellow, red, dim, cmd
+from trainmate.util import today_str, yellow, red, dim, cmd
 import trainmate.garmin as _g
 from trainmate.garmin.client import (GarminAuthRequired, GarminClient, _date_range,
     _derivation_pad_days, _shift, _to_date)

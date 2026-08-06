@@ -17,7 +17,7 @@ from flask import Flask, jsonify, request, send_from_directory
 from typing import Any, Dict, List
 from trainmate import benchmarks, garmin, intensity, llm_models, plan_diff, progression
 from trainmate.db import db
-from trainmate.adherence import analyze_adherence, date_covered
+from trainmate.adherence import analyze_adherence, classify_adherence, date_covered
 from trainmate.calendar_state import calendar_status
 from trainmate.modification_state import modification_status
 from trainmate.config import config, plan_config_hash
@@ -266,12 +266,16 @@ def compare_workouts() -> Any:
         for r in day_results:
             w = r["planned"]
             act = r["completed"]
-            is_rest = w["sport_type"] == "rest"
+            # Ask the shared classifier rather than re-deriving: the inline version
+            # skipped canonical_sport() and the load threshold, so a "Rest" workout
+            # read as a normal sport and a light stroll read as a violation here only.
+            verdict = classify_adherence(w, act, threshold)
             results_out.append({
                 "planned": w,
                 "completed": act,
-                "is_rest": is_rest,
-                "rest_violation": bool(is_rest and act),
+                "is_rest": verdict["status"] in ("rest_ok", "rest_violation"),
+                "rest_violation": verdict["status"] == "rest_violation",
+                "status": verdict["status"],
             })
 
         unplanned_out = []

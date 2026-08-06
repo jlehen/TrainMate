@@ -1,16 +1,7 @@
 import argparse
 import sys
-from datetime import datetime, timedelta
-from typing import Optional
 import trainmate_cli as cli
-from trainmate.config import config
-from trainmate.adherence import analyze_adherence, date_covered
-from trainmate.util import (
-    bold, dim, green, red, yellow, cyan, blue, magenta, gray, cmd,
-    visible_len, pad_visible, wrap_text, format_labeled_text,
-    format_labeled_block, today_str as _today_str, today_date as _today_date,
-)
-from trainmate.cli.common import fmt_date, ensure_recent_data
+from trainmate.util import bold, green, red, yellow, cyan, gray, cmd, format_labeled_block
 from trainmate.db.objectives import goal_state, GOAL_UPCOMING
 from trainmate.sports import CANONICAL_SPORTS
 

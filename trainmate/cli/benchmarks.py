@@ -4,8 +4,7 @@ from typing import Optional, Tuple
 
 import trainmate_cli as cli
 from trainmate.util import (
-    bold, dim, green, red, yellow, cyan, blue, gray, cmd,
-    format_labeled_block, today_str as _today_str,
+    bold, dim, green, red, yellow, cyan, gray, cmd, format_labeled_block, today_str as _today_str,
 )
 from trainmate.cli.common import fmt_date
 from trainmate.cli.selectors import add_single_date_arg

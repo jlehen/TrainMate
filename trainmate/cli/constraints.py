@@ -16,7 +16,6 @@ from trainmate.util import (
     bold, dim, green, red, yellow, cyan, gray, cmd, format_labeled_block,
     today_str as _today_str,
 )
-from trainmate.cli.common import fmt_date
 from trainmate.cli.selectors import add_selector_args, has_selector, resolve_window
 
 

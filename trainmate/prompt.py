@@ -29,7 +29,7 @@ import json
 import os
 import sys
 from dataclasses import dataclass
-from typing import List, Optional, Sequence
+from typing import Optional, Sequence
 
 # Wire framing for JsonPrompt requests. A request is one line on stdout:
 #   \x1eTM-PROMPT {json}\n

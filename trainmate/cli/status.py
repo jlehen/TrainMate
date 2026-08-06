@@ -1,16 +1,11 @@
-import argparse
-import sys
-from datetime import datetime, timedelta, timezone
-from typing import Optional
+from datetime import datetime, timezone
 import trainmate_cli as cli
 from trainmate import intensity
 from trainmate.config import config
-from trainmate.adherence import analyze_adherence, date_covered
 from trainmate.util import (
-    bold, dim, green, red, yellow, cyan, blue, magenta, gray, cmd,
-    color_load_ratio, color_ramp, pmc_cells, pmc_warming_note, visible_len, pad_visible,
-    wrap_text, format_labeled_text, format_labeled_block, default_wrap_width,
-    PMC_TSB_LAG_NOTE, today_str as _today_str, today_date as _today_date,
+    bold, dim, green, red, yellow, cyan, magenta, gray, cmd, color_load_ratio, color_ramp,
+    pmc_cells, pmc_warming_note, format_labeled_block, default_wrap_width, PMC_TSB_LAG_NOTE,
+    today_str as _today_str, today_date as _today_date,
 )
 from trainmate.cli.common import fmt_date, ensure_recent_data, pmc_warmup_cutoff
 from trainmate.db.objectives import goal_state, GOAL_UPCOMING
