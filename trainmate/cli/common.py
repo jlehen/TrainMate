@@ -110,9 +110,10 @@ def mark_adherence_from_results(
         w = r['planned']
         if not w.get('google_event_id'):
             continue
-        # Skip future dates always. Skip today only when unmatched — a not-yet-done
-        # session would falsely read as missed.
-        if r['date'] > today_str:
+        # Skip future dates always, and anything analyze_adherence flagged pending — a
+        # not-yet-done session would falsely read as missed. The date test behind
+        # `pending` is owned there; it is repeated here only for hand-built rows.
+        if r['date'] > today_str or r.get('pending'):
             continue
         if r['date'] == today_str and not r['completed']:
             continue
@@ -154,6 +155,7 @@ def mark_adherence_range(start_date: str, end_date: str) -> int:
     end_obj = datetime.strptime(end_date, "%Y-%m-%d").date()
     history_days = (end_obj - start_obj).days + 1
     covered_ranges = runtime.db.get_mesocycle_ranges(start_date, end_date)
+    today = _today_str()
     _, matching_results, _ = analyze_adherence(
         planned_workouts=workouts,
         completed_activities=activities,
@@ -161,5 +163,6 @@ def mark_adherence_range(start_date: str, end_date: str) -> int:
         history_days=history_days,
         minor_activity_load_threshold=config.minor_activity_load_threshold,
         covered_ranges=covered_ranges,
+        pending_from=today,
     )
-    return mark_adherence_from_results(matching_results, _today_str())
+    return mark_adherence_from_results(matching_results, today)

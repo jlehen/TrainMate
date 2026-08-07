@@ -110,6 +110,12 @@ class TestAdaptationAdapt(unittest.TestCase):
                 "2026-06-02", "cycling", "Tempo Ride", "60 mins",
                 duration_minutes=60, rpe=6, tss=40,
             )
+            # Never trained, on a day that is over -> a real miss.
+            test_db.save_workout(
+                "2026-06-02", "running", "Skipped Recovery Jog", "20 mins",
+                duration_minutes=20, rpe=2, tss=10,
+            )
+            # On the evaluation date itself: not trained YET, so pending, not missed.
             test_db.save_workout(
                 "2026-06-03", "running", "Interval Session", "45 mins",
                 duration_minutes=45, rpe=8, tss=60,
@@ -135,9 +141,14 @@ class TestAdaptationAdapt(unittest.TestCase):
 
             prompt_user_content = mock_client.complete.call_args[0][1]
             self.assertIn(
-                "Complete Miss! Missed planned workout 'Interval Session'",
+                "Complete Miss! Missed planned workout 'Skipped Recovery Jog'",
                 prompt_user_content,
             )
+            # The evaluation date's own session is still ahead of the athlete: calling it
+            # a miss made adapt reschedule work that was never skipped (it duplicated a
+            # benchmark that way). It stays in the plan listing, out of the discrepancies.
+            self.assertNotIn("'Interval Session'", prompt_user_content)
+            self.assertIn("Interval Session", prompt_user_content)
             self.assertIn("duration mismatch", prompt_user_content)
 
     @patch("trainmate.coach.engine.openrouter_client")

@@ -411,3 +411,100 @@ class TestSportMatching(unittest.TestCase):
         }]
         disc, _, _ = analyze_adherence(planned, completed, date(2026, 6, 1), 1)
         self.assertTrue(any(d.kind == "rest_violation" for d in disc))
+
+
+class TestPendingSessions(unittest.TestCase):
+    """A planned session on a day that is not over yet is PENDING, not missed.
+
+    `workout adapt` runs in the morning, so the evaluation date's own sessions are
+    still ahead of the athlete. Reporting them as misses told the coach work had been
+    skipped and invited it to reschedule sessions nobody had skipped — that is how a
+    benchmark ended up scheduled twice. Withdrawing a session is `workout remove`;
+    saying it won't happen is the adapt note.
+    """
+
+    @staticmethod
+    def _run(pending_from=None):
+        planned = [
+            {"date": "2026-06-01", "sport_type": "running", "title": "Yesterday Run",
+             "duration_minutes": 60, "tss": 50.0, "rpe": 5},
+            {"date": "2026-06-02", "sport_type": "running", "title": "Today Run",
+             "duration_minutes": 60, "tss": 50.0, "rpe": 5},
+        ]
+        return analyze_adherence(
+            planned, [], date(2026, 6, 1), 2, pending_from=pending_from
+        )
+
+    def test_without_pending_from_every_date_is_final(self):
+        disc, matching, _ = self._run()
+        self.assertEqual([d.date for d in disc if d.kind == "missed"],
+                         ["2026-06-01", "2026-06-02"])
+        self.assertFalse(any(r["pending"] for r in matching))
+
+    def test_evaluation_date_is_pending_and_earlier_days_still_miss(self):
+        disc, matching, _ = self._run(pending_from="2026-06-02")
+        self.assertEqual([d.date for d in disc if d.kind == "missed"], ["2026-06-01"])
+        self.assertEqual(
+            {r["date"]: r["pending"] for r in matching},
+            {"2026-06-01": False, "2026-06-02": True},
+        )
+
+    def test_a_completed_session_on_the_pending_date_is_not_pending(self):
+        planned = [{"date": "2026-06-02", "sport_type": "running", "title": "Today Run",
+                    "duration_minutes": 60, "tss": 50.0, "rpe": 5}]
+        completed = [{"date": "2026-06-02", "activity_id": "a1", "activity_name": "Run",
+                      "activity_type": "running", "duration_sec": 3600, "tss": 50.0,
+                      "rpe": 5}]
+        disc, matching, _ = analyze_adherence(
+            planned, completed, date(2026, 6, 2), 1, pending_from="2026-06-02"
+        )
+        self.assertEqual(disc, [])
+        self.assertFalse(matching[0]["pending"])
+        self.assertIsNotNone(matching[0]["completed"])
+
+    def test_pending_does_not_mask_a_rest_violation(self):
+        # The athlete DID train — that is a fact about today, not a prediction.
+        planned = [{"date": "2026-06-02", "sport_type": "rest", "title": "Rest"}]
+        completed = [{"date": "2026-06-02", "activity_id": "a1", "activity_name": "Ride",
+                      "activity_type": "cycling", "duration_sec": 7200, "tss": 120.0,
+                      "rpe": 7}]
+        disc, _, _ = analyze_adherence(
+            planned, completed, date(2026, 6, 2), 1, pending_from="2026-06-02"
+        )
+        self.assertTrue(any(d.kind == "rest_violation" for d in disc))
+
+    def test_a_partially_executed_session_today_still_reports(self):
+        # Short of plan but done: real evidence, not a prediction about the rest of the day.
+        planned = [{"date": "2026-06-02", "sport_type": "running", "title": "Long Run",
+                    "duration_minutes": 120, "tss": 120.0, "rpe": 6}]
+        completed = [{"date": "2026-06-02", "activity_id": "a1", "activity_name": "Run",
+                      "activity_type": "running", "duration_sec": 900, "tss": 12.0,
+                      "rpe": 3}]
+        disc, matching, _ = analyze_adherence(
+            planned, completed, date(2026, 6, 2), 1, pending_from="2026-06-02"
+        )
+        self.assertTrue(any(d.kind == "partial" for d in disc))
+        self.assertFalse(matching[0]["pending"])
+
+
+class TestClassifyPending(unittest.TestCase):
+    def test_pending_flag_changes_the_verdict_only_when_unmatched(self):
+        from trainmate.adherence import classify_adherence
+        run = {"sport_type": "running", "title": "Run", "duration_minutes": 60,
+               "tss": 50.0, "rpe": 5}
+        self.assertEqual(classify_adherence(run, None)["status"], "missed")
+        self.assertEqual(
+            classify_adherence(run, None, pending=True)["status"], "pending"
+        )
+        act = {"activity_id": "a1", "activity_type": "running", "duration_sec": 3600,
+               "tss": 50.0, "rpe": 5}
+        self.assertEqual(
+            classify_adherence(run, act, pending=True)["status"], "done"
+        )
+
+    def test_a_rest_day_is_never_pending(self):
+        from trainmate.adherence import classify_adherence
+        rest = {"sport_type": "rest", "title": "Rest"}
+        self.assertEqual(
+            classify_adherence(rest, None, pending=True)["status"], "rest_ok"
+        )

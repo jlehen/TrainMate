@@ -11,6 +11,10 @@ MISSED = "missed"
 PARTIAL = "partial"
 UNPLANNED = "unplanned"
 
+# A planned session on a day that has not finished yet is not a miss — the athlete may
+# still train it. Withdrawing it is `workout remove`; saying so is the adapt note.
+PENDING = "pending"
+
 
 @dataclass(frozen=True)
 class Discrepancy:
@@ -165,6 +169,7 @@ def classify_adherence(
     planned: Dict[str, Any],
     completed: Optional[Dict[str, Any]],
     minor_activity_load_threshold: float = 25.0,
+    pending: bool = False,
 ) -> Dict[str, Any]:
     """Per-workout adherence verdict for a planned workout and the activity it
     matched (or None). `completed` is the *already-matched* activity from
@@ -173,9 +178,13 @@ def classify_adherence(
 
         rest_ok          rest planned, no significant activity
         rest_violation   rest planned, a significant activity was performed
+        pending          non-rest planned, nothing matched, day not over yet
         missed           non-rest planned, nothing matched
         done             non-rest planned, matched within tolerance
         partial          non-rest planned, matched but duration/load off
+
+    `pending` is the caller's "this day has not finished" flag — carried on the
+    `analyze_adherence` row that produced this pair, never re-derived here.
     """
     if canonical_sport(planned["sport_type"]) == "rest":
         if completed and activity_load(completed) >= minor_activity_load_threshold:
@@ -183,7 +192,7 @@ def classify_adherence(
         return {"status": "rest_ok", "reasons": []}
 
     if not completed:
-        return {"status": "missed", "reasons": []}
+        return {"status": PENDING if pending else "missed", "reasons": []}
 
     reasons = _discrepancy_reasons(planned, completed)
     return {"status": "partial" if reasons else "done", "reasons": reasons}
@@ -196,6 +205,7 @@ def analyze_adherence(
     history_days: int,
     minor_activity_load_threshold: float = 25.0,
     covered_ranges: Optional[List[Tuple[str, str]]] = None,
+    pending_from: Optional[str] = None,
 ) -> Tuple[List[str], List[Dict[str, Any]], List[Dict[str, Any]]]:
     """Evaluates planned workouts vs completed Garmin activities over a rolling window.
 
@@ -211,11 +221,15 @@ def analyze_adherence(
             no planned workout is reported as a deviation ("Unplanned Activity!") only if
             its date falls within one of these spans; outside all coverage it is softened
             to an informational note. None means treat every date as covered.
+        pending_from: first date whose day is not over yet (normally today). An unmatched
+            non-rest session on or after it is PENDING, not missed — the athlete is
+            assumed to still be doing it. None means every date is final.
 
     Returns:
         A tuple containing:
             - List of text discrepancy messages (deviations from the plan).
-            - List of mapping results with date, planned workout, and completed activity.
+            - List of mapping results with date, planned workout, completed activity, and
+              the `pending` flag consumers must use rather than re-deriving the date rule.
             - List of completed activities that fall outside any planned block (informational).
     """
     matching_results = []
@@ -243,11 +257,15 @@ def analyze_adherence(
 
         used_act_ids = set()
 
+        # Dates are YYYY-MM-DD, so lexicographic comparison is chronological.
+        day_pending = bool(pending_from) and date_curr >= pending_from
+
         for w in day_workouts:
             # Canonicalize: a session stored under an alias ("strength", "Running") must
             # still match its activity, or it reads as a Complete Miss.
             w_sport = canonical_sport(w["sport_type"])
             matched_act = None
+            pending = False
 
             if w_sport == "rest":
                 # Check for rest day violation: any activity with significant workload
@@ -277,10 +295,14 @@ def analyze_adherence(
                         break
 
                 if not matched_act:
-                    # Complete miss
-                    discrepancies.append(
-                        Discrepancy(kind=MISSED, date=date_curr, planned=w)
-                    )
+                    # Still ahead of the athlete on an unfinished day, so not yet a miss.
+                    # Reporting it as one told the adapt prompt the session was lost and
+                    # invited it to reschedule work that was never skipped.
+                    pending = day_pending
+                    if not pending:
+                        discrepancies.append(
+                            Discrepancy(kind=MISSED, date=date_curr, planned=w)
+                        )
                 else:
                     disc_reasons = _discrepancy_reasons(w, matched_act)
 
@@ -293,7 +315,8 @@ def analyze_adherence(
             matching_results.append({
                 "date": date_curr,
                 "planned": w,
-                "completed": matched_act
+                "completed": matched_act,
+                "pending": pending,
             })
 
         # Check for completed activities when nothing was planned

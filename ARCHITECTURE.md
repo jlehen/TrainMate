@@ -185,7 +185,9 @@ classes themselves.
 |                      |                      | pure functions; compare planned vs completed     |
 |                      |                      | (the latter yields a per-workout verdict). Also  |
 |                      |                      | exposes `planned_load()` (public), the expected- |
-|                      |                      | load valuation `progression.py` reuses.          |
+|                      |                      | load valuation `progression.py` reuses. The      |
+|                      |                      | `pending_from` cutoff keeps an unfinished day's  |
+|                      |                      | untrained sessions out of the misses (below).    |
 | `plan_diff.py`       | —                    | Compares two periodization plan versions:        |
 |                      |                      | `resolve_versions` (which two, over a passed-in  |
 |                      |                      | db handle) + `diff_plans` → strategy/feedback     |
@@ -1356,7 +1358,7 @@ single read-only view that is its whole state (`model`), which acts bare instead
 | `plan`       | `wipe`       | —        | Delete all plans                                                         |
 | `progress`   | `[SPORT ...]` | `pr`    | Show the progress timeline: measured load to date, plan-projected forward (CTL/ATL/TSB), weekly planned-vs-actual bars (`-w/--weeks N`, `--chart [PATH]` for a PNG; DESIGN_progress_timeline.md). `-z`/`--zones` (implied by naming a sport) adds one weekly time-in-zone table per sport — measured behind today, prescribed ahead of it (`--blocks` for block grain, `--power`/`--hr` to force the currency; DESIGN_intensity_distribution.md §9.6/§9.8). The sport argument scopes the **zone tables only**: CTL/ATL/TSB, the projection and the load table stay whole-athlete |
 | `workout`    | `list`       | `w l`    | Show planned workouts. Defaults to a 7-day window from today. Positional `TARGET…` (workout IDs and/or date selectors, e.g. `wo li 12 15 -v`) plus the shared selectors `-d`/`-m`/`-M`/`-g` and `-t/--type TYPE`, `--removed` (DESIGN_cli_selectors.md). |
-| `workout`    | `compare`    | `w c`    | Compare planned vs completed (`analyze_adherence()`): prints PLANNED/ACTUAL per day, flags misses (red), rest violations (red), unplanned high-load (yellow), then a discrepancy summary. Same selectors as `workout list`; default 14-day lookback; a bare span (`-d 7d`) looks *back*; end capped at today. |
+| `workout`    | `compare`    | `w c`    | Compare planned vs completed (`analyze_adherence()`): prints PLANNED/ACTUAL per day, flags misses (red), rest violations (red), unplanned high-load (yellow), then a discrepancy summary. Today's untrained sessions read `(not yet — still ahead today)` and are not misses (`pending_from`, [§10](#10-key-data-flows)). Same selectors as `workout list`; default 14-day lookback; a bare span (`-d 7d`) looks *back*; end capped at today. |
 | `workout`    | `generate`   | `w g`    | Generate workouts from the plan blocks covering the days generated (the dates pick the plan, not a goal — DESIGN_cli_selectors.md §8). No horizon flag → `config.workout_generation_span_days` ahead (28 default). Horizon flags (mutually exclusive, only the END of the resolved window is used): `-g/--goal [ID]` = through the goal's target date, i.e. the whole plan; `-d`; `-m`; `-M` (which also settles which plan to follow where two cover the same days). Lists the proposed sessions the way `workout list` renders them and asks before writing; on a `y` it archives the previous plan's future workouts and pushes the new ones to Calendar immediately. `-f/-y` skips both prompts. |
 | `workout`    | `rm`         | `w rm`   | Soft-remove by ID (`ID REASON`, both positional): marks `removed`, marks the Calendar event deleted; kept in DB, hidden from list/compare, shown to coach as a cancellation. |
 | `workout`    | `restore`    | `w res`  | Restore soft-removed workout by ID. Clears `removed` flags and syncs to Calendar to remove the `[Deleted]` mark. Unrelated to `workout rollback`, which restores a whole archived batch. |
@@ -1622,7 +1624,17 @@ event-day TSB over the plan's own workouts — is a deferred Phase 2 follow-up.
    [§3](#3-coach-package-architecture)).
 2. `analyze_adherence()` (`adherence.py`) computes discrepancies (misses,
    duration/load mismatches, rest violations) over the **active** workouts only —
-   removed workouts never count as misses.
+   removed workouts never count as misses. The window *ends on the evaluation date*, so
+   `pending_from=target_date` marks that day's untrained sessions **pending**, not
+   missed: adapt runs in the morning and the athlete has not had the day yet. Assuming
+   a session will still happen is the default; withdrawing it is `workout remove`, and
+   saying it won't happen is the `-m/--message` note. Reporting it as a miss told the
+   coach work had been skipped and invited it to reschedule sessions nobody skipped —
+   how a benchmark once ended up scheduled on two dates at once. Only the *absence* of
+   an activity is deferred this way: a rest violation, an unplanned ride, or a
+   partially-executed session on that date is evidence already in hand and still
+   reports. Consumers read the `pending` flag on each matching row rather than
+   re-deriving the date rule.
 3. Finds active mesocycle for the target date → sets `meso_end_date` for
    adaptation range.
 3b. `_intensity_block_context()` builds the block's **measured intensity distribution**

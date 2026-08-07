@@ -119,6 +119,8 @@ class AdaptationMixin:
         # Match planned workouts vs completed activities and compute discrepancies.
         # analyze_adherence only inspects the `history_days` backward window, so the
         # future-dated workouts now in `planned_workouts` are ignored here (no false misses).
+        # The window ENDS on the evaluation date, though, so today's not-yet-trained
+        # sessions are pending, not missed — adapt runs in the morning.
         discrepancies, matching_results, informational = analyze_adherence(
             planned_workouts=planned_workouts,
             completed_activities=completed_activities,
@@ -126,6 +128,7 @@ class AdaptationMixin:
             history_days=history_days,
             minor_activity_load_threshold=config.minor_activity_load_threshold,
             covered_ranges=covered_ranges,
+            pending_from=target_date_str,
         )
 
         # Sessions that already have a matching completed Garmin activity are history and

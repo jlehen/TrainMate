@@ -231,6 +231,7 @@ def compare_workouts() -> Any:
         history_days=history_days,
         minor_activity_load_threshold=threshold,
         covered_ranges=covered_ranges,
+        pending_from=today,
     )
 
     matched_act_ids = {
@@ -269,12 +270,13 @@ def compare_workouts() -> Any:
             # Ask the shared classifier rather than re-deriving: the inline version
             # skipped canonical_sport() and the load threshold, so a "Rest" workout
             # read as a normal sport and a light stroll read as a violation here only.
-            verdict = classify_adherence(w, act, threshold)
+            verdict = classify_adherence(w, act, threshold, pending=r.get("pending", False))
             results_out.append({
                 "planned": w,
                 "completed": act,
                 "is_rest": verdict["status"] in ("rest_ok", "rest_violation"),
                 "rest_violation": verdict["status"] == "rest_violation",
+                "pending": verdict["status"] == "pending",
                 "status": verdict["status"],
             })
 

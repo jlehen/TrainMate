@@ -553,6 +553,7 @@ def run_workout_compare(args: argparse.Namespace) -> None:
         history_days=history_days,
         minor_activity_load_threshold=config.minor_activity_load_threshold,
         covered_ranges=covered_ranges,
+        pending_from=today_str,
     )
 
     sport_filter = (getattr(args, 'sport_type', None) or "").lower() or None
@@ -634,6 +635,8 @@ def run_workout_compare(args: argparse.Namespace) -> None:
                     print(f"  ACTUAL:     {red(act_str)} {bold(red('[REST VIOLATION]'))}")
                 else:
                     print(f"  ACTUAL:     {green(act_str)}")
+            elif r.get('pending'):
+                print(f"  ACTUAL:     {gray('(not yet — still ahead today)')}")
             elif not is_rest:
                 print(f"  ACTUAL:     {red('(none — missed)')}")
 

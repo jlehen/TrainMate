@@ -687,6 +687,8 @@ function renderCompare(data) {
                 const cls = r.rest_violation ? "actual-bad" : "actual-good";
                 const tag = r.rest_violation ? ` <strong class="actual-bad">[REST VIOLATION]</strong>` : "";
                 html += `<div class="compare-line"><span class="compare-label">ACTUAL</span> <span class="${cls}">${act}</span>${tag}</div>`;
+            } else if (r.pending) {
+                html += `<div class="compare-line"><span class="compare-label">ACTUAL</span> <span class="actual-muted">(not yet — still ahead today)</span></div>`;
             } else if (!r.is_rest) {
                 html += `<div class="compare-line"><span class="compare-label">ACTUAL</span> <span class="actual-bad">(none — missed)</span></div>`;
             }

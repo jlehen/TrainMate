@@ -692,10 +692,18 @@ class TestCliWorkouts(unittest.TestCase):
     def test_workout_compare(self):
         today = datetime.now(timezone.utc).date()
         yesterday = today - timedelta(days=1)
+        two_days_ago = today - timedelta(days=2)
         yesterday_str = yesterday.strftime("%Y-%m-%d")
+        two_days_ago_str = two_days_ago.strftime("%Y-%m-%d")
         today_str = today.strftime("%Y-%m-%d")
 
-        # Planned run yesterday (will be matched), planned run today (missed)
+        # A run two days ago never done (a real miss — that day is over), a run
+        # yesterday that was (will be matched), and a run today not done YET, which
+        # is pending rather than missed: the day has not finished.
+        test_db.save_workout(
+            date=two_days_ago_str, sport_type="running", title="Skipped Run",
+            description="40 mins", duration_minutes=40, rpe=5, tss=30,
+        )
         test_db.save_workout(
             date=yesterday_str, sport_type="running", title="Easy Run",
             description="30 mins", duration_minutes=30, rpe=4, tss=20,
@@ -720,15 +728,18 @@ class TestCliWorkouts(unittest.TestCase):
             tss=20.0,
         )
 
-        exit_code, stdout, stderr = self.run_cli(["workout", "compare", "-d", "2d"])
+        exit_code, stdout, stderr = self.run_cli(["workout", "compare", "-d", "3d"])
         self.assertEqual(exit_code, 0)
         self.assertIn("=== WORKOUT COMPARE ===", stdout)
         self.assertIn("Easy Run", stdout)
         self.assertIn("Morning Run", stdout)
         self.assertIn("Tempo Run", stdout)
+        # The finished day reads as a miss; today's untrained session does not.
         self.assertIn("(none — missed)", stdout)
+        self.assertIn("(not yet — still ahead today)", stdout)
         self.assertIn("=== DISCREPANCIES ===", stdout)
-        self.assertIn("Complete Miss", stdout)
+        self.assertIn("Complete Miss! Missed planned workout 'Skipped Run'", stdout)
+        self.assertNotIn("Tempo Run' (running)", stdout)
 
         # Date range with no data → empty message
         exit_code, stdout, stderr = self.run_cli([
