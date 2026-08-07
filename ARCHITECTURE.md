@@ -253,7 +253,8 @@ classes themselves.
 |                      |                      | (DESIGN_intensity_distribution.md).              |
 | `util.py`            | —                    | ANSI color helpers (`bold`, `green`, `red`, …),  |
 |                      |                      | `cmd` (every "run X" call to action), `wrap_text`,|
-|                      |                      | `format_labeled_text`, `strip_ansi`.             |
+|                      |                      | `format_labeled_text`, `strip_ansi`, `Progress`  |
+|                      |                      | (self-erasing bar, silent off a terminal).       |
 
 ### Change recipes (where to edit for a given task)
 

@@ -1,6 +1,7 @@
 import base64
+from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
-from typing import Any, List, Optional
+from typing import Any, Iterator, List, Optional
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
@@ -18,6 +19,22 @@ CALENDAR_SYNC_PAGE_SIZE = 250
 # Tag stamped on every workout event we write, and the only handle on ownership left
 # once the rows that referenced the events are gone (see `list_workout_events`).
 WORKOUT_EVENT_TAG = "TrainMate"
+
+
+# Whether each event write announces itself. Callers that push a whole batch render a
+# count and a progress bar instead, and silence the per-event lines with `quiet_events()`.
+_event_log: bool = True
+
+
+@contextmanager
+def quiet_events() -> Iterator[None]:
+    """Silences the per-event 'Created'/'Deleted' lines; warnings and errors still print."""
+    global _event_log
+    was, _event_log = _event_log, False
+    try:
+        yield
+    finally:
+        _event_log = was
 
 
 def event_url(event_id: Optional[str], calendar_id: Optional[str]) -> Optional[str]:
@@ -299,9 +316,10 @@ class CalendarSyncer:
                 body=event_body
             ).execute()
             new_event_id = created_event.get('id')
-            print(
-                f"Created new calendar event for {date_str} ({sport_type})."
-            )
+            if _event_log:
+                print(
+                    f"Created new calendar event for {date_str} ({sport_type})."
+                )
             
             # Record the push: store the new event handle + the signature of what we
             # just pushed, so the row derives as `synced` until edited again.
@@ -523,7 +541,8 @@ class CalendarSyncer:
                 calendarId=self.calendar_id,
                 eventId=google_event_id
             ).execute()
-            print(f"Deleted Google Calendar event {google_event_id}.")
+            if _event_log:
+                print(f"Deleted Google Calendar event {google_event_id}.")
             return True
         except Exception as e:
             print(f"Warning: Failed to delete Google Calendar event {google_event_id}: {e}")

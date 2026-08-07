@@ -1,13 +1,28 @@
+from contextlib import contextmanager
 from datetime import date, datetime, timedelta
-from typing import Any, List, Optional, Tuple, Dict
+from typing import Any, Iterator, List, Optional, Tuple, Dict
 from trainmate.config import config
 from trainmate.types import Constraint, Workout
 from trainmate.adherence import analyze_adherence
 from trainmate.coach.proposals import GenerateProposal
 from trainmate.sports import canonical_sport
 from trainmate import intensity
-from trainmate.util import green, yellow, red, cmd
+from trainmate.util import green, yellow, red, cmd, Progress
 import trainmate.coach.service as _svc
+
+
+@contextmanager
+def _calendar_progress(total: int, verbose: bool) -> Iterator[Progress]:
+    """A batch of Calendar writes under one summary line and a bar; -v keeps the
+    per-event lines instead (and no bar, so they scroll undisturbed)."""
+    if verbose:
+        yield Progress(0)
+        return
+    # Imported here, not at module load: importing google_calendar builds the syncer
+    # singleton, which needs credentials (see runtime._build_calendar_syncer).
+    from trainmate.google_calendar import quiet_events
+    with quiet_events(), Progress(total) as bar:
+        yield bar
 
 
 class WorkoutGenMixin:
@@ -250,22 +265,44 @@ class WorkoutGenMixin:
                     f"fitness test keeps your zones calibrated."
                 ))
 
-    def _archive_and_teardown(self, from_date: str) -> List[Workout]:
+    def _archive_and_teardown(self, from_date: str, verbose: bool = False) -> List[Workout]:
         """Archives every live workout from `from_date` on and deletes their Calendar events.
 
         The displaced rows keep their `macrocycle_id` tag and share one `archived_at` batch
         stamp, so a later rollback can resurrect exactly this set (DESIGN_plan_rollback.md).
         Returns the rows as they were before archival."""
         archived = self._db.archive_future_workouts(from_date)
-        for ew in archived:
-            if ew.get('google_event_id'):
+        if not archived:
+            return archived
+        print(yellow(
+            f"Removing {len(archived)} previously planned workout(s) from Google Calendar..."
+        ))
+        stale = [ew for ew in archived if ew.get('google_event_id')]
+        with _calendar_progress(len(stale), verbose) as bar:
+            for ew in stale:
                 try:
                     self._calendar_syncer.delete_workout_event(ew['google_event_id'])
                 except Exception as e:
                     print(red(f"Error deleting Google Calendar event: {e}"))
+                bar.step()
         return archived
 
-    def workout_rollback(self, batch: Optional[str] = None) -> Dict[str, Any]:
+    def _push_batch(self, workouts: List[Workout], message: str, verbose: bool) -> None:
+        """Pushes a whole batch to Calendar under one summary line, bar or per-event lines."""
+        if not workouts:
+            return
+        print(green(message))
+        with _calendar_progress(len(workouts), verbose) as bar:
+            try:
+                for w in workouts:
+                    self._calendar_syncer.sync_workout(w)
+                    bar.step()
+            except Exception as e:
+                print(red(f"Error syncing to Google Calendar: {e}"))
+
+    def workout_rollback(
+        self, batch: Optional[str] = None, verbose: bool = False
+    ) -> Dict[str, Any]:
         """Restores a previously archived batch of workouts, undoing a regeneration.
 
         The sibling of `plan_rollback` on the workout axis: it swaps the live upcoming
@@ -302,13 +339,13 @@ class WorkoutGenMixin:
                 f"{target['last_date']}) is in the past — there is nothing to restore."
             )
 
-        archived = self._archive_and_teardown(today_str)
+        archived = self._archive_and_teardown(today_str, verbose)
         restored = self._db.restore_workout_batch(target['archived_at'], today_str)
-        if restored:
-            try:
-                self._calendar_syncer.sync_multiple(restored)
-            except Exception as e:
-                print(red(f"Error syncing to Google Calendar: {e}"))
+        self._push_batch(
+            restored,
+            f"Restoring {len(restored)} archived workout(s) in Google Calendar...",
+            verbose,
+        )
 
         return {
             'batch': target['archived_at'],
@@ -498,19 +535,16 @@ class WorkoutGenMixin:
             gen_start=gen_start_str,
         )
 
-    def workout_generate_apply(self, proposal: GenerateProposal) -> List[Workout]:
+    def workout_generate_apply(
+        self, proposal: GenerateProposal, verbose: bool = False
+    ) -> List[Workout]:
         """Commits an accepted `workout generate` proposal: archive, save, push.
 
         Archives (rather than deletes) the displaced plan's future workouts so they can be
         resurrected by `plan rollback` / `workout rollback` (DESIGN_plan_rollback.md), then
         saves the proposed sessions and pushes them to Calendar eagerly, so the calendar
         always mirrors the active plan. Returns the persisted rows."""
-        if proposal.displaced:
-            print(yellow(
-                f"Removing {len(proposal.displaced)} previously planned workout(s) from "
-                "Google Calendar..."
-            ))
-        self._archive_and_teardown(proposal.gen_start)
+        self._archive_and_teardown(proposal.gen_start, verbose)
 
         saved_workouts: List[Workout] = []
         for w in proposal.workouts:
@@ -538,12 +572,9 @@ class WorkoutGenMixin:
             # the same lifecycle footer a later re-push would (created_at, original load).
             saved_workouts.append(self._db.get_workout_by_id(wid))
 
-        if saved_workouts:
-            print(green(
-                f"Creating {len(saved_workouts)} new workout(s) in Google Calendar..."
-            ))
-            try:
-                self._calendar_syncer.sync_multiple(saved_workouts)
-            except Exception as e:
-                print(red(f"Error syncing to Google Calendar: {e}"))
+        self._push_batch(
+            saved_workouts,
+            f"Creating {len(saved_workouts)} new workout(s) in Google Calendar...",
+            verbose,
+        )
         return saved_workouts

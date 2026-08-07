@@ -314,7 +314,9 @@ def run_workout_generate(args: argparse.Namespace) -> None:
         print(yellow("Workouts discarded — your current plan is unchanged."))
         return
 
-    saved = runtime.coach_service.workout_generate_apply(proposal)
+    saved = runtime.coach_service.workout_generate_apply(
+        proposal, verbose=getattr(args, 'verbose', False)
+    )
     print(green(
         f"\nScheduled {len(saved)} workout(s) from {fmt_date(proposal.gen_start)}."
     ))
@@ -439,7 +441,9 @@ def run_workout_rollback(args: argparse.Namespace) -> None:
             return
 
     try:
-        result = runtime.coach_service.workout_rollback(batch=target['archived_at'])
+        result = runtime.coach_service.workout_rollback(
+            batch=target['archived_at'], verbose=getattr(args, 'verbose', False)
+        )
     except ValueError as e:
         print(red(str(e)))
         return

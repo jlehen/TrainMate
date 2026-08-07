@@ -1,9 +1,10 @@
+import io
 import os
 import unittest
 from unittest.mock import patch
 from trainmate.util import (
     wrap_text, visible_len, pad_visible, color_load_ratio, format_labeled_text,
-    yellow,
+    yellow, Progress,
 )
 
 
@@ -79,6 +80,37 @@ class TestUtils(unittest.TestCase):
             formatted_colored = format_labeled_text(label, text, width=40, color_fn=yellow)
         self.assertIn("\033[33mThis is a daily adaptation", formatted_colored)
         self.assertIn("values are drop.\033[0m", formatted_colored)
+
+
+class TestProgress(unittest.TestCase):
+    class _Tty(io.StringIO):
+        def isatty(self) -> bool:
+            return True
+
+    def test_bar_draws_on_a_terminal_and_erases_itself(self):
+        out = self._Tty()
+        with patch("sys.stdout", out):
+            with Progress(2) as bar:
+                bar.step()
+                bar.step()
+        written = out.getvalue()
+        self.assertIn("1/2", written)
+        self.assertIn("2/2", written)
+        # Nothing survives on the line: the summary above the bar is the only trace left.
+        self.assertTrue(written.endswith("\r\033[K"))
+
+    def test_silent_when_not_a_terminal_or_empty(self):
+        out = io.StringIO()
+        with patch("sys.stdout", out):
+            with Progress(3) as bar:
+                bar.step()
+        self.assertEqual(out.getvalue(), "")
+
+        tty = self._Tty()
+        with patch("sys.stdout", tty):
+            with Progress(0) as bar:
+                bar.step()
+        self.assertEqual(tty.getvalue(), "")
 
 
 class TestWrapWidth(unittest.TestCase):

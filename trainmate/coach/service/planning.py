@@ -7,7 +7,7 @@ from trainmate.coach.proposals import PlanFingerprints
 from trainmate.adherence import planned_load
 from trainmate.sports import canonical_sport
 from trainmate.util import (
-    cyan, yellow, bold, red, cmd, wrap_text, format_labeled_block, default_wrap_width,
+    cyan, yellow, bold, cmd, wrap_text, format_labeled_block, default_wrap_width,
 )
 import trainmate.coach.service as _svc
 
@@ -450,11 +450,11 @@ class PlanningMixin:
 
         # 3. Resurrect the restored version's workouts and re-push them.
         restored = self._db.restore_macrocycle_workouts(target['id'], today_str)
-        if restored:
-            try:
-                self._calendar_syncer.sync_multiple(restored)
-            except Exception as e:
-                print(red(f"Error syncing to Google Calendar: {e}"))
+        self._push_batch(
+            restored,
+            f"Restoring {len(restored)} archived workout(s) in Google Calendar...",
+            verbose=False,
+        )
 
         return {
             'objective': objective,

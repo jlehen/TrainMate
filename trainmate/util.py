@@ -214,6 +214,48 @@ def pad_visible(s: str, width: int, align_left: bool = True) -> str:
         return padding + s
 
 
+class Progress:
+    """A single self-erasing '[####....] 7/28' line for a loop whose only other option is
+    one printed line per item (the Calendar round-trips of generate/rollback).
+
+    Silent unless stdout is a terminal, so piped output, the bot and the tests keep just
+    the summary line that introduced it. Usable as a context manager, which erases the
+    line on the way out."""
+
+    BAR_WIDTH = 24
+
+    def __init__(self, total: int) -> None:
+        self.total = total
+        self.done_count = 0
+        self.active = total > 0 and sys.stdout.isatty()
+        self._draw()
+
+    def __enter__(self) -> "Progress":
+        return self
+
+    def __exit__(self, *exc) -> None:
+        self.close()
+
+    def step(self, n: int = 1) -> None:
+        self.done_count = min(self.total, self.done_count + n)
+        self._draw()
+
+    def close(self) -> None:
+        """Erases the bar, leaving the surrounding output as if it never drew."""
+        if self.active:
+            sys.stdout.write("\r\033[K")
+            sys.stdout.flush()
+            self.active = False
+
+    def _draw(self) -> None:
+        if not self.active:
+            return
+        filled = round(self.BAR_WIDTH * self.done_count / self.total)
+        bar = "#" * filled + "." * (self.BAR_WIDTH - filled)
+        sys.stdout.write(f"\r\033[K  [{bar}] {self.done_count}/{self.total}")
+        sys.stdout.flush()
+
+
 def is_narrow_client() -> bool:
     """True when the CLI is driven by a narrow front-end (e.g. the Telegram bot)
     that asked for a tight wrap width via TRAINMATE_WRAP_WIDTH.

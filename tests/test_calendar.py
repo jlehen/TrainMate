@@ -626,6 +626,30 @@ class TestCalendarSync(unittest.TestCase):
         self.assertNotIn("pageToken", first_kwargs)
         self.assertEqual(second_kwargs.get("pageToken"), "page-2")
 
+    def test_quiet_events_silences_per_event_lines_but_not_failures(self):
+        """`quiet_events` hides the routine 'Created'/'Deleted' lines a batch push would
+        repeat per session; failures stay visible, and the flag is restored on exit."""
+        from trainmate.google_calendar import quiet_events
+
+        mock_service = MagicMock()
+        with patch.object(calendar_syncer, "service", mock_service), \
+                patch.object(calendar_syncer, "calendar_id", "cal-test"):
+            with quiet_events():
+                with patch("builtins.print") as quiet_print:
+                    calendar_syncer.delete_event("evt-a")
+                mock_service.events().delete.return_value.execute.side_effect = (
+                    RuntimeError("boom")
+                )
+                with patch("builtins.print") as failure_print:
+                    calendar_syncer.delete_event("evt-b")
+            mock_service.events().delete.return_value.execute.side_effect = None
+            with patch("builtins.print") as loud_print:
+                calendar_syncer.delete_event("evt-c")
+
+        quiet_print.assert_not_called()
+        self.assertIn("boom", failure_print.call_args.args[0])
+        self.assertIn("evt-c", loud_print.call_args.args[0])
+
 
 if __name__ == "__main__":
     unittest.main()

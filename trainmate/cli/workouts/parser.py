@@ -116,6 +116,11 @@ def add_workout_parser(subparsers, pull_bypass_parser, llm_debug_parser):
         help="Skip the confirmation prompts (spending the LLM call, applying the "
              "proposed workouts, and the out-of-date-plan warning)"
     )
+    p_w_gen.add_argument(
+        "-v", "--verbose", action="store_true",
+        help="Name each Calendar event as it is deleted and created, instead of the "
+             "progress bar"
+    )
     # Generation always starts today, so only the END of the resolved window is used as the
     # horizon; the selectors are grouped because a horizon is one choice, not several. `-M`
     # doubles as the tiebreaker when two plans cover the same days.
@@ -150,6 +155,11 @@ def add_workout_parser(subparsers, pull_bypass_parser, llm_debug_parser):
     )
     w_rollback.add_argument(
         "-y", "--yes", action="store_true", help="Skip confirmation prompt"
+    )
+    w_rollback.add_argument(
+        "-v", "--verbose", action="store_true",
+        help="Name each Calendar event as it is deleted and created, instead of the "
+             "progress bar"
     )
 
     # workout batches

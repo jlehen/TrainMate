@@ -614,7 +614,7 @@ class TestPeriodization(unittest.TestCase):
         self.assertEqual(result["restored_workouts"], 1)
         self.assertEqual(result["archived_workouts"], 1)
         # The restored workout was re-pushed to Calendar.
-        self.assertTrue(mock_calendar.sync_multiple.called)
+        self.assertTrue(mock_calendar.sync_workout.called)
 
     @patch("trainmate.coach.engine.openrouter_client")
     def test_plan_rollback_without_history_raises(self, mock_client):
@@ -683,7 +683,7 @@ class TestPeriodization(unittest.TestCase):
         )
         self.assertEqual(result["restored_workouts"], 1)
         self.assertEqual(result["archived_workouts"], 1)
-        self.assertTrue(mock_calendar.sync_multiple.called)
+        self.assertTrue(mock_calendar.sync_workout.called)
 
     @patch("trainmate.runtime.calendar_syncer")
     @patch("trainmate.coach.engine.openrouter_client")

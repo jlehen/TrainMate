@@ -842,6 +842,11 @@ class TestCliWorkouts(unittest.TestCase):
         self.assertEqual(
             mock_coach.workout_rollback.call_args.kwargs.get("batch"), stamp
         )
+        # Calendar chatter is off by default (a count and a progress bar stand in for it)
+        # and -v turns the per-event lines back on.
+        self.assertFalse(mock_coach.workout_rollback.call_args.kwargs.get("verbose"))
+        self.run_cli(["workout", "rollback", "-y", "-v"])
+        self.assertTrue(mock_coach.workout_rollback.call_args.kwargs.get("verbose"))
 
     @patch("trainmate.cli.workouts.generate.ensure_recent_data")
     @patch("trainmate.runtime.prompt")
@@ -947,6 +952,10 @@ class TestCliWorkouts(unittest.TestCase):
         self.assertEqual(exit_code, 0)
         self.assertIs(mock_coach.workout_generate_apply.call_args.args[0], proposal)
         self.assertIn("Scheduled 1 workout(s)", stdout)
+        # Same verbosity contract as rollback: quiet by default, per-event lines under -v.
+        self.assertFalse(mock_coach.workout_generate_apply.call_args.kwargs["verbose"])
+        self.run_cli(["workout", "generate", "-v"])
+        self.assertTrue(mock_coach.workout_generate_apply.call_args.kwargs["verbose"])
 
     @patch("trainmate.cli.workouts.generate.ensure_recent_data")
     @patch("trainmate.runtime.prompt")
