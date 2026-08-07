@@ -419,7 +419,7 @@ class TestBenchmarkPlacementGuards(unittest.TestCase):
         ]
         _, out = self._capture(
             coach_service._warn_missing_boundary_benchmarks,
-            workouts, [], macro_id, "2026-08-03",
+            workouts, [], test_db.get_mesocycles_for_macrocycle(macro_id), "2026-08-03",
         )
         self.assertIn("No benchmark scheduled in the boundary week of 'Base 1'", out)
         self.assertIn("2026-08-24 to 2026-08-30", out)
@@ -433,7 +433,7 @@ class TestBenchmarkPlacementGuards(unittest.TestCase):
         ]
         _, out = self._capture(
             coach_service._warn_missing_boundary_benchmarks,
-            workouts, [], macro_id, "2026-08-03",
+            workouts, [], test_db.get_mesocycles_for_macrocycle(macro_id), "2026-08-03",
         )
         self.assertEqual(out, "")
 
@@ -446,7 +446,7 @@ class TestBenchmarkPlacementGuards(unittest.TestCase):
         }]
         _, out = self._capture(
             coach_service._warn_missing_boundary_benchmarks,
-            workouts, rest, macro_id, "2026-08-03",
+            workouts, rest, test_db.get_mesocycles_for_macrocycle(macro_id), "2026-08-03",
         )
         self.assertEqual(out, "")
 
@@ -473,7 +473,7 @@ class TestBenchmarkPlacementGuards(unittest.TestCase):
                     for d in ("2026-09-18", "2026-09-25", "2026-09-30")]
         _, out = self._capture(
             coach_service._warn_missing_boundary_benchmarks,
-            workouts, [], macro_id, "2026-08-31",
+            workouts, [], test_db.get_mesocycles_for_macrocycle(macro_id), "2026-08-31",
         )
         self.assertIn("boundary week of 'Specific'", out)
         self.assertNotIn("Taper", out)
@@ -496,7 +496,7 @@ class TestBenchmarkPlacementGuards(unittest.TestCase):
         ]
         _, out = self._capture(
             coach_service._warn_missing_boundary_benchmarks,
-            workouts, [], macro_id, "2026-08-27",
+            workouts, [], test_db.get_mesocycles_for_macrocycle(macro_id), "2026-08-27",
         )
         self.assertEqual(out, "")
 
@@ -515,7 +515,7 @@ class TestBenchmarkPlacementGuards(unittest.TestCase):
         ]
         _, out = self._capture(
             coach_service._warn_missing_boundary_benchmarks,
-            workouts, [], macro_id, "2026-08-27",
+            workouts, [], test_db.get_mesocycles_for_macrocycle(macro_id), "2026-08-27",
         )
         self.assertIn("No benchmark scheduled in the boundary week of 'Base 1'", out)
 
@@ -526,7 +526,7 @@ class TestBenchmarkPlacementGuards(unittest.TestCase):
         workouts = [{"date": "2026-08-05", "sport_type": "cycling", "title": "Z2"}]
         _, out = self._capture(
             coach_service._warn_missing_boundary_benchmarks,
-            workouts, [], macro_id, "2026-08-03",
+            workouts, [], test_db.get_mesocycles_for_macrocycle(macro_id), "2026-08-03",
         )
         self.assertEqual(out, "")
 

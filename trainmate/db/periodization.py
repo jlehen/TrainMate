@@ -165,6 +165,64 @@ class PeriodizationMixin:
             )
             return [dict(row) for row in cursor.fetchall()]  # type: ignore
 
+    def get_mesocycles_in_range(self, start_date: str, end_date: str) -> List[Mesocycle]:
+        """Every active mesocycle overlapping the window, chronologically.
+
+        The date-keyed counterpart of get_mesocycles_for_macrocycle: which blocks govern
+        these days, asked without naming a goal or a plan version
+        (DESIGN_cli_selectors.md §8). Same active-objective/active-version filter as
+        get_active_mesocycle, so the two never disagree about what is live.
+        """
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT m.* FROM mesocycles m
+                JOIN macrocycles mac ON m.macrocycle_id = mac.id
+                JOIN objectives o ON mac.objective_id = o.id
+                WHERE o.status = 'active' AND COALESCE(mac.status, 'active') = 'active'
+                  AND m.start_date <= ? AND m.end_date >= ?
+                ORDER BY m.start_date ASC, m.id ASC
+            """, (end_date, start_date))
+            return [dict(row) for row in cursor.fetchall()]  # type: ignore
+
+    def get_governing_mesocycles(
+        self, start_date: str, end_date: str, prefer_macro_id: Optional[int] = None
+    ) -> Tuple[List[Mesocycle], List[int]]:
+        """The blocks that govern a window, plus the macrocycle IDs dropped as conflicts.
+
+        Sequential plans both survive — a long span legitimately crosses from one goal's
+        last block into the next goal's first — but two plans covering the *same* dates
+        cannot both be followed, so the most recently created wins, the same tiebreak
+        get_periodization_ids_for_date makes per day. `prefer_macro_id` settles that
+        contest by hand instead.
+
+        Falls back to get_active_mesocycle's own chain when nothing overlaps, so a plan
+        that starts after the window (or ended before it) still answers rather than
+        leaving the caller with no plan at all.
+        """
+        mesos = self.get_mesocycles_in_range(start_date, end_date)
+        if not mesos:
+            fallback = self.get_active_mesocycle(start_date)
+            return ([fallback] if fallback else []), []
+
+        spans: Dict[int, Tuple[str, str]] = {}
+        for m in mesos:
+            mid = m['macrocycle_id']
+            start, end = spans.get(mid, (m['start_date'], m['end_date']))
+            spans[mid] = (min(start, m['start_date']), max(end, m['end_date']))
+
+        kept: List[int] = []
+        dropped: List[int] = []
+        # Newest plan first, unless one was named; a plan is dropped only when it fights
+        # an already-kept plan for the same days.
+        for mid in sorted(spans, key=lambda i: (i == prefer_macro_id, i), reverse=True):
+            start, end = spans[mid]
+            if any(start <= spans[k][1] and end >= spans[k][0] for k in kept):
+                dropped.append(mid)
+            else:
+                kept.append(mid)
+        return [m for m in mesos if m['macrocycle_id'] in kept], sorted(dropped)
+
     def get_mesocycle_ranges(self, start_date: str, end_date: str) -> List[Tuple[str, str]]:
         """Returns the (start_date, end_date) spans of all mesocycles overlapping the
         given window, across every objective regardless of status.

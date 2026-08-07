@@ -30,7 +30,8 @@ The fatigue signal is not actually lost, though — it travels a different path.
 `workout_generate` reads the same `metrics_lookback_days` window (metrics, completed
 activities, baseline), so regenerating the next block against current metrics closes the loop.
 The real failure mode is **staleness**: a block generated far ahead (e.g. `workout generate
---until-goal` laying down a whole macrocycle) is never re-read against the athlete's present
+-g` laying down a whole macrocycle — the natural reading of that flag since
+DESIGN_cli_selectors.md §8, so this is now the easy thing to ask for) is never re-read against the athlete's present
 state, and `adapt` cannot reach it to say so.
 
 ## 2. Why adapt does not reach across the boundary

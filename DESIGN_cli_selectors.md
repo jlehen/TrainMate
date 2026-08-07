@@ -118,7 +118,7 @@ The renames that rule forced:
   which is what §a2 of DESIGN_cli_noargs.md says a command's subject should be anyway;
 * `goal edit --date` → `--target-date`.
 
-Three deliberate exceptions, each because the command cannot mean the reserved thing:
+Two deliberate exceptions, each because the command cannot mean the reserved thing:
 
 * **`workout adapt -m`** stays `--message`, and **`context add`** takes no `-m`/`-M`: both
   act on days, not on blocks, so a mesocycle is not a slice they could take. `-d` there is
@@ -127,10 +127,10 @@ Three deliberate exceptions, each because the command cannot mean the reserved t
   not a filter. The line: a command that acts over a span of days takes `-d` (`context add`
   writes one row per day); a command that writes one row whose own columns are a start and
   an end keeps those columns as named flags.
-* **`workout generate --until-goal [ID]`** survives because a goal's target date is not a
-  window's end (§2) — and because `-g` on `generate` is the *target* goal it plans for, not
-  a filter. Generation always starts today, so it takes the **end** of whatever `-d`/`-m`
-  resolve to and ignores the start.
+
+There used to be a third: `workout generate --until-goal [ID]`, kept because `-g` there
+meant the *target goal* rather than a window. §8 retired both the exception and the flag —
+`-g` on `generate` now means what it means everywhere else.
 
 `progress -w/--weeks N` is untouched: it means "N weeks either side of today", a symmetric
 zoom rather than a range, and `--weeks` no longer exists anywhere else to collide with.
@@ -149,12 +149,103 @@ works in chat too.
 ## §7 — What this replaced
 
 Four resolvers became one (`resolve_window`); `_resolve_workout_date_range`,
-`_resolve_historical_date_range` and `resolve_cleanup_range` are gone, and
-`_resolve_workout_end_date` is now only the `--until-goal` special case plus a call to the
-shared one. The `basic_date_parser` / `plan_date_parser` / `sport_type_parser` parent
+`_resolve_historical_date_range`, `resolve_cleanup_range` and (with §8)
+`_resolve_workout_end_date` are all gone. The `basic_date_parser` / `plan_date_parser` /
+`sport_type_parser` parent
 parsers in trainmate_cli.py are gone too: a parent parser cannot carry a per-command
 default, which is exactly what each command needed.
 
 `coach_service.data_bootstrap`/`data_reflect` lost their `days=`/`weeks=` parameters. A
 relative span is a CLI spelling, and resolving it twice — once in the selector, once in the
 service — is how the two ends drift apart.
+
+## §8 — `workout generate`: the plan follows the dates, not a goal
+
+The last exception in §5 was `-g` on `workout generate` meaning "the goal to plan for".
+Tracing what that goal was actually *used* for closed the exception rather than defending
+it.
+
+### The goal was an indirection, not an input
+
+In `workout_generate`, the resolved goal fed exactly one call —
+`get_macrocycle_for_objective(goal['id'])` — and was never read again. Everything
+downstream keyed off the macrocycle: its `strategy` and mesocycle list built the prompt,
+its `id` tagged every saved workout and drove the boundary-benchmark check, and where the
+goal's *target date* was needed later it was fetched back **through** the macrocycle
+(`_goal_date_for_macrocycle`), walking the same 1:1 link in reverse.
+
+Nor did `-g` narrow what the coach saw about the athlete's goals: the prompt is built from
+`upcoming_objectives()` regardless. Its whole effect was swapping which strategy string
+got attached.
+
+This was history, not design. `macrocycles.objective_id` points at the anchor table, and
+when generation was written there was no macrocycle-facing selector — `-M` and plan
+versions arrived later with DESIGN_plan_rollback.md. `-g` was the pre-`-M` spelling of
+"which plan", left in place after the concept got its own flag.
+
+### Even the macrocycle is the wrong key
+
+What shapes a generated week is the **mesocycle covering those dates**. The rest of the
+app already knew this: `get_active_mesocycle(date)`, `get_next_mesocycle(date)` and
+`get_mesocycle_ranges(start, end)` are all date-keyed, and `workout adapt`, the block
+progress context, the block-boundary hint and `workout compare` reach their blocks that
+way without naming a goal. Generation was the one command routing through an objective to
+reach blocks a date lookup finds directly.
+
+The symptom was in the prompt. `_get_active_strategy_and_meso_text` listed **every**
+mesocycle in the macrocycle, including blocks that ended months ago, and the task text
+asked the model to work out "the active mesocycle block(s) the athlete is in during this
+period" for itself.
+
+### The rule
+
+`db.get_governing_mesocycles(start, end, prefer_macro_id=None)` answers "which blocks
+govern these days", and both the CLI's staleness check and `workout_generate` read through
+it. The blocks reach the prompt through the shared assembler: `_coach_context(constraints,
+blocks=…)` takes its strategy text from them instead of from a goal's macrocycle, so the
+date-keyed path is a parameter of the one context builder rather than a second way to
+assemble a prompt. The rule itself:
+
+* **Sequential plans both survive.** A long horizon legitimately runs out of one goal's
+  last block into the next goal's first; dropping either would leave those weeks
+  unplanned.
+* **Plans covering the same dates cannot both be followed**, so the most recently
+  generated one wins — the same tiebreak `get_periodization_ids_for_date` already made per
+  day. The loser is named on stdout rather than silently discarded.
+* **`-M ID` settles that contest by hand.** It is the tiebreaker, not a filter: a bare
+  `-M` (or a range) names no single winner and leaves the recency rule alone.
+* **Nothing overlapping falls back** to `get_active_mesocycle`'s own chain, so a plan that
+  ended before the window — or starts after it — still answers. "No strategy" now means
+  there genuinely is none.
+
+Two things follow that the goal-keyed version could not express. `macrocycle_id` is
+stamped **per workout** from the block covering its date, so a span crossing a plan
+boundary tags each session with the plan it belongs to (`plan rollback` accounting keys off
+that column). And a horizon reaching past the last block is *visible*: generation says the
+plan runs out on X, where before it just produced weeks with no block behind them.
+
+### What `-g` means now
+
+The horizon, like every other selector: generation always starts today, so it takes the
+**end** of whatever `-d`/`-m`/`-M`/`-g` resolves to. `-g` is a goal's plan-start-through-
+target-date span (§2), whose end is race day — so `workout generate -g` generates the whole
+plan, and `--until-goal` is retired into it. `-d 4w` still asks for four weeks, and `-g 7
+-d 4w` cannot be spelled at all: the flags share a mutually exclusive group, because a
+horizon is one choice.
+
+The staleness warning moved with it. It used to check the plan of the earliest upcoming
+goal; it now checks every plan governing the horizon, so a span crossing two of them warns
+about both.
+
+### The cost this leaves standing
+
+Generating a whole macrocycle in one call is now the easy thing to ask for, and
+DESIGN_block_boundary.md §1 names the price: sessions laid down months ahead are planned
+against today's metrics, never re-read against the athlete's present state, and `adapt` is
+firewalled inside the current block and cannot say so. That was already true of
+`--until-goal`; making it the natural reading of `-g` does not make it safer. The plan-end
+warning above is a nudge in the other direction, not a fix.
+
+`workout adapt` still resolves its strategy text the old way, through
+`_get_active_strategy_and_meso_text`. It is already date-scoped to one block, so the
+indirection costs it less; converting it is a separate change.

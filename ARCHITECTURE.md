@@ -1349,7 +1349,7 @@ single read-only view that is its whole state (`model`), which acts bare instead
 | `progress`   | `[SPORT ...]` | `pr`    | Show the progress timeline: measured load to date, plan-projected forward (CTL/ATL/TSB), weekly planned-vs-actual bars (`-w/--weeks N`, `--chart [PATH]` for a PNG; DESIGN_progress_timeline.md). `-z`/`--zones` (implied by naming a sport) adds one weekly time-in-zone table per sport — measured behind today, prescribed ahead of it (`--blocks` for block grain, `--power`/`--hr` to force the currency; DESIGN_intensity_distribution.md §9.6/§9.8). The sport argument scopes the **zone tables only**: CTL/ATL/TSB, the projection and the load table stay whole-athlete |
 | `workout`    | `list`       | `w l`    | Show planned workouts. Defaults to a 7-day window from today. Positional `TARGET…` (workout IDs and/or date selectors, e.g. `wo li 12 15 -v`) plus the shared selectors `-d`/`-m`/`-M`/`-g` and `-t/--type TYPE`, `--removed` (DESIGN_cli_selectors.md). |
 | `workout`    | `compare`    | `w c`    | Compare planned vs completed (`analyze_adherence()`): prints PLANNED/ACTUAL per day, flags misses (red), rest violations (red), unplanned high-load (yellow), then a discrepancy summary. Same selectors as `workout list`; default 14-day lookback; a bare span (`-d 7d`) looks *back*; end capped at today. |
-| `workout`    | `generate`   | `w g`    | Generate workouts from active strategy. No horizon flag → `config.workout_generation_span_days` ahead (28 default). Flags: `-g/--goal ID` (the goal to plan for, not a filter), `-d`/`-m` (only the END of the resolved window is used as the horizon), `--until-goal [ID]`. Eager: archives the previous plan's future workouts and pushes the new ones to Calendar immediately. |
+| `workout`    | `generate`   | `w g`    | Generate workouts from the plan blocks covering the days generated (the dates pick the plan, not a goal — DESIGN_cli_selectors.md §8). No horizon flag → `config.workout_generation_span_days` ahead (28 default). Horizon flags (mutually exclusive, only the END of the resolved window is used): `-g/--goal [ID]` = through the goal's target date, i.e. the whole plan; `-d`; `-m`; `-M` (which also settles which plan to follow where two cover the same days). Eager: archives the previous plan's future workouts and pushes the new ones to Calendar immediately. |
 | `workout`    | `rm`         | `w rm`   | Soft-remove by ID (`ID REASON`, both positional): marks `removed`, marks the Calendar event deleted; kept in DB, hidden from list/compare, shown to coach as a cancellation. |
 | `workout`    | `restore`    | `w res`  | Restore soft-removed workout by ID. Clears `removed` flags and syncs to Calendar to remove the `[Deleted]` mark. Unrelated to `workout rollback`, which restores a whole archived batch. |
 | `workout`    | `rollback`   | `w rb`   | Undo a regeneration: archive the upcoming sessions and restore a previously archived batch, re-pushing it to Calendar (`--batch N` per `workout batches`, default the most recent; `-y`). Leaves the active plan version alone — unlike `plan rollback`, so it also undoes a regeneration made under one plan (DESIGN_plan_rollback.md §9). Unrelated to `workout restore`. |
@@ -1543,17 +1543,22 @@ flag (DESIGN_pmc_fitness_fatigue.md §5.2). Forward taper projection — project
 event-day TSB over the plan's own workouts — is a deferred Phase 2 follow-up.
 
 ### Workout Generation (`workout generate`)
-1. CLI resolves the generation horizon (end date): `--until-goal [ID]` if given, else the
-   END of whatever `-d`/`-m` select (`-d 4w`, `-d ..2026-09-01`, `-m 5` — generation always
-   starts today, so a selector's start is ignored), else
-   `config.workout_generation_span_days` (default 28). See DESIGN_cli_selectors.md §5.
+1. CLI resolves the generation horizon (end date): the END of whatever `-d`/`-m`/`-M`/`-g`
+   select (`-g 7` = through goal 7's target date, i.e. the whole plan; `-d 4w`;
+   `-d ..2026-09-01`; `-m 5` — generation always starts today, so a selector's start is
+   ignored), else `config.workout_generation_span_days` (default 28). One mutually
+   exclusive group: a horizon is one choice. See DESIGN_cli_selectors.md §8.
 1b. Before spending the LLM call, the CLI confirms the replacement when live
    workouts already exist from today onward — a regen is archive-and-rebuild, not
    fill-in, so a repeat run would otherwise silently archive manual edits. The
    question names the count, span, how many were hand-added, and the new horizon.
    `-f/--force` skips it (and the out-of-date-plan warning) for unattended runs.
-2. `CoachService.workout_generate(end_date=...)` verifies a macrocycle exists,
-   computes `num_days` from `(end_date − today)`.
+2. `CoachService.workout_generate(end_date=..., prefer_macro_id=...)` computes `num_days`
+   from `(end_date − today)`, then resolves the periodization blocks governing
+   `[gen_start, gen_end]` via `db.get_governing_mesocycles` — no goal is named, the dates
+   decide (DESIGN_cli_selectors.md §8). Sequential plans both apply; two plans over the
+   same days are settled by recency (or by `-M`), and a horizon past the last block is
+   reported. Raises "run `plan generate`" when no block governs the span at all.
 3. Fetches metrics history (last `metrics_lookback_days` days) + baseline.
 3b. `_block_progress_context(today, gen_start)` builds the elapsed part of the block whose
    remainder this run is writing (DESIGN_block_progress.md). Two halves in one section:

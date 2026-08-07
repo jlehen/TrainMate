@@ -220,11 +220,12 @@ class TestSelectorVocabularyInvariants(unittest.TestCase):
     def test_the_retired_range_flags_are_gone(self):
         import trainmate_cli
         parser, _ = trainmate_cli.build_parser()
+        # `--until-goal` retired with the rest: `workout generate -g` now IS the horizon,
+        # so a goal's target date reaches generation through the shared grammar rather
+        # than through a flag of its own (DESIGN_cli_selectors.md §8).
         retired = {"--from", "--until", "--from-date", "--until-date", "--from-mesocycle",
-                   "--until-mesocycle", "--days"}
+                   "--until-mesocycle", "--days", "--until-goal"}
         for path, action in self._walk(parser):
-            # `workout generate --until-goal` survives: a goal's target date is not a
-            # window's end, so it is not a selector (DESIGN_cli_selectors.md §5).
             clash = retired & set(action.option_strings)
             self.assertFalse(clash, f"'{path}' still registers {sorted(clash)}")
 

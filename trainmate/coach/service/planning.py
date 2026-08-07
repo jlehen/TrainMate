@@ -476,10 +476,14 @@ class PlanningMixin:
                 []
             )
 
-        # Workouts are generated against the goal the plan was actually saved under, which
-        # is the next active one when no id was given.
+        # Workouts follow the blocks covering the days they land on, so the plan just
+        # saved needs no naming here — it is the newest, and therefore wins any overlap
+        # with an older goal's plan. Named explicitly all the same, so an explicit replan
+        # of one goal still settles that contest its way (DESIGN_cli_selectors.md §8).
         proposal = self.plan_generate(force=force, objective_id=objective_id)
         planned_goal = proposal['goal']
-        return self.workout_generate(
-            objective_id=planned_goal['id'] if planned_goal else objective_id
+        macro = (
+            self._db.get_macrocycle_for_objective(planned_goal['id'])
+            if planned_goal else None
         )
+        return self.workout_generate(prefer_macro_id=macro['id'] if macro else None)

@@ -318,7 +318,7 @@ class TestRenderProgress(unittest.TestCase):
         text = "\n".join(lines)
         self.assertIn("FORM today (actual)", text)
         self.assertIn("plan generated through", text)
-        self.assertIn("workout generate --until-goal", text)
+        self.assertIn("workout generate -g", text)
 
     def test_per_objective_projection_when_reached(self):
         days = [_day("2026-07-03", 55, 61, -6, "actual"),

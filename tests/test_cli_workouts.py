@@ -897,3 +897,85 @@ class TestCliWorkouts(unittest.TestCase):
             self.assertIn("Proceeding anyway (--force)", stdout)
             mock_stamp.assert_not_called()
         mock_coach.workout_generate.assert_called_once()
+
+    def _goal_with_plan(self, target_days_out: int, block_days_out: int = 20):
+        today_date = datetime.now(timezone.utc).date()
+        goal_id = test_db.add_objective(
+            title="Autumn Marathon",
+            target_date=(
+                today_date + timedelta(days=target_days_out)
+            ).strftime("%Y-%m-%d"),
+            sport_type="running", priority=1, status="active",
+        )
+        macro_id = test_db.save_macrocycle(
+            objective_id=goal_id, strategy="Build", goals_hash="g", constraints_hash="c",
+            mesocycles=[{
+                "name": "Base",
+                "start_date": today_date.strftime("%Y-%m-%d"),
+                "end_date": (
+                    today_date + timedelta(days=block_days_out)
+                ).strftime("%Y-%m-%d"),
+                "focus": "Aerobic",
+            }],
+        )
+        return goal_id, macro_id
+
+    @patch("trainmate.cli.workouts.generate.ensure_recent_data")
+    @patch("trainmate.runtime.prompt")
+    @patch("trainmate.runtime.coach_service")
+    def test_generate_g_is_the_horizon_not_a_plan_selector(
+        self, mock_coach, mock_prompt, _ensure
+    ):
+        """`-g` reads like it does everywhere else in the grammar: generate through this
+        goal's target date. It replaced `--until-goal`, and it no longer picks which plan
+        applies — the dates do that (DESIGN_cli_selectors.md §8)."""
+        mock_coach.workout_generate.return_value = ("Reasoning", [])
+        mock_coach.config_changed.return_value = None
+        goal_id, _ = self._goal_with_plan(target_days_out=100)
+        target_date = test_db.get_objective(goal_id)["target_date"]
+
+        exit_code, _, _ = self.run_cli(["workout", "generate", "-g", str(goal_id), "-f"])
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(
+            mock_coach.workout_generate.call_args.kwargs["end_date"], target_date
+        )
+
+        # Bare -g is the active goal, the same shorthand every other command gives it.
+        mock_coach.workout_generate.reset_mock()
+        exit_code, _, _ = self.run_cli(["workout", "generate", "-g", "-f"])
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(
+            mock_coach.workout_generate.call_args.kwargs["end_date"], target_date
+        )
+
+        # The retired flag is gone rather than silently ignored.
+        exit_code, _, stderr = self.run_cli(["workout", "generate", "--until-goal"])
+        self.assertNotEqual(exit_code, 0)
+        self.assertIn("unrecognized arguments", stderr)
+
+    @patch("trainmate.cli.workouts.generate.ensure_recent_data")
+    @patch("trainmate.runtime.prompt")
+    @patch("trainmate.runtime.coach_service")
+    def test_generate_passes_a_named_plan_through_as_the_tiebreaker(
+        self, mock_coach, mock_prompt, _ensure
+    ):
+        """`-M ID` bounds the horizon *and* settles which plan to follow where two cover
+        the same days; a bare -M names no single winner, so it does not."""
+        mock_coach.workout_generate.return_value = ("Reasoning", [])
+        mock_coach.config_changed.return_value = None
+        _, macro_id = self._goal_with_plan(target_days_out=100)
+
+        exit_code, _, _ = self.run_cli(
+            ["workout", "generate", "-M", str(macro_id), "-f"]
+        )
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(
+            mock_coach.workout_generate.call_args.kwargs["prefer_macro_id"], macro_id
+        )
+
+        mock_coach.workout_generate.reset_mock()
+        exit_code, _, _ = self.run_cli(["workout", "generate", "-M", "-f"])
+        self.assertEqual(exit_code, 0)
+        self.assertIsNone(
+            mock_coach.workout_generate.call_args.kwargs["prefer_macro_id"]
+        )

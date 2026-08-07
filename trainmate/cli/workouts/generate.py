@@ -17,8 +17,7 @@ from trainmate.cli.common import (
 )
 
 from trainmate.cli.selectors import has_selector as _has_selector, resolve_window, split_targets
-from trainmate.cli.workouts._helpers import (_fmt_ts,
-    _resolve_workout_end_date, workout_line)
+from trainmate.cli.workouts._helpers import _fmt_ts, workout_line
 
 
 def _print_block_boundary_hint(date_str: str) -> None:
@@ -194,6 +193,60 @@ def _confirm_regeneration(end_date: Optional[str]) -> bool:
     )
 
 
+def _preferred_macro_id(args: argparse.Namespace) -> Optional[int]:
+    """The plan `-M` names, when it names exactly one — the tiebreaker for two plans
+    covering the same days. A bare `-M` (the active plan) and a range name no single
+    winner, so both leave the choice to the newest-plan rule."""
+    rng = getattr(args, 'macro_range', None)
+    if rng is None or rng.current:
+        return None
+    return rng.start if rng.start is not None and rng.start == rng.end else None
+
+
+def _confirm_out_of_date_plans(
+    start_date: str, end_date: str, prefer_macro_id: Optional[int], force: bool
+) -> bool:
+    """Warns when a plan governing this horizon was generated from inputs that have since
+    changed. Read off the dates, like the generation itself, so a horizon long enough to
+    cross from one goal's plan into the next checks both. Returns False to stop."""
+    blocks, _ = runtime.db.get_governing_mesocycles(
+        start_date, end_date, prefer_macro_id=prefer_macro_id
+    )
+    for macro_id in dict.fromkeys(b['macrocycle_id'] for b in blocks):
+        macro = runtime.db.get_macrocycle(macro_id)
+        if not macro:
+            continue
+        change_reason = runtime.coach_service.config_changed(macro)
+        if not change_reason:
+            continue
+        warning = (
+            "Warning: a plan-shaping input has "
+            "changed since the active periodization plan was "
+            f"generated ({change_reason}).\n"
+            "Generating workouts using the out-of-date plan might "
+            "result in incorrect training targets.\n"
+            "It is highly recommended to run "
+            + cmd("plan generate") + " first."
+        )
+        if force:
+            print(yellow(warning + " Proceeding anyway (--force)."))
+        elif not runtime.prompt.confirm(yellow(warning + " Proceed anyway?")):
+            print(yellow(
+                "Workout generation cancelled. Please run "
+                + cmd("plan generate") + " first."
+            ))
+            return False
+        else:
+            # Confirming accepts the out-of-date plan, so stamp the current config;
+            # --force only skips the question and leaves the warning live for next run.
+            print("Proceeding. Updating configuration hash in database.")
+            runtime.db.update_macrocycle_config_hash(
+                macro['id'], runtime.coach_service._get_config_hash(),
+                runtime.coach_service._get_config_snapshot()
+            )
+    return True
+
+
 def run_workout_generate(args: argparse.Namespace) -> None:
     """Executes the AI workout generation command based on active strategy."""
     force = getattr(args, 'force', False)
@@ -201,61 +254,27 @@ def run_workout_generate(args: argparse.Namespace) -> None:
         no_pull=args.no_pull, force_pull=getattr(args, 'force_pull', False)
     )
 
-    next_goal = None
-    objectives = runtime.db.upcoming_objectives()
-    if objectives:
-        if args.goal_id is not None:
-            target_goals = [o for o in objectives if o['id'] == args.goal_id]
-            next_goal = target_goals[0] if target_goals else None
-        else:
-            objectives.sort(key=lambda x: str(x['target_date']))
-            next_goal = objectives[0]
+    # Generation always starts today, so only the END of the resolved window is the
+    # horizon — which is what makes `-g` read as "through this goal's target date"
+    # (DESIGN_cli_selectors.md §8).
+    end_date = resolve_window(args)[1]
+    prefer_macro_id = _preferred_macro_id(args)
 
-        if next_goal:
-            macro = runtime.db.get_macrocycle_for_objective(next_goal['id'])
-            if macro:
-                change_reason = runtime.coach_service.config_changed(macro)
-                if change_reason:
-                    warning = (
-                        "Warning: a plan-shaping input has "
-                        "changed since the active periodization plan was "
-                        f"generated ({change_reason}).\n"
-                        "Generating workouts using the out-of-date plan might "
-                        "result in incorrect training targets.\n"
-                        "It is highly recommended to run "
-                        + cmd("plan generate") + " first."
-                    )
-                    if force:
-                        print(yellow(warning + " Proceeding anyway (--force)."))
-                    elif not runtime.prompt.confirm(yellow(warning + " Proceed anyway?")):
-                        print(yellow(
-                            "Workout generation cancelled. Please run "
-                            + cmd("plan generate") + " first."
-                        ))
-                        return
-                    else:
-                        # Confirming accepts the out-of-date plan, so stamp the
-                        # current config; --force only skips the question and leaves
-                        # the warning live for the next run.
-                        print("Proceeding. Updating configuration hash in database.")
-                        runtime.db.update_macrocycle_config_hash(
-                            macro['id'], runtime.coach_service._get_config_hash(),
-                            runtime.coach_service._get_config_snapshot()
-                        )
-
-    workout_kwargs = {}
-    if args.goal_id is not None:
-        workout_kwargs['objective_id'] = args.goal_id
-
-    end_date = _resolve_workout_end_date(args, next_goal)
-    if end_date is not None:
-        workout_kwargs['end_date'] = end_date
+    # The staleness check looks over the days about to be written, so the config default
+    # stands in when no selector bounded the horizon.
+    preview_end = end_date or (
+        _today_date() + timedelta(days=config.workout_generation_span_days - 1)
+    ).strftime("%Y-%m-%d")
+    if not _confirm_out_of_date_plans(_today_str(), preview_end, prefer_macro_id, force):
+        return
 
     if not force and not _confirm_regeneration(end_date):
         print(yellow("Workout generation cancelled — your current plan is unchanged."))
         return
 
-    reasoning, workouts = runtime.coach_service.workout_generate(**workout_kwargs)
+    reasoning, workouts = runtime.coach_service.workout_generate(
+        end_date=end_date, prefer_macro_id=prefer_macro_id
+    )
     print(bold(cyan("\n=== WORKOUTS GENERATED BY COACH ===")))
     print(f"{bold('Reasoning')}:\n{wrap_text(reasoning)}\n")
     print(green(
@@ -266,6 +285,8 @@ def run_workout_generate(args: argparse.Namespace) -> None:
         f"Run {cmd('workout rollback')} to undo this regeneration, or "
         f"{cmd('plan rollback')} to step the strategy back with it."
     ))
+
+
 def _batch_line(index: int, batch: dict) -> str:
     """One `workout batches` row: '#N  <when>  <n> workouts · <span>  plan ID …'."""
     count = f"{batch['workouts']} workout(s)"

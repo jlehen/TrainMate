@@ -202,16 +202,16 @@ def format_plan_gap_banner(
     plan_end_date: str, next_objective: Dict[str, Any], weeks_before: int
 ) -> List[str]:
     """The plan-end gap banner (§3): plan generated through X, N weeks before the next
-    objective it doesn't yet reach; names the fix (`workout generate --until-goal`). The
-    gap itself (which objective, how many weeks) is computed once in
-    `progression.plan_gap` and passed in — this is presentation only (§7.1)."""
+    objective it doesn't yet reach; names the fix (`workout generate -g`, whose bare form
+    is the active goal). The gap itself (which objective, how many weeks) is computed once
+    in `progression.plan_gap` and passed in — this is presentation only (§7.1)."""
     return [
         yellow(
             f"⚠ plan generated through {_short_date(plan_end_date)} "
             f"— {weeks_before} wks before"
         ),
         f"  \U0001F3C1 {next_objective['target_date']} {next_objective['title']}",
-        yellow(f"  ({cmd('workout generate --until-goal', quote=False)})"),
+        yellow(f"  ({cmd('workout generate -g', quote=False)})"),
     ]
 
 

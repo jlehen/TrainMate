@@ -114,6 +114,7 @@ class PromptConfigMixin:
         constraints: List[Dict[str, Any]],
         objectives: Optional[List[Objective]] = None,
         objective_id: Optional[int] = None,
+        blocks: Optional[List[Dict[str, Any]]] = None,
     ) -> CoachContext:
         """Assembles the shared context every prompt builder needs.
 
@@ -121,11 +122,19 @@ class PromptConfigMixin:
         calls. `constraints` stays a parameter because the window each command reads
         differs — adaptation asks for the adaptation range, generation for the
         generation window — and that difference is deliberate.
+
+        `blocks` is the date-keyed path (DESIGN_cli_selectors.md §8): a caller that has
+        already resolved which mesocycles govern its window takes its strategy text from
+        those, rather than from whichever macrocycle a goal points at. Generation uses it;
+        planning and adaptation still name a goal.
         """
         if objectives is None:
             objectives = self._db.upcoming_objectives()
-        strategy, meso_text = self._get_active_strategy_and_meso_text(
-            objectives, objective_id=objective_id
+        strategy, meso_text = (
+            self.strategy_text_for_blocks(blocks) if blocks is not None
+            else self._get_active_strategy_and_meso_text(
+                objectives, objective_id=objective_id
+            )
         )
         return CoachContext(
             objectives=objectives,
@@ -164,6 +173,54 @@ class PromptConfigMixin:
             )
             meso_text = "  - Not established yet."
         return strategy, meso_text
+
+    def strategy_text_for_blocks(self, blocks: List[Dict[str, Any]]) -> Tuple[str, str]:
+        """Renders (strategy, meso_text) for a window's governing blocks.
+
+        Each governing plan's blocks are listed in full, not just the ones the window
+        touches: how a block is written depends on what follows it, so the coach still
+        needs to see the ones past the horizon. The covered ones are marked so it no
+        longer has to infer which blocks the span falls in from the dates alone.
+        """
+        macro_ids: List[int] = []
+        for b in blocks:
+            if b['macrocycle_id'] not in macro_ids:
+                macro_ids.append(b['macrocycle_id'])
+        if not macro_ids:
+            return (
+                "Not established yet. Establish an endurance-focused training strategy "
+                "based on goals.",
+                "  - Not established yet.",
+            )
+
+        covered = {b['id'] for b in blocks}
+        multi = len(macro_ids) > 1
+        strategy_parts: List[str] = []
+        meso_parts: List[str] = []
+        for macro_id in macro_ids:
+            macro = self._db.get_macrocycle(macro_id)
+            if not macro:
+                continue
+            goal = self._db.get_objective(macro.get('objective_id'))
+            label = (
+                f"{goal['title']} ({goal['target_date']})" if goal else f"plan {macro_id}"
+            )
+            strategy_parts.append(
+                f"For {label}:\n{macro['strategy']}" if multi else macro['strategy']
+            )
+            if multi:
+                meso_parts.append(f"  Toward {label}:")
+            for m in self._db.get_mesocycles_for_macrocycle(macro_id):
+                mark = ">" if m['id'] in covered else "-"
+                meso_parts.append(
+                    f"  {mark} {m['name']} ({m['start_date']} to "
+                    f"{m['end_date']}): {m['focus']}"
+                )
+        meso_parts.append(
+            "  ('>' marks the blocks this generation window falls in; '-' blocks are "
+            "context, outside it.)"
+        )
+        return "\n\n".join(strategy_parts), "\n".join(meso_parts) + "\n"
 
     def _get_learnings_text(self) -> str:
         """Renders active athlete observations as a tagged block for prompts. Each line is

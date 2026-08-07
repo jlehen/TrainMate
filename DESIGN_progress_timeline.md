@@ -220,7 +220,7 @@ plan through the first objective (2026-09-30), 9 mesocycles, and three active
 objectives spanning to 2027-01-31. Note that the plan reaching the objective
 is a **snapshot, not an invariant**: `workout generate` defaults to a rolling
 `workout_generation_span_days` (28-day) horizon, so most of the time workouts
-stop well short of race day unless `--until-goal` was used — §3's plan-end
+stop well short of race day unless `-g` widened the horizon — §3's plan-end
 rule exists for exactly this. This feature is a pure read-side derivation.
 
 ## 2. What the picture shows
@@ -323,7 +323,7 @@ through 2026-07-31 (9 wks before objective)"*). Deliberately **not** a
 it, then recompute the gap to draw it richly. Per-objective projected CTL/TSB
 figures are shown **only** for objectives the plan actually reaches, and only
 for those still ahead — a race already run has no projection (§7.1, §11). The
-CLI hint names the fix (`workout generate --until-goal`).
+CLI hint names the fix (`workout generate -g`).
 
 **Comparable days (rev 9).** A percentage is only honest when its two halves
 cover the same days. Two ways a week fails that, one rule for both:
@@ -864,7 +864,7 @@ FORM today (actual)  CTL 55  ATL 61  TSB −6
 CTL 8w ▁▂▂▃▃▅▅▆   plan end 07-31: CTL 61 TSB +1
 ⚠ plan generated through 07-31 — 9 wks before
   🏁 2026-09-30 Trail marathon
-  (workout generate --until-goal)
+  (workout generate -g)
 
 WEEKLY LOAD plan  ▓done ▒plan  done  adh
 ── ~Base Accumulation ─────────────────────────
@@ -1083,7 +1083,7 @@ No bot-native command; both paths ride the CLI-as-subprocess parity model
       is read from the real axes extent rather than a fudge factor.
     - *Coincident vertical markers.* The plan-end marker is suppressed when an
       objective already marks that date. A plan generated **to** an objective is
-      the common case, not an edge case — `workout generate --until-goal` makes
+      the common case, not an edge case — `workout generate -g` makes
       it the default — and two rotated labels on one `x` are unreadable.
 - **matplotlib** sits in `requirements.txt`'s optional tier (like
   `python-telegram-bot`; already there since the snapshot, §10.1): imported

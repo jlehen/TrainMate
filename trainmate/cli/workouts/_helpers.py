@@ -1,7 +1,6 @@
 """Shared resolvers/formatters for the workout CLI handlers."""
 import argparse
 import re
-import sys
 from datetime import datetime, timedelta
 from typing import Optional
 from trainmate import runtime
@@ -11,7 +10,6 @@ from trainmate.util import (
     bold, green, red, yellow, cyan, blue, magenta, cmd, today_str as _today_str,
 )
 from trainmate.cli.common import fmt_date
-from trainmate.cli.selectors import resolve_window
 
 
 
@@ -90,27 +88,6 @@ def warn_stale_before(start_date: str) -> None:
         f"calendar events are out of date and this push did not cover them. "
         f"Run {cmd(f'workout push -d {earliest}..')} to update them."
     ))
-def _resolve_workout_end_date(
-    args: argparse.Namespace, resolved_goal: dict | None
-) -> str | None:
-    """The horizon for `workout generate`: a goal's target date, or the END of whatever the
-    selectors cover. Generation always starts today, so a selector's start is not used."""
-    if getattr(args, 'horizon_goal_id', None) is not None:
-        goal_id = args.horizon_goal_id
-        if goal_id == -1:
-            # Sentinel: use the already-resolved goal for this generate run
-            if resolved_goal is None:
-                print(red("No active goal found for --until-goal."))
-                sys.exit(1)
-            return resolved_goal['target_date']
-        goal = next((o for o in runtime.db.upcoming_objectives() if o['id'] == goal_id), None)
-        if goal is None:
-            print(red(f"Active goal with ID {goal_id} not found."))
-            sys.exit(1)
-        return goal['target_date']
-
-    return resolve_window(args)[1]  # None falls back to the config default span
-
 
 def _classify_swap_target(value: str) -> str | None:
     """Classifies a swap positional as 'date' (YYYY-MM-DD) or 'id' (bare integer)."""

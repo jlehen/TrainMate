@@ -1,3 +1,4 @@
+import io
 import os
 import shutil
 import tempfile
@@ -1434,6 +1435,180 @@ class TestPlanLineage(unittest.TestCase):
             test_db.get_previous_macrocycle_version(autumn)["id"], autumn_v1
         )
         self.assertEqual(test_db.get_preceding_macrocycle(autumn)["id"], spring_macro)
+
+
+class TestDateKeyedGeneration(unittest.TestCase):
+    """`workout generate` reads its periodization off the dates it is writing, not off a
+    goal the caller names (DESIGN_cli_selectors.md §8). The goal used to be an
+    indirection to the macrocycle and nothing more, which meant the earliest goal's plan
+    shaped the sessions even when a different plan governed the days in question."""
+
+    @classmethod
+    def setUpClass(cls):
+        if os.path.exists(TEST_DB_PATH):
+            os.remove(TEST_DB_PATH)
+        global test_db
+        test_db = Database(db_path=TEST_DB_PATH)
+        rebind_test_db(test_db)
+
+    @classmethod
+    def tearDownClass(cls):
+        if os.path.exists(TEST_DB_PATH):
+            try:
+                os.remove(TEST_DB_PATH)
+            except OSError:
+                pass
+
+    def setUp(self):
+        clear_all_tables(test_db)
+
+    def _goal(self, title, target_date):
+        return test_db.add_objective(
+            title=title, target_date=target_date, sport_type="running", priority=1,
+        )
+
+    def _plan(self, obj_id, strategy, blocks):
+        return test_db.save_macrocycle(
+            objective_id=obj_id, strategy=strategy, goals_hash="g", constraints_hash="c",
+            mesocycles=[{"name": name, "start_date": start, "end_date": end,
+                         "focus": f"focus of {name}"} for name, start, end in blocks],
+        )
+
+    @staticmethod
+    def _one_session_response(date_str):
+        return {
+            "reasoning": "why",
+            "workouts": [{
+                "date": date_str, "sport_type": "running",
+                "title": "Run", "description": "[Run]\n30 mins",
+            }],
+        }
+
+    # --- the DB rule on its own ---------------------------------------------------
+
+    def test_sequential_plans_both_govern_a_long_window(self):
+        """A horizon can legitimately run out of one goal's last block into the next
+        goal's first, so neither plan is dropped."""
+        first = self._goal("Spring 10k", _days_out(30))
+        self._plan(first, "spring", [("Base", _days_out(0), _days_out(30))])
+        second = self._goal("Autumn Marathon", _days_out(90))
+        self._plan(second, "autumn", [("Build", _days_out(31), _days_out(90))])
+
+        blocks, dropped = test_db.get_governing_mesocycles(_days_out(0), _days_out(60))
+        self.assertEqual([b["name"] for b in blocks], ["Base", "Build"])
+        self.assertEqual(dropped, [])
+
+    def test_plans_covering_the_same_days_are_settled_by_recency(self):
+        """Two plans cannot both be followed on one day; the more recently generated one
+        wins, the same tiebreak get_periodization_ids_for_date makes."""
+        first = self._goal("Spring 10k", _days_out(40))
+        old = self._plan(first, "spring", [("Base", _days_out(0), _days_out(40))])
+        second = self._goal("Autumn Marathon", _days_out(90))
+        new = self._plan(second, "autumn", [("Build", _days_out(0), _days_out(90))])
+
+        blocks, dropped = test_db.get_governing_mesocycles(_days_out(0), _days_out(30))
+        self.assertEqual([b["macrocycle_id"] for b in blocks], [new])
+        self.assertEqual(dropped, [old])
+
+        # Naming a plan settles it the other way instead.
+        blocks, dropped = test_db.get_governing_mesocycles(
+            _days_out(0), _days_out(30), prefer_macro_id=old
+        )
+        self.assertEqual([b["macrocycle_id"] for b in blocks], [old])
+        self.assertEqual(dropped, [new])
+
+    def test_a_window_no_block_covers_falls_back_rather_than_answering_empty(self):
+        """A plan that has run out still answers, so generation reports "no strategy"
+        only when there is genuinely none."""
+        goal = self._goal("Spring 10k", _days_out(-5))
+        self._plan(goal, "spring", [("Base", _days_out(-40), _days_out(-10))])
+
+        blocks, dropped = test_db.get_governing_mesocycles(_days_out(0), _days_out(27))
+        self.assertEqual([b["name"] for b in blocks], ["Base"])
+        self.assertEqual(dropped, [])
+
+        clear_all_tables(test_db)
+        self.assertEqual(
+            test_db.get_governing_mesocycles(_days_out(0), _days_out(27)), ([], [])
+        )
+
+    # --- what generation actually does with it ------------------------------------
+
+    @patch("trainmate.runtime.calendar_syncer")
+    @patch("trainmate.coach.engine.openrouter_client")
+    def test_the_plan_covering_today_shapes_the_sessions_not_the_earliest_goal(
+        self, mock_client, _mock_calendar
+    ):
+        """The regression the goal indirection caused: the nearest goal's plan was used
+        even when its blocks were long finished and another plan covered today."""
+        stale = self._goal("Club 10k", _days_out(20))
+        self._plan(stale, "STALE STRATEGY", [("Old", _days_out(-60), _days_out(-30))])
+        live = self._goal("Autumn Marathon", _days_out(90))
+        self._plan(live, "LIVE STRATEGY", [("Build", _days_out(-1), _days_out(60))])
+
+        mock_client.complete.return_value = self._one_session_response(_days_out(1))
+        coach_service.workout_generate()
+
+        system_prompt = mock_client.complete.call_args.args[0]
+        self.assertIn("LIVE STRATEGY", system_prompt)
+        self.assertNotIn("STALE STRATEGY", system_prompt)
+        # The covered block is marked, so the model no longer has to infer which blocks
+        # the span falls in from the dates alone.
+        self.assertIn("> Build", system_prompt)
+
+    @patch("trainmate.runtime.calendar_syncer")
+    @patch("trainmate.coach.engine.openrouter_client")
+    def test_a_span_crossing_two_plans_tags_each_session_with_its_own(
+        self, mock_client, _mock_calendar
+    ):
+        """`plan rollback` accounting keys off macrocycle_id, so a session belongs to the
+        plan governing its date — not to one id stamped across the whole batch."""
+        first = self._goal("Spring 10k", _days_out(20))
+        early = self._plan(first, "spring", [("Base", _days_out(0), _days_out(20))])
+        second = self._goal("Autumn Marathon", _days_out(90))
+        late = self._plan(second, "autumn", [("Build", _days_out(21), _days_out(90))])
+
+        mock_client.complete.return_value = {
+            "reasoning": "why",
+            "workouts": [
+                {"date": _days_out(5), "sport_type": "running",
+                 "title": "Early", "description": "[Early]\n30 mins"},
+                {"date": _days_out(40), "sport_type": "running",
+                 "title": "Late", "description": "[Late]\n30 mins"},
+            ],
+        }
+        _, workouts = coach_service.workout_generate(end_date=_days_out(60))
+
+        by_title = {w["title"]: w for w in workouts}
+        self.assertEqual(by_title["Early"]["macrocycle_id"], early)
+        self.assertEqual(by_title["Late"]["macrocycle_id"], late)
+        # Both strategies reached the prompt: the span is genuinely governed by both.
+        system_prompt = mock_client.complete.call_args.args[0]
+        self.assertIn("spring", system_prompt)
+        self.assertIn("autumn", system_prompt)
+
+    @patch("trainmate.runtime.calendar_syncer")
+    @patch("trainmate.coach.engine.openrouter_client")
+    def test_a_horizon_past_the_last_block_says_so(self, mock_client, _mock_calendar):
+        """Days past the plan's end have no block to follow — a date-keyed view can see
+        that and say it, where the goal-keyed one could not."""
+        goal = self._goal("Autumn Marathon", _days_out(90))
+        self._plan(goal, "autumn", [("Base", _days_out(0), _days_out(20))])
+
+        mock_client.complete.return_value = self._one_session_response(_days_out(1))
+        with patch("sys.stdout", new_callable=io.StringIO) as out:
+            coach_service.workout_generate(end_date=_days_out(60))
+        self.assertIn("The plan runs out on", out.getvalue())
+        self.assertIn(_days_out(20), out.getvalue())
+
+    @patch("trainmate.runtime.calendar_syncer")
+    @patch("trainmate.coach.engine.openrouter_client")
+    def test_no_plan_at_all_still_names_plan_generate(self, mock_client, _mock_calendar):
+        self._goal("Autumn Marathon", _days_out(90))
+        with self.assertRaises(ValueError) as ctx:
+            coach_service.workout_generate()
+        self.assertIn("plan generate", str(ctx.exception))
+        mock_client.complete.assert_not_called()
 
 
 if __name__ == "__main__":

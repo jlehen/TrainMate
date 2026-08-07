@@ -96,35 +96,32 @@ def add_workout_parser(subparsers, pull_bypass_parser, llm_debug_parser):
         parents=[pull_bypass_parser, llm_debug_parser],
         help="Generate workouts (microcycles) based on the active strategy",
         description=(
-            "Generate workouts (microcycles) from today, driven by the active "
-            "periodization strategy. The horizon is the END of whatever -d/-m selects "
-            "(e.g. -d 4w, -d ..2026-09-01, -m 5). With no horizon flag, generates "
-            "config.workout_generation_span_days days ahead (28 by default). The new plan "
-            "is pushed to Google Calendar straight away (the previous plan's upcoming "
-            f"workouts are archived first); use '{green('plan rollback')}' to undo a "
-            "regeneration. This is a full rebuild, not a fill-in: when upcoming sessions "
-            "already exist it asks before replacing them (-f skips the prompt)."
+            "Generate workouts (microcycles) from today, driven by the periodization "
+            "blocks covering the days being generated — which plan applies is read off "
+            "the dates, so no goal has to be named. The horizon is the END of whatever "
+            "-d/-m/-M/-g selects: '-g' generates through a goal's target date (the whole "
+            "plan), '-d 4w' four weeks, '-m 5' to the end of block 5. With no horizon "
+            "flag, generates config.workout_generation_span_days days ahead (28 by "
+            "default). The new plan is pushed to Google Calendar straight away (the "
+            f"previous plan's upcoming workouts are archived first); use "
+            f"'{green('plan rollback')}' to undo a regeneration. This is a full rebuild, "
+            "not a fill-in: when upcoming sessions already exist it asks before replacing "
+            "them (-f skips the prompt)."
         )
     )
     p_w_gen.set_defaults(func=run_workout_generate)
-    p_w_gen.add_argument(
-        "-g", "--goal", "--goal-id", type=int, dest="goal_id",
-        help="Target goal ID to generate workouts for"
-    )
     p_w_gen.add_argument(
         "-f", "--force", "-y", "--yes", action="store_true", dest="force",
         help="Skip the confirmation prompts (replacing the upcoming plan, and the "
              "out-of-date-plan warning)"
     )
     # Generation always starts today, so only the END of the resolved window is used as the
-    # horizon; the selectors are grouped because a horizon is one choice, not several.
+    # horizon; the selectors are grouped because a horizon is one choice, not several. `-M`
+    # doubles as the tiebreaker when two plans cover the same days.
     p_w_gen_horizon = p_w_gen.add_mutually_exclusive_group()
     add_selector_args(
-        p_w_gen, meso=True, direction="forward", default=None, group=p_w_gen_horizon,
-    )
-    p_w_gen_horizon.add_argument(
-        "--until-goal", type=int, nargs="?", const=-1, dest="horizon_goal_id", metavar="ID",
-        help="Generate workouts until the target date of a goal (uses current goal if ID omitted)"
+        p_w_gen, meso=True, macro=True, goal=True, direction="forward", default=None,
+        group=p_w_gen_horizon, horizon=True,
     )
 
 

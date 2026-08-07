@@ -198,20 +198,20 @@ class WorkoutGenMixin:
 
     def _warn_missing_boundary_benchmarks(
         self, workouts: List[Dict[str, Any]], constraints: List[Constraint],
-        macrocycle_id: int, gen_start: str
+        mesocycles: List[Dict[str, Any]], gen_start: str
     ) -> None:
         """Boundary-week post-check (§4.1): warn — don't auto-insert — when a covered
         mesocycle-boundary week ended up with no benchmark. Same spirit as the rest-window
         pass, but a surfaced warning the athlete can act on (regenerate), not a silent fix.
         Stays quiet when the boundary week sits under a `rest` constraint — rest wins — and
         for a boundary week reaching into the goal's own week, where a maximal test would
-        compete with the event it is meant to serve (§4.1)."""
-        if not workouts:
+        compete with the event it is meant to serve (§4.1).
+
+        `mesocycles` are the blocks governing this span, which may come from more than one
+        plan when a long horizon runs from one goal into the next — so the goal week that
+        silences a test is read per block, not once for the run."""
+        if not workouts or not mesocycles:
             return
-        mesocycles = self._db.get_mesocycles_for_macrocycle(macrocycle_id)
-        if not mesocycles:
-            return
-        goal_obj = self._goal_date_for_macrocycle(macrocycle_id)
         dated = [w for w in workouts if w.get('date')]
         span_end = max(w['date'] for w in dated)
         rest_windows = self._hard_rest_windows(constraints)
@@ -222,6 +222,7 @@ class WorkoutGenMixin:
                 continue
             end_obj = datetime.strptime(end, "%Y-%m-%d").date()
             # Goal week wins: a boundary week ending inside it gets no test (§4.1).
+            goal_obj = self._goal_date_for_macrocycle(m['macrocycle_id'])
             if goal_obj and end_obj > goal_obj - timedelta(days=7):
                 continue
             win_start = (end_obj - timedelta(days=6)).strftime("%Y-%m-%d")
@@ -317,28 +318,16 @@ class WorkoutGenMixin:
         }
 
     def workout_generate(
-        self, objective_id: Optional[int] = None, end_date: Optional[str] = None
+        self, end_date: Optional[str] = None, prefer_macro_id: Optional[int] = None
     ) -> Tuple[str, List[Workout]]:
-        """Generates workouts (microcycles) based on the active strategy."""
-        # Identify the target goal
-        if objective_id is not None:
-            next_goal = self._db.get_active_objective(objective_id)
-            if not next_goal:
-                next_goal = self._db.get_objective(objective_id)
-                if not next_goal:
-                    raise ValueError(f"Active goal with ID {objective_id} not found.")
-        else:
-            next_goal = self._db.get_active_objective()
-            if not next_goal:
-                return "No active goals found. TrainMate needs at least one objective.", []
+        """Generates workouts (microcycles) from the plan blocks governing the horizon.
 
-        # Verify active periodization strategy exists
-        macrocycle = self._db.get_macrocycle_for_objective(next_goal['id'])
-        if not macrocycle:
-            raise ValueError(
-                "No active periodization strategy found. Run "
-                + cmd("plan generate") + " first."
-            )
+        Which plan applies is read off the dates being generated, not off a goal the
+        caller names: the goal was only ever an indirection to the macrocycle, and the
+        blocks a span falls in are what actually shape the sessions
+        (DESIGN_cli_selectors.md §8)."""
+        if not self._db.get_active_objective():
+            return "No active goals found. TrainMate needs at least one objective.", []
 
         today_str = _svc._today_str()
         today_date_obj = datetime.strptime(today_str, "%Y-%m-%d").date()
@@ -380,7 +369,33 @@ class WorkoutGenMixin:
         constraints = self._db.get_constraints(gen_start_str)
         self._maybe_nudge_no_threshold()
 
-        ctx = self._coach_context(constraints, objective_id=objective_id)
+        # The blocks governing the days about to be written — the whole periodization
+        # input to this run, resolved from the window itself (§8).
+        blocks, dropped_macros = self._db.get_governing_mesocycles(
+            gen_start_str, gen_end_str, prefer_macro_id=prefer_macro_id
+        )
+        if not blocks:
+            raise ValueError(
+                "No active periodization strategy found. Run "
+                + cmd("plan generate") + " first."
+            )
+        for macro_id in dropped_macros:
+            print(yellow(
+                f"Plan ID {macro_id} also covers part of this span; following the more "
+                f"recently generated plan instead. Pass "
+                + cmd(f"-M {macro_id}", quote=False) + " to follow that one."
+            ))
+        plan_end = max(b['end_date'] for b in blocks)
+        if plan_end < gen_end_str:
+            print(yellow(
+                f"The plan runs out on {plan_end}, before this horizon ({gen_end_str}) — "
+                f"sessions after it have no block to follow. Run "
+                + cmd("plan generate") + " to extend the periodization first."
+            ))
+
+        # All upcoming goals still reach the prompt as context; only the blocks above
+        # decide what the sessions are shaped like.
+        ctx = self._coach_context(constraints, blocks=blocks)
         objectives = ctx.objectives
         guidelines, profile = ctx.guidelines, ctx.profile
         strategy, meso_text, learnings = ctx.strategy, ctx.meso_text, ctx.learnings
@@ -444,8 +459,18 @@ class WorkoutGenMixin:
         # block boundary lacks a fitness test. Runs after the rest pass so a rest-covered
         # boundary week is already silenced.
         self._warn_missing_boundary_benchmarks(
-            workouts, constraints, macrocycle['id'], gen_start_str
+            workouts, constraints, blocks, gen_start_str
         )
+
+        # Which plan version each session belongs to, per date: a span long enough to run
+        # from one goal's last block into the next goal's first produces workouts from two
+        # macrocycles, and `plan rollback` accounting keys off this tag. Days past the last
+        # block fall back to the plan that governed the start.
+        def _macro_for(date_str: str) -> int:
+            for b in blocks:
+                if b['start_date'] <= date_str <= b['end_date']:
+                    return b['macrocycle_id']
+            return blocks[0]['macrocycle_id']
 
         # Archive (don't delete) future workouts from the previous plan so they can be
         # resurrected by `plan rollback` / `workout rollback` (see DESIGN_plan_rollback.md).
@@ -466,7 +491,7 @@ class WorkoutGenMixin:
                 tss=w.get('tss'),
                 source='generated',
                 benchmark_type=w.get('benchmark_type'),
-                macrocycle_id=macrocycle['id'],
+                macrocycle_id=_macro_for(w['date']),
                 planned_zone_currency=zone_currency,
                 planned_zone_sec=zone_sec
             )
