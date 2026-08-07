@@ -294,6 +294,13 @@ revive and refuse a batch that is wholly in the past instead of "restoring" noth
   counts, date span, and plan version. Numbering is positional and shifts after a rollback;
   the underlying key is the timestamp. Like `plan versions`, `workout b` resolves as an
   unambiguous **prefix**, not a registered alias.
+  The plan **in force** carries no `archived_at`, so a listing of batches alone silently
+  omits the one thing a reader looks for first — and `#1`, the default rollback target,
+  then reads as "the current plan" when it is in fact the plan the current one displaced.
+  So the live sessions are counted separately (`_live_batch`) and printed above the
+  numbered rows in the same columns, labelled `live` rather than `#N`: shown because it is
+  the reference point, unnumbered because a rollback *archives* it rather than restoring
+  it. `--batch` only ever addresses the numbered rows.
 - **`workout rollback [--batch N] [-y]`** (registered alias `rb`) — restores batch `#N`,
   default `#1`. Confirms interactively, naming both what comes back and what gets archived.
 - Not to be confused with **`workout restore <id>`**, which un-cancels a single

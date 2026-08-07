@@ -146,7 +146,7 @@ def add_workout_parser(subparsers, pull_bypass_parser, llm_debug_parser):
     w_rollback.add_argument(
         "--batch", type=int, metavar="N",
         help="Which archived batch to restore, as numbered by 'workout batches' "
-             "(1 = most recent, the default)"
+             "(1 = the plan the live one displaced, the default)"
     )
     w_rollback.add_argument(
         "-y", "--yes", action="store_true", help="Skip confirmation prompt"
@@ -159,7 +159,10 @@ def add_workout_parser(subparsers, pull_bypass_parser, llm_debug_parser):
         description=(
             "List the archived batches of workouts, newest first. Each batch is the set "
             "of upcoming sessions that was live when a regeneration or rollback replaced "
-            f"it; '{green('workout rollback --batch N')}' restores one."
+            f"it; '{green('workout rollback --batch N')}' restores one. The numbered "
+            "entries are all past plans — the plan currently in force is shown above them "
+            f"as an unnumbered 'live' row (see '{green('workout list')}' for its "
+            "sessions), and #1 is the plan it displaced."
         )
     )
     _batches_parser.set_defaults(func=run_workout_batches)

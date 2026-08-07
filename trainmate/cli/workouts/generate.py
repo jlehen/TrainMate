@@ -324,8 +324,11 @@ def run_workout_generate(args: argparse.Namespace) -> None:
     ))
 
 
-def _batch_line(index: int, batch: dict) -> str:
-    """One `workout batches` row: '#N  <when>  <n> workouts · <span>  plan ID …'."""
+def _batch_line(label: str, when: str, batch: dict) -> str:
+    """One `workout batches` row: '<label>  <when>  <n> workouts · <span>  plan ID …'.
+
+    Shared by the archived rows and the unnumbered live one, so the plan in force and the
+    plans it replaced line up column for column (DESIGN_plan_rollback.md §9)."""
     count = f"{batch['workouts']} workout(s)"
     restorable = batch.get('restorable')
     if restorable == 0:
@@ -336,29 +339,57 @@ def _batch_line(index: int, batch: dict) -> str:
     plan = f"plan ID {', '.join(str(m) for m in macros)}" if macros else "unversioned"
     span = f"{fmt_date(batch['first_date'])} → {fmt_date(batch['last_date'])}"
     return (
-        f"{pad_visible(cyan(f'#{index}'), 5)} "
-        f"{pad_visible(_fmt_ts(batch['archived_at']), 18)} "
+        f"{pad_visible(label, 5)} {pad_visible(when, 18)} "
         f"{pad_visible(count, 32)} {gray(span)}  {gray(plan)}"
     )
+
+
+def _live_batch(today: str) -> Optional[dict]:
+    """The live upcoming sessions, shaped like an archived batch for `_batch_line`.
+
+    Only archived rows carry an `archived_at` to group on, so the plan in force is absent
+    from `get_archived_batches` and has to be counted separately."""
+    live = runtime.db.get_workouts(start_date=today)
+    if not live:
+        return None
+    return {
+        'workouts': len(live),
+        'first_date': live[0]['date'],
+        'last_date': live[-1]['date'],
+        'macrocycle_ids': sorted({w['macrocycle_id'] for w in live if w.get('macrocycle_id')}),
+    }
 
 
 def run_workout_batches(args: argparse.Namespace) -> None:
     """Lists the archived workout batches a `workout rollback` can restore."""
     today = _today_str()
     batches = runtime.db.get_archived_batches(from_date=today)
+    live = _live_batch(today)
 
-    print(bold(cyan("\n=== ARCHIVED WORKOUT BATCHES ===")))
+    print(bold(cyan("\n=== WORKOUT BATCHES ===")))
+    # The live plan is shown but never numbered: it is what a rollback would displace, not
+    # something a rollback can restore.
+    if live:
+        print(gray("The plan you are on now — what a rollback would archive:"))
+        print(_batch_line(green("live"), green("in force"), live))
+        print()
+    else:
+        print(gray("No upcoming sessions are scheduled right now.\n"))
     if not batches:
         print(gray(
-            "No archived workouts — nothing has displaced the current sessions yet."
+            "No archived workouts yet — nothing has displaced a plan, so there is nothing "
+            "to roll back to."
         ))
         return
-    print(gray(
-        "Each batch is the set of upcoming sessions that was live when a regeneration "
-        "or rollback replaced it, newest first.\n"
-    ))
+    headline = (
+        "Past plans, newest first — each is the set of upcoming sessions that was live "
+        "until a regeneration or rollback replaced it."
+    )
+    if live:
+        headline += " The plan above is not one of them: #1 is the plan it displaced."
+    print(gray(wrap_text(headline) + "\n"))
     for i, b in enumerate(batches, start=1):
-        print(_batch_line(i, b))
+        print(_batch_line(cyan(f"#{i}"), _fmt_ts(b['archived_at']), b))
     print()
     print(gray("Restore one with " + cmd("workout rollback [--batch N]")
                + " (defaults to #1). Numbering is positional and shifts after a "

@@ -808,6 +808,22 @@ class TestCliWorkouts(unittest.TestCase):
         self.assertEqual(exit_code, 0)
         self.assertIn("#1", stdout)
         self.assertIn("1 workout(s)", stdout)
+        # Everything numbered is history: the archive above emptied the live plan, so no
+        # `live` row is printed alongside it.
+        self.assertNotIn("in force", stdout)
+
+        # With upcoming sessions again, they show as an unnumbered `live` row — the plan in
+        # force is never one of the restorable batches (DESIGN_plan_rollback.md §9).
+        test_db.save_workout(
+            date=future_str, sport_type="running", title="Current Run",
+            description="30 mins", duration_minutes=30,
+        )
+        exit_code, stdout, _ = self.run_cli(["workout", "batches"])
+        self.assertEqual(exit_code, 0)
+        live_row = next(ln for ln in stdout.splitlines() if "in force" in ln)
+        self.assertIn("live", live_row)
+        self.assertNotIn("#", live_row)  # never numbered: --batch cannot address it
+        self.assertIn("#1", stdout)
 
         # An out-of-range batch number is refused before anything is archived.
         exit_code, stdout, _ = self.run_cli(["workout", "rollback", "--batch", "9"])
