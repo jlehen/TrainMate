@@ -102,18 +102,19 @@ def add_workout_parser(subparsers, pull_bypass_parser, llm_debug_parser):
             "-d/-m/-M/-g selects: '-g' generates through a goal's target date (the whole "
             "plan), '-d 4w' four weeks, '-m 5' to the end of block 5. With no horizon "
             "flag, generates config.workout_generation_span_days days ahead (28 by "
-            "default). The new plan is pushed to Google Calendar straight away (the "
-            f"previous plan's upcoming workouts are archived first); use "
-            f"'{green('plan rollback')}' to undo a regeneration. This is a full rebuild, "
-            "not a fill-in: when upcoming sessions already exist it asks before replacing "
-            "them (-f skips the prompt)."
+            f"default). The proposed sessions are listed as '{green('workout list')}' "
+            "shows them and nothing is written until you accept; on a yes the previous "
+            "plan's upcoming workouts are archived and the new ones pushed to Google "
+            f"Calendar, undoable with '{green('plan rollback')}'. This is a full rebuild, "
+            "not a fill-in: when upcoming sessions already exist it also asks before "
+            "spending the LLM call (-f skips both prompts)."
         )
     )
     p_w_gen.set_defaults(func=run_workout_generate)
     p_w_gen.add_argument(
         "-f", "--force", "-y", "--yes", action="store_true", dest="force",
-        help="Skip the confirmation prompts (replacing the upcoming plan, and the "
-             "out-of-date-plan warning)"
+        help="Skip the confirmation prompts (spending the LLM call, applying the "
+             "proposed workouts, and the out-of-date-plan warning)"
     )
     # Generation always starts today, so only the END of the resolved window is used as the
     # horizon; the selectors are grouped because a horizon is one choice, not several. `-M`

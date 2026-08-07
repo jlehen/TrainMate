@@ -220,7 +220,8 @@ week's, `data show-activities --zones` gives you per-activity zones and the
 coverage that tells you when the strap dropped out.
 
 Your workouts sync to Google Calendar automatically as part of `plan generate`,
-`workout generate`, and the daily `workout adapt` — there's no separate sync step.
+`workout generate` (once you accept its proposal), and the daily `workout adapt` —
+there's no separate sync step.
 (To force a manual re-push after a Calendar mishap, the maintenance command
 `workout push` is still there; see below.)
 
@@ -266,10 +267,11 @@ Two things to know when you regenerate:
 - **`workout generate` archives and rebuilds all future workouts**, manual edits
   included (they are recoverable via `workout rollback` or `plan rollback`, not
   deleted; a session you've already completed today is preserved). Because it
-  replaces rather than fills in, it asks before overwriting an existing upcoming
-  plan — naming how many sessions are at stake and how many you added by hand;
-  `-f/--force` skips that question for unattended runs. So make
-  strategic changes *first*
+  replaces rather than fills in, it asks twice: once before spending the LLM call,
+  naming how many sessions are at stake and how many you added by hand, and again once
+  it can show you the coach's proposal — listed exactly as `workout list` would show it —
+  before anything is written. `-f/--force` skips both questions for unattended runs. So
+  make strategic changes *first*
   (a plan-shaping `constraint` → `plan generate` → `workout generate`), then layer
   manual `add`/`swap` tweaks on top — not the other way around.
 

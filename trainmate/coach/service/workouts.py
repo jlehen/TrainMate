@@ -3,6 +3,7 @@ from typing import Any, List, Optional, Tuple, Dict
 from trainmate.config import config
 from trainmate.types import Constraint, Workout
 from trainmate.adherence import analyze_adherence
+from trainmate.coach.proposals import GenerateProposal
 from trainmate.sports import canonical_sport
 from trainmate import intensity
 from trainmate.util import green, yellow, red, cmd
@@ -232,8 +233,8 @@ class WorkoutGenMixin:
             # A test already run earlier in this boundary week counts (§4.1): regenerating
             # mid-boundary-week would otherwise advise regenerating again to recover a
             # benchmark the athlete has already done. Bounded below gen_start because the
-            # displaced plan's future rows are still live at this point — they are archived
-            # further down — and would answer for sessions this run has just replaced.
+            # displaced plan's future rows are still live here — only an accepted proposal
+            # archives them — and would answer for sessions this run proposes to replace.
             already_run = any(
                 w.get('benchmark_type') and win_start <= w['date'] < gen_start
                 for w in self._db.get_workouts(start_date=win_start, end_date=end)
@@ -319,15 +320,21 @@ class WorkoutGenMixin:
 
     def workout_generate(
         self, end_date: Optional[str] = None, prefer_macro_id: Optional[int] = None
-    ) -> Tuple[str, List[Workout]]:
-        """Generates workouts (microcycles) from the plan blocks governing the horizon.
+    ) -> GenerateProposal:
+        """Proposes workouts (microcycles) from the plan blocks governing the horizon.
+
+        Writes nothing: the caller previews the sessions and passes the proposal back to
+        `workout_generate_apply` on a `y`, so a regeneration cannot archive the live plan
+        for a proposal the athlete never saw.
 
         Which plan applies is read off the dates being generated, not off a goal the
         caller names: the goal was only ever an indirection to the macrocycle, and the
         blocks a span falls in are what actually shape the sessions
         (DESIGN_cli_selectors.md §8)."""
         if not self._db.get_active_objective():
-            return "No active goals found. TrainMate needs at least one objective.", []
+            return GenerateProposal(
+                reasoning="No active goals found. TrainMate needs at least one objective."
+            )
 
         today_str = _svc._today_str()
         today_date_obj = datetime.strptime(today_str, "%Y-%m-%d").date()
@@ -472,12 +479,41 @@ class WorkoutGenMixin:
                     return b['macrocycle_id']
             return blocks[0]['macrocycle_id']
 
-        # Archive (don't delete) future workouts from the previous plan so they can be
-        # resurrected by `plan rollback` / `workout rollback` (see DESIGN_plan_rollback.md).
-        self._archive_and_teardown(gen_start_str)
+        for w in workouts:
+            w['macrocycle_id'] = _macro_for(w['date'])
+
+        # Chronological, because the preview is read as a plan and the model returns the
+        # sessions in whatever order it wrote them.
+        workouts.sort(key=lambda w: (w['date'], w.get('sport_type', '')))
+
+        # The live plan this would displace, read here so the preview's warning and the
+        # apply's teardown are the same set. `include_removed` matches what
+        # `archive_future_workouts` actually takes.
+        displaced = self._db.get_workouts(start_date=gen_start_str, include_removed=True)
+
+        return GenerateProposal(
+            reasoning=plan_data.get("reasoning", "Plan generated."),
+            workouts=tuple(workouts),
+            displaced=tuple(displaced),
+            gen_start=gen_start_str,
+        )
+
+    def workout_generate_apply(self, proposal: GenerateProposal) -> List[Workout]:
+        """Commits an accepted `workout generate` proposal: archive, save, push.
+
+        Archives (rather than deletes) the displaced plan's future workouts so they can be
+        resurrected by `plan rollback` / `workout rollback` (DESIGN_plan_rollback.md), then
+        saves the proposed sessions and pushes them to Calendar eagerly, so the calendar
+        always mirrors the active plan. Returns the persisted rows."""
+        if proposal.displaced:
+            print(yellow(
+                f"Removing {len(proposal.displaced)} previously planned workout(s) from "
+                "Google Calendar..."
+            ))
+        self._archive_and_teardown(proposal.gen_start)
 
         saved_workouts: List[Workout] = []
-        for w in workouts:
+        for w in proposal.workouts:
             # The intensity target the coach stated while it still knew the intent
             # (DESIGN_intensity_distribution.md §9.8) — validated, never rescaled.
             zone_currency, zone_sec = intensity.parse_planned_zones(w)
@@ -491,7 +527,7 @@ class WorkoutGenMixin:
                 tss=w.get('tss'),
                 source='generated',
                 benchmark_type=w.get('benchmark_type'),
-                macrocycle_id=_macro_for(w['date']),
+                macrocycle_id=w.get('macrocycle_id'),
                 planned_zone_currency=zone_currency,
                 planned_zone_sec=zone_sec
             )
@@ -502,14 +538,12 @@ class WorkoutGenMixin:
             # the same lifecycle footer a later re-push would (created_at, original load).
             saved_workouts.append(self._db.get_workout_by_id(wid))
 
-        print(green(f"Generated {len(workouts)} workouts."))
-        # Eager sync: push the new plan to Google Calendar straight away so the calendar
-        # always mirrors the active plan (the old events were just torn down). Rollback is
-        # the symmetric inverse (see DESIGN_plan_rollback.md).
         if saved_workouts:
+            print(green(
+                f"Creating {len(saved_workouts)} new workout(s) in Google Calendar..."
+            ))
             try:
                 self._calendar_syncer.sync_multiple(saved_workouts)
-                print(green("Synced new workouts to Google Calendar."))
             except Exception as e:
                 print(red(f"Error syncing to Google Calendar: {e}"))
-        return plan_data.get("reasoning", "Plan generated."), saved_workouts
+        return saved_workouts

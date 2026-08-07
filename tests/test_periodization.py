@@ -30,6 +30,16 @@ rebind_test_db(test_db)
 from trainmate.coach import coach_service
 
 
+def _generate_workouts(**kwargs):
+    """`workout generate` end to end: propose, then accept, as the CLI does on a `y`.
+
+    Generation is two halves so the athlete reads the plan before it is written; tests
+    exercising the write want both, and the proposal alone is called directly where only
+    the refusal or the prompt is under test."""
+    proposal = coach_service.workout_generate(**kwargs)
+    return proposal.reasoning, coach_service.workout_generate_apply(proposal)
+
+
 class TestPeriodization(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -374,7 +384,7 @@ class TestPeriodization(unittest.TestCase):
                 "title": "Base Run", "description": "30 mins",
             }],
         }
-        reason, workouts = coach_service.workout_generate()
+        reason, workouts = _generate_workouts()
         self.assertEqual(reason, "Separate workout reasoning")
         self.assertEqual(len(workouts), 1)
         self.assertEqual(workouts[0]["title"], "Base Run")
@@ -422,7 +432,7 @@ class TestPeriodization(unittest.TestCase):
                 "title": "Tomorrow Run", "description": "fresh",
             }],
         }
-        coach_service.workout_generate()
+        _generate_workouts()
 
         # Today's completed workout survives; the new plan begins tomorrow.
         titles = [w["title"] for w in test_db.get_workouts(start_date=today)]
@@ -466,7 +476,7 @@ class TestPeriodization(unittest.TestCase):
                 "title": "New Run", "description": "fresh",
             }],
         }
-        coach_service.workout_generate()
+        _generate_workouts()
 
         # The stale synced workout is gone, and only the new workout remains.
         remaining = test_db.get_workouts(start_date=today)
@@ -513,7 +523,7 @@ class TestPeriodization(unittest.TestCase):
                 "title": "New Run", "description": "fresh",
             }],
         }
-        coach_service.workout_generate()
+        _generate_workouts()
 
         remaining = test_db.get_workouts(start_date=today)
         self.assertEqual([w["title"] for w in remaining], ["New Run"])
@@ -575,7 +585,7 @@ class TestPeriodization(unittest.TestCase):
                 "title": "V1 Run", "description": "v1 session",
             }],
         }
-        coach_service.workout_generate()
+        _generate_workouts()
 
         # --- Plan v2 + its workouts (archives v1's) ---
         mock_client.complete.return_value = {"strategy": "v2", "mesocycles": meso}
@@ -587,7 +597,7 @@ class TestPeriodization(unittest.TestCase):
                 "title": "V2 Run", "description": "v2 session",
             }],
         }
-        coach_service.workout_generate()
+        _generate_workouts()
         self.assertEqual(
             [w["title"] for w in test_db.get_workouts(start_date=today)], ["V2 Run"]
         )
@@ -643,7 +653,7 @@ class TestPeriodization(unittest.TestCase):
                 "title": title, "description": f"{title} session",
             }],
         }
-        coach_service.workout_generate()
+        _generate_workouts()
 
     @patch("trainmate.runtime.calendar_syncer")
     @patch("trainmate.coach.engine.openrouter_client")
@@ -1093,7 +1103,7 @@ class TestPeriodization(unittest.TestCase):
             }],
         }
 
-        coach_service.workout_generate()
+        _generate_workouts()
 
         user_content = mock_client.complete.call_args[0][1]
         self.assertIn("Athlete's Metrics History (Past 15 Days):", user_content)
@@ -1547,7 +1557,7 @@ class TestDateKeyedGeneration(unittest.TestCase):
         self._plan(live, "LIVE STRATEGY", [("Build", _days_out(-1), _days_out(60))])
 
         mock_client.complete.return_value = self._one_session_response(_days_out(1))
-        coach_service.workout_generate()
+        _generate_workouts()
 
         system_prompt = mock_client.complete.call_args.args[0]
         self.assertIn("LIVE STRATEGY", system_prompt)
@@ -1577,7 +1587,7 @@ class TestDateKeyedGeneration(unittest.TestCase):
                  "title": "Late", "description": "[Late]\n30 mins"},
             ],
         }
-        _, workouts = coach_service.workout_generate(end_date=_days_out(60))
+        _, workouts = _generate_workouts(end_date=_days_out(60))
 
         by_title = {w["title"]: w for w in workouts}
         self.assertEqual(by_title["Early"]["macrocycle_id"], early)

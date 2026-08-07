@@ -24,7 +24,10 @@ def _fmt_ts(iso: Optional[str]) -> str:
     except ValueError:
         return iso
 def workout_line(w: dict) -> str:
-    """One-line rendering of a workout for `list` (and the `add` echo)."""
+    """One-line rendering of a workout for `list` (and the `add` echo).
+
+    Also renders a *proposed* session — a `workout generate` preview, which has no row and
+    so no ID — so the plan being accepted reads exactly like the plan `list` will show."""
     mod_marker = ""
     mod_status = modification_status(w)
     if mod_status == 'adapted':
@@ -59,8 +62,9 @@ def workout_line(w: dict) -> str:
     duration_str = f" | {duration}min" if duration else ""
     tss_str = f" | TSS {tss}" if tss is not None else ""
     rpe_str = f" | RPE {rpe}" if rpe is not None else ""
+    ident = f"ID: {w['id']} | " if w.get('id') is not None else ""
     return (
-        f"ID: {w['id']} | {cyan(fmt_date(w['date']))} | {magenta(w['sport_type'].upper())} | "
+        f"{ident}{cyan(fmt_date(w['date']))} | {magenta(w['sport_type'].upper())} | "
         f"{bold(w['title'])}{bench_marker}{mod_marker}{sync_marker}{rem_marker}"
         f"{src_marker}{duration_str}{tss_str}{rpe_str}"
     )

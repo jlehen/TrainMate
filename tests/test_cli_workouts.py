@@ -5,7 +5,7 @@ from unittest.mock import patch
 
 from tests.helpers import clear_all_tables, run_cli, rebind_test_db
 from trainmate.cli.common import fmt_date
-from trainmate.coach.proposals import AdaptPair, AdaptProposal
+from trainmate.coach.proposals import AdaptPair, AdaptProposal, GenerateProposal
 
 TEST_DB_PATH = os.path.join(os.path.dirname(__file__), "test_trainmate_cli_workouts.db")
 
@@ -15,6 +15,21 @@ import trainmate_cli
 
 test_db = Database(db_path=TEST_DB_PATH)
 rebind_test_db(test_db)
+
+PROPOSED_DATE = (datetime.now(timezone.utc).date() + timedelta(days=1)).strftime("%Y-%m-%d")
+
+
+def _proposal(displaced=()):
+    """One proposed session, as `workout generate` hands it to the CLI for preview."""
+    return GenerateProposal(
+        reasoning="Reasoning",
+        workouts=({
+            "date": PROPOSED_DATE, "sport_type": "running", "title": "Base Run",
+            "description": "45 min easy", "duration_minutes": 45, "tss": 40, "rpe": 4,
+        },),
+        displaced=tuple(displaced),
+        gen_start=datetime.now(timezone.utc).date().strftime("%Y-%m-%d"),
+    )
 
 
 class TestCliWorkouts(unittest.TestCase):
@@ -809,17 +824,17 @@ class TestCliWorkouts(unittest.TestCase):
     ):
         """A regen is archive-and-rebuild, so an existing upcoming plan is confirmed
         before the LLM call; --force skips the prompt."""
-        mock_coach.workout_generate.return_value = ("Reasoning", [])
+        mock_coach.workout_generate.return_value = _proposal()
         today = datetime.now(timezone.utc).date()
         d1 = (today + timedelta(days=1)).strftime("%Y-%m-%d")
         d2 = (today + timedelta(days=5)).strftime("%Y-%m-%d")
 
         # Empty plan: nothing to lose, so no prompt stands between the athlete and the
-        # coach (confirm would decline if one were asked).
+        # coach — the only question asked is the apply gate, after the preview.
         mock_prompt.confirm.return_value = False
         exit_code, _, _ = self.run_cli(["workout", "generate"])
         self.assertEqual(exit_code, 0)
-        mock_prompt.confirm.assert_not_called()
+        mock_prompt.confirm.assert_called_once()
         mock_coach.workout_generate.assert_called_once()
 
         test_db.save_workout(
@@ -831,6 +846,7 @@ class TestCliWorkouts(unittest.TestCase):
         )
 
         # Declining leaves the live plan alone and never spends the LLM call.
+        mock_prompt.confirm.reset_mock()
         mock_coach.workout_generate.reset_mock()
         exit_code, stdout, _ = self.run_cli(["workout", "generate"])
         self.assertEqual(exit_code, 0)
@@ -849,14 +865,80 @@ class TestCliWorkouts(unittest.TestCase):
         self.assertEqual(exit_code, 0)
         mock_coach.workout_generate.assert_called_once()
 
-        # --force skips the question entirely, even when confirm would decline.
+        # --force skips both questions, even when confirm would decline.
         mock_prompt.confirm.reset_mock()
         mock_prompt.confirm.return_value = False
         mock_coach.workout_generate.reset_mock()
+        mock_coach.workout_generate_apply.reset_mock()
         exit_code, _, _ = self.run_cli(["workout", "generate", "--force"])
         self.assertEqual(exit_code, 0)
         mock_prompt.confirm.assert_not_called()
         mock_coach.workout_generate.assert_called_once()
+        mock_coach.workout_generate_apply.assert_called_once()
+
+    @patch("trainmate.cli.workouts.generate.ensure_recent_data")
+    @patch("trainmate.runtime.prompt")
+    @patch("trainmate.runtime.coach_service")
+    def test_generate_previews_the_workouts_then_asks_before_writing(
+        self, mock_coach, mock_prompt, _ensure
+    ):
+        """The proposed sessions are shown the way `workout list` shows them, and nothing
+        is written until the athlete accepts."""
+        today = datetime.now(timezone.utc).date()
+        displaced = {
+            "id": 7, "date": today.strftime("%Y-%m-%d"), "sport_type": "running",
+            "title": "Old Tempo", "description": "30 min",
+        }
+        proposal = _proposal(displaced=(displaced,))
+        mock_coach.workout_generate.return_value = proposal
+
+        # Declining writes nothing.
+        mock_prompt.confirm.return_value = False
+        exit_code, stdout, _ = self.run_cli(["workout", "generate"])
+        self.assertEqual(exit_code, 0)
+        self.assertIn("WORKOUTS PROPOSED BY COACH", stdout)
+        # Rendered by the same `workout_line` the listing uses — the date, the sport, the
+        # title and the load, with no ID, since the session has no row yet.
+        self.assertIn(fmt_date(PROPOSED_DATE), stdout)
+        self.assertIn("RUNNING", stdout)
+        self.assertIn("Base Run", stdout)
+        self.assertIn("45min", stdout)
+        self.assertNotIn("ID:", stdout)
+        self.assertIn("Workouts discarded", stdout)
+        mock_coach.workout_generate_apply.assert_not_called()
+
+        # The apply question names what it would archive.
+        question = " ".join(mock_prompt.confirm.call_args.args[0].split())
+        self.assertIn("Schedule these 1 workout(s)", question)
+        self.assertIn("archives the 1 session(s)", question)
+
+        # Accepting hands the very same proposal to the writer — the preview and the
+        # write cannot disagree about what is scheduled.
+        mock_prompt.confirm.return_value = True
+        mock_coach.workout_generate_apply.return_value = [displaced]
+        exit_code, stdout, _ = self.run_cli(["workout", "generate"])
+        self.assertEqual(exit_code, 0)
+        self.assertIs(mock_coach.workout_generate_apply.call_args.args[0], proposal)
+        self.assertIn("Scheduled 1 workout(s)", stdout)
+
+    @patch("trainmate.cli.workouts.generate.ensure_recent_data")
+    @patch("trainmate.runtime.prompt")
+    @patch("trainmate.runtime.coach_service")
+    def test_generate_with_no_proposed_sessions_asks_nothing(
+        self, mock_coach, mock_prompt, _ensure
+    ):
+        """A coach that proposes nothing must not archive the live plan for an empty
+        rebuild — there is nothing to apply, so there is nothing to ask."""
+        mock_coach.workout_generate.return_value = GenerateProposal(
+            reasoning="No active goals found."
+        )
+        mock_prompt.confirm.return_value = True
+        exit_code, stdout, _ = self.run_cli(["workout", "generate"])
+        self.assertEqual(exit_code, 0)
+        self.assertIn("No active goals found.", stdout)
+        self.assertIn("nothing to apply", stdout)
+        mock_prompt.confirm.assert_not_called()
+        mock_coach.workout_generate_apply.assert_not_called()
 
     @patch("trainmate.cli.workouts.generate.ensure_recent_data")
     @patch("trainmate.runtime.prompt")
@@ -866,7 +948,7 @@ class TestCliWorkouts(unittest.TestCase):
     ):
         """--force proceeds past the out-of-date-plan warning without stamping the
         config hash — only an explicit confirmation accepts the stale plan."""
-        mock_coach.workout_generate.return_value = ("Reasoning", [])
+        mock_coach.workout_generate.return_value = _proposal()
         mock_coach.config_changed.return_value = "athlete profile changed"
         obj_id = test_db.add_objective(
             title="London Marathon", target_date="2026-09-20",
@@ -929,7 +1011,7 @@ class TestCliWorkouts(unittest.TestCase):
         """`-g` reads like it does everywhere else in the grammar: generate through this
         goal's target date. It replaced `--until-goal`, and it no longer picks which plan
         applies — the dates do that (DESIGN_cli_selectors.md §8)."""
-        mock_coach.workout_generate.return_value = ("Reasoning", [])
+        mock_coach.workout_generate.return_value = _proposal()
         mock_coach.config_changed.return_value = None
         goal_id, _ = self._goal_with_plan(target_days_out=100)
         target_date = test_db.get_objective(goal_id)["target_date"]
@@ -961,7 +1043,7 @@ class TestCliWorkouts(unittest.TestCase):
     ):
         """`-M ID` bounds the horizon *and* settles which plan to follow where two cover
         the same days; a bare -M names no single winner, so it does not."""
-        mock_coach.workout_generate.return_value = ("Reasoning", [])
+        mock_coach.workout_generate.return_value = _proposal()
         mock_coach.config_changed.return_value = None
         _, macro_id = self._goal_with_plan(target_days_out=100)
 

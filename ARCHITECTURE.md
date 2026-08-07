@@ -459,24 +459,31 @@ called by the UIs.
   `CoachEngine._plan_generate_strategy()`, returns a `PlanProposal`. Saves to DB only
   under `auto_apply`; otherwise the caller passes the proposal to `plan_apply()` once
   the athlete accepts. The plan window has no minimum or maximum length (§10, step 5).
-- **`workout_generate(objective_id, end_date)`** — requires an existing macrocycle.
+- **`workout_generate(end_date, prefer_macro_id)`** — requires an existing macrocycle.
+  Writes nothing: it returns a `GenerateProposal` (reasoning, the proposed sessions
+  already tagged with their date's `macrocycle_id`, the live plan they would displace,
+  and `gen_start`), which the caller previews and hands back to
+  `workout_generate_apply()` once the athlete accepts — the same
+  propose-then-apply split as `plan_generate`/`plan_apply`.
   Applies the deterministic rest-window pre-pass to the generated workouts
   (`_enforce_rest_windows_generate(workouts, constraints, gen_start)`: every `rest = 1`
   date in `[gen_start, max returned date]` becomes a single rest session, **including
   dates the model returned nothing for** — an absent row and an explicit rest day mean
   different things to adherence. Every other constraint is advisory, left to the model)
-  before saving.
+  before proposing, so the forced rest days are visible in the preview.
   - **Preserves a completed session:** if today's planned workout already has a
     matching completed activity (`_today_workout_completed`, a one-day
     `analyze_adherence` pass), generation starts *tomorrow*; otherwise today. A
     defensive filter drops any model-emitted workout dated before the start.
   - **Horizon:** `num_days` from `end_date` (or `config.workout_generation_span_days`)
     relative to the start, then `CoachEngine._workout_generate_logic()`.
-  - **Eager:** archives the previous plan's future workouts from the start (tearing
-    down their Calendar events), saves the new workouts tagged with the active
-    `macrocycle_id`, and pushes them to Calendar immediately — calendar always mirrors
-    the active plan. Archive (not delete) makes regeneration undoable via
-    `plan_rollback` (DESIGN_plan_rollback.md).
+- **`workout_generate_apply(proposal)`** — the accepted half. Archives the previous
+  plan's future workouts from `gen_start` (tearing down their Calendar events), saves the
+  proposed sessions with the `macrocycle_id` the proposal already carries, and pushes them
+  to Calendar immediately — the calendar always mirrors the active plan. Each half of the
+  calendar work is announced before it runs ("Removing N previously planned workout(s)…",
+  "Creating N new workout(s)…"), since both are slow network round-trips. Archive (not
+  delete) makes regeneration undoable via `plan_rollback` (DESIGN_plan_rollback.md).
 - **`plan_apply(objective_id, strategy, mesocycles, fingerprints=None)`** — persists an
   already-generated strategy + mesocycles, returning the goal id it saved under.
   `fingerprints` are the goals/constraints/config hashes and snapshots taken when the
@@ -666,7 +673,8 @@ connection + schema setup), `objectives.py`, `constraints.py`,
   what the reports print).
 - `archive_future_workouts(from_date)` **soft-archives** every live future workout
   (sets `archived_at`, clears the Calendar handle) and returns the pre-archive rows so
-  the caller can delete their events. Used by eager `workout generate`, `plan rollback`
+  the caller can delete their events. Used by an accepted `workout generate`,
+  `plan rollback`
   and `workout rollback` to displace a plan's workouts without losing them. One call
   stamps one shared `archived_at`, which is therefore the **batch identity** a rollback
   restores; the rows also stay tagged with their `macrocycle_id`, which is how
@@ -1349,7 +1357,7 @@ single read-only view that is its whole state (`model`), which acts bare instead
 | `progress`   | `[SPORT ...]` | `pr`    | Show the progress timeline: measured load to date, plan-projected forward (CTL/ATL/TSB), weekly planned-vs-actual bars (`-w/--weeks N`, `--chart [PATH]` for a PNG; DESIGN_progress_timeline.md). `-z`/`--zones` (implied by naming a sport) adds one weekly time-in-zone table per sport — measured behind today, prescribed ahead of it (`--blocks` for block grain, `--power`/`--hr` to force the currency; DESIGN_intensity_distribution.md §9.6/§9.8). The sport argument scopes the **zone tables only**: CTL/ATL/TSB, the projection and the load table stay whole-athlete |
 | `workout`    | `list`       | `w l`    | Show planned workouts. Defaults to a 7-day window from today. Positional `TARGET…` (workout IDs and/or date selectors, e.g. `wo li 12 15 -v`) plus the shared selectors `-d`/`-m`/`-M`/`-g` and `-t/--type TYPE`, `--removed` (DESIGN_cli_selectors.md). |
 | `workout`    | `compare`    | `w c`    | Compare planned vs completed (`analyze_adherence()`): prints PLANNED/ACTUAL per day, flags misses (red), rest violations (red), unplanned high-load (yellow), then a discrepancy summary. Same selectors as `workout list`; default 14-day lookback; a bare span (`-d 7d`) looks *back*; end capped at today. |
-| `workout`    | `generate`   | `w g`    | Generate workouts from the plan blocks covering the days generated (the dates pick the plan, not a goal — DESIGN_cli_selectors.md §8). No horizon flag → `config.workout_generation_span_days` ahead (28 default). Horizon flags (mutually exclusive, only the END of the resolved window is used): `-g/--goal [ID]` = through the goal's target date, i.e. the whole plan; `-d`; `-m`; `-M` (which also settles which plan to follow where two cover the same days). Eager: archives the previous plan's future workouts and pushes the new ones to Calendar immediately. |
+| `workout`    | `generate`   | `w g`    | Generate workouts from the plan blocks covering the days generated (the dates pick the plan, not a goal — DESIGN_cli_selectors.md §8). No horizon flag → `config.workout_generation_span_days` ahead (28 default). Horizon flags (mutually exclusive, only the END of the resolved window is used): `-g/--goal [ID]` = through the goal's target date, i.e. the whole plan; `-d`; `-m`; `-M` (which also settles which plan to follow where two cover the same days). Lists the proposed sessions the way `workout list` renders them and asks before writing; on a `y` it archives the previous plan's future workouts and pushes the new ones to Calendar immediately. `-f/-y` skips both prompts. |
 | `workout`    | `rm`         | `w rm`   | Soft-remove by ID (`ID REASON`, both positional): marks `removed`, marks the Calendar event deleted; kept in DB, hidden from list/compare, shown to coach as a cancellation. |
 | `workout`    | `restore`    | `w res`  | Restore soft-removed workout by ID. Clears `removed` flags and syncs to Calendar to remove the `[Deleted]` mark. Unrelated to `workout rollback`, which restores a whole archived batch. |
 | `workout`    | `rollback`   | `w rb`   | Undo a regeneration: archive the upcoming sessions and restore a previously archived batch, re-pushing it to Calendar (`--batch N` per `workout batches`, default the most recent; `-y`). Leaves the active plan version alone — unlike `plan rollback`, so it also undoes a regeneration made under one plan (DESIGN_plan_rollback.md §9). Unrelated to `workout restore`. |
@@ -1548,11 +1556,11 @@ event-day TSB over the plan's own workouts — is a deferred Phase 2 follow-up.
    `-d ..2026-09-01`; `-m 5` — generation always starts today, so a selector's start is
    ignored), else `config.workout_generation_span_days` (default 28). One mutually
    exclusive group: a horizon is one choice. See DESIGN_cli_selectors.md §8.
-1b. Before spending the LLM call, the CLI confirms the replacement when live
-   workouts already exist from today onward — a regen is archive-and-rebuild, not
-   fill-in, so a repeat run would otherwise silently archive manual edits. The
-   question names the count, span, how many were hand-added, and the new horizon.
-   `-f/--force` skips it (and the out-of-date-plan warning) for unattended runs.
+1b. Before spending the LLM call, the CLI confirms it when live workouts already exist
+   from today onward — a regen is archive-and-rebuild, not fill-in, so a repeat run
+   would otherwise cost a call the athlete never meant to spend. The question names the
+   count, span, how many were hand-added, and the new horizon. `-f/--force` skips it
+   (and the apply gate at step 5, and the out-of-date-plan warning) for unattended runs.
 2. `CoachService.workout_generate(end_date=..., prefer_macro_id=...)` computes `num_days`
    from `(end_date − today)`, then resolves the periodization blocks governing
    `[gen_start, gen_end]` via `db.get_governing_mesocycles` — no goal is named, the dates
@@ -1583,10 +1591,16 @@ event-day TSB over the plan's own workouts — is a deferred Phase 2 follow-up.
 4. Calls `CoachEngine._workout_generate_logic(num_days=...)` → LLM →
    `{reasoning, workouts[]}`. **Read-only** w.r.t. coach learnings (see
    [§3](#3-coach-package-architecture)).
-5. Archives the previous plan's future workouts (`archive_future_workouts`,
-   tearing down their Calendar events), saves the new workouts tagged with the
-   active `macrocycle_id`, and pushes them to Calendar eagerly — undoable via
-   `workout rollback`, or `plan rollback` to step the strategy back with it
+5. `workout_generate` returns the sessions as a `GenerateProposal` — nothing written yet.
+   The CLI prints them one per line through the *same* `workout_line` renderer as
+   `workout list` (which drops the `ID:` column when there is no row yet), so the plan
+   being accepted reads exactly like the plan that will be listed afterwards, then asks.
+   Declining leaves the live plan untouched; `-f/-y` accepts without asking.
+6. On a `y`, `workout_generate_apply(proposal)` archives the previous plan's future
+   workouts (`archive_future_workouts`, tearing down their Calendar events), saves the
+   new workouts tagged with the `macrocycle_id` the proposal carries, and pushes them to
+   Calendar eagerly — each of the two Calendar phases announced before it runs. Undoable
+   via `workout rollback`, or `plan rollback` to step the strategy back with it
    (see [§3](#3-coach-package-architecture)).
 
 ### Daily Adaptation (`workout adapt`)
@@ -1763,7 +1777,8 @@ The shared core then:
   versions.
 - **Workouts** = daily microcycle activities implementing the mesocycle focus.
   Commands: `workout generate/adapt/push/swap/add/rollback/batches`. `workout generate`
-  pushes to Calendar eagerly; `workout rollback` undoes a regeneration by restoring an
+  lists what it proposes and, on a `y`, pushes it to Calendar eagerly; `workout rollback`
+  undoes a regeneration by restoring an
   archived batch (`workout batches` lists them), and `plan rollback` does the same while
   also stepping the strategy back (DESIGN_plan_rollback.md).
 
@@ -1801,8 +1816,9 @@ weekly-TSS-delta heuristic), and mesocycle-boundary crossings.
 Plan must be generated before workouts. Workouts cover a rolling window from
 today whose length is controlled by the horizon flags on `workout generate`
 (default: `workout_generation_span_days` in `config.yaml`, falling back to 28 days).
-`replan()` calls `plan_generate` then `workout_generate` in one
-step (always uses the config default).
+`replan()` calls `plan_generate` then `workout_generate` + `workout_generate_apply` in one
+step (always uses the config default, and applies without a preview — it is the
+unattended path).
 
 ---
 

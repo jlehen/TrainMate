@@ -467,7 +467,10 @@ class PlanningMixin:
     def replan(
         self, force: bool = False, objective_id: Optional[int] = None
     ) -> Tuple[str, List[Workout]]:
-        """Generates or adapts the training plan from today onwards."""
+        """Generates or adapts the training plan from today onwards.
+
+        Unattended by design — it applies the generated workouts without a preview, unlike
+        the CLI's `workout generate`, which shows them and asks."""
         objectives = self._db.upcoming_objectives()
         if not objectives:
             return (
@@ -486,4 +489,9 @@ class PlanningMixin:
             self._db.get_macrocycle_for_objective(planned_goal['id'])
             if planned_goal else None
         )
-        return self.workout_generate(prefer_macro_id=macro['id'] if macro else None)
+        generated = self.workout_generate(
+            prefer_macro_id=macro['id'] if macro else None
+        )
+        if not generated.workouts:
+            return generated.reasoning, []
+        return generated.reasoning, self.workout_generate_apply(generated)

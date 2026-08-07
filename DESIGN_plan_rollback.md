@@ -93,10 +93,15 @@ the generated batch, restored together).
 Marks the objective's current `active` version `superseded` (stamping `superseded_at`),
 then inserts the new version as `active`. No deletion.
 
-### `workout_generate` (coach/service/workouts.py) — eager
-0. If live upcoming workouts exist, the CLI confirms first (`_confirm_regeneration`,
-   `cli/workouts/generate.py`) — it names how many are at stake, how many were added by
-   hand, and that `workout rollback` brings them back; `-f/--force/-y` skips it.
+### `workout_generate` (coach/service/workouts.py) — eager, once accepted
+0. If live upcoming workouts exist, the CLI confirms the LLM call first
+   (`_confirm_regeneration`, `cli/workouts/generate.py`) — it names how many are at
+   stake, how many were added by hand, and that `workout rollback` brings them back;
+   `-f/--force/-y` skips it.
+0b. `workout_generate` writes nothing: it returns a `GenerateProposal`, which the CLI
+   lists (as `workout list` renders it) and gates behind a second confirmation. Steps 1-4
+   below are `workout_generate_apply`, reached only on a `y` (or `-f`). Declining leaves
+   the live rows and their Calendar events exactly as they were.
 1. `archive_future_workouts(<generation start>)` → soft-archives every live row from the
    generation start onward (sets `archived_at`, clears
    `google_event_id`/`pushed_signature`) and **returns the pre-archive rows** so their

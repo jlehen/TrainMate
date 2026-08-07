@@ -53,6 +53,22 @@ class AdaptProposal:
     removals: Tuple[Dict[str, Any], ...] = ()
 
 
+@dataclass(frozen=True)
+class GenerateProposal:
+    """A `workout generate` result, before anything has been written.
+
+    Generation is archive-and-rebuild, so the athlete sees the sessions first and the
+    write happens only on a `y` (ARCHITECTURE.md §"Workout Generation"). `workouts` are
+    already tagged with the `macrocycle_id` governing their date, and `displaced` is the
+    live plan this would archive — both decided here, so the preview and the apply cannot
+    disagree about what appears and what disappears.
+    """
+    reasoning: str
+    workouts: Tuple[Dict[str, Any], ...] = ()
+    displaced: Tuple[Dict[str, Any], ...] = ()
+    gen_start: str = ""
+
+
 def pair_adaptations(
     proposals: List[Dict[str, Any]], existing: List[Dict[str, Any]]
 ) -> Tuple[Tuple[AdaptPair, ...], Tuple[Dict[str, Any], ...]]:
