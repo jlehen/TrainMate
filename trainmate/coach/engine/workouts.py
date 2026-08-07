@@ -44,7 +44,7 @@ def _terminal_window_task(days_left: int, meso_end_date_str: str) -> str:
         else f"ends in {days_left} day(s), on {meso_end_date_str}"
     )
     return f"""
-THIS BLOCK IS ENDING:
+### THIS BLOCK IS ENDING
 The block you are adapting {ending}.
 An easing applied now therefore has no runway to rebound — no later session remains in which
 to restore the load you shed — and the days after {meso_end_date_str} belong to the next
@@ -65,7 +65,7 @@ def _block_progress_task(block_progress: Optional[str]) -> str:
     if not block_progress:
         return ""
     return """
-CONTINUING A BLOCK ALREADY UNDER WAY:
+### CONTINUING A BLOCK ALREADY UNDER WAY
 The user content includes a section titled "BLOCK PROGRESS SO FAR": what the block the
 athlete is currently in has already banked — its volume and measured intensity, then each
 already-trained week with the load the plan asked of it beside the load the athlete actually
@@ -102,7 +102,7 @@ def _block_composition_task(block_progress: Optional[str], has_intensity: bool) 
     if not block_progress or not has_intensity:
         return ""
     return """
-JUDGING THE BLOCK'S COMPOSITION:
+### JUDGING THE BLOCK'S COMPOSITION
 The block-progress section carries what the athlete's sessions actually MEASURED, per sport
 and zone, beside what the plan PRESCRIBED over the same weeks and beside the block's stated
 focus. Composition is yours: how many hard sessions the block holds, and how its easy and
@@ -151,7 +151,7 @@ def _planned_zone_task(zone_currencies: Optional[Dict[str, str]]) -> str:
         for sport, cur in sorted(zone_currencies.items())
     )
     return f"""
-PRESCRIBING INTENSITY (planned time in zone):
+### PRESCRIBING INTENSITY (planned time in zone)
 State each session's intensity target as structured data, not only in the prose. The
 currency per sport is fixed by what the athlete's recordings actually cover — use
 exactly these and nothing else:
@@ -219,13 +219,15 @@ class WorkoutLogicMixin:
         else:
             duration_desc = f"{num_days} day{'s' if num_days != 1 else ''}"
         custom_task = (
-            f"TASK:\nGenerate a training schedule for the next {duration_desc} starting from {starting_phrase}.\n"
+            "## TASK\n"
+            f"Generate a training schedule for the next {duration_desc} starting from "
+            f"{starting_phrase}.\n"
             "Ensure the weekly schedules/microcycles are designed specifically to match the focus, target\n"
             "volume, and intensity of the active mesocycle block(s) the athlete is in during this period, and\n"
             "incorporate any deload weeks or exceptions for the athlete's active constraints in accordance\n"
             "with the science guidelines.\n"
             "\n"
-            "BENCHMARK PLACEMENT (fitness tests — see the BENCHMARK guidelines above):\n"
+            "### BENCHMARK PLACEMENT (fitness tests — see the BENCHMARK guidelines above)\n"
             "Schedule ONE benchmark (fitness test) of the sport/kind appropriate to the athlete's goal in\n"
             "each mesocycle-boundary week this span covers (a block's final week), EXCEPT any boundary\n"
             "week falling inside the last seven days before the goal or the goal's own week — the final\n"
@@ -243,6 +245,7 @@ class WorkoutLogicMixin:
             + _block_composition_task(block_progress, block_has_intensity)
             + _planned_zone_task(zone_currencies)
             + "\n"
+            "## RESPONSE FORMAT\n"
             "You MUST respond with a JSON object containing:\n"
             "{\n"
             '  "reasoning": "Explain the microcycle design, detailing how workouts align with the active\n'
@@ -298,8 +301,9 @@ class WorkoutLogicMixin:
         # Same gate as the task section above, so the two never disagree about its presence.
         if block_progress:
             history_text_parts.append(
-                "BLOCK PROGRESS SO FAR (the part of the current block already trained — "
-                f"see CONTINUING A BLOCK ALREADY UNDER WAY):\n{block_progress}"
+                "## BLOCK PROGRESS SO FAR\n"
+                "The part of the current block already trained — see CONTINUING A BLOCK "
+                f"ALREADY UNDER WAY.\n{block_progress}"
             )
         if metrics:
             metrics_text = format_metrics_history(metrics, pmc_warmup_cutoff)
@@ -309,17 +313,17 @@ class WorkoutLogicMixin:
             if pmc_context:
                 metrics_text += "\n" + pmc_context
             history_text_parts.append(
-                f"Athlete's Metrics History (Past 15 Days):\n{metrics_text}"
+                f"## ATHLETE'S METRICS HISTORY (PAST 15 DAYS)\n{metrics_text}"
             )
         if baseline:
             baseline_str = format_baseline(baseline)
             history_text_parts.append(
-                f"Baseline Reference:\n{baseline_str}"
+                f"## BASELINE REFERENCE\n{baseline_str}"
             )
         if completed_activities:
             completed_text = format_completed_activities(completed_activities)
             history_text_parts.append(
-                f"Actual Completed Garmin Activities in Window:\n{completed_text}"
+                f"## ACTUAL COMPLETED GARMIN ACTIVITIES IN WINDOW\n{completed_text}"
             )
 
         if history_text_parts:
@@ -388,7 +392,7 @@ class WorkoutLogicMixin:
             "  the case no other branch here covers.\n"
         )
         custom_task = f"""
-TASK:
+## TASK
 Analyze the athlete's actual workout adherence and physiological metrics trajectory over
 the past {history_days} days: completed activities against planned workouts, the calculated
 discrepancies (misses, workload/duration differences, rest violations), and the rolling
@@ -404,7 +408,8 @@ the active mesocycle block (from {target_date_str} to {meso_end_date_str}).
 - If they are fully recovered and on track, keep the plan as scheduled or make minor
   optimal adjustments.
 {drift_branch}
-STANDING RULES — these govern every section below, and it does not restate them:
+### STANDING RULES
+These govern every section below, and none of them restates these rules:
 1. MOVE BEFORE YOU EASE, EASE BEFORE YOU DELETE. Rescheduling a session a day or two
    preserves the planned work; deleting it loses it.
 2. THE BLOCK IS NOT YOURS TO RESHAPE. You adapt the sessions inside it. No single day's
@@ -419,14 +424,14 @@ STANDING RULES — these govern every section below, and it does not restate the
 5. RECOVERY METRICS LAG. A morning reflects what came before it, not what you schedule
    after it. Two sections below turn on this.
 
-WHAT YOU MAY NOT TOUCH:
+### WHAT YOU MAY NOT TOUCH
 Sessions tagged "[COMPLETED — locked history, not adaptable]" have already been performed,
 including any the athlete trained earlier on the evaluation date. Do NOT adapt them, and
 never restate a finished session to match what was actually done — adapt only sessions
 still ahead. Sessions tagged "[athlete-added]" are the athlete's own deliberate intent:
 preserve them as planned unless fatigue or injury risk clearly warrants easing.
 
-ATTRIBUTING A DEPRESSED MORNING — TRAINING FATIGUE vs LIFESTYLE NOISE:
+### ATTRIBUTING A DEPRESSED MORNING — TRAINING FATIGUE vs LIFESTYLE NOISE
 By rule 5, read the externally-logged daily-context signal from the DAY BEFORE a depressed
 morning: if one (e.g. alcohol, a bad night, high stress) explains the dip, that suppression
 is transient lifestyle noise, NOT accumulated training fatigue.
@@ -437,7 +442,7 @@ load REDUCTIONS for fatigue the TRAINING actually caused (a depressed morning fo
 genuinely hard days, with no lifestyle signal to explain it). When a hard day AND a
 lifestyle signal coincide, both may contribute — weigh them rather than blaming training.
 
-DO NOT COMPOUND A PRIOR ADAPTATION:
+### DO NOT COMPOUND A PRIOR ADAPTATION
 Sessions tagged "[ALREADY EASED by a prior adaptation ...]" are NOT the original plan —
 their numbers are the reduced form a previous adaptation already produced. Rule 5 again:
 the morning after an easing still looks depressed from the very fatigue you already acted
@@ -452,7 +457,7 @@ athlete recovers is encouraged; deepening an already-fresh cut is not.
         # Why a test may never be softened, and why moving it is the model's call and not a
         # deterministic pass: DESIGN_benchmark_workouts.md §4.
         custom_task += """
-PROTECTING A BENCHMARK — RESCHEDULE, DON'T DILUTE:
+### PROTECTING A BENCHMARK — RESCHEDULE, DON'T DILUTE
 A session tagged "[BENCHMARK ...]" is a fitness test: measurement, not stimulus, so the
 usual "ease the hard day" logic is exactly wrong for it — run tired it reads low and then
 mis-scales every workout after it. NEVER reduce, soften or shorten a benchmark, and never
@@ -469,7 +474,7 @@ freshness beats a lost test. A benchmark you are NOT changing need not be return
         # the block contains is not.
         if has_intensity:
             custom_task += """
-CORRECTING EXECUTION DRIFT:
+### CORRECTING EXECUTION DRIFT
 The block summary shows what the athlete's sessions ACTUALLY measured, per sport
 and zone, beside the block's stated focus — as a per-week rate over the block's
 completed weeks, then the current week's raw minutes so far with how much of that
@@ -509,7 +514,7 @@ belongs to the next `workout generate`, not to you.
 
         if has_message:
             custom_task += """
-ATHLETE'S NOTE FOR TODAY:
+### ATHLETE'S NOTE FOR TODAY
 The user content includes a section titled "ATHLETE'S NOTE FOR THIS ADAPTATION": a
 free-text note the athlete attached to THIS run — extra intent or constraints the metrics
 can't show (e.g. a niggle to protect, no access to a sport/venue on a given day, or how
@@ -518,7 +523,7 @@ let it tip a judgement call. It is advisory, not an override — do NOT schedule
 unsafe load just because the athlete asks (if recovery signals warrant easing, ease and say
 why). It speaks for this adaptation only and is never durable evidence about the block.
 
-EXTRACTING A DURABLE CONSTRAINT FROM THE NOTE:
+### EXTRACTING A DURABLE CONSTRAINT FROM THE NOTE
 Separately from adapting today's sessions, decide whether the note ALSO states something
 the coach must work around beyond today: unavailability, a time/intensity cap, an injury
 layoff, a venue/equipment limit, or a stated preference with a date or date range (e.g.
@@ -534,6 +539,7 @@ actions and the app, not you, decides those.
 """
 
         custom_task += """
+### DURABLE OBSERVATIONS ARE READ-ONLY HERE
 This daily adaptation is READ-ONLY with respect to the coach's durable observations:
 use the COACH LEARNINGS as context, but do NOT emit any learning updates here — durable,
 evidence-backed observations are authored only by the weekly history analysis
@@ -594,6 +600,7 @@ evidence-backed observations are authored only by the weekly history analysis
                 "  ]"
             )
         custom_task += (
+            "\n## RESPONSE FORMAT\n"
             "You MUST respond with a JSON object containing:\n{\n"
             + ",\n".join(schema_members)
             + "\n}\n"
@@ -630,15 +637,15 @@ evidence-backed observations are authored only by the weekly history analysis
         removed_section = ""
         if removed_workouts:
             removed_section = (
-                "\nWorkouts Removed by Athlete (deliberately cancelled — not misses):\n"
+                "\n## WORKOUTS REMOVED BY ATHLETE (deliberately cancelled — not misses)\n"
                 + format_removed_workouts(removed_workouts) + "\n"
             )
 
         informational_section = ""
         if informational:
             informational_section = (
-                "\nActivities Outside Any Plan (informational — load counts, "
-                "but not adherence failures):\n" + format_completed_activities(informational) + "\n"
+                "\n## ACTIVITIES OUTSIDE ANY PLAN (informational — load counts, "
+                "but not adherence failures)\n" + format_completed_activities(informational) + "\n"
             )
 
         # Ephemeral, this-run-only note from the athlete (see custom_task guidance). Same
@@ -647,9 +654,10 @@ evidence-backed observations are authored only by the weekly history analysis
         message_section = ""
         if has_message:
             message_section = (
-                "\nATHLETE'S NOTE FOR THIS ADAPTATION (free-text intent/constraints for "
-                "today only — advisory, not an override; do not treat as durable evidence "
-                f"about the block):\n{athlete_message.strip()}\n"
+                "\n## ATHLETE'S NOTE FOR THIS ADAPTATION\n"
+                "Free-text intent/constraints for today only — advisory, not an override;\n"
+                "do not treat as durable evidence about the block.\n"
+                f"{athlete_message.strip()}\n"
             )
 
         # The measured block summary (§9.3). Kept out of the metrics block on purpose:
@@ -657,9 +665,10 @@ evidence-backed observations are authored only by the weekly history analysis
         intensity_section = ""
         if has_intensity:
             intensity_section = (
-                "\nMEASURED INTENSITY DISTRIBUTION OF THE ACTIVE BLOCK (what the athlete's "
-                "sessions actually recorded, per sport and zone — see CORRECTING EXECUTION "
-                f"DRIFT):\n{intensity_context.strip()}\n"
+                "\n## MEASURED INTENSITY DISTRIBUTION OF THE ACTIVE BLOCK\n"
+                "What the athlete's sessions actually recorded, per sport and zone —\n"
+                "see CORRECTING EXECUTION DRIFT.\n"
+                f"{intensity_context.strip()}\n"
             )
 
         user_content = f"""
@@ -667,17 +676,18 @@ Evaluation Date: {target_date_str}
 Adaptation Range: {target_date_str} to {meso_end_date_str}
 {message_section}{intensity_section}
 
-Athlete's Metrics History (Past {history_days} Days):
+## ATHLETE'S METRICS HISTORY (PAST {history_days} DAYS)
 {metrics_text}
 
-Externally-Logged Daily Context (alcohol, poor sleep, stress, etc.):
+## EXTERNALLY-LOGGED DAILY CONTEXT (alcohol, poor sleep, stress, etc.)
 {context_text}
 
-Baseline Reference:
+## BASELINE REFERENCE
 {baseline_str}
 
-Planned Workouts (recent window for adherence + already-scheduled sessions through
-the adaptation range). This is the full forward plan for CONTEXT — most of it will
+## PLANNED WORKOUTS
+The recent window for adherence, plus already-scheduled sessions through the
+adaptation range. This is the full forward plan for CONTEXT — most of it will
 usually be fine and should be left untouched; return a session in "adapted_workouts"
 only if you are genuinely changing it (the schema's "adapted_workouts" comment covers
 omitting unchanged sessions and why re-listing one is a spurious adaptation).
@@ -691,10 +701,10 @@ where their state actually warrants it; the descriptions are here only so detail
 keeping isn't lost for lack of being restated:
 {planned_text}
 {removed_section}
-Actual Completed Garmin Activities in Window:
+## ACTUAL COMPLETED GARMIN ACTIVITIES IN WINDOW
 {completed_text}
 
-Adherence Discrepancies & Violations:
+## ADHERENCE DISCREPANCIES & VIOLATIONS
 {discrepancy_text}
 {informational_section}"""
         print(cyan(f"Querying OpenRouter to evaluate adaptation for the remainder of the mesocycle "

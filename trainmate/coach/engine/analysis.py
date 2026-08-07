@@ -20,12 +20,12 @@ class AnalysisLogicMixin:
     ) -> Dict[str, Any]:
         """Queries LLM to reverse-engineer training cycles from weekly summaries."""
         custom_task = (
-            "TASK:\n"
+            "## TASK\n"
             "Analyze the athlete's completed training load, zone distributions, and\n"
             "physiological metrics week-by-week. Reverse-engineer this data to identify\n"
             "the underlying training phases (macrocycle & mesocycles) that occurred.\n"
             "\n"
-            "READING THE PER-WEEK CONTEXT FIELDS:\n"
+            "### READING THE PER-WEEK CONTEXT FIELDS\n"
             "- 'constraints': athlete-declared directives overlapping the week (illness,\n"
             "  travel, work crunch, capacity caps, etc.). Consider them as a possible\n"
             "  explanation for load, performance, or recovery anomalies before attributing\n"
@@ -52,7 +52,7 @@ class AnalysisLogicMixin:
         # so the guide never describes a section the model wasn't given.
         if context_days:
             custom_task += (
-                "READING 'context_days' (quantitative context impact, full history):\n"
+                "### READING 'context_days' (quantitative context impact, full history)\n"
                 "- A separate block, per external signal category (e.g. alcohol), of aligned\n"
                 "  EPISODES. An episode is a run of one or more signal-days; each has a 'days'\n"
                 "  dose sequence ({date, value, load_tss} — the signal magnitude and that day's\n"
@@ -77,6 +77,7 @@ class AnalysisLogicMixin:
             )
 
         custom_task += (
+            "## RESPONSE FORMAT\n"
             "You MUST respond with a JSON object containing:\n"
             "{\n"
             '  "macrocycle_summary": "High-level summary of the training period.",\n'
@@ -107,17 +108,11 @@ class AnalysisLogicMixin:
             "You are TrainMate Coach, an advanced AI sports science training coach.\n"
             "You analyze historical activities and physiological metrics to identify\n"
             "training periodization phases (macro and mesocycles).\n\n"
-            "================================================================================\n"
-            "START OF SPORTS SCIENCE GUIDELINES\n"
-            "================================================================================\n"
             f"{guidelines}\n"
-            "================================================================================\n"
-            "END OF SPORTS SCIENCE GUIDELINES\n"
-            "================================================================================\n"
         )
 
         athlete_profile = self._format_athlete_profile(profile)
-        system_prompt += f"\nATHLETE PROFILE & PREFERENCES:\n{athlete_profile}\n"
+        system_prompt += f"\n## ATHLETE PROFILE & PREFERENCES\n{athlete_profile}\n"
 
         obj_text = ""
         for o in objectives:
@@ -127,21 +122,23 @@ class AnalysisLogicMixin:
                 f"Sport: {o['sport_type']} | Details: {details}\n"
             )
         system_prompt += (
-            f"\nATHLETE GOALS IN OR AFTER THIS PERIOD:\n"
+            f"\n## ATHLETE GOALS IN OR AFTER THIS PERIOD\n"
             f"{obj_text if obj_text else 'No objectives.'}\n"
         )
 
         # Show existing observations so the model can revise/reinforce/retire them by
         # [id] rather than only re-adding near-duplicates on every run.
         system_prompt += (
-            "\nCOACH LEARNINGS — existing athlete observations "
-            "(reference by [id] when revising, reinforcing, or retiring):\n"
+            "\n## COACH LEARNINGS\n"
+            "Existing athlete observations — reference by [id] when revising, "
+            "reinforcing, or retiring.\n"
             f"{learnings}\n"
         )
 
         system_prompt += f"\n{custom_task}\n"
 
-        user_content = "Please analyze the following weekly training summaries:\n\n"
+        user_content = "Please analyze the weekly training summaries below.\n\n"
+        user_content += "## WEEKLY TRAINING SUMMARIES\n"
         user_content += json.dumps(weekly_summaries, indent=2)
 
         # Quantitative context-impact rows ride beside the weekly summaries, covering the
@@ -149,12 +146,12 @@ class AnalysisLogicMixin:
         # Emitted only when some category has rows, so its absence reads as "nothing logged".
         if context_days:
             user_content += (
-                "\n\nQUANTITATIVE CONTEXT IMPACT (full signal-day history, episode-aligned):\n"
+                "\n\n## QUANTITATIVE CONTEXT IMPACT (full signal-day history, episode-aligned)\n"
             )
             user_content += json.dumps(context_days, indent=2)
 
         if context:
-            user_content += f"\n\nATHLETE SUBJECTIVE CONTEXT FOR THIS PERIOD:\n{context}\n"
+            user_content += f"\n\n## ATHLETE SUBJECTIVE CONTEXT FOR THIS PERIOD\n{context}\n"
 
         print(cyan("Querying OpenRouter to perform training history analysis..."))
         result = _eng.openrouter_client.complete(

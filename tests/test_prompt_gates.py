@@ -20,14 +20,14 @@ test_db = bind_test_db(TEST_DB_PATH)
 from trainmate.coach.engine import CoachEngine
 
 # Sentinels for each region a gate controls, matched against the built prompt.
-NOTE_INSTRUCTIONS = "ATHLETE'S NOTE FOR TODAY:"
+NOTE_INSTRUCTIONS = "### ATHLETE'S NOTE FOR TODAY"
 NOTE_SCHEMA_MEMBER = '"new_constraints"'
 NOTE_CLAUSE = "constraint from the athlete's note drove the change"
-NOTE_DATA = "ATHLETE'S NOTE FOR THIS ADAPTATION"
+NOTE_DATA = "## ATHLETE'S NOTE FOR THIS ADAPTATION"
 
-DRIFT_INSTRUCTIONS = "CORRECTING EXECUTION DRIFT:"
+DRIFT_INSTRUCTIONS = "### CORRECTING EXECUTION DRIFT"
 DRIFT_BRANCH = "measured intensity distribution has diverged from its stated"
-DRIFT_DATA = "MEASURED INTENSITY DISTRIBUTION OF THE ACTIVE BLOCK"
+DRIFT_DATA = "## MEASURED INTENSITY DISTRIBUTION OF THE ACTIVE BLOCK"
 
 BASE = dict(
     history_days=7,

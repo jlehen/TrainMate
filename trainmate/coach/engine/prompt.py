@@ -109,7 +109,11 @@ class PromptBuildMixin:
         guidelines: str, strategy: str, meso_text: str, learnings: str,
         profile: Optional[Dict[str, Any]], custom_task: str = ""
     ) -> str:
-        """Constructs the system prompt with sports science guidelines and athlete details."""
+        """Constructs the system prompt with sports science guidelines and athlete details.
+
+        Sections are marked `## NAME`; `custom_task` supplies `## TASK` and everything under
+        it. The one hierarchy every prompt in the app follows: DESIGN_prompt_structure.md §2.
+        """
         obj_text = ""
         for o in objectives:
             details = o.get('description', '')
@@ -125,7 +129,7 @@ class PromptBuildMixin:
 You design and adapt personalized training plans for endurance athletes using sports science
 principles.
 
-COACHING ROLE AND OBJECTIVES:
+## COACHING ROLE AND OBJECTIVES
 1. Design periodized training plans (macro, meso, micro cycles) leading up to the target goals.
 2. Focus scheduling on the NEXT CHRONOLOGICAL GOAL only. If there are multiple goals, identify
    synergies between them (e.g. general base or strength building phases).
@@ -139,15 +143,9 @@ COACHING ROLE AND OBJECTIVES:
    do not exceed daily availability or max sessions). Respect certainty percentages (higher
    values indicate more rigid constraints; lower values allow flexibility).
 
-================================================================================
-START OF SPORTS SCIENCE GUIDELINES
-================================================================================
 {guidelines}
-================================================================================
-END OF SPORTS SCIENCE GUIDELINES
-================================================================================
 
-COACH LEARNINGS & ACTIVE PERIODIZATION STRATEGY:
+## COACH LEARNINGS & ACTIVE PERIODIZATION STRATEGY
 - Established Training Strategy for the current macro-cycle:
 {strategy}
 - Mesocycles making up the macro-cycle:
@@ -155,13 +153,13 @@ COACH LEARNINGS & ACTIVE PERIODIZATION STRATEGY:
 - Athlete-Specific Observations (reference by [id] when revising or retiring):
 {learnings}
 
-ATHLETE PROFILE & PREFERENCES:
+## ATHLETE PROFILE & PREFERENCES
 {athlete_profile}
 
-ACTIVE ATHLETE GOALS (CHRONOLOGICAL):
+## ACTIVE ATHLETE GOALS (CHRONOLOGICAL)
 {obj_text if obj_text else "No active goals."}
 
-ACTIVE CONSTRAINTS (athlete-declared directives to work around):
+## ACTIVE CONSTRAINTS (athlete-declared directives to work around)
 {c_text if c_text else "No active constraints."}
 
 {custom_task}

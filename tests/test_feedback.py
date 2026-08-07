@@ -85,7 +85,7 @@ class TestFeedback(unittest.TestCase):
         coach_service.plan_generate(force=True)
 
         system_prompt = mock_client.complete.call_args[0][0]
-        self.assertIn("ATHLETE FEEDBACK ON THE PREVIOUS PLAN:", system_prompt)
+        self.assertIn("### ATHLETE FEEDBACK ON THE PREVIOUS PLAN", system_prompt)
         self.assertIn("Strategy was too easy.", system_prompt)
         self.assertIn("Long runs are too short.", system_prompt)
 

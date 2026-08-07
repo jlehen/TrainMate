@@ -26,7 +26,7 @@ class PlanStrategyMixin:
         call produces (DESIGN_backward_evaluation.md §10.1)."""
         plan_start = plan_start_str or today_str
         custom_task = f"""
-TASK:
+## TASK
 Determine the overall periodization strategy (macrocycle) from {plan_start} until the target
 goal ({next_goal['target_date']}).
 
@@ -42,7 +42,7 @@ on or around the goal date ({next_goal['target_date']}).
 
         if athlete_feedback:
             custom_task += f"""
-ATHLETE FEEDBACK ON THE PREVIOUS PLAN:
+### ATHLETE FEEDBACK ON THE PREVIOUS PLAN
 The athlete has provided direct feedback on the previous periodization plan:
 {athlete_feedback}
 You MUST revise the macrocycle strategy and/or the duration, boundaries, and focuses of individual
@@ -53,14 +53,16 @@ sports science principles and guidelines.
 
         if previous_strategy_text:
             custom_task += """
-For context, the PREVIOUS periodization strategy that was in place before this
-replanning is provided below. Please take it into account to ensure continuity
+### CONTINUITY WITH THE PREVIOUS PLAN
+The PREVIOUS periodization strategy that was in place before this replanning is
+given above, as its own section. Please take it into account to ensure continuity
 in the athlete's training, adapting or building on top of what has been planned
 or done so far, rather than starting completely from scratch, unless a complete
 reset is warranted by major changes.
 """
 
         custom_task += f"""
+## RESPONSE FORMAT
 You MUST respond with a JSON object containing:
 {{
   "strategy": "Explain the overall training strategy philosophy and periodization strategy
@@ -92,45 +94,40 @@ You MUST respond with a JSON object containing:
             "You are TrainMate Coach, an advanced AI sports science training coach.\n"
             "You design periodized training plans (macro, meso, micro cycles) leading up "
             "to target goals.\n\n"
-            "================================================================================\n"
-            "START OF SPORTS SCIENCE GUIDELINES\n"
-            "================================================================================\n"
             f"{guidelines}\n"
-            "================================================================================\n"
-            "END OF SPORTS SCIENCE GUIDELINES\n"
-            "================================================================================\n"
         )
 
         if previous_strategy_text:
             system_prompt += f"\n{previous_strategy_text}\n"
 
         system_prompt += (
-            f"\nATHLETE PROFILE & PREFERENCES:\n{athlete_profile}\n"
+            f"\n## ATHLETE PROFILE & PREFERENCES\n{athlete_profile}\n"
         )
         if history_summary:
             system_prompt += (
-                f"\nATHLETE RECENT TRAINING SUMMARY (PAST 15 DAYS):\n{history_summary}\n"
+                f"\n## ATHLETE RECENT TRAINING SUMMARY (PAST 15 DAYS)\n{history_summary}\n"
             )
         # Planned-vs-actual review of the prior plan + any inferred reconstruction, fed as
         # read-only context so the new plan is grounded in demonstrated reality rather than
         # an idealized template (DESIGN_backward_evaluation.md §6, Option A).
         if prior_training_text:
-            system_prompt += f"\nPRIOR TRAINING REVIEW:\n{prior_training_text}\n"
+            system_prompt += f"\n## PRIOR TRAINING REVIEW\n{prior_training_text}\n"
         # The distilled half of what the analysis flow found; the reconstruction above is
         # its narrative half (DESIGN_backward_evaluation.md §10.1).
         if learnings:
             system_prompt += (
-                "\nATHLETE-SPECIFIC OBSERVATIONS (accumulated by the training-history "
-                "analysis, tagged\n[id|sports|confidence]):\n"
+                "\n## ATHLETE-SPECIFIC OBSERVATIONS\n"
+                "Accumulated by the training-history analysis, tagged "
+                "[id|sports|confidence].\n"
                 f"{learnings}\n"
                 "Weigh these when shaping the blocks — a higher confidence means more weeks "
                 "of evidence\nbehind the observation. They are input only here: authoring "
                 "and revising them belongs\nto the analysis flow.\n"
             )
         system_prompt += (
-            f"\nACTIVE ATHLETE GOALS (CHRONOLOGICAL):\n"
+            f"\n## ACTIVE ATHLETE GOALS (CHRONOLOGICAL)\n"
             f"{obj_text if obj_text else 'No active goals.'}\n\n"
-            f"ACTIVE CONSTRAINTS (athlete-declared directives to work around):\n"
+            f"## ACTIVE CONSTRAINTS (athlete-declared directives to work around)\n"
             f"{c_text if c_text else 'No active constraints.'}\n\n"
             f"{custom_task}\n"
         )

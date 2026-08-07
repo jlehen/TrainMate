@@ -226,7 +226,7 @@ class TestAdaptationAdapt(unittest.TestCase):
             # Surrounding whitespace is trimmed before rendering.
             self.assertIn("knee is sore, keep impact low", user_content)
             self.assertNotIn("  knee is sore", user_content)
-            self.assertIn("ATHLETE'S NOTE FOR TODAY", system_prompt)
+            self.assertIn("### ATHLETE'S NOTE FOR TODAY", system_prompt)
 
             # No message → the section is absent (message-less run is unchanged).
             mock_client.complete.reset_mock()
@@ -604,7 +604,7 @@ class TestAdaptationAdapt(unittest.TestCase):
         self.assertIn("Z3 tempo", flat)
         self.assertIn("Current week so far", flat)
         self.assertIn("NOT extrapolated", flat)
-        self.assertIn("CORRECTING EXECUTION DRIFT:", system_prompt)
+        self.assertIn("### CORRECTING EXECUTION DRIFT", system_prompt)
         self.assertIn("even when\n  recovery metrics are fine", system_prompt)
         # §9.2: adapt may move a session's intensity, never the block's composition.
         self.assertIn("belongs to the next `workout generate`", system_prompt)

@@ -90,12 +90,17 @@ class OpenRouterClient:
                     ""
                 ])
                 
+            # Both messages are fenced: the prompt carries its own `##`/`###` section
+            # markers (DESIGN_prompt_structure.md §2), and unfenced they would render as
+            # headings of this log file and read as its structure rather than the prompt's.
             lines.extend([
                 "## System Prompt",
                 "<details>",
                 "<summary>Click to expand system prompt</summary>",
                 "",
+                "```",
                 system_content,
+                "```",
                 "</details>",
                 "",
                 "## User Content",

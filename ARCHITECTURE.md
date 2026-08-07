@@ -314,7 +314,11 @@ three submodules:
 
 ### `_load_science_guidelines(app_science_dir, science_dir) → str`
 Module-level function in `formatting.py`. Concatenates all `*.txt` files from
-`trainmate/science/` (built-in) and `science/` (user-provided). Called by
+`trainmate/science/` (built-in) and `science/` (user-provided), **one `====` banner per
+source** so the coach can tell whose material it is reading, and so the documents' own
+markdown headings are visibly not the prompt's (`DESIGN_prompt_structure.md` §3). The
+banners are emitted here, not by the three call sites. Returns `""` when neither directory
+holds documents, so no empty banner is produced. Called by
 `CoachService._load_science_guidelines()`.
 
 ### `CoachEngine`
@@ -322,7 +326,10 @@ Module-level function in `formatting.py`. Concatenates all `*.txt` files from
 `CoachService` or directly by tests).
 
 - **`_build_system_prompt(...)`** — assembles the main LLM system prompt
-  (guidelines, strategy, goals, constraints, athlete profile). `_render_constraints`
+  (guidelines, strategy, goals, constraints, athlete profile). Every prompt in the app —
+  system and user message alike — uses one section hierarchy: `## NAME` for a top-level
+  section, `### NAME` for a sub-section of `## TASK`, and a `====` banner only around a
+  verbatim quoted document (`DESIGN_prompt_structure.md` §2). `_render_constraints`
   renders the active directives block (`title | dates | enforcement | description`, where
   enforcement is "no training (rest enforced)" or "advisory").
 - **`_format_athlete_profile(profile)`** — formats the (effective) profile into a
@@ -2145,6 +2152,24 @@ A rule never displaces a *mechanic*, though — `PROTECTING A BENCHMARK` still s
 to encode a move, and the drift section still carries its escalation to `workout generate` in
 full, because that escalation must stay gated rather than float up into an always-on rule.
 See DESIGN_adapt_task_prompt.md.
+
+### Prompt structure: one hierarchy, three markers
+Every prompt was assembled from parts written at different times, each announcing itself
+its own way: the system prompt in `ALL CAPS:`, the user content mostly in `Title Case:`,
+and the science documents in whatever markdown their author used. `TASK:` and
+`BENCHMARK PLACEMENT:` were the same shape, so nothing said the second was *part of* the
+first — which it is, structurally, since both live in one `custom_task` string.
+
+Now: `## NAME` for a top-level section, `### NAME` for a sub-section of `## TASK`, and a
+`====` banner only around a document quoted verbatim. Names stay ALL CAPS because the task
+prose cites sections *by name* ("the section titled `BLOCK PROGRESS SO FAR`"); the marker
+carries the level, the caps carry the identity. Both messages use the same scheme.
+
+The science documents keep their banner rather than folding into the markdown scheme: they
+*are* markdown, with their own `#`/`##`/`###` at arbitrary depth, so the banner is what says
+"quoted — these headings are its own", and it is precisely what lets the frame use `##`
+safely everywhere else. Two banners, one per source (app / athlete-provided), each stating
+its provenance. See DESIGN_prompt_structure.md.
 
 ### Workout state: derived axes, not a stored `status` enum
 A single `status` string once conflated *modified*, *calendar*, and *removed*.

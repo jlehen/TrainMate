@@ -254,20 +254,58 @@ def format_baseline(baseline: Optional[Dict[str, Any]]) -> str:
     )
 
 
-def _load_science_guidelines(app_science_dir: str, science_dir: str) -> str:
-    """Loads and concatenates all text files in the app and user science directories."""
-    directories = [app_science_dir, science_dir]
-    texts = []
-    for s_dir in directories:
-        if not os.path.exists(s_dir):
+_RULE = "=" * 80
+
+
+def _science_block(s_dir: str, title: str, provenance: str) -> str:
+    """One bannered block of quoted science documents, or "" when the directory holds none.
+
+    The banner is the prompt's third marker (DESIGN_prompt_structure.md §3): everything
+    inside it is verbatim source, so its own `#` headings are the document's and not the
+    prompt's — which is why the frame never uses one.
+    """
+    if not os.path.exists(s_dir):
+        return ""
+    docs = []
+    for filename in sorted(os.listdir(s_dir)):
+        if not filename.endswith(".txt"):
             continue
-        for filename in sorted(os.listdir(s_dir)):
-            if not filename.endswith(".txt"):
-                continue
-            filepath = os.path.join(s_dir, filename)
-            try:
-                with open(filepath, "r", encoding="utf-8") as f:
-                    texts.append(f"=== Guidelines from {filename} ===\n" + f.read())
-            except Exception as e:
-                print(f"Error reading science guideline {filename}: {e}")
-    return "\n\n".join(texts)
+        filepath = os.path.join(s_dir, filename)
+        try:
+            with open(filepath, "r", encoding="utf-8") as f:
+                docs.append(f"--- {filename} ---\n" + f.read())
+        except Exception as e:
+            print(f"Error reading science guideline {filename}: {e}")
+    if not docs:
+        return ""
+    return "\n".join([
+        _RULE, f"START OF {title}", _RULE,
+        provenance,
+        "",
+        "\n\n".join(docs),
+        _RULE, f"END OF {title}", _RULE,
+    ])
+
+
+def _load_science_guidelines(app_science_dir: str, science_dir: str) -> str:
+    """The sports-science reference documents, one banner per source.
+
+    Split so the coach can tell whose material it is reading (§3): the app's own guidelines
+    and the athlete's are different kinds of authority, and concatenating them under one
+    banner hid that. Returns "" when neither directory has documents, so no caller emits an
+    empty banner.
+    """
+    blocks = [
+        _science_block(
+            app_science_dir,
+            "TRAINMATE SPORTS SCIENCE GUIDELINES",
+            "TrainMate's own reference material, shipped with the app.",
+        ),
+        _science_block(
+            science_dir,
+            "ATHLETE-PROVIDED SPORTS SCIENCE GUIDELINES",
+            "Reference material the athlete supplied themselves — the training philosophy\n"
+            "and sources they want their coaching drawn from.",
+        ),
+    ]
+    return "\n\n".join(b for b in blocks if b)

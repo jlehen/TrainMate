@@ -34,6 +34,11 @@
 - Everything wraps at 100 characters: code lines, comments and LLM prompts.
 - Multiline LLM prompts must use string literal enclosed in triple quotes
   or implicit string concatenation with parenthesis.
+- LLM prompts have one section hierarchy, in both the system and the user
+  message: `## SECTION NAME` for a top-level section, `### SUB-SECTION NAME`
+  for a sub-section of `## TASK`, and a `====` banner only around a document
+  quoted verbatim. Names stay ALL CAPS, no trailing colon. See
+  DESIGN_prompt_structure.md before adding a section.
 - Try to reduce indented code, unless it's very trivial (1-2 lines).
   For instance, instead of:
 

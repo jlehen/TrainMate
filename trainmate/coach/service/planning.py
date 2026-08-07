@@ -279,7 +279,7 @@ class PlanningMixin:
                         f"{m['focus']}\n"
                     )
                 prev_strategy_text = (
-                    "PREVIOUS PERIODIZATION STRATEGY (FOR CONTEXT):\n"
+                    "## PREVIOUS PERIODIZATION STRATEGY (FOR CONTEXT)\n"
                     f"- Overall Strategy: {prev_macro['strategy']}\n"
                     f"- Mesocycles:\n{prev_meso_text or '  - None\n'}"
                 )

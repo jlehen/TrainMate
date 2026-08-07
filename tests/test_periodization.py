@@ -173,9 +173,9 @@ class TestPeriodization(unittest.TestCase):
         self.assertIn("Run long and slow", prompt)
         self.assertIn("Base Building (2026-06-01 to 2026-06-28): Zone 2 runs", prompt)
         self.assertIn("Peak & Taper (2026-06-29 to 2026-07-05): Tapering", prompt)
-        self.assertIn("COACH LEARNINGS & ACTIVE PERIODIZATION STRATEGY:", prompt)
-        self.assertIn("START OF SPORTS SCIENCE GUIDELINES", prompt)
-        self.assertIn("END OF SPORTS SCIENCE GUIDELINES", prompt)
+        self.assertIn("## COACH LEARNINGS & ACTIVE PERIODIZATION STRATEGY", prompt)
+        self.assertIn("START OF TRAINMATE SPORTS SCIENCE GUIDELINES", prompt)
+        self.assertIn("END OF TRAINMATE SPORTS SCIENCE GUIDELINES", prompt)
 
     @patch("trainmate.coach.engine.openrouter_client")
     def test_replan_provides_previous_strategy_context_to_llm(self, mock_client):
@@ -215,14 +215,15 @@ class TestPeriodization(unittest.TestCase):
 
         self.assertEqual(mock_client.complete.call_count, 2)
         system_prompt = mock_client.complete.call_args_list[0][0][0]
-        self.assertIn("PREVIOUS PERIODIZATION STRATEGY (FOR CONTEXT):", system_prompt)
+        self.assertIn("## PREVIOUS PERIODIZATION STRATEGY (FOR CONTEXT)", system_prompt)
         self.assertIn("Keep heart rate low", system_prompt)
         self.assertIn(
             "Base Building (2026-06-01 to 2026-06-28): Aerobic conditioning",
             system_prompt,
         )
+        self.assertIn("### CONTINUITY WITH THE PREVIOUS PLAN", system_prompt)
         self.assertIn(
-            "For context, the PREVIOUS periodization strategy that was in place",
+            "The PREVIOUS periodization strategy that was in place before this",
             system_prompt,
         )
 
@@ -258,7 +259,7 @@ class TestPeriodization(unittest.TestCase):
         }
         coach_service.plan_generate(force=True, objective_id=obj_id)
         system_prompt = mock_client.complete.call_args[0][0]
-        self.assertIn("PRIOR TRAINING REVIEW:", system_prompt)
+        self.assertIn("## PRIOR TRAINING REVIEW", system_prompt)
         self.assertIn("PLANNED vs ACTUAL", system_prompt)
         self.assertIn("Aerobic conditioning", system_prompt)
         self.assertIn("1 session", system_prompt)
@@ -764,13 +765,46 @@ class TestPeriodization(unittest.TestCase):
 
             guidelines = coach_service._load_science_guidelines()
 
-            self.assertIn("=== Guidelines from app_science.txt ===", guidelines)
+            self.assertIn("--- app_science.txt ---", guidelines)
             self.assertIn("App guideline text", guidelines)
-            self.assertIn("=== Guidelines from user_science.txt ===", guidelines)
+            self.assertIn("--- user_science.txt ---", guidelines)
             self.assertIn("User guideline text", guidelines)
+            # Each source gets its own banner, so the coach can tell whose material it is
+            # reading (DESIGN_prompt_structure.md §3): the app's text must close out before
+            # the athlete's banner opens.
+            self.assertLess(
+                guidelines.index("App guideline text"),
+                guidelines.index("END OF TRAINMATE SPORTS SCIENCE GUIDELINES"),
+            )
+            self.assertLess(
+                guidelines.index("END OF TRAINMATE SPORTS SCIENCE GUIDELINES"),
+                guidelines.index("START OF ATHLETE-PROVIDED SPORTS SCIENCE GUIDELINES"),
+            )
+            self.assertLess(
+                guidelines.index("START OF ATHLETE-PROVIDED SPORTS SCIENCE GUIDELINES"),
+                guidelines.index("User guideline text"),
+            )
         finally:
             shutil.rmtree(temp_app_dir)
             shutil.rmtree(temp_user_dir)
+
+    @patch("trainmate.runtime.config")
+    def test_science_guidelines_omit_banner_for_empty_source(self, mock_config):
+        """A fresh install has no `science/` dir — it must produce no athlete banner at
+        all, rather than an empty one (DESIGN_prompt_structure.md §3)."""
+        temp_app_dir = tempfile.mkdtemp()
+        try:
+            mock_config.app_science_dir = temp_app_dir
+            mock_config.science_dir = os.path.join(temp_app_dir, "does_not_exist")
+            with open(os.path.join(temp_app_dir, "app_science.txt"), "w") as f:
+                f.write("App guideline text")
+
+            guidelines = coach_service._load_science_guidelines()
+
+            self.assertIn("START OF TRAINMATE SPORTS SCIENCE GUIDELINES", guidelines)
+            self.assertNotIn("ATHLETE-PROVIDED", guidelines)
+        finally:
+            shutil.rmtree(temp_app_dir)
 
     def test_config_hash_logic(self):
         initial_hash = coach_service._get_config_hash()
@@ -1066,7 +1100,7 @@ class TestPeriodization(unittest.TestCase):
         coach_service.plan_generate(force=True)
 
         system_prompt = mock_client.complete.call_args[0][0]
-        self.assertIn("ATHLETE RECENT TRAINING SUMMARY (PAST 15 DAYS):", system_prompt)
+        self.assertIn("## ATHLETE RECENT TRAINING SUMMARY (PAST 15 DAYS)", system_prompt)
         self.assertIn("Completed Workouts (Past 15 days):", system_prompt)
         self.assertIn("running: 1 sessions", system_prompt)
         self.assertIn("Resting Heart Rate: 55.0 bpm", system_prompt)
@@ -1106,7 +1140,7 @@ class TestPeriodization(unittest.TestCase):
         _generate_workouts()
 
         user_content = mock_client.complete.call_args[0][1]
-        self.assertIn("Athlete's Metrics History (Past 15 Days):", user_content)
+        self.assertIn("## ATHLETE'S METRICS HISTORY (PAST 15 DAYS)", user_content)
         self.assertIn("RHR=55bpm, HRV=60ms", user_content)
 
 
