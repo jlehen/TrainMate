@@ -564,32 +564,31 @@ The block summary shows what the athlete's sessions ACTUALLY measured, per sport
 and zone, beside the block's stated focus — as a per-week rate over the block's
 completed weeks, then the current week's raw minutes so far with how much of that
 week has elapsed. The current week is NOT extrapolated: read it against the
-elapsed fraction yourself. When the measured picture and the focus disagree, that
-is an execution error, not a fatigue signal — and it is yours to fix.
+elapsed fraction yourself.
 
-Correct it by changing HOW the remaining sessions are prescribed, not how much
-they contain. Hold duration and planned TSS; sharpen the intensity target and
-give it an explicit guard rail the athlete can act on mid-session (a HR ceiling,
-a pace cap, "walk the hills"). Name the evidence in change_reason so the athlete
-sees why.
+A measured picture that disagrees with the focus is an execution error, not a
+fatigue signal, and it is yours to fix — by changing HOW the remaining sessions
+are prescribed, not how much they contain. Hold duration and planned TSS; sharpen
+the intensity target and give it an explicit guard rail the athlete can act on
+mid-session (a HR ceiling, a pace cap, "walk the hills").
+- Drift upward means the athlete WANTS more, so do not only cap it: say where the
+  appetite may legitimately go, in the batch-level reason, and spend it in the
+  block's own currency — in a volume block, more easy minutes; in an intensity
+  block, a fuller effort on the days already designated hard.
+- Drift downward means under-execution, so the guard rail becomes a floor and the
+  advice is about how to reach it. Condition this on the power table where one
+  exists — HR lag makes under-execution look real when it is not (§7).
 
-Drift upward usually means the athlete WANTS more, so do not only cap it — say
-where the appetite may legitimately go, in the batch-level reason. Spend it in
-the block's own currency: in a volume block, more easy minutes; in an intensity
-block, a fuller effort on the days already designated hard. If what they want
-exceeds that, say plainly that it is a change to the block itself and belongs to
-the next plan generation, not to a daily adaptation.
-
-Drift downward mirrors this: a VO2max block measuring as a threshold block means
-the sessions are being under-executed, so the guard rail becomes a floor and the
-advice is about how to reach it. Condition this on the power table where one
-exists — HR lag makes under-execution look real when it is not (§7).
-
-This is not a load reduction and must not become one. If the block genuinely
-contains too much hard work — as opposed to easy work being run too hard — that
-is a periodization question, and it belongs to the next `workout generate`, not
-to you.
+This is never a load reduction. If the block genuinely contains too much hard work
+— as opposed to easy work being run too hard — that is composition, and it
+belongs to the next `workout generate`, not to you.
 ```
+
+Three things this section deliberately no longer says, because the TASK's STANDING RULES
+say them once for every section (`DESIGN_adapt_task_prompt.md` §2): name the evidence in
+`change_reason` (rule 3), that a drift reading is not licence to re-cut the block (rule 2),
+and the up/down cases spelled out as separate paragraphs rather than as the two bullets they
+are. The escalation clause is kept in full — it is the load-bearing half.
 
 That last paragraph hands a decision to `workout generate`. §9.2a is the other end of the
 handoff: generate receives the measured distribution, what was prescribed beside it, and the

@@ -368,6 +368,9 @@ Module-level function in `formatting.py`. Concatenates all `*.txt` files from
   learnings. Label `workout_generation`.
 - **`_workout_adapt_logic(...)`** — LLM call →
   `{change_needed, reason, adapted_workouts[]}`. **Read-only** w.r.t. learnings.
+  The TASK states its cross-cutting rules once, as `STANDING RULES` immediately after
+  the decision branches; the sections below cite them rather than restate them, so a
+  rule has one wording and cannot drift copy by copy (DESIGN_adapt_task_prompt.md §2).
   Within `config.adapt_terminal_window_days` of the block's end it appends a
   `THIS BLOCK IS ENDING` section biasing the model toward holding load, since a cut
   there cannot rebound (DESIGN_block_boundary.md §3). There is **no separate
@@ -2126,6 +2129,21 @@ block end) and, on the write side, `workout_adapt` dropping any proposal dated p
 adaptation range end. A hallucinated post-boundary date therefore cannot be written, and
 the apply range — derived from the surviving proposals — cannot stretch into the next
 block. See DESIGN_block_boundary.md.
+
+### The adapt TASK: standing rules, not restated ones
+The adapt prompt's TASK is one always-on body plus five conditional sections, each written
+at its own time against its own design doc. Each had independently re-derived the same house
+rules — "prefer rescheduling over deleting" and "do not reshape the mesocycle" were each
+restated in several sections, one of which said the latter twice within itself. The cost
+that matters is not the tokens but the divergence: each copy was phrased against its own
+local concern, so the same rule slowly stopped meaning the same thing, and nothing caught it.
+
+The rules are now stated once as `STANDING RULES`, placed *after* the decision branches (the
+branches are the task; the rules bound how it is expressed). Sections cite them in a clause.
+A rule never displaces a *mechanic*, though — `PROTECTING A BENCHMARK` still spells out how
+to encode a move, and the drift section still carries its escalation to `workout generate` in
+full, because that escalation must stay gated rather than float up into an always-on rule.
+See DESIGN_adapt_task_prompt.md.
 
 ### Workout state: derived axes, not a stored `status` enum
 A single `status` string once conflated *modified*, *calendar*, and *removed*.

@@ -46,14 +46,12 @@ def _terminal_window_task(days_left: int, meso_end_date_str: str) -> str:
     return f"""
 THIS BLOCK IS ENDING:
 The block you are adapting {ending}.
-That bounds what any adaptation can achieve here. An easing applied now has no runway to
-rebound within the block — no later sessions remain in which to restore the load you shed.
-And the sessions after {meso_end_date_str} belong to the next block, which is outside your
-reach: you can neither adapt it nor pre-empt it.
-So hold the planned load unless the signal is one you would act on even if this were the
-block's very last session. Prefer preserving or rescheduling a session over cutting it. Do
-not deepen a cut in order to "carry" the athlete into the next block — that block is planned
-separately, against the athlete's metrics as they stand when it is generated.
+An easing applied now therefore has no runway to rebound — no later session remains in which
+to restore the load you shed — and the days after {meso_end_date_str} belong to the next
+block, which you can neither adapt nor pre-empt.
+Hold the planned load unless the signal is one you would act on even if this were the
+block's very last session. Do not deepen a cut to "carry" the athlete into the next block:
+it is planned separately, against their metrics as they stand when it is generated.
 """
 
 
@@ -391,15 +389,10 @@ class WorkoutLogicMixin:
         )
         custom_task = f"""
 TASK:
-Analyze the athlete's actual workout adherence and physiological metrics trajectory
-over the past {history_days} days.
-Review the list of completed activities compared to planned workouts and any
-calculated discrepancies (misses, workload/duration differences, rest violations).
-Activities listed as informational fell on dates no plan governed (e.g. before the
-plan began) — count their load when judging fatigue, but do NOT treat them as
-adherence failures or unplanned deviations.
-Also inspect the rolling baseline reference and the daily metrics sequence to see
-if the athlete shows signs of accumulated fatigue.
+Analyze the athlete's actual workout adherence and physiological metrics trajectory over
+the past {history_days} days: completed activities against planned workouts, the calculated
+discrepancies (misses, workload/duration differences, rest violations), and the rolling
+baseline against the daily metrics sequence for signs of accumulated fatigue.
 
 Based on this, determine if we need to adapt the training plan for the remainder of
 the active mesocycle block (from {target_date_str} to {meso_end_date_str}).
@@ -411,65 +404,64 @@ the active mesocycle block (from {target_date_str} to {meso_end_date_str}).
 - If they are fully recovered and on track, keep the plan as scheduled or make minor
   optimal adjustments.
 {drift_branch}
+STANDING RULES — these govern every section below, and it does not restate them:
+1. MOVE BEFORE YOU EASE, EASE BEFORE YOU DELETE. Rescheduling a session a day or two
+   preserves the planned work; deleting it loses it.
+2. THE BLOCK IS NOT YOURS TO RESHAPE. You adapt the sessions inside it. No single day's
+   signal — a depressed morning, a note, a drift reading — is evidence the BLOCK is too
+   hard, and none permanently re-cuts its planned volume/intensity. When you do believe the
+   block itself is wrong, say so in "reason" and leave it alone.
+3. NAME THE CAUSE. Every session you change carries a "change_reason" (see the schema);
+   when something other than the metrics drove it, that cause belongs there.
+4. NOT EVERY GAP IS A MISS. Activities listed as informational fell on dates no plan
+   governed; sessions listed as deliberately removed are the athlete's own plan edits.
+   Count both when judging load and intent — neither is an adherence failure.
+5. RECOVERY METRICS LAG. A morning reflects what came before it, not what you schedule
+   after it. Two sections below turn on this.
+
+WHAT YOU MAY NOT TOUCH:
+Sessions tagged "[COMPLETED — locked history, not adaptable]" have already been performed,
+including any the athlete trained earlier on the evaluation date. Do NOT adapt them, and
+never restate a finished session to match what was actually done — adapt only sessions
+still ahead. Sessions tagged "[athlete-added]" are the athlete's own deliberate intent:
+preserve them as planned unless fatigue or injury risk clearly warrants easing.
+
 ATTRIBUTING A DEPRESSED MORNING — TRAINING FATIGUE vs LIFESTYLE NOISE:
-When recovery looks bad, separate WHY it is depressed from WHAT to do today — they are
-different decisions. If an externally-logged daily-context signal (e.g. alcohol, a bad
-night, high stress — recovery lags, so look at the signal the DAY BEFORE the depressed
-morning) explains the dip, treat that suppression as transient lifestyle noise, NOT
-accumulated training fatigue.
-- Today's readiness still counts: a suppressed body trains a hard session poorly and
-  with more risk regardless of cause, so easing today, or better RESCHEDULING the hard
-  session a day or two later (preserving the planned work rather than deleting it), is
-  a reasonable call. Use your judgement on acute readiness.
-- But do NOT read a lifestyle-suppressed morning as evidence the BLOCK is too hard:
-  don't permanently cut the mesocycle's planned volume/intensity on its account, and
-  don't treat it as accumulated training fatigue. Reserve genuine load REDUCTIONS for
-  fatigue the TRAINING actually caused (a depressed morning following genuinely hard
-  days, with no lifestyle signal to explain it).
-When a hard day AND a lifestyle signal coincide, both may contribute — weigh them
-rather than blaming training alone.
-
-Some sessions may be listed as deliberately removed by the athlete. These are
-intentional plan edits, NOT adherence failures — do not treat them as missed workouts.
-You may, however, consider them when judging the athlete's intent and remaining load.
-
-Planned sessions tagged "[COMPLETED — locked history, not adaptable]" have already
-been performed (a matching activity was recorded), including any session the athlete
-trained earlier on the evaluation date. They are history: do NOT adapt them, and never
-restate a finished session to match what was actually done. Adapt only sessions still
-ahead of the athlete.
-
-Sessions tagged "[athlete-added]" were scheduled by the athlete themselves, not
-generated by you — treat them as deliberate intent. Preserve them as planned unless
-fatigue or injury risk clearly warrants easing, and prefer rescheduling a day or two
-over deleting them. If you must reduce one, say why in the reason.
+By rule 5, read the externally-logged daily-context signal from the DAY BEFORE a depressed
+morning: if one (e.g. alcohol, a bad night, high stress) explains the dip, that suppression
+is transient lifestyle noise, NOT accumulated training fatigue.
+That changes WHY, not WHAT TO DO TODAY: a suppressed body trains a hard session poorly and
+with more risk regardless of cause, so easing or moving today's hard session remains a fair
+call on acute readiness. What it changes is what the day is EVIDENCE of — reserve genuine
+load REDUCTIONS for fatigue the TRAINING actually caused (a depressed morning following
+genuinely hard days, with no lifestyle signal to explain it). When a hard day AND a
+lifestyle signal coincide, both may contribute — weigh them rather than blaming training.
 
 DO NOT COMPOUND A PRIOR ADAPTATION:
 Sessions tagged "[ALREADY EASED by a prior adaptation ...]" are NOT the original plan —
-their current numbers are the reduced form a previous adaptation already produced.
-Recovery metrics LAG, so the morning after an easing often still looks depressed from
-the very fatigue you already acted on; reading that as "still too hard" and cutting
-again would spiral the load down without ever letting it rebound. Default to HOLDING the
-already-eased form. Only cut it further if the metrics have clearly WORSENED since it was
-eased, or a genuinely NEW signal (a hard completed session, a fresh constraint/context event)
-warrants it — and the more recently and more times it was already eased (see the tag),
-the higher your bar for touching it again. Restoring load toward the original as the
+their numbers are the reduced form a previous adaptation already produced. Rule 5 again:
+the morning after an easing still looks depressed from the very fatigue you already acted
+on, and reading that as "still too hard" spirals the load down without ever letting it
+rebound. Default to HOLDING the already-eased form. Cut further only if the metrics have
+clearly WORSENED since it was eased, or a genuinely NEW signal (a hard completed session, a
+fresh constraint/context event) warrants it — and the more recently and more times it was
+already eased (see the tag), the higher your bar. Restoring load toward the original as the
 athlete recovers is encouraged; deepening an already-fresh cut is not.
 """
 
+        # Why a test may never be softened, and why moving it is the model's call and not a
+        # deterministic pass: DESIGN_benchmark_workouts.md §4.
         custom_task += """
 PROTECTING A BENCHMARK — RESCHEDULE, DON'T DILUTE:
-A session tagged "[BENCHMARK ...]" is a fitness test: its purpose is measurement, not
-stimulus, so the usual "ease the hard day" logic is exactly wrong for it. NEVER reduce,
-soften, or shorten a benchmark, and never blank its benchmark_type. A test needs the
-athlete FRESH — a test run tired reads low and then mis-scales every workout after it.
-So if the athlete will not be fresh on test day (negative TSB / poor recovery), MOVE the
-benchmark intact — same content, same benchmark_type — to a later day within THIS block
-where they will be fresher, and lighten the days before it instead. To move it, emit the
-test on its new date (benchmark_type preserved) and a replacement for its old date.
-Fallback: if the benchmark is already on the block's LAST day and no later in-block day
-exists, leave it in place and lighten the days before it — slightly-off freshness beats a
-lost test. A benchmark you are NOT changing does not need to be returned at all.
+A session tagged "[BENCHMARK ...]" is a fitness test: measurement, not stimulus, so the
+usual "ease the hard day" logic is exactly wrong for it — run tired it reads low and then
+mis-scales every workout after it. NEVER reduce, soften or shorten a benchmark, and never
+blank its benchmark_type. If the athlete will not be fresh on test day (negative TSB / poor
+recovery), MOVE it intact — same content, same benchmark_type — to a later day within THIS
+block where they will be fresher, and lighten the days before it; emit the test on its new
+date and a replacement for its old one. If it already sits on the block's LAST day and no
+later in-block day exists, leave it there and lighten the days before it — slightly-off
+freshness beats a lost test. A benchmark you are NOT changing need not be returned at all.
 """
 
         # Adapt owns execution, generate owns periodization (§9.2): changing what zone
@@ -482,31 +474,24 @@ The block summary shows what the athlete's sessions ACTUALLY measured, per sport
 and zone, beside the block's stated focus — as a per-week rate over the block's
 completed weeks, then the current week's raw minutes so far with how much of that
 week has elapsed. The current week is NOT extrapolated: read it against the
-elapsed fraction yourself. When the measured picture and the focus disagree, that
-is an execution error, not a fatigue signal — and it is yours to fix.
+elapsed fraction yourself.
 
-Correct it by changing HOW the remaining sessions are prescribed, not how much
-they contain. Hold duration and planned TSS; sharpen the intensity target and
-give it an explicit guard rail the athlete can act on mid-session (a HR ceiling,
-a pace cap, "walk the hills"). Name the evidence in change_reason so the athlete
-sees why.
+A measured picture that disagrees with the focus is an execution error, not a
+fatigue signal, and it is yours to fix — by changing HOW the remaining sessions
+are prescribed, not how much they contain. Hold duration and planned TSS; sharpen
+the intensity target and give it an explicit guard rail the athlete can act on
+mid-session (a HR ceiling, a pace cap, "walk the hills").
+- Drift upward means the athlete WANTS more, so do not only cap it: say where the
+  appetite may legitimately go, in the batch-level reason, and spend it in the
+  block's own currency — in a volume block, more easy minutes; in an intensity
+  block, a fuller effort on the days already designated hard.
+- Drift downward means under-execution, so the guard rail becomes a floor and the
+  advice is about how to reach it. Condition this on the power table where one
+  exists — HR lag makes under-execution look real when it is not.
 
-Drift upward usually means the athlete WANTS more, so do not only cap it — say
-where the appetite may legitimately go, in the batch-level reason. Spend it in
-the block's own currency: in a volume block, more easy minutes; in an intensity
-block, a fuller effort on the days already designated hard. If what they want
-exceeds that, say plainly that it is a change to the block itself and belongs to
-the next plan generation, not to a daily adaptation.
-
-Drift downward mirrors this: a VO2max block measuring as a threshold block means
-the sessions are being under-executed, so the guard rail becomes a floor and the
-advice is about how to reach it. Condition this on the power table where one
-exists — HR lag makes under-execution look real when it is not.
-
-This is not a load reduction and must not become one. If the block genuinely
-contains too much hard work — as opposed to easy work being run too hard — that
-is a periodization question, and it belongs to the next `workout generate`, not
-to you.
+This is never a load reduction. If the block genuinely contains too much hard work
+— as opposed to easy work being run too hard — that is composition, and it
+belongs to the next `workout generate`, not to you.
 """
 
         # §9.2 gives adapt the intensity factor of a scheduled session, and §9.4's drift
@@ -526,17 +511,12 @@ to you.
             custom_task += """
 ATHLETE'S NOTE FOR TODAY:
 The user content includes a section titled "ATHLETE'S NOTE FOR THIS ADAPTATION": a
-free-text note the athlete attached to THIS run — extra intent or constraints the
-metrics can't show (e.g. a niggle to protect, no access to a sport/venue on a given day,
-or how they feel). Weigh it as today's intent alongside the data: honour stated
-constraints, and let it tip a judgement call. It is advisory, not an override — do NOT
-schedule clearly unsafe load just because the athlete asks (if recovery signals warrant
-easing, ease and say why). Treat it as a one-off for this adaptation only: do NOT read it
-as durable evidence about the block, and do NOT permanently re-shape the mesocycle on its
-account. When the note drives a session change, name that external cause in the session's
-"change_reason" (see the schema) so a later run without the note won't blindly undo it.
-This footprint is the tactical session note only; it is still NOT durable block evidence
-and must not reshape the mesocycle.
+free-text note the athlete attached to THIS run — extra intent or constraints the metrics
+can't show (e.g. a niggle to protect, no access to a sport/venue on a given day, or how
+they feel). Weigh it as today's intent alongside the data: honour stated constraints, and
+let it tip a judgement call. It is advisory, not an override — do NOT schedule clearly
+unsafe load just because the athlete asks (if recovery signals warrant easing, ease and say
+why). It speaks for this adaptation only and is never durable evidence about the block.
 
 EXTRACTING A DURABLE CONSTRAINT FROM THE NOTE:
 Separately from adapting today's sessions, decide whether the note ALSO states something
@@ -544,13 +524,13 @@ the coach must work around beyond today: unavailability, a time/intensity cap, a
 layoff, a venue/equipment limit, or a stated preference with a date or date range (e.g.
 "no run Thursday", "only 45 min today", "broke my ankle, out 6 weeks"). If so, return it in
 "new_constraints" below — one entry per distinct directive, exactly as if the athlete had
-run `constraint add`. A note that is only about how they feel right now ("felt flat, ease
-today") is NOT durable — leave "new_constraints" empty for it. When unsure, leave it out: a
+run `constraint add`. A note only about how they feel right now ("felt flat, ease today") is
+NOT durable — leave "new_constraints" empty for it. When unsure, leave it out: a
 durable-looking note mis-filed as a constraint is worse than a missed one. This is
 extraction only — never invent a plan-shaping escalation, and never omit "start_date"/
 "end_date" (default both to today when the note doesn't say). Extracted constraints are
-always advisory (the deterministic-rest and plan-shaping escalations are deliberate human
-actions); the app, not you, decides those — do not guess at either.
+always advisory; the deterministic-rest and plan-shaping escalations are deliberate human
+actions and the app, not you, decides those.
 """
 
         custom_task += """

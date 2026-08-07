@@ -56,9 +56,14 @@ of it.
 
 When the evaluation date falls within `config.adapt_terminal_window_days` of the block's end,
 `coach/engine/workouts.py::_workout_adapt_logic` appends a `THIS BLOCK IS ENDING` section to
-the task. It states the two consequences from §1 and biases the model toward holding planned load:
-preserve or reschedule rather than cut, and do not deepen a cut to "carry" the athlete into a
-block that will be planned against its own metrics when it is generated.
+the task. It states the two consequences from §1 and biases the model toward holding planned
+load: an easing has no runway left to rebound, and a cut must not be deepened to "carry" the
+athlete into a block that will be planned against its own metrics when it is generated.
+
+"Prefer rescheduling over cutting" used to be restated here too. It is now standing rule 1 of
+the TASK (`DESIGN_adapt_task_prompt.md` §2), which holds over every section, so this one
+carries only what is specific to the terminal window — the lost runway and the next block
+being out of reach. The rationale for both is §1 and §2 above, not the prompt.
 
 The section is appended conditionally, so runs outside the window produce a byte-identical
 prompt to before.
