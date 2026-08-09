@@ -238,6 +238,83 @@ class TestCliData(unittest.TestCase):
             for line in out.split("\n"):
                 self.assertLessEqual(visible_len(line), int(width), msg=repr(line))
 
+    def _seed_reconstruction(self, horizon, name, window_start, window_end):
+        test_db.save_analysis_cache(
+            horizon=horizon, fingerprint=f"fp-{horizon}",
+            window_start=window_start, window_end=window_end,
+            reconstruction={
+                "inferred_macrocycle": {
+                    "overall_focus": f"{name} focus",
+                    "start_date": window_start, "end_date": window_end,
+                },
+                "inferred_mesocycles": [{
+                    "name": name, "start_date": window_start, "end_date": window_end,
+                    "focus_detected": "Volume", "average_weekly_tss": 300,
+                    "estimated_consistency": "High",
+                }],
+                "physiological_insights": [f"{name} insight"],
+            },
+        )
+
+    def test_data_show_analysis_renders_the_stored_reconstruction(self):
+        # Read-only: renders the stored slot, names where it came from, and never
+        # reaches the coach service (no LLM call, unlike bootstrap --inspect-only).
+        self._seed_reconstruction("long", "Base Block", "2026-01-01", "2026-03-31")
+        with patch("trainmate.runtime.coach_service") as mock_coach:
+            exit_code, stdout, stderr = self.run_cli(["data", "show-analysis"])
+        self.assertEqual(exit_code, 0)
+        self.assertIn("data bootstrap", stdout)
+        self.assertIn("window 2026-01-01 to 2026-03-31", stdout)
+        self.assertIn("Base Block", stdout)
+        self.assertIn("Base Block insight", stdout)
+        mock_coach.data_bootstrap.assert_not_called()
+
+    def test_data_show_analysis_alias_and_short_horizon(self):
+        # The two slots are separately addressable; `san` reaches the same command.
+        self._seed_reconstruction("long", "Base Block", "2026-01-01", "2026-03-31")
+        self._seed_reconstruction("short", "Recent Week", "2026-04-01", "2026-04-07")
+
+        exit_code, stdout, stderr = self.run_cli(["data", "san"])
+        self.assertEqual(exit_code, 0)
+        self.assertIn("Base Block", stdout)
+
+        exit_code, stdout, stderr = self.run_cli(["data", "show-analysis", "--short"])
+        self.assertEqual(exit_code, 0)
+        self.assertIn("data reflect", stdout)
+        self.assertIn("Recent Week", stdout)
+        self.assertNotIn("Base Block", stdout)
+
+    def test_data_show_analysis_flags_evidence_the_slot_predates(self):
+        # The slot is only refreshed by a re-run, so activities past its window are
+        # absent from the picture; silence there would read as "this is current".
+        self._seed_reconstruction("long", "Base Block", "2026-01-01", "2026-03-31")
+        test_db.save_completed_activity(
+            activity_id="act_after", date="2026-04-02", start_time="10:00",
+            activity_name="Ride", activity_type="cycling", duration_sec=3600,
+            distance_km=30.0, elevation_gain_m=200, avg_hr=140, max_hr=165,
+            rpe=5, tss=60.0,
+        )
+        exit_code, stdout, stderr = self.run_cli(["data", "show-analysis"])
+        self.assertEqual(exit_code, 0)
+        self.assertIn("1 activity since 2026-03-31 is not reflected here", stdout)
+
+        # The provenance and staleness lines are this command's own, outside the shared
+        # renderer the wrap test covers, and must hold the client width too (AGENTS.md).
+        from trainmate.util import visible_len
+        os.environ["TRAINMATE_WRAP_WIDTH"] = "48"
+        try:
+            exit_code, stdout, stderr = self.run_cli(["data", "show-analysis"])
+        finally:
+            del os.environ["TRAINMATE_WRAP_WIDTH"]
+        for line in stdout.split("\n"):
+            self.assertLessEqual(visible_len(line), 48, msg=repr(line))
+
+    def test_data_show_analysis_without_a_stored_reconstruction(self):
+        exit_code, stdout, stderr = self.run_cli(["data", "show-analysis"])
+        self.assertEqual(exit_code, 0)
+        self.assertIn("No long-horizon reconstruction stored", stdout)
+        self.assertIn("data bootstrap", stdout)
+
     @patch("trainmate.runtime.garmin")
     def test_data_show_metrics_command(self, mock_garmin):
         # garmin is mocked (to stub ensure_data); the PMC read helpers are pure DB reads,

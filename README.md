@@ -47,7 +47,8 @@ does the coaching reasoning.
 - **Backward evaluation / bootstrap.** TrainMate can reverse-engineer your past
   training from completed activities and metrics, reconstructing the cycles you
   *actually* did and seeding coach learnings — so it starts smart instead of cold,
-  and reviews planned-vs-actual when it replans.
+  and reviews planned-vs-actual when it replans. `data show-analysis` prints that
+  reconstruction back to you; `progress` draws its blocks as `~`-prefixed bands.
 
 - **Real-world context: one principled split.** TrainMate separates *observations*
   (things that happened / are true about you) from *directives* (things you ask the

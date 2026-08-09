@@ -262,7 +262,7 @@ Reuse decision (in `CoachService`): compute the current fingerprint, call
 `get_analysis_cache(horizon)`; reuse when fingerprints match and `--force` is
 absent, else recompute and `save_analysis_cache(...)`.
 
-**Forward consumers of the `long` slot** (both read-only, neither recomputes):
+**Forward consumers of the `long` slot** (all read-only, none recomputes):
 
 1. `CoachService._build_prior_training_context()` → the strategy prompt (§6).
 2. `trainmate/timeline.py` → `progression.assemble_timeline()`, which draws the
@@ -270,6 +270,14 @@ absent, else recompute and `save_analysis_cache(...)`.
    covers the span (`progress timeline` and the web dashboard's read-only view).
    Added later by DESIGN_progress_timeline.md §6.1; the sections below that call
    the strategy prompt the *only* consumer predate it.
+3. `data show-analysis` (`san`) → `cli/data.py:_render_analysis_report`, the same
+   renderer `bootstrap`/`reflect` print through. It exists because the two ways to
+   *read* a stored reconstruction before it were both indirect: the timeline shows
+   block names only, and `bootstrap --inspect-only` — read-only as to writes — still
+   pays for a fresh LLM pass the moment the fingerprint has moved, so "show me what
+   is stored" could silently become "recompute it". `--short` addresses the other
+   slot. Retention being one-row-per-horizon, it reports the current picture and
+   flags activities that post-date the slot's window rather than implying currency.
 
 ---
 

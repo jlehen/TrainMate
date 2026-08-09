@@ -8,9 +8,9 @@ from trainmate.garmin.load import activity_load, load_method
 from trainmate.sports import sport_aliases
 from trainmate.baselines import classify_metric, is_anomalous, UNKNOWN
 from trainmate.util import (
-    bold, green, red, yellow, cyan, magenta, gray, color_load_ratio, pmc_cells, visible_len,
-    wrap_text, format_labeled_text, format_labeled_block, render_table, is_narrow_client,
-    default_wrap_width,
+    bold, green, red, yellow, cyan, magenta, gray, cmd, color_load_ratio, pmc_cells,
+    visible_len, wrap_text, format_labeled_text, format_labeled_block, render_table,
+    is_narrow_client, default_wrap_width,
 )
 from trainmate.cli.common import mark_adherence_range, pmc_warmup_cutoff
 from trainmate.cli.selectors import add_selector_args, resolve_window
@@ -501,6 +501,37 @@ def run_data_reflect(args: argparse.Namespace) -> None:
     if not result:
         return  # Nothing new to reflect on; service already printed why.
     _render_analysis_report(result, args.inspect_only)
+def run_data_show_analysis(args: argparse.Namespace) -> None:
+    """Renders the stored reconstruction for one horizon slot; never recomputes it
+    (DESIGN_backward_evaluation.md §5.1, forward consumer 3)."""
+    horizon, source = ("short", "data reflect") if args.short else ("long", "data bootstrap")
+    cached = runtime.db.get_analysis_cache(horizon)
+    if not cached or not cached.get("reconstruction"):
+        print(yellow(wrap_text(f"No {horizon}-horizon reconstruction stored. Run "
+                               f"{cmd(source)} to build one.")))
+        return
+
+    window = f"{cached.get('window_start')} to {cached.get('window_end')}"
+    computed = (cached.get("created_at") or "")[:10]
+    print()
+    print(gray(wrap_text(f"From {cmd(source)} · window {window} · computed {computed}")))
+    _render_analysis_report(cached["reconstruction"], inspect_only=False)
+
+    # The slot is only refreshed by a re-run, so training since its window closed is
+    # simply absent from the picture above — say so rather than let it read as current.
+    window_end = cached.get("window_end")
+    newer = [
+        a for a in runtime.db.get_completed_activities(start_date=window_end)
+        if a["date"] > window_end
+    ] if window_end else []
+    if newer:
+        noun = "activity" if len(newer) == 1 else "activities"
+        print(yellow(wrap_text(
+            f"{len(newer)} {noun} since {window_end} {'is' if len(newer) == 1 else 'are'} "
+            f"not reflected here; re-run {cmd(f'{source} --force')} to rebuild."
+        )))
+
+
 def _render_analysis_report(result: dict, inspect_only: bool) -> None:
     """Renders a bootstrap/reflect reconstruction + applied coach learning deltas."""
     print(bold(cyan("\n=== HISTORICAL WORKOUT ANALYSIS REPORT ===")))
@@ -768,6 +799,28 @@ def add_data_parser(subparsers, pull_bypass_parser, llm_debug_parser):
     d_sa.add_argument(
         "-a", "--all", action="store_true", dest="all",
         help="Show all cached completed activities"
+    )
+
+    # data show-analysis — the stored reconstruction, rendered without recomputing it
+    d_san = data_subparsers.add_parser(
+        "show-analysis", aliases=["san"],
+        help="Show the macro/mesocycle reconstruction stored by the last "
+             "'data bootstrap' (read-only: no LLM call, no Garmin pull)",
+        description=(
+            "Print the reconstruction cached by the last 'data bootstrap': the inferred "
+            "macro focus, the mesocycle blocks 'tm progress' draws as '~' bands, and the "
+            "physiological insights. Read-only in the strict sense — it renders what is "
+            "stored and never calls the LLM, unlike 'data bootstrap --inspect-only' which "
+            "recomputes as soon as the evidence has moved. --short shows 'data reflect's "
+            "own reconstruction over its incremental window instead. Only the latest of "
+            "each is kept, so this is the current picture, not a history."
+        )
+    )
+    d_san.set_defaults(func=run_data_show_analysis)
+    d_san.add_argument(
+        "--short", action="store_true",
+        help="Show the short-horizon reconstruction from the last 'data reflect' instead "
+             "of the bootstrap one"
     )
 
     # data wipe
