@@ -321,6 +321,22 @@ banners are emitted here, not by the three call sites. Returns `""` when neither
 holds documents, so no empty banner is produced. Called by
 `CoachService._load_science_guidelines()`.
 
+**The two corpora are layered, and the layering is one-directional.**
+`trainmate/science/` (built-in) owns *how to measure and what the words mean*; `science/`
+(user) owns *what to do*. So a user document may cite a built-in one; a built-in one may
+never cite a user document by name, because the user corpus is gitignored and may be empty
+or contain anything. Concretely, a built-in file must not state a duration, a loading ratio,
+a taper magnitude, a session count, or a block order — those are the user layer's to set,
+and a built-in file that fixes one silently overrides the philosophy the athlete supplied.
+Each built-in file therefore opens with an `AUTHORITY:` line naming its role
+(`VOCABULARY` / `DIAGNOSTIC` / `MEASUREMENT` / `PROTECTIVE`), and the user files with the
+authority they claim over each other (`PRESCRIPTIVE` / `REFERENCE ONLY`).
+
+The one carve-out: **a built-in file may hold a hard rule when that rule can only ever
+reduce load.** `recovery_metrics.txt` is protective in whole, and `training_load.txt` §5's
+final directive is flagged inline as a floor. Anything that would add or sustain load is a
+default the user layer overrides.
+
 ### `CoachEngine`
 **Pure business logic — no DB or I/O.** All methods are prefixed `_` (called by
 `CoachService` or directly by tests).
@@ -1945,6 +1961,9 @@ all three; only the delivery differs.
   `recovery_metrics.txt`, `training_load.txt`
 - `science/` — user-provided; empty by default; any `.txt` files added here are
   injected into every LLM prompt.
+- The two are layered — built-in owns measurement and vocabulary, user owns
+  prescription, and the citation only runs one way. Contract in
+  [§3](#_load_science_guidelinesapp_science_dir-science_dir--str).
 
 ---
 

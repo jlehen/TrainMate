@@ -1,5 +1,9 @@
 RECOVERY AND FATIGUE METRICS GUIDELINES
-======================================
+=======================================
+
+AUTHORITY: PROTECTIVE. Baselines and thresholds for readiness. Unlike the other
+built-in guidelines these are floors, not defaults: a plan document may decide
+how to respond to a depressed-recovery signal, but may not decide to ignore one.
 
 Monitoring autonomic nervous system balance and sleep quality helps determine an athlete's
 readiness to train and absorb stress.

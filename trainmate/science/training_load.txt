@@ -1,6 +1,12 @@
 TRAINING LOAD MONITORING GUIDELINES (FITNESS/FATIGUE MODEL)
 ===========================================================
 
+AUTHORITY: DIAGNOSTIC. This file describes how to READ training load; it does
+not decide what load to prescribe. Where a plan document in science/ specifies
+volumes, block lengths, session counts or taper depth, that document governs —
+use the models here to judge whether the athlete is absorbing it. The one
+exception is §5's final directive, which is a floor rather than a default.
+
 Training load monitoring answers three related questions:
   (a) Where is the athlete on the fitness / fatigue / freshness curve, and how
       should load progress week over week and taper into an event?  -> PMC (CTL/ATL/TSB)
@@ -120,37 +126,46 @@ mechanism is concentrated loading and sharp transitions.
    A value that matches its planned trajectory is on plan, whatever band it
    falls in. A value that departs from the planned trajectory is the signal.
 
-   Expected trajectories (see periodization.txt for the block definitions):
+   Do not look the athlete's block up in a table of block names — plans use
+   different vocabularies (periodization.txt §2B). Derive the expected
+   direction from what the block SAYS IT IS FOR, then compare:
 
-   - Accumulation / high-volume block: ATL:CTL steps up on entry (typically
-     1.2-1.4) and settles back toward 1.1 as CTL catches up. TSB sits in the
-     -10 to -30 productive-overload band. Do NOT trim planned volume merely
-     because the ratio is elevated; that sands the step off and turns block
-     periodization into a linear ramp.
-   - Transmutation / intensity block: volume drops sharply while intensity
-     steps up, so ATL:CTL falls to ~0.7-0.9 and TSB rises. This is the block
+   - A block whose purpose is accumulating VOLUME: ATL:CTL steps up on entry
+     and settles back down as CTL catches up; TSB sits in the productive-
+     overload range. Do NOT trim planned volume merely because the ratio is
+     elevated; that sands the step off and turns block periodization into a
+     linear ramp.
+   - A block that CUTS VOLUME to concentrate INTENSITY: ATL:CTL falls and TSB
+     rises, because the ratio tracks load, not effort. This is the block
      working as designed. Do NOT add volume back to "correct" the low ratio —
      the block's effect depends on staying concentrated and low-volume.
-   - Realization / taper: load is cut hard. ATL:CTL falls to ~0.6-0.8 and TSB
-     rises into the +5 to +25 target band. A low ratio here is the goal.
-   - Deload week: ATL:CTL dips to ~0.7-0.9 for the week by design.
+   - A TAPER or DELOAD: load is cut deliberately, so ATL:CTL falls and TSB
+     rises toward freshness. A low ratio here is the goal, not a lapse.
    - Unstructured, off-plan, or returning from a layoff/illness: no planned
      trajectory exists to compare against, so read the bands in §1 and §3
      directly. This is where an unplanned spike is genuinely dangerous and
      where the ratio earns its keep.
+
+   Note that the second case is the one most often misread: an intensity block
+   can be the hardest fortnight of the athlete's year and still show a falling
+   ratio and a rising TSB, because neither metric can see intensity.
 
    When actual load departs from planned load, the DEVIATION is what matters:
    a ratio of 1.44 against a planned 1.40 is on plan; a ratio of 1.44 against a
    planned 1.05 is an unplanned spike and should be treated as one.
 
 
-5. COACHING DIRECTIVES
-----------------------
-   - Build CTL gradually via ramp rate, and keep ATL:CTL near 1.0-1.3 outside
-     deliberate overload blocks.
+5. READING DIRECTIVES
+---------------------
+These are how to interpret the numbers. With one exception, flagged below, they
+are defaults that a plan document overrides.
+
    - Establish which phase the athlete is in BEFORE reading any band. Inside a
-     declared block, compare against the §4 expected trajectory. Outside one,
-     read the bands directly.
+     declared block, derive the expected direction as in §4 and compare against
+     that. Outside one, read the bands directly.
+   - Outside a deliberate overload block, ATL:CTL near 1.0-1.3 is the
+     unremarkable case. A departure is something to EXPLAIN — against the plan
+     first — not something to correct on sight.
    - Treat an UNPLANNED ATL:CTL above 1.5, or a ramp rate above 8, as a caution
      even when the other looks fine — they can diverge. A single big week can
      spike the ratio while ramp stays fine; a smooth relentless build can hold
@@ -164,12 +179,14 @@ mechanism is concentrated loading and sharp transitions.
    - Scale the TSB and ramp thresholds down for a low-CTL athlete, and lean on
      ATL:CTL instead: at CTL under ~30 the absolute bands are too permissive
      (§3).
-   - To peak for an A event, taper load so TSB rises into the +5 to +25 band by
-     event day while preserving intensity (see periodization deload/realization
-     protocol).
+   - A taper is working when TSB rises into the +5 to +25 band by event day
+     while intensity is preserved (periodization.txt §2B). If it does not get
+     there, the taper was too shallow to peak the athlete — report that; how
+     deep to cut is the plan document's call, not this file's.
    - Sustained TSB well above +25 means fitness is decaying: resume building —
-     unless the athlete is inside a planned realization/taper block, where it
-     is the intended state.
-   - Cross-check all of the above against recovery metrics (HRV, RHR, sleep);
-     depressed recovery overrides a "safe" reading on any of these models, and
-     is the abort signal that outranks a planned block.
+     unless the athlete is inside a planned taper, where it is the intended
+     state.
+   - THIS ONE IS A FLOOR, NOT A DEFAULT: cross-check all of the above against
+     recovery metrics (HRV, RHR, sleep). Depressed recovery overrides a "safe"
+     reading on any of these models, and is the abort signal that outranks a
+     planned block — including a plan document that says to keep loading.
