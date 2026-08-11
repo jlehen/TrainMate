@@ -325,13 +325,15 @@ class PromptConfigMixin:
         ))
 
     def _maybe_warn_stale_analysis(self, today_str: str) -> None:
-        """Warns when the cached reconstructions fed to the strategy prompt have fallen
-        behind today. `plan generate` reads them as-is and never recomputes, so without this
-        the plan is shaped by an old picture of the athlete's training in silence
+        """Warns when the cached analyses fed to the strategy prompt have fallen behind
+        today. `plan generate` reads them as-is and never recomputes, so without this the
+        plan is shaped by an old picture of the athlete's training in silence
         (DESIGN_backward_evaluation.md §5).
 
         Judged over `_cached_reconstructions()` — the same rows the prompt reads — so the
-        `data reflect` this points at is a command that can actually clear it (§10.2)."""
+        `data reflect` this points at is a command that can actually clear it (§10.2). The
+        wording names the *history read*, not a reconstruction: past §10.3 only bootstrap's
+        row carries cycles, and bootstrap being old is by design rather than news."""
         ends = [
             c["window_end"] for c in self._cached_reconstructions() if c.get("window_end")
         ]
@@ -343,8 +345,8 @@ class PromptConfigMixin:
         if lag <= config.analysis_staleness_days:
             return
         print(yellow(
-            f"The training-history reconstruction ends {window_end} ({lag} days ago); "
-            f"sessions since then did not shape this plan. Run " + cmd("data reflect")
+            f"The training history read into this plan ends {window_end} ({lag} days ago); "
+            f"sessions since then did not shape it. Run " + cmd("data reflect")
             + " first to bring it up to date."
         ))
 

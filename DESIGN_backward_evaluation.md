@@ -156,7 +156,7 @@ affordable exactly where it is rare and is excluded where it is frequent.
 > | Command            | Backward eval? | Horizon slot | Product & use                                                        | Learnings  | Frequency  |
 > |--------------------|----------------|--------------|----------------------------------------------------------------------|------------|------------|
 > | `data bootstrap`   | Yes — curator  | `long`       | Full reconstruction (cycles + insights); cached and replayed forward  | **Writes** | Once       |
-> | `data reflect`     | Yes — curator  | `short`      | Same LLM pass, incremental window from the reflect watermark          | **Writes** | Occasional |
+> | `data reflect`     | Yes — curator  | `short`      | Recent-response read (insights, no cycles — §10.3); window runs from the watermark to the last completed week (§10.4) | **Writes** | Occasional |
 > | `plan generate`    | **No LLM pass**| —            | *Reads* the cached `long` reconstruction + a computed planned-vs-actual review into the prompt (§6) | Read-only | Rare |
 > | `workout generate` | **No**         | —            | Never built. Raw metrics + PMC over `metrics_lookback_days`; no backward pass, no cache access | Read-only | Occasional |
 > | `workout adapt`    | **No**         | —            | Excluded as designed; also made read-only w.r.t. learnings            | Read-only  | Daily      |
@@ -167,16 +167,20 @@ affordable exactly where it is rare and is excluded where it is frequent.
   reconstruction is meaningless below the long horizon* — you cannot infer a
   periodization structure from four weeks.
 
-> **AS BUILT — the horizon selects the cache slot, not the product.** Both
-> `bootstrap` and `reflect` run the *identical* prompt through
-> `_run_workout_analysis()`; `horizon` picks which `analysis_cache` row is written
-> and the label is used only for LLM logging. So `data reflect` also emits
-> `inferred_macrocycle` / `inferred_mesocycles` over its short window — the model
-> is simply reconstructing less structure from less evidence, which is a weaker
-> claim rather than a different product. What differs is **consumption**: only the
-> `long` slot is read forward (`_build_prior_training_context`, `timeline.py`), so
-> the short slot is effectively write-only cache. Splitting the prompt by horizon
-> stayed unbuilt because nothing consumes the short reconstruction.
+> **AS BUILT (rev 1) — the horizon selected the cache slot, not the product.** Both
+> commands ran the *identical* prompt through `_run_workout_analysis()`; `horizon`
+> picked which `analysis_cache` row was written and the label was used only for LLM
+> logging, so `data reflect` also emitted `inferred_macrocycle` /
+> `inferred_mesocycles` over its short window. Splitting the prompt by horizon
+> stayed unbuilt because **nothing consumed the short reconstruction** — a weaker
+> claim written to a slot no one read costs nothing but tokens.
+>
+> **AS BUILT (rev 2) — built, once that premise expired.** §10.2 wired the short
+> slot into the strategy prompt, at which point reflect's cycle-guessing stopped
+> being inert and started shaping plans: a five-day window would name a
+> "macrocycle" whose own focus text conceded the surrounding period was unknown.
+> `_data_analyze_logic` now takes `horizon` and branches on it (§10.3), so the
+> paragraph above this box is the behaviour rather than the intent.
 
 ---
 
@@ -590,21 +594,88 @@ the plan prompt's view of "what was figured out" was **frozen at onboarding**.
 
 **`CoachService._cached_reconstructions()` is now the single accessor** for both
 what the prompt replays and how far behind it is. It returns bootstrap's row, then
-reflect's when reflect's window ends *later* than bootstrap's — a reflect window
-that ends no later covers ground bootstrap already described, and replaying it
-would put two accounts of the same weeks in front of the model. Each row carries a
+reflect's when reflect's window *begins* after bootstrap's ends. Each row carries a
 `label` (`full history reconstruction` / `most recent reflection`) so the prompt
 names which command produced which window rather than presenting one undated
 blur.
 
+The gate tests the window's **start**, not its end. Ending later is the wrong
+question: a window that re-reads bootstrap's weeks on its way past them still puts
+one body of evidence in front of the model twice, and the model has no way to
+discount the second copy. Testing the start admits only genuinely new ground.
+Normal operation is unaffected — the watermark puts reflect's start the day after
+bootstrap's end — so this bites exactly the two cases that create overlap: an
+explicit `data reflect -d` reaching backwards, and a re-run of `bootstrap` that
+rewinds the watermark. The cost is that a *partially* overlapping window is
+dropped whole, tail included; the recovery is a reflect without `-d`. Simplicity
+wins here over a rule that would have to reason about which prose sentence
+described which week.
+
 `_maybe_warn_stale_analysis` judges the lag over the same rows, taking the latest
 window end. The warning can therefore never name a window the prompt did not read,
-and the command it points at is one that can actually clear it.
+and the command it points at is one that can actually clear it. Its wording names
+the *training history read into the plan* rather than "the reconstruction": past
+§10.3 only bootstrap's row carries cycles, and bootstrap being months old is the
+design (once per onboarding) rather than news worth a warning.
 
 The two reconstructions are **complementary, not competing**: bootstrap's is the
 long arc, reflect's is the recent slice, and they are shown as two sections with
 their own date spans rather than merged. Only one `short` row is ever retained
 (one row per horizon, upsert), so "most recent reflection" is literal.
+
+### 10.3 The horizon finally selects the question
+
+§4 always said the horizon should dictate the *product*. §10.2 is what forced it:
+once reflect's slot was replayed forward, the structure it invented from a handful
+of days was no longer inert. `_data_analyze_logic` therefore takes `horizon` and
+branches in three places — the TASK opener, the `## RESPONSE FORMAT` schema, and
+the system prompt's one-line role.
+
+| | `long` (`data bootstrap`) | `short` (`data reflect`) |
+|---|---|---|
+| asks for | the periodization phases that occurred | how the athlete *responded* |
+| schema | all five fields | summary, insights, learning updates |
+| forbids | — | inferring macro/mesocycles, explicitly |
+
+Reflect keeps `macrocycle_summary` despite the name being a poor fit for a short
+window: renaming it would mean teaching the renderer, the strategy prompt and the
+cache reader two spellings for one field, which costs more than the wart.
+
+Nothing downstream needed defending. `_render_analysis_report` already guards each
+section with a presence check, `_reconstruction_lines` iterates `… or []`, and
+`timeline.py` only ever reads the `long` slot. A field that stops being emitted
+simply stops being rendered.
+
+### 10.4 A window ends on a completed week
+
+The evidence basis counts **whole weeks** (DESIGN_evidence_based_confidence.md §4),
+and `available_weeks` is every Monday the window touches — partial ones included.
+A window ending mid-week therefore let a part-week be cited as a whole one, and the
+`UNIQUE(learning_id, week_commencing, polarity)` dedup that protects against
+re-counting then *prevented* the rest of that week from ever topping it up. Reflect
+every Wednesday and each week's citation rests on three days; reflect daily and it
+rests on one. Confidence would climb per calendar week on a seventh of the evidence
+— not double-counting, but arriving at the same wrong place.
+
+`data reflect` now ends its window at the last completed Sunday unless an explicit
+end date is given. Two consequences, both wanted:
+
+1. Every citable week is a whole week.
+2. A run with no completed week since the watermark takes the existing
+   "nothing new" path — **no LLM call, no cost**. This is what makes a daily
+   invocation harmless rather than merely tolerated, and it lets a weekly cadence
+   emerge from the data model instead of from the athlete's memory.
+
+An explicit `--until` is honoured as given: the snap is a default, not a policy.
+Because a snapped end can now fall before an explicit start, the
+start-after-end `ValueError` is raised only when the caller supplied *both* ends —
+otherwise the run reports nothing new, which is what it means.
+
+**Not fixed, deliberately:** a week split across two windows (bootstrap ends
+mid-week, so reflect's first window starts mid-week) is still cited from whichever
+part was analysed first. Closing that would mean refusing weeks not wholly inside
+the window, which would orphan every boundary week permanently. The snap removes
+the case that recurs on every run; this one happens once per bootstrap.
 
 ---
 

@@ -538,7 +538,7 @@ class PmcContextMixin:
 
     def _cached_reconstructions(self) -> List[Dict[str, Any]]:
         """The cached history analyses the strategy prompt replays, oldest window first:
-        `data bootstrap`'s reconstruction, then `data reflect`'s latest one when it reaches
+        `data bootstrap`'s reconstruction, then `data reflect`'s latest one when it begins
         past bootstrap's window (DESIGN_backward_evaluation.md §10.2).
 
         Each row is its cache row plus a `label` naming the command behind it, and this is
@@ -551,10 +551,11 @@ class PmcContextMixin:
         if long_row and long_row.get("reconstruction"):
             out.append({**long_row, "label": "full history reconstruction"})
         short_row = self._db.get_analysis_cache("short")
-        short_end = (short_row or {}).get("window_end") or ""
-        # A reflect window that ends no later than bootstrap's has nothing to add: it is
-        # ground bootstrap already covered, and the two would contradict each other on it.
-        if short_row and short_row.get("reconstruction") and short_end > long_end:
+        short_start = (short_row or {}).get("window_start") or ""
+        # Replay reflect only where it covers ground bootstrap never saw. Gating on its
+        # START (not its end) rejects a window that merely reaches further while re-reading
+        # weeks bootstrap already read — two accounts of one body of evidence (§10.2).
+        if short_row and short_row.get("reconstruction") and short_start > long_end:
             out.append({**short_row, "label": "most recent reflection"})
         return out
 

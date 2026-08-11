@@ -16,15 +16,29 @@ class AnalysisLogicMixin:
         learnings: str,
         context: Optional[str] = None,
         context_days: Optional[Dict[str, List[Dict[str, Any]]]] = None,
-        label: str = "workout_analysis"
+        label: str = "workout_analysis",
+        horizon: str = "long"
     ) -> Dict[str, Any]:
-        """Queries LLM to reverse-engineer training cycles from weekly summaries."""
+        """Queries the LLM to read a window of completed training.
+
+        `horizon` selects the question, not just the window: `long` reverse-engineers the
+        periodization structure, `short` reads the recent response only — a periodization
+        structure cannot be inferred from a few weeks
+        (DESIGN_backward_evaluation.md §3, §10.3).
+        """
+        cycles = horizon == "long"
         custom_task = (
             "## TASK\n"
             "Analyze the athlete's completed training load, zone distributions, and\n"
-            "physiological metrics week-by-week. Reverse-engineer this data to identify\n"
-            "the underlying training phases (macrocycle & mesocycles) that occurred.\n"
-            "\n"
+            "physiological metrics week-by-week. "
+            + ("Reverse-engineer this data to identify\n"
+               "the underlying training phases (macrocycle & mesocycles) that occurred.\n"
+               if cycles else
+               "Read how the athlete RESPONDED to the\n"
+               "training in this window: recovery, tolerance, and what the evidence supports\n"
+               "as a durable observation about them. This window is too short to support a\n"
+               "claim about periodization structure — do not infer macro/mesocycles.\n")
+            + "\n"
             "### READING THE PER-WEEK CONTEXT FIELDS\n"
             "- 'constraints': athlete-declared directives overlapping the week (illness,\n"
             "  travel, work crunch, capacity caps, etc.). Consider them as a possible\n"
@@ -81,22 +95,22 @@ class AnalysisLogicMixin:
             "You MUST respond with a JSON object containing:\n"
             "{\n"
             '  "macrocycle_summary": "High-level summary of the training period.",\n'
-            '  "inferred_macrocycle": {\n'
-            '    "overall_focus": "e.g. Marathon base prep",\n'
-            '    "start_date": "YYYY-MM-DD",\n'
-            '    "end_date": "YYYY-MM-DD"\n'
-            "  },\n"
-            '  "inferred_mesocycles": [\n'
-            "    {\n"
-            '      "name": "Phase Name (e.g. Base Building, Build, Recovery, etc.)",\n'
-            '      "start_date": "YYYY-MM-DD",\n'
-            '      "end_date": "YYYY-MM-DD",\n'
-            '      "focus_detected": "Key detected focus of this block",\n'
-            '      "average_weekly_tss": 380.0,\n'
-            '      "estimated_consistency": "High" | "Moderate" | "Low"\n'
-            "    }\n"
-            "  ],\n"
-            '  "physiological_insights": [\n'
+            + ('  "inferred_macrocycle": {\n'
+               '    "overall_focus": "e.g. Marathon base prep",\n'
+               '    "start_date": "YYYY-MM-DD",\n'
+               '    "end_date": "YYYY-MM-DD"\n'
+               "  },\n"
+               '  "inferred_mesocycles": [\n'
+               "    {\n"
+               '      "name": "Phase Name (e.g. Base Building, Build, Recovery, etc.)",\n'
+               '      "start_date": "YYYY-MM-DD",\n'
+               '      "end_date": "YYYY-MM-DD",\n'
+               '      "focus_detected": "Key detected focus of this block",\n'
+               '      "average_weekly_tss": 380.0,\n'
+               '      "estimated_consistency": "High" | "Moderate" | "Low"\n'
+               "    }\n"
+               "  ],\n" if cycles else "")
+            + '  "physiological_insights": [\n'
             '    "Physiological response observations (e.g., HRV/RHR trends vs load)."\n'
             "  ],\n"
             + LEARNING_UPDATES_FIELD +
@@ -106,9 +120,11 @@ class AnalysisLogicMixin:
 
         system_prompt = (
             "You are TrainMate Coach, an advanced AI sports science training coach.\n"
-            "You analyze historical activities and physiological metrics to identify\n"
-            "training periodization phases (macro and mesocycles).\n\n"
-            f"{guidelines}\n"
+            "You analyze historical activities and physiological metrics to "
+            + ("identify\ntraining periodization phases (macro and mesocycles).\n\n"
+               if cycles else
+               "read how an\nathlete is responding to their training.\n\n")
+            + f"{guidelines}\n"
         )
 
         athlete_profile = self._format_athlete_profile(profile)

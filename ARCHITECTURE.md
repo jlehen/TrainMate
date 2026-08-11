@@ -577,12 +577,16 @@ called by the UIs.
   / "Originally:"; replaced title+duration/TSS/RPE + athlete reason →
   `modification_reason` / "Reason:"), carries the old `google_event_id` over, then
   syncs. Load re-balancing is left to `workout_adapt`. (See [§11](#11-terminology-plans-vs-workouts).)
-- **`data_bootstrap(...)` / `data_reflect(...)`** — reverse-engineer past training
-  cycles from completed activities + metrics via the shared `_run_workout_analysis`
-  core. `bootstrap` = cold-start over the full backlog (horizon `long`), sets the
-  reflect watermark; `reflect` = incremental since the watermark (horizon `short`),
-  advances it. Both reuse `analysis_cache` on unchanged evidence; `force` recomputes;
-  `inspect_only` renders without writing. See DESIGN_backward_evaluation.md §5, §8, §9.
+- **`data_bootstrap(...)` / `data_reflect(...)`** — read past training from completed
+  activities + metrics via the shared `_run_workout_analysis` core, which passes the
+  horizon down so each asks its own question (§10.3). `bootstrap` = cold-start over the
+  full backlog (horizon `long`), reverse-engineers the cycles, sets the reflect
+  watermark; `reflect` = incremental since the watermark (horizon `short`), recent
+  response only, advances it. Reflect's window ends on the last **completed** week
+  unless an end date is named, so a part-week is never cited as a whole one and a run
+  with nothing complete since the watermark makes no LLM call (§10.4). Both reuse
+  `analysis_cache` on unchanged evidence; `force` recomputes; `inspect_only` renders
+  without writing. See DESIGN_backward_evaluation.md §5, §8, §9.
 - **`_build_prior_training_context(prior_macros, today)`** — builds the read-only
   "planned vs actual" review injected into the `plan generate` strategy prompt
   (Option A). Anchored on the elapsed mesocycle windows of every plan handed in **and of
@@ -1207,15 +1211,18 @@ Cached backward-evaluation reconstruction (inferred cycles + insights), keyed by
 an evidence fingerprint. One row per `horizon`; cleared by `wipe_metrics`. See
 DESIGN_backward_evaluation.md §5.1.
 
-The `horizon` is a **cache slot, not a different product**: `data bootstrap` and
-`data reflect` run the identical prompt through `_run_workout_analysis()`, and the
-horizon only selects which row is written. Two forward consumers read it —
-`plan generate`'s prior-training context via `CoachService._cached_reconstructions()`, and
+The `horizon` **selects the question, not just the slot**: `_data_analyze_logic` takes it
+and branches, so `long` (`data bootstrap`) asks for the periodization structure while
+`short` (`data reflect`) asks only how the athlete responded and is told not to infer
+macro/mesocycles — a few weeks cannot support the claim
+(DESIGN_backward_evaluation.md §10.3). Three forward consumers read the table —
+`plan generate`'s prior-training context via `CoachService._cached_reconstructions()`;
 `trainmate/timeline.py`, which feeds the reconstruction's `inferred_mesocycles` into
 `progression.assemble_timeline()` as `~`-prefixed bands wherever no planned block covers
-the span (DESIGN_progress_timeline.md §6.1). The timeline reads `long` alone; the plan
-prompt replays **both** slots, `short` only when its window ends later than `long`'s —
-otherwise it re-describes weeks bootstrap already covered. Neither
+the span (DESIGN_progress_timeline.md §6.1); and `data show-analysis`, which renders a
+slot as stored. The timeline reads `long` alone; the plan prompt replays **both** slots,
+`short` only when its window *starts* after `long`'s ends — a window that re-reads
+bootstrap's weeks on its way past them would show one body of evidence twice. Neither
 consumer checks the fingerprint — it is consulted only in the *writing* flow, so a
 months-old reconstruction can be replayed (the covered window is printed alongside it),
 and `_maybe_warn_stale_analysis()` says so once the latest of the two windows falls
@@ -1401,7 +1408,7 @@ single read-only view that is its whole state (`model`), which acts bare instead
 | `workout`    | `prune-calendar` | —    | Delete Calendar workout events that no local row references — the orphans a fresh DB, a restored backup, or a wipe that never reached Calendar leaves behind. Ownership read from the `source=TrainMate` tag, not from stored ids; events of soft-removed workouts are kept. `-d RANGE` windows it (as on `data wipe`), `-n`/`--dry-run` previews, `-y` skips the prompt |
 | `data`       | `pull`       | `d p`    | Fetch Garmin activities/metrics and Google Calendar context (`-d RANGE`/`--metrics-only`/`--activities-only`/`--sleep`). Defaults to the last 2 days ending today. |
 | `data`       | `bootstrap`  | `d b`    | Cold-start reconstruction over the full backlog; seeds evidence-based learnings, sets the reflect watermark. Flags: `-d RANGE`, `--context`, `--force`, `--inspect-only`, `--auto`. No date filter → window auto-detected (since previous goal, else 12 wk). |
-| `data`       | `reflect`    | `d r`    | Incremental analysis since the reflect watermark; updates learnings + resolves pending demotions (same flags as `bootstrap`). `--auto`: unattended — staleness demotions auto-apply, contradiction ones stay queued. |
+| `data`       | `reflect`    | `d r`    | Incremental analysis since the reflect watermark; updates learnings + physiological insights (no cycle inference — §10.3) and resolves pending demotions (same flags as `bootstrap`). Window ends on the last completed week unless an end date is given, so a mid-week run with nothing complete costs nothing. `--auto`: unattended — staleness demotions auto-apply, contradiction ones stay queued. |
 | `data`       | `show-metrics` | `d sm` | Show athlete metrics over a date range (default 7-day lookback). Selectors `-d`/`-m`/`-M`/`-g` plus `-a`/`--all`, `--no-pull`, `--csv`. |
 | `data`       | `show-activities` | `d sa` | Show completed activities over a date range (default 7-day lookback). Selectors `-d`/`-m`/`-M`/`-g` plus `-a`/`--all`, `-t/--type` filter, `--no-pull`, `--csv`. |
 | `data`       | `show-analysis` | `d san` | Show the reconstruction stored by the last `bootstrap` — inferred macro focus, the mesocycle blocks `progress` draws as `~` bands, physiological insights. Strictly read-only (renders the slot; never calls the LLM, unlike `bootstrap --inspect-only`). `--short` reads `reflect`'s slot instead; flags when activities post-date the slot's window. |

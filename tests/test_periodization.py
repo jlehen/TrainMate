@@ -1339,9 +1339,13 @@ class TestStaleAnalysisWarning(unittest.TestCase):
     def setUp(self):
         clear_all_tables(test_db)
 
-    def _cache_ending(self, window_end: str, horizon: str = "long") -> None:
+    def _cache_ending(
+        self, window_end: str, horizon: str = "long", window_start: str = "2026-01-01"
+    ) -> None:
+        # A reflect row must start past bootstrap's end to be read forward at all (§10.2),
+        # so its start is explicit here rather than shared with bootstrap's.
         test_db.save_analysis_cache(
-            horizon=horizon, fingerprint=f"fp-{horizon}", window_start="2026-01-01",
+            horizon=horizon, fingerprint=f"fp-{horizon}", window_start=window_start,
             window_end=window_end, reconstruction={"macrocycle_summary": "Base build."},
         )
 
@@ -1370,12 +1374,13 @@ class TestStaleAnalysisWarning(unittest.TestCase):
         `data reflect` can actually move — otherwise it repeats forever however diligently
         the athlete runs it (§10.2)."""
         self._cache_ending("2026-01-31")                     # bootstrap, months behind
-        self._cache_ending("2026-06-25", horizon="short")    # reflect, caught up
+        self._cache_ending("2026-06-25", horizon="short",    # reflect, caught up
+                           window_start="2026-02-01")
         self.assertEqual(self._warn("2026-07-01"), "")
 
     def test_a_stale_reflection_still_warns_from_the_later_window(self):
         self._cache_ending("2026-01-31")
-        self._cache_ending("2026-06-01", horizon="short")
+        self._cache_ending("2026-06-01", horizon="short", window_start="2026-02-01")
         out = self._warn("2026-07-01")
         self.assertIn("2026-06-01", out)                     # the later of the two
         self.assertNotIn("2026-01-31", out)

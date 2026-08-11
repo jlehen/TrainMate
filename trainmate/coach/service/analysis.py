@@ -158,11 +158,18 @@ class DataAnalysisMixin:
         to 'established' when the command was run day after day over a sliding window.
         Advances the watermark on success.
 
+        The window also ENDS on a completed week unless an explicit end date is given: the
+        evidence basis counts whole weeks, so a window ending mid-week lets a part-week be
+        cited as one (DESIGN_evidence_based_confidence.md §4, §10.4 here). A run with no
+        completed week since the watermark therefore reports nothing new and makes no LLM
+        call, which is what makes a daily invocation harmless.
+
         Reuse / integrity invariants are inherited from `_run_workout_analysis`.
         """
         until_date = self._resolve_until(until_date_str)
+        if not until_date_str:
+            until_date -= timedelta(days=until_date.weekday() + 1)  # last completed Sunday
 
-        explicit = bool(from_date_str)
         watermark = self._db.get_sync_state("reflect")
         if from_date_str:
             from_date = datetime.strptime(from_date_str, "%Y-%m-%d").date()
@@ -184,10 +191,13 @@ class DataAnalysisMixin:
             ))
 
         if from_date > until_date:
-            if explicit:
+            # Only a range the caller gave BOTH ends of can be self-contradictory; a start
+            # that outruns a snapped end just means no week has completed yet.
+            if from_date_str and until_date_str:
                 raise ValueError(f"Start date {from_date} is after end date {until_date}.")
-            since = watermark["through_date"] if watermark else "?"
-            print(cyan(f"Nothing new to reflect on since {since}."))
+            since = watermark["through_date"] if watermark else (from_date_str or "?")
+            tail = "" if until_date_str else " (no completed week since)"
+            print(cyan(f"Nothing new to reflect on since {since}{tail}."))
             # Even with no new evidence, surface any staleness demotions that have come due.
             if not inspect_only:
                 self._review_learning_proposals(auto=auto)
@@ -694,7 +704,8 @@ class DataAnalysisMixin:
             context_days=context_days,
             learnings=self._get_learnings_text(),
             context=context,
-            label=label
+            label=label,
+            horizon=horizon
         )
 
         if not inspect_only:

@@ -692,16 +692,19 @@ def add_data_parser(subparsers, pull_bypass_parser, llm_debug_parser):
         "reflect",
         parents=[pull_bypass_parser, llm_debug_parser],
         help="Update coach learnings from how the athlete responded to training "
-             "since the last reflect (incremental; no reconstruction)",
+             "since the last reflect (incremental; no cycle inference)",
         description=(
             "Incremental: analyze only evidence accrued since the last reflect watermark "
-            "(the day after the last reflected-through date). Its output is coach learnings "
-            "— delta-updated from the new evidence; unlike 'data bootstrap' it does not "
-            "feed a reconstruction to 'plan generate'. A date filter overrides the "
-            "watermark. Because overlapping history is never re-counted, repeated runs no "
-            "longer ratchet confidence to 'established'. Run 'data bootstrap' first to "
-            "establish a baseline. --inspect-only renders without writing; --force bypasses "
-            "the per-window cache."
+            "(the day after the last reflected-through date), through the last COMPLETED "
+            "week — the evidence basis counts whole weeks, so a run with nothing complete "
+            "since the watermark reports nothing new and costs no LLM call. Its output is "
+            "coach learnings and physiological insights; unlike 'data bootstrap' it does "
+            "not reverse-engineer macro/mesocycles, which a few weeks cannot support. A "
+            "date filter overrides both the watermark and the completed-week end. Because "
+            "overlapping history is never re-counted, repeated runs no longer ratchet "
+            "confidence to 'established'. Run 'data bootstrap' first to establish a "
+            "baseline. --inspect-only renders without writing; --force bypasses the "
+            "per-window cache."
         )
     )
     d_reflect.set_defaults(func=run_data_reflect)
@@ -811,9 +814,11 @@ def add_data_parser(subparsers, pull_bypass_parser, llm_debug_parser):
             "macro focus, the mesocycle blocks 'tm progress' draws as '~' bands, and the "
             "physiological insights. Read-only in the strict sense — it renders what is "
             "stored and never calls the LLM, unlike 'data bootstrap --inspect-only' which "
-            "recomputes as soon as the evidence has moved. --short shows 'data reflect's "
-            "own reconstruction over its incremental window instead. Only the latest of "
-            "each is kept, so this is the current picture, not a history."
+            "recomputes as soon as the evidence has moved. --short shows the last "
+            "'data reflect' instead — its recent-response read: summary and physiological "
+            "insights, no cycles, because a few weeks cannot support a periodization "
+            "claim. Only the latest of each is kept, so this is the current picture, not "
+            "a history."
         )
     )
     d_san.set_defaults(func=run_data_show_analysis)
