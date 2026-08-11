@@ -330,7 +330,10 @@ a taper magnitude, a session count, or a block order — those are the user laye
 and a built-in file that fixes one silently overrides the philosophy the athlete supplied.
 Each built-in file therefore opens with an `AUTHORITY:` line naming its role
 (`VOCABULARY` / `DIAGNOSTIC` / `MEASUREMENT` / `PROTECTIVE`), and the user files with the
-authority they claim over each other (`PRESCRIPTIVE` / `REFERENCE ONLY`).
+authority they claim over each other (`PRESCRIPTIVE` / `REFERENCE ONLY`). The same
+precedence is stated to the coach at run time, in each block's `provenance` line — the file
+headers alone would not tell it which corpus yields, and the user corpus can be empty or
+say anything.
 
 The one carve-out: **a built-in file may hold a hard rule when that rule can only ever
 reduce load.** `recovery_metrics.txt` is protective in whole, and `training_load.txt` §5's

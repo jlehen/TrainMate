@@ -299,13 +299,17 @@ def _load_science_guidelines(app_science_dir: str, science_dir: str) -> str:
         _science_block(
             app_science_dir,
             "TRAINMATE SPORTS SCIENCE GUIDELINES",
-            "TrainMate's own reference material, shipped with the app.",
+            "TrainMate's own reference material, shipped with the app. It defines how to\n"
+            "measure training and what the terms mean; the athlete's documents below decide\n"
+            "what to prescribe. Where the two disagree, these yield — except for the rules\n"
+            "each document marks as a floor, which never yield.",
         ),
         _science_block(
             science_dir,
             "ATHLETE-PROVIDED SPORTS SCIENCE GUIDELINES",
             "Reference material the athlete supplied themselves — the training philosophy\n"
-            "and sources they want their coaching drawn from.",
+            "and sources they want their coaching drawn from. These govern what is\n"
+            "prescribed: volumes, durations, session counts, block order, taper depth.",
         ),
     ]
     return "\n\n".join(b for b in blocks if b)
