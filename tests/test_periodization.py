@@ -228,6 +228,86 @@ class TestPeriodization(unittest.TestCase):
         )
 
     @patch("trainmate.coach.engine.openrouter_client")
+    def test_fresh_withholds_the_plan_in_place(self, mock_client):
+        """`--fresh`: the intent is withheld, the evidence is not
+        (DESIGN_backward_evaluation.md §6.1)."""
+        obj_id = test_db.add_objective(
+            title="Zurich Marathon", target_date=GOAL_DATE,
+            sport_type="running", priority=1,
+        )
+        test_db.save_macrocycle(
+            objective_id=obj_id,
+            strategy="Keep heart rate low",
+            goals_hash="old_goals_hash",
+            constraints_hash="old_constraints_hash",
+            mesocycles=[{
+                "name": "Base Building", "start_date": "2026-06-01",
+                "end_date": "2026-06-28", "focus": "Aerobic conditioning",
+            }],
+        )
+        test_db.save_completed_activity(
+            activity_id="a1", date="2026-06-01", start_time="08:00:00",
+            activity_name="Base Run", activity_type="running",
+            duration_sec=3600.0, distance_km=10.0, elevation_gain_m=50.0,
+            avg_hr=140, max_hr=160, rpe=5, tss=60.0,
+            zone1_sec=300, zone2_sec=2700, zone3_sec=400, zone4_sec=200, zone5_sec=0,
+        )
+        mock_client.complete.return_value = {
+            "strategy": "New strategy", "mesocycles": [{
+                "name": "Build", "start_date": "2026-06-08",
+                "end_date": "2026-10-15", "focus": "Threshold",
+            }],
+        }
+
+        coach_service.plan_generate(fresh=True, objective_id=obj_id, auto_apply=False)
+
+        system_prompt = mock_client.complete.call_args[0][0]
+        self.assertNotIn("PREVIOUS PERIODIZATION STRATEGY", system_prompt)
+        self.assertNotIn("CONTINUITY WITH THE PREVIOUS PLAN", system_prompt)
+        self.assertNotIn("Keep heart rate low", system_prompt)
+        # What the athlete trained under that plan still reaches the prompt.
+        self.assertIn("PLANNED vs ACTUAL", system_prompt)
+        self.assertIn("Aerobic conditioning", system_prompt)
+
+    @patch("trainmate.coach.engine.openrouter_client")
+    def test_fresh_implies_force(self, mock_client):
+        """A clean slate is a regeneration: an up-to-date plan is not reused."""
+        obj_id = test_db.add_objective(
+            title="Zurich Marathon", target_date=GOAL_DATE,
+            sport_type="running", priority=1,
+        )
+        test_db.save_macrocycle(
+            objective_id=obj_id,
+            strategy="Keep heart rate low",
+            goals_hash=coach_service._get_goals_hash(test_db.upcoming_objectives()),
+            constraints_hash=coach_service._get_constraints_hash([]),
+            config_hash=coach_service._get_config_hash(),
+            config_snapshot=coach_service._get_config_snapshot(),
+            mesocycles=[{
+                "name": "Base Building", "start_date": "2026-06-01",
+                "end_date": "2026-06-28", "focus": "Aerobic conditioning",
+            }],
+        )
+        mock_client.complete.return_value = {
+            "strategy": "New strategy", "mesocycles": [{
+                "name": "Build", "start_date": "2026-06-08",
+                "end_date": "2026-10-15", "focus": "Threshold",
+            }],
+        }
+
+        # Same inputs, so without `fresh` this would be reused without an LLM call.
+        reused = coach_service.plan_generate(
+            objective_id=obj_id, auto_apply=False
+        )['reused']
+        self.assertTrue(reused)
+
+        proposal = coach_service.plan_generate(
+            fresh=True, objective_id=obj_id, auto_apply=False
+        )
+        self.assertFalse(proposal['reused'])
+        self.assertEqual(proposal['strategy'], "New strategy")
+
+    @patch("trainmate.coach.engine.openrouter_client")
     def test_plan_generate_injects_planned_vs_actual(self, mock_client):
         # Option A (DESIGN_backward_evaluation.md §6): the prior plan's elapsed blocks are
         # compared against what was actually completed, and fed into the strategy prompt.

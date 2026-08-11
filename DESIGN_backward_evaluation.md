@@ -357,6 +357,13 @@ interchangeable:
   goal's own. It feeds the singular `PREVIOUS PERIODIZATION STRATEGY` block, which
   is about the intent the new plan departs from, so singular is right there.
 
+The split between the two is what makes `plan generate --fresh` a coherent option
+rather than an amnesia switch. Asking for a clean slate withholds the
+`PREVIOUS PERIODIZATION STRATEGY` block and its continuity instruction — the athlete
+is saying *don't build on that intent* — while `prev_macro` still reaches the review
+below, because what they actually trained under the old plan is evidence, not intent,
+and a plan written blind to it would be the idealized template §6 exists to prevent.
+
 `prev_macro` used to be assigned over the top of `preceding_macro`, so only one of
 the two ever reached the review. In practice the loss was **narrower than it looks**:
 the review also adds `get_governing_macrocycle()` — the *earliest* active goal with

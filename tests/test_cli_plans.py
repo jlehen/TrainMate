@@ -87,17 +87,31 @@ class TestCliPlans(unittest.TestCase):
         exit_code, stdout, stderr = self.run_cli(["plan", "generate"])
         self.assertEqual(exit_code, 0)
         self.assertIn("Plan discarded", stdout)
-        mock_coach.plan_generate.assert_called_once_with(force=False, auto_apply=False)
+        mock_coach.plan_generate.assert_called_once_with(
+            force=False, fresh=False, auto_apply=False
+        )
 
         mock_coach.plan_generate.reset_mock()
         exit_code, stdout, stderr = self.run_cli(["plan", "generate", "-f"])
         self.assertEqual(exit_code, 0)
-        mock_coach.plan_generate.assert_called_once_with(force=True, auto_apply=False)
+        mock_coach.plan_generate.assert_called_once_with(
+            force=True, fresh=False, auto_apply=False
+        )
 
         mock_coach.plan_generate.reset_mock()
         exit_code, stdout, stderr = self.run_cli(["plan", "generate", "--force"])
         self.assertEqual(exit_code, 0)
-        mock_coach.plan_generate.assert_called_once_with(force=True, auto_apply=False)
+        mock_coach.plan_generate.assert_called_once_with(
+            force=True, fresh=False, auto_apply=False
+        )
+
+        # --fresh forces regeneration on its own, so the staleness prompt never runs.
+        mock_coach.plan_generate.reset_mock()
+        exit_code, stdout, stderr = self.run_cli(["plan", "generate", "--fresh"])
+        self.assertEqual(exit_code, 0)
+        mock_coach.plan_generate.assert_called_once_with(
+            force=True, fresh=True, auto_apply=False
+        )
 
         exit_code, stdout, stderr = self.run_cli(["workout", "generate"])
         self.assertEqual(exit_code, 0)

@@ -33,6 +33,11 @@ def _resolve_goal(goal_id: Optional[int]) -> Optional[dict]:
 
 def run_plan_generate(args: argparse.Namespace) -> None:
     """Executes the AI periodization strategy plan generation command."""
+    # A clean slate is a regeneration by definition, so the staleness question below —
+    # "an input changed, regenerate?" — is already answered.
+    if args.fresh:
+        args.force = True
+
     # Make sure we have latest metrics cached
     ensure_recent_data(no_pull=args.no_pull, force_pull=getattr(args, 'force_pull', False))
     metrics = runtime.db.get_metrics_cache()
@@ -94,7 +99,7 @@ def run_plan_generate(args: argparse.Namespace) -> None:
     if args.goal_id is not None:
         plan_kwargs['objective_id'] = args.goal_id
     proposal = runtime.coach_service.plan_generate(
-        force=bool(args.force), **plan_kwargs
+        force=bool(args.force), fresh=bool(args.fresh), **plan_kwargs
     )
     mesocycles = proposal['mesocycles']
 
@@ -873,6 +878,14 @@ def add_plan_parser(subparsers, pull_bypass_parser, llm_debug_parser):
     p_gen.add_argument(
         "-f", "--force", action="store_true",
         help="Force regeneration of the macrocycle/mesocycle strategy"
+    )
+    p_gen.add_argument(
+        "--fresh", action="store_true",
+        help=(
+            "Clean slate: don't show the coach the plan currently in place, so the new "
+            "strategy is not asked to continue it (implies --force). Your training "
+            "history and plan feedback still feed in."
+        )
     )
     p_gen.add_argument(
         "-y", "--yes", "--auto", action="store_true", dest="auto",

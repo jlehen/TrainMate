@@ -153,12 +153,20 @@ class PlanningMixin:
         return False
 
     def plan_generate(
-        self, force: bool = False, objective_id: Optional[int] = None, auto_apply: bool = True
+        self, force: bool = False, objective_id: Optional[int] = None,
+        auto_apply: bool = True, fresh: bool = False
     ) -> PlanProposal:
         """Determines the macrocycle strategy and mesocycle blocks.
 
         With `auto_apply` the proposal is saved before returning; otherwise the caller
-        hands it back to :meth:`plan_apply` once the athlete accepts it."""
+        hands it back to :meth:`plan_apply` once the athlete accepts it.
+
+        `fresh` withholds the plan in place from the prompt, so the new strategy is not
+        asked to continue it — a clean slate, not a revision. It implies `force`: there is
+        nothing to reuse when the point is to depart. What the athlete *did* still feeds in
+        (the planned-vs-actual review, the history summary, the learnings, their feedback);
+        only the old plan's stated intent is withheld."""
+        force = force or fresh
         # Identify the target goal
         if objective_id is not None:
             next_goal = self._db.get_active_objective(objective_id)
@@ -269,8 +277,11 @@ class PlanningMixin:
             # from. The *review* below sees both (§6.1).
             prev_macro = existing_macro or preceding_macro
 
+            # `fresh` withholds only this block: `prev_macro` still reaches the
+            # planned-vs-actual review below, which is what the athlete trained, not the
+            # intent they are departing from.
             prev_strategy_text = None
-            if prev_macro:
+            if prev_macro and not fresh:
                 prev_mesos = self._db.get_mesocycles_for_macrocycle(prev_macro['id'])
                 prev_meso_text = ""
                 for m in prev_mesos:
@@ -301,10 +312,17 @@ class PlanningMixin:
 
             # Generate new macrocycle strategy and mesocycles
             width = default_wrap_width()
-            print(cyan(wrap_text(
-                "Goals or plan-shaping constraints have changed, or force generation "
-                "requested. Determining new overall periodization strategy..."
-            )))
+            if fresh:
+                print(cyan(wrap_text(
+                    "Clean slate: the plan in place is withheld from the prompt, so the "
+                    "new strategy is not asked to continue it. Your training history, the "
+                    "planned-vs-actual review and your plan feedback still feed in."
+                )))
+            else:
+                print(cyan(wrap_text(
+                    "Goals or plan-shaping constraints have changed, or force generation "
+                    "requested. Determining new overall periodization strategy..."
+                )))
             guidelines = self._load_science_guidelines()
             profile = self._effective_profile()
             history_summary = self._get_recent_history_summary(today_str)

@@ -84,7 +84,7 @@ def _run_replan_flow(title: str) -> None:
     from trainmate.cli.plans import run_plan_generate
     print(green(f"Marked '{title}' as plan-shaping. Regenerating the plan around it..."))
     ns = argparse.Namespace(
-        no_pull=False, force_pull=False, auto=False, goal_id=None, force=False
+        no_pull=False, force_pull=False, auto=False, goal_id=None, force=False, fresh=False
     )
     run_plan_generate(ns)
     print(dim("If you applied the new plan, run " + cmd("workout generate")

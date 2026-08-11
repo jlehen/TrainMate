@@ -265,6 +265,10 @@ Two things to know when you regenerate:
 - **A regen is not a cold start.** The new plan is fed your previous strategy, a
   planned-vs-actual review of the blocks you've *already* trained, and your coach
   learnings — so it refines the existing arc rather than redrawing it from scratch.
+  When that arc is the thing you want gone, `plan generate --fresh` withholds the
+  plan in place, and only that: the review of what you actually trained, your
+  learnings and your plan feedback still go in, because a plan drawn blind to your
+  training is a template, not a plan.
 - **`workout generate` archives and rebuilds all future workouts**, manual edits
   included (they are recoverable via `workout rollback` or `plan rollback`, not
   deleted; a session you've already completed today is preserved). Because it

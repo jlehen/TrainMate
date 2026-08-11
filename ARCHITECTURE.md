@@ -486,11 +486,18 @@ recompute does not silently demote them (see [§15](#15-design-rationale--histor
 **Orchestrator — owns all DB and calendar access.** Exposes the public API
 called by the UIs.
 
-- **`plan_generate(force, objective_id, auto_apply)`** — fetches objectives/constraints,
+- **`plan_generate(force, objective_id, auto_apply, fresh)`** — fetches objectives/constraints,
   checks hashes (constraints hash covers only the plan-shaping `replan=1` rows), calls
   `CoachEngine._plan_generate_strategy()`, returns a `PlanProposal`. Saves to DB only
   under `auto_apply`; otherwise the caller passes the proposal to `plan_apply()` once
   the athlete accepts. The plan window has no minimum or maximum length (§10, step 5).
+  `fresh` (CLI `--fresh`) withholds the `PREVIOUS PERIODIZATION STRATEGY` block and its
+  `CONTINUITY WITH THE PREVIOUS PLAN` instruction, so the strategy is written without the
+  plan in place to build on; it implies `force`, since there is nothing to reuse when the
+  point is to depart. Everything derived from what the athlete *did* is unaffected — the
+  planned-vs-actual review still covers the replaced plan's elapsed blocks, as do the
+  history summary, the learnings and the athlete's plan feedback
+  (DESIGN_backward_evaluation.md §6.1).
 - **`workout_generate(end_date, prefer_macro_id)`** — requires an existing macrocycle.
   Writes nothing: it returns a `GenerateProposal` (reasoning, the proposed sessions
   already tagged with their date's `macrocycle_id`, the live plan they would displace,
@@ -1385,7 +1392,7 @@ single read-only view that is its whole state (`model`), which acts bare instead
 | `learnings`  | `demote`     | —        | Accept a pending confidence downgrade by ID                            |
 | `learnings`  | `keep`       | —        | Dismiss + affirm a pending downgrade by ID                             |
 | `learnings`  | `wipe`       | —        | Delete all coach learnings                                             |
-| `plan`       | `generate`   | `pl g`   | Generate/reuse macrocycle+mesocycles (`-f` to force, `-g/--goal ID`)        |
+| `plan`       | `generate`   | `pl g`   | Generate/reuse macrocycle+mesocycles (`-f` to force, `-g/--goal ID`, `--fresh` for a clean slate that withholds the plan in place from the prompt) |
 | `plan`       | `show`       | `pl s`   | Show a periodization plan: strategy, snapshotted inputs (goals, constraints, threshold anchors), mesocycle timeline with each block's workout count/duration/load. Flags: `-g/--goal ID` (any status, not just active), `-M/--macrocycle ID` for a superseded version — each plan version IS a macrocycle, `-a/--all` for every goal that has a plan, `-w/--workouts` to list each mesocycle's sessions |
 | `plan`       | `versions`   | `pl v`   | List a goal's kept plan versions — active + superseded — with IDs and dates (`-g/--goal ID`) |
 | `plan`       | `diff`       | `pl df`  | Compare two plan versions (`[PLAN_ID_A] [PLAN_ID_B]`, `-g/--goal ID`): strategy + feedback prose, mesocycles added/removed/renamed/re-dated, and snapshotted input deltas. No ID → previous vs active; one ID → that vs active. Prose rewritten wholesale collapses to a note unless `--full`. Comparison logic in `trainmate/plan_diff.py`, shared with `/api/plan/diff` |
