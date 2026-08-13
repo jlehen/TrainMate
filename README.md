@@ -118,10 +118,20 @@ internals work, see the [Architecture Document](ARCHITECTURE.md).
 
 ### Prerequisites
 
-- Python 3.8+ (install dependencies with `pip install -r requirements.txt`)
+- Python 3.10+
 - [OpenRouter API key](https://openrouter.ai/) for LLM access
 - A Garmin Connect account (for daily metrics and activities)
 - A Google Service Account with access to your Google Calendar (for workout sync)
+
+The `./tm` wrapper is the everyday entry point: it runs the CLI inside the
+repo's own virtualenv, creating `venv/` on first run. Install the dependencies
+into it once:
+```bash
+./tm            # first run creates venv/
+venv/bin/pip install -r requirements.txt
+```
+Every example below uses `./tm`; `python trainmate_cli.py` is the same thing
+if you manage your own environment.
 
 ### Turn off Garmin's automatic threshold detection
 
@@ -150,13 +160,32 @@ see it.
 
 ### Configuration
 
-Edit `config.yaml` to include your specific IDs and profile (use
-`config_template.yaml` as a base). You will need:
-- `openrouter_api_key`
-- `google_calendar_id`
-- A valid `service_account.json` file in the root directory.
-- `garmin_email` and `garmin_password` (config.yaml is gitignored, keeping
-  credentials out of the environment; FTP/LTHR come from `user_profile`).
+Copy `config_template.yaml` to `config.yaml` and fill it in. `config.yaml` is
+gitignored, so your credentials stay in the file and out of git and the
+environment. The blocks you must fill:
+
+- **`llm:`** — `api_key` (an `OPENROUTER_API_KEY` env var overrides it) and
+  `models`, the list of OpenRouter models this install may use; `model set`
+  switches between them at runtime, and the first entry is the default.
+- **`google:`** — `calendar_id` of the calendar your workouts are written to,
+  and `service_account_file`, the service-account JSON used to authenticate
+  (`service_account.json` in the repo root by default).
+- **`garmin:`** — `email` and `password` for Garmin Connect.
+- **`user_profile:`** — the athlete the coach is planning for: `max_hr`,
+  `weekly_target_hours`, sport preferences, chronic injuries, free-text
+  preferences, and a per-day `weekly_schedule` — how many hours and sessions
+  each weekday can hold, how *certain* you are to actually train that day
+  (the coach weights planning toward higher-certainty days), and what
+  equipment is at hand. The plan is built around this block, so fill it
+  honestly rather than optimistically.
+
+Everything else in the template is optional tuning and documented inline —
+sensible defaults apply when a key is commented out.
+
+Note what is *not* in the config: trainable thresholds (FTP, LTHR, threshold
+pace, …) live in the dated benchmark logbook, recorded with
+`./tm benchmark record` — that logbook, not `config.yaml`, is what the coach
+reads (see [Basic Usage](#basic-usage-cli)).
 
 ### Personalizing TrainMate
 
@@ -199,7 +228,7 @@ sources TrainMate's author used to generate `science/jeremie_science_summary.txt
 
 Add a goal:
 ```bash
-python trainmate_cli.py goal add "Marathon Prep" "2026-10-15" running --priority 1
+./tm goal add "Marathon Prep" "2026-10-15" running --priority 1
 ```
 By default the date is an **event** — race day — and the plan peaks and tapers
 for it. If nothing happens on the date itself ("get my FTP to 280 by next
@@ -209,23 +238,38 @@ tests aren't suppressed (there's no event for them to compete with).
 `goal edit <id> --date-type …` flips an existing goal and flags the plan for
 regeneration.
 
+Record your current thresholds — the coach prescribes workout targets from
+these (remember to [turn off Garmin's auto-detection](#turn-off-garmins-automatic-threshold-detection) first):
+```bash
+./tm benchmark record cycling --ftp 220
+./tm benchmark record running --lthr 165
+```
+With nothing on record the coach still works: it prescribes by RPE and
+heart-rate feel, and schedules a benchmark session to establish the numbers.
+
 Generate a periodization plan and initial workouts:
 ```bash
-python trainmate_cli.py plan generate
-python trainmate_cli.py workout generate
+./tm plan generate
+./tm workout generate
 ```
 
 Pull Garmin data and adapt the plan daily:
 ```bash
-python trainmate_cli.py data pull
-python trainmate_cli.py workout adapt
+./tm data pull
+./tm workout adapt
 ```
+The first `data pull` looks at how far back your Garmin history reaches and,
+when the gap is large, hands you the backfill command to run rather than
+fetching months of data unannounced. If you arrive with a real training past,
+run `data bootstrap` once after backfilling: it reverse-engineers the training
+blocks you actually did and seeds coach learnings from them, so the coach
+starts warm instead of cold.
 
 See where the plan is going, and how it is actually being executed:
 ```bash
-python trainmate_cli.py progress                  # every sport you train
-python trainmate_cli.py progress cycling running  # just these two, in this order
-python trainmate_cli.py progress --blocks         # per mesocycle, graded on its focus
+./tm progress                  # every sport you train
+./tm progress cycling running  # just these two, in this order
+./tm progress --blocks         # per mesocycle, graded on its focus
 ```
 The load half (CTL/ATL/TSB, the projection, the weekly bars) is always
 whole-athlete — naming a sport scopes the zone tables only, because a
@@ -242,17 +286,17 @@ there's no separate sync step.
 Switch the LLM behind the coach without editing config by hand — `model` lists what
 `llm.models` in `config.yaml` offers, numbered, and `model set` picks one:
 ```bash
-python trainmate_cli.py model
-python trainmate_cli.py model set 3
+./tm model
+./tm model set 3
 ```
 The choice is stored and survives restarts; `--llm-model <id>` still overrides it for a
 single command without storing anything.
 
-See `python trainmate_cli.py --help` for the everyday commands, or
-`python trainmate_cli.py help` to see every command and its sub-commands at once.
+See `./tm --help` for the everyday commands, or
+`./tm help` to see every command and its sub-commands at once.
 Rarely-used maintenance commands — `wipe`, `workout push`, `data backfill-tss`,
 `data bootstrap` — are kept out of the default listings to reduce clutter;
-`python trainmate_cli.py help --all` reveals them.
+`./tm help --all` reveals them.
 
 ### Steering the plan: which channel, and how a regen behaves
 
