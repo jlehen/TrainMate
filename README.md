@@ -20,7 +20,12 @@ does the coaching reasoning.
   TrainMate builds a full macrocycle → mesocycle → microcycle structure (long-term
   strategy down to individual sessions), over whatever horizon your goal sits on —
   how a short run-in or a multi-season build should be structured comes from the
-  science guidelines you supply, not from thresholds baked into the app.
+  science guidelines you supply, not from thresholds baked into the app. A goal's
+  date can mean two different things, and the plan respects the difference: an
+  **event** date is a day something happens on (a race), so the plan builds to a
+  peak and taper for it; a **horizon** date only says how far you want to train
+  toward the goal, so the plan still ends around it — but with an ordinary
+  training block, no taper pinned to a day nothing happens on.
 
 - **Context-aware daily adaptation.** Each day it weighs your recovery signals
   against the planned session and eases, reschedules, or holds the workout
@@ -158,10 +163,11 @@ Edit `config.yaml` to include your specific IDs and profile (use
 **Goals.** Don't fill in `goal add` cold. The title, target date, sport,
 and priority are much easier to get right once you've actually thought the goal
 through — so brainstorm it first with an LLM (ChatGPT, Claude, whatever you
-use) through a short interview: what's the event, why does it matter, what's
-your current fitness, what constraints (time, injuries, other goals) does the
-plan need to respect. Then turn the outcome of that conversation into your
-`goal add` call(s).
+use) through a short interview: what's the event, why does it matter, whether
+anything actually *happens* on the target date or the date just bounds the
+training window, what's your current fitness, what constraints (time, injuries,
+other goals) does the plan need to respect. Then turn the outcome of that
+conversation into your `goal add` call(s).
 
 **The `science/` directory.** Every `.txt` file in the top-level `science/`
 directory (gitignored, empty by default) is injected into TrainMate's coaching
@@ -195,6 +201,13 @@ Add a goal:
 ```bash
 python trainmate_cli.py goal add "Marathon Prep" "2026-10-15" running --priority 1
 ```
+By default the date is an **event** — race day — and the plan peaks and tapers
+for it. If nothing happens on the date itself ("get my FTP to 280 by next
+summer"), add `--date-type horizon`: the plan still ends around the date, but
+its last block is ordinary training with no taper, and goal-week benchmark
+tests aren't suppressed (there's no event for them to compete with).
+`goal edit <id> --date-type …` flips an existing goal and flags the plan for
+regeneration.
 
 Generate a periodization plan and initial workouts:
 ```bash
