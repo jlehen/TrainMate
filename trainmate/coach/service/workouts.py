@@ -4,7 +4,7 @@ from typing import Any, Iterator, List, Optional, Tuple, Dict
 from trainmate.config import config
 from trainmate.types import Constraint, Workout
 from trainmate.adherence import analyze_adherence
-from trainmate.coach.proposals import GenerateProposal
+from trainmate.coach.proposals import GenerateProposal, normalize_load_fields
 from trainmate.sports import canonical_sport
 from trainmate import intensity
 from trainmate.util import green, yellow, red, cmd, Progress
@@ -478,6 +478,9 @@ class WorkoutGenMixin:
 
         # Save workouts to database
         workouts = plan_data.get("workouts", [])
+
+        # Integers, before the preview and the save both read these numbers.
+        normalize_load_fields(workouts)
 
         # Guard the preserved day: when today's completed session is being kept, drop any
         # workout the model mistakenly dated before the generation start. save_workout

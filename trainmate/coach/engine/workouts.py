@@ -264,7 +264,7 @@ class WorkoutLogicMixin:
             '        duration, heart rate zones, and goals.",\n'
             "      \"duration_minutes\": 60, (Estimated workout duration in minutes, integer. Use 0 for rest days)\n"
             "      \"rpe\": 6, (Expected Rate of Perceived Exertion, integer 1-10. Use 0 for rest days)\n"
-            "      \"tss\": 45.0, (Expected Training Stress Score, float/integer. Use 0 for rest days)\n"
+            "      \"tss\": 45, (Expected Training Stress Score, integer. Use 0 for rest days)\n"
             + _planned_zone_fields(zone_currencies) +
             '      "benchmark_type": null (Normally null. Set ONLY on a scheduled fitness\n'
             "        test — see BENCHMARK PLACEMENT — to the test kind, e.g. \"ftp_20min\" |\n"
@@ -575,7 +575,7 @@ evidence-backed observations are authored only by the weekly history analysis
                 '        duration, heart rate zones, and goals.",\n'
                 '      "duration_minutes": 45,\n'
                 '      "rpe": 5,\n'
-                '      "tss": 30.0,\n'
+                '      "tss": 30,\n'
                 + _planned_zone_fields(zone_currencies) +
                 '      "benchmark_type": null (Preserve VERBATIM when the session is a\n'
                 "        benchmark — a moved/kept test must stay a test. Never invent one\n"

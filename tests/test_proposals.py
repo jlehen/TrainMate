@@ -13,7 +13,9 @@ from tests.helpers import clear_all_tables, rebind_test_db
 TEST_DB_PATH = os.path.join(os.path.dirname(__file__), "test_proposals.db")
 
 from trainmate.db import Database
-from trainmate.coach.proposals import AdaptProposal, PlanFingerprints, pair_adaptations
+from trainmate.coach.proposals import (
+    AdaptProposal, PlanFingerprints, normalize_load_fields, pair_adaptations,
+)
 
 test_db = Database(db_path=TEST_DB_PATH)
 rebind_test_db(test_db)
@@ -82,6 +84,30 @@ class TestPairAdaptations(unittest.TestCase):
         )
         self.assertIsNone(pairs[0].original)
         self.assertFalse(pairs[0].is_swap)
+
+
+class TestLoadFieldsAreIntegers(unittest.TestCase):
+    """A model that answers `"tss": 24.0` proposes the same load as a stored `24`, but the
+    preview rendered `TSS24 -> TSS24.0` and an unchanged number read as a change."""
+
+    def test_a_float_load_becomes_the_integer_the_column_stores(self):
+        workouts = [{"duration_minutes": 45.0, "rpe": 5.0, "tss": 24.0}]
+
+        normalize_load_fields(workouts)
+
+        self.assertEqual(workouts[0], {"duration_minutes": 45, "rpe": 5, "tss": 24})
+        for value in workouts[0].values():
+            self.assertIsInstance(value, int)
+
+    def test_a_fractional_load_rounds_rather_than_truncating(self):
+        workouts = [{"tss": 24.6}]
+        normalize_load_fields(workouts)
+        self.assertEqual(workouts[0]["tss"], 25)
+
+    def test_integers_and_missing_fields_are_left_alone(self):
+        workouts = [{"duration_minutes": 45, "tss": None}]
+        normalize_load_fields(workouts)
+        self.assertEqual(workouts[0], {"duration_minutes": 45, "tss": None})
 
 
 class TestAdaptProposalCarriesItsRange(unittest.TestCase):

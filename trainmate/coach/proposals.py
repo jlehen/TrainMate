@@ -69,6 +69,20 @@ class GenerateProposal:
     gen_start: str = ""
 
 
+def normalize_load_fields(workouts: List[Dict[str, Any]]) -> None:
+    """Rounds the model's load fields to the integers the plan columns store.
+
+    A JSON `24.0` is the same load as a stored `24`, but it survives into the preview and
+    renders `TSS24 -> TSS24.0`, so an otherwise-unchanged number reads as a change. Fixed
+    here rather than in the prompt so correctness does not rest on the model's formatting.
+    """
+    for w in workouts:
+        for field in ('duration_minutes', 'rpe', 'tss'):
+            value = w.get(field)
+            if isinstance(value, float):
+                w[field] = round(value)
+
+
 def pair_adaptations(
     proposals: List[Dict[str, Any]], existing: List[Dict[str, Any]]
 ) -> Tuple[Tuple[AdaptPair, ...], Tuple[Dict[str, Any], ...]]:

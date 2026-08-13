@@ -7,7 +7,7 @@ from trainmate.sports import canonical_sport
 from trainmate import intensity
 from trainmate.util import yellow, red, cmd
 from trainmate.coach.formatting import format_baseline
-from trainmate.coach.proposals import AdaptProposal, pair_adaptations
+from trainmate.coach.proposals import AdaptProposal, normalize_load_fields, pair_adaptations
 import trainmate.coach.service as _svc
 
 
@@ -213,6 +213,9 @@ class AdaptationMixin:
         adapted = []
         if decision.get("change_needed"):
             adapted = decision.get("adapted_workouts", [])
+
+        # Integers, before the no-op backstop and the preview both read these numbers.
+        normalize_load_fields(adapted)
 
         # Drop any proposal dated past the adaptation range: the next block is out of reach
         # and was never shown to the model, so a post-boundary date is a hallucination
