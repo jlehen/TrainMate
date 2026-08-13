@@ -29,9 +29,10 @@ class WipesMixin:
             conn.commit()
 
     def wipe_plans(self) -> None:
-        """Deletes all macrocycles and mesocycles from the database."""
+        """Deletes all macrocycles, mesocycles and plan feedback from the database."""
         with self._get_connection() as conn:
             cursor = conn.cursor()
+            cursor.execute("DELETE FROM plan_feedback")
             cursor.execute("DELETE FROM mesocycles")
             cursor.execute("DELETE FROM macrocycles")
             conn.commit()

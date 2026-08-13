@@ -42,13 +42,14 @@ on or around the goal date ({next_goal['target_date']}).
 
         if athlete_feedback:
             custom_task += f"""
-### ATHLETE FEEDBACK ON THE PREVIOUS PLAN
-The athlete has provided direct feedback on the previous periodization plan:
+### ATHLETE FEEDBACK ON THE CURRENT PLAN
+Verbatim notes from the athlete about the plan in place, oldest first. A note marked
+(phase: <name>) was filed against that mesocycle; unmarked notes address the plan as a whole.
 {athlete_feedback}
-You MUST revise the macrocycle strategy and/or the duration, boundaries, and focuses of individual
-mesocycles to directly address this feedback. Make adjustments (e.g. scheduling more rest,
-changing block emphasis, extending/shortening specific cycles) while continuing to respect overall
-sports science principles and guidelines.
+You MUST address every note: revise the macrocycle strategy and/or the duration, boundaries,
+and focuses of individual mesocycles accordingly (e.g. scheduling more rest, changing block
+emphasis, extending/shortening specific cycles), while continuing to respect overall sports
+science principles and guidelines.
 """
 
         if previous_strategy_text:

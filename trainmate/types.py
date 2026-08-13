@@ -163,7 +163,6 @@ class Macrocycle(TypedDict):
     goals_snapshot: Optional[str]
     constraints_snapshot: Optional[str]
     created_at: str
-    feedback: Optional[str]
     status: Optional[str]  # 'active' | 'superseded'
     superseded_at: Optional[str]
 
@@ -175,7 +174,21 @@ class Mesocycle(TypedDict):
     start_date: str
     end_date: str
     focus: str
-    feedback: Optional[str]
+
+class PlanFeedback(TypedDict):
+    """One note in a plan's feedback log — a message the athlete addressed to the next
+    plan version, written while this one is in force (DESIGN_plan_feedback.md §2).
+
+    `mesocycle_id` None = the note addresses the plan as a whole. `mesocycle_name` is
+    not a column: `list_plan_feedback` joins it in, because a phase NAME survives the
+    version churn its ID does not (§7).
+    """
+    id: Optional[int]
+    macrocycle_id: int
+    mesocycle_id: Optional[int]
+    created_at: str  # ISO-8601 UTC, full precision
+    text: str
+    mesocycle_name: Optional[str]
 
 class PlanProposal(TypedDict):
     """What `plan generate` produced, before the athlete has accepted it.

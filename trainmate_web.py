@@ -129,11 +129,13 @@ def get_status() -> Any:
 
     macrocycle = None
     mesocycles = []
+    plan_feedback = []
     config_mismatch = False
     if next_goal and next_goal['id'] is not None:
         macrocycle = runtime.db.get_macrocycle_for_objective(next_goal['id'])
         if macrocycle:
             mesocycles = runtime.db.get_mesocycles_for_macrocycle(macrocycle['id'])
+            plan_feedback = runtime.db.list_plan_feedback(macrocycle['id'])
             config_mismatch = macrocycle.get('config_hash') != plan_config_hash()
 
     # The web app is a pure reader — it never pulls from Garmin (see
@@ -151,6 +153,9 @@ def get_status() -> Any:
         },
         "macrocycle": macrocycle,
         "mesocycles": mesocycles,
+        # The pending feedback log, read-only like everything here — it is written with
+        # `tm plan feedback` (DESIGN_plan_feedback.md §8).
+        "plan_feedback": plan_feedback,
         "config_mismatch": config_mismatch,
         "sync_state": sync_state
     })
@@ -466,10 +471,14 @@ def get_plan() -> Any:
     mesocycles = (
         runtime.db.get_mesocycles_for_macrocycle(macrocycle['id']) if macrocycle else []
     )
+    plan_feedback = (
+        runtime.db.list_plan_feedback(macrocycle['id']) if macrocycle else []
+    )
     return jsonify({
         "goal": goal,
         "macrocycle": macrocycle,
         "mesocycles": mesocycles,
+        "plan_feedback": plan_feedback,
     })
 
 
@@ -510,6 +519,8 @@ def plan_diff_versions() -> Any:
         old, new,
         runtime.db.get_mesocycles_for_macrocycle(old['id']),
         runtime.db.get_mesocycles_for_macrocycle(new['id']),
+        runtime.db.list_plan_feedback(old['id']),
+        runtime.db.list_plan_feedback(new['id']),
     )
     return jsonify({"goal": goal, "diff": diff})
 

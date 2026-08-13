@@ -162,8 +162,8 @@ async function fetchStatus() {
             document.getElementById("strategy-philosophy").innerText =
                 data.macrocycle.strategy;
             renderStrategyInputs(data.macrocycle);
-            renderMacroFeedback(data.macrocycle);
-            renderTimeline(data.mesocycles);
+            renderPlanFeedback(data.plan_feedback);
+            renderTimeline(data.mesocycles, data.plan_feedback);
 
             if (data.macrocycle.created_at) {
                 const created = new Date(data.macrocycle.created_at);
@@ -233,14 +233,26 @@ function renderSyncFreshness(syncState) {
     el.innerText = `Garmin data through ${through}${ago} — pulling is CLI-only.`;
 }
 
-/** Feedback the athlete left on the plan. Read-only here: it is written with
- *  `tm plan feedback` and only takes effect on the next generation. */
-function renderMacroFeedback(macrocycle) {
+/** One note of the plan's feedback log: date, what it was filed to, the text. */
+function feedbackNote(n) {
+    const date = n.created_at ? String(n.created_at).slice(0, 10) : "";
+    return `<div class="pf-note">`
+        + `<span class="pf-meta">${escapeHtml(date)}`
+        + ` · ${escapeHtml(n.mesocycle_name || "plan-level")}</span>`
+        + `<span class="si-desc">${escapeHtml(n.text || "")}</span></div>`;
+}
+
+/** The notes the athlete addressed to the next plan version. Read-only here: they are
+ *  written with `tm plan feedback` and are consumed by the next generation
+ *  (DESIGN_plan_feedback.md §8). */
+function renderPlanFeedback(notes) {
     const el = document.getElementById("strategy-feedback");
     if (!el) return;
-    if (!macrocycle.feedback) { el.innerHTML = ""; return; }
-    el.innerHTML = `<div class="si-heading"><i class="fa-solid fa-comments"></i> Your feedback on this plan</div>`
-        + `<div class="si-desc">${escapeHtml(macrocycle.feedback)}</div>`;
+    const all = notes || [];
+    if (!all.length) { el.innerHTML = ""; return; }
+    el.innerHTML = `<div class="si-heading"><i class="fa-solid fa-comments"></i> `
+        + `Your feedback on this plan (${all.length} pending)</div>`
+        + all.map(feedbackNote).join("");
 }
 
 // Renders the goals and constraints the plan was generated from. These are snapshotted
@@ -308,7 +320,7 @@ function renderStrategyInputs(macrocycle) {
         </details>`;
 }
 
-function renderTimeline(mesocycles) {
+function renderTimeline(mesocycles, planFeedback) {
     const container = document.getElementById("web-timeline-container");
     if (!container) return;
     container.innerHTML = "";
@@ -357,9 +369,10 @@ function renderTimeline(mesocycles) {
             detailsName.innerText = m.name;
             detailsDates.innerText = `${m.start_date} to ${m.end_date} (${duration} days)`;
             detailsFocus.innerText = m.focus;
-            detailsFeedback.innerHTML = m.feedback
+            const filed = (planFeedback || []).filter(n => n.mesocycle_id === m.id);
+            detailsFeedback.innerHTML = filed.length
                 ? `<div class="si-heading"><i class="fa-solid fa-comment-medical"></i> Block feedback</div>`
-                  + `<div class="si-desc">${escapeHtml(m.feedback)}</div>`
+                  + filed.map(feedbackNote).join("")
                 : "";
         });
 
@@ -1234,6 +1247,20 @@ function renderProse(prose) {
         + `</summary>${lines}</details>`;
 }
 
+/** Each version's own feedback notes. An append-only log is not prose-diffed: for
+ *  adjacent versions, A's notes are what drove B (DESIGN_plan_feedback.md §8). */
+function renderFeedbackSides(entry) {
+    if (!entry) return `<div class="pd-empty">none</div>`;
+    return ["from", "to"].map((side, i) => {
+        const notes = entry[side] || [];
+        const body = notes.length
+            ? notes.map(n => `<div class="pd-detail">${escapeHtml(n.date)} · `
+                + `${escapeHtml(n.filing || "plan-level")} · ${escapeHtml(n.text)}</div>`).join("")
+            : `<div class="pd-empty">none</div>`;
+        return `<div class="pd-detail"><b>${i === 0 ? "A" : "B"}</b>:</div>${body}`;
+    }).join("");
+}
+
 function renderMesocycles(entries) {
     const changed = (entries || []).filter(e => e.change !== "unchanged");
     if (!changed.length) return `<div class="pd-empty">unchanged</div>`;
@@ -1323,7 +1350,7 @@ async function loadPlanDiff(fromVersion) {
             + `<button class="btn btn-secondary btn-sm pd-close" id="btn-close-plan-diff">`
             + `<i class="fa-solid fa-xmark"></i></button></div>`
             + diffSection("Strategy", renderProse(d.strategy))
-            + diffSection("Macrocycle feedback", renderProse(d.feedback))
+            + diffSection("Athlete feedback", renderFeedbackSides(d.feedback))
             + diffSection("Mesocycles", renderMesocycles(d.mesocycles))
             + diffSection("Goals considered", renderRecords(d.goals))
             + diffSection("Constraints considered", renderRecords(d.constraints))

@@ -59,6 +59,7 @@ def pin_clock(testcase, day: str) -> None:
 
 # Delete children before parents to satisfy foreign-key constraints.
 _ALL_TABLES = [
+    "plan_feedback",
     "mesocycles",
     "macrocycles",
     "workouts",

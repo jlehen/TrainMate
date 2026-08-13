@@ -1,14 +1,11 @@
-"""Argparse extensions for the CLI: wrap-aware help/parser, the $EDITOR helper,
-and the network-appliance-style dashless-argv translator + command-tree printer.
+"""Argparse extensions for the CLI: the wrap-aware help/parser and the
+network-appliance-style dashless-argv translator + command-tree printer.
 
 Extracted from trainmate_cli.py; those names are re-imported there so existing
 ``trainmate_cli.<name>`` patch seams keep working."""
 import argparse
-import os
 import re
-import subprocess
 import sys
-import tempfile
 import textwrap
 from typing import Optional
 
@@ -169,31 +166,6 @@ class WrapAwareArgumentParser(argparse.ArgumentParser):
             self.print_help(sys.stderr)
             self.exit(2, red(f"\n{self.prog}: error: {message}\n"))
         super().error(message)
-
-def _edit_text_in_editor(initial: str) -> Optional[str]:
-    """Opens $EDITOR (falling back to vi) seeded with `initial`, returns the saved text.
-
-    Returns None if the editor exits non-zero (treated as an abort). Trailing newlines are
-    stripped. Used by `plan feedback --edit`.
-    """
-    editor = os.environ.get("EDITOR") or os.environ.get("VISUAL") or "vi"
-    with tempfile.NamedTemporaryFile(
-        mode="w", suffix=".txt", prefix="trainmate-feedback-", delete=False
-    ) as tf:
-        tf.write(initial or "")
-        path = tf.name
-    try:
-        result = subprocess.run([editor, path])
-        if result.returncode != 0:
-            print(red(f"Editor exited with status {result.returncode}; feedback unchanged."))
-            return None
-        with open(path, "r", encoding="utf-8") as f:
-            return f.read().rstrip("\n")
-    finally:
-        try:
-            os.unlink(path)
-        except OSError:
-            pass
 
 def _weeks_arg(raw: str):
     """`--weeks N` must be a whole number >= 1, or the literal `all`

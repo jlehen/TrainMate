@@ -78,12 +78,15 @@ included. The same field is a positional where it is mandatory and a flag where 
 is not: `add` takes `TITLE` positionally, `edit` takes `--title` because an edit
 that only moves a date must not have to restate the title.
 
-Two shapes are deliberately *not* covered, because the mandatory thing is a choice
+One shape is deliberately *not* covered, because the mandatory thing is a choice
 among flags rather than a value: `benchmark record`'s anchor flags (`--ftp 250`,
 `--lthr 165` — the flag names the metric, so exactly one is required and the value
-rides along) and `plan feedback`'s `--macro | --meso ID`. Collapsing either into
-positionals would trade a self-documenting `-h` listing for argument order the
-athlete has to remember.
+rides along). Collapsing it into positionals would trade a self-documenting `-h`
+listing for argument order the athlete has to remember.
+
+`plan feedback` used to be the second such shape (`--macro | --meso ID`). It no longer
+is: the note itself is the positional and nothing else is mandatory, so a bare run lists
+instead of refusing (DESIGN_plan_feedback.md §4).
 
 Enforcement is argparse's, not the handlers': a missing positional is reported by
 §a before any handler runs, so no command re-checks for its own mandatory input,

@@ -8,7 +8,7 @@ from trainmate.config import config
 # migrations are idempotent, so this is a "skip the work" marker rather than a ledger of
 # steps to replay — TrainMate has one user and one database, and the alternative (a
 # numbered migration framework) would be more machinery than that warrants.
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 
 # How long a connection waits for a writer to finish before raising "database is
@@ -619,7 +619,6 @@ class BaseDB:
                     goals_snapshot TEXT,
                     constraints_snapshot TEXT,
                     created_at TEXT NOT NULL,
-                    feedback TEXT DEFAULT NULL,
                     FOREIGN KEY (objective_id) REFERENCES objectives(id) ON DELETE CASCADE
                 )
             """)
@@ -691,10 +690,51 @@ class BaseDB:
                     start_date TEXT NOT NULL,
                     end_date TEXT NOT NULL,
                     focus TEXT NOT NULL,
-                    feedback TEXT DEFAULT NULL,
                     FOREIGN KEY (macrocycle_id) REFERENCES macrocycles(id) ON DELETE CASCADE
                 )
             """)
+
+            # The plan's feedback log (DESIGN_plan_feedback.md §6): an append-only list of
+            # notes the athlete addressed to the NEXT plan version, attached to the version
+            # they were written against. `mesocycle_id` NULL = plan-level. Pending means
+            # "on the goal's active macrocycle" — supersession is the consumption event, so
+            # there is no consumed flag.
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS plan_feedback (
+                    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                    macrocycle_id INTEGER NOT NULL,
+                    mesocycle_id  INTEGER,
+                    created_at    TEXT NOT NULL,
+                    text          TEXT NOT NULL,
+                    FOREIGN KEY (macrocycle_id) REFERENCES macrocycles(id)
+                        ON DELETE CASCADE,
+                    FOREIGN KEY (mesocycle_id) REFERENCES mesocycles(id) ON DELETE CASCADE
+                )
+            """)
+            cursor.execute(
+                "CREATE INDEX IF NOT EXISTS idx_plan_feedback_macro "
+                "ON plan_feedback(macrocycle_id)"
+            )
+            # One-off (§6): each non-empty overwrite slot becomes one log row, then the
+            # slots go. A mesocycle carries no timestamp of its own, so its note inherits
+            # the parent macro's — the best available, and it only orders a backfill.
+            if self._table_has_column(cursor, "macrocycles", "feedback"):
+                cursor.execute(
+                    "INSERT INTO plan_feedback "
+                    "  (macrocycle_id, mesocycle_id, created_at, text) "
+                    "SELECT id, NULL, created_at, feedback FROM macrocycles "
+                    "WHERE feedback IS NOT NULL AND TRIM(feedback) != ''"
+                )
+                cursor.execute("ALTER TABLE macrocycles DROP COLUMN feedback")
+            if self._table_has_column(cursor, "mesocycles", "feedback"):
+                cursor.execute(
+                    "INSERT INTO plan_feedback "
+                    "  (macrocycle_id, mesocycle_id, created_at, text) "
+                    "SELECT m.macrocycle_id, m.id, mac.created_at, m.feedback "
+                    "FROM mesocycles m JOIN macrocycles mac ON m.macrocycle_id = mac.id "
+                    "WHERE m.feedback IS NOT NULL AND TRIM(m.feedback) != ''"
+                )
+                cursor.execute("ALTER TABLE mesocycles DROP COLUMN feedback")
 
             # Backward-evaluation reconstruction cache (see DESIGN_backward_evaluation.md
             # §5.1). Each row is a cached reconstruction (inferred cycles + physiological

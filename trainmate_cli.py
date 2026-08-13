@@ -19,7 +19,7 @@ from trainmate.util import (
 )
 
 from trainmate.cli.argparse_ext import (
-    WrapAwareArgumentParser, _edit_text_in_editor,
+    WrapAwareArgumentParser,
     _print_command_tree, translate_dashless_argv, _HelpAllAction,
     sort_command_tree,
 )

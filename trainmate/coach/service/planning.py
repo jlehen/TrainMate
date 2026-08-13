@@ -256,8 +256,15 @@ class PlanningMixin:
         if next_goal['id'] is not None:
             existing_macro = self._db.get_macrocycle_for_objective(next_goal['id'])
 
+        # Notes the athlete left against the plan in place. They are plan inputs, so
+        # their presence is one more disjunct in the staleness test below — feedback
+        # applies without --force (DESIGN_plan_feedback.md §7).
+        pending_feedback = (
+            self._db.list_plan_feedback(existing_macro['id']) if existing_macro else []
+        )
+
         reused = False
-        if existing_macro and not force:
+        if existing_macro and not force and not pending_feedback:
             if (
                 existing_macro['goals_hash'] == goals_hash
                 and existing_macro['constraints_hash'] == constraints_hash
@@ -295,20 +302,15 @@ class PlanningMixin:
                     f"- Mesocycles:\n{prev_meso_text or '  - None\n'}"
                 )
 
-            # Retrieve active feedback from existing plan
-            feedback_text = None
-            if existing_macro:
-                fb_parts = []
-                if existing_macro.get('feedback'):
-                    fb_parts.append(
-                        f"- Overall Strategy Feedback: \"{existing_macro['feedback']}\""
-                    )
-                existing_mesos = self._db.get_mesocycles_for_macrocycle(existing_macro['id'])
-                for m in existing_mesos:
-                    if m.get('feedback'):
-                        fb_parts.append(f"- Phase \"{m['name']}\" Feedback: \"{m['feedback']}\"")
-                if fb_parts:
-                    feedback_text = "\n".join(fb_parts)
+            # The pending log, verbatim and oldest first, so a later note reads as an
+            # amendment of an earlier one. Filed notes carry the phase NAME: names
+            # survive version churn, IDs do not (DESIGN_plan_feedback.md §7).
+            feedback_text = "\n".join(
+                f"- [{str(n['created_at'])[:10]}]"
+                + (f" (phase: {n['mesocycle_name']})" if n.get('mesocycle_name') else "")
+                + f" \"{n['text']}\""
+                for n in pending_feedback
+            ) or None
 
             # Generate new macrocycle strategy and mesocycles
             width = default_wrap_width()

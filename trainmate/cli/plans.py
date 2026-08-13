@@ -11,7 +11,7 @@ from trainmate.util import (
     wrap_text, format_labeled_block, default_wrap_width, today_date as _today_date,
 )
 from trainmate.cli.common import fmt_date, ensure_recent_data
-from trainmate.cli.argparse_ext import _edit_text_in_editor
+from trainmate.cli.selectors import CURRENT, SelectorError, resolve_meso_atom
 
 
 def _resolve_goal(goal_id: Optional[int]) -> Optional[dict]:
@@ -172,6 +172,34 @@ def _print_segments(pad: str, segments: list, width: int) -> None:
             line = candidate
     if line:
         print(pad + line)
+
+
+def _print_feedback_notes(notes: List[dict], width: int, indent: str = "") -> None:
+    """The log's one rendering — '[id] date · plan-level|<block> · text', oldest first —
+    shared by the listing, `plan show` and `plan diff` (DESIGN_plan_feedback.md §4)."""
+    for n in notes:
+        filing = n.get('mesocycle_name') or 'plan-level'
+        date = str(n.get('created_at') or '')[:10]
+        _print_hanging(
+            f"{indent}{gray('[' + str(n['id']) + ']')} {cyan(fmt_date(date))} "
+            f"· {magenta(filing)} · ",
+            n['text'], width,
+        )
+
+
+def _print_plan_feedback(macrocycle: dict, width: int) -> None:
+    """The notes attached to the shown plan version (DESIGN_plan_feedback.md §8)."""
+    notes = runtime.db.list_plan_feedback(macrocycle['id'])
+    if not notes:
+        return
+    state = (
+        "consumed by the successor version"
+        if macrocycle.get('status') == 'superseded'
+        else "pending — feeds the next " + cmd('plan generate')
+    )
+    print(bold("Athlete Feedback") + f" ({gray(state)}):")
+    _print_feedback_notes(notes, width, indent="  ")
+    print()
 
 
 def _print_considered_inputs(macrocycle: dict) -> None:
@@ -376,9 +404,8 @@ def _print_plan(next_goal: dict, macrocycle: dict, args: argparse.Namespace) -> 
         width,
     )
     print(format_labeled_block(f"{bold('Macrocycle Strategy')}:", macrocycle['strategy']))
-    if macrocycle.get('feedback'):
-        print(format_labeled_block(f"{bold('Macrocycle Feedback')}:", macrocycle['feedback']))
     print()
+    _print_plan_feedback(macrocycle, width)
     _print_considered_inputs(macrocycle)
     print(bold("Mesocycle Timeline:"))
     
@@ -439,9 +466,6 @@ def _print_plan(next_goal: dict, macrocycle: dict, args: argparse.Namespace) -> 
         print(f"{pad}[{bar}]{extra}")
         _print_mesocycle_workouts(m, workouts, pad, width, show_workouts)
         _print_indented(m['focus'], pad, width)
-        if m.get('feedback'):
-            print(f"{pad}{bold('Mesocycle Feedback')}:")
-            _print_indented(m['feedback'], pad + "  ", width)
         print(pad + gray("-" * min(40, max(10, width - len(pad)))))
 
 
@@ -542,6 +566,22 @@ def _print_mesocycles_diff(entries: list, width: int, full: bool) -> None:
         if e['focus']:
             print(f"      {gray('focus:')}")
             _print_prose_diff(e['focus'], width, full, indent="        ")
+
+
+def _print_feedback_diff(entry: dict, width: int) -> None:
+    """Renders a `plan_diff.diff_feedback` result: each version's own notes. Append-only
+    logs are not prose-diffed — for adjacent versions, A's notes are what drove B (§8)."""
+    for tag, notes in (("A", entry['from']), ("B", entry['to'])):
+        print(f"  {bold(tag)}:")
+        if not notes:
+            print(f"    {gray('none')}")
+            continue
+        for n in notes:
+            _print_hanging(
+                f"    {gray('[' + str(n['id']) + ']')} {cyan(fmt_date(n['date']))} "
+                f"· {magenta(n['filing'] or 'plan-level')} · ",
+                n['text'], width,
+            )
 
 
 def _print_missing_snapshot(missing: str) -> None:
@@ -649,12 +689,14 @@ def run_plan_diff(args: argparse.Namespace) -> None:
         old, new,
         runtime.db.get_mesocycles_for_macrocycle(old['id']),
         runtime.db.get_mesocycles_for_macrocycle(new['id']),
+        runtime.db.list_plan_feedback(old['id']),
+        runtime.db.list_plan_feedback(new['id']),
     )
     full = getattr(args, 'full', False)
     print(bold("\nStrategy:"))
     _print_prose_diff(diff['strategy'], width, full)
-    print(bold("\nMacrocycle feedback:"))
-    _print_prose_diff(diff['feedback'], width, full)
+    print(bold("\nAthlete feedback:"))
+    _print_feedback_diff(diff['feedback'], width)
     print(bold("\nMesocycles:"))
     _print_mesocycles_diff(diff['mesocycles'], width, full)
     print(bold("\nGoals considered:"))
@@ -773,86 +815,136 @@ def run_plan_rollback(args: argparse.Namespace) -> None:
     print(green(f"Run {cmd('plan show')} to review the restored strategy."))
 
 
-def _resolve_feedback_text(args: argparse.Namespace, current: Optional[str]) -> Optional[str]:
-    """Returns the feedback text to save: either the editor result (--edit, seeded with the
-    current value) or the positional `text`. Returns None to signal 'do not save' (aborted
-    edit or empty input)."""
-    if args.edit:
-        new_text = _edit_text_in_editor(current or "")
-        if new_text is None:
-            return None
-        if not new_text.strip():
-            print(red("Error: Feedback is empty; nothing saved."))
-            return None
-        return new_text
-    if not args.text:
-        print(red("Error: Feedback text cannot be empty (or use --edit)."))
+# `--rm` given without an ID: argparse hands the const through untouched, so the handler
+# can answer it with DESIGN_cli_noargs.md §a's missing-argument treatment rather than
+# argparse's bare "expected one argument".
+_RM_NO_ID = object()
+
+
+def _feedback_list(goal: dict, macro: dict) -> None:
+    """The bare run: the pending log, read-only (DESIGN_cli_noargs.md bucket 1)."""
+    notes = runtime.db.list_plan_feedback(macro['id'])
+    if not notes:
+        print(gray(
+            f"No feedback pending on the plan for '{goal['title']}'. Add a note with "
+            + cmd('plan feedback "…"') + "."
+        ))
+        return
+    print(bold(f"Plan feedback for '{goal['title']}'") + gray(
+        f" ({len(notes)} pending — feeds the next {cmd('plan generate')})"
+    ) + ":")
+    _print_feedback_notes(notes, default_wrap_width())
+
+
+def _feedback_rm(args: argparse.Namespace) -> None:
+    """Deletes one note. Rewording is `--rm` + re-add, which is why there is no --edit."""
+    if args.rm is _RM_NO_ID:
+        args._parser.error("the following arguments are required: --rm ID")
+    note = runtime.db.get_plan_feedback(args.rm)
+    if not note:
+        print(red(f"No feedback note with ID {args.rm}."))
         sys.exit(1)
-    return args.text
+    _print_feedback_notes([note], default_wrap_width())
+    if not args.yes and not runtime.prompt.confirm("Delete this note?", danger=True):
+        print("Removal cancelled.")
+        return
+    runtime.db.rm_plan_feedback(args.rm)
+    print(green(f"Removed feedback note {args.rm}."))
 
 
-_FEEDBACK_REGEN_NOTE = (
-    yellow("Note: You must regenerate the periodization plan to apply this feedback.\n"
-           "Run " + cmd("plan generate --force") + " (or with "
-           + cmd("--goal <ID> --force") + ") to update the plan.")
-)
+def _meso_owner_hint(atom, goal: dict) -> str:
+    """Where a rejected mesocycle ID actually lives — another goal's plan, or a
+    superseded version of this one (DESIGN_plan_feedback.md §4/§5)."""
+    if not (isinstance(atom, str) and atom.strip().isdigit()):
+        return ""
+    meso = runtime.db.get_mesocycle(int(atom))
+    macro = runtime.db.get_macrocycle(meso['macrocycle_id']) if meso else None
+    if not macro:
+        return ""
+    if macro.get('status') == 'superseded':
+        return (f"\nBlock {atom} ('{meso['name']}') belongs to a superseded version of "
+                "this plan, and a note can only steer the active one.")
+    owner = runtime.db.get_objective(macro['objective_id'])
+    if not owner or owner['id'] == goal['id']:
+        return ""
+    return (f"\nBlock {atom} ('{meso['name']}') belongs to the plan for "
+            f"'{owner['title']}' — reach it with " + cmd("-g " + str(owner['id'])) + ".")
+
+
+def _feedback_replan(goal: dict) -> None:
+    """Runs the regeneration flow right after saving, so feedback → new plan is one
+    command. It does not imply --force and does not need to: pending notes are a plan
+    input, so the gate lets the regeneration through (§7). The preview and its human `y`
+    still stand, per the constraints precedent (trainmate/cli/constraints.py)."""
+    print(green("Regenerating the periodization plan around your feedback..."))
+    run_plan_generate(argparse.Namespace(
+        no_pull=False, force_pull=False, auto=False,
+        goal_id=goal['id'], force=False, fresh=False,
+    ))
+    print(dim("If you applied the new plan, run " + cmd("workout generate")
+              + " to schedule it."))
 
 
 def run_plan_feedback(args: argparse.Namespace) -> None:
-    """Saves athlete feedback for a macrocycle or specific mesocycle.
+    """Appends to — or lists, or prunes — the plan's feedback log
+    (DESIGN_plan_feedback.md §4).
 
-    With --edit, opens $EDITOR seeded with the current feedback instead of taking text.
-    """
-    if not args.macro and not args.meso:
-        print(red("Error: You must specify --macro or --meso <id>."))
+    No LLM anywhere here: capture is an INSERT, and the one consumer of the result is the
+    regeneration, which reads the whole log and does the understanding there (§2)."""
+    goal = _resolve_goal(args.goal_id)
+    if not goal:
         sys.exit(1)
-
-    # 1. Handle mesocycle feedback directly if specified
-    if args.meso:
-        meso = runtime.db.get_mesocycle(args.meso)
-        if not meso:
-            print(red(f"Mesocycle with ID {args.meso} not found."))
-            sys.exit(1)
-        text = _resolve_feedback_text(args, meso.get('feedback'))
-        if text is None:
-            return
-        runtime.db.update_mesocycle_feedback(args.meso, text)
-        print(green(
-            f"Feedback successfully saved for Mesocycle ID {args.meso} ('{meso['name']}')."
-        ))
-        print(_FEEDBACK_REGEN_NOTE)
-        return
-
-    # 2. Handle macrocycle feedback. Find target goal first.
-    objectives = runtime.db.upcoming_objectives()
-    if not objectives:
-        print(yellow("No active goals found. TrainMate needs at least one goal."))
-        sys.exit(1)
-
-    if args.goal_id is not None:
-        target_goals = [o for o in objectives if o['id'] == args.goal_id]
-        if not target_goals:
-            print(red(f"Active goal with ID {args.goal_id} not found."))
-            sys.exit(1)
-        next_goal = target_goals[0]
-    else:
-        objectives.sort(key=lambda x: str(x['target_date']))
-        next_goal = objectives[0]
-
-    macro = runtime.db.get_macrocycle_for_objective(next_goal['id'])
+    macro = runtime.db.get_macrocycle_for_objective(goal['id'])
     if not macro:
-        print(yellow(f"No active periodization plan exists for goal '{next_goal['title']}'."))
+        print(yellow(f"No active periodization plan exists for goal '{goal['title']}'."))
+        print(green(f"Run {cmd('plan generate')} to create one."))
         sys.exit(1)
 
-    text = _resolve_feedback_text(args, macro.get('feedback'))
-    if text is None:
+    if args.rm is not None:
+        if args.text or args.meso is not None or args.replan:
+            print(red("Error: --rm deletes one note by ID; it takes nothing else."))
+            sys.exit(1)
+        _feedback_rm(args)
         return
-    runtime.db.update_macrocycle_feedback(macro['id'], text)
-    print(green(
-        f"Feedback successfully saved for Macrocycle ID {macro['id']} "
-        f"(Goal: '{next_goal['title']}')."
+
+    if args.text is not None and not args.text.strip():
+        print(red("Error: the note is empty; nothing was saved."))
+        sys.exit(1)
+
+    if args.text is None:
+        if args.meso is not None or args.replan:
+            print(red("Error: give the note text — there is nothing to file yet."))
+            sys.exit(1)
+        _feedback_list(goal, macro)
+        return
+
+    # `-g` picks the plan, `-m` resolves inside it: filing to a superseded version cannot
+    # steer the next one, so the atom only ever sees the active plan's blocks (§5).
+    meso = None
+    if args.meso is not None:
+        try:
+            meso = resolve_meso_atom(
+                args.meso, runtime.db.get_mesocycles_for_macrocycle(macro['id'])
+            )
+        except SelectorError as e:
+            print(red(f"Error: {e}") + _meso_owner_hint(args.meso, goal))
+            sys.exit(1)
+
+    note_id = runtime.db.add_plan_feedback(
+        macro['id'], args.text.strip(), meso['id'] if meso else None
+    )
+    filing = f"filed: {meso['name']}" if meso else "plan-level"
+    print(green(f"Noted [id {note_id}, {filing}]: ") + f"\"{args.text.strip()}\"")
+
+    if args.replan:
+        _feedback_replan(goal)
+        return
+    pending = len(runtime.db.list_plan_feedback(macro['id']))
+    print(dim(
+        f"{pending} note{'s' if pending != 1 else ''} pending — "
+        f"{'they feed' if pending != 1 else 'it feeds'} the next {cmd('plan generate')} "
+        f"({cmd('--replan')} runs it now)."
     ))
-    print(_FEEDBACK_REGEN_NOTE)
 
 
 def add_plan_parser(subparsers, pull_bypass_parser, llm_debug_parser):
@@ -936,7 +1028,8 @@ def add_plan_parser(subparsers, pull_bypass_parser, llm_debug_parser):
         help="Compare two plan versions (strategy, mesocycles, inputs)",
         description=(
             "Compare two periodization plan versions field by field: what changed in the "
-            "macrocycle strategy and feedback, which mesocycles were added, removed, "
+            "macrocycle strategy, which feedback notes each version carries, which "
+            "mesocycles were added, removed, "
             "renamed or re-dated, and how the snapshotted inputs (goals, constraints, "
             "threshold anchors) differ. With no version given, compares the previous "
             "version against the active one; with one, that version against the active one."
@@ -1018,32 +1111,47 @@ def add_plan_parser(subparsers, pull_bypass_parser, llm_debug_parser):
     # plan feedback
     p_fb = plan_subparsers.add_parser(
         "feedback",
-        description="Add athlete feedback (either --macro or --meso is mandatory).",
-        help="Add athlete feedback (either --macro or --meso is mandatory)"
+        help="Tell the coach what you think of the plan (bare run lists pending notes)",
+        description=(
+            "Leave a note about the plan for the next 'plan generate' to read. Notes "
+            "accumulate against the active plan — a second thought adds to the first "
+            "rather than replacing it — and are consumed when a new version supersedes "
+            "the one they were written against. Bare text is plan-level; -m files the "
+            "note to one block, by name, date or ID. A bare run lists what is pending; "
+            "nothing here calls the LLM, so capture is instant."
+        )
     )
-    p_fb.set_defaults(func=run_plan_feedback)
+    # `_parser` lets the handler route `--rm` with no ID back through argparse's own
+    # missing-argument path (DESIGN_cli_noargs.md §a).
+    p_fb.set_defaults(func=run_plan_feedback, _parser=p_fb)
     p_fb.add_argument(
-        "--macro", action="store_true",
-        help="Provide general feedback on the overall macrocycle strategy"
+        "text", nargs="?", default=None,
+        help="The note to append (omit to list what is pending)"
     )
     p_fb.add_argument(
-        "--meso", type=int,
-        help="Provide feedback on a specific mesocycle ID"
+        "-m", "--mesocycle", dest="meso", nargs="?", const=CURRENT, metavar="ATOM",
+        help="File the note to ONE block: its name (any part of it), a date it covers "
+             "(YYYY-MM-DD, today, -7d, +2w) or its mesocycle ID. Bare -m is the current "
+             "block; without -m the note is plan-level"
     )
     p_fb.add_argument(
         "-g", "--goal", "--goal-id", type=int, dest="goal_id",
         help=(
             "Target goal ID whose plan the feedback should attach to "
-            "(default to the current active goal)"
+            "(defaults to the next active goal)"
         )
     )
     p_fb.add_argument(
-        "--edit", action="store_true",
-        help="Open $EDITOR seeded with the current feedback (takes no text argument)"
+        "--rm", nargs="?", type=int, const=_RM_NO_ID, default=None, metavar="ID",
+        help="Delete one pending note by ID (the bare listing shows them)"
     )
     p_fb.add_argument(
-        "text", nargs="?", default=None,
-        help="Feedback content string (omit when using --edit)"
+        "-y", "--yes", action="store_true", help="Skip the --rm confirmation prompt"
+    )
+    p_fb.add_argument(
+        "--replan", action="store_true",
+        help="After saving, regenerate the plan straight away (same preview-and-confirm "
+             "as 'plan generate'; no --force needed)"
     )
 
     # plan wipe

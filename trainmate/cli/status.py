@@ -85,7 +85,16 @@ def run_status(args) -> None:
                     "\nWarning: a plan-shaping input has changed since the "
                     f"active periodization plan was generated ({change_reason}).\nRun "
                     + cmd("plan generate") + " to regenerate."))
-            
+
+            # Pending notes are a plan input too, so they belong beside the staleness
+            # warning (DESIGN_plan_feedback.md §8).
+            pending = runtime.db.list_plan_feedback(macro['id'])
+            if pending:
+                print(yellow(
+                    f"Plan feedback: {len(pending)} pending — " + cmd("plan generate")
+                    + f" will address {'them' if len(pending) != 1 else 'it'}."
+                ))
+
             mesos = runtime.db.get_mesocycles_for_macrocycle(macro['id'])
             active_meso = None
             for m in mesos:

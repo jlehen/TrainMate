@@ -126,7 +126,7 @@ def _diff_mesocycle_pair(old: Dict[str, Any], new: Dict[str, Any]) -> Dict[str, 
     """Compares two mesocycles taken to be the same phase across versions."""
     fields = [
         {"field": key, "from": old.get(key) or None, "to": new.get(key) or None}
-        for key in ('phase', 'feedback')
+        for key in ('phase',)
         if (old.get(key) or None) != (new.get(key) or None)
     ]
     dates = None
@@ -244,12 +244,34 @@ def diff_thresholds(old: Optional[dict], new: Optional[dict]) -> Dict[str, Any]:
     return {"missing": None, "added": added, "removed": removed, "changed": changed}
 
 
+def diff_feedback(
+    old_notes: Optional[list], new_notes: Optional[list]
+) -> Dict[str, Any]:
+    """The feedback notes attached to each version, side by side.
+
+    Not a prose diff: the log is append-only, so a version's notes are a list rather than
+    an edited blob — and for adjacent versions, A's notes are what drove B
+    (DESIGN_plan_feedback.md §8)."""
+    def note(n: Dict[str, Any]) -> Dict[str, Any]:
+        return {
+            "id": n.get('id'),
+            "date": str(n.get('created_at') or '')[:10],
+            "filing": n.get('mesocycle_name'),
+            "text": n.get('text'),
+        }
+    return {
+        "from": [note(n) for n in old_notes or ()],
+        "to": [note(n) for n in new_notes or ()],
+    }
+
+
 def diff_plans(
     old_macro: Dict[str, Any], new_macro: Dict[str, Any],
     old_mesos: List[Dict[str, Any]], new_mesos: List[Dict[str, Any]],
+    old_notes: Optional[list] = None, new_notes: Optional[list] = None,
 ) -> Dict[str, Any]:
-    """Everything that differs between two plan versions: the macrocycle's strategy and
-    feedback prose, its mesocycle blocks, and the inputs each was generated from."""
+    """Everything that differs between two plan versions: the macrocycle's strategy, the
+    feedback each carries, its mesocycle blocks, and the inputs each was generated from."""
     old_goals, old_events, old_thresholds = input_snapshots(old_macro)
     new_goals, new_events, new_thresholds = input_snapshots(new_macro)
     return {
@@ -264,7 +286,7 @@ def diff_plans(
             "superseded_at": new_macro.get('superseded_at'),
         },
         "strategy": diff_prose(old_macro.get('strategy'), new_macro.get('strategy')),
-        "feedback": diff_prose(old_macro.get('feedback'), new_macro.get('feedback')),
+        "feedback": diff_feedback(old_notes, new_notes),
         "mesocycles": diff_mesocycles(old_mesos, new_mesos),
         "goals": diff_records(old_goals, new_goals),
         "constraints": diff_records(old_events, new_events),

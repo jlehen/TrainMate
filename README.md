@@ -245,14 +245,15 @@ Rarely-used maintenance commands — `wipe`, `workout push`, `data backfill-tss`
 
 When life gets in the way, which tool you reach for depends on whether the
 change is *strategic* (it should reshape the plan) or *tactical* (it only
-affects a run or a few days). The three real-world context channels above map
-onto that choice:
+affects a run or a few days). The real-world context channels above map onto that
+choice, with a fourth for the plan itself:
 
 | Channel | Reach for it when… |
 | --- | --- |
 | `constraint add` | You're asking the coach to *work around* something — "no run Thursday", "only 45 min today", a trip, an injury layoff. One object covers every horizon: a blanket `hard` constraint deterministically rests those dates, while a sport-scoped `hard` and every `soft` one stay advisory. If it's big enough to reshape the plan, TrainMate **derives** that from its magnitude and asks to regenerate — or pass `--replan` to say so up front. |
 | `context add` (or tagged Calendar events) | You're *reporting* something that happened — alcohol, poor sleep, stress — so a rough morning reads as lifestyle noise, not "the block is too hard." Signals never reshape the plan. |
 | `workout adapt --message "…"` | Quick capture in the moment. A durable, constraint-shaped note ("away, no gym Thursday") is saved as a real `constraint` you can inspect and `rm`; a one-off nudge ("felt flat, ease today") is folded into that session's adaptation reason. |
+| `plan feedback "…"` | You have an *opinion about the plan itself* — "drop the second FTP test", "the Friday sessions should progress duration, not surges". Notes pile up against the current plan (nothing is overwritten, nothing calls the LLM, so capture is instant) and the next `plan generate` reads them all and must address each one. `-m` files a note to one block by name, date or ID; `--rm ID` drops one; `--replan` regenerates on the spot. |
 
 Alongside these, **manual overrides** (`workout add`, `rm`, `swap`) let you edit
 individual sessions by hand. Daily `adapt` treats a hand-added session as

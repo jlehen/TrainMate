@@ -485,8 +485,8 @@ class PmcContextMixin:
         backward-evaluation reconstruction then follows, reused without another LLM call
         (§10, §10.2). Returns None if there is nothing to report.
 
-        This does NOT write to any `feedback` field: under Option A the assessment is
-        prompt context only, sidestepping the feedback-lifecycle collision (§11).
+        This writes nothing — not a row in the plan's feedback log either: under Option A
+        the assessment is prompt context only, sidestepping the lifecycle collision (§11).
         """
         sections: List[str] = []
 

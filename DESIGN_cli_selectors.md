@@ -47,6 +47,13 @@ argparse, which sees a leading dash and reports a missing value rather than read
 one (§6 is the narrow exception that survives). `..` also makes signed offsets composable:
 `-1w..+1w` is a fortnight around today, which `-` cannot spell at all.
 
+The `-m` atom has since grown past "a mesocycle ID": `plan feedback -m` also takes a
+date (the block covering that day) and a case-insensitive infix of a block *name*
+(DESIGN_plan_feedback.md §5, `resolve_meso_atom` in trainmate/cli/selectors.py). It is
+defined there as a **single-target** resolver, beside this range machinery rather than
+inside it — the day a filtering command wants `workout list -m climb`, the range grammar
+lifts it rather than reinventing it.
+
 **A bare number is never a date.** `7` is a row ID (§4), so a span must carry its unit:
 `-d 7d`, `-d 2w`. That is also what lets `10d` be a *span* while `-10d` is an *endpoint* —
 an unsigned offset with a `..` beside it (`7d..`) is refused by name, because it cannot say

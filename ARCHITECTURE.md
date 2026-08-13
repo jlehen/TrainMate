@@ -190,8 +190,9 @@ classes themselves.
 |                      |                      | untrained sessions out of the misses (below).    |
 | `plan_diff.py`       | —                    | Compares two periodization plan versions:        |
 |                      |                      | `resolve_versions` (which two, over a passed-in  |
-|                      |                      | db handle) + `diff_plans` → strategy/feedback     |
-|                      |                      | prose, mesocycle fates, snapshotted-input deltas. |
+|                      |                      | db handle) + `diff_plans` → strategy prose, each  |
+|                      |                      | side's feedback notes (an append-only log is not  |
+|                      |                      | prose-diffed), mesocycle fates, input deltas.     |
 |                      |                      | Format-free, so `cli/plans.py` renders it as text |
 |                      |                      | and `/api/plan/diff` returns it as JSON. Also     |
 |                      |                      | owns `input_snapshots()` (the goals/constraints/  |
@@ -266,6 +267,7 @@ flow for each lives in [§10](#10-key-data-flows).
 | Daily adaptation logic           | `coach/service/adaptation.py:workout_adapt*`, `coach/engine/workouts.py:_workout_adapt_logic`, prompt helpers in `coach/formatting.py` ([§10](#daily-adaptation-workout-adapt)) |
 | Plan / strategy generation       | `coach/service/planning.py:plan_generate`, `coach/engine/planning.py:_plan_generate_strategy` ([§10](#plan-generation-plan-generate)) |
 | Plan version comparison / display | `trainmate/plan_diff.py` (comparison + snapshot parsing), `cli/plans.py` (text rendering), `/api/plan/diff` in `trainmate_web.py`, `loadPlanDiff()`/`render*` in `static/app.js` |
+| Plan feedback (the athlete's notes on the plan) | `db/periodization.py` (`add_/list_/get_/rm_plan_feedback` over the `plan_feedback` table), `cli/plans.py:run_plan_feedback` + `cli/selectors.py:resolve_meso_atom` (the `-m` atom), `coach/service/planning.py` (the regen gate disjunct + prompt assembly), `coach/engine/planning.py` (the prompt section), DESIGN_plan_feedback.md |
 | Workout generation horizon       | `coach/service/workouts.py:workout_generate`, `cli/workouts/parser.py` (flag parsing), `config.workout_generation_span_days` |
 | Coach-learnings / confidence     | `db/learnings.py`, `coach/service/prompt.py` (`_apply_learning_updates`), model is **canonical** in [§3](#3-coach-package-architecture) |
 | Backward analysis (bootstrap/reflect) | `coach/service/analysis.py:_run_workout_analysis`, `coach/engine/analysis.py:_data_analyze_logic` ([§10](#data-analysis-data-bootstrap--data-reflect)) |
@@ -608,8 +610,8 @@ called by the UIs.
   the same weeks (§9.2a) and **one planned-vs-actual load line per week**, without which a
   half-missed block reads exactly like a completed one. Folds in every cached
   reconstruction (`_cached_reconstructions()`): summary, inferred macro/mesocycle blocks,
-  and physiological insights. Writes no
-  `feedback` field. The whole review is wrapped **once**, at build time, and printed
+  and physiological insights. Writes nothing anywhere — it is prompt context, never a
+  note in the plan's feedback log. The whole review is wrapped **once**, at build time, and printed
   verbatim — the zone tables are column-aligned and a screen-width re-wrap shreds them.
 - **`_intensity_history_context(macros, today)`** — the block walk behind the above.
   Navigates **macrocycle-first**, orders the lineages by their first block's start date,
@@ -797,7 +799,10 @@ methods whose behavior is *not* obvious from that convention are called out belo
   `get_preceding_macrocycle` is the other "previous plan" — the previous *goal's* active
   one, for retrospective views that must not walk superseded versions; `plan_lineage.py`
   is the shared walk. Plan versioning + rollback: DESIGN_plan_rollback.md (§6.1 for the
-  two accessors).
+  two accessors). The plan's feedback log lives here too: `add_plan_feedback` /
+  `list_plan_feedback` (joined with block names, oldest first) / `get_plan_feedback` /
+  `rm_plan_feedback`, replacing the `update_*_feedback` overwrite slots
+  (DESIGN_plan_feedback.md §6).
 
 ---
 
@@ -1191,7 +1196,6 @@ guarantee (re-citing a counted week is an `INSERT OR IGNORE` no-op). Full model:
 |                   |                       | generated from; NULL on pre-snapshot plans (older |
 |                   |                       | plans fall back to a legacy `lifeevents_snapshot`) |
 | `created_at`      | TEXT                  | ISO timestamp                                    |
-| `feedback`        | TEXT                  | Athlete feedback for next replanning             |
 | `status`          | TEXT                  | `active` or `superseded`. Exactly one active     |
 |                   |                       | version per objective; readers filter on active. |
 |                   |                       | Defaults to `active` (legacy rows). See           |
@@ -1211,7 +1215,30 @@ Regenerating a plan **supersedes** the prior version (kept) rather than deleting
 | `start_date`    | TEXT                    | YYYY-MM-DD                              |
 | `end_date`      | TEXT                    | YYYY-MM-DD                              |
 | `focus`         | TEXT                    | E.g. "Zone 2 aerobic base, high volume" |
-| `feedback`      | TEXT                    | Athlete feedback for next replanning    |
+
+### plan_feedback
+The plan's feedback log — an append-only list of notes the athlete addressed to the
+**next** plan version, written while this one is in force (DESIGN_plan_feedback.md §6).
+Replaces the single `feedback` slot that used to sit on `macrocycles` and `mesocycles`,
+so a second thought adds to the first instead of overwriting it.
+
+| Column          | Type                    | Notes                                   |
+|-----------------|-------------------------|-----------------------------------------|
+| `id`            | INTEGER PK              | The handle `plan feedback --rm` takes   |
+| `macrocycle_id` | INTEGER FK→macrocycles  | The plan version the note was written   |
+|                 |                         | against. Cascade delete                 |
+| `mesocycle_id`  | INTEGER FK→mesocycles   | The block it was filed to; NULL =       |
+|                 |                         | plan-level. Cascade delete              |
+| `created_at`    | TEXT                    | ISO-8601 UTC, full precision; orders    |
+|                 |                         | the log oldest first everywhere         |
+| `text`          | TEXT                    | The note, verbatim — never LLM-touched  |
+|                 |                         | at capture                              |
+
+**Pending** := rows whose `macrocycle_id` is the goal's *active* macrocycle. There is no
+consumed flag: supersession is the consumption event, so a regeneration that is previewed
+and declined leaves the notes pending, and a `plan rollback` makes an earlier version's
+notes pending again. Pending notes are a plan input, so their presence alone makes
+`plan generate` regenerate without `--force` (DESIGN_plan_feedback.md §7).
 
 ### analysis_cache
 Cached backward-evaluation reconstruction (inferred cycles + insights), keyed by
@@ -1357,6 +1384,10 @@ Each command declares its own default window and direction (`forward`/`backward`
 when it registers the flags via `add_selector_args`, so no handler carries a private
 "no filter means…" rule. Those five letters (plus `-t/--type`) mean the same thing at every
 level of the tree; `TestSelectorVocabularyInvariants` walks the real parser and pins it.
+`resolve_meso_atom` sits beside that machinery as its **single-target** counterpart: the
+one block an atom names — mesocycle ID, a date it covers, or an infix of its name —
+resolved against one plan's blocks, which is what `plan feedback -m` files a note to
+(DESIGN_plan_feedback.md §5).
 
 **A bare command group** (`goal`, `constraint`, `benchmark`, `context`, `learnings`,
 `workout`, `data`, `plan`, and the root) prints that level's full help and exits 1. This
@@ -1395,10 +1426,10 @@ single read-only view that is its whole state (`model`), which acts bare instead
 | `plan`       | `generate`   | `pl g`   | Generate/reuse macrocycle+mesocycles (`-f` to force, `-g/--goal ID`, `--fresh` for a clean slate that withholds the plan in place from the prompt) |
 | `plan`       | `show`       | `pl s`   | Show a periodization plan: strategy, snapshotted inputs (goals, constraints, threshold anchors), mesocycle timeline with each block's workout count/duration/load. Flags: `-g/--goal ID` (any status, not just active), `-M/--macrocycle ID` for a superseded version — each plan version IS a macrocycle, `-a/--all` for every goal that has a plan, `-w/--workouts` to list each mesocycle's sessions |
 | `plan`       | `versions`   | `pl v`   | List a goal's kept plan versions — active + superseded — with IDs and dates (`-g/--goal ID`) |
-| `plan`       | `diff`       | `pl df`  | Compare two plan versions (`[PLAN_ID_A] [PLAN_ID_B]`, `-g/--goal ID`): strategy + feedback prose, mesocycles added/removed/renamed/re-dated, and snapshotted input deltas. No ID → previous vs active; one ID → that vs active. Prose rewritten wholesale collapses to a note unless `--full`. Comparison logic in `trainmate/plan_diff.py`, shared with `/api/plan/diff` |
+| `plan`       | `diff`       | `pl df`  | Compare two plan versions (`[PLAN_ID_A] [PLAN_ID_B]`, `-g/--goal ID`): strategy prose, each version's attached feedback notes, mesocycles added/removed/renamed/re-dated, and snapshotted input deltas. No ID → previous vs active; one ID → that vs active. Prose rewritten wholesale collapses to a note unless `--full`. Comparison logic in `trainmate/plan_diff.py`, shared with `/api/plan/diff` |
 | `plan`       | `rollback`   | `pl rb`  | Restore a superseded plan version + its workouts (`-g/--goal ID`, `-M/--macrocycle ID`, `-y`); defaults to the chronologically previous version. The inverse of eager generation (DESIGN_plan_rollback.md) |
 | `plan`       | `rm`         | `pl rm`  | Delete plan for a goal ID. The old `pl d` alias is gone — `d` now prefixes `diff` |
-| `plan`       | `feedback`   | `pl f`   | Add feedback (`--macro` or `--meso ID`, `-g/--goal ID`, text; `--edit` opens `$EDITOR` seeded with current feedback) |
+| `plan`       | `feedback`   | `pl f`   | Append a note about the plan to its append-only log — bare text is plan-level, `-m [ATOM]` files it to one block by name-infix / date / mesocycle ID (bare `-m` = the current block). Bare run lists what is pending, `--rm ID [-y]` deletes one, `--replan` regenerates straight away, `-g/--goal ID` targets another goal's plan. No LLM at capture; the next `plan generate` reads the whole log and must address every note (DESIGN_plan_feedback.md) |
 | `plan`       | `wipe`       | —        | Delete all plans                                                         |
 | `progress`   | `[SPORT ...]` | `pr`    | Show the progress timeline: measured load to date, plan-projected forward (CTL/ATL/TSB), weekly planned-vs-actual bars (`-w/--weeks N`, `--chart [PATH]` for a PNG; DESIGN_progress_timeline.md). `-z`/`--zones` (implied by naming a sport) adds one weekly time-in-zone table per sport — measured behind today, prescribed ahead of it (`--blocks` for block grain, `--power`/`--hr` to force the currency; DESIGN_intensity_distribution.md §9.6/§9.8). The sport argument scopes the **zone tables only**: CTL/ATL/TSB, the projection and the load table stay whole-athlete |
 | `workout`    | `list`       | `w l`    | Show planned workouts. Defaults to a 7-day window from today. Positional `TARGET…` (workout IDs and/or date selectors, e.g. `wo li 12 15 -v`) plus the shared selectors `-d`/`-m`/`-M`/`-g` and `-t/--type TYPE`, `--removed` (DESIGN_cli_selectors.md). |
@@ -1458,8 +1489,9 @@ top-level tabs, all lazy-loaded on first show:
 
 - **Dashboard** — status, recovery/load metrics, sync freshness, coach-memory summary,
   objective and constraint listings, the active LLM (`model list`), and the strategy card
-  (philosophy, the goals/constraints snapshot the plan was generated from, athlete
-  feedback, the mesocycle timeline, and a "Plan versions & compare" disclosure whose
+  (philosophy, the goals/constraints snapshot the plan was generated from, the pending
+  feedback log, the mesocycle timeline — a block's own notes appear in its details panel
+  — and a "Plan versions & compare" disclosure whose
   superseded entries render `/api/plan/diff` into `#plan-diff-panel`).
 - **Workouts** — date/sport/removed-filtered list with the derived state markers, the
   compare/adherence view, and the archived-batch listing.
@@ -1571,7 +1603,9 @@ threshold-less profile is a valid cold start (the coach nudges, never refuses).
    constraints.
 2. Computes `goals_hash`, `constraints_hash` (plan-shaping constraints only), `config_hash`.
 3. If existing macrocycle has matching goals/constraints hashes,
-   `config_changed()` reports no drift, and `force=False` → reuse.
+   `config_changed()` reports no drift, **no plan feedback is pending** and
+   `force=False` → reuse. Pending notes are a plan input, so they open the gate on
+   their own — feedback applies without `--force` (DESIGN_plan_feedback.md §7).
 4. Otherwise: builds a read-only **planned-vs-actual review** via
    `_build_prior_training_context()` (Option A — anchored on the elapsed mesocycle
    windows of the prior plan and of the current one, each with its per-sport per-zone
@@ -2086,7 +2120,9 @@ venv/bin/python -m unittest discover -s tests -p "test_*.py"
 | `tests/test_db.py`             | `Database` CRUD, evidence-based confidence (derivation, dedup,   |
 |                                | week validation, contradiction/demote/keep, staleness,          |
 |                                | grandfather migration), decay, `analysis_cache`                 |
-| `tests/test_feedback.py`       | Feedback saving + use in replanning                             |
+| `tests/test_feedback.py`       | The `plan feedback` log: capture/list/`--rm`, the `-m` atom      |
+|                                | (ID, date, name-infix, bare), the pending→consumed lifecycle,    |
+|                                | the regen gate + prompt section, the one-off slot migration      |
 | `tests/test_intensity.py`      | `intensity.py`: the completed-weeks divisor (first six days,    |
 |                                | partial tail excluded from both sides, finished block, weeks    |
 |                                | from the block start not Mondays), coverage with a meterless    |

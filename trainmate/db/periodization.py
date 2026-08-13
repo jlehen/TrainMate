@@ -1,12 +1,12 @@
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
-from trainmate.types import Macrocycle, Mesocycle
+from trainmate.types import Macrocycle, Mesocycle, PlanFeedback
 from trainmate.util import today_date
 from trainmate.db.objectives import ARCHIVED
 
 
 class PeriodizationMixin:
-    """Macrocycles & mesocycles: persistence, lookups, and feedback."""
+    """Macrocycles & mesocycles: persistence, lookups, and the plan feedback log."""
 
     def get_macrocycle_for_objective(self, objective_id: int) -> Optional[Macrocycle]:
         """Fetches the active macrocycle for a specific objective.
@@ -348,21 +348,60 @@ class PeriodizationMixin:
             row = cursor.fetchone()
             return dict(row) if row else None # type: ignore
 
-    def update_macrocycle_feedback(self, macrocycle_id: int, feedback: str) -> None:
-        """Saves user feedback for a specific macrocycle strategy."""
+    def add_plan_feedback(
+        self, macrocycle_id: int, text: str, mesocycle_id: Optional[int] = None
+    ) -> int:
+        """Appends one note to a plan's feedback log and returns its id.
+
+        `mesocycle_id` None files the note against the plan as a whole
+        (DESIGN_plan_feedback.md §6)."""
+        created_at = datetime.now(timezone.utc).isoformat()
         with self._get_connection() as conn:
-            conn.cursor().execute(
-                "UPDATE macrocycles SET feedback = ? WHERE id = ?",
-                (feedback, macrocycle_id)
+            cursor = conn.cursor()
+            cursor.execute(
+                "INSERT INTO plan_feedback (macrocycle_id, mesocycle_id, created_at, text) "
+                "VALUES (?, ?, ?, ?)",
+                (macrocycle_id, mesocycle_id, created_at, text)
             )
             conn.commit()
+            return int(cursor.lastrowid)
 
-    def update_mesocycle_feedback(self, mesocycle_id: int, feedback: str) -> None:
-        """Saves user feedback for a specific training phase/mesocycle block."""
+    def list_plan_feedback(self, macrocycle_id: int) -> List[PlanFeedback]:
+        """The notes attached to one plan version, **oldest first**, each carrying the
+        name of the block it was filed against (None = plan-level).
+
+        One ordering everywhere — this listing, `plan show`, the regeneration prompt — so
+        the log reads as a conversation in the order it happened, and a later note reads
+        as an amendment of an earlier one (DESIGN_plan_feedback.md §4/§7)."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT f.*, m.name AS mesocycle_name
+                FROM plan_feedback f
+                LEFT JOIN mesocycles m ON f.mesocycle_id = m.id
+                WHERE f.macrocycle_id = ?
+                ORDER BY f.created_at ASC, f.id ASC
+            """, (macrocycle_id,))
+            return [dict(row) for row in cursor.fetchall()]  # type: ignore
+
+    def get_plan_feedback(self, feedback_id: int) -> Optional[PlanFeedback]:
+        """One note by id, with the name of the block it was filed against."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT f.*, m.name AS mesocycle_name
+                FROM plan_feedback f
+                LEFT JOIN mesocycles m ON f.mesocycle_id = m.id
+                WHERE f.id = ?
+            """, (feedback_id,))
+            row = cursor.fetchone()
+            return dict(row) if row else None  # type: ignore
+
+    def rm_plan_feedback(self, feedback_id: int) -> None:
+        """Deletes one note from the log."""
         with self._get_connection() as conn:
             conn.cursor().execute(
-                "UPDATE mesocycles SET feedback = ? WHERE id = ?",
-                (feedback, mesocycle_id)
+                "DELETE FROM plan_feedback WHERE id = ?", (feedback_id,)
             )
             conn.commit()
 

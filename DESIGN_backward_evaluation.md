@@ -52,8 +52,10 @@ with the cached reconstruction's insights, reused without a new LLM call),
 field. The §7 auto-write / 4-step-ordering subsection below is therefore
 **superseded** and retained only for rationale — as are the other places that
 assert the auto-write (§2 goal 4, §3 "Owned by `plan generate`", §4 table
-"diff → feedback", §6 closing, §10 second bullet). `plan feedback --edit` remains
-the human's path to that field.
+"diff → feedback", §6 closing, §10 second bullet). `plan feedback --edit` was the
+human's path to that field; the field itself is gone since — feedback is now an
+append-only log the regeneration reads whole, and `--edit` retired with the slot it
+curated (DESIGN_plan_feedback.md).
 
 This document captures the design for feeding *backward-looking* analysis of
 past training into *forward-looking* decisions (planning and workout
@@ -404,8 +406,10 @@ about which goals count as history.
 
 ## 7. Feedback Auto-Write — SUPERSEDED (Option A)
 
-*Retained for rationale only: nothing auto-writes `feedback`. `plan feedback
---edit` (below) shipped and is the only writer besides `plan feedback <text>`.*
+*Retained for rationale only: nothing auto-writes `feedback`. `plan feedback --edit`
+(below) shipped and was the only writer besides `plan feedback <text>`; both the
+`feedback` columns and `--edit` have since been replaced by an append-only log
+(DESIGN_plan_feedback.md).*
 
 The diff/assessment is **auto-written** into the `feedback` fields. The field is
 single-voice, last-write-wins, but **never silently** overwritten.
