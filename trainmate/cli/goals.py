@@ -20,9 +20,14 @@ def _print_goal(g: dict) -> None:
     else:
         status_disp = gray(f"[{status_tag}]")
         title_disp = gray(g['title'])
+    # 'on' a date something happens on; 'by ~' a date that only bounds the plan.
+    if g.get('date_type') == 'horizon':
+        date_disp = f"by ~{cyan(g['target_date'])} (horizon)"
+    else:
+        date_disp = f"on {cyan(g['target_date'])}"
     print(
         f"{status_disp} ID: {g['id']} | {title_disp} "
-        f"({sport_str}) on {cyan(g['target_date'])} (Priority: {g['priority']})"
+        f"({sport_str}) {date_disp} (Priority: {g['priority']})"
     )
     if g.get('description'):
         print(format_labeled_block("  Description:", g['description']))
@@ -37,7 +42,8 @@ def run_goal_add(args: argparse.Namespace) -> None:
         sport_type=sports_str,
         description=args.desc,
         priority=args.priority,
-        status='active'
+        status='active',
+        date_type=args.date_type
     )
     goal = runtime.db.get_objective(goal_id)
     if goal:
@@ -68,6 +74,8 @@ def run_goal_edit(args: argparse.Namespace) -> None:
         kwargs['priority'] = args.priority
     if args.status is not None:
         kwargs['status'] = args.status
+    if args.date_type is not None:
+        kwargs['date_type'] = args.date_type
 
     if not kwargs:
         print(yellow("No fields to update. Provide at least one field to change."))
@@ -132,6 +140,12 @@ def add_goal_parser(subparsers):
     )
     g_add.add_argument("--desc", default="", help="Description")
     g_add.add_argument("--priority", type=int, default=1, help="Goal priority (1 = highest)")
+    g_add.add_argument(
+        "--date-type", dest="date_type", choices=["event", "horizon"], default="event",
+        help="What the date means: 'event' = something happens on that day, so the plan "
+             "peaks for it; 'horizon' = just how far you want to train toward the goal — "
+             "no taper or peak pinned to the date."
+    )
 
     # goal edit
     g_edit = goal_subparsers.add_parser(
@@ -158,6 +172,12 @@ def add_goal_parser(subparsers):
         "--status", choices=["active", "archived"],
         help="Call the goal off ('archived') or reinstate it ('active'). A goal completes "
              "on its own once its target date passes."
+    )
+    g_edit.add_argument(
+        "--date-type", dest="date_type", choices=["event", "horizon"],
+        help="What the date means: 'event' = something happens on that day, so the plan "
+             "peaks for it; 'horizon' = just how far you want to train toward the goal — "
+             "no taper or peak pinned to the date."
     )
     
     # goal rm

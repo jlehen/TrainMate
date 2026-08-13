@@ -1,4 +1,5 @@
 """Schema stamping, transactions, and the invariants that used to live at the CLI."""
+import hashlib
 import os
 import sqlite3
 import tempfile
@@ -52,6 +53,34 @@ class TestSchemaStamping(unittest.TestCase):
             if ("CREATE TABLE" in s or "ALTER TABLE" in s) and "schema_version" not in s
         ]
         self.assertEqual(ddl, [], f"re-ran schema work on an up-to-date database: {ddl}")
+
+    def test_changing_the_schema_forces_a_version_bump(self):
+        """`date_type` shipped without bumping SCHEMA_VERSION past the value the previous
+        commit had already used, so every stamped database skipped the ALTER and crashed on
+        the first goal edit. Fresh databases — every other test — were unaffected.
+
+        If this fails because you added or removed a column: bump SCHEMA_VERSION and put
+        the new pair below.
+        """
+        db = Database(db_path=self.path)
+        with db._get_connection() as conn:
+            tables = sorted(
+                r[0] for r in conn.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table'"
+                )
+            )
+            columns = [
+                f"{t}.{r[1]}"
+                for t in tables
+                for r in conn.execute(f"PRAGMA table_info({t})")
+            ]
+        fingerprint = hashlib.sha256("\n".join(columns).encode()).hexdigest()[:16]
+
+        self.assertEqual(
+            (SCHEMA_VERSION, fingerprint), (3, "df90071f97ac3378"),
+            "the schema changed without a matching SCHEMA_VERSION bump — existing "
+            "databases would skip the migration",
+        )
 
     def test_clearing_the_stamp_reruns_them(self):
         db = Database(db_path=self.path)

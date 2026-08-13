@@ -11,6 +11,9 @@ class Objective(TypedDict):
     # Called off or not. 'completed' is derived from target_date, never stored: see
     # db.objectives.goal_state() and DESIGN_backward_evaluation.md §12.
     status: str  # 'active' | 'archived'
+    # Whether target_date is a scheduled event or just how far the athlete wants to
+    # train toward the goal (ARCHITECTURE.md §15 "Goal dates").
+    date_type: str  # 'event' | 'horizon'
 
 class Constraint(TypedDict):
     """A single directive — anything the athlete asks the coach to work around, at

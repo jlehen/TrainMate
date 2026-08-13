@@ -198,12 +198,16 @@ class WorkoutGenMixin:
             out.append(w)
         return out
 
-    def _goal_date_for_macrocycle(self, macrocycle_id: int) -> Optional[date]:
-        """The target date of the objective a macrocycle serves, or None if unresolvable."""
+    def _event_date_for_macrocycle(self, macrocycle_id: int) -> Optional[date]:
+        """The event date a macrocycle's boundary tests must keep clear of — None when
+        unresolvable, and None for a horizon goal, whose date has no event a test could
+        compete with."""
         macro = self._db.get_macrocycle(macrocycle_id)
         if not macro:
             return None
         objective = self._db.get_objective(macro.get('objective_id'))
+        if (objective or {}).get('date_type') == 'horizon':
+            return None
         target = (objective or {}).get('target_date')
         if not target:
             return None
@@ -237,8 +241,9 @@ class WorkoutGenMixin:
             if not (gen_start <= end <= span_end):
                 continue
             end_obj = datetime.strptime(end, "%Y-%m-%d").date()
-            # Goal week wins: a boundary week ending inside it gets no test (§4.1).
-            goal_obj = self._goal_date_for_macrocycle(m['macrocycle_id'])
+            # Goal week wins: a boundary week ending inside it gets no test (§4.1) —
+            # unless the goal is a horizon, which has no event week to protect.
+            goal_obj = self._event_date_for_macrocycle(m['macrocycle_id'])
             if goal_obj and end_obj > goal_obj - timedelta(days=7):
                 continue
             win_start = (end_obj - timedelta(days=6)).strftime("%Y-%m-%d")

@@ -130,13 +130,7 @@ class AnalysisLogicMixin:
         athlete_profile = self._format_athlete_profile(profile)
         system_prompt += f"\n## ATHLETE PROFILE & PREFERENCES\n{athlete_profile}\n"
 
-        obj_text = ""
-        for o in objectives:
-            details = o.get('description', '')
-            obj_text += (
-                f"- Goal: {o['title']} | Date: {o['target_date']} | "
-                f"Sport: {o['sport_type']} | Details: {details}\n"
-            )
+        obj_text = self._render_goal_lines(objectives)
         system_prompt += (
             f"\n## ATHLETE GOALS IN OR AFTER THIS PERIOD\n"
             f"{obj_text if obj_text else 'No objectives.'}\n"

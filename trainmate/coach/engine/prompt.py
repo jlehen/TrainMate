@@ -104,6 +104,27 @@ class PromptBuildMixin:
             )
         return lines
 
+    def _render_goal_lines(self, objectives: List[Objective]) -> str:
+        """One `- Goal:` line per objective, the same everywhere goals reach a prompt.
+
+        A horizon goal's date is tagged so every prompt carries what the date means,
+        not just the planning task (ARCHITECTURE.md §15 "Goal dates")."""
+        lines = ""
+        for o in objectives:
+            details = o.get('description', '')
+            if o.get('date_type') == 'horizon':
+                date_txt = (
+                    f"around {o['target_date']} (a training horizon — "
+                    "nothing is scheduled on this date)"
+                )
+            else:
+                date_txt = str(o['target_date'])
+            lines += (
+                f"- Goal: {o['title']} | Date: {date_txt} | "
+                f"Sport: {o['sport_type']} | Details: {details}\n"
+            )
+        return lines
+
     def _build_system_prompt(
         self, objectives: List[Objective], constraints: List[Constraint],
         guidelines: str, strategy: str, meso_text: str, learnings: str,
@@ -114,13 +135,7 @@ class PromptBuildMixin:
         Sections are marked `## NAME`; `custom_task` supplies `## TASK` and everything under
         it. The one hierarchy every prompt in the app follows: DESIGN_prompt_structure.md §2.
         """
-        obj_text = ""
-        for o in objectives:
-            details = o.get('description', '')
-            obj_text += (
-                f"- Goal: {o['title']} | Date: {o['target_date']} | "
-                f"Sport: {o['sport_type']} | Details: {details}\n"
-            )
+        obj_text = self._render_goal_lines(objectives)
 
         c_text = self._render_constraints(constraints)
 
@@ -174,7 +189,7 @@ principles.
         """
         cleaned = []
         for o in objectives:
-            cleaned.append({
+            entry = {
                 'id': o.get('id'),
                 'title': o.get('title'),
                 'target_date': o.get('target_date'),
@@ -182,7 +197,13 @@ principles.
                 'description': o.get('description'),
                 'priority': o.get('priority'),
                 'status': o.get('status')
-            })
+            }
+            # Only when it departs from the default, so pre-field plans keep their
+            # goals_hash; flipping a goal either way still changes the hash
+            # (ARCHITECTURE.md §15 "Goal dates").
+            if o.get('date_type') == 'horizon':
+                entry['date_type'] = 'horizon'
+            cleaned.append(entry)
         cleaned.sort(key=lambda x: (str(x['target_date']), x['id'] or 0))
         return cleaned
 

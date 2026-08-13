@@ -26,16 +26,19 @@ class ObjectivesMixin:
 
     def add_objective(
         self, title: str, target_date: str, sport_type: str,
-        description: str = "", priority: int = 1, status: str = 'active'
+        description: str = "", priority: int = 1, status: str = 'active',
+        date_type: str = 'event'
     ) -> int:
         """Adds a new objective to the database and returns its ID."""
         with self._get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("""
                 INSERT INTO objectives (
-                    title, target_date, sport_type, description, priority, status
-                ) VALUES (?, ?, ?, ?, ?, ?)
-            """, (title, target_date, sport_type, description, priority, status))
+                    title, target_date, sport_type, description, priority, status,
+                    date_type
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+            """, (title, target_date, sport_type, description, priority, status,
+                  date_type))
             conn.commit()
             return int(cursor.lastrowid)
 

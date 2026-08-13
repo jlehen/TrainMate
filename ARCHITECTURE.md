@@ -361,6 +361,9 @@ default the user layer overrides.
   planning-relevant fields, normalized and stably ordered. Single source of truth
   shared by the hash functions and the snapshots persisted on the macrocycle.
   `_clean_constraints` is fed only the plan-shaping (replan=1) constraints.
+  `date_type` is included only when `horizon`, so goals predating the field (all
+  `event`) keep their hash and no plan flags stale on upgrade; flipping a goal
+  either way still changes the hash ([§15](#goal-dates-event-vs-training-horizon)).
 - **`_get_goals_hash(objectives)`** — SHA-256 of the `_clean_goals` list.
 - **`_get_constraints_hash(constraints)`** — SHA-256 of the `_clean_constraints` list.
 - **`_get_config_hash()`** — SHA-256 of `_clean_profile()`: the `user_profile` block
@@ -373,6 +376,9 @@ default the user layer overrides.
   (`metrics_lookback_days`) are not fingerprinted at all.
 - **`_plan_generate_strategy(...)`** — LLM call → `{strategy, mesocycles}` covering the
   plan start through the goal date, whatever the horizon. Label `periodization_plan`.
+  Branches on the goal's `date_type`: a `horizon` goal's task forbids pinning a
+  peak/taper/realization phase to the date and drops the `Peak & Taper, Race/Event`
+  phase examples ([§15](#goal-dates-event-vs-training-horizon)).
   Builds its own system prompt rather than calling `_build_system_prompt`, which states
   the ACTIVE strategy and blocks as settled fact — the very artifact this call produces;
   the plan prompt shows the *previous* strategy instead. It takes `learnings` explicitly
@@ -818,7 +824,10 @@ performs no I/O; the DDL used to run in full — around 630 lines, writes includ
 every process start. The migrations stay idempotent (`CREATE TABLE IF NOT EXISTS`,
 `_add_column` guarded by `PRAGMA table_info`), so the stamp is a way to skip work rather
 than a ledger to replay: clearing it re-runs everything. Bump `SCHEMA_VERSION` when the
-DDL changes. Guarded ALTERs replaced `try: ALTER … except OperationalError: pass`,
+DDL changes — reusing the number a previous commit already stamped is silent, since every
+existing database skips the new migration while fresh ones (and so the tests) look fine;
+`test_db_lifecycle.py` fingerprints the schema and fails on an unbumped change. Guarded
+ALTERs replaced `try: ALTER … except OperationalError: pass`,
 which also swallowed "database is locked" and let a locked database half-migrate in
 silence.
 
@@ -837,6 +846,17 @@ one connection instead of one per day.
 | `status`      | TEXT       | `active` or `archived` **only** — see below           |
 | `priority`    | INTEGER    | 1 = highest                                          |
 | `description` | TEXT       |                                                      |
+| `date_type`   | TEXT       | `event` (default) or `horizon` — see below            |
+
+`date_type` says what `target_date` means: an **event** is a day something happens
+on, so the plan peaks and tapers for it; a **horizon** is just how far the athlete
+wants to train toward the goal — the plan still ends around the date, but with an
+ordinary training block, no peak/taper pinned to it, and the goal-week
+no-benchmark carve-out does not apply. The planning prompt branches on it
+(`engine/planning.py`), goal lines everywhere tag it
+(`engine/prompt.py:_render_goal_lines`), and `_clean_goals` includes it only when
+`horizon` so pre-existing plans keep their `goals_hash`. Rationale in
+[§15](#goal-dates-event-vs-training-horizon).
 
 `status` records one thing: whether the goal was **called off**. Completion is not
 stored — a goal that is not archived and whose `target_date` has passed *is*
@@ -2316,3 +2336,21 @@ PNG; the interactive uPlot tab and its JSON endpoint are a follow-on (§8.5). Th
 endpoint is deliberately uncached (a fingerprint scheme would just re-derive "did
 anything change" at higher complexity than recomputing a few hundred rows). Full
 design: DESIGN_progress_timeline.md; PMC model: [§12](#fitnessfatigueform-pmc-model).
+
+### Goal dates: event vs. training horizon
+Not every goal happens on its date — some dates only say how far the athlete wants to
+train. Description prose could not express that: a goal stating, in capitals, that its
+date was indicative and not a race still got a freshening phase pinned to the date,
+because the event framing is structural — the planning task ("the last mesocycle must
+end on or around the goal date"), its response format ("Peak & Taper, Race/Event"),
+and the user message ("'{title}' on {date}") all restate it, and one `Details:` field
+loses that argument every time. `objectives.date_type` (`event` default | `horizon`)
+makes the meaning a field that both the prompts and deterministic code branch on: a
+horizon plan still ends around the date (a plan needs an end), but its last block is
+an ordinary training block with no peak/taper pinned to the date, and the goal-week
+no-benchmark carve-out does not apply — there is no event for a maximal test to
+compete with. `_clean_goals` includes the field only when it is `horizon`: an event
+goal — every goal predating the field — hashes exactly as before, so shipping the
+field did not flag existing plans stale, while flipping a goal either way adds or
+removes the key, changes `goals_hash`, and prompts the replan that change warrants.
+Current-state reference: [§5 objectives](#objectives).

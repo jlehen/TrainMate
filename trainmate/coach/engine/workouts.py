@@ -218,6 +218,29 @@ class WorkoutLogicMixin:
             duration_desc = f"{int(weeks)} week{'s' if weeks != 1 else ''} ({num_days} days)"
         else:
             duration_desc = f"{num_days} day{'s' if num_days != 1 else ''}"
+        # The no-test-near-goal carve-out is event logic — a horizon goal has no event
+        # for a test to compete with. `objectives` is the upcoming list,
+        # date-ascending, so [0] is the goal governing this span.
+        if objectives and objectives[0].get('date_type') == 'horizon':
+            goal_week_exception = (
+                ". The athlete's goal date is a training\n"
+                "horizon, not a scheduled event, so no goal-week exception applies — a "
+                "boundary week\n"
+                "near the goal date still gets its test."
+            )
+        else:
+            goal_week_exception = (
+                ", EXCEPT any boundary\n"
+                "week falling inside the last seven days before the goal or the goal's own "
+                "week — the final\n"
+                "block tapers into the event, and a maximal test there competes with the "
+                "effort it is meant to\n"
+                "serve. Do NOT add a separate pre-goal validation test either: the last "
+                "boundary test already\n"
+                "sets the anchor the athlete races on, and re-testing during a taper "
+                "measures noise while\n"
+                "costing freshness."
+            )
         custom_task = (
             "## TASK\n"
             f"Generate a training schedule for the next {duration_desc} starting from "
@@ -229,12 +252,9 @@ class WorkoutLogicMixin:
             "\n"
             "### BENCHMARK PLACEMENT (fitness tests — see the BENCHMARK guidelines above)\n"
             "Schedule ONE benchmark (fitness test) of the sport/kind appropriate to the athlete's goal in\n"
-            "each mesocycle-boundary week this span covers (a block's final week), EXCEPT any boundary\n"
-            "week falling inside the last seven days before the goal or the goal's own week — the final\n"
-            "block tapers into the event, and a maximal test there competes with the effort it is meant to\n"
-            "serve. Do NOT add a separate pre-goal validation test either: the last boundary test already\n"
-            "sets the anchor the athlete races on, and re-testing during a taper measures noise while\n"
-            "costing freshness. Set that session's \"benchmark_type\" to the test kind and precede it with\n"
+            "each mesocycle-boundary week this span covers (a block's final week)"
+            + goal_week_exception
+            + " Set that session's \"benchmark_type\" to the test kind and precede it with\n"
             "an opener or easy day so the athlete is fresh (positive TSB) on test day — a test on a\n"
             "fatigued day reads low and mis-scales every workout after it. Keep the session venue-neutral\n"
             "in its title/description (e.g. \"20-min FTP test or ramp test\"); the athlete's preferences say\n"

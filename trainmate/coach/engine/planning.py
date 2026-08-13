@@ -25,6 +25,10 @@ class PlanStrategyMixin:
         states the ACTIVE strategy and blocks as settled fact, which is the very thing this
         call produces (DESIGN_backward_evaluation.md §10.1)."""
         plan_start = plan_start_str or today_str
+        # The date-as-event framing is structural — repeated in the task, the response
+        # format, and the user message — so a horizon goal has to branch it here; prose
+        # in the goal description cannot override it (ARCHITECTURE.md §15 "Goal dates").
+        is_horizon = next_goal.get('date_type') == 'horizon'
         custom_task = f"""
 ## TASK
 Determine the overall periodization strategy (macrocycle) from {plan_start} until the target
@@ -38,6 +42,13 @@ change with a long travel block).
 Make sure there are no gaps between the end date of one mesocycle and the start date of the next.
 The first mesocycle must start on the start date ({plan_start}) and the last mesocycle must end
 on or around the goal date ({next_goal['target_date']}).
+"""
+        if is_horizon:
+            custom_task += f"""
+The goal's date is a TRAINING HORIZON, not a scheduled event: nothing happens on
+{next_goal['target_date']} itself. Do NOT plan a peak, taper, or race-day realization phase
+pinned to that date — finish with an ordinary training block, and let any performance attempt
+(e.g. a timed effort at the goal) fall wherever the plan has the athlete fit and fresh.
 """
 
         if athlete_feedback:
@@ -62,6 +73,10 @@ or done so far, rather than starting completely from scratch, unless a complete
 reset is warranted by major changes.
 """
 
+        phase_examples = (
+            "Base Building, Specific Preparation, Build, Consolidation" if is_horizon
+            else "Base Building, Specific Preparation, Build,\n        Peak & Taper, Race/Event"
+        )
         custom_task += f"""
 ## RESPONSE FORMAT
 You MUST respond with a JSON object containing:
@@ -70,8 +85,7 @@ You MUST respond with a JSON object containing:
     until the goal date ({next_goal['target_date']}).",
   "mesocycles": [
     {{
-      "name": "Phase Name (e.g., Base Building, Specific Preparation, Build,
-        Peak & Taper, Race/Event)",
+      "name": "Phase Name (e.g., {phase_examples})",
       "start_date": "YYYY-MM-DD",
       "end_date": "YYYY-MM-DD",
       "focus": "Key focus and description of this block (e.g., volume progression,
@@ -80,13 +94,7 @@ You MUST respond with a JSON object containing:
   ]
 }}
 """
-        obj_text = ""
-        for o in objectives:
-            details = o.get('description', '')
-            obj_text += (
-                f"- Goal: {o['title']} | Date: {o['target_date']} | "
-                f"Sport: {o['sport_type']} | Details: {details}\n"
-            )
+        obj_text = self._render_goal_lines(objectives)
 
         c_text = self._render_constraints(constraints)
 
@@ -133,9 +141,15 @@ You MUST respond with a JSON object containing:
             f"{custom_task}\n"
         )
 
+        if is_horizon:
+            goal_phrase = (
+                f"'{next_goal['title']}', training toward a horizon of "
+                f"{next_goal['target_date']}"
+            )
+        else:
+            goal_phrase = f"'{next_goal['title']}' on {next_goal['target_date']}"
         user_content = (
-            f"Today's date is {today_str}. The target goal is "
-            f"'{next_goal['title']}' on {next_goal['target_date']}. "
+            f"Today's date is {today_str}. The target goal is {goal_phrase}. "
             "Please determine the macrocycle and mesocycle blocks starting from "
             f"{plan_start}."
         )

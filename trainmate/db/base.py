@@ -8,7 +8,7 @@ from trainmate.config import config
 # migrations are idempotent, so this is a "skip the work" marker rather than a ledger of
 # steps to replay — TrainMate has one user and one database, and the alternative (a
 # numbered migration framework) would be more machinery than that warrants.
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 
 # How long a connection waits for a writer to finish before raising "database is
@@ -169,9 +169,18 @@ class BaseDB:
                     sport_type TEXT NOT NULL,
                     description TEXT,
                     priority INTEGER DEFAULT 1,
-                    status TEXT DEFAULT 'active' -- 'active' | 'archived'; see below
+                    status TEXT DEFAULT 'active', -- 'active' | 'archived'; see below
+                    date_type TEXT NOT NULL DEFAULT 'event' -- 'event' | 'horizon'; see below
                 )
             """)
+
+            # Whether target_date is a scheduled event or just how far to train
+            # (ARCHITECTURE.md §15 "Goal dates"). Existing rows read 'event', which is
+            # what they meant.
+            self._add_column(
+                cursor, "objectives", "date_type",
+                "ALTER TABLE objectives ADD COLUMN date_type TEXT NOT NULL DEFAULT 'event'"
+            )
 
             # One-off (single-user app): 'completed' is no longer a stored state. A goal
             # the athlete has not archived and whose target date has passed IS completed,
