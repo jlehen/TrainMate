@@ -4,7 +4,8 @@ from typing import Optional, Tuple
 
 from trainmate import runtime
 from trainmate.util import (
-    bold, dim, green, red, yellow, cyan, gray, cmd, format_labeled_block, today_str as _today_str,
+    aside, bold, dim, green, red, yellow, cyan, gray, cmd, format_labeled_block,
+    today_str as _today_str,
 )
 from trainmate.cli.common import fmt_date
 from trainmate.cli.selectors import add_single_date_arg
@@ -163,10 +164,7 @@ def run_benchmark_list(args: argparse.Namespace) -> None:
     print(bold(cyan("=== BENCHMARK LOGBOOK ===")))
     if not rows:
         print(dim("(no results recorded yet)"))
-        print(gray(
-            "Record one with e.g. "
-            "'benchmark record cycling --ftp 250'."
-        ))
+        aside("Record one with e.g. 'benchmark record cycling --ftp 250'.", color_fn=gray)
         return
 
     for r, prev_value in benchmarks.with_previous(rows):

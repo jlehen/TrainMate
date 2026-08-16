@@ -4,7 +4,7 @@ from trainmate.config import config
 from trainmate.types import Constraint, Workout
 from trainmate import garmin
 from trainmate.garmin import activity_load
-from trainmate.util import today_date as _today_date, cyan, yellow, cmd
+from trainmate.util import today_date as _today_date, aside, cyan, yellow, cmd
 import trainmate.coach.service as _svc
 
 
@@ -440,7 +440,7 @@ class DataAnalysisMixin:
         from_str = from_date.strftime("%Y-%m-%d")
         until_str = until_date.strftime("%Y-%m-%d")
 
-        print(cyan(f"Analyzing activities from {from_str} to {until_str}..."))
+        aside(f"Analyzing activities from {from_str} to {until_str}...", cyan)
 
         # Ensure Garmin data covers the analysis window (auto-pull recent/small gaps,
         # surface a command for large backfills) before reading it unless no_pull is True.
@@ -485,8 +485,8 @@ class DataAnalysisMixin:
         cached = self._db.get_analysis_cache(horizon)
         evidence_unchanged = bool(cached and cached.get("fingerprint") == fingerprint)
         if evidence_unchanged and not force and cached.get("reconstruction"):
-            print(cyan("Evidence unchanged since last analysis; reusing cached reconstruction "
-                  "(use --force to recompute)."))
+            aside("Evidence unchanged since last analysis; reusing cached reconstruction "
+                  "(use --force to recompute).", cyan)
             return cached["reconstruction"]
 
         # Group by ISO week (Monday date string)

@@ -10,7 +10,7 @@ from trainmate.config import config
 from trainmate.types import Workout
 from trainmate.calendar_state import calendar_signature
 from trainmate import intensity
-from trainmate.util import yellow, dim
+from trainmate.util import yellow, aside
 
 # Events fetched per Calendar API page during a context sync (the response is paged
 # through with pageToken regardless, so this only tunes round-trips vs payload size).
@@ -585,11 +585,11 @@ def sync_calendar_context(force: bool = False) -> None:
                     state["last_pull_utc"]
                 )
                 if age <= timedelta(minutes=config.data_refresh_minutes):
-                    print(dim(
+                    aside(
                         f"Calendar context is fresh (last sync "
                         f"{int(age.total_seconds() // 60)}m ago); using cache. "
                         "Pass --force-pull to refresh now."
-                    ))
+                    )
                     _context_synced = True
                     return
             except (ValueError, TypeError):

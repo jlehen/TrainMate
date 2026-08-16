@@ -160,5 +160,48 @@ class TestWrapWidth(unittest.TestCase):
         self.assertTrue(all(len(line) <= 60 for line in lines))
 
 
+class TestAsides(unittest.TestCase):
+    """Side information prints on a terminal and not in chat
+    (DESIGN_output_verbosity.md §3)."""
+
+    def setUp(self):
+        self._saved = {
+            k: os.environ.pop(k, None) for k in ("TRAINMATE_VERBOSE", "TRAINMATE_FRONTEND")
+        }
+        from trainmate import util
+        self.util = util
+
+    def tearDown(self):
+        for k, v in self._saved.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+
+    def _emit(self) -> str:
+        buf = io.StringIO()
+        with patch("sys.stdout", buf):
+            self.util.aside("side information")
+        return buf.getvalue()
+
+    def test_prints_on_a_terminal(self):
+        self.assertTrue(self.util.asides_enabled())
+        self.assertIn("side information", self._emit())
+
+    def test_silent_under_the_chat_frontend(self):
+        os.environ["TRAINMATE_FRONTEND"] = "json"
+        self.assertFalse(self.util.asides_enabled())
+        self.assertEqual(self._emit(), "")
+
+    def test_env_forces_them_back_on_in_chat(self):
+        os.environ["TRAINMATE_FRONTEND"] = "json"
+        os.environ["TRAINMATE_VERBOSE"] = "1"
+        self.assertIn("side information", self._emit())
+
+    def test_env_forces_them_off_on_a_terminal(self):
+        os.environ["TRAINMATE_VERBOSE"] = "0"
+        self.assertEqual(self._emit(), "")
+
+
 if __name__ == "__main__":
     unittest.main()

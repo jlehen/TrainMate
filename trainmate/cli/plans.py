@@ -7,8 +7,9 @@ from trainmate import runtime
 from trainmate import plan_diff
 from trainmate.adherence import planned_load
 from trainmate.util import (
-    bold, dim, green, red, yellow, cyan, blue, magenta, gray, cmd, visible_len, pad_visible,
-    wrap_text, format_labeled_block, default_wrap_width, today_date as _today_date,
+    aside, bold, green, red, yellow, cyan, blue, magenta, gray, cmd, visible_len,
+    pad_visible, wrap_text, format_labeled_block, default_wrap_width,
+    today_date as _today_date,
 )
 from trainmate.cli.common import fmt_date, ensure_recent_data
 from trainmate.cli.selectors import CURRENT, SelectorError, resolve_meso_atom
@@ -69,10 +70,10 @@ def run_plan_generate(args: argparse.Namespace) -> None:
             next_goal = objectives[0]
             # Name the defaulted goal so a bare `plan generate` isn't silent
             # about which objective it planned for (DESIGN_cli_noargs.md §b).
-            print(dim(wrap_text(
+            aside(wrap_text(
                 f"No goal given — planning for your next goal: "
                 f"{next_goal.get('title', '')} on {fmt_date(next_goal['target_date'])}."
-            )))
+            ))
 
         if next_goal:
             macro = runtime.db.get_macrocycle_for_objective(next_goal['id'])
@@ -509,11 +510,12 @@ def run_plan_versions(args: argparse.Namespace) -> None:
         if excerpt:
             print(f"    {gray(excerpt)}")
     print()
-    print(gray(
+    aside(
         "Restore a version with " + cmd("plan rollback --macrocycle <ID>")
         + ", inspect one with " + cmd("plan show --macrocycle <ID>")
-        + ", or compare two with " + cmd("plan diff <ID> <ID>") + "."
-    ))
+        + ", or compare two with " + cmd("plan diff <ID> <ID>") + ".",
+        color_fn=gray,
+    )
 
 
 def _print_change(marker: str, text: str, width: int, color_fn, indent: str = "  ") -> None:
@@ -881,8 +883,8 @@ def _feedback_replan(goal: dict) -> None:
         no_pull=False, force_pull=False, auto=False,
         goal_id=goal['id'], force=False, fresh=False,
     ))
-    print(dim("If you applied the new plan, run " + cmd("workout generate")
-              + " to schedule it."))
+    aside("If you applied the new plan, run " + cmd("workout generate")
+          + " to schedule it.")
 
 
 def run_plan_feedback(args: argparse.Namespace) -> None:
@@ -940,11 +942,11 @@ def run_plan_feedback(args: argparse.Namespace) -> None:
         _feedback_replan(goal)
         return
     pending = len(runtime.db.list_plan_feedback(macro['id']))
-    print(dim(
+    aside(
         f"{pending} note{'s' if pending != 1 else ''} pending — "
         f"{'they feed' if pending != 1 else 'it feeds'} the next {cmd('plan generate')} "
         f"({cmd('--replan')} runs it now)."
-    ))
+    )
 
 
 def add_plan_parser(subparsers, pull_bypass_parser, llm_debug_parser):

@@ -5,7 +5,7 @@ from typing import Any, List, Optional, Tuple
 
 from trainmate import runtime
 from trainmate.config import config
-from trainmate.util import today_str, yellow, red, dim, cmd
+from trainmate.util import today_str, yellow, red, cmd, aside
 import trainmate.garmin as _g
 from trainmate.garmin.client import (GarminAuthRequired, GarminClient, _date_range,
     _derivation_pad_days, _shift, _to_date)
@@ -13,7 +13,9 @@ from trainmate.garmin.load import _safe_round, compute_load, measured_tss
 from trainmate.sports import canonical_sport
 from trainmate.garmin.pmc import recompute_derived
 
-def _ingest_activities(client: GarminClient, start: str, end: str, throttle: float) -> None:
+def _ingest_activities(client: GarminClient, start: str, end: str, throttle: float) -> int:
+    """Ingests the range's activities, returning how many Garmin returned — -1 on a
+    failed fetch, so `pull` says "unavailable" rather than "0"."""
     try:
         activities = client.get_activities(start, end)
     except Exception as e:
@@ -21,8 +23,8 @@ def _ingest_activities(client: GarminClient, start: str, end: str, throttle: flo
         # here would otherwise be read as "Garmin has no activities" and prune
         # the whole local range.
         print(red(f"Error fetching activities {start}..{end}: {e}"))
-        return
-    print(f"Found {len(activities)} activities in {start}..{end}.")
+        return -1
+    aside(f"Found {len(activities)} activities in {start}..{end}.")
     underestimated_activities = []  # activities whose load is a weak estimate for lack of RPE
     fetched_ids = []  # everything Garmin still has in this range, for deletion reconcile
     for idx, act in enumerate(activities):
@@ -98,9 +100,11 @@ def _ingest_activities(client: GarminClient, start: str, end: str, throttle: flo
     if pruned:
         print(f"  Removed {pruned} activit{'y' if pruned == 1 else 'ies'} "
               "deleted in Garmin since the last sync.")
-def _ingest_metrics(client: GarminClient, start: str, end: str, throttle: float) -> None:
+    return len(activities)
+def _ingest_metrics(client: GarminClient, start: str, end: str, throttle: float) -> int:
+    """Ingests one row per day in the range, returning how many days that was."""
     dates = _date_range(start, end)
-    print(f"Fetching daily metrics for {len(dates)} day(s) {start}..{end}...")
+    aside(f"Fetching daily metrics for {len(dates)} day(s) {start}..{end}...")
     for date_str in dates:
         m = client.get_daily_metrics(date_str)
         # Write a row for EVERY day in range, even all-null, so the metrics-cache
@@ -113,6 +117,7 @@ def _ingest_metrics(client: GarminClient, start: str, end: str, throttle: float)
         )
         if throttle:
             time.sleep(throttle)
+    return len(dates)
 def _int_or_none(v: Any) -> Optional[int]:
     if v is None:
         return None
@@ -124,21 +129,30 @@ def pull(
     start_date: str, end_date: str, *,
     metrics: bool = True, activities: bool = True,
     throttle: Optional[float] = None, advance_watermark: bool = True,
-) -> None:
+) -> str:
     """Pulls a date range directly from Garmin into the DB, then recomputes derived
     metrics and (optionally) advances the watermark. Raises GarminAuthRequired if a
-    non-interactive re-auth is needed."""
+    non-interactive re-auth is needed.
+
+    Returns a one-line summary of what landed: the step narration is an aside, but for
+    `data pull` the sync IS the answer (DESIGN_output_verbosity.md §3.1)."""
     if throttle is None:
         throttle = config.garmin_throttle_seconds
 
     client = GarminClient(config.garmin_email, config.garmin_password, config.garmin_token_dir)
-    print(f"Logging into Garmin Connect (tokens: {config.garmin_token_dir})...")
+    aside(f"Logging into Garmin Connect (tokens: {config.garmin_token_dir})...")
     client.login()
 
+    landed = []
     if activities:
-        _ingest_activities(client, start_date, end_date, throttle)
+        count = _ingest_activities(client, start_date, end_date, throttle)
+        landed.append(
+            "activities unavailable" if count < 0
+            else f"{count} activit{'y' if count == 1 else 'ies'}"
+        )
     if metrics:
-        _ingest_metrics(client, start_date, end_date, throttle)
+        days = _ingest_metrics(client, start_date, end_date, throttle)
+        landed.append(f"{days} day{'' if days == 1 else 's'} of metrics")
 
     recompute_derived()
 
@@ -154,7 +168,7 @@ def pull(
 
     # An explicit pull also refreshes external calendar context (best-effort).
     _sync_calendar_context(force=True)
-    print("Garmin sync completed.")
+    return f"Garmin {start_date}..{end_date}: " + (", ".join(landed) or "nothing requested") + "."
 # Process-level memo: the widest [start, end] window already ensured this run, so
 # repeated reads (coach.py touches metrics/activities many times) cost nothing and
 # we never log into Garmin twice per command.
@@ -252,10 +266,10 @@ def ensure_data(start_date: str, end_date: str, force: bool = False) -> None:
                 f"last pull {last_pull_age_min}m ago, < {refresh_minutes}m"
                 if last_pull_age_min is not None else "recently pulled"
             )
-            print(dim(
+            aside(
                 f"Garmin data is fresh ({age_note}); using cache. "
                 "Pass --force-pull to refresh now."
-            ))
+            )
         _remember(pad_start, req_end)
         return
 
@@ -279,7 +293,7 @@ def ensure_data(start_date: str, end_date: str, force: bool = False) -> None:
 
     for region in auto_regions:
         try:
-            print(dim(f"Auto-syncing Garmin {region[0]}..{region[1]}..."))
+            aside(f"Auto-syncing Garmin {region[0]}..{region[1]}...")
             _g.pull(region[0], region[1], throttle=config.garmin_throttle_seconds)
         except GarminAuthRequired:
             print(yellow(

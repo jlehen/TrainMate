@@ -1,6 +1,6 @@
 from typing import Any, List, Optional, Dict
 from trainmate.types import Objective, Constraint
-from trainmate.util import cyan, wrap_text
+from trainmate.util import cyan, aside, wrap_text
 import trainmate.coach.engine as _eng
 
 
@@ -154,10 +154,10 @@ You MUST respond with a JSON object containing:
             f"{plan_start}."
         )
 
-        print(cyan(wrap_text(
+        aside(wrap_text(
             "Querying OpenRouter to generate macrocycle and mesocycles "
             "periodization strategy..."
-        )))
+        ), cyan)
         result = _eng.openrouter_client.complete(
             system_prompt, user_content, label="plan_generate"
         )

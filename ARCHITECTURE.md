@@ -144,6 +144,14 @@ classes themselves.
     text, so a future sentinel degrades gracefully on a stale bot build. Currently used
     by `tm progress --chart` (DESIGN_progress_timeline.md §7.2); any future CLI command
     can reuse the same transport.
+  - **Output is quieter here than on a terminal.** Because `_drive` buffers the whole
+    run and flushes it as one message, progress narration arrives *after* the work it
+    describes, ahead of the answer. So `TRAINMATE_FRONTEND=json` also switches off
+    "asides" — `trainmate.util.aside`, used for progress lines, cache-reuse notes,
+    defaulting notices, next-step hints and standing caveats. Answers, warnings and
+    errors are unaffected. `TRAINMATE_VERBOSE=1/0` overrides either way; there is no CLI
+    flag, since `-v/--verbose` already means "more detail in this listing" on seven
+    sub-commands (DESIGN_output_verbosity.md).
 
 ### Package `trainmate/`
 
@@ -255,7 +263,9 @@ classes themselves.
 | `util.py`            | —                    | ANSI color helpers (`bold`, `green`, `red`, …),  |
 |                      |                      | `cmd` (every "run X" call to action), `wrap_text`,|
 |                      |                      | `format_labeled_text`, `strip_ansi`, `Progress`  |
-|                      |                      | (self-erasing bar, silent off a terminal).       |
+|                      |                      | (self-erasing bar, silent off a terminal),       |
+|                      |                      | `aside`/`asides_enabled` (side information —     |
+|                      |                      | terminal only, DESIGN_output_verbosity.md).      |
 
 ### Change recipes (where to edit for a given task)
 
@@ -278,7 +288,9 @@ flow for each lives in [§10](#10-key-data-flows).
 | Calendar push / daily-context ingest | `trainmate/google_calendar.py`, see [§13](#13-daily-context-calendar-ingest) |
 | Workout state (modified/calendar/removed/archived) | `trainmate/modification_state.py`, `trainmate/calendar_state.py`, `db/workouts.py` ([§5](#workout-state--four-orthogonal-axes-not-one-enum)) |
 | A CLI command                    | `trainmate/cli/<family>.py` (`run_*`), dispatcher in `trainmate_cli.py` ([§7](#7-cli-commands-reference)) |
-| A message telling the athlete to run something | wrap the command in `util.cmd()`, nested *inside* the line's colour call, so it renders as the bright shade of that colour |
+| A message telling the athlete to run something | wrap the command in `util.cmd()`, nested *inside* the line's colour call, so it renders as the bright shade of that colour — and emit it with `util.aside`, not `print`: a "you could now run X" hint is side information |
+| Whether a line reaches the chat front-end | `util.aside` (side information, terminal only) vs `print` (the answer, warnings, errors). Building a list of lines rather than printing? gate on `util.asides_enabled()`. DESIGN_output_verbosity.md §3 |
+| How long the coach's prose is    | `coach/engine/prompt.py` (`## WRITING FOR THE ATHLETE`, shared by every command built on `_build_system_prompt`) + the per-field caps in each `## RESPONSE FORMAT`. Check `coach/formatting.py` first: a field re-injected into later prompts must not be capped (DESIGN_output_verbosity.md §5.1) |
 | A web *view* of existing data    | a GET in `trainmate_web.py` + a panel in `static/app.js` ([§8](#8-web-api-endpoints)) |
 | A web endpoint that would *write* | it does not go in the web app — add the CLI command instead ([§8](#8-web-api-endpoints)) |
 | The Telegram bot                 | `trainmate_bot.py` (runs the CLI as a subprocess) ([§2](#entry-points)) |
@@ -2230,6 +2242,23 @@ block end) and, on the write side, `workout_adapt` dropping any proposal dated p
 adaptation range end. A hallucinated post-boundary date therefore cannot be written, and
 the apply range — derived from the surviving proposals — cannot stretch into the next
 block. See DESIGN_block_boundary.md.
+
+### The line that is only true while it scrolls past
+Both front-ends run the same CLI, but they do not read it the same way: the bot buffers a
+whole run and delivers it as one message, so `Auto-syncing Garmin …` and
+`Querying OpenRouter …` land *after* the work is done, above the answer, on a 48-column
+phone screen. The split is therefore not verbose-vs-terse but **is this line still true
+when it arrives** — progress narration is information about the present, and history when
+it isn't. So `util.aside` prints only where output is live (terminal, or
+`TRAINMATE_VERBOSE=1`), while answers, warnings and errors always print. `garmin.pull`
+shows why the line, not the content, is what moves: its step narration is an aside, but
+for `data pull` the sync *is* the answer, so `pull` returns a one-line summary the handler
+prints. The same reasoning already existed locally in `cli/progress.py`, which had put
+`PMC_TSB_LAG_NOTE` behind `--explain` because "printing it on every invocation trained the
+eye to skip it"; this generalises it. The prompts got the matching half — a shared
+`## WRITING FOR THE ATHLETE` section plus per-field sentence caps on the rationale fields
+— with `plan generate`'s `strategy` deliberately exempt, because it is re-injected into
+every later prompt rather than read once. See DESIGN_output_verbosity.md.
 
 ### The adapt TASK: standing rules, not restated ones
 The adapt prompt's TASK is one always-on body plus five conditional sections, each written

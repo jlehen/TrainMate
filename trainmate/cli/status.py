@@ -4,7 +4,8 @@ from trainmate import intensity
 from trainmate.baselines import classify_metric, is_anomalous, UNKNOWN
 from trainmate.config import config
 from trainmate.util import (
-    bold, dim, green, red, yellow, cyan, magenta, gray, cmd, color_load_ratio, color_ramp,
+    aside, asides_enabled, bold, dim, green, red, yellow, cyan, magenta, gray, cmd,
+    color_load_ratio, color_ramp,
     pmc_cells, pmc_warming_note, format_labeled_block, default_wrap_width, PMC_TSB_LAG_NOTE,
     today_str as _today_str, today_date as _today_date,
 )
@@ -117,6 +118,9 @@ def run_status(args) -> None:
                     active_meso, _today_str(), runtime.db.get_completed_activities,
                     current_week=True, benchmarks=runtime.db.get_benchmark_results(),
                     with_focus=False, indent="", width=default_wrap_width(),
+                    # The measurement caveats are the same six lines every run — an
+                    # aside here, though never in a prompt (DESIGN_output_verbosity.md §3.2).
+                    notes=asides_enabled(),
                 )
                 if report:
                     print(f"\n{bold('Measured Intensity Distribution')}:")
@@ -230,7 +234,7 @@ def run_status(args) -> None:
                 f"ATL:CTL {ratio_s} | Ramp {ramp_s}"
             )
             if tsb_v is not None:
-                print(dim(f"  {PMC_TSB_LAG_NOTE}"))
+                aside(f"  {PMC_TSB_LAG_NOTE}")
         # Young/warming DB (§3.3b): say WHY freshness reads low — shown even while the
         # values themselves are warm-up-suppressed above (the suppression is the reason).
         caveat = runtime.garmin.pmc_data_caveat(history_start)

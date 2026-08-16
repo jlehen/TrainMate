@@ -5,7 +5,7 @@ from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
 
 from trainmate.config import config
-from trainmate.util import dim
+from trainmate.util import aside
 
 def _derivation_pad_days() -> int:
     """Raw history needed *before* a displayed window so the baselines and the CTL EWMA
@@ -88,7 +88,7 @@ class GarminClient:
                 metrics["rhr"] = stats.get("restingHeartRate")
                 metrics["stress"] = stats.get("averageStressLevel")
         except Exception as e:
-            print(dim(f"[{date_str}] daily stats unavailable: {e}"))
+            aside(f"[{date_str}] daily stats unavailable: {e}")
 
         try:
             sleep_data = self.api.get_sleep_data(date_str)
@@ -103,7 +103,7 @@ class GarminClient:
                         if isinstance(q, dict):
                             metrics["sleep_score"] = q.get("score")
         except Exception as e:
-            print(dim(f"[{date_str}] sleep data unavailable: {e}"))
+            aside(f"[{date_str}] sleep data unavailable: {e}")
 
         try:
             hrv_data = self.api.get_hrv_data(date_str)

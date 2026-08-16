@@ -6,7 +6,9 @@ from typing import Optional
 from trainmate import runtime
 from trainmate.calendar_state import calendar_status
 from trainmate.sports import canonical_sport
-from trainmate.util import bold, dim, green, red, yellow, cyan, gray, cmd, today_str as _today_str
+from trainmate.util import (
+    aside, bold, dim, green, red, yellow, cyan, gray, cmd, today_str as _today_str,
+)
 from trainmate.cli.selectors import resolve_window
 
 from trainmate.cli.workouts._helpers import (_resolve_swap_ops,
@@ -50,7 +52,7 @@ def run_workout_push(args: argparse.Namespace) -> None:
         warn_stale_before(start_date)
         return
 
-    print(f"Syncing {len(to_push)} workouts to Google Calendar...")
+    aside(f"Syncing {len(to_push)} workouts to Google Calendar...")
     try:
         runtime.calendar_syncer.sync_multiple(to_push)
         print(green("Google Calendar synchronization completed."))
@@ -74,7 +76,7 @@ def run_workout_rm(args: argparse.Namespace) -> None:
     runtime.db.mark_workout_removed(args.id, reason=args.reason)
 
     if workout.get('google_event_id'):
-        print("Workout is synced to Google Calendar. Updating calendar event...")
+        aside("Workout is synced to Google Calendar. Updating calendar event...")
         updated_workout = runtime.db.get_workout_by_id(args.id)
         if updated_workout is not None:
             try:
@@ -102,7 +104,7 @@ def run_workout_restore(args: argparse.Namespace) -> None:
     runtime.db.restore_workout(args.id)
 
     if workout.get('google_event_id'):
-        print("Workout is synced to Google Calendar. Updating calendar event...")
+        aside("Workout is synced to Google Calendar. Updating calendar event...")
         updated_workout = runtime.db.get_workout_by_id(args.id)
         if updated_workout is not None:
             try:
@@ -193,7 +195,7 @@ def run_workout_wipe(args: argparse.Namespace) -> None:
     workouts = runtime.db.get_workouts()
     synced_workouts = [w for w in workouts if w.get('google_event_id')]
     if synced_workouts:
-        print(f"Deleting {len(synced_workouts)} events from Google Calendar...")
+        aside(f"Deleting {len(synced_workouts)} events from Google Calendar...")
         for w in synced_workouts:
             ge_id = w['google_event_id']
             if ge_id:

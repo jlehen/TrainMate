@@ -1,7 +1,7 @@
 from typing import Any, List, Optional, Dict
 from trainmate.config import config
 from trainmate.types import Objective, Constraint, Workout, CompletedActivity
-from trainmate.util import cyan, days_between
+from trainmate.util import cyan, days_between, aside
 from trainmate.coach.formatting import (
     format_metrics_history, format_completed_activities, format_baseline,
     format_planned_workouts_detailed, format_removed_workouts, format_daily_context,
@@ -268,8 +268,9 @@ class WorkoutLogicMixin:
             "## RESPONSE FORMAT\n"
             "You MUST respond with a JSON object containing:\n"
             "{\n"
-            '  "reasoning": "Explain the microcycle design, detailing how workouts align with the active\n'
-            '    mesocycle focus.",\n'
+            '  "reasoning": "How this microcycle design serves the active mesocycle focus, in AT\n'
+            '    MOST 4 SENTENCES. The sessions themselves are listed below your prose — describe\n'
+            '    the shape of the week and why, not each workout in turn.",\n'
             # Workout generation is read-only w.r.t. coach learnings (see
             # DESIGN_backward_evaluation.md §11): it consumes the rendered learnings in the
             # system prompt but authors none. Tactical/recent observations are better
@@ -349,7 +350,7 @@ class WorkoutLogicMixin:
         if history_text_parts:
             user_content += "\n\n" + "\n\n".join(history_text_parts)
 
-        print(cyan("Querying OpenRouter to generate training workouts (microcycles)..."))
+        aside("Querying OpenRouter to generate training workouts (microcycles)...", cyan)
         plan_data = _eng.openrouter_client.complete(
             system_prompt, user_content, label="workout_generate"
         )
@@ -400,7 +401,8 @@ class WorkoutLogicMixin:
                 '        understands it, e.g. \"Rest — athlete away, no training access this\n'
                 '        day.\"' if has_message else ''
             )
-            + ' Keep it to a single sentence; do not restate the overall reason.",\n'
+            + '\n        Keep it to a single sentence of at most 20 words; do not restate\n'
+              '        the overall reason.",\n'
         )
         # The fourth branch the TASK is missing (§9.1): every existing branch treats
         # adaptation as a response to fatigue or absence, and an athlete running their
@@ -573,7 +575,10 @@ evidence-backed observations are authored only by the weekly history analysis
             '  "change_needed": true | false',
             (
                 '  "reason": "Overall rationale for the whole adaptation: the readiness/load\n'
-                '    picture and the strategy applied across the block. This is the batch-level\n'
+                '    picture and the strategy applied across the block, in AT MOST 3 SENTENCES\n'
+                '    (~60 words). Adapt runs daily, so this is the line the athlete reads most\n'
+                '    often — name the signal you acted on and what you did about it, and leave\n'
+                '    out the readings that did NOT change your mind. This is the batch-level\n'
                 '    summary, shared by every adapted workout below — do NOT repeat it per\n'
                 '    workout; keep per-workout notes in "change_reason"."'
             ),
@@ -727,8 +732,8 @@ keeping isn't lost for lack of being restated:
 ## ADHERENCE DISCREPANCIES & VIOLATIONS
 {discrepancy_text}
 {informational_section}"""
-        print(cyan(f"Querying OpenRouter to evaluate adaptation for the remainder of the mesocycle "
-              f"({target_date_str} -> {meso_end_date_str})..."))
+        aside(f"Querying OpenRouter to evaluate adaptation for the remainder of the mesocycle "
+             f"({target_date_str} -> {meso_end_date_str})...", cyan)
         decision = _eng.openrouter_client.complete(
             system_prompt, user_content, label="workout_adapt"
         )

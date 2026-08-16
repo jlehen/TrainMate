@@ -99,6 +99,26 @@ def gray(text: str) -> str:
     return colorize(text, "\033[90m")
 
 
+def asides_enabled() -> bool:
+    """Whether side information prints: a terminal reads it live, a chat front-end gets
+    it as history above the answer. TRAINMATE_VERBOSE=1/0 forces either way — no CLI
+    flag, `-v` is taken (DESIGN_output_verbosity.md §2/§4)."""
+    raw = os.environ.get("TRAINMATE_VERBOSE")
+    if raw:
+        return raw.lower() not in ("0", "no", "false")
+    from trainmate.prompt import is_json_frontend
+    return not is_json_frontend()
+
+
+def aside(text: str, color_fn=None) -> None:
+    """Prints one piece of side information — progress, cache reuse, a next-step hint.
+    The answer, warnings and errors use `print` and reach every front-end
+    (DESIGN_output_verbosity.md §3)."""
+    if not asides_enabled():
+        return
+    print((color_fn or dim)(text))
+
+
 def strip_ansi(text: str) -> str:
     """Drops ANSI colour codes — for surfaces that aren't a terminal (JSON, logs)."""
     return ANSI_ESCAPE.sub("", text)

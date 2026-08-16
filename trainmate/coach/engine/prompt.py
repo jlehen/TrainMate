@@ -177,6 +177,18 @@ principles.
 ## ACTIVE CONSTRAINTS (athlete-declared directives to work around)
 {c_text if c_text else "No active constraints."}
 
+## WRITING FOR THE ATHLETE
+Your prose is read on a phone, by one athlete who is already looking at the numbers and the
+sessions this command prints beside your words. Write accordingly:
+- Lead with the decision. No preamble, no restating the question, no summing up at the end.
+- Name only the signals that actually drove it. Do not re-list metrics, dates, or session
+  details that are already on the athlete's screen.
+- Say a thing once. A rationale that reads well after deleting half its words was twice as
+  long as it needed to be.
+Any length limit stated on a field in RESPONSE FORMAT is a hard limit, not a target. This
+section governs rationale and summary prose only: a workout "description" is the
+prescription the athlete trains from, and stays as complete as the session requires.
+
 {custom_task}
 """
         return system_prompt

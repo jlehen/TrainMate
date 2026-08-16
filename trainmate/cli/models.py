@@ -6,7 +6,7 @@ from trainmate.llm_models import (
     active_source, clear_active_model, configured_models, list_models, set_active_model,
     stored_at,
 )
-from trainmate.util import bold, cyan, dim, green, red
+from trainmate.util import bold, cyan, dim, green, aside, red
 
 
 def _since(iso_utc: str) -> str:
@@ -35,17 +35,17 @@ def run_model_list(args: argparse.Namespace) -> None:
     for row in list_models():
         marker = green("*") if row["active"] else " "
         number = f"{row['number']:>2} " if row["number"] is not None else " - "
-        note = ""
+        annotation = ""
         if row["active"]:
-            note = "  " + green(_active_note())
+            annotation = "  " + green(_active_note())
             if row["number"] is None:
-                note += dim("  not in config list — `model set N` to move off it")
-        print(f"{marker} {number} {row['model']}{note}")
+                annotation += dim("  not in config list — `model set N` to move off it")
+        print(f"{marker} {number} {row['model']}{annotation}")
 
     override = getattr(args, "llm_model", None)
     if override:
         print(dim(f"\nOverridden for this run only by --llm-model: {override}"))
-    print(dim("\nPick one with `model set <number>`; edit the list in config.yaml (llm.models)."))
+    aside("\nPick one with `model set <number>`; edit the list in config.yaml (llm.models).")
 
 
 def run_model_set(args: argparse.Namespace) -> None:

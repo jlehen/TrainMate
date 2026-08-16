@@ -46,6 +46,20 @@ class TestCliData(unittest.TestCase):
         self.assertEqual(exit_code, 0)
         mock_garmin.pull.assert_called_once()
 
+    @patch("trainmate.runtime.garmin")
+    def test_data_pull_reports_what_landed_even_in_chat(self, mock_garmin):
+        # `pull`'s step narration is a terminal-only aside, so the summary it RETURNS is
+        # the whole answer here — without it a chat front-end would render "(no output)"
+        # (DESIGN_output_verbosity.md §3.1).
+        mock_garmin.pull.return_value = "Garmin 2026-06-01..2026-06-02: 3 activities, 2 days"
+        os.environ["TRAINMATE_FRONTEND"] = "json"
+        try:
+            exit_code, stdout, stderr = self.run_cli(["data", "pull", "--no-mark"])
+        finally:
+            os.environ.pop("TRAINMATE_FRONTEND", None)
+        self.assertEqual(exit_code, 0)
+        self.assertIn("Garmin 2026-06-01..2026-06-02: 3 activities, 2 days", stdout)
+
     @patch("trainmate.cli.data.mark_adherence_range")
     @patch("trainmate.runtime.garmin")
     def test_data_pull_marks_adherence(self, mock_garmin, mock_mark):

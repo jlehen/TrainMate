@@ -5,6 +5,7 @@ import re
 from datetime import datetime, timezone
 from typing import Any, Optional
 from trainmate.config import config
+from trainmate.util import aside
 
 # A fenced reply may be one line (```{"a":1}```) or many, with or without a language
 # tag; the one-line form has no newline to split on.
@@ -121,7 +122,7 @@ class OpenRouterClient:
             with open(filepath, "w", encoding="utf-8") as f:
                 f.write("\n".join(lines))
                 
-            print(f"Logged LLM exchange to: {filepath}")
+            aside(f"Logged LLM exchange to: {filepath}")
         except Exception as e:
             print(f"Warning: Failed to log LLM exchange: {e}")
 
@@ -201,7 +202,7 @@ class OpenRouterClient:
         resp_data = None
         logged = False
         try:
-            print(f"Querying OpenRouter with model: {self.model}")
+            aside(f"Querying OpenRouter with model: {self.model}")
             response = requests.post(
                 self.api_url, headers=headers, json=payload,
                 timeout=config.llm_request_timeout,
@@ -220,9 +221,10 @@ class OpenRouterClient:
                 logged = True
                 raise ValueError(f"OpenRouter API error: {err_msg}")
 
-            # Print token usage details for prompt caching verification
+            # Token usage, for prompt-caching verification — a terminal-only aside
+            # (DESIGN_output_verbosity.md §3).
             usage = resp_data.get("usage", {})
-            print(
+            aside(
                 f"OpenRouter Tokens - Prompt: {usage.get('prompt_tokens')}, "
                 f"Completion: {usage.get('completion_tokens')}, "
                 f"Total: {usage.get('total_tokens')}"

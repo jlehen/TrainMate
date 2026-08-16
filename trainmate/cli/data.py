@@ -8,7 +8,7 @@ from trainmate.garmin.load import activity_load, load_method
 from trainmate.sports import sport_aliases
 from trainmate.baselines import classify_metric, is_anomalous, UNKNOWN
 from trainmate.util import (
-    bold, green, red, yellow, cyan, magenta, gray, cmd, color_load_ratio, pmc_cells,
+    aside, bold, green, red, yellow, cyan, magenta, gray, cmd, color_load_ratio, pmc_cells,
     visible_len, wrap_text, format_labeled_text, format_labeled_block, render_table,
     is_narrow_client, default_wrap_width,
 )
@@ -27,12 +27,14 @@ def run_data_pull(args: argparse.Namespace) -> None:
 
     pulled = False
     try:
-        runtime.garmin.pull(
+        # The sync's own step-by-step narration is side information; its summary is
+        # this command's answer, so it prints here (DESIGN_output_verbosity.md §3.1).
+        print(green(runtime.garmin.pull(
             start_date, end_date,
             metrics=not args.activities_only,
             activities=not args.metrics_only,
             throttle=args.sleep,
-        )
+        )))
         pulled = True
     except runtime.garmin.GarminAuthRequired as e:
         print(red(f"Garmin authentication required: {e}"))
@@ -300,7 +302,7 @@ def _show_activities_zones(activities: list) -> None:
         print("No zone data recorded for these activities.")
         return
     print(render_table(headers, rows))
-    print(gray(wrap_text(intensity.NEVER_SUM_NOTE)))
+    aside(wrap_text(intensity.NEVER_SUM_NOTE), color_fn=gray)
 
 
 def run_data_show_activities(args: argparse.Namespace) -> None:

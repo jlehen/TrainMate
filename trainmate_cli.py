@@ -12,7 +12,7 @@ from typing import Optional
 from trainmate import runtime
 from trainmate.prompt import PromptCancelled
 from trainmate.util import (
-    bold, dim, green, red, yellow, cyan, blue, magenta, gray,
+    bold, dim, green, red, yellow, cyan, blue, magenta, gray, aside,
     visible_len, pad_visible, wrap_text, format_labeled_text,
     format_labeled_block, default_wrap_width,
     today_str as _today_str, today_date as _today_date,
@@ -221,7 +221,7 @@ def run_once(argv, parser, named_subparsers) -> None:
         print(bold(parser.description))
         print()
         _print_command_tree(parser, include_advanced=getattr(args, "show_all", False))
-        print(dim(PREFIX_HINT))
+        aside(PREFIX_HINT)
         return
     if cmd == "shell":
         _repl(parser, named_subparsers)
@@ -317,7 +317,7 @@ def main(argv=None) -> None:
         if debug:
             raise
         print(red(f"Error: {e}"))
-        print(dim("Re-run with --debug for the full traceback."))
+        aside("Re-run with --debug for the full traceback.")
         sys.exit(1)
 
 

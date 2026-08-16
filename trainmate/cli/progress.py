@@ -23,8 +23,8 @@ from trainmate.intensity import (
 )
 from trainmate.sports import SPORT_MAPPING, canonical_sport
 from trainmate.util import (
-    bold, green, red, yellow, gray, dim, cmd, pad_visible, visible_len, wrap_text,
-    color_tsb, today_str as _today_str, PMC_TSB_LAG_NOTE,
+    asides_enabled, bold, green, red, yellow, gray, dim, cmd, pad_visible, visible_len,
+    wrap_text, color_tsb, today_str as _today_str, PMC_TSB_LAG_NOTE,
 )
 from trainmate.cli.common import ensure_recent_data
 
@@ -844,9 +844,10 @@ def render_block_section(
         return [yellow("No mesocycle overlaps this window.")]
 
     # Once per section, under the last block — `block_report` printing its own would
-    # render the same two caveats three times over three blocks (§9.6).
+    # render the same two caveats three times over three blocks (§9.6). Standing
+    # boilerplate, so terminal-only (DESIGN_output_verbosity.md §3.2).
     rows = intensity.zone_rows(fetch(window_start, today))
-    notes = intensity.format_notes(rows, width=TABLE_WIDTH)
+    notes = intensity.format_notes(rows, width=TABLE_WIDTH) if asides_enabled() else []
     if notes:
         lines.append("")
         lines.extend(gray(n) for n in notes)

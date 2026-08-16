@@ -8,7 +8,7 @@ from trainmate.adherence import analyze_adherence, date_covered, format_discrepa
 from trainmate.google_calendar import event_url
 from trainmate.sports import canonical_sport
 from trainmate.util import (
-    bold, dim, green, red, yellow, cyan, magenta, gray, cmd, pad_visible, wrap_text,
+    bold, green, red, yellow, cyan, magenta, gray, cmd, aside, pad_visible, wrap_text,
     format_labeled_block, render_table, today_str as _today_str, today_date as _today_date,
     days_between,
 )
@@ -39,12 +39,13 @@ def _print_block_boundary_hint(date_str: str) -> None:
         return
 
     when = "today" if days_left == 0 else f"in {days_left} day(s), on {meso['end_date']}"
+    # Actionable, so it reaches every front-end — but in two lines rather than the four
+    # it used to take (DESIGN_output_verbosity.md §3.2).
     print(yellow(f"This block ({meso['name']}) ends {when}."))
-    print(gray(wrap_text(
-        f"Sessions in the next block ({next_meso['name']}) are outside this adaptation's "
-        f"reach. To re-plan them against current metrics:"
+    print(yellow(wrap_text(
+        f"The next block ({next_meso['name']}) is outside adapt's reach — re-plan it with "
+        + cmd(f"workout generate -m ..{next_meso['id']}") + "."
     )))
-    print(gray("    " + cmd(f"workout generate -m ..{next_meso['id']}", quote=False)))
     print()
 
 
@@ -53,7 +54,7 @@ def run_workout_adapt(args: argparse.Namespace) -> None:
     date_str = args.date or _today_str()
     if not args.date:
         # Name the defaulted target so a bare `adapt` isn't silent (DESIGN_cli_noargs.md §b).
-        print(dim(f"No date given — adapting today ({date_str})."))
+        aside(f"No date given — adapting today ({date_str}).")
 
     ensure_recent_data(
         date_str, no_pull=args.no_pull, force_pull=getattr(args, 'force_pull', False)
@@ -66,14 +67,14 @@ def run_workout_adapt(args: argparse.Namespace) -> None:
         date_obj = datetime.strptime(date_str, "%Y-%m-%d").date()
         start_date = (date_obj - timedelta(days=history_days - 1)).strftime("%Y-%m-%d")
         metrics_history = runtime.db.get_metrics_cache(start_date=start_date, end_date=date_str)
-        print(dim(f"\nUsing {len(metrics_history)} days of recovery metrics "
-                  f"(past {history_days}-day window)."))
+        aside(f"\nUsing {len(metrics_history)} days of recovery metrics "
+             f"(past {history_days}-day window).")
     except Exception as e:
         print(yellow(f"Warning: Could not load metrics trajectory: {e}"))
 
     _print_block_boundary_hint(date_str)
 
-    print(f"Evaluating daily Garmin metrics adaptation for {date_str}...")
+    aside(f"Evaluating daily Garmin metrics adaptation for {date_str}...")
     try:
         proposal = runtime.coach_service.workout_adapt(
             date_str, message=getattr(args, 'message', None)
@@ -159,7 +160,7 @@ def run_workout_adapt(args: argparse.Namespace) -> None:
             )
 
         if apply:
-            print("\nApplying adaptations...")
+            aside("\nApplying adaptations...")
             runtime.coach_service.workout_adapt_apply(proposal)
             print(green("Adaptations applied and synced to calendar successfully."))
         else:
@@ -393,9 +394,9 @@ def run_workout_batches(args: argparse.Namespace) -> None:
     for i, b in enumerate(batches, start=1):
         print(_batch_line(cyan(f"#{i}"), _fmt_ts(b['archived_at']), b))
     print()
-    print(gray("Restore one with " + cmd("workout rollback [--batch N]")
-               + " (defaults to #1). Numbering is positional and shifts after a "
-                 "rollback."))
+    aside("Restore one with " + cmd("workout rollback [--batch N]")
+         + " (defaults to #1). Numbering is positional and shifts after a rollback.",
+         color_fn=gray)
 
 
 def run_workout_rollback(args: argparse.Namespace) -> None:

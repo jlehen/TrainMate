@@ -371,7 +371,16 @@ CLI — the leading `/` Telegram requires is optional:
 ```
 
 Each message is run through `trainmate_cli.py` as a subprocess, so the bot
-always supports exactly what the CLI does. Setup:
+always supports exactly what the CLI does.
+
+Chat replies are shorter than the terminal's. The bot delivers a whole run as
+one message, so progress lines ("Auto-syncing Garmin…", "Querying OpenRouter…"),
+cache-reuse notes and "you could now run X" hints would arrive after the work
+they describe, above the answer — they are suppressed there and kept in the
+terminal. Answers, warnings and errors always show. Set `TRAINMATE_VERBOSE=1`
+to get them back in chat, or `=0` to silence them in the terminal.
+
+Setup:
 
 1. Create a bot with [@BotFather](https://t.me/BotFather) and copy its token.
 2. Message your bot once, then find your numeric chat id (e.g. via

@@ -310,7 +310,9 @@ class TestAdaptationAdapt(unittest.TestCase):
             with patch("trainmate.cli.workouts.generate.runtime") as mock_cli, redirect_stdout(buf):
                 mock_cli.db = test_db
                 workouts_cli._print_block_boundary_hint(date_str)
-            return buf.getvalue()
+            # Collapsed: the hint is wrapped prose and the wrap width varies per
+            # front-end, so a line break may fall inside any block name.
+            return " ".join(buf.getvalue().split()) if buf.getvalue().strip() else buf.getvalue()
 
         # One day before the block ends -> hint fires, even with no adaptation proposed.
         out = hint_output("2026-06-29")
