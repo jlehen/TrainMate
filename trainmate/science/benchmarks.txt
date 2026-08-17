@@ -1,9 +1,11 @@
 BENCHMARK (FITNESS TEST) GUIDELINES
 ===================================
 
-AUTHORITY: MEASUREMENT. This file defines what a threshold anchor is and when a
-test result can be trusted. Which blocks need which anchors, and how often the
-plan's structure calls for one, is a plan document's decision.
+AUTHORITY: MEASUREMENT. This file defines what a threshold anchor is, when a
+test result can be trusted, and when a measured difference is real. Which blocks
+need which anchors, and how often the plan's structure calls for one, is a plan
+document's decision — except for the rules marked FLOOR below, which are
+properties of the measurement rather than preferences and never yield.
 
 A benchmark workout is a standardized, repeatable maximal or threshold effort
 whose result establishes the athlete's THRESHOLD ANCHOR. All training zones and
@@ -18,41 +20,69 @@ by sport, but the pipeline is always the same:
 
 1. WHEN TO RE-BENCHMARK
 -----------------------
-Re-anchor on EVIDENCE that the anchor is stale, not on a fixed calendar. A
-formal test costs a quality session and a day of freshness, so the cheapest
-correct answer is usually not to run one.
+The default is NOT to test. Re-anchor on EVIDENCE that the anchor is stale, not
+on the calendar and not on a position in the block structure. A formal test
+costs a quality session and a day of freshness, and returns one number that
+training already performed will usually tell you for free.
 
-MODELLING FIRST. Where enough session data exists, the anchor can be modeled
-from normal training — a cycling power-duration curve from interval work, an
-estimated 1RM from rep-max sets — instead of a dedicated test. A plan that
-already prescribes long efforts near threshold is generating this data for
-free, so a modeled anchor tracks fitness continuously and costs nothing.
-Prefer modeled estimates by default. Reserve formal tests for confirmation, for
-anchors that cannot be modeled (1RM, 2k row), and for the trigger cases below.
-
-Run a formal test when:
-   - Sessions systematically decouple from target zones (planned efforts feel
-     consistently too easy or too hard for their prescribed intensity). This is
-     the primary trigger: it is direct evidence the anchor is wrong.
+Run a formal test when one of these fires:
+   - Sessions systematically decouple from their target zones — planned efforts
+     feel consistently too easy or too hard for the intensity prescribed, across
+     several sessions rather than one bad day. This is the primary trigger: it
+     is direct evidence the anchor is wrong.
    - Returning from a detraining gap (illness, injury layoff, travel block),
-     where the modeled anchor is stale and probably too high.
-   - Entering a block whose targets DEPEND on that anchor, and no recent
-     modeled estimate exists. Note that this is not every block transition —
-     a block of all-out unpaced work needs no threshold anchor to prescribe it,
-     so entering one triggers nothing.
+     where the anchor is stale and probably too high.
+   - Entering a block whose targets DEPEND on that anchor, and nothing recent
+     establishes it. Not every block transition qualifies — a block of all-out
+     unpaced work needs no threshold anchor to prescribe it, so entering one
+     triggers nothing.
+   - The anchor has never been measured. A seeded, assumed or self-reported
+     value is a starting guess, not a measurement; the first real test of an
+     anchor is worth running early.
 
-MINIMUM INTERVAL. Do not run formal tests of the same anchor closer than about
-3-4 weeks apart: below that the change is inside measurement noise, so the test
-buys no information and costs real fatigue. This interval is a property of the
-measurement and holds regardless of how short the plan's blocks are — a plan
-with two-week blocks does not get a test at every boundary.
+Absent a trigger, do not test. A boundary between blocks is not a trigger.
 
-TEST FRESH, BUT NOT DURING A TAPER. An anchor set from a fatigued test
-mis-scales every subsequent workout, so tests need a fresh day (positive or
-neutral TSB, good recovery metrics). That does NOT mean putting the test in a
-taper or deload week: a maximal effort is exactly the stress the taper exists to
-remove, and spending it there defeats the taper's purpose. The taper PRODUCES
-the freshness; spend it on an early, fresh day of the block that follows.
+MINIMUM INTERVAL — THIS ONE IS A FLOOR, NOT A DEFAULT: do not run formal tests
+of the same anchor closer than 4 weeks apart. Below that the difference is
+inside measurement noise, so the test buys no information and costs real
+fatigue. This is a property of the measurement and holds regardless of how the
+plan is structured — a plan with three-week blocks does not get a test at every
+boundary, and neither does one with two-week blocks.
+
+TYPICAL CADENCE. The floor is not the target. Expect 8-12 weeks between formal
+tests of the same anchor — a handful per year, not one per block. Testing every
+four weeks clears the floor and is still a classic error: it sits at the edge of
+the noise band, converts training time into testing time, and invites acting on
+differences that are not real (§3).
+
+DO NOT TEST WHEN THE RESULT CANNOT BE TRUSTED — THIS ONE IS A FLOOR, NOT A
+DEFAULT. A test run while ill, sleep-deprived, or on suppressed recovery metrics
+does not yield a low reading of today's fitness; it yields a wrong anchor that
+mis-scales every session after it. Postpone, do not proceed. Likewise do not
+test inside the run-in to a goal event: the test competes with the effort it
+exists to serve, and a taper deliberately lifts performance above the tested
+value, so the number is stale in the optimistic direction by the time it is used.
+
+TEST FRESH — AND A RECOVERY WEEK IS THE BEST SLOT, NOT A FORBIDDEN ONE. An
+anchor set on a fatigued day mis-scales every subsequent workout, so a test
+needs a genuinely fresh one: positive or neutral TSB, recovery metrics normal.
+Two cases look alike here and are opposites:
+   - Recovery/deload week: test at its END. Fatigue has dissipated, the athlete
+     is as fresh as the plan ever makes them outside a taper, and the session
+     displaced was going to be easy anyway. In a standard 3:1 structure this is
+     the single best testing opportunity available — use it.
+   - Race taper: do not test. A maximal effort is precisely the stress the taper
+     exists to remove. The taper produces freshness for the event; spending it
+     on a measurement defeats its purpose.
+
+MODELED AND PASSIVE ANCHORS. Where the system actually produces one, an anchor
+estimated from normal training — a power-duration curve from interval work, an
+e1RM from a rep-max set — tracks fitness continuously, costs nothing, and is
+preferable to a dedicated test. This is conditional on the estimate existing.
+Where none is available, the triggers above are the whole rule, and the absence
+of a modeled anchor is NOT itself a reason to test. Confirm a modeled anchor
+against a real test every 8-16 weeks, or sooner if it disagrees with observed
+session performance.
 
 
 2. BENCHMARK PROTOCOL AND ANCHOR BY SPORT
@@ -85,15 +115,43 @@ the freshness; spend it on an early, fresh day of the block that follows.
      - Protocol: Cooper test / maximal aerobic speed or power test.
      - Anchor: MAS / MAP / VO2max proxy.
 
+PROTOCOL IS PART OF THE MEASUREMENT. The protocols listed under a sport are
+alternative ways to ESTABLISH an anchor, not interchangeable ways to measure the
+same one. A ramp test and a 20-minute test systematically disagree, and the
+direction of the disagreement is rider-dependent: ramp protocols flatter
+anaerobically-strong athletes and penalise diesels. Pick one protocol per anchor
+and keep it. Conditions are part of the protocol — indoor versus outdoor, and a
+different trainer or course, are different measurements.
 
-3. COACHING DIRECTIVES
+
+3. READING A RESULT
+-------------------
+MINIMUM MEANINGFUL CHANGE — THIS ONE IS A FLOOR, NOT A DEFAULT. A new value is a
+CHANGE only when it clears the noise band and was produced by the same protocol
+and conditions as the value it is compared against. Otherwise it is another
+reading of the same anchor, and nothing downstream moves.
+   - Below roughly 3-5% — for cycling FTP on a trained rider, about 8-10 W — do
+     not treat the difference as real and do not recompute zones from it. Acting
+     on 2-3 W thrashes every dependent target on noise.
+   - A protocol or venue change invalidates the comparison outright. The new
+     value starts a new series rather than continuing the old one; report it as
+     a fresh baseline, not as a gain or a loss.
+
+WHEN A CHANGE IS REAL, the new value becomes the single source of truth for zone
+derivation and every dependent zone recomputes from it.
+
+TREND, NOT POINTS. A rising anchor across several tests confirms progressive
+overload is working; a stalled or falling anchor across blocks signals plateau
+or under-recovery. One test is a point, and a point is not a trend — read the
+series, and read it only across values the rules above make comparable.
+
+
+4. COACHING DIRECTIVES
 ----------------------
-   - Treat the threshold anchor as the single source of truth for zone
-     derivation; when a benchmark updates it, recompute all dependent zones.
-   - Keep the benchmark protocol and conditions consistent run-to-run so results
-     are comparable over time.
-   - Adapt cadence to test cost: passively-estimated anchors (e.g. FTP) can
-     update often and cheaply; fatiguing maximal tests (1RM, 2k row) warrant the
-     §1 minimum interval and a rested day.
-   - A rising anchor confirms progressive overload is working; a stalled or
-     falling anchor across blocks signals plateau or under-recovery.
+   - Cost scales with the protocol. A passively-estimated anchor can update
+     often and cheaply; a fatiguing maximal test (1RM, 2k row, 20-min FTP) needs
+     the §1 floor, a rested day, and a reason.
+   - Prescribe from the anchor you have. An anchor that is old but uncontradicted
+     beats a fresh one bought with a compromised test.
+   - Never let a test displace the training it exists to serve. If the only way
+     to fit a test in is to cut the block's key session, the test is not due.
