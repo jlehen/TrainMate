@@ -59,8 +59,8 @@ def _block_progress_task(block_progress: Optional[str]) -> str:
     """The CONTINUING A BLOCK section (DESIGN_block_progress.md §4).
 
     Gated on the data being present, so a run that starts a block cleanly produces the
-    prompt it always did. It also conditions BENCHMARK PLACEMENT above, whose "one test per
-    boundary week" is unconditional on its own and would re-place a test already run (§4.1).
+    prompt it always did. It also conditions BENCHMARK PLACEMENT above, which on its own
+    cannot know a boundary test was already run earlier in the block (§4.1).
     """
     if not block_progress:
         return ""
@@ -203,7 +203,8 @@ class WorkoutLogicMixin:
         pmc_context: Optional[str] = None,
         block_progress: Optional[str] = None,
         block_has_intensity: bool = False,
-        zone_currencies: Optional[Dict[str, str]] = None
+        zone_currencies: Optional[Dict[str, str]] = None,
+        anchor_history: Optional[str] = None
     ) -> Dict[str, Any]:
         """Queries LLM to generate workouts for a given number of days based on active strategy.
 
@@ -218,28 +219,23 @@ class WorkoutLogicMixin:
             duration_desc = f"{int(weeks)} week{'s' if weeks != 1 else ''} ({num_days} days)"
         else:
             duration_desc = f"{num_days} day{'s' if num_days != 1 else ''}"
-        # The no-test-near-goal carve-out is event logic — a horizon goal has no event
-        # for a test to compete with. `objectives` is the upcoming list,
-        # date-ascending, so [0] is the goal governing this span.
+        # Whether a test is DUE is benchmarks.txt §1's call (triggers, cadence, floor);
+        # this section names only the slot and the one fact the guidelines cannot know —
+        # the tests this same span is placing (DESIGN_benchmark_workouts.md §4.1). The
+        # no-test-near-goal carve-out is event logic — a horizon goal has no event for a
+        # test to compete with. `objectives` is the upcoming list, date-ascending, so [0]
+        # is the goal governing this span.
         if objectives and objectives[0].get('date_type') == 'horizon':
             goal_week_exception = (
-                ". The athlete's goal date is a training\n"
-                "horizon, not a scheduled event, so no goal-week exception applies — a "
-                "boundary week\n"
-                "near the goal date still gets its test."
+                " The athlete's goal date is a training horizon, not a scheduled event,\n"
+                "so a boundary week near it is an ordinary boundary."
             )
         else:
             goal_week_exception = (
-                ", EXCEPT any boundary\n"
-                "week falling inside the last seven days before the goal or the goal's own "
-                "week — the final\n"
-                "block tapers into the event, and a maximal test there competes with the "
-                "effort it is meant to\n"
-                "serve. Do NOT add a separate pre-goal validation test either: the last "
-                "boundary test already\n"
-                "sets the anchor the athlete races on, and re-testing during a taper "
-                "measures noise while\n"
-                "costing freshness."
+                " Never place a test inside the last seven days before the goal or the\n"
+                "goal's own week — the final block tapers into the event, and a maximal "
+                "test there\n"
+                "competes with the effort it is meant to serve."
             )
         custom_task = (
             "## TASK\n"
@@ -251,16 +247,16 @@ class WorkoutLogicMixin:
             "with the science guidelines.\n"
             "\n"
             "### BENCHMARK PLACEMENT (fitness tests — see the BENCHMARK guidelines above)\n"
-            "Schedule ONE benchmark (fitness test) of the sport/kind appropriate to the athlete's goal in\n"
-            "each mesocycle-boundary week this span covers (a block's final week)"
+            "A mesocycle-boundary week (a block's final week) is the natural slot for a fitness test;\n"
+            "whether one is DUE there is the BENCHMARK guidelines' call. Apply their re-benchmark\n"
+            "triggers, typical cadence and minimum-interval floor — counting any tests you are placing\n"
+            "in this same span — and leave a boundary week without a test when none is due. ANCHORS ON\n"
+            "RECORD in the user content dates each anchor's last measurement."
             + goal_week_exception
-            + " Set that session's \"benchmark_type\" to the test kind and precede it with\n"
-            "an opener or easy day so the athlete is fresh (positive TSB) on test day — a test on a\n"
-            "fatigued day reads low and mis-scales every workout after it. Keep the session venue-neutral\n"
-            "in its title/description (e.g. \"20-min FTP test or ramp test\"); the athlete's preferences say\n"
-            "where they test. Do NOT place a benchmark in a week the athlete's constraints put under full\n"
-            "rest. If no threshold is on record yet, still schedule the first benchmark early — it is how\n"
-            "the athlete's zones get established.\n"
+            + " When you do place one: set \"benchmark_type\" to the test kind, precede it with an opener\n"
+            "or easy day so the athlete is fresh (positive TSB) on test day, keep the title/description\n"
+            "venue-neutral (e.g. \"20-min FTP test or ramp test\" — the athlete's preferences say where\n"
+            "they test), and never put it in a week the athlete's constraints put under full rest.\n"
             + _block_progress_task(block_progress)
             + _block_composition_task(block_progress, block_has_intensity)
             + _planned_zone_task(zone_currencies)
@@ -317,6 +313,15 @@ class WorkoutLogicMixin:
             )
 
         history_text_parts = []
+        # What BENCHMARK PLACEMENT's interval rule reads against — without dates the
+        # model cannot know whether an anchor is due (DESIGN_benchmark_workouts.md §4.1).
+        if anchor_history:
+            history_text_parts.append(
+                "## ANCHORS ON RECORD\n"
+                "The dated logbook behind the profile's thresholds. A 'manual' or "
+                "'modeled' value is\nan assumption, not a measurement — only a test "
+                "starts the interval clock.\n" + anchor_history
+            )
         # First of the history sections: it frames what the metrics and activities below
         # mean — the same volume reads differently in a block's first week than its last.
         # Same gate as the task section above, so the two never disagree about its presence.
@@ -487,8 +492,11 @@ blank its benchmark_type. If the athlete will not be fresh on test day (negative
 recovery), MOVE it intact — same content, same benchmark_type — to a later day within THIS
 block where they will be fresher, and lighten the days before it; emit the test on its new
 date and a replacement for its old one. If it already sits on the block's LAST day and no
-later in-block day exists, leave it there and lighten the days before it — slightly-off
-freshness beats a lost test. A benchmark you are NOT changing need not be returned at all.
+later in-block day exists, POSTPONE it: replace it with an ordinary easy session (no
+benchmark_type) — a compromised maximal test sets a wrong anchor that mis-scales every
+session after it, so a skipped test costs a retest where a bad number costs a block. The
+next generated block re-places the test when it is due. A benchmark you are NOT changing
+need not be returned at all.
 """
 
         # Adapt owns execution, generate owns periodization (§9.2): changing what zone

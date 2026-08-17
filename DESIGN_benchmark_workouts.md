@@ -2,6 +2,34 @@
 
 **Status:** Phase 1 & Phase 2 **implemented**; Phase 3 unbuilt (§7).
 
+> **Rev. 3 (2026-08-17) — due-ness moved to the science file.** Rev. 2's placement rule
+> ("one test per mesocycle boundary", §4.1; resolved in §8 as the cadence knob) over-tested
+> short blocks: an 11- and a 21-day block produced FTP tests 21 days apart, inside the
+> noise floor `benchmarks.txt` §1 already named — the TASK prompt was overriding the
+> guideline it pointed at. `benchmarks.txt` now carries the mechanics as FLOOR-marked
+> rules (4-week same-anchor minimum, 8-12 week typical cadence, minimum meaningful
+> change, protocol lock, deload-end-vs-taper split), and the code defers to it:
+>
+> - The generate prompt names the boundary week as the *slot* and leaves due-ness to the
+>   guidelines, explicitly counting tests placed in the same span (the one fact the
+>   science file cannot know). A new **ANCHORS ON RECORD** user-content section
+>   (`_anchor_history_text()`, `coach/service/context.py`) supplies each anchor's last
+>   value, provenance and measured date — the dates the interval floor is judged against.
+> - `_warn_missing_boundary_benchmarks()` gains a fourth silence: any test — proposed in
+>   the batch, live before the span, or a measured logbook row — within `MIN_RETEST_DAYS`
+>   (`trainmate/benchmarks.py`) of the boundary. Any anchor silences, since the check
+>   cannot know which anchor a missing test would have measured; a false silence costs
+>   one un-nudged athlete where a false nag contradicts the generator.
+> - Adapt's last-day fallback (§4.2) inverted: a benchmark that cannot be moved to a
+>   fresh in-block day is POSTPONED (replaced with an easy session), not run compromised
+>   — a skipped test costs a retest, a wrong anchor mis-scales a block.
+> - `benchmark record --source` defaults to `manual`: a typed value is an assumption
+>   unless declared a test, so §3.4's seeding commands record what they are and cannot
+>   start the interval clock or satisfy the never-measured trigger.
+>
+> §4.1's prose below still describes the rev. 2 unconditional rule and §8's "cadence
+> knob — resolved" bullet is superseded accordingly; both read through this note.
+
 > **Rev. 2 (2026-08-04) — post-implementation reconciliation.** Rev. 1 was the
 > pre-implementation spec, written in the imperative future ("Add…", "Introduce…") with
 > "change this line" pointers. Phases 1 and 2 shipped and the architecture held: the

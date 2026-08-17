@@ -519,6 +519,63 @@ class TestBenchmarkPlacementGuards(unittest.TestCase):
         )
         self.assertIn("No benchmark scheduled in the boundary week of 'Base 1'", out)
 
+    def test_recent_planned_test_before_the_span_silences_the_warning(self):
+        """A test within MIN_RETEST_DAYS of the boundary means none is due there
+        (benchmarks.txt §1 floor) — warning would nag toward violating it."""
+        macro_id = self._macrocycle_with_boundary()
+        test_db.save_workout(
+            date="2026-08-10", sport_type="cycling", title="FTP Test",
+            description="[FTP Test]\n20-min test", benchmark_type="ftp_20min",
+            macrocycle_id=macro_id,
+        )
+        workouts = [{"date": "2026-08-28", "sport_type": "cycling", "title": "Z2"},
+                    {"date": "2026-08-30", "sport_type": "running", "title": "Long run"}]
+        _, out = self._capture(
+            coach_service._warn_missing_boundary_benchmarks,
+            workouts, [], test_db.get_mesocycles_for_macrocycle(macro_id), "2026-08-14",
+        )
+        self.assertEqual(out, "")
+
+    def test_recent_test_in_the_same_batch_silences_the_warning(self):
+        """The floor counts tests this run itself is placing, not only history."""
+        macro_id = self._macrocycle_with_boundary()
+        workouts = [
+            {"date": "2026-08-20", "sport_type": "cycling", "title": "FTP Test",
+             "benchmark_type": "ftp_20min"},
+            {"date": "2026-08-30", "sport_type": "running", "title": "Long run"},
+        ]
+        _, out = self._capture(
+            coach_service._warn_missing_boundary_benchmarks,
+            workouts, [], test_db.get_mesocycles_for_macrocycle(macro_id), "2026-08-03",
+        )
+        self.assertEqual(out, "")
+
+    def test_measured_logbook_result_silences_but_a_manual_seed_does_not(self):
+        """Only a measurement starts the interval clock — a seeded value is a guess."""
+        macro_id = self._macrocycle_with_boundary()
+        workouts = [{"date": "2026-08-28", "sport_type": "cycling", "title": "Z2"},
+                    {"date": "2026-08-30", "sport_type": "running", "title": "Long run"}]
+        mesos = test_db.get_mesocycles_for_macrocycle(macro_id)
+        seed = test_db.add_benchmark_result(
+            date="2026-08-15", sport_type="cycling", anchor_kind="ftp",
+            value=220.0, unit="W", source="manual",
+        )
+        _, out = self._capture(
+            coach_service._warn_missing_boundary_benchmarks,
+            workouts, [], mesos, "2026-08-14",
+        )
+        self.assertIn("No benchmark scheduled in the boundary week of 'Base 1'", out)
+        test_db.delete_benchmark_result(seed)
+        test_db.add_benchmark_result(
+            date="2026-08-15", sport_type="cycling", anchor_kind="ftp",
+            value=235.0, unit="W", source="test",
+        )
+        _, out = self._capture(
+            coach_service._warn_missing_boundary_benchmarks,
+            workouts, [], mesos, "2026-08-14",
+        )
+        self.assertEqual(out, "")
+
     def test_boundary_outside_the_generated_span_is_not_checked(self):
         macro_id = self._macrocycle_with_boundary()
         # The span stops well before the 2026-08-30 boundary, so there is nothing to warn
@@ -529,6 +586,24 @@ class TestBenchmarkPlacementGuards(unittest.TestCase):
             workouts, [], test_db.get_mesocycles_for_macrocycle(macro_id), "2026-08-03",
         )
         self.assertEqual(out, "")
+
+    def test_anchor_history_names_provenance_and_planned_tests(self):
+        """ANCHORS ON RECORD: a manual seed reads as never measured, and a planned test
+        before the span is listed so the interval floor can count it (§4.1)."""
+        macro_id = self._macrocycle_with_boundary()
+        test_db.add_benchmark_result(
+            date="2026-07-31", sport_type="cycling", anchor_kind="ftp",
+            value=220.0, unit="W", source="manual",
+        )
+        test_db.save_workout(
+            date="2026-08-10", sport_type="cycling", title="FTP Test",
+            description="[FTP Test]\n20-min test", benchmark_type="ftp_20min",
+            macrocycle_id=macro_id,
+        )
+        text = coach_service._anchor_history_text("2026-08-14")
+        self.assertIn("220 W", text)
+        self.assertIn("never measured by a test", text)
+        self.assertIn("2026-08-10 ftp_20min", text)
 
 
 if __name__ == "__main__":

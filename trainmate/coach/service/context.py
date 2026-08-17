@@ -413,6 +413,40 @@ class PmcContextMixin:
             out.append(f"    - {r['date']}: {measured(r)} recorded (no planned test)")
         return out
 
+    def _anchor_history_text(self, gen_start: str) -> str:
+        """ANCHORS ON RECORD: each anchor's latest value with its date and source — the
+        dates BENCHMARK PLACEMENT's interval floor is judged against (§4.1). Planned test
+        sessions count too, like §4.1's de-dup: a test performed but never recorded must
+        still hold the interval. Bounded below `gen_start` — the displaced plan's future
+        rows are live here and must not answer for days this run is rewriting."""
+        lines: List[str] = []
+        latest: Dict[str, Dict[str, Any]] = {}
+        tested: Dict[str, str] = {}
+        for r in self._db.get_benchmark_results():  # newest first
+            latest.setdefault(r['anchor_kind'], r)
+            if r.get('source') == 'test':
+                tested.setdefault(r['anchor_kind'], r['date'])
+        for kind, r in latest.items():
+            anchor = ANCHOR_KINDS.get(kind)
+            label = anchor.label if anchor else kind
+            when = (f"last tested {tested[kind]}" if kind in tested
+                    else "never measured by a test")
+            lines.append(
+                f"  - {label}: {format_value(kind, float(r['value']))} — recorded "
+                f"{r['date']} ({r.get('source', 'test')}); {when}"
+            )
+        # Tests on the calendar in the typical-cadence horizon (benchmarks.txt §1).
+        lookback = (
+            datetime.strptime(gen_start, "%Y-%m-%d").date() - timedelta(days=90)
+        ).strftime("%Y-%m-%d")
+        for w in self._db.get_workouts(start_date=lookback, end_date=gen_start):
+            if w.get('benchmark_type') and w['date'] < gen_start:
+                lines.append(
+                    f"  - Planned test on the calendar: {w['date']} "
+                    f"{w['benchmark_type']} ({w['sport_type']})"
+                )
+        return "\n".join(lines)
+
     def _planning_zone_currencies(self, as_of: str) -> Dict[str, str]:
         """`{sport: 'power'|'hr'}` for the sports the coach may prescribe zone targets in
         (DESIGN_intensity_distribution.md §9.8).

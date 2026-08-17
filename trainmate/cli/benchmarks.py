@@ -236,9 +236,13 @@ def add_benchmark_parser(subparsers):
         b_rec, "Test date: YYYY-MM-DD, 'today' (the default) or an offset like -2d"
     )
     b_rec.add_argument("--note", help="Protocol/conditions note")
+    # Defaults to the weaker claim: a typed-in value is an assumption unless the athlete
+    # says it came from a performed test — a seed must not start the §1 interval clock.
     b_rec.add_argument(
-        "--source", choices=["test", "manual", "modeled"], default="test",
-        help="How the value arrived (default: test)",
+        "--source", choices=["test", "manual", "modeled"], default="manual",
+        help="How the value arrived: 'test' = result of a performed fitness test, "
+             "'manual' = typed-in assumption or seed (default), 'modeled' = computed "
+             "estimate. Pass --source test when recording a real test result.",
     )
     b_rec.add_argument(
         "-y", "--yes", action="store_true", help="Skip the confirmation prompt"

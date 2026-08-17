@@ -6,6 +6,7 @@ from trainmate.types import Constraint, Workout
 from trainmate.adherence import analyze_adherence
 from trainmate.coach.proposals import GenerateProposal, normalize_load_fields
 from trainmate.sports import canonical_sport
+from trainmate.benchmarks import MIN_RETEST_DAYS
 from trainmate import intensity
 from trainmate.util import green, yellow, red, cmd, Progress
 import trainmate.coach.service as _svc
@@ -263,11 +264,34 @@ class WorkoutGenMixin:
                 w.get('benchmark_type') and win_start <= w['date'] <= end
                 for w in dated
             )
-            if not has_benchmark:
+            if has_benchmark:
+                continue
+            # The §1 interval floor wins: a test inside MIN_RETEST_DAYS of this boundary
+            # means none is due here, so warning would nag the athlete into violating the
+            # floor the generator just honored. Any anchor silences — the check cannot
+            # know which anchor a missing test would have measured, and a false silence
+            # costs one un-nudged athlete where a false nag contradicts the plan.
+            recent_start = (
+                end_obj - timedelta(days=MIN_RETEST_DAYS)
+            ).strftime("%Y-%m-%d")
+            recent_test = (
+                any(w.get('benchmark_type') and recent_start <= w['date'] < win_start
+                    for w in dated)
+                or any(
+                    w.get('benchmark_type') and w['date'] < gen_start
+                    for w in self._db.get_workouts(
+                        start_date=recent_start, end_date=end)
+                )
+                or any(
+                    r.get('source') == 'test' and recent_start <= r['date'] <= end
+                    for r in self._db.get_benchmark_results()
+                )
+            )
+            if not recent_test:
                 print(yellow(
                     f"No benchmark scheduled in the boundary week of '{m.get('name', '')}' "
-                    f"({win_start} to {end}). Consider regenerating — a block-boundary "
-                    f"fitness test keeps your zones calibrated."
+                    f"({win_start} to {end}), and none tested in the {MIN_RETEST_DAYS} "
+                    f"days before it. If a test is due, consider regenerating."
                 ))
 
     def _archive_and_teardown(self, from_date: str, verbose: bool = False) -> List[Workout]:
@@ -474,7 +498,8 @@ class WorkoutGenMixin:
             pmc_context=pmc_context,
             block_progress=block_progress,
             block_has_intensity=block_has_intensity,
-            zone_currencies=self._planning_zone_currencies(today_str)
+            zone_currencies=self._planning_zone_currencies(today_str),
+            anchor_history=self._anchor_history_text(gen_start_str)
         )
 
         # NOTE: workout generation is read-only w.r.t. coach learnings (see

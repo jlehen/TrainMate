@@ -112,7 +112,7 @@ class TestGoalDateType(unittest.TestCase):
         self.assertIn(f"training toward a horizon of {GOAL_DATE}", plan_user)
 
         gen_prompt = mock_client.complete.call_args_list[1][0][0]
-        self.assertIn("no goal-week exception applies", gen_prompt)
+        self.assertIn("a boundary week near it is an ordinary boundary", gen_prompt)
         self.assertNotIn("competes with the effort it is meant to", gen_prompt)
 
     @patch("trainmate.runtime.calendar_syncer")
@@ -133,7 +133,7 @@ class TestGoalDateType(unittest.TestCase):
 
         gen_prompt = mock_client.complete.call_args_list[1][0][0]
         self.assertIn("competes with the effort it is meant to", gen_prompt)
-        self.assertNotIn("no goal-week exception applies", gen_prompt)
+        self.assertNotIn("a boundary week near it is an ordinary boundary", gen_prompt)
 
     def test_event_date_for_macrocycle_is_none_for_horizon_goals(self):
         pin_clock(self, "2026-06-01")
