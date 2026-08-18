@@ -4,8 +4,8 @@
 
 Two problems, one root cause.
 
-**(a) ACWR fought block periodization.** `periodization.txt` §2B offers a Block style
-whose mesocycles change by "a steep, abrupt vertical step function". `training_load.txt`
+**(a) ACWR fought block periodization.** `periodization.md` §2B offers a Block style
+whose mesocycles change by "a steep, abrupt vertical step function". `training_load.md`
 told the coach to keep ACWR in 0.8–1.3, to trim planned volume above 1.3, and to
 "rebuild load gradually" below 0.8. Those instructions are incompatible: block
 periodization is *made of* deliberate steps, and ACWR flags every step as a defect.
@@ -98,7 +98,7 @@ the mirror; that is a separate change, not a defect here.
 
 Dropping ACWR removes the most block-hostile bands, but a ratio is still a ratio: a
 transmutation block drives ATL:CTL to ~0.7 by design. So the science file gains
-`training_load.txt` §4, "Planned vs unplanned":
+`training_load.md` §4, "Planned vs unplanned":
 
 > TSB and ATL:CTL detect UNINTENDED load. Judge the athlete's numbers against the PLAN,
 > not against a universal band.

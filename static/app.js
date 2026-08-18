@@ -435,7 +435,7 @@ function updateMetrics(metrics, baseline) {
     } else { sleepVal.innerText = "--"; sleepBase.innerText = "baseline: --"; sleepBadge.style.display = "none"; }
 
     // 4. ATL:CTL — relative overload. Only the high end warns: a LOW ratio is a taper,
-    // deload, or intensity block doing its job (training_load.txt §3/§4).
+    // deload, or intensity block doing its job (training_load.md §3/§4).
     const ratioVal = document.querySelector("#metric-load-ratio .metric-value");
     const ratioBase = document.querySelector("#metric-load-ratio .metric-baseline");
     const ratioBadge = document.getElementById("load-ratio-badge");

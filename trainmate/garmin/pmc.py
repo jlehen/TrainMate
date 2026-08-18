@@ -17,7 +17,7 @@ from trainmate.garmin.load import _hr_zone_coverage, activity_load, compute_load
 
 def load_ratio(atl: Optional[float], ctl: Optional[float]) -> Optional[float]:
     """ATL/CTL — fatigue relative to the athlete's own fitness base, the scale-invariant
-    companion to TSB's absolute difference (training_load.txt §3).
+    companion to TSB's absolute difference (training_load.md §3).
 
     None when either EWMA is NULL (pre-recompute row) or CTL has not warmed above zero:
     there is no base to divide by, and a ratio against ~0 is noise, not a spike."""
@@ -52,7 +52,7 @@ def compute_pmc(
         atl_d = atl_{d-1} + (load_d - atl_{d-1}) / atl_days
         tsb_d = ctl_{d-1} - atl_{d-1}   # yesterday's values — the form you woke up with
 
-    The TSB off-by-one is deliberate and load-bearing (training_load.txt §1): today's
+    The TSB off-by-one is deliberate and load-bearing (training_load.md §1): today's
     form must NOT include today's workout. Returns {ISO date -> (ctl, atl, tsb)} at
     full precision — rounding moves to display, so the seed stays exact
     (DESIGN_progress_timeline.md §4). Empty {} on a degenerate span.

@@ -327,7 +327,7 @@ three submodules:
   `__init__.py`, so the patch targets and import paths are the flat ones above.
 
 ### `_load_science_guidelines(app_science_dir, science_dir) → str`
-Module-level function in `formatting.py`. Concatenates all `*.txt` files from
+Module-level function in `formatting.py`. Concatenates all `*.md` files from
 `trainmate/science/` (built-in) and `science/` (user-provided), **one `====` banner per
 source** so the coach can tell whose material it is reading, and so the documents' own
 markdown headings are visibly not the prompt's (`DESIGN_prompt_structure.md` §3). The
@@ -350,7 +350,7 @@ headers alone would not tell it which corpus yields, and the user corpus can be 
 say anything.
 
 The one carve-out: **a built-in file may hold a hard rule when that rule can only ever
-reduce load.** `recovery_metrics.txt` is protective in whole, and `training_load.txt` §5's
+reduce load.** `recovery_metrics.md` is protective in whole, and `training_load.md` §5's
 final directive is flagged inline as a floor. Anything that would add or sustain load is a
 default the user layer overrides.
 
@@ -1987,7 +1987,7 @@ Relative overload — fatigue against the athlete's own fitness base.
 at **read time** and never stored; `None` when either is NULL or CTL ≤ 0 (no base to
 divide by). Colouring (`util.color_load_ratio`) is **overload-only**: > 1.5 red,
 1.3–1.5 yellow, at or below 1.3 bare — a *low* ratio is phase-dependent, and
-`training_load.txt` §4 judges the ratio against the planned block rather than a universal
+`training_load.md` §4 judges the ratio against the planned block rather than a universal
 band. This replaced the rolling-sum acute/chronic/ACWR model (7/28-day sums with the
 0.8–1.3 "sweet spot"), whose stored columns are dropped by guarded DDL in `db/base.py`
 and whose universal band fought block periodization. See DESIGN_load_ratio.md.
@@ -2040,9 +2040,9 @@ all three; only the delivery differs.
   the block's planned load is not cut on a non-training artifact.
 
 ### Science Guidelines Files
-- `trainmate/science/` — built-in: `benchmarks.txt`, `periodization.txt`,
-  `recovery_metrics.txt`, `training_load.txt`
-- `science/` — user-provided; empty by default; any `.txt` files added here are
+- `trainmate/science/` — built-in: `benchmarks.md`, `periodization.md`,
+  `recovery_metrics.md`, `training_load.md`
+- `science/` — user-provided; empty by default; any `.md` files added here are
   injected into every LLM prompt.
 - The two are layered — built-in owns measurement and vocabulary, user owns
   prescription, and the citation only runs one way. Contract in

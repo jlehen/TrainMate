@@ -714,7 +714,7 @@ the case that recurs on every run; this one happens once per bootstrap.
 
 - **Prompt/science changes do *not* invalidate reuse (for now).** The evidence
   fingerprint hashes only activity/metric inputs, *not* the prompt or science
-  files. So editing a prompt or `science/*.txt` reuses a stale reconstruction
+  files. So editing a prompt or `science/*.md` reuses a stale reconstruction
   until the underlying data changes; `--force` is the manual escape hatch.
   **Action:** add a code comment at the fingerprint computation making this
   limitation explicit, so the omission reads as deliberate, not forgotten. *As

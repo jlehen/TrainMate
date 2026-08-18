@@ -17,15 +17,15 @@ COACHING ROLE AND OBJECTIVES:
 ================================================================================
 START OF SPORTS SCIENCE GUIDELINES
 ================================================================================
-=== Guidelines from benchmarks.txt ===
+=== Guidelines from benchmarks.md ===
 BENCHMARK (FITNESS TEST) GUIDELINES
 ===================================
 ...
-=== Guidelines from periodization.txt ===
+=== Guidelines from periodization.md ===
 # TrainMate Engine Architecture: Periodization & Training Structure Guide
 ## 1. Core Architectural Overview
 ...
-=== Guidelines from jeremie_science_summary.txt ===
+=== Guidelines from jeremie_science_summary.md ===
 ...
 ================================================================================
 END OF SPORTS SCIENCE GUIDELINES
@@ -95,7 +95,7 @@ user message's request are the lede, not a section.
 
 Markdown headings would be the obvious single convention for everything — except that the
 science files *are* markdown, with their own `#`, `##` and `###` at whatever depth their
-author chose. `periodization.txt` opens with a `#` title and `## 1. Core Architectural
+author chose. `periodization.md` opens with a `#` title and `## 1. Core Architectural
 Overview`. Under a markdown-only scheme, that heading and `## TASK` would be siblings, and
 a quoted document's internal structure would read as the prompt's.
 
@@ -111,7 +111,7 @@ START OF TRAINMATE SPORTS SCIENCE GUIDELINES
 ================================================================================
 TrainMate's own reference material, shipped with the app.
 
---- benchmarks.txt ---
+--- benchmarks.md ---
 ...
 ================================================================================
 END OF TRAINMATE SPORTS SCIENCE GUIDELINES
@@ -123,11 +123,11 @@ START OF ATHLETE-PROVIDED SPORTS SCIENCE GUIDELINES
 Reference material the athlete supplied themselves — the training philosophy
 and sources they want their coaching drawn from.
 
---- jeremie_science_summary.txt ---
+--- jeremie_science_summary.md ---
 ...
 ```
 
-The per-file marker drops from `=== Guidelines from X.txt ===` to `--- X.txt ---`: inside a
+The per-file marker drops from `=== Guidelines from X.md ===` to `--- X.md ---`: inside a
 banner, the `=` rule is taken, and the lighter marker keeps the nesting visible.
 
 `formatting._load_science_guidelines` emits the banners itself rather than returning bare

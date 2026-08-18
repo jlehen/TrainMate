@@ -53,7 +53,7 @@ class TestUtils(unittest.TestCase):
         with patch("trainmate.util.is_color_enabled", return_value=True):
             # Only the overload end is coloured. A LOW ratio is phase-dependent
             # (taper, deload, intensity block), so it must render bare — see
-            # training_load.txt §3/§4.
+            # training_load.md §3/§4.
             self.assertEqual("0.70", color_load_ratio(0.70))
             self.assertEqual("1.10", color_load_ratio(1.10))
             # Bands are half-open (> 1.3 yellow, > 1.5 red), so both edges belong to

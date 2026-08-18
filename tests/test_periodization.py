@@ -838,17 +838,20 @@ class TestPeriodization(unittest.TestCase):
             mock_config.app_science_dir = temp_app_dir
             mock_config.science_dir = temp_user_dir
 
-            with open(os.path.join(temp_app_dir, "app_science.txt"), "w") as f:
+            with open(os.path.join(temp_app_dir, "app_science.md"), "w") as f:
                 f.write("App guideline text")
-            with open(os.path.join(temp_user_dir, "user_science.txt"), "w") as f:
+            with open(os.path.join(temp_user_dir, "user_science.md"), "w") as f:
                 f.write("User guideline text")
+            with open(os.path.join(temp_user_dir, "notes.txt"), "w") as f:
+                f.write("Ignored guideline text")
 
             guidelines = coach_service._load_science_guidelines()
 
-            self.assertIn("--- app_science.txt ---", guidelines)
+            self.assertIn("--- app_science.md ---", guidelines)
             self.assertIn("App guideline text", guidelines)
-            self.assertIn("--- user_science.txt ---", guidelines)
+            self.assertIn("--- user_science.md ---", guidelines)
             self.assertIn("User guideline text", guidelines)
+            self.assertNotIn("Ignored guideline text", guidelines)
             # Each source gets its own banner, so the coach can tell whose material it is
             # reading (DESIGN_prompt_structure.md §3): the app's text must close out before
             # the athlete's banner opens.
@@ -876,7 +879,7 @@ class TestPeriodization(unittest.TestCase):
         try:
             mock_config.app_science_dir = temp_app_dir
             mock_config.science_dir = os.path.join(temp_app_dir, "does_not_exist")
-            with open(os.path.join(temp_app_dir, "app_science.txt"), "w") as f:
+            with open(os.path.join(temp_app_dir, "app_science.md"), "w") as f:
                 f.write("App guideline text")
 
             guidelines = coach_service._load_science_guidelines()

@@ -43,7 +43,7 @@
   For instance, instead of:
 
     for filename in file_list;
-        if filename.endswith(".txt"):
+        if filename.endswith(".md"):
           try:
             do_something(filename)
           except Exception as e:
@@ -52,7 +52,7 @@
   Use:
 
     for filename in file_list;
-        if not filename.endswith(".txt"):
+        if not filename.endswith(".md"):
           continue
         try:
           do_something(filename)

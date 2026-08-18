@@ -279,7 +279,7 @@ prescription the athlete trains from, and stays as complete as the session requi
         (§7). Constraints and `stress` are hashed because they now feed the analysis input
         as discounting context (DESIGN_richer_analysis_evidence.md §5, DESIGN_constraints.md §6).
 
-        DELIBERATE OMISSIONS (§11 / richer-evidence §5): the prompt text and science/*.txt
+        DELIBERATE OMISSIONS (§11 / richer-evidence §5): the prompt text and science/*.md
         files are NOT hashed; neither is *baseline recomputation* that shifts a deviation
         without any in-window metric changing (baselines track the metrics, so they move
         together in practice). Editing a prompt/guideline or a bare baseline recompute will

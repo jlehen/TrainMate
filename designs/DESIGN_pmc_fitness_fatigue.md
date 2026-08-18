@@ -61,7 +61,7 @@
 > instead of caveating numbers that aren't shown — and `tm status` shows it even
 > then. (4) The TSB-lag footnote appears only where TSB itself is shown.
 
-`trainmate/science/training_load.txt` (f0bb707) documents the full Performance Management
+`trainmate/science/training_load.md` (f0bb707) documents the full Performance Management
 Chart model — CTL (fitness), ATL (fatigue), TSB (form), and the CTL ramp rate —
 and its §5 coaching directives tell the coach things like *"when TSB falls below
 −30, default to recovery"* and *"taper so TSB rises into +5..+25 by event day"*.
@@ -92,7 +92,7 @@ free from the science file.
 - **Week-over-week progression is unguided.** The science caps CTL ramp rate
   (~3–5 sustainable, >8 red flag), but no ramp number exists anywhere — plans
   can climb unsustainably for weeks while ACWR stays in the sweet spot, the
-  exact divergence `training_load.txt` warns about (§5 directives, after the file's
+  exact divergence `training_load.md` warns about (§5 directives, after the file's
   ACWR→ATL:CTL renumbering).
 - **The user can't see fitness either.** `tm status` shows ACWR/acute/chronic
   but nothing answers "am I fitter than last month?" or "how fresh am I?" —
@@ -171,7 +171,7 @@ tsb_d = ctl_{d-1} − atl_{d-1}          # yesterday's values, per the science f
   picking the convention the athlete's other tools use makes numbers
   comparable).
 - **TSB off-by-one is deliberate and load-bearing:** today's form is what you
-  woke up with — it must not include today's workout. `training_load.txt` §1
+  woke up with — it must not include today's workout. `training_load.md` §1
   states `TSB = CTL(yesterday) − ATL(yesterday)`; implement exactly that, and
   pin it with a test (§8), because it is the classic mistake.
 - **Span end is `max(last activity, last metrics)`**, not the last metrics date.
@@ -694,7 +694,7 @@ retention.
   > **Superseded (2026-07-31, DESIGN_load_ratio.md) — this non-goal was reversed.**
   > ACWR *was* retired, and its relative-overload role handed to the **`ATL:CTL` load
   > ratio**, which divides the two EWMAs this document introduced (so it needed no new
-  > columns, no new config, and no new sweep). `training_load.txt` was rewritten to
+  > columns, no new config, and no new sweep). `training_load.md` was rewritten to
   > match: its §3 is now the ATL:CTL section.
   >
   > **Scope of the supersede: this entire document, above and below.** Every mention

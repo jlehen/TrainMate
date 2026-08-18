@@ -160,7 +160,7 @@ see it.
 
 ### Keep Garmin's zone boundaries at their defaults
 
-TrainMate's zone vocabulary (`trainmate/science/zones.txt`) and its load math
+TrainMate's zone vocabulary (`trainmate/science/zones.md`) and its load math
 (`trainmate/garmin/load.py`) assume Garmin's **default** zone boundaries, and
 Garmin buckets every activity against whatever your profile says. Two settings
 to pin, once, before your first pull:
@@ -218,7 +218,7 @@ training window, what's your current fitness, what constraints (time, injuries,
 other goals) does the plan need to respect. Then turn the outcome of that
 conversation into your `goal add` call(s).
 
-**The `science/` directory.** Every `.txt` file in the top-level `science/`
+**The `science/` directory.** Every `.md` file in the top-level `science/`
 directory (gitignored, empty by default) is injected into TrainMate's coaching
 prompts alongside the built-in guidelines in `trainmate/science/` — it's how
 you teach the coach the training philosophy you actually want it to follow,
@@ -228,7 +228,7 @@ The easiest way to build one of these files is to pick articles, YouTube
 videos, or podcasts that reflect your preferred approach, pull their text with
 [Link2Text](https://github.com/jlehen/Link2Text), and hand the result to an
 LLM to synthesize into a single guideline doc. For reference, here are the
-sources TrainMate's author used to generate `science/jeremie_science_summary.txt`:
+sources TrainMate's author used to generate `science/jeremie_science_summary.md`:
 
 | # | Title | URL |
 | - | --- | --- |

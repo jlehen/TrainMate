@@ -5,8 +5,8 @@
 > **Rev. 3 (2026-08-17) — due-ness moved to the science file.** Rev. 2's placement rule
 > ("one test per mesocycle boundary", §4.1; resolved in §8 as the cadence knob) over-tested
 > short blocks: an 11- and a 21-day block produced FTP tests 21 days apart, inside the
-> noise floor `benchmarks.txt` §1 already named — the TASK prompt was overriding the
-> guideline it pointed at. `benchmarks.txt` now carries the mechanics as FLOOR-marked
+> noise floor `benchmarks.md` §1 already named — the TASK prompt was overriding the
+> guideline it pointed at. `benchmarks.md` now carries the mechanics as FLOOR-marked
 > rules (4-week same-anchor minimum, 8-12 week typical cadence, minimum meaningful
 > change, protocol lock, deload-end-vs-taper split), and the code defers to it:
 >
@@ -58,7 +58,7 @@ source of truth for the athlete's thresholds — feeding the coaching prompt, th
 replan trigger, and long-term progress tracking.
 
 *Before this design*, a benchmark existed only as prose in
-`trainmate/science/benchmarks.txt`. The coach *could* schedule one as an ordinary
+`trainmate/science/benchmarks.md`. The coach *could* schedule one as an ordinary
 workout, but nothing placed them reliably, nothing stopped daily `adapt` from softening
 one into meaninglessness, and there was nowhere to put the result. This design closes
 those three gaps.
@@ -194,7 +194,7 @@ entries behave. Two reads answer everything:
 
 - **"What is my FTP right now?"** → the latest `cycling` / `ftp` row.
 - **"Is my fitness rising?"** → read down the column: 235 → 242 → 250. That
-  progression *is* the signal `benchmarks.txt` cares about ("a rising anchor
+  progression *is* the signal `benchmarks.md` cares about ("a rising anchor
   confirms progressive overload; a stalled or falling anchor signals plateau").
 
 A single overwritten scalar cannot show that trend; a dated logbook can. One
@@ -338,7 +338,7 @@ snapshotted, prompted, trended and displayed like everything else.
 ### 4.1 Placement — instruct, then verify
 
 Benchmarks belong at block boundaries and on a ~4–6 week cadence
-(`benchmarks.txt` §1). The split of labor plays to each side's strength:
+(`benchmarks.md` §1). The split of labor plays to each side's strength:
 
 - **The LLM places.** The generation prompt (`coach/engine/workouts.py:155-167`)
   instructs the coach to schedule one benchmark of the appropriate kind in each
@@ -365,7 +365,7 @@ maximal test is physiologically the same event as the goal effort, so in a taper
 spends the freshness it is measuring — and the taper deliberately lifts performance
 above the tested value, making a mid-taper anchor stale in the optimistic direction
 by race day. The final boundary test already sets a current anchor, and
-`benchmarks.txt` §1 puts re-tests inside ~3-4 weeks in the noise. The clause also
+`benchmarks.md` §1 puts re-tests inside ~3-4 weeks in the noise. The clause also
 collided with the boundary rule whenever the taper was short enough to make "the
 block's final week" and "the last week before the goal" adjacent.
 

@@ -268,7 +268,7 @@ def _science_block(s_dir: str, title: str, provenance: str) -> str:
         return ""
     docs = []
     for filename in sorted(os.listdir(s_dir)):
-        if not filename.endswith(".txt"):
+        if not filename.endswith(".md"):
             continue
         filepath = os.path.join(s_dir, filename)
         try:

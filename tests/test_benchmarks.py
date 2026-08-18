@@ -521,7 +521,7 @@ class TestBenchmarkPlacementGuards(unittest.TestCase):
 
     def test_recent_planned_test_before_the_span_silences_the_warning(self):
         """A test within MIN_RETEST_DAYS of the boundary means none is due there
-        (benchmarks.txt §1 floor) — warning would nag toward violating it."""
+        (benchmarks.md §1 floor) — warning would nag toward violating it."""
         macro_id = self._macrocycle_with_boundary()
         test_db.save_workout(
             date="2026-08-10", sport_type="cycling", title="FTP Test",

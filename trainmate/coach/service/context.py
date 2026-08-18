@@ -435,7 +435,7 @@ class PmcContextMixin:
                 f"  - {label}: {format_value(kind, float(r['value']))} — recorded "
                 f"{r['date']} ({r.get('source', 'test')}); {when}"
             )
-        # Tests on the calendar in the typical-cadence horizon (benchmarks.txt §1).
+        # Tests on the calendar in the typical-cadence horizon (benchmarks.md §1).
         lookback = (
             datetime.strptime(gen_start, "%Y-%m-%d").date() - timedelta(days=90)
         ).strftime("%Y-%m-%d")

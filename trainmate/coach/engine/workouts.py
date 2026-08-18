@@ -219,7 +219,7 @@ class WorkoutLogicMixin:
             duration_desc = f"{int(weeks)} week{'s' if weeks != 1 else ''} ({num_days} days)"
         else:
             duration_desc = f"{num_days} day{'s' if num_days != 1 else ''}"
-        # Whether a test is DUE is benchmarks.txt §1's call (triggers, cadence, floor);
+        # Whether a test is DUE is benchmarks.md §1's call (triggers, cadence, floor);
         # this section names only the slot and the one fact the guidelines cannot know —
         # the tests this same span is placing (DESIGN_benchmark_workouts.md §4.1). The
         # no-test-near-goal carve-out is event logic — a horizon goal has no event for a

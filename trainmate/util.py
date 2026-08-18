@@ -138,7 +138,7 @@ def cmd(text: str, *, quote: bool = True) -> str:
 
 def color_load_ratio(ratio: float) -> str:
     """ATL/CTL (fatigue vs fitness) coloring — colors only the overload end, phase-blind
-    (training_load.txt §3).
+    (training_load.md §3).
 
     > 1.5 red (excessive relative spike), 1.3-1.5 yellow (caution). Everything at or
     below 1.3 stays uncolored: a *low* ratio is phase-dependent, not a fault — an
@@ -154,7 +154,7 @@ def color_load_ratio(ratio: float) -> str:
 
 
 # The printed CTL | ATL | TSB triple won't subtract to the shown TSB, because TSB is
-# CTL(yesterday) - ATL(yesterday) (training_load.txt §1) while CTL/ATL are today's. This
+# CTL(yesterday) - ATL(yesterday) (training_load.md §1) while CTL/ATL are today's. This
 # lag is correct (matching TrainingPeaks) but reads as an arithmetic error, so this
 # one-line footnote rides wherever TSB is surfaced (per-day prompt block, coach summary,
 # tm status). Lives here — not in coach.formatting — because both the CLI and the coach

@@ -527,7 +527,7 @@ class BaseDB:
                 )
             """)
             # ACWR retired in favour of ATL/CTL, which reads off the PMC EWMAs already on
-            # this row (training_load.txt §3). Pure DDL, guarded by column presence, so
+            # this row (training_load.md §3). Pure DDL, guarded by column presence, so
             # it is idempotent and needs no separate migration script.
             cursor.execute("PRAGMA table_info(athlete_metrics_cache)")
             mcols = [row['name'] for row in cursor.fetchall()]

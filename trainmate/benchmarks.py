@@ -48,7 +48,7 @@ ANCHOR_KINDS: Dict[str, AnchorKind] = {
 # are the `--<kind>` value flags `benchmark record` accepts.
 LOGBOOK_KINDS: List[str] = [k for k in ANCHOR_KINDS if k != "max_hr"]
 
-# science/benchmarks.txt §1's minimum-interval FLOOR: same-anchor tests closer than this
+# science/benchmarks.md §1's minimum-interval FLOOR: same-anchor tests closer than this
 # measure noise. Code reasoning about test spacing reads the number here, not the prose.
 MIN_RETEST_DAYS = 28
 
