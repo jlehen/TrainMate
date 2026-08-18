@@ -64,9 +64,7 @@ does the coaching reasoning.
     nulls out training on its dates; a `hard` constraint scoped to a sport, and every `soft`
     one, is advisory — preferences the coach honors by judgement. Whether a constraint
     *reshapes the plan* is **derived** from its
-    magnitude and confirmed by you — never a category you pick blind. (Life events are
-    just plan-shaping constraints; the old `lifeevent` command has been removed in
-    favor of `constraint`.)
+    magnitude and confirmed by you — never a category you pick blind.
   - *Daily context* adds **weighted signals** (alcohol, poor sleep, stress)
     ingested automatically from tagged Google Calendar events. These don't
     reshape the plan; they help the daily adaptation tell lifestyle noise from
@@ -92,10 +90,12 @@ does the coaching reasoning.
   context events back in.
 - **Adherence tracking** — compares planned vs. completed and flags misses,
   load/duration mismatches, and rest-day violations.
-- **Time in zone, per sport** — TSS folds volume and intensity into one number,
-  so easy days drifting to tempo read as flat weekly load at 100% adherence.
-  `tm progress` puts a weekly zone table under the load table for each sport you
-  train — what you measured behind today, what the plan prescribes ahead of it.
+- **Time in zone, per sport** — a single load number like TSS blends volume
+  and intensity together, so a week where your easy days quietly drifted into
+  tempo can still show the planned load and 100% adherence. The weekly
+  time-in-zone table `tm progress` prints under the load table catches exactly
+  that: for each sport you train, the minutes you actually spent in each zone
+  behind today, next to what the plan prescribes ahead of it.
 - **Manual overrides** — add, swap, or remove individual workouts by hand;
   adaptation re-balances around them.
 
@@ -116,67 +116,76 @@ internals work, see the [Architecture Document](ARCHITECTURE.md).
 
 ## Getting Started
 
+### Quick start
+
+The whole path, end to end — every step is detailed in the sections below:
+
+1. **Install** — run `./tm` once (it creates `venv/` and stops), then
+   `venv/bin/pip install -r requirements.txt`.
+2. **Configure** — copy `config_template.yaml` to `config.yaml` and fill in
+   your OpenRouter key, Google Calendar + service account, Garmin login, and
+   athlete profile ([Configuration](#configuration)).
+3. **Pin Garmin's settings** — turn off automatic threshold detection and keep
+   the default zones on the right basis
+   ([One-time Garmin settings](#one-time-garmin-settings)).
+4. **Say what you're training for** —
+   `./tm goal add "Marathon Prep" "2026-10-15" running`.
+5. **Record your thresholds** — `./tm benchmark record cycling --ftp 220`
+   (skippable: with nothing on record the coach prescribes by feel and
+   schedules a benchmark test to establish the numbers).
+6. **Generate** — `./tm plan generate`, then `./tm workout generate`; the
+   workouts land in your Google Calendar.
+7. **Live with it** — `./tm data pull && ./tm workout adapt` daily, and
+   `./tm status` whenever you want to know where you stand.
+
 ### Prerequisites
 
 - Python 3.10+
 - [OpenRouter API key](https://openrouter.ai/) for LLM access
 - A Garmin Connect account (for daily metrics and activities)
-- A Google Service Account with access to your Google Calendar (for workout sync)
+- A Google Service Account with access to your Google Calendar (for workout
+  sync — [Configuration](#configuration) walks through creating one)
 
 The `./tm` wrapper is the everyday entry point: it runs the CLI inside the
 repo's own virtualenv, creating `venv/` on first run. Install the dependencies
 into it once:
 ```bash
-./tm            # first run creates venv/
+./tm            # first run creates venv/ and stops
 venv/bin/pip install -r requirements.txt
 ```
 Every example below uses `./tm`; `python trainmate_cli.py` is the same thing
 if you manage your own environment.
 
-### Turn off Garmin's automatic threshold detection
+### One-time Garmin settings
 
-**Do this before you record your first benchmark.** In Garmin Connect, disable
-**automatic FTP detection** and **automatic lactate-threshold detection** — they are two
-independent settings, and turning off one leaves the other drifting.
+Garmin buckets every activity into heart-rate and power zones the moment it is
+recorded, using whatever thresholds and zone boundaries your profile holds at
+the time — and there is no raw stream to re-bucket later. TrainMate reads
+those buckets as-is, so pin four settings in Garmin Connect before your first
+pull:
 
-TrainMate treats the values you record with `benchmark record` as authoritative. Garmin,
-however, buckets each activity into heart-rate and power zones using *its own* threshold
-values as they stood at the time. When Garmin auto-detects a new FTP, the Z4/Z5 boundary
-moves, and from then on the same effort lands one zone lower. A training block then looks
-easier than it was, for no reason visible anywhere in the data.
+1. Disable **automatic FTP detection**.
+2. Disable **automatic lactate-threshold detection** (a separate setting —
+   turning off one leaves the other on).
+3. **Power zones**: keep the default %FTP bands (the Coggan 7-zone model).
+   Don't hand-tune the percentages.
+4. **Heart-rate zones**: set the basis to **%LTHR** (not %max HR) and keep the
+   default bands.
 
-Nothing can be recomputed after the fact: the bucketing is already done when the activity
-arrives and there is no raw stream to re-bucket. So this fixes the future only — every
-activity already stored was bucketed under whatever zones were in force then. If an
-intensity report shows hard minutes falling sharply for no visible reason, an FTP
-auto-bump moving the boundary is a likely explanation. (Manually editing your Garmin zones
-has the same effect, and is invisible in the same way.)
+Then one habit: whenever `./tm benchmark record` establishes a new FTP or
+LTHR, enter the same value in Garmin Connect. Change the anchor values, never
+the percentage bands.
 
-This matters more for the sessions ahead of you than for the ones behind. A *measurement*
-compares like with like, so a moved boundary shows up as a one-off step; a *prescription*
-outlives the moment it was written. With auto-detection left on, two sessions planned
-identically six months apart mean different efforts, and neither you nor the coach can
-see it.
-
-### Keep Garmin's zone boundaries at their defaults
-
-TrainMate's zone vocabulary (`trainmate/science/zones.md`) and its load math
-(`trainmate/garmin/load.py`) assume Garmin's **default** zone boundaries, and
-Garmin buckets every activity against whatever your profile says. Two settings
-to pin, once, before your first pull:
-
-- **Power zones**: leave the default %FTP bands (Garmin ships the Coggan
-  7-zone model). Don't hand-tune the percentages.
-- **Heart-rate zones**: set the basis to **%LTHR** (not %max HR) and leave the
-  default bands. LTHR is a trained, benchmarkable anchor like FTP; %max HR is
-  not, so leaving zones on it quietly de-anchors your HR data from the
-  benchmark logbook. Switching the basis re-bands *future* activities — a
-  one-off step in intensity history — so do it early and then leave it alone.
-
-The **values** behind those percentages are the one thing you *should* edit:
-after `./tm benchmark record` establishes a new FTP or LTHR, enter the same
-number in Garmin Connect so future activities bucket against the new anchor.
-Change the anchor value, never the percentage bands.
+Why it matters: TrainMate treats your benchmark logbook as the truth about
+your thresholds, and its zone vocabulary (`trainmate/science/zones.md`) and
+load math (`trainmate/garmin/load.py`) assume Garmin's default bands sit on
+those anchors. If Garmin silently auto-bumps your FTP, the Z4/Z5 boundary
+moves and the same effort starts landing one zone lower — a training block
+looks easier than it was, and two sessions prescribed identically six months
+apart mean different efforts, with nothing in the data to show it. The %LTHR
+basis matters for the same reason: LTHR is a benchmarkable anchor like FTP,
+while %max HR is not, so leaving HR zones on it quietly de-anchors your HR
+data from the logbook.
 
 ### Configuration
 
@@ -200,6 +209,19 @@ documentation staying in the template.) The blocks you must fill:
   (the coach weights planning toward higher-certainty days), and what
   equipment is at hand. The plan is built around this block, so fill it
   honestly rather than optimistically.
+
+If you don't have a Google service account yet, it's a one-time setup:
+
+1. In the [Google Cloud Console](https://console.cloud.google.com/), create
+   (or pick) a project and enable the **Google Calendar API** for it.
+2. Create a **service account** (no roles needed), add a **JSON key** to it,
+   and save the downloaded file as `service_account.json` in the repo root.
+3. In Google Calendar, open the settings of the calendar your workouts should
+   land in and **share it with the service account's email** (the
+   `…@….iam.gserviceaccount.com` address from the JSON) with **"Make changes
+   to events"** permission.
+4. That calendar's ID — shown under "Integrate calendar" on the same settings
+   page — is what goes in `google.calendar_id`.
 
 Everything else in the template is optional tuning and documented inline —
 sensible defaults apply when a key is commented out.
@@ -285,7 +307,7 @@ tests aren't suppressed (there's no event for them to compete with).
 regeneration.
 
 Record your current thresholds — the coach prescribes workout targets from
-these (remember to [turn off Garmin's auto-detection](#turn-off-garmins-automatic-threshold-detection) first):
+these (remember to pin the [one-time Garmin settings](#one-time-garmin-settings) first):
 ```bash
 ./tm benchmark record cycling --ftp 220
 ./tm benchmark record running --lthr 165
@@ -311,6 +333,13 @@ run `data bootstrap` once after backfilling: it reverse-engineers the training
 blocks you actually did and seeds coach learnings from them, so the coach
 starts warm instead of cold.
 
+When you just want to know where things stand, one command answers:
+```bash
+./tm status
+```
+It shows your current state and recent recovery metrics, your active goals,
+and what the coach has learned about you so far.
+
 See where the plan is going, and how it is actually being executed:
 ```bash
 ./tm progress                  # every sport you train
@@ -318,8 +347,9 @@ See where the plan is going, and how it is actually being executed:
 ./tm progress --blocks         # per mesocycle, graded on its focus
 ```
 The load half (CTL/ATL/TSB, the projection, the weekly bars) is always
-whole-athlete — naming a sport scopes the zone tables only, because a
-running-only CTL is not a quantity. To see one session's recording rather than a
+whole-athlete — naming a sport scopes the zone tables only, because fitness
+and fatigue accumulate in one body: a running-only CTL isn't a meaningful
+number. To see one session's recording rather than a
 week's, `data show-activities --zones` gives you per-activity zones and the
 coverage that tells you when the strap dropped out.
 
@@ -396,9 +426,10 @@ Two things to know when you regenerate:
 
 ## Running the Web UI
 
-To start the Flask server locally:
+To start the Flask server locally (the dependencies live in the repo's
+virtualenv):
 ```bash
-python trainmate_web.py
+venv/bin/python trainmate_web.py
 ```
 Then visit `http://127.0.0.1:5000` in your browser.
 
@@ -456,3 +487,7 @@ Setup:
 Only allow-listed chat ids are served. Because the bot can't ask for
 confirmation, destructive commands (`wipe`, `rm`) are declined unless you pass
 their `-y`/`--yes` flag.
+
+## License
+
+TrainMate is released under the [BSD 3-Clause License](LICENSE).
