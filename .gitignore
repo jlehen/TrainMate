@@ -1,6 +1,7 @@
 .claude
 TODO
-science
+# Top-level only: a bare "science" would also swallow trainmate/science/, the tracked built-ins
+/science/
 
 # Virtual environment
 venv/

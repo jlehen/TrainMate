@@ -158,6 +158,26 @@ outlives the moment it was written. With auto-detection left on, two sessions pl
 identically six months apart mean different efforts, and neither you nor the coach can
 see it.
 
+### Keep Garmin's zone boundaries at their defaults
+
+TrainMate's zone vocabulary (`trainmate/science/zones.txt`) and its load math
+(`trainmate/garmin/load.py`) assume Garmin's **default** zone boundaries, and
+Garmin buckets every activity against whatever your profile says. Two settings
+to pin, once, before your first pull:
+
+- **Power zones**: leave the default %FTP bands (Garmin ships the Coggan
+  7-zone model). Don't hand-tune the percentages.
+- **Heart-rate zones**: set the basis to **%LTHR** (not %max HR) and leave the
+  default bands. LTHR is a trained, benchmarkable anchor like FTP; %max HR is
+  not, so leaving zones on it quietly de-anchors your HR data from the
+  benchmark logbook. Switching the basis re-bands *future* activities — a
+  one-off step in intensity history — so do it early and then leave it alone.
+
+The **values** behind those percentages are the one thing you *should* edit:
+after `./tm benchmark record` establishes a new FTP or LTHR, enter the same
+number in Garmin Connect so future activities bucket against the new anchor.
+Change the anchor value, never the percentage bands.
+
 ### Configuration
 
 Copy `config_template.yaml` to `config.yaml` and fill it in. `config.yaml` is
