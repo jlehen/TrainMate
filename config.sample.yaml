@@ -1,0 +1,121 @@
+# A realistic, fully filled-in config to imitate — every value here is
+# fictional. See config_template.yaml for the complete list of optional knobs
+# and their documentation; this file only shows what a working install
+# actually fills in. Copy it to config.yaml (gitignored) and make it yours.
+#
+# What makes a profile useful is honesty and texture: the free-text blocks
+# below (injuries, preferences) are read verbatim by the LLM coach, so write
+# them the way you'd brief a human coach — specifics, quirks, non-negotiables.
+
+llm:
+  api_key: "YOUR_OPENROUTER_API_KEY"   # or set OPENROUTER_API_KEY in the env
+  # `model` lists these, numbered; `model set` switches; first entry is default.
+  models:
+    - model: "anthropic/claude-opus-5"
+    - model: "openai/gpt-5.6-sol"
+    - model: "google/gemini-3.1-pro-preview"
+
+google:
+  service_account_file: "service_account.json"
+  calendar_id: "YOUR_CALENDAR_ID@group.calendar.google.com"
+
+garmin:
+  email: "you@example.com"
+  password: "your-garmin-password"
+
+# Optional: drive TrainMate from your phone (./tm-bot). Omit to disable.
+#telegram:
+#  bot_token: "123456789:ABCdef..."    # from @BotFather
+#  allowed_chat_ids:
+#    - 123456789
+#  command_timeout_seconds: 600
+
+user_profile:
+  name: "Sam"
+  birth_year: 1986
+  max_hr: 188
+  weekly_target_hours: 7.0
+  sport_preferences:
+    - "cycling"
+    - "strength_training"
+    - "trail_running"
+    - "hiking"
+    - "yoga"
+  chronic_injuries: |
+    Left ACL reconstructed years ago; the knee dislikes hard pivoting, so no
+    court or stop-and-go sports. Running is fine on trails, unpleasant on
+    pavement beyond ~45 minutes.
+  preferences: |
+    Prioritize long-term health span and longevity: structural strength, joint
+    resilience, mixed-intensity cardiovascular capacity, proactive recovery.
+    Endurance is the competitive outlet — I ride with a fast weekend group and
+    want to hold my own — but strength is a year-round priority in its own
+    right, not just support for the current goal: keep 2 sessions/week through
+    every phase, including taper and off-season. Trim their volume when the
+    endurance block demands it, but never drop them entirely.
+
+    I tend to over-do sessions that are prescribed easy — call this out.
+
+    Weekdays I ride the home trainer for time efficiency and structure;
+    weekends I want to be outside if the weather allows. Where I live is
+    flat but windy — long steady efforts are easy to find, real climbs are
+    not, so climbing prep has to come from the trainer.
+
+    A short kettlebell circuit once in a while is welcome as a change of pace.
+  equipment:
+    - "Garmin watch with HR strap"
+    - "carbon road bike"
+    - "smart trainer with Zwift"
+    - "trail running shoes"
+    - "16/24 kg kettlebells"
+  # Per-day availability. certainty_percent is how likely you are to actually
+  # train that day (the coach weights planning toward higher-certainty days).
+  weekly_schedule:
+    Monday:
+      total_available_hours: 1.0
+      max_sessions: 1
+      certainty_percent: 100
+      equipment:
+        - "office gym (full featured)"
+    Tuesday:
+      total_available_hours: 1.5
+      max_sessions: 1
+      certainty_percent: 90
+      equipment:
+        - "smart trainer"
+        - "kettlebells"
+    Wednesday:
+      total_available_hours: 1.0
+      max_sessions: 1
+      certainty_percent: 100
+      equipment:
+        - "office gym (full featured)"
+    Thursday:
+      total_available_hours: 1.5
+      max_sessions: 1
+      certainty_percent: 90
+      equipment:
+        - "smart trainer"
+        - "kettlebells"
+    Friday:
+      total_available_hours: 0.0
+      max_sessions: 0
+      certainty_percent: 100
+      equipment: []
+    Saturday:
+      total_available_hours: 3.5
+      max_sessions: 2
+      certainty_percent: 60
+      equipment:
+        - "road bike"
+        - "smart trainer"
+        - "trail shoes"
+    Sunday:
+      total_available_hours: 2.5
+      max_sessions: 2
+      certainty_percent: 70
+      equipment:
+        - "road bike"
+        - "smart trainer"
+        - "trail shoes"
+        - "kettlebells"

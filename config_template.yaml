@@ -67,7 +67,7 @@ google:
   # Service-account JSON file used to authenticate to the Google APIs.
   service_account_file: "service_account.json"
   # Google Calendar that planned workouts are written to / read from.
-  calendar_id: "a05efe90aef057e16bf8f423500dda43244ae61b3bd1a9990f55cade1f4e8549@group.calendar.google.com"
+  calendar_id: "YOUR_CALENDAR_ID@group.calendar.google.com"
   # Source tag for calendar events containing daily context.
   #calendar_context_tag: "trainmate-context"
 

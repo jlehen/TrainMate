@@ -1,14 +1,14 @@
 import os
 import sys
 import json
+import yaml
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 
-SERVICE_ACCOUNT_FILE = 'service_account.json'
-CALENDAR_ID = (
-    'a05efe90aef057e16bf8f423500dda43244ae61b3bd1a9990f55cade1f4e8549'
-    '@group.calendar.google.com'
-)
+with open('config.yaml', encoding='utf-8') as f:
+    _google_cfg = yaml.safe_load(f).get('google', {})
+SERVICE_ACCOUNT_FILE = _google_cfg.get('service_account_file', 'service_account.json')
+CALENDAR_ID = _google_cfg['calendar_id']
 SCOPES = ['https://www.googleapis.com/auth/calendar']
 
 def main() -> None:

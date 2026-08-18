@@ -182,7 +182,9 @@ Change the anchor value, never the percentage bands.
 
 Copy `config_template.yaml` to `config.yaml` and fill it in. `config.yaml` is
 gitignored, so your credentials stay in the file and out of git and the
-environment. The blocks you must fill:
+environment. (`config.sample.yaml` shows what a working install's config
+actually looks like filled in — all values fictional — with the full knob
+documentation staying in the template.) The blocks you must fill:
 
 - **`llm:`** — `api_key` (an `OPENROUTER_API_KEY` env var overrides it) and
   `models`, the list of OpenRouter models this install may use; `model set`
@@ -209,40 +211,60 @@ reads (see [Basic Usage](#basic-usage-cli)).
 
 ### Personalizing TrainMate
 
-**Goals.** Don't fill in `goal add` cold. The title, target date, sport,
-and priority are much easier to get right once you've actually thought the goal
-through — so brainstorm it first with an LLM (ChatGPT, Claude, whatever you
-use) through a short interview: what's the event, why does it matter, whether
-anything actually *happens* on the target date or the date just bounds the
-training window, what's your current fitness, what constraints (time, injuries,
-other goals) does the plan need to respect. Then turn the outcome of that
-conversation into your `goal add` call(s).
+Beyond the `user_profile:` block above (who you are), the deepest way to
+personalize the coach is the top-level `science/` directory: *how you want to
+be coached*.
 
-**The `science/` directory.** Every `.md` file in the top-level `science/`
-directory (gitignored, empty by default) is injected into TrainMate's coaching
-prompts alongside the built-in guidelines in `trainmate/science/` — it's how
-you teach the coach the training philosophy you actually want it to follow,
-rather than a generic one.
+**What it is.** Every `.md` file in `science/` (gitignored, empty by default)
+is injected into TrainMate's coaching prompts alongside the built-in guidelines
+in `trainmate/science/`. It serves two purposes:
 
-The easiest way to build one of these files is to pick articles, YouTube
-videos, or podcasts that reflect your preferred approach, pull their text with
+- **Your training philosophy.** The built-ins teach the coach mainstream
+  sports science — zones, load math, periodization theory, benchmarking,
+  recovery metrics. They deliberately don't pick a methodology. A file here is
+  where you say *which* approach the coach should actually plan with: how
+  blocks should be structured, what a hard week looks like, how you want to
+  taper.
+- **Extra reference material.** Domain knowledge the built-ins don't cover —
+  say, how strength work should coexist with endurance blocks — that the coach
+  should be able to draw on when reasoning about your plan.
+
+**How to build a file.** Pick the articles, YouTube videos, or podcasts that
+reflect the approach you want, pull their text with
 [Link2Text](https://github.com/jlehen/Link2Text), and hand the result to an
-LLM to synthesize into a single guideline doc. For reference, here are the
-sources TrainMate's author used to generate `science/jeremie_science_summary.md`:
+LLM to synthesize into a single guideline doc. That same conversation is a
+good place to pressure-test the material — ask the LLM to flag internal
+contradictions, and to separate what's *prescriptive* (do this) from what's
+merely *explanatory* — before the coach ever sees it.
 
-| # | Title | URL |
-| - | --- | --- |
-| 1 | How to mix Weighlifting with High Intensity Cycling? | https://www.youtube.com/watch?v=ThDnA-Ct2DE |
-| 2 | The Simple Framework That Actually Builds FTP | https://www.youtube.com/watch?v=pt-VIQuQGdc |
-| 3 | Periodization Training Simplified: A Strategic Guide \| NASM Blog | https://blog.nasm.org/periodization-training-simplified |
-| 4 | Dr. Andy Galpin Unveils the 9 Core Principles of Training: Ultimate Human Performance Blueprint | https://www.youtube.com/watch?v=rBlaGSwOXSA |
-| 5 | Block Periodization in Action: A Case Study | https://www.trainingpeaks.com/blog/block-periodization-in-action/ |
-| 6 | Cycling Power Zones Explained | https://www.trainingpeaks.com/blog/power-training-levels/ |
-| 7 | Exploring Types of Periodization | https://www.trainingpeaks.com/blog/exploring-periodization-methods/ |
-| 8 | Implementing Block Periodization in Endurance Training | https://www.trainingpeaks.com/blog/implementing-block-periodization/ |
-| 9 | Polarized vs. Pyramidal Training — Which is Better For Your Athletes? | https://www.trainingpeaks.com/coach-blog/polarized-pyramidal-training-which-is-better/ |
-| 10 | Easy Ways to Customize Your Readymade Endurance Training Plan | https://www.trainingpeaks.com/blog/customize-your-training-plan/ |
-| 11 | Number One Mistake Cyclists Make with Weight Training | https://www.youtube.com/watch?v=PsEMv2oOscQ |
+**Be deliberate about what goes in.** Everything in `science/` rides along on
+every coaching call, so this is a place where less is more:
+
+- **Don't overload it.** Every page competes for the coach's attention with
+  your metrics, plan history, and learnings. A handful of focused documents
+  beats a library.
+- **Keep it consistent.** Two documents that quietly disagree — one polarized,
+  one sweet-spot; two different taper prescriptions — don't average out. They
+  confuse the coach and make its plans less predictable. When you keep
+  overlapping documents, say which one wins: the samples below do this with an
+  **AUTHORITY** banner at the top of each file, declaring it either
+  *prescriptive* (a source of workout parameters) or *reference only*
+  (rationale and background, never parameters).
+- **Don't restate the built-ins.** Generic periodization or zone theory is
+  already in `trainmate/science/` — duplicating it adds bulk without adding
+  signal.
+
+**Worked examples.** The `science.sample/` directory contains the files the
+author actually trains with — copy the ones you like into `science/` and adapt,
+or just imitate their shape. Each names its sources:
+
+- `sustainable_training.md` — the **prescriptive** methodology the coach plans
+  workouts from (block structure, intensities, work:rest ratios), lightly
+  summarized from Jem Arnold's [Sustainable Training](https://sparecycles.blog/2022/01/02/sustainable-training/).
+- `strength_integration.md` — **reference only**: how heavy lifting and
+  high-intensity endurance work coexist.
+- `plan_customization.md` — **reference only**: adjusting a plan around real
+  life (secondary races, travel, missed weeks).
 
 ### Basic Usage (CLI)
 
