@@ -100,3 +100,34 @@ These apply unless a plan document deliberately specifies otherwise:
   decision.
 * **The Rest Mandate:** 1 to 2 complete rest or active-recovery days within any
   rolling 7-day equivalent.
+
+---
+
+## 3. Training Residuals
+
+A **training residual** is how long an adaptation takes to decay back toward
+baseline after training for it stops. Loss begins within days — the figure
+marks roughly when the quality is gone, not a window in which it holds.
+Figures are for trained athletes. What to do about a residual — block order,
+revisit frequency — is a plan-document decision.
+
+* **Aerobic endurance: 30 ± 5 days.**
+* **Maximal strength: 30 ± 5 days.**
+* **Anaerobic (glycolytic) endurance: 18 ± 4 days.**
+* **Strength endurance: 15 ± 5 days.**
+* **Maximal speed / alactic power (incl. rate of force development):
+  5 ± 3 days.**
+
+* Structural adaptations (capillarization, cardiac remodelling, hypertrophy)
+  decay slowly; enzymatic and neural ones (glycolytic enzymes, buffering,
+  phosphocreatine stores, neural drive) decay fast.
+* Endurance decays delivery-first (plasma volume → stroke volume → VO2max,
+  first ~3 weeks), then utilization (mitochondrial enzymes). Performance
+  decays faster than VO2max: time-to-exhaustion falls ~4–25% inside the
+  first 2–4 weeks.
+* Novices (< 1–2 years of training) have much shorter residuals; a longer
+  block leaves a longer residual.
+* A maintenance dose stops the decay: intensity must survive, volume and
+  frequency can drop sharply — as little as one weekly heavy session has
+  been shown to hold maximal strength, and endurance has held 4–8 weeks on
+  much-reduced volume. Same asymmetry as the deload protocol (§2B).
