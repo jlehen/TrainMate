@@ -262,9 +262,13 @@ or just imitate their shape. Each names its sources:
   workouts from (block structure, intensities, work:rest ratios), lightly
   summarized from Jem Arnold's [Sustainable Training](https://sparecycles.blog/2022/01/02/sustainable-training/).
 - `strength_integration.md` — **reference only**: how heavy lifting and
-  high-intensity endurance work coexist.
+  high-intensity endurance work coexist. Synthesized from
+  [Number One Mistake Cyclists Make with Weight Training](https://www.youtube.com/watch?v=PsEMv2oOscQ),
+  [How to mix Weightlifting with High Intensity Cycling?](https://www.youtube.com/watch?v=ThDnA-Ct2DE)
+  and [Dr. Andy Galpin's 9 Core Principles of Training](https://www.youtube.com/watch?v=rBlaGSwOXSA).
 - `plan_customization.md` — **reference only**: adjusting a plan around real
-  life (secondary races, travel, missed weeks).
+  life (secondary races, travel, missed weeks), from TrainingPeaks'
+  [Easy Ways to Customize Your Readymade Endurance Training Plan](https://www.trainingpeaks.com/blog/customize-your-training-plan/).
 
 ### Basic Usage (CLI)
 
@@ -333,6 +337,16 @@ Switch the LLM behind the coach without editing config by hand — `model` lists
 ```
 The choice is stored and survives restarts; `--llm-model <id>` still overrides it for a
 single command without storing anything.
+
+Which model to pick is not a coin flip. On 2026-08-17 the author benchmarked
+fifteen OpenRouter models head-to-head — one isolated TrainMate install per
+model, same athlete, same goal — and **`anthropic/claude-opus-5` was the clear
+winner**: the only model that argued its block ordering rather than asserting
+it, tested the unverified FTP anchor on day 3, engaged with the athlete's
+actual failure modes, and scheduled the goal attempt with fallback days. The
+full measured comparison (load rhythm, benchmark spacing, constraint
+compliance, cost) is in
+[docs/model_comparison_2026-08.md](docs/model_comparison_2026-08.md).
 
 See `./tm --help` for the everyday commands, or
 `./tm help` to see every command and its sub-commands at once.

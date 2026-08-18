@@ -25,7 +25,7 @@ BENCHMARK (FITNESS TEST) GUIDELINES
 # TrainMate Engine Architecture: Periodization & Training Structure Guide
 ## 1. Core Architectural Overview
 ...
-=== Guidelines from jeremie_science_summary.md ===
+=== Guidelines from sustainable_training.md ===
 ...
 ================================================================================
 END OF SPORTS SCIENCE GUIDELINES
@@ -123,7 +123,7 @@ START OF ATHLETE-PROVIDED SPORTS SCIENCE GUIDELINES
 Reference material the athlete supplied themselves — the training philosophy
 and sources they want their coaching drawn from.
 
---- jeremie_science_summary.md ---
+--- sustainable_training.md ---
 ...
 ```
 

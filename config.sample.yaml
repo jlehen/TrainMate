@@ -34,7 +34,7 @@ user_profile:
   name: "Sam"
   birth_year: 1986
   max_hr: 188
-  weekly_target_hours: 7.0
+  weekly_target_hours: 8.0
   sport_preferences:
     - "cycling"
     - "strength_training"
@@ -54,12 +54,12 @@ user_profile:
     every phase, including taper and off-season. Trim their volume when the
     endurance block demands it, but never drop them entirely.
 
-    I tend to over-do sessions that are prescribed easy — call this out.
+    I consistently over-do sessions that are prescribed easy — call this out.
 
-    Weekdays I ride the home trainer for time efficiency and structure;
+    Weekdays I ride the smart trainer for time efficiency and structure;
     weekends I want to be outside if the weather allows. Where I live is
-    flat but windy — long steady efforts are easy to find, real climbs are
-    not, so climbing prep has to come from the trainer.
+    hilly, and my house sits on top of a ~200 m hill — every outdoor ride
+    ends with that climb whether the plan wants it or not.
 
     A short kettlebell circuit once in a while is welcome as a change of pace.
   equipment:
@@ -72,38 +72,40 @@ user_profile:
   # train that day (the coach weights planning toward higher-certainty days).
   weekly_schedule:
     Monday:
-      total_available_hours: 1.0
+      total_available_hours: 1.3
       max_sessions: 1
       certainty_percent: 100
       equipment:
         - "office gym (full featured)"
     Tuesday:
-      total_available_hours: 1.5
+      total_available_hours: 1.3
       max_sessions: 1
-      certainty_percent: 90
+      certainty_percent: 100
       equipment:
         - "smart trainer"
         - "kettlebells"
     Wednesday:
-      total_available_hours: 1.0
+      total_available_hours: 1.3
       max_sessions: 1
       certainty_percent: 100
       equipment:
         - "office gym (full featured)"
     Thursday:
-      total_available_hours: 1.5
+      total_available_hours: 1.3
+      max_sessions: 1
+      certainty_percent: 100
+      equipment:
+        - "smart trainer"
+        - "kettlebells"
+    Friday:
+      total_available_hours: 2.0
       max_sessions: 1
       certainty_percent: 90
       equipment:
         - "smart trainer"
         - "kettlebells"
-    Friday:
-      total_available_hours: 0.0
-      max_sessions: 0
-      certainty_percent: 100
-      equipment: []
     Saturday:
-      total_available_hours: 3.5
+      total_available_hours: 3.0
       max_sessions: 2
       certainty_percent: 60
       equipment:
@@ -111,7 +113,7 @@ user_profile:
         - "smart trainer"
         - "trail shoes"
     Sunday:
-      total_available_hours: 2.5
+      total_available_hours: 3.0
       max_sessions: 2
       certainty_percent: 70
       equipment:
