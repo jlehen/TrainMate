@@ -368,14 +368,16 @@ Switch the LLM behind the coach without editing config by hand — `model` lists
 The choice is stored and survives restarts; `--llm-model <id>` still overrides it for a
 single command without storing anything.
 
-Which model to pick is not a coin flip. On 2026-08-17 the author benchmarked
+Which model to pick is not a coin flip. On 2026-08-18 the author benchmarked
 fifteen OpenRouter models head-to-head — one isolated TrainMate install per
-model, same athlete, same goal — and **`anthropic/claude-opus-5` was the clear
-winner**: the only model that argued its block ordering rather than asserting
-it, tested the unverified FTP anchor on day 3, engaged with the athlete's
-actual failure modes, and scheduled the goal attempt with fallback days. The
-full measured comparison (load rhythm, benchmark spacing, constraint
-compliance, cost) is in
+model, same athlete, same two-goal season, same late-breaking constraints.
+**`google/gemini-3.1-pro-preview` ranked first**: the only model that reworked
+the schedule around both constraints dropped on it after planning.
+**`anthropic/claude-opus-5` wrote the best 14-week plan** — the only one derived
+from the athlete's per-day equipment calendar, with a reasoned FTP-test
+placement — but, like five others, adapted nothing. The full measured
+comparison (periodization, load rhythm, constraint compliance, adaptation,
+cost) is in
 [docs/model_comparison_2026-08.md](docs/model_comparison_2026-08.md).
 
 See `./tm --help` for the everyday commands, or

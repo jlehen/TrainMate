@@ -3,21 +3,21 @@
 **Status:** Phase 1 & Phase 2 **implemented**; Phase 3 unbuilt (§7).
 
 > **Rev. 4 (2026-08-19) — the flag travels with the test, not with the date.** A
-> model-comparison run left three adaptations with a social ride sitting on an FTP test's
-> date wearing the test's flag — "Friends Group Ride [BENCHMARK]". One cause, app-side:
-> `save_workout`'s UPDATE branch COALESCE-preserved `benchmark_type`, so a proposal
-> emitting `null` was silently overridden by the stored value — which made §4.2's POSTPONE
-> fallback ("replace it with an ordinary easy session (no benchmark_type)") unimplementable
-> through the adapt path however well the model followed it. `save_workout` gains
-> `clear_benchmark`, and adapt sets it when a returned change lands on a benchmark row
-> without re-emitting the flag (§3.1, §4.2).
+> model-comparison run found three models converting an FTP-test day into a social ride and
+> emitting the replacement with `benchmark_type` still set — "Friends Group Ride
+> [BENCHMARK]". Two independent causes, both fixed:
 >
-> The models were not at fault, and the raw adapt responses say so: gpt-5.6, sol-pro and
-> grok-4.5 each moved the test intact to a fresh in-block day and emitted the group ride
-> with `"benchmark_type": null`. §4.2's rewording — the flag travels with the test, any
-> other session on its date carries `null`, and here is what a mislabel costs — is
-> hardening against a reading the older "Preserve VERBATIM when the session is a benchmark"
-> invited, not a fix for a failure anyone observed.
+> - **The prompt described the flag as a property of the slot.** "Preserve VERBATIM when
+>   the session is a benchmark", read against a date that holds a test, says preserve. §4.2
+>   now states the rule in terms of the session — the flag travels with the test, and any
+>   other session landing on the test's date carries `null` — and names the two costs
+>   (a social ride read as an FTP result; the block believing it already tested).
+> - **The flag could not be cleared even when the model got it right.** `save_workout`'s
+>   UPDATE branch COALESCE-preserved `benchmark_type`, so a proposal emitting `null` was
+>   silently overridden by the stored value — which made §4.2's POSTPONE fallback
+>   ("replace it with an ordinary easy session (no benchmark_type)") unimplementable
+>   through the adapt path. `save_workout` gains `clear_benchmark`, and adapt sets it when
+>   a returned change lands on a benchmark row without re-emitting the flag (§3.1, §4.2).
 >
 > Left as-is deliberately: adapt may still legitimately drop a test the athlete cannot do.
 > With the flag cleared, the block-progress section reports no test run and the next
@@ -473,11 +473,10 @@ rendering marks benchmark sessions (`coach/formatting.py:204-207`).
 **The flag belongs to the test, not to its date.** A move and a postponement both leave
 *another* session sitting on the test's old date, and that session is not the test. Stating
 the rule as "preserve `benchmark_type` when the session is a benchmark" invited exactly the
-wrong reading — the date holds a benchmark, so preserve. No model was caught taking it: the
-run that surfaced "Friends Group Ride [BENCHMARK]" had all three affected models emitting
-`null` on the ride, and the app resurrected the flag underneath them (the COALESCE below).
-The prompt is stated in terms of the session anyway — the flag travels with the test, any
-other session on that date carries `null` — and names what a mislabel costs: `benchmark record` and the
+wrong reading — the date holds a benchmark, so preserve — and a model-comparison run caught
+three models emitting "Friends Group Ride [BENCHMARK]" after converting a test day into a
+social ride. The prompt now says the flag travels with the test and that any other session
+on that date carries `null`, and names what a mislabel costs: `benchmark record` and the
 adherence matcher read the ride as the completed test, `_block_benchmark_lines` tells the
 next generate run the block already tested (DESIGN_block_progress.md §4.1), and
 `_drop_benchmark_collisions` starts protecting a group ride's date.
