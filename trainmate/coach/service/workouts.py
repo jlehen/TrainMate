@@ -433,7 +433,9 @@ class WorkoutGenMixin:
 
         if end_date is not None:
             end_date_obj = datetime.strptime(end_date, "%Y-%m-%d").date()
-            num_days = max(1, (end_date_obj - gen_start_obj).days)
+            # Inclusive of end_date itself — a `-g` horizon reads as "through this
+            # goal's target date", so the race day belongs in the span (§8).
+            num_days = max(1, (end_date_obj - gen_start_obj).days + 1)
             gen_end_str = end_date
         else:
             num_days = config.workout_generation_span_days
