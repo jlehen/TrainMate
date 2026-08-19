@@ -664,6 +664,69 @@ class TestAdaptationAdapt(unittest.TestCase):
         self.assertIsNotNone(row["adapted_at"])
         self.assertEqual(row["adaptation_count"], 1)
 
+    def test_adapt_replacing_a_benchmark_strips_its_flag(self):
+        """The flag belongs to the test, not to its date: a session that takes over a
+        test's date and does not re-emit benchmark_type must not inherit it, or a social
+        ride is filed as an FTP result and the block believes it already tested
+        (DESIGN_benchmark_workouts.md §4.2)."""
+        test_db.save_workout(
+            "2026-06-24", "cycling", "FTP Test", "[FTP Test]\n20-min test or ramp.",
+            duration_minutes=75, rpe=9, tss=90, benchmark_type="ftp_20min",
+            source="generated",
+        )
+        service = trainmate.coach.CoachService(
+            db_instance=test_db, calendar_syncer_instance=Mock()
+        )
+        proposed = [{
+            "date": "2026-06-24", "sport_type": "cycling", "title": "Friends Group Ride",
+            "description": "[Friends Group Ride]\n90 min social pace.",
+            "modification_reason": "Athlete riding with friends; test postponed.",
+            "duration_minutes": 90, "rpe": 5, "tss": 60,
+        }]
+        service.workout_adapt_apply(AdaptProposal(
+            reason="Social ride replaces the test", workouts=proposed, new_constraints=[],
+            range_start="2026-06-24", range_end="2026-06-24",
+        ))
+        row = test_db.get_workout("2026-06-24", "cycling")
+        self.assertEqual(row["title"], "Friends Group Ride")
+        self.assertIsNone(row["benchmark_type"])
+
+    def test_adapt_moving_a_benchmark_carries_the_flag_to_its_new_date(self):
+        """A move emits the test on its new date and a replacement on the old one. The
+        test keeps its flag; the replacement left behind loses it
+        (DESIGN_benchmark_workouts.md §4.2)."""
+        test_db.save_workout(
+            "2026-06-24", "cycling", "FTP Test", "[FTP Test]\n20-min test or ramp.",
+            duration_minutes=75, rpe=9, tss=90, benchmark_type="ftp_20min",
+            source="generated",
+        )
+        service = trainmate.coach.CoachService(
+            db_instance=test_db, calendar_syncer_instance=Mock()
+        )
+        proposed = [
+            {
+                "date": "2026-06-24", "sport_type": "cycling", "title": "Easy Spin",
+                "description": "[Easy Spin]\n45 min Z1.",
+                "modification_reason": "Freshening up for the test moved to Friday.",
+                "duration_minutes": 45, "rpe": 2, "tss": 25,
+            },
+            {
+                "date": "2026-06-26", "sport_type": "cycling", "title": "FTP Test",
+                "description": "[FTP Test]\n20-min test or ramp.",
+                "modification_reason": "Moved intact — TSB negative on Wednesday.",
+                "duration_minutes": 75, "rpe": 9, "tss": 90,
+                "benchmark_type": "ftp_20min",
+            },
+        ]
+        service.workout_adapt_apply(AdaptProposal(
+            reason="Test moved to a fresher day", workouts=proposed, new_constraints=[],
+            range_start="2026-06-24", range_end="2026-06-26",
+        ))
+        self.assertIsNone(test_db.get_workout("2026-06-24", "cycling")["benchmark_type"])
+        self.assertEqual(
+            test_db.get_workout("2026-06-26", "cycling")["benchmark_type"], "ftp_20min"
+        )
+
     def test_adapt_swap_inherits_displaced_session_as_original(self):
         """A cross-sport swap (strength -> yoga) deletes the planned strength session
         and inserts a yoga one. The new session should inherit the displaced strength

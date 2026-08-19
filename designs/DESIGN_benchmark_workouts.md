@@ -2,6 +2,27 @@
 
 **Status:** Phase 1 & Phase 2 **implemented**; Phase 3 unbuilt (§7).
 
+> **Rev. 4 (2026-08-19) — the flag travels with the test, not with the date.** A
+> model-comparison run found three models converting an FTP-test day into a social ride and
+> emitting the replacement with `benchmark_type` still set — "Friends Group Ride
+> [BENCHMARK]". Two independent causes, both fixed:
+>
+> - **The prompt described the flag as a property of the slot.** "Preserve VERBATIM when
+>   the session is a benchmark", read against a date that holds a test, says preserve. §4.2
+>   now states the rule in terms of the session — the flag travels with the test, and any
+>   other session landing on the test's date carries `null` — and names the two costs
+>   (a social ride read as an FTP result; the block believing it already tested).
+> - **The flag could not be cleared even when the model got it right.** `save_workout`'s
+>   UPDATE branch COALESCE-preserved `benchmark_type`, so a proposal emitting `null` was
+>   silently overridden by the stored value — which made §4.2's POSTPONE fallback
+>   ("replace it with an ordinary easy session (no benchmark_type)") unimplementable
+>   through the adapt path. `save_workout` gains `clear_benchmark`, and adapt sets it when
+>   a returned change lands on a benchmark row without re-emitting the flag (§3.1, §4.2).
+>
+> Left as-is deliberately: adapt may still legitimately drop a test the athlete cannot do.
+> With the flag cleared, the block-progress section reports no test run and the next
+> `workout generate` re-places it — the system self-heals rather than needing a guard.
+
 > **Rev. 3 (2026-08-17) — due-ness moved to the science file.** Rev. 2's placement rule
 > ("one test per mesocycle boundary", §4.1; resolved in §8 as the cadence knob) over-tested
 > short blocks: an 11- and a 21-day block produced FTP tests 21 days apart, inside the
@@ -144,9 +165,15 @@ therefore threaded through each enumeration:
 same-`(date, sport)` re-save that simply omits the field preserves the stored value
 instead of nulling it. This is not the kind of guard §4.2 argues against: it reverses no
 model intent and reads no proposal batch, it only stops an omission from being read as a
-deletion. The stated consequence is that `benchmark_type` can never be *cleared* through
-`save_workout` — clearing it takes a delete-then-insert, which is what the manual-replace
-path already does (`coach/service/editing.py:248, 257`).
+deletion.
+
+Preserving an omission must not mean the flag is *unclearable*, though — §4.2's POSTPONE
+fallback needs to strip it, and for one revision could not. `save_workout` therefore takes
+a `clear_benchmark` flag (`db/workouts.py:21, 105`) that blanks the column in place; the
+UPDATE reads `CASE WHEN ? THEN NULL ELSE COALESCE(?, benchmark_type) END`. It is off for
+every caller but adapt (§4.2), so the default behaviour — omission preserves — is
+unchanged, and a delete-then-insert (the manual-replace path,
+`coach/service/editing.py:248, 257`) still clears the flag as it always did.
 
 As a stored column it is creation-time intent, exactly like the existing
 `source` column — *not* like the `[MANUAL]`/`[SWAPPED]` markers, which are
@@ -442,6 +469,32 @@ flag travels because it is part of the model's output contract (§3.1). No
 exemptions, no proposal rejection, no special-casing in the apply step. So that the
 model can see what it is being asked to protect, the adapt prompt's planned-workout
 rendering marks benchmark sessions (`coach/formatting.py:204-207`).
+
+**The flag belongs to the test, not to its date.** A move and a postponement both leave
+*another* session sitting on the test's old date, and that session is not the test. Stating
+the rule as "preserve `benchmark_type` when the session is a benchmark" invited exactly the
+wrong reading — the date holds a benchmark, so preserve — and a model-comparison run caught
+three models emitting "Friends Group Ride [BENCHMARK]" after converting a test day into a
+social ride. The prompt now says the flag travels with the test and that any other session
+on that date carries `null`, and names what a mislabel costs: `benchmark record` and the
+adherence matcher read the ride as the completed test, `_block_benchmark_lines` tells the
+next generate run the block already tested (DESIGN_block_progress.md §4.1), and
+`_drop_benchmark_collisions` starts protecting a group ride's date.
+
+The app-side half is not a guard on the model's judgement but the absence of one: with
+`benchmark_type` COALESCE-preserved on UPDATE (§3.1), a proposal that correctly emitted
+`null` was overridden by the stored value, so the POSTPONE fallback above could not be
+carried out however well the model followed it. `workout_adapt_apply` now passes
+`clear_benchmark` when a returned change lands on a benchmark row without re-emitting the
+flag (`coach/service/adaptation.py:401`). The signal is sound here specifically because
+adapt tells the model that *a benchmark it is not changing need not be returned at all* —
+so a returned change that drops the flag is a statement, not an omission. The accepted
+cost is the mirror case: a model that softens a test *and* forgets the flag loses the
+test's identity rather than keeping a diluted test — the better of two failures, since the
+next generate re-places a missing test but nothing detects a 45-minute "FTP test". The
+narrowest version of that mistake costs nothing anyway: a verbatim re-list that merely drops
+the field never reaches the apply step, because `_adapt_is_change()` compares title,
+description and load and discards it as a no-op.
 
 This composes cleanly with the existing block-boundary firewall
 (`DESIGN_block_boundary.md`): `adapt` already never crosses into the next

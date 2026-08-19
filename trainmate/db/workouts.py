@@ -18,7 +18,7 @@ class WorkoutsMixin:
         removed: bool = False, removed_reason: Optional[str] = None,
         source: Optional[str] = None, adaptation_summary: Optional[str] = None,
         macrocycle_id: Optional[int] = None, adapted_at: Optional[str] = None,
-        benchmark_type: Optional[str] = None,
+        benchmark_type: Optional[str] = None, clear_benchmark: bool = False,
         planned_zone_currency: Optional[str] = None,
         planned_zone_sec: Optional[List[Optional[int]]] = None
     ) -> int:
@@ -56,6 +56,11 @@ class WorkoutsMixin:
         callers (plan/generate, swap, add) leave it None, which preserves both columns
         untouched — a fresh INSERT then starts at count 0 / NULL, so regenerating a plan
         resets the adaptation history of that slot.
+
+        `benchmark_type` COALESCE-preserves so a partial re-save cannot read an omission as
+        a deletion; `clear_benchmark=True` is the one way to blank it in place, used when an
+        adaptation replaces a test with something that is no longer that test
+        (DESIGN_benchmark_workouts.md §3.1/§4.2).
 
         `planned_zone_currency` + `planned_zone_sec` (a 7-slot list, HR sessions filling
         1-5 and leaving 6-7 None) carry the session's intensity target
@@ -102,7 +107,8 @@ class WorkoutsMixin:
                         original_rpe = COALESCE(original_rpe, ?, rpe),
                         removed = ?, removed_reason = ?,
                         source = COALESCE(?, source),
-                        benchmark_type = COALESCE(?, benchmark_type),
+                        benchmark_type =
+                            CASE WHEN ? THEN NULL ELSE COALESCE(?, benchmark_type) END,
                         adapted_at = COALESCE(?, adapted_at),
                         adaptation_count = COALESCE(adaptation_count, 0)
                             + CASE WHEN ? IS NOT NULL THEN 1 ELSE 0 END,
@@ -122,7 +128,7 @@ class WorkoutsMixin:
                       duration_minutes, rpe, tss,
                       original_duration_minutes, original_tss, original_rpe,
                       int(removed), removed_reason, source,
-                      benchmark_type,
+                      int(clear_benchmark), benchmark_type,
                       adapted_at, adapted_at,
                       planned_zone_currency, *zones,
                       workout_id))

@@ -488,15 +488,23 @@ athlete recovers is encouraged; deepening an already-fresh cut is not.
 A session tagged "[BENCHMARK ...]" is a fitness test: measurement, not stimulus, so the
 usual "ease the hard day" logic is exactly wrong for it — run tired it reads low and then
 mis-scales every workout after it. NEVER reduce, soften or shorten a benchmark, and never
-blank its benchmark_type. If the athlete will not be fresh on test day (negative TSB / poor
-recovery), MOVE it intact — same content, same benchmark_type — to a later day within THIS
-block where they will be fresher, and lighten the days before it; emit the test on its new
-date and a replacement for its old one. If it already sits on the block's LAST day and no
-later in-block day exists, POSTPONE it: replace it with an ordinary easy session (no
-benchmark_type) — a compromised maximal test sets a wrong anchor that mis-scales every
-session after it, so a skipped test costs a retest where a bad number costs a block. The
-next generated block re-places the test when it is due. A benchmark you are NOT changing
-need not be returned at all.
+blank the flag on the session that still IS the test. If the athlete will not be fresh on
+test day (negative TSB / poor recovery), MOVE it intact — same content, same
+benchmark_type — to a later day within THIS block where they will be fresher, and lighten
+the days before it; emit the test on its new date and a replacement for its old one. If it
+already sits on the block's LAST day and no later in-block day exists, POSTPONE it: replace
+it with an ordinary easy session (no benchmark_type) — a compromised maximal test sets a
+wrong anchor that mis-scales every session after it, so a skipped test costs a retest where
+a bad number costs a block. The next generated block re-places the test when it is due. A
+benchmark you are NOT changing need not be returned at all.
+
+benchmark_type says what a session IS, not which day it sits on — it travels with the test,
+not with the date. So any OTHER session you put on a test's date — the replacement left
+behind by a move, the easy day of a postponement, or something the athlete asked for
+instead — is NOT the test and MUST carry "benchmark_type": null. Copying the flag onto it
+files that session as a completed fitness test: a social ride is then read as an FTP
+result, and the block believes it has already tested and skips the real one. If you replace
+a test rather than move it, say so in the reason and leave the flag off.
 """
 
         # Adapt owns execution, generate owns periodization (§9.2): changing what zone
@@ -610,9 +618,10 @@ evidence-backed observations are authored only by the weekly history analysis
                 '      "rpe": 5,\n'
                 '      "tss": 30,\n'
                 + _planned_zone_fields(zone_currencies) +
-                '      "benchmark_type": null (Preserve VERBATIM when the session is a\n'
-                "        benchmark — a moved/kept test must stay a test. Never invent one\n"
-                "        here; null for an ordinary session. See PROTECTING A BENCHMARK.)\n"
+                '      "benchmark_type": null (Preserve VERBATIM on the row that still IS\n'
+                "        the test — a moved/kept test must stay a test. null on EVERY\n"
+                "        other session, including one that takes over a test's date.\n"
+                "        Never invent one here. See PROTECTING A BENCHMARK.)\n"
                 "    }\n"
                 "  ]"
             ),

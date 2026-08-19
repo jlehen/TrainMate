@@ -274,9 +274,9 @@ class AdaptationMixin:
                 'rpe': w.get('rpe'),
                 'tss': w.get('tss'),
                 # Carry the benchmark flag through the rebuild: a moved test must stay a
-                # test. The model owns its survival by re-emitting it (§3.1/§4.2); if it
-                # omits it on a same-row change, save_workout's COALESCE preserves the
-                # stored value. It is dropped only on a genuine sport swap, which is correct.
+                # test. The model owns its survival by re-emitting it, and a returned change
+                # that drops it clears the stored flag at apply time
+                # (DESIGN_benchmark_workouts.md §3.1/§4.2).
                 'benchmark_type': w.get('benchmark_type')
             } for w in adapted
         ]
@@ -394,6 +394,14 @@ class AdaptationMixin:
             )
             zone_currency, zone_sec = intensity.parse_planned_zones(w)
 
+            # The flag belongs to the TEST, not to the slot: a returned change on a
+            # benchmark's date that does not re-emit benchmark_type is the model saying this
+            # session is no longer that test, so blank it rather than let COALESCE resurrect
+            # it onto a replacement (DESIGN_benchmark_workouts.md §4.2).
+            clear_benchmark = bool(
+                existing and existing['benchmark_type'] and not w.get('benchmark_type')
+            )
+
             self._db.save_workout(
                 date=w['date'],
                 sport_type=w['sport_type'],
@@ -411,6 +419,7 @@ class AdaptationMixin:
                 tss=w.get('tss'),
                 source=source,
                 benchmark_type=w.get('benchmark_type'),
+                clear_benchmark=clear_benchmark,
                 adapted_at=adapted_at if eased else None,
                 # A drift correction rewrites HOW a session is prescribed, so its zone
                 # target moves with it; omitted, COALESCE preserves what the plan already

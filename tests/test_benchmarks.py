@@ -124,6 +124,20 @@ class TestBenchmarkDB(unittest.TestCase):
             test_db.get_workout_by_id(wid)["benchmark_type"], "ftp_20min"
         )
 
+    def test_clear_benchmark_blanks_the_flag_in_place(self):
+        """COALESCE must not make the flag unclearable: §4.2's POSTPONE fallback replaces a
+        test with an ordinary session on the same row, and that row must stop being a test
+        (DESIGN_benchmark_workouts.md §3.1)."""
+        wid = test_db.save_workout(
+            date="2026-08-05", sport_type="cycling", title="FTP Test",
+            description="[FTP Test]", benchmark_type="ftp_20min", source="generated",
+        )
+        test_db.save_workout(
+            date="2026-08-05", sport_type="cycling", title="Easy Spin",
+            description="[Easy Spin]", clear_benchmark=True,
+        )
+        self.assertIsNone(test_db.get_workout_by_id(wid)["benchmark_type"])
+
 
 class TestEffectiveThresholds(unittest.TestCase):
     @classmethod
