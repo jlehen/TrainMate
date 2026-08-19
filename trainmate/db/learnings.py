@@ -280,7 +280,7 @@ class LearningsMixin:
     def apply_learning_deltas(
         self, deltas: List[Dict[str, Any]],
         available_weeks: Optional[Iterable[str]] = None, source: str = "reflect"
-    ) -> None:
+    ) -> Dict[str, int]:
         """Applies evidence-cited learning operations in one transaction, then recomputes the
         confidence of every touched learning from its (updated) basis.
 
@@ -297,9 +297,15 @@ class LearningsMixin:
         window are dropped, mirroring the skip-malformed philosophy). `last_reinforced_at` is
         refreshed only when a *new* supporting week actually lands — so re-citing counted
         weeks neither inflates confidence nor resets decay. Malformed deltas are skipped.
+
+        Returns `{"applied": n, "skipped": n}`. Skipping stays silent here, but the count
+        does not: a response whose deltas ALL skip is indistinguishable from one that
+        authored none, and the caller has to be able to tell those apart
+        (DESIGN_backward_evaluation.md §13).
         """
+        tally = {"applied": 0, "skipped": 0}
         if not deltas:
-            return
+            return tally
         allowed: Optional[Set[str]] = None
         if available_weeks is not None:
             allowed = {
@@ -327,11 +333,13 @@ class LearningsMixin:
             cursor = conn.cursor()
             for delta in deltas:
                 if not isinstance(delta, dict):
+                    tally["skipped"] += 1
                     continue
                 op = delta.get("op")
                 if op == "add":
                     text = (delta.get("text") or "").strip()
                     if not text:
+                        tally["skipped"] += 1
                         continue
                     cursor.execute(
                         "INSERT INTO coach_learnings (text, sports, confidence, created_at, "
@@ -343,9 +351,11 @@ class LearningsMixin:
                         cursor, lid, filtered(delta.get("evidence")), +1, source, now
                     )
                     touched.add(lid)
+                    tally["applied"] += 1
                 elif op == "revise":
                     lid = delta.get("id")
                     if lid is None or not _exists(cursor, lid):
+                        tally["skipped"] += 1
                         continue  # skip hallucinated ids (FK would abort the txn)
                     sets, params = [], []
                     text = (delta.get("text") or "").strip()
@@ -371,9 +381,11 @@ class LearningsMixin:
                             (now, lid)
                         )
                     touched.add(lid)
+                    tally["applied"] += 1
                 elif op == "reinforce":
                     lid = delta.get("id")
                     if lid is None or not _exists(cursor, lid):
+                        tally["skipped"] += 1
                         continue
                     new_weeks = self._add_evidence_weeks(
                         cursor, lid, filtered(delta.get("evidence")), +1, source, now
@@ -385,24 +397,38 @@ class LearningsMixin:
                             (now, lid)
                         )
                         touched.add(lid)
+                    # A re-cited week lands nothing by design, so this counts as applied
+                    # either way — it is a recognized op against a real learning.
+                    tally["applied"] += 1
                 elif op == "contradict":
                     lid = delta.get("id")
                     if lid is None or not _exists(cursor, lid):
+                        tally["skipped"] += 1
                         continue
                     new_weeks = self._add_evidence_weeks(
                         cursor, lid, filtered(delta.get("evidence")), -1, source, now
                     )
                     if new_weeks:
                         touched.add(lid)
+                    tally["applied"] += 1
                 elif op == "retire":
                     lid = delta.get("id")
-                    if lid is not None:
+                    if lid is None:
+                        tally["skipped"] += 1
+                    else:
                         cursor.execute("DELETE FROM coach_learnings WHERE id=?", (lid,))
+                        tally["applied"] += 1
+                else:
+                    # No recognized op — the delta named something the app cannot act on
+                    # (or the key itself came back mangled, as with a model that prefixes
+                    # every nested key). Skipping is right; hiding it is not.
+                    tally["skipped"] += 1
 
             # Re-level every touched learning from its (updated) basis in the same transaction
             # the denormalized confidence column lives in.
             for lid in touched:
                 self._recompute_confidence(cursor, lid, now)
+        return tally
 
     def recompute_all_confidence(self) -> None:
         """Re-derives confidence for every learning from its basis (upgrade auto-applies,

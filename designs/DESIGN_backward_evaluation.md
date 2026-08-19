@@ -850,7 +850,70 @@ than safer.
 
 ---
 
-## 13. Out of Scope
+## 13. A response that parses is not yet a result
+
+The 2026-08-18 model comparison ran the same bootstrap across fifteen models and
+turned up a failure mode the code had no name for. `moonshotai/kimi-k3` returned
+syntactically perfect JSON in which every *nested* key carried a `>` prefix:
+
+```json
+"inferred_macrocycle": {
+  ">overall_focus": "Summer aerobic base building …",
+  ">start_date": "2026-05-25"
+}
+```
+
+Top-level keys were intact, so `_parse_json_content` succeeded and the response
+walked the whole flow. Every `.get('overall_focus')` missed. The report printed
+`Macrocycle Focus ( to ): N/A` over three nameless mesocycle blocks; all three
+learning deltas had a `">op"` instead of an `"op"`, so `apply_learning_deltas` skipped
+each one under its skip-malformed rule and said nothing; and the next command
+greeted the user with *"No coach learnings yet. Run `data bootstrap`"* — the command
+that had just run.
+
+Three separate silences compounded there, and each is fixed where it lives.
+
+**The reconstruction.** Parse success was standing in for a shape check that no
+one was doing. A response is now judged by whether any part the app actually reads
+came back with content: the summary, the physiological insights, and — on the long
+horizon — a macrocycle focus and at least one named mesocycle. None of them
+readable makes it a failed exchange, and it raises. That matters more than the
+error message: the old path *cached* the emptiness against the evidence
+fingerprint and moved the reflect watermark, so the window counted as read, the
+next `data bootstrap` hit the repeat-run prompt, and confirming it returned the
+same empty reconstruction from cache without another LLM call. Only `--force`
+escaped. Failing before any write leaves the retry free — no cache, no watermark,
+no bootstrap record.
+
+Partial damage is not failure, though. One good part is a result worth keeping, so
+a response with a real summary and a mangled macrocycle still saves — it just names
+the parts that came back unreadable instead of letting them render as blank blocks.
+Presence is the discriminator: an omitted key is the model declining to answer, a
+populated one whose fields all miss is a shape mismatch.
+
+**The deltas.** Skipping a malformed delta is still right (§8) — the alternative is
+writing junk into the evidence basis. What was wrong is that the skip was invisible,
+which made "the model authored nothing" and "the app understood nothing" look
+identical. `apply_learning_deltas` now returns `{"applied", "skipped"}` and the
+service reports a non-zero skip count. Note that `reinforce` against a re-cited week
+counts as applied: landing no new week is the dedup working as designed, not a
+failure to read.
+
+**The nudge.** `_maybe_nudge_bootstrap` fires on "no active learnings", which is a
+true statement in both a cold start and a bootstrap that seeded nothing — but only
+the first is answered by running bootstrap. It now checks the `bootstrap`
+`sync_state` key and, when the run has already happened, says so and points at
+`--force`. Bootstrap itself closes the same gap from the other side: ending a run
+with no active learnings is reported at the end of the run, where the user is
+looking, rather than left to surface as a cold-start hint two commands later.
+
+This is deliberately not a repair layer. Un-prefixing `">op"` would be guessing at
+one model's quirk, and the next model will be wrong in some other way. The app's job
+is to notice, refuse to persist an empty read, and say which part it could not use.
+
+---
+
+## 14. Out of Scope
 
 - Backward evaluation in `workout adapt`.
 - Per-learning evidence provenance.

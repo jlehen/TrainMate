@@ -5,7 +5,9 @@ from trainmate import runtime
 from trainmate.config import config
 from trainmate.prompt import Choice
 from trainmate.types import Objective, Constraint
-from trainmate.util import cyan, green, yellow, bold, red, gray, cmd, format_labeled_block
+from trainmate.util import (
+    cyan, green, yellow, bold, red, gray, cmd, format_labeled_block, wrap_text
+)
 from trainmate.coach.formatting import _load_science_guidelines
 from trainmate.coach.proposals import CoachContext
 import trainmate.coach.service as _svc
@@ -240,19 +242,32 @@ class PromptConfigMixin:
 
     def _apply_learning_updates(
         self, data: Dict[str, Any], available_weeks: List[str], source: str
-    ) -> None:
+    ) -> Dict[str, int]:
         """Applies evidence-cited learning deltas returned by the LLM, if any.
 
         `available_weeks` is the set of week_commencing (Monday) dates under analysis; cited
         weeks outside it are dropped. `source` tags the evidence rows ('bootstrap'/'reflect').
         Confidence is derived by the app from the accumulated basis — re-citing counted weeks
         cannot inflate it (see db.apply_learning_deltas and
-        DESIGN_evidence_based_confidence.md §6)."""
-        self._db.apply_learning_deltas(
+        DESIGN_evidence_based_confidence.md §6).
+
+        Deltas the app cannot act on are skipped, but the skip is reported: silently dropping
+        every delta reads to the user as "the model had nothing to say"
+        (DESIGN_backward_evaluation.md §13)."""
+        tally = self._db.apply_learning_deltas(
             data.get("learning_updates") or [],
             available_weeks=available_weeks,
             source=source,
         )
+        if tally["skipped"]:
+            noun = "update" if tally["skipped"] == 1 else "updates"
+            print(yellow(wrap_text(
+                f"{tally['skipped']} coach-learning {noun} came back in a shape this app "
+                f"cannot read and {'was' if tally['skipped'] == 1 else 'were'} discarded "
+                f"({tally['applied']} applied). The full response is in the LLM exchange "
+                "log; re-running with " + cmd("--force") + " asks the model again."
+            )))
+        return tally
 
     def _review_learning_proposals(self, auto: bool = False) -> None:
         """Resolves pending learning-confidence downgrades (§7).
@@ -316,8 +331,22 @@ class PromptConfigMixin:
 
     def _maybe_nudge_bootstrap(self) -> None:
         """Prints a cold-start hint to run `data bootstrap` when there are no active coach
-        learnings yet — durable observations are authored only by the history analysis."""
+        learnings yet — durable observations are authored only by the history analysis.
+
+        A bootstrap that already ran and seeded nothing gets the other half of the message:
+        pointing at a command the user just ran reads as the app not having noticed
+        (DESIGN_backward_evaluation.md §13)."""
         if any(not l.get("dormant") for l in self._db.get_learnings()):
+            return
+        # Only when the table is genuinely empty: learnings that exist but have all gone
+        # dormant are a staleness story, not a bootstrap that came back with nothing.
+        prior = self._db.get_sync_state("bootstrap")
+        if prior and not self._db.get_learnings():
+            ran_on = (prior.get("last_pull_utc") or "")[:10] or "?"
+            print(yellow(
+                f"No coach learnings yet — bootstrap ran on {ran_on} but seeded none. "
+                "Re-run " + cmd("data bootstrap --force") + " to ask the model again."
+            ))
             return
         print(yellow(
             "No coach learnings yet. Run " + cmd("data bootstrap")

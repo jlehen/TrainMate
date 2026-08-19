@@ -250,6 +250,29 @@ class TestDatabase(unittest.TestCase):
         test_db.apply_learning_deltas([{"op": "retire", "id": lid}])
         self.assertEqual(len(test_db.get_learnings()), 0)
 
+    def test_the_merge_counts_what_it_could_not_act_on(self):
+        """Skipping a malformed delta is right; hiding the skip is not — a caller has to be
+        able to tell "authored nothing" from "understood nothing"
+        (DESIGN_backward_evaluation.md §13)."""
+        lid = test_db.add_learning("Tolerates volume")
+        tally = test_db.apply_learning_deltas([
+            {"op": "add", "text": "Recovers fast"},          # applied
+            {"op": "reinforce", "id": lid},                   # applied (no new week is fine)
+            {">op": "add", ">text": "Key came back mangled"},  # skipped: no recognized op
+            {"op": "revise", "id": 9999, "text": "x"},        # skipped: hallucinated id
+            {"op": "add", "text": "   "},                     # skipped: no text
+            {"op": "retire"},                                 # skipped: no id
+            "not even an object",                             # skipped: not a dict
+        ])
+        self.assertEqual(tally, {"applied": 2, "skipped": 5})
+        self.assertEqual(
+            {l["text"] for l in test_db.get_learnings()},
+            {"Tolerates volume", "Recovers fast"},
+        )
+
+    def test_the_merge_tally_is_empty_when_there_is_nothing_to_do(self):
+        self.assertEqual(test_db.apply_learning_deltas([]), {"applied": 0, "skipped": 0})
+
     def test_evidence_dedup_blocks_inflation(self):
         """Re-citing counted weeks is a structural no-op: confidence cannot ratchet and
         recency is not refreshed (DESIGN_evidence_based_confidence.md §6)."""

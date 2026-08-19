@@ -441,6 +441,10 @@ _CSV_ZONE_COLUMNS = (
     + [f"power_zone{i}_sec" for i in range(1, 8)]
 )
 
+# The learning-delta ops db.apply_learning_deltas acts on; anything else was skipped there,
+# so the report must not present it as saved (DESIGN_backward_evaluation.md §13).
+_LEARNING_OPS = ("add", "revise", "reinforce", "contradict", "retire")
+
 
 def _show_activities_csv(activities: list) -> None:
     """Output activities as CSV — everything, with no flag gating it.
@@ -582,17 +586,26 @@ def _render_analysis_report(result: dict, inspect_only: bool) -> None:
     # Coach learnings (incremental updates applied to learnings)
     updates = result.get("learning_updates")
     if updates:
-        header = (
-            "Coach Observations (NOT saved — inspect mode):"
-            if inspect_only
-            else "Coach Observations (Saved to learnings):"
+        # "Saved" is a claim, so it is only made when some delta named an op the app
+        # acts on — a response whose every delta is unreadable saved nothing (§13).
+        saved_any = any(
+            isinstance(u, dict) and u.get("op") in _LEARNING_OPS for u in updates
         )
+        if inspect_only:
+            header = "Coach Observations (NOT saved — inspect mode):"
+        elif saved_any:
+            header = "Coach Observations (Saved to learnings):"
+        else:
+            header = "Coach Observations (none saved — see below):"
         print(bold(cyan("\n" + header)))
         try:
             learnings_map = {l['id']: l for l in runtime.db.get_learnings()}
         except Exception:
             learnings_map = {}
         for u in updates:
+            if not isinstance(u, dict):
+                print(yellow(f"  ! unreadable update ({type(u).__name__}) — skipped"))
+                continue
             op = u.get("op")
             meta = []
             if u.get("sports"):
@@ -623,6 +636,11 @@ def _render_analysis_report(result: dict, inspect_only: bool) -> None:
                 print(format_labeled_block(tag, text) if text else tag)
             elif op == "retire":
                 print(f"  - retired [{u.get('id')}]")
+            else:
+                # Named no op the app knows, so nothing was saved for it. Printing the
+                # skip keeps the block from rendering empty under a "Saved" header
+                # (DESIGN_backward_evaluation.md §13).
+                print(yellow(f"  ! unreadable update (op={op!r}) — skipped"))
 
     print(bold(cyan("\n==========================================")))
 

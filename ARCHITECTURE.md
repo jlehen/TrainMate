@@ -436,7 +436,10 @@ default the user layer overrides.
 none (DESIGN_backward_evaluation.md §11; DESIGN_evidence_based_confidence.md §2).
 The app owns the merge via `CoachService._apply_learning_updates()` →
 `db.apply_learning_deltas(deltas, available_weeks, source)`, so a model that omits
-an existing learning cannot lose it. Each learning carries a **sport scope**
+an existing learning cannot lose it. Deltas the app cannot act on are still skipped, but
+the merge returns `{"applied", "skipped"}` and a non-zero skip is reported — otherwise
+"the model authored nothing" and "the app understood nothing" look the same
+(DESIGN_backward_evaluation.md §13). Each learning carries a **sport scope**
 (`sports`) and an **app-computed confidence** (`tentative`/`moderate`/`established`).
 The LLM **no longer sets confidence** — it only attributes each observation to the
 training **week(s)** it was shown (`week_commencing` Mondays). The five ops:
@@ -613,7 +616,10 @@ called by the UIs.
   unless an end date is named, so a part-week is never cited as a whole one and a run
   with nothing complete since the watermark makes no LLM call (§10.4). Both reuse
   `analysis_cache` on unchanged evidence; `force` recomputes; `inspect_only` renders
-  without writing. See DESIGN_backward_evaluation.md §5, §8, §9.
+  without writing. A response that parses but carries no readable content raises before
+  anything is written — caching it would pin the emptiness behind the fingerprint and move
+  the watermark as if the history had been read; a partly-readable one saves and names the
+  parts it could not use. See DESIGN_backward_evaluation.md §5, §8, §9, §13.
 - **`_build_prior_training_context(prior_macros, today)`** — builds the read-only
   "planned vs actual" review injected into the `plan generate` strategy prompt
   (Option A). Anchored on the elapsed mesocycle windows of every plan handed in **and of

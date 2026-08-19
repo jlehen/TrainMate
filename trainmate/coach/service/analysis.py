@@ -4,8 +4,66 @@ from trainmate.config import config
 from trainmate.types import Constraint, Workout
 from trainmate import garmin
 from trainmate.garmin import activity_load
-from trainmate.util import today_date as _today_date, aside, cyan, yellow, cmd
+from trainmate.util import (
+    today_date as _today_date, aside, cyan, yellow, cmd, wrap_text
+)
 import trainmate.coach.service as _svc
+
+
+def _nonblank(value: Any) -> bool:
+    """True when a scalar the LLM was asked to fill actually carries text/number."""
+    if value is None or isinstance(value, bool):
+        return False
+    if isinstance(value, (int, float)):
+        return True
+    return bool(str(value).strip())
+
+
+def _reconstruction_content(decision: Dict[str, Any], cycles: bool) -> Dict[str, bool]:
+    """Which parts of an analysis response came back readable.
+
+    A response can parse as JSON and still be empty of everything the app reads: a model
+    that mangles nested keys (prefixing each one, say) yields well-formed objects whose
+    every `.get()` misses. Judged per part so the caller can tell "the model said little"
+    from "nothing survived" (DESIGN_backward_evaluation.md §13).
+    """
+    macro = decision.get("inferred_macrocycle")
+    mesos = decision.get("inferred_mesocycles")
+    insights = decision.get("physiological_insights")
+    content = {
+        "summary": _nonblank(decision.get("macrocycle_summary")),
+        "insights": isinstance(insights, (list, tuple)) and any(
+            _nonblank(i) for i in insights
+        ),
+    }
+    if cycles:
+        content["macrocycle"] = isinstance(macro, dict) and _nonblank(
+            macro.get("overall_focus")
+        )
+        content["mesocycles"] = isinstance(mesos, (list, tuple)) and any(
+            isinstance(m, dict) and _nonblank(m.get("name")) for m in mesos
+        )
+    return content
+
+
+def _unreadable_parts(decision: Dict[str, Any], cycles: bool) -> List[str]:
+    """Parts the model DID answer but the app could not read, as display names.
+
+    Presence is the discriminator: an omitted key is the model declining to answer, while
+    a populated one whose fields all miss is a shape mismatch worth reporting (§13). Only
+    the structured parts can mismatch — a summary is a plain string, so it is either
+    answered or not.
+    """
+    content = _reconstruction_content(decision, cycles)
+    parts = []
+    if decision.get("physiological_insights") and not content["insights"]:
+        parts.append("physiological insights")
+    if cycles:
+        if decision.get("inferred_macrocycle") and not content["macrocycle"]:
+            parts.append("macrocycle")
+        if decision.get("inferred_mesocycles") and not content["mesocycles"]:
+            parts.append("mesocycle blocks")
+    return parts
 
 
 class DataAnalysisMixin:
@@ -142,6 +200,15 @@ class DataAnalysisMixin:
             self._set_reflect_watermark(until_date.strftime("%Y-%m-%d"))
             self._record_bootstrap_run(until_date.strftime("%Y-%m-%d"))
             self._review_learning_proposals(auto=auto)
+            # Bootstrap is the command that seeds observations, so ending with none on
+            # record is news — otherwise the next command's cold-start nudge points the
+            # user right back here with no hint that the run already happened (§13).
+            if not any(not l.get("dormant") for l in self._db.get_learnings()):
+                print(yellow(wrap_text(
+                    "Bootstrap finished with no active coach observations on record. The "
+                    "reconstruction above is saved; re-run with "
+                    + cmd("data bootstrap --force") + " to ask the model again."
+                )))
         return decision
 
     def data_reflect(
@@ -707,6 +774,27 @@ class DataAnalysisMixin:
             label=label,
             horizon=horizon
         )
+
+        # A response that parses but carries nothing the app can read is a failed exchange,
+        # not a result: caching it pins the emptiness behind the fingerprint (only --force
+        # gets past it) and, for bootstrap, the watermark would move as if the history had
+        # been read (DESIGN_backward_evaluation.md §13).
+        cycles = horizon == "long"
+        if not any(_reconstruction_content(decision, cycles).values()):
+            raise ValueError(
+                f"The model's {label} response parsed but contained none of the requested "
+                "content — no summary, no insights"
+                + (", no macrocycle or mesocycle blocks" if cycles else "")
+                + ". Nothing was saved. The raw response is in the LLM exchange log; re-run "
+                "to ask again, or switch models with " + cmd("model set") + "."
+            )
+        unreadable = _unreadable_parts(decision, cycles)
+        if unreadable:
+            print(yellow(wrap_text(
+                "The model answered but these parts came back in an unreadable shape and "
+                f"render empty below: {', '.join(unreadable)}. The raw response is in the "
+                "LLM exchange log."
+            )))
 
         if not inspect_only:
             # Apply evidence-cited learning deltas. The LLM attributes observations to the

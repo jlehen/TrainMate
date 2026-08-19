@@ -252,6 +252,41 @@ class TestCliData(unittest.TestCase):
             for line in out.split("\n"):
                 self.assertLessEqual(visible_len(line), int(width), msg=repr(line))
 
+    def test_unreadable_learning_deltas_are_shown_not_silently_dropped(self):
+        """The kimi-k3 shape: every delta key prefixed, so no op is recognized. The block
+        must not render empty under a 'Saved to learnings' header
+        (DESIGN_backward_evaluation.md §13)."""
+        from trainmate.cli.data import _render_analysis_report
+
+        result = {
+            "macrocycle_summary": "A real reconstruction.",
+            "learning_updates": [
+                {">op": "add", ">text": "Absorbs volume well"},
+                "not even an object",
+            ],
+        }
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            _render_analysis_report(result, False)
+        out = buf.getvalue()
+        self.assertIn("none saved", out)
+        self.assertNotIn("Saved to learnings", out)
+        self.assertEqual(out.count("unreadable update"), 2)
+
+    def test_a_readable_delta_still_reports_as_saved(self):
+        from trainmate.cli.data import _render_analysis_report
+
+        result = {
+            "macrocycle_summary": "A real reconstruction.",
+            "learning_updates": [{"op": "add", "text": "Absorbs volume well"}],
+        }
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            _render_analysis_report(result, False)
+        out = buf.getvalue()
+        self.assertIn("Saved to learnings", out)
+        self.assertNotIn("unreadable update", out)
+
     def _seed_reconstruction(self, horizon, name, window_start, window_end):
         test_db.save_analysis_cache(
             horizon=horizon, fingerprint=f"fp-{horizon}",
