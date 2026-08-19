@@ -28,22 +28,29 @@ RENAME_RATIO = 0.4
 
 def input_snapshots(
     macrocycle: Dict[str, Any]
-) -> Tuple[Optional[list], Optional[list], Optional[dict]]:
-    """The goals, plan-shaping constraints and threshold anchors snapshotted when the plan
-    was generated (see db.save_macrocycle), or None each when that plan predates the column.
+) -> Tuple[Optional[list], Optional[list], Optional[list], Optional[dict]]:
+    """The goals, plan-shaping constraints, all active constraints, and threshold anchors
+    snapshotted when the plan was generated (see db.save_macrocycle), or None each when
+    that plan predates the column.
 
     Snapshots reflect the inputs the plan was actually built on rather than the current
     live records, which may have since changed. Plans predating the constraints rename
-    fall back to the legacy lifeevents snapshot."""
+    fall back to the legacy lifeevents snapshot. `all_events` is every constraint active
+    at generation time (each tagged with a `replan` flag), a superset of `events` — the
+    prompt is built from all of them, but only the `replan = 1` subset fingerprints the
+    plan (DESIGN_constraints.md §7) — and is None on plans predating that column even when
+    `events` is present."""
     raw_goals = macrocycle.get('goals_snapshot')
     raw_events = (
         macrocycle.get('constraints_snapshot')
         or macrocycle.get('lifeevents_snapshot')
     )
+    raw_all_events = macrocycle.get('all_constraints_snapshot')
     raw_config = macrocycle.get('config_snapshot')
     return (
         json.loads(raw_goals) if raw_goals else None,
         json.loads(raw_events) if raw_events else None,
+        json.loads(raw_all_events) if raw_all_events else None,
         json.loads(raw_config) if raw_config else None,
     )
 
@@ -272,8 +279,8 @@ def diff_plans(
 ) -> Dict[str, Any]:
     """Everything that differs between two plan versions: the macrocycle's strategy, the
     feedback each carries, its mesocycle blocks, and the inputs each was generated from."""
-    old_goals, old_events, old_thresholds = input_snapshots(old_macro)
-    new_goals, new_events, new_thresholds = input_snapshots(new_macro)
+    old_goals, old_events, _old_all_events, old_thresholds = input_snapshots(old_macro)
+    new_goals, new_events, _new_all_events, new_thresholds = input_snapshots(new_macro)
     return {
         "from": {
             "id": old_macro['id'], "status": old_macro.get('status'),

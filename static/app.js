@@ -266,15 +266,23 @@ function renderStrategyInputs(macrocycle) {
     // New snapshots carry constraint fields; legacy plans (pre-constraints-rename)
     // carry the old lifeevents_snapshot — read whichever is present.
     const rawEvents = macrocycle.constraints_snapshot ?? macrocycle.lifeevents_snapshot;
+    // Every active constraint at generation time (not just the replan=1 subset `rawEvents`
+    // fingerprints), tagged with `replan`. Null on plans predating this column.
+    const rawAllEvents = macrocycle.all_constraints_snapshot;
     if (rawGoals == null && rawEvents == null) {
         el.innerHTML = `<div class="strategy-inputs-note">`
             + `Inputs considered: not recorded (plan predates input snapshots).</div>`;
         return;
     }
 
-    let goals = [], events = [];
+    let goals = [], events = [], allEvents = null;
     try { goals = rawGoals ? JSON.parse(rawGoals) : []; } catch (e) { goals = []; }
     try { events = rawEvents ? JSON.parse(rawEvents) : []; } catch (e) { events = []; }
+    try { allEvents = rawAllEvents ? JSON.parse(rawAllEvents) : null; } catch (e) { allEvents = null; }
+    // The tactical (replan=0) constraints the prompt saw but the fingerprint didn't —
+    // shown separately so "Constraints considered" never reads as "None" while one of
+    // these plainly shaped the strategy text.
+    const tactical = allEvents ? allEvents.filter(e => !e.replan) : null;
 
     const goalItems = goals.length
         ? goals.map(g => `<li>`
@@ -285,8 +293,8 @@ function renderStrategyInputs(macrocycle) {
             + `</li>`).join("")
         : `<li class="si-empty">None</li>`;
 
-    const eventItems = events.length
-        ? events.map(e => {
+    const constraintItems = (list) => list.length
+        ? list.map(e => {
             // Snapshots are historical: tolerate the current `rest` flag, the pre-rev-6
             // binding/sport/type, and the original event_type/impact_description.
             const label = e.type || e.event_type || "";
@@ -305,6 +313,12 @@ function renderStrategyInputs(macrocycle) {
         }).join("")
         : `<li class="si-empty">None</li>`;
 
+    const tacticalSection = tactical ? `
+            <div class="si-section">
+                <div class="si-heading"><i class="fa-solid fa-calendar-check"></i> Also active (tactical — did not trigger replan)</div>
+                <ul class="si-list">${constraintItems(tactical)}</ul>
+            </div>` : "";
+
     el.innerHTML = `
         <details class="strategy-inputs-details">
             <summary>Inputs considered (${goals.length} goal${goals.length === 1 ? "" : "s"}, `
@@ -314,9 +328,9 @@ function renderStrategyInputs(macrocycle) {
                 <ul class="si-list">${goalItems}</ul>
             </div>
             <div class="si-section">
-                <div class="si-heading"><i class="fa-solid fa-calendar-day"></i> Constraints considered</div>
-                <ul class="si-list">${eventItems}</ul>
-            </div>
+                <div class="si-heading"><i class="fa-solid fa-calendar-day"></i> Constraints considered (plan-shaping)</div>
+                <ul class="si-list">${constraintItems(events)}</ul>
+            </div>${tacticalSection}
         </details>`;
 }
 

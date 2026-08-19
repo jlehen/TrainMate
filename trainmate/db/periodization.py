@@ -409,16 +409,20 @@ class PeriodizationMixin:
         self, objective_id: int, strategy: str, goals_hash: str,
         constraints_hash: str, mesocycles: List[Dict[str, Any]],
         config_hash: str = "", config_snapshot: str = "", goals_snapshot: str = "",
-        constraints_snapshot: str = ""
+        constraints_snapshot: str = "", all_constraints_snapshot: str = ""
     ) -> int:
         """Saves a macrocycle and its nested mesocycles for the objective.
 
         goals_snapshot/constraints_snapshot are JSON of the goals and plan-shaping
         constraints the plan was generated from (the same cleaned data the hashes
         fingerprint), preserved so the inputs can be shown later even after the live
-        records change. config_snapshot is JSON of the physiological thresholds the
-        plan was generated with, kept as raw values (not a hash) so staleness can be
-        judged against a drift tolerance (coach/service.config_changed).
+        records change. all_constraints_snapshot is JSON of *every* constraint active
+        at generation time, replan or not, tagged per-entry with its `replan` flag —
+        display-only, since the prompt is built from all of them but only the
+        `replan = 1` subset fingerprints the plan (DESIGN_constraints.md §7). config_snapshot
+        is JSON of the physiological thresholds the plan was generated with, kept as raw
+        values (not a hash) so staleness can be judged against a drift tolerance
+        (coach/service.config_changed).
 
         The previously-active macrocycle for the objective is *superseded* rather than
         deleted (see DESIGN_plan_rollback.md): it and its mesocycles are kept so that
@@ -437,11 +441,13 @@ class PeriodizationMixin:
             cursor.execute("""
                 INSERT INTO macrocycles (
                     objective_id, strategy, goals_hash, constraints_hash, config_hash,
-                    config_snapshot, goals_snapshot, constraints_snapshot, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    config_snapshot, goals_snapshot, constraints_snapshot,
+                    all_constraints_snapshot, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (objective_id, strategy, goals_hash, constraints_hash, config_hash,
                   config_snapshot or None, goals_snapshot or None,
-                  constraints_snapshot or None, created_at))
+                  constraints_snapshot or None, all_constraints_snapshot or None,
+                  created_at))
             macrocycle_id = cursor.lastrowid
 
             for meso in mesocycles:

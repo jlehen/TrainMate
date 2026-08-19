@@ -247,6 +247,9 @@ class PlanningMixin:
             constraints_snapshot=json.dumps(
                 self.engine._clean_constraints(replan_constraints)
             ),
+            all_constraints_snapshot=json.dumps(
+                self.engine._clean_constraints_all(constraints)
+            ),
         )
 
         # Try to retrieve existing macrocycle
@@ -388,9 +391,8 @@ class PlanningMixin:
         if fingerprints is None:
             today_str = _svc._today_str()
             objectives = self._db.upcoming_objectives()
-            replan_constraints = [
-                c for c in self._db.get_constraints(today_str) if c.get('replan')
-            ]
+            constraints = self._db.get_constraints(today_str)
+            replan_constraints = [c for c in constraints if c.get('replan')]
             fingerprints = PlanFingerprints(
                 goals_hash=self.engine._get_goals_hash(objectives),
                 constraints_hash=self.engine._get_constraints_hash(replan_constraints),
@@ -399,6 +401,9 @@ class PlanningMixin:
                 goals_snapshot=json.dumps(self.engine._clean_goals(objectives)),
                 constraints_snapshot=json.dumps(
                     self.engine._clean_constraints(replan_constraints)
+                ),
+                all_constraints_snapshot=json.dumps(
+                    self.engine._clean_constraints_all(constraints)
                 ),
             )
 
@@ -411,6 +416,7 @@ class PlanningMixin:
             config_snapshot=fingerprints.config_snapshot,
             goals_snapshot=fingerprints.goals_snapshot,
             constraints_snapshot=fingerprints.constraints_snapshot,
+            all_constraints_snapshot=fingerprints.all_constraints_snapshot,
             mesocycles=mesocycles
         )
         return objective_id

@@ -203,9 +203,46 @@ def _print_plan_feedback(macrocycle: dict, width: int) -> None:
     print()
 
 
+def _print_constraint_entry(e: dict, width: int) -> None:
+    """One constraint line under a "Constraints considered" heading.
+
+    Snapshots are historical JSON, so tolerate three shapes: the current one (a `rest`
+    flag), the pre-rev-6 constraint (binding/sport/type), and the original lifeevent
+    (event_type/impact_description). Read whichever is present.
+    """
+    if 'rest' in e:
+        enforcement = "no training" if e.get('rest') else "advisory"
+    else:
+        enforcement = e.get('binding') or ''
+    label = e.get('type') or e.get('event_type') or ''
+    sport = e.get('sport')
+    tags = " ".join(
+        t for t in (
+            label,
+            enforcement,
+            (f"[{sport}]" if sport else ""),
+        ) if t
+    )
+    pad = _print_hanging(
+        f"  - [Constraint ID: {e.get('id')}] ", e.get('title', ''), width, cyan
+    )
+    _print_segments(
+        pad,
+        [
+            tags,
+            f"{cyan(fmt_date(e.get('start_date')))} -> "
+            f"{cyan(fmt_date(e.get('end_date')))}",
+        ],
+        width,
+    )
+    detail = e.get('description') or e.get('impact_description')
+    if detail:
+        _print_indented(detail, pad, width, gray)
+
+
 def _print_considered_inputs(macrocycle: dict) -> None:
     """Prints the goals, constraints and threshold anchors the plan was generated from."""
-    goals, events, thresholds = plan_diff.input_snapshots(macrocycle)
+    goals, events, all_events, thresholds = plan_diff.input_snapshots(macrocycle)
     if goals is None and events is None and thresholds is None:
         print(gray("Inputs considered: not recorded (plan predates input snapshots)."))
         print()
@@ -235,42 +272,29 @@ def _print_considered_inputs(macrocycle: dict) -> None:
     else:
         print(f"  {gray('None')}")
 
-    print(bold("Constraints considered:"))
+    # `events` (constraints_snapshot) is only the replan=1 subset that fingerprints the
+    # plan — "None" here is literally true but can mislead, since the prompt is built
+    # from every active constraint, not just the plan-shaping ones. `all_events`
+    # (all_constraints_snapshot) is that full set, tagged with `replan`; when it's
+    # present, split it into the plan-shaping list (same as `events`) and a second,
+    # explicitly tactical list, so an active advisory constraint is never silently
+    # dropped from the render just because it didn't trigger a replan.
+    tactical = [e for e in all_events if not e.get('replan')] if all_events is not None else None
+
+    print(bold("Constraints considered (plan-shaping):"))
     if events:
         for e in events:
-            # Snapshots are historical JSON, so tolerate three shapes: the current one
-            # (a `rest` flag), the pre-rev-6 constraint (binding/sport/type), and the
-            # original lifeevent (event_type/impact_description). Read whichever is present.
-            if 'rest' in e:
-                enforcement = "no training" if e.get('rest') else "advisory"
-            else:
-                enforcement = e.get('binding') or ''
-            label = e.get('type') or e.get('event_type') or ''
-            sport = e.get('sport')
-            tags = " ".join(
-                t for t in (
-                    label,
-                    enforcement,
-                    (f"[{sport}]" if sport else ""),
-                ) if t
-            )
-            pad = _print_hanging(
-                f"  - [Constraint ID: {e.get('id')}] ", e.get('title', ''), width, cyan
-            )
-            _print_segments(
-                pad,
-                [
-                    tags,
-                    f"{cyan(fmt_date(e.get('start_date')))} -> "
-                    f"{cyan(fmt_date(e.get('end_date')))}",
-                ],
-                width,
-            )
-            detail = e.get('description') or e.get('impact_description')
-            if detail:
-                _print_indented(detail, pad, width, gray)
+            _print_constraint_entry(e, width)
     else:
         print(f"  {gray('None')}")
+
+    if tactical is not None:
+        print(bold("Also active (tactical — did not trigger replan):"))
+        if tactical:
+            for e in tactical:
+                _print_constraint_entry(e, width)
+        else:
+            print(f"  {gray('None')}")
 
     # The effective threshold anchors the plan prescribed against; drift past
     # `coach.threshold_replan_pct` is what makes it stale (ARCHITECTURE §5, macrocycles).

@@ -181,3 +181,4 @@ class PlanFingerprints:
     config_snapshot: Optional[str] = None
     goals_snapshot: Optional[str] = None
     constraints_snapshot: Optional[str] = None
+    all_constraints_snapshot: Optional[str] = None

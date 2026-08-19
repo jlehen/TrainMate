@@ -165,6 +165,7 @@ class Macrocycle(TypedDict):
     config_snapshot: Optional[str]
     goals_snapshot: Optional[str]
     constraints_snapshot: Optional[str]
+    all_constraints_snapshot: Optional[str]
     created_at: str
     status: Optional[str]  # 'active' | 'superseded'
     superseded_at: Optional[str]

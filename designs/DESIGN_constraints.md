@@ -475,7 +475,17 @@ load displacements trip it) and tune the two knobs from there.
 **Snapshotting & staleness.** `plan generate` records the active `replan = 1`
 constraints onto the macrocycle as a new `constraints_snapshot` (the successor
 to `lifeevents_snapshot`), so "inputs this plan was built on" stays inspectable
-(`plans._print_considered_inputs`). The staleness fingerprint moves with it: the
+(`plans._print_considered_inputs`). But the strategy prompt (§5) is built from
+*every* active constraint, not just the `replan = 1` subset — so a `plan show`
+reading `constraints_snapshot` alone could print "Constraints considered: None"
+while a tactical directive plainly shaped the strategy text, which misleads
+exactly when someone is auditing why a plan reads the way it does. A second
+column, `all_constraints_snapshot`, therefore also records every active
+constraint at generation time, each tagged with its `replan` flag
+(`CoachEngine._clean_constraints_all`) — display only, never hashed. `plan show`
+renders it as a second, explicitly-tactical list alongside the plan-shaping one,
+so the reader is never left inferring "no constraints" from an empty
+plan-shaping section. The staleness fingerprint moves with the first column: the
 macrocycle's `lifeevents_hash` (compared on every `plan generate` to decide
 reuse vs regen — the `coach/service/planning.py` reuse check) becomes
 `constraints_hash`, computed over the **`replan = 1` constraints only**. Tactical

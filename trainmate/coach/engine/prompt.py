@@ -240,6 +240,22 @@ prescription the athlete trains from, and stays as complete as the session requi
         cleaned.sort(key=lambda x: (str(x['start_date']), x['id'] or 0))
         return cleaned
 
+    def _clean_constraints_all(self, constraints: List[Constraint]) -> List[Dict[str, Any]]:
+        """Every active constraint, tagged with its `replan` flag — display only.
+
+        `_clean_constraints` above is fed only the `replan = 1` subset, so the plan's
+        staleness fingerprint and snapshot never see a tactical directive. But the prompt
+        (`_plan_generate_strategy`) renders *every* active constraint, so a `plan show`
+        that reads only the fingerprinted subset can print "Constraints considered: None"
+        while a tactical constraint plainly shaped the strategy. This is the same cleaning
+        rule, just unfiltered and marked so a caller can tell plan-shaping from tactical.
+        """
+        cleaned = self._clean_constraints(constraints)
+        replan_by_id = {c.get('id'): int(c.get('replan') or 0) for c in constraints}
+        for entry in cleaned:
+            entry['replan'] = replan_by_id.get(entry['id'], 0)
+        return cleaned
+
     def _get_goals_hash(self, objectives: List[Objective]) -> str:
         """Computes a hash representation of objectives list to check for updates."""
         serialized = json.dumps(self._clean_goals(objectives), sort_keys=True)

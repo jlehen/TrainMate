@@ -389,6 +389,28 @@ class TestCliPlans(unittest.TestCase):
         self.assertIn("ftp: 220", stdout)
         self.assertIn("max_hr: 185", stdout)
 
+    def test_plan_show_surfaces_tactical_constraints(self):
+        """A tactical (replan=0) constraint reached the LLM prompt even though it never
+        fingerprints the plan, so `plan show` must not render it as if nothing was active:
+        the plan-shaping list is legitimately empty, but the tactical one still shows."""
+        oid = test_db.add_objective(
+            title="Tactical Goal", target_date="2026-12-15", sport_type="running",
+        )
+        test_db.save_macrocycle(
+            objective_id=oid, strategy="Run", goals_hash="g", constraints_hash="c",
+            mesocycles=[],
+            constraints_snapshot=json.dumps([]),
+            all_constraints_snapshot=json.dumps([{
+                "id": 9, "title": "no run Thursday", "start_date": "2026-06-05",
+                "end_date": "2026-06-05", "rest": 0, "description": None, "replan": 0,
+            }]),
+        )
+        exit_code, stdout, _ = self.run_cli(["plan", "show", "--goal", str(oid)])
+        self.assertEqual(exit_code, 0)
+        self.assertIn("Constraints considered (plan-shaping):", stdout)
+        self.assertIn("Also active (tactical", stdout)
+        self.assertIn("no run Thursday", stdout)
+
     @patch("trainmate.runtime.garmin")
     @patch("trainmate.runtime.coach_service")
     def test_accepting_a_plan_with_no_goal_reports_instead_of_crashing(

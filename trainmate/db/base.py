@@ -8,7 +8,7 @@ from trainmate.config import config
 # migrations are idempotent, so this is a "skip the work" marker rather than a ledger of
 # steps to replay — TrainMate has one user and one database, and the alternative (a
 # numbered migration framework) would be more machinery than that warrants.
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 
 # How long a connection waits for a writer to finish before raising "database is
@@ -627,6 +627,7 @@ class BaseDB:
                     config_snapshot TEXT,
                     goals_snapshot TEXT,
                     constraints_snapshot TEXT,
+                    all_constraints_snapshot TEXT,
                     created_at TEXT NOT NULL,
                     FOREIGN KEY (objective_id) REFERENCES objectives(id) ON DELETE CASCADE
                 )
@@ -666,6 +667,17 @@ class BaseDB:
             if 'constraints_snapshot' not in columns:
                 cursor.execute(
                     "ALTER TABLE macrocycles ADD COLUMN constraints_snapshot TEXT"
+                )
+            # Every constraint active at generation time (not just the `replan = 1`
+            # subset `constraints_snapshot` fingerprints), tagged per-entry with its
+            # `replan` flag. Display-only: `plan show`'s "Constraints considered" used
+            # to read `constraints_snapshot` alone, which could print "None" even though
+            # a tactical constraint had visibly shaped the LLM's prompt (it sees every
+            # active constraint, not just plan-shaping ones — DESIGN_constraints.md §7).
+            # NULL on macrocycles created before this column existed.
+            if 'all_constraints_snapshot' not in columns:
+                cursor.execute(
+                    "ALTER TABLE macrocycles ADD COLUMN all_constraints_snapshot TEXT"
                 )
             # Physiological thresholds (max_hr/lthr/ftp) the plan was generated with,
             # as JSON. Unlike the profile fields folded into config_hash, thresholds

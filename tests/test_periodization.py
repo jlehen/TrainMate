@@ -416,12 +416,20 @@ class TestPeriodization(unittest.TestCase):
         macro = test_db.get_macrocycle_for_objective(obj_id)
         self.assertIsNotNone(macro["goals_snapshot"])
         self.assertIsNotNone(macro["constraints_snapshot"])
+        self.assertIsNotNone(macro["all_constraints_snapshot"])
 
         goals = json.loads(macro["goals_snapshot"])
         events = json.loads(macro["constraints_snapshot"])
+        all_events = json.loads(macro["all_constraints_snapshot"])
         self.assertEqual([g["title"] for g in goals], ["Berlin Marathon"])
         # Only the plan-shaping constraint is snapshotted, not the tactical one.
         self.assertEqual([e["title"] for e in events], ["Work trip"])
+        # But the display-only "all" snapshot carries both, tagged with `replan`, since
+        # the prompt is built from every active constraint (DESIGN_constraints.md §7).
+        self.assertEqual(
+            sorted((e["title"], e["replan"]) for e in all_events),
+            [("Work trip", 1), ("no run Thursday", 0)],
+        )
 
         # The snapshot must serialize exactly the data the hash fingerprints, so the
         # two never disagree about what the plan was built on.
