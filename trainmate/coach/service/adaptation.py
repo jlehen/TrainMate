@@ -1,20 +1,23 @@
 from datetime import datetime, timedelta, timezone
-from typing import Any, List, Optional, Tuple, Dict
+from typing import Any, List, Optional, Dict
 from trainmate.config import config
-from trainmate.types import Workout
 from trainmate.adherence import analyze_adherence, format_discrepancies
 from trainmate.sports import canonical_sport
 from trainmate import intensity
 from trainmate.util import yellow, red, cmd
 from trainmate.coach.formatting import format_baseline
-from trainmate.coach.proposals import AdaptProposal, normalize_load_fields, pair_adaptations
+from trainmate.coach import honoring
+from trainmate.coach.proposals import RevisionProposal
+from trainmate.coach.revisions import (
+    normalize_load_fields, pair_revisions, structure_revision,
+)
 import trainmate.coach.service as _svc
 
 
 class AdaptationMixin:
     """Part of :class:`CoachService` — see coach/service/__init__.py."""
 
-    def _adapt_is_change(self, proposal: Dict[str, Any]) -> bool:
+    def _revision_is_change(self, proposal: Dict[str, Any]) -> bool:
         """True unless `proposal` exactly reproduces an existing same-sport session.
 
         Backstops the adaptation prompt's "return only changed sessions" rule: a verbatim
@@ -48,7 +51,7 @@ class AdaptationMixin:
 
     def workout_adapt(
         self, target_date_str: Optional[str] = None, message: Optional[str] = None
-    ) -> AdaptProposal:
+    ) -> RevisionProposal:
         """Evaluates metrics/activities over a rolling window and adapts mesocycle if needed.
 
         `message` is an optional free-text note from the athlete, passed to the SAME LLM
@@ -102,11 +105,13 @@ class AdaptationMixin:
             )
         meso_end_date_str = active_meso['end_date']
 
-        window_workouts = self._db.get_workouts(
+        # The BACKWARD window — from the adherence lookback start, removed rows included —
+        # not the forward one the proposal carries. Two different ranges, so two names.
+        lookback_workouts = self._db.get_workouts(
             start_date=start_date_str, end_date=meso_end_date_str, include_removed=True
         )
-        planned_workouts = [w for w in window_workouts if not w.get('removed')]
-        removed_workouts = [w for w in window_workouts if w.get('removed')]
+        planned_workouts = [w for w in lookback_workouts if not w.get('removed')]
+        removed_workouts = [w for w in lookback_workouts if w.get('removed')]
 
         baseline = self._db.get_baseline(target_date_str)
         baseline_str = format_baseline(baseline)
@@ -238,12 +243,12 @@ class AdaptationMixin:
         # proposal is a real change unless it matches an EXISTING same-sport session on every
         # meaningful field; a sport swap (no same-sport original) or a brand-new date always
         # counts as a change and is kept.
-        adapted = [w for w in adapted if self._adapt_is_change(w)]
+        adapted = [w for w in adapted if self._revision_is_change(w)]
 
         # Deterministic rest-window pre-pass (§6): force rest onto any future,
         # not-yet-completed planned session that falls under a `rest` constraint, so the
         # guarantee holds regardless of what the model proposed.
-        adapted = self._enforce_rest_windows_adapt(
+        adapted = self._enforce_rest_windows_revision(
             adapted, planned_workouts, constraints, completed_keys, target_date_str
         )
 
@@ -253,58 +258,42 @@ class AdaptationMixin:
         # writes a row.
         new_constraints = (decision.get("new_constraints") or []) if message else []
 
-        # Filter and structure returned workouts
-        structured = [
-            {
-                'id': None,
-                'date': w['date'],
-                'sport_type': w['sport_type'],
-                'title': w['title'],
-                'description': w['description'],
-                'original_description': w['description'],
-                # Per-workout note; the long batch rationale travels separately as the
-                # returned `reason` and is stamped onto adaptation_summary at apply time.
-                # Fall back to the batch reason so an adapted session is never left with a
-                # NULL modification_reason (the load-bearing "modified?" flag) if the model
-                # omits a per-workout change_reason.
-                'modification_reason': w.get('change_reason') or reason,
-                'adaptation_summary': reason,
-                'google_event_id': None,
-                'duration_minutes': w.get('duration_minutes'),
-                'rpe': w.get('rpe'),
-                'tss': w.get('tss'),
-                # Carry the benchmark flag through the rebuild: a moved test must stay a
-                # test. The model owns its survival by re-emitting it, and a returned change
-                # that drops it clears the stored flag at apply time
-                # (DESIGN_benchmark_workouts.md §3.1/§4.2).
-                'benchmark_type': w.get('benchmark_type')
-            } for w in adapted
-        ]
+        # The row shape both revision commands write, built in one place (§7).
+        structured = structure_revision(adapted, reason)
 
         # Pair here, once, against the same range apply will act on — the CLI used to
         # re-derive this rule for its preview and rebuild a narrower range from the
         # proposal dates, so the two could disagree about which sessions disappear.
-        pairs, removals = pair_adaptations(
-            structured,
-            self._db.get_workouts(start_date=target_date_str, end_date=meso_end_date_str),
+        window_workouts = self._db.get_workouts(
+            start_date=target_date_str, end_date=meso_end_date_str
         )
-        return AdaptProposal(
+        pairs, removals = pair_revisions(structured, window_workouts)
+        return RevisionProposal(
             reason=reason,
             workouts=structured,
-            new_constraints=new_constraints,
+            new_constraints=tuple(new_constraints),
             range_start=target_date_str,
             range_end=meso_end_date_str,
             pairs=pairs,
             removals=removals,
+            # Decided at proposal time so apply stamps this list rather than re-deriving
+            # it from a set that may have been edited since (§8).
+            covered_constraint_ids=honoring.covered_ids(
+                constraints, target_date_str, meso_end_date_str
+            ),
+            window_workouts=tuple(window_workouts),
         )
 
-    def workout_adapt_apply(
-        self, proposal: AdaptProposal
+    def workout_revision_apply(
+        self, proposal: RevisionProposal
     ) -> None:
-        """Saves proposed adapted workouts, cleans up overridden ones, and syncs to Calendar.
+        """Saves a revision's workouts in place, cleans up overridden ones, syncs Calendar.
 
-        Takes the whole proposal so the range and the displacement decisions are the
-        ones the coach actually made, not a reconstruction.
+        Shared by `workout adapt` and `workout accommodate` (DESIGN_constraint_reschedule.md
+        §7): both edit rows where they stand rather than archiving and rebuilding, and both
+        need preview and apply to agree about what disappears. Takes the whole proposal so
+        the range and the displacement decisions are the ones the coach actually made, not
+        a reconstruction — including whether this pass may stamp `adapted_at` at all.
         """
         proposed_workouts = proposal.workouts
         reason = proposal.reason
@@ -392,6 +381,10 @@ class AdaptationMixin:
                 != float(existing['duration_minutes'] or 0)
                 or float(w.get('tss') or 0) != float(existing['tss'] or 0)
             )
+            # A reschedule never stamps (§7). `eased` cannot decide this alone: a session
+            # moved to a new date has no same-sport predecessor there, so `not existing`
+            # would read the move as an easing.
+            eased = eased and proposal.stamp_adapted_at
             zone_currency, zone_sec = intensity.parse_planned_zones(w)
 
             # The flag belongs to the TEST, not to the slot: a returned change on a
@@ -438,3 +431,17 @@ class AdaptationMixin:
                     self._calendar_syncer.sync_workout(updated)
                 except Exception as e:
                     print(red(f"Error syncing {w['title']} to Google Calendar: {e}"))
+
+        # Stamped on the athlete's `y`, never on a proposal they declined (§8).
+        honoring.stamp(self._db, proposal.covered_constraint_ids)
+
+    def workout_revision_record_no_change(self, proposal: RevisionProposal) -> None:
+        """Stamps a pass that proposed nothing. Every revision command's no-change branch
+        calls this, and it is the only write on that path.
+
+        The pass still had the constraints in scope with authority over them, which is all
+        `honored_at` claims — requiring a *change* would leave "no adaptation needed"
+        flagged forever (§8). Separate from `workout_revision_apply` because there is
+        nothing to apply, and outside the propose call because a propose writes nothing.
+        """
+        honoring.stamp(self._db, proposal.covered_constraint_ids)

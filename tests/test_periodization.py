@@ -829,7 +829,9 @@ class TestPeriodization(unittest.TestCase):
         self.assertEqual(batches[0]["workouts"], 2)
         self.assertEqual(batches[0]["restorable"], 1)
 
-        restored = test_db.restore_workout_batch(batches[0]["archived_at"], "2026-06-03")
+        restored, _unhonored = test_db.restore_workout_batch(
+            batches[0]["archived_at"], "2026-06-03"
+        )
         self.assertEqual([w["title"] for w in restored], ["Old Fri"])
         # One live row per date+sport: the past-dated "Old Mon" stayed archived.
         self.assertEqual(
@@ -1837,6 +1839,32 @@ class TestDateKeyedGeneration(unittest.TestCase):
         clear_all_tables(test_db)
         self.assertEqual(
             test_db.get_governing_mesocycles(_days_out(0), _days_out(27)), ([], [])
+        )
+
+    def test_the_covering_readers_answer_only_with_blocks_that_cover_the_window(self):
+        """The strict question, for every caller that goes on to treat the answer as
+        covering the days it asked about — a block that does not contain the window is not
+        something to reshuffle towards (DESIGN_constraint_reschedule.md §5).
+
+        Its own NAME rather than a flag on the governing readers: a boolean whose meaning
+        each call site had to re-derive is how the same by-hand re-check came to be
+        written out at five separate sites.
+        """
+        goal = self._goal("Spring 10k", _days_out(-5))
+        self._plan(goal, "spring", [("Base", _days_out(-40), _days_out(-10))])
+
+        self.assertEqual(
+            test_db.get_covering_mesocycles(_days_out(0), _days_out(27)),
+            ([], []),
+        )
+        self.assertIsNone(test_db.get_covering_mesocycle(_days_out(0)))
+        # The governing readers still fall back, because `generate` depends on it.
+        self.assertIsNotNone(test_db.get_active_mesocycle(_days_out(0)))
+        # And a window a block really does cover answers the same through either reader.
+        covered = _days_out(-20)
+        self.assertEqual(
+            [b["name"] for b in test_db.get_covering_mesocycles(covered, covered)[0]],
+            ["Base"],
         )
 
     # --- what generation actually does with it ------------------------------------

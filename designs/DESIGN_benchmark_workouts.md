@@ -441,12 +441,30 @@ session cannot slip past a `cycling` benchmark on a spelling.
 
 ### 4.2 Adapt — "reschedule, don't dilute"
 
+**It is no longer adapt's section.** `workout accommodate` reschedules sessions in a
+constraint's own window and can land on a test day, so the section is now a shared,
+scope-parametrized helper (`coach/engine/workouts.py::_benchmark_task`) that both TASKs
+append. The argument below is unchanged; what changed is that two commands now rely on it,
+and that three phrases move with the scope — "a later day within THIS block" becomes "within
+this window", the last-day fallback names the window's last day, and adapt's postponement
+escape ("the next generated block re-places the test when it is due") becomes "the daily
+adapt or the next generated block re-places it". That third one is the load-bearing
+difference: adapt's promise is honest because a block boundary really does bring a
+`workout generate`, and a window sitting mid-block has no such guarantee, so repeating it
+would tell the model a postponement is cheaper than it is
+(DESIGN_constraint_reschedule.md §9).
+
+The section's closing line — "a benchmark you are NOT changing need not be returned at all"
+— travels with it and must: `workout_revision_apply` infers `clear_benchmark` from a
+returned change that drops the flag, and that inference is only sound because the prompt has
+told the model an unchanged test may be omitted.
+
 This is the one rule genuinely different from every other session, and it is
 enforced the way every other adapt behavior is: **by instructing the model, not
 by engineering guards around it**. A deterministic guard here would have to
 reverse-engineer intent from a proposal batch — is this pair of changes a move,
 a displacement, or a softening? (Concretely: exempting benchmark rows from the
-overridden-workout deletion in `workout_adapt_apply`,
+overridden-workout deletion in `workout_revision_apply`,
 `coach/service/adaptation.py:299-322`, would block the very deletion that completes a
 legitimate move, leaving the test duplicated on both days.) That is precisely the
 judgement the model already has in front of it, so the model keeps it — the deletion
@@ -493,7 +511,7 @@ cost is the mirror case: a model that softens a test *and* forgets the flag lose
 test's identity rather than keeping a diluted test — the better of two failures, since the
 next generate re-places a missing test but nothing detects a 45-minute "FTP test". The
 narrowest version of that mistake costs nothing anyway: a verbatim re-list that merely drops
-the field never reaches the apply step, because `_adapt_is_change()` compares title,
+the field never reaches the apply step, because `_revision_is_change()` compares title,
 description and load and discards it as a no-op.
 
 This composes cleanly with the existing block-boundary firewall

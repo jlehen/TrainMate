@@ -137,6 +137,11 @@ coach:
   #replan_displaced_load_pct: 50
   # ...OR, independently, when a `rest` constraint spans at least this many days.
   #replan_rest_span_days: 3
+  # `workout accommodate` (DESIGN_constraint_reschedule.md §5):
+  # how many days either side of a constraint's own dates the pass may reshuffle, so
+  # displaced load has somewhere to land. Bounded and small on purpose — a window it
+  # may rebalance freely is a window in which it is re-periodizing.
+  #accommodate_spill_days: 2
   # Relative drift (percent) an effective threshold anchor (max_hr, or a logbook
   # anchor like ftp/lthr) may move from the value the active plan was generated with
   # before the plan is flagged stale. Small retest corrections flow into workout

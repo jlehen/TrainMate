@@ -129,7 +129,10 @@ Two deliberate exceptions, each because the command cannot mean the reserved thi
 
 * **`workout adapt -m`** stays `--message`, and **`context add`** takes no `-m`/`-M`: both
   act on days, not on blocks, so a mesocycle is not a slice they could take. `-d` there is
-  a single date (`parse_single_date`), as it is on `benchmark record`.
+  a single date (`parse_single_date`), as it is on `benchmark record`. Work that *does* need
+  a block selector takes a verb of its own rather than retiring this exception —
+  `workout accommodate -m 7`, which reads the reserved vocabulary unchanged
+  (DESIGN_constraint_reschedule.md §4).
 * **`goal edit --target-date`, `constraint add/edit --start/--end`** name a *stored field*,
   not a filter. The line: a command that acts over a span of days takes `-d` (`context add`
   writes one row per day); a command that writes one row whose own columns are a start and

@@ -11,7 +11,7 @@ from trainmate.util import (
     pad_visible, wrap_text, format_labeled_block, default_wrap_width,
     today_date as _today_date,
 )
-from trainmate.cli.common import fmt_date, ensure_recent_data
+from trainmate.cli.common import fmt_date, ensure_recent_data, report_unhonored
 from trainmate.cli.selectors import CURRENT, SelectorError, resolve_meso_atom
 
 
@@ -840,6 +840,7 @@ def run_plan_rollback(args: argparse.Namespace) -> None:
         f"Restored {result['restored_workouts']} workout(s) and archived "
         f"{result['archived_workouts']} from the superseded plan; Google Calendar updated."
     )
+    report_unhonored(result['unhonored'])
     print(green(f"Run {cmd('plan show')} to review the restored strategy."))
 
 

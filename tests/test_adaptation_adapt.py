@@ -16,7 +16,7 @@ test_db = Database(db_path=TEST_DB_PATH)
 rebind_test_db(test_db)
 
 from trainmate.coach import coach_service
-from trainmate.coach.proposals import AdaptProposal
+from trainmate.coach.proposals import RevisionProposal
 
 # trainmate_cli re-exports names from trainmate.cli.workouts, so it must be imported first.
 import trainmate_cli  # noqa: F401
@@ -298,6 +298,34 @@ class TestAdaptationAdapt(unittest.TestCase):
             coach_service.workout_adapt("2026-06-10")
             self.assertNotIn("THIS BLOCK IS ENDING", mock_client.complete.call_args[0][0])
 
+    @patch("trainmate.coach.engine.openrouter_client")
+    def test_the_shared_revision_sections_render_adapts_scope(self, mock_client):
+        """Two sections are now shared with `workout accommodate`, so what has to hold here
+        is that adapt still gets ITS wording (DESIGN_constraint_reschedule.md §9)."""
+        with patch.dict(trainmate.coach.config.data, {
+            "user_profile": {"lthr": 165, "max_hr": 185},
+            "coach": {"metrics_lookback_days": 3, "minor_activity_load_threshold": 10.0},
+        }):
+            mock_client.complete.return_value = {
+                "change_needed": False, "reason": "On track.", "adapted_workouts": [],
+            }
+            test_db.save_metric_cache("2026-06-10", 50, 60, 80, 20, 10.0, 8.0, 1.2)
+            test_db.save_baseline("2026-06-10", 50.0, 2.0, 60.0, 5.0, 80.0, 5.0)
+            coach_service.workout_adapt("2026-06-10")
+            system_prompt = mock_client.complete.call_args[0][0]
+
+        # Always-on: adapt has the same latent vacate gap, and only its benchmark section
+        # used to state the encoding.
+        self.assertIn("### RE-FILLING A DATE YOU VACATE", system_prompt)
+        # Rule 2 keeps adapt's own three signals, not the window pass's constraint wording.
+        self.assertIn("a depressed morning, a note, a drift reading", system_prompt)
+        self.assertNotIn("No constraint, however disruptive,", system_prompt)
+        # The benchmark section keeps the block scope its postponement escape rests on.
+        self.assertIn("to a later day within THIS block", system_prompt)
+        self.assertIn(
+            "The next generated block re-places the test when it is due.", system_prompt
+        )
+
     def test_block_boundary_hint_names_next_mesocycle(self):
         """Inside the terminal window the CLI names the ending block and the exact generate
         command for the next one; mid-block it stays silent (DESIGN_block_boundary.md §4)."""
@@ -547,7 +575,7 @@ class TestAdaptationAdapt(unittest.TestCase):
             "description": "Cut to Z2", "modification_reason": "Eased for fatigue",
             "duration_minutes": 35, "rpe": 5, "tss": 30,
         }]
-        service.workout_adapt_apply(AdaptProposal(
+        service.workout_revision_apply(RevisionProposal(
             reason="Block too hard", workouts=proposed, new_constraints=[],
             range_start="2026-06-20", range_end="2026-06-20",
         ))
@@ -558,7 +586,7 @@ class TestAdaptationAdapt(unittest.TestCase):
         proposed[0]["description"] = "Cut further to easy walk"
         proposed[0]["duration_minutes"] = 25
         proposed[0]["tss"] = 18
-        service.workout_adapt_apply(AdaptProposal(
+        service.workout_revision_apply(RevisionProposal(
             reason="Still fatigued", workouts=proposed, new_constraints=[],
             range_start="2026-06-20", range_end="2026-06-20",
         ))
@@ -644,7 +672,7 @@ class TestAdaptationAdapt(unittest.TestCase):
             "modification_reason": "Third block week where 'easy' runs averaged Z3.",
             "duration_minutes": 60, "rpe": 4, "tss": 40.0,
         }]
-        service.workout_adapt_apply(AdaptProposal(
+        service.workout_revision_apply(RevisionProposal(
             reason="Correcting execution drift", workouts=proposed, new_constraints=[],
             range_start="2026-06-21", range_end="2026-06-21",
         ))
@@ -656,7 +684,7 @@ class TestAdaptationAdapt(unittest.TestCase):
         # A genuine cut on the same session still stamps normally.
         proposed[0]["duration_minutes"] = 40
         proposed[0]["tss"] = 25
-        service.workout_adapt_apply(AdaptProposal(
+        service.workout_revision_apply(RevisionProposal(
             reason="Fatigued", workouts=proposed, new_constraints=[],
             range_start="2026-06-21", range_end="2026-06-21",
         ))
@@ -683,7 +711,7 @@ class TestAdaptationAdapt(unittest.TestCase):
             "modification_reason": "Athlete riding with friends; test postponed.",
             "duration_minutes": 90, "rpe": 5, "tss": 60,
         }]
-        service.workout_adapt_apply(AdaptProposal(
+        service.workout_revision_apply(RevisionProposal(
             reason="Social ride replaces the test", workouts=proposed, new_constraints=[],
             range_start="2026-06-24", range_end="2026-06-24",
         ))
@@ -718,7 +746,7 @@ class TestAdaptationAdapt(unittest.TestCase):
                 "benchmark_type": "ftp_20min",
             },
         ]
-        service.workout_adapt_apply(AdaptProposal(
+        service.workout_revision_apply(RevisionProposal(
             reason="Test moved to a fresher day", workouts=proposed, new_constraints=[],
             range_start="2026-06-24", range_end="2026-06-26",
         ))
@@ -747,7 +775,7 @@ class TestAdaptationAdapt(unittest.TestCase):
             "modification_reason": "Swapped from strength after a workload spike.",
             "duration_minutes": 30, "rpe": 1, "tss": 4,
         }]
-        service.workout_adapt_apply(AdaptProposal(
+        service.workout_revision_apply(RevisionProposal(
             reason="Reduce load", workouts=proposed, new_constraints=[],
             range_start="2026-07-02", range_end="2026-07-02",
         ))

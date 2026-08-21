@@ -162,6 +162,23 @@ classes themselves.
 | `prompt.py`          | (`cli.prompt`)       | Front-end-agnostic prompt broker: `confirm`/`choose`/`ask_text` over `TtyPrompt` (`input()`) or `JsonPrompt` (chat/web). See [§6](#6-singletons). |
 | `db/`                | `db`                 | SQLite wrapper; `Database` composed from         |
 |                      |                      | per-domain mixins. Full CRUD for all tables.     |
+| `coach/honoring.py`  | —                    | Which coach pass owns a constraint, and whether  |
+|                      |                      | one has happened. Two rules, one owner each:     |
+|                      |                      | `covers`/`covered_ids`/`stamp` (who may claim    |
+|                      |                      | `honored_at`, and the one write), and            |
+|                      |                      | `constraint_window`/`needs_a_pass`/              |
+|                      |                      | `constraints_needing_a_pass` (whether the window |
+|                      |                      | tier should be offered at all — the sweep, the   |
+|                      |                      | `status` line, `constraint list`/`show` and the  |
+|                      |                      | add-time nudge all ask HERE, so they cannot      |
+|                      |                      | disagree). DESIGN_constraint_reschedule.md §8.   |
+| `coach/revisions.py` | —                    | The pure helpers behind a `RevisionProposal`:    |
+|                      |                      | `RevisionPair`, `pair_revisions`,                |
+|                      |                      | `normalize_load_fields`, and                     |
+|                      |                      | `structure_revision` (the row shape both         |
+|                      |                      | `adapt` and `accommodate` write). Apart from     |
+|                      |                      | `proposals.py`, which holds only the frozen      |
+|                      |                      | records the coach hands the CLI.                 |
 | `coach/`             | `coach_service`      | `service/` `CoachService` orchestrator +         |
 |                      |                      | `engine/` `CoachEngine` pure logic +             |
 |                      |                      | `formatting.py` prompt helpers. Both are         |
@@ -279,6 +296,7 @@ flow for each lives in [§10](#10-key-data-flows).
 | Plan version comparison / display | `trainmate/plan_diff.py` (comparison + snapshot parsing), `cli/plans.py` (text rendering), `/api/plan/diff` in `trainmate_web.py`, `loadPlanDiff()`/`render*` in `static/app.js` |
 | Plan feedback (the athlete's notes on the plan) | `db/periodization.py` (`add_/list_/get_/rm_plan_feedback` over the `plan_feedback` table), `cli/plans.py:run_plan_feedback` + `cli/selectors.py:resolve_meso_atom` (the `-m` atom), `coach/service/planning.py` (the regen gate disjunct + prompt assembly), `coach/engine/planning.py` (the prompt section), DESIGN_plan_feedback.md |
 | Workout generation horizon       | `coach/service/workouts.py:workout_generate`, `cli/workouts/parser.py` (flag parsing), `config.workout_generation_span_days` |
+| Honoring a constraint the daily adapt cannot reach | `coach/service/accommodate.py` (`accommodation_plan` — which passes can run and the **typed** reason each refusal is one: `ungoverned` / `spent` / `plan_end`, so the CLI never infers a horizon of its own; plus window resolution, the single strict `get_covering_mesocycles` governance consult — whose blocks ride on each pass — and the two-sided date clamp), `coach/engine/workouts.py:_workout_accommodate_logic` + the shared `_standing_rules_task`/`_vacate_task`/`_benchmark_task` helpers, `cli/workouts/accommodate.py` (names which constraints are in scope — a window selector, `-c`, or the bare sweep — then renders the plan's buckets), `cli/workouts/revisions.py:preview_and_confirm_revision`, `coach/honoring.py` (**canonical** for `honored_at`: who may stamp, the write, and whether the tier applies at all), `coach/revisions.py:structure_revision` (the row shape, shared with adapt), `db/constraints.py`, `config.accommodate_spill_days`, DESIGN_constraint_reschedule.md. The write path is **shared with adapt** (`workout_revision_apply`), not with generate: a revision edits rows in place, a generation archives and rebuilds (§7 of that doc) |
 | Coach-learnings / confidence     | `db/learnings.py`, `coach/service/prompt.py` (`_apply_learning_updates`), model is **canonical** in [§3](#3-coach-package-architecture) |
 | Backward analysis (bootstrap/reflect) | `coach/service/analysis.py:_run_workout_analysis`, `coach/engine/analysis.py:_data_analyze_logic` ([§10](#data-analysis-data-bootstrap--data-reflect)) |
 | Garmin pull / metrics / load model | `trainmate/garmin/sync.py` (`pull`, `ensure_data`), `garmin/load.py` (`activity_load`), `garmin/pmc.py` (PMC + `recompute_derived`), see [§12](#12-sports-science--coaching-mathematics) |
@@ -575,7 +593,7 @@ called by the UIs.
     `constraint` row (`source='message'`, `replan=0`, honored this run and every future
     run). Auto-capture never sets `replan=1` — a plan-shaping capture only *surfaces a
     suggestion* to escalate.
-  - **Rest-window pre-pass** (`_enforce_rest_windows_adapt`): eases any future,
+  - **Rest-window pre-pass** (`_enforce_rest_windows_revision`): eases any future,
     not-yet-completed planned session under a `rest = 1` constraint to rest, regardless
     of the model's proposals.
   - **Block firewall (write side):** any proposal dated past the block end is dropped —
@@ -597,7 +615,7 @@ called by the UIs.
   - **Locked history:** any proposal targeting a `(date, sport)` that already has a
     matching completed activity (incl. one done earlier today) is dropped — a finished
     workout is never "adapted".
-  - **No-op backstop** (`_adapt_is_change`): drops any proposal that reproduces an
+  - **No-op backstop** (`_revision_is_change`): drops any proposal that reproduces an
     existing same-sport session on every meaningful field (title, description,
     duration/RPE/TSS — whitespace- and int/float-insensitive), so an unchanged re-list
     is never re-stamped or needlessly re-synced.
@@ -919,6 +937,7 @@ at any horizon (DESIGN_constraints.md). Supersedes `lifeevents`.
 | `replan`      | INTEGER    | 1 = escalated to plan-shaping (built into the plan, §7)    |
 | `source`      | TEXT       | `manual` \| `message` \| `lifeevent` (migration)          |
 | `created`     | TEXT       | UTC ISO                                                    |
+| `honored_at`  | TEXT       | UTC ISO of the last coach pass that had this directive in scope **with authority over every day of it still ahead** — `workout accommodate`, `workout generate`, or `workout adapt`. NULL ⟺ the plan does not reflect it yet. Deliberately NOT a claim that the plan changed. Two rules, both owned by `coach/honoring.py` and nowhere else: who may stamp (`covers`), and whether the window tier should be offered for a directive at all (`needs_a_pass` — unstamped, `replan = 0`, a non-empty §5 window, and **at least one session scheduled in that window**, since a window with nothing in it is nothing to reshuffle). The sweep, `status`, `constraint list`/`show` and the add-time nudge all call that one predicate; there is deliberately no SQL half-copy of it in `db/constraints.py`, because that is how they came to disagree (DESIGN_constraint_reschedule.md §8). Cleared by a `constraint edit` that moves the window or rewrites the directive, and by a rollback restoring a plan older than the honoring |
 
 Index: `idx_constraints_start` on `start_date`. Rev 6 dropped the pre-rev-6
 `binding`/`sport`/`type` columns (a hard/soft × sport matrix plus an opaque label) in
@@ -1464,7 +1483,7 @@ single read-only view that is its whole state (`model`), which acts bare instead
 | `constraint` | `edit`       | `cons e` | Adjust scope / rest / text / replan by ID (`--rest`/`--no-rest`)        |
 | `constraint` | `rm`         | `cons r` | Remove a directive by ID                                                |
 | `constraint` | `list`       | `cons l` | List directives from the current mesocycle onward (`-a`/`--all`, `-v`, selectors `-d`/`-m`/`-M`/`-g`; default anchor: active mesocycle start, else show all) |
-| `constraint` | `show`       | `cons s` | Show a directive in detail (incl. plan-shaping status)                  |
+| `constraint` | `show`       | `cons s` | Show a directive in detail (incl. plan-shaping status and whether a coach pass has honored it) |
 | `constraint` | `wipe`       | —        | Delete all constraints                                                  |
 | `context`    | `add`        | `ctx a`  | Author daily-context signal(s) (positional `METRIC [TEXT…]` or `-l/--label`, `--value N`, `-d RANGE` — no `-m`/`-M`, a signal spans days not blocks; one tagged all-day event per day) |
 | `context`    | `rm`         | `ctx r`  | Remove signal(s) by positional ID(s) or metric, and/or selectors `-d`/`-m`/`-M`/`-g` (deletes calendar event + local row) |
@@ -1494,6 +1513,7 @@ single read-only view that is its whole state (`model`), which acts bare instead
 | `workout`    | `rollback`   | `w rb`   | Undo a regeneration: archive the upcoming sessions and restore a previously archived batch, re-pushing it to Calendar (`--batch N` per `workout batches`, default the most recent; `-y`). Leaves the active plan version alone — unlike `plan rollback`, so it also undoes a regeneration made under one plan (DESIGN_plan_rollback.md §9). Unrelated to `workout restore`. |
 | `workout`    | `batches`    | `w b`    | List the archived workout batches a rollback can restore, newest first: positional `#N`, archive time, total/restorable counts, date span, plan version. The plan in force is printed above them as an unnumbered `live` row — shown as the reference point, unnumbered because a rollback archives it rather than restoring it (DESIGN_plan_rollback.md §9) |
 | `workout`    | `adapt`      | `w a`    | Run daily adaptation check (`-d/--date` one day: `YYYY-MM-DD`, `today`, `-1d`; `-m` athlete note — kept, since adapt takes no block selector; `-y` auto-apply) |
+| `workout`    | `accommodate` | `w ac`  | Honor the constraints the plan does not reflect yet, each in its own window — the middle tier between daily `adapt` (current block only) and `--replan` (the whole plan). Bare = sweep every unhonored constraint from today to the plan's end; `-d`/`-m`/`-M`/`-g` restrict it to those overlapping that window; `-c ID…` honors the ones you name whether or not the plan already reflects them, which is how a window edited by hand is re-honored (`-c` and the window selectors are exclusive: they answer the same question two ways); `-y` auto-applies. A window is a constraint's dates ± `config.accommodate_spill_days`, clipped to tomorrow — today is adapt's. Reads NO metrics on purpose: it acts on what was declared, and that is what lets it cross the block boundary adapt may not (DESIGN_constraint_reschedule.md §2/§5). One LLM call per pass; the WHOLE window is previewed before anything is written |
 | `workout`    | `push`       | `w p`    | Sync planned workouts to Google Calendar. Defaults to today onward; pushes only unsynced unless `-f`/`--force` re-pushes already-synced ones. |
 | `workout`    | `swap`       | `w s`    | Swap two workouts by dates (`<date> <date>`) or IDs (`<id> <id>`), same kind on both sides, plus a mandatory positional `REASON`. Runs recovery checks (consecutive hard days, load spikes, mesocycle crossings), prompts on warnings unless `-f`; syncs unless `--no-sync`; the reason is folded into `modification_reason`. |
 | `workout`    | `wipe`       | —        | Delete all workouts                                                      |
@@ -1624,6 +1644,7 @@ Required fields:
 |                        |      | `service_account.json`)                                       |
 | `metrics_lookback_days`  | int  | Rolling window for adaptation (default: 15)                  |
 | `workout_generation_span_days` | int  | Default horizon for `workout generate` (default: 28)         |
+| `accommodate_spill_days` | int | Days either side of a constraint's own dates that `workout accommodate` may reshuffle, so displaced load has somewhere to land (default: 2). Bounded and small on purpose — a window it may rebalance freely is a window in which it is re-periodizing (DESIGN_constraint_reschedule.md §5) |
 | `minor_activity_load_threshold`    | float| Workload score below which an activity is "minor"            |
 |                         |      | (default: 25). Controls rest-day violations and unplanned    |
 |                         |      | activity visibility (shown as gray/minor if below threshold,  |
@@ -2268,6 +2289,26 @@ block end) and, on the write side, `workout_adapt` dropping any proposal dated p
 adaptation range end. A hallucinated post-boundary date therefore cannot be written, and
 the apply range — derived from the surviving proposals — cannot stretch into the next
 block. See DESIGN_block_boundary.md.
+
+### Going around the firewall rather than widening it
+The firewall above is not about the *range*; it is about what would ride along with it.
+Adapt's whole input is a backward window of recovery metrics, so a longer reach would give
+this morning's HRV authority over a session four weeks out, where it has no predictive
+claim. `workout accommodate` therefore crosses the boundary the daily adapt may not, on
+one condition that makes it a different question: **adapt reacts to something inferred,
+this reacts to something declared.** A constraint is a dated fact the athlete typed in, so
+honoring it needs no metrics and makes no fitness judgement — which is why the command
+deliberately reads none, and why the moment it did, the firewall argument would apply to
+it too.
+
+Two bounds keep it a reschedule rather than a re-periodization: the window is the
+constraint's own dates plus `config.accommodate_spill_days` either side (enough for a
+displaced session to land, not enough to restructure a block), and its near side is
+clipped to *tomorrow* — today belongs to adapt, which judges it with the full metrics
+picture. The write path is adapt's, not generate's: rows are edited in place by
+`workout_revision_apply`, because archive-and-rebuild is defined "from a date onward" and a
+window-scoped rewrite has no representation in it (DESIGN_plan_rollback.md §9). See
+DESIGN_constraint_reschedule.md.
 
 ### The line that is only true while it scrolls past
 Both front-ends run the same CLI, but they do not read it the same way: the bot buffers a

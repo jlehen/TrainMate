@@ -229,11 +229,11 @@ class PmcContextMixin:
 
         No preceding block and no delta — block-over-block creep is a periodization
         question, and §9.2 gives those to `generate`. Returns None when today falls
-        outside every block: `get_active_mesocycle` falls back to the next FUTURE block,
-        which would render an empty table for training that has not happened (§8).
+        outside every block — the next FUTURE block would render an empty table for
+        training that has not happened (§8).
         """
-        meso = self._db.get_active_mesocycle(as_of)
-        if not meso or not (meso['start_date'] <= as_of <= meso['end_date']):
+        meso = self._db.get_covering_mesocycle(as_of)
+        if not meso:
             return None
         return intensity.block_report(
             meso, as_of, self._db.get_completed_activities,
@@ -254,12 +254,12 @@ class PmcContextMixin:
         tables actually having rows rather than on the section merely existing (§5.1).
 
         `text` is None when there is no fulfilled part to report — `as_of` outside every
-        block (`get_active_mesocycle` falls back to a future or first block, which would
-        describe training that has not happened), or `gen_start` on/before the block's
-        first day, where generate IS writing the whole block and has nothing to continue.
+        block (a future or first block would describe training that has not happened),
+        or `gen_start` on/before the block's first day, where generate IS writing the
+        whole block and has nothing to continue.
         """
-        meso = self._db.get_active_mesocycle(as_of)
-        if not meso or not (meso['start_date'] <= as_of <= meso['end_date']):
+        meso = self._db.get_covering_mesocycle(as_of)
+        if not meso:
             return None, False
         elapsed_end = (
             datetime.strptime(gen_start, "%Y-%m-%d").date() - timedelta(days=1)

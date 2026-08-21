@@ -1,6 +1,6 @@
 """What the coach proposes, before the athlete has accepted it.
 
-These objects exist to stop the same rule being written twice on both sides of a
+These records exist to stop the same rule being written twice on both sides of a
 boundary. Two drift bugs came from that:
 
 * The CLI preview re-derived which planned session a proposal displaces, and rebuilt
@@ -14,43 +14,88 @@ boundary. Two drift bugs came from that:
   silently defeating the staleness detector whose whole job is catching that.
 
 So a proposal carries the facts it was computed from, and the consumer renders rather
-than recomputes.
+than recomputes. Records only: the logic that fills them in lives in `revisions.py`.
 """
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
 
-from trainmate.sports import canonical_sport
+from trainmate.coach.revisions import RevisionPair
 
 
 @dataclass(frozen=True)
-class AdaptPair:
-    """One proposed session and the planned session it stands in for.
+class RevisionProposal:
+    """An in-place rewrite of the sessions in a window, before it has been accepted.
 
-    `original` is the session being replaced — the same-sport session for an in-place
-    adaptation, or the displaced one for a sport swap. It is None for a session
-    proposed on a date that had nothing planned.
-    """
-    proposal: Dict[str, Any]
-    original: Optional[Dict[str, Any]]
-    is_swap: bool
+    The shape `workout adapt` and `workout accommodate` share: rows edited where they
+    stand rather than archived and rebuilt (DESIGN_constraint_reschedule.md §7). Both are
+    applied by `workout_revision_apply`.
 
-
-@dataclass(frozen=True)
-class AdaptProposal:
-    """A `workout adapt` result: the changes, and the range they were judged over.
-
-    `range_start`/`range_end` are the window the coach actually evaluated
-    (target date through the end of the mesocycle), not the span of the proposals it
-    happened to return. Apply deletes overridden sessions across this range, so the
-    two must be the same window or apply removes sessions the preview never showed.
+    `range_start`/`range_end` are the window the coach actually evaluated, not the span of
+    the proposals it happened to return. Apply deletes overridden sessions across this
+    range, so the two must be the same window or apply removes sessions the preview never
+    showed — which is also why every caller renders these rather than its own request.
     """
     reason: str
     workouts: List[Dict[str, Any]]
-    new_constraints: List[Dict[str, Any]]
     range_start: str
     range_end: str
-    pairs: Tuple[AdaptPair, ...] = ()
+    pairs: Tuple[RevisionPair, ...] = ()
     removals: Tuple[Dict[str, Any], ...] = ()
+    # Everything below is defaulted, and that is the rule this record keeps: a producer
+    # names only what it actually has. `workout adapt` extracts candidate directives from
+    # the athlete's note and `workout accommodate` has no note to extract from, so the
+    # second one says nothing rather than declaring an empty list — a field a producer has
+    # to opt out of is how a shared record turns into a union of two.
+    new_constraints: Tuple[Dict[str, Any], ...] = ()
+    # Constraints this pass had authority over every remaining day of, so apply stamps
+    # exactly the set decided at proposal time (§8). See `coach/honoring.py`.
+    covered_constraint_ids: Tuple[int, ...] = ()
+    # Only a pass that EASES load may stamp `adapted_at`, which drives the DO NOT COMPOUND
+    # guard (§7). Carried here rather than passed to apply so the producer decides once and
+    # no call site can forget it.
+    stamp_adapted_at: bool = True
+    # Every session in the evaluated window, for a whole-window preview (§10). Carried so
+    # the CLI renders the proposal rather than re-reading the rows behind it.
+    window_workouts: Tuple[Dict[str, Any], ...] = ()
+
+
+@dataclass(frozen=True)
+class AccommodationPass:
+    """One §5 window and the directives it honors — the unit `workout accommodate` runs.
+
+    Several constraints when their spill-widened windows overlapped and were merged: a
+    second pass over shared days would preview a plan the first had not yet applied
+    (DESIGN_constraint_reschedule.md §4.1).
+
+    `blocks` are the governing blocks, resolved once at plan time (§4.2): the pass runs
+    over its whole window whenever any of it is governed, so the propose call and the
+    CLI's "plan runs out" warning both read this list rather than asking again.
+    """
+    range_start: str
+    range_end: str
+    constraints: Tuple[Dict[str, Any], ...] = ()
+    blocks: Tuple[Dict[str, Any], ...] = ()
+
+
+@dataclass(frozen=True)
+class AccommodationPlan:
+    """What can and cannot be done about a set of directives, decided before any of it is.
+
+    Every refusal is a populated field rather than a message the caller inferred. The CLI
+    used to work these out for itself — a plan horizon from all blocks covering today, a
+    `start_date > plan_end` test for "too far out" — while the service worked out its own
+    from the blocks overlapping each window. Two computations of one fact, so a constraint
+    landing in a GAP between blocks passed the caller's test, became a pass, and was
+    refused mid-loop with "no active periodization strategy found" — which was not true
+    (§4.1, §5).
+    """
+    plan_end: Optional[str]
+    passes: Tuple[AccommodationPass, ...] = ()
+    # No block covers their window, so there is nothing to reshuffle them towards: past
+    # the plan's end, or inside a gap in it. One bucket, because the answer is the same.
+    ungoverned: Tuple[Dict[str, Any], ...] = ()
+    # Nothing left of their window but today, which belongs to `workout adapt` (§5).
+    spent: Tuple[Dict[str, Any], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -67,83 +112,9 @@ class GenerateProposal:
     workouts: Tuple[Dict[str, Any], ...] = ()
     displaced: Tuple[Dict[str, Any], ...] = ()
     gen_start: str = ""
-
-
-def normalize_load_fields(workouts: List[Dict[str, Any]]) -> None:
-    """Rounds the model's load fields to the integers the plan columns store.
-
-    A JSON `24.0` is the same load as a stored `24`, but it survives into the preview and
-    renders `TSS24 -> TSS24.0`, so an otherwise-unchanged number reads as a change. Fixed
-    here rather than in the prompt so correctness does not rest on the model's formatting.
-    """
-    for w in workouts:
-        for field in ('duration_minutes', 'rpe', 'tss'):
-            value = w.get(field)
-            if isinstance(value, float):
-                w[field] = round(value)
-
-
-def pair_adaptations(
-    proposals: List[Dict[str, Any]], existing: List[Dict[str, Any]]
-) -> Tuple[Tuple[AdaptPair, ...], Tuple[Dict[str, Any], ...]]:
-    """Decides, per date, which planned session each proposal replaces.
-
-    An in-place adaptation matches its original by (date, canonical sport). A sport
-    swap carries a new sport_type and so has no same-sport original: on a proposed
-    date, an existing session whose canonical sport is not among that date's proposals
-    is the one being overridden, and is paired with that date's new-sport proposal.
-
-    Returns `(pairs, removals)`, where removals are overridden sessions left without a
-    replacement — plain deletions, which the preview must show so apply never drops a
-    session silently.
-    """
-    proposed_by_date: Dict[str, List[Dict[str, Any]]] = {}
-    for proposal in proposals:
-        proposed_by_date.setdefault(proposal["date"], []).append(proposal)
-
-    existing_by_date: Dict[str, List[Dict[str, Any]]] = {}
-    for session in existing:
-        existing_by_date.setdefault(session["date"], []).append(session)
-
-    swap_original: Dict[int, Dict[str, Any]] = {}
-    removals: List[Dict[str, Any]] = []
-
-    for date, date_proposals in proposed_by_date.items():
-        on_date = existing_by_date.get(date, [])
-        proposed_sports = {canonical_sport(p["sport_type"]) for p in date_proposals}
-        existing_sports = {canonical_sport(e["sport_type"]) for e in on_date}
-
-        overridden = [
-            e for e in on_date if canonical_sport(e["sport_type"]) not in proposed_sports
-        ]
-        new_sport_proposals = [
-            p for p in date_proposals
-            if canonical_sport(p["sport_type"]) not in existing_sports
-        ]
-        # The common case is one overridden session and one new-sport proposal — a clean
-        # swap — so pair positionally and treat the surplus as deletions.
-        for proposal, original in zip(new_sport_proposals, overridden):
-            swap_original[id(proposal)] = original
-        removals.extend(overridden[len(new_sport_proposals):])
-
-    pairs = []
-    for proposal in proposals:
-        same_sport = next(
-            (
-                e for e in existing_by_date.get(proposal["date"], [])
-                if canonical_sport(e["sport_type"]) == canonical_sport(proposal["sport_type"])
-            ),
-            None,
-        )
-        displaced = swap_original.get(id(proposal))
-        pairs.append(
-            AdaptPair(
-                proposal=proposal,
-                original=same_sport or displaced,
-                is_swap=same_sport is None and displaced is not None,
-            )
-        )
-    return tuple(pairs), tuple(removals)
+    # As on `RevisionProposal` (§8). Decided where `gen_start`/`gen_end` are both in
+    # scope, so the proposal carries the resulting ids rather than a range to re-check.
+    covered_constraint_ids: Tuple[int, ...] = ()
 
 
 @dataclass(frozen=True)

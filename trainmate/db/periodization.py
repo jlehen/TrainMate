@@ -165,45 +165,55 @@ class PeriodizationMixin:
             )
             return [dict(row) for row in cursor.fetchall()]  # type: ignore
 
-    def get_mesocycles_in_range(self, start_date: str, end_date: str) -> List[Mesocycle]:
+    def get_mesocycles_in_range(
+        self, start_date: str, end_date: Optional[str] = None
+    ) -> List[Mesocycle]:
         """Every active mesocycle overlapping the window, chronologically.
 
         The date-keyed counterpart of get_mesocycles_for_macrocycle: which blocks govern
         these days, asked without naming a goal or a plan version
         (DESIGN_cli_selectors.md §8). Same active-objective/active-version filter as
         get_active_mesocycle, so the two never disagree about what is live.
+
+        `end_date=None` means no upper bound — "every block from here to the plan's end",
+        the form `get_constraints` already takes, so no caller has to invent a far-future
+        date to stand in for one.
         """
+        clauses = ["m.end_date >= ?"]
+        params: List[str] = [start_date]
+        if end_date is not None:
+            clauses.append("m.start_date <= ?")
+            params.append(end_date)
         with self._get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute("""
+            cursor.execute(f"""
                 SELECT m.* FROM mesocycles m
                 JOIN macrocycles mac ON m.macrocycle_id = mac.id
                 JOIN objectives o ON mac.objective_id = o.id
                 WHERE o.status = 'active' AND COALESCE(mac.status, 'active') = 'active'
-                  AND m.start_date <= ? AND m.end_date >= ?
+                  AND {' AND '.join(clauses)}
                 ORDER BY m.start_date ASC, m.id ASC
-            """, (end_date, start_date))
+            """, params)
             return [dict(row) for row in cursor.fetchall()]  # type: ignore
 
-    def get_governing_mesocycles(
-        self, start_date: str, end_date: str, prefer_macro_id: Optional[int] = None
+    def get_covering_mesocycles(
+        self, start_date: str, end_date: Optional[str] = None,
+        prefer_macro_id: Optional[int] = None
     ) -> Tuple[List[Mesocycle], List[int]]:
-        """The blocks that govern a window, plus the macrocycle IDs dropped as conflicts.
+        """The blocks that ACTUALLY overlap a window — or none — plus the macrocycle IDs
+        dropped as conflicts. The strict reader: an empty answer means no block covers
+        any of these days, and every caller that treats the answer as covering the
+        window wants this form (DESIGN_constraint_reschedule.md §5).
 
         Sequential plans both survive — a long span legitimately crosses from one goal's
         last block into the next goal's first — but two plans covering the *same* dates
         cannot both be followed, so the most recently created wins, the same tiebreak
         get_periodization_ids_for_date makes per day. `prefer_macro_id` settles that
         contest by hand instead.
-
-        Falls back to get_active_mesocycle's own chain when nothing overlaps, so a plan
-        that starts after the window (or ended before it) still answers rather than
-        leaving the caller with no plan at all.
         """
         mesos = self.get_mesocycles_in_range(start_date, end_date)
         if not mesos:
-            fallback = self.get_active_mesocycle(start_date)
-            return ([fallback] if fallback else []), []
+            return [], []
 
         spans: Dict[int, Tuple[str, str]] = {}
         for m in mesos:
@@ -222,6 +232,24 @@ class PeriodizationMixin:
             else:
                 kept.append(mid)
         return [m for m in mesos if m['macrocycle_id'] in kept], sorted(dropped)
+
+    def get_governing_mesocycles(
+        self, start_date: str, end_date: Optional[str] = None,
+        prefer_macro_id: Optional[int] = None
+    ) -> Tuple[List[Mesocycle], List[int]]:
+        """`get_covering_mesocycles`, answering with get_active_mesocycle's nearest block
+        when nothing overlaps — so a plan that starts after the window still answers
+        rather than leaving the caller with no plan at all. What `generate` wants, since
+        it lays sessions near a plan's edges and reads an empty result as "no plan at
+        all"; a caller that would treat the answer as covering the window wants the
+        strict reader instead."""
+        mesos, dropped = self.get_covering_mesocycles(
+            start_date, end_date, prefer_macro_id
+        )
+        if mesos:
+            return mesos, dropped
+        nearest = self.get_active_mesocycle(start_date)
+        return ([nearest] if nearest else []), []
 
     def get_mesocycle_ranges(self, start_date: str, end_date: str) -> List[Tuple[str, str]]:
         """Returns the (start_date, end_date) spans of all mesocycles overlapping the
@@ -286,16 +314,12 @@ class PeriodizationMixin:
             row = cursor.fetchone()
             return dict(row) if row else None  # type: ignore
 
-    def get_active_mesocycle(self, target_date: str) -> Optional[Mesocycle]:
-        """Finds the active mesocycle block for a given date.
-
-        Falls back to the next future mesocycle, or the absolute first mesocycle
-        if none contain or follow the target date. Only considers active objectives.
-        """
+    def get_covering_mesocycle(self, target_date: str) -> Optional[Mesocycle]:
+        """The active mesocycle that actually CONTAINS this date, or None. The strict
+        reader: what every caller wants that goes on to read the answer's dates as
+        covering the target. Only considers active objectives."""
         with self._get_connection() as conn:
             cursor = conn.cursor()
-
-            # Primary: mesocycle containing target_date
             cursor.execute("""
                 SELECT m.* FROM mesocycles m
                 JOIN macrocycles mac ON m.macrocycle_id = mac.id
@@ -305,7 +329,18 @@ class PeriodizationMixin:
                 ORDER BY m.start_date ASC LIMIT 1
             """, (target_date, target_date))
             row = cursor.fetchone()
-            if row: return dict(row) # type: ignore
+            return dict(row) if row else None  # type: ignore
+
+    def get_active_mesocycle(self, target_date: str) -> Optional[Mesocycle]:
+        """`get_covering_mesocycle`, falling back to the next future mesocycle, or the
+        absolute first one, when none contains the date — the block a command should act
+        RELATIVE to, not necessarily one containing the date. A caller that reads the
+        answer's dates as covering the target wants the strict reader instead."""
+        covering = self.get_covering_mesocycle(target_date)
+        if covering:
+            return covering
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
 
             # Fallback 1: first mesocycle that ends in the future
             cursor.execute("""

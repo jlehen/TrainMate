@@ -4,7 +4,9 @@ from typing import Any, Iterator, List, Optional, Tuple, Dict
 from trainmate.config import config
 from trainmate.types import Constraint, Workout
 from trainmate.adherence import analyze_adherence
-from trainmate.coach.proposals import GenerateProposal, normalize_load_fields
+from trainmate.coach import honoring
+from trainmate.coach.proposals import GenerateProposal
+from trainmate.coach.revisions import normalize_load_fields
 from trainmate.sports import canonical_sport
 from trainmate.benchmarks import MIN_RETEST_DAYS
 from trainmate import intensity
@@ -129,7 +131,7 @@ class WorkoutGenMixin:
         return out
 
     @classmethod
-    def _enforce_rest_windows_adapt(
+    def _enforce_rest_windows_revision(
         cls, adapted: List[Dict[str, Any]], planned_workouts: List[Workout],
         constraints: List[Constraint], completed_keys: Optional[set], from_date: str
     ) -> List[Dict[str, Any]]:
@@ -369,7 +371,9 @@ class WorkoutGenMixin:
             )
 
         archived = self._archive_and_teardown(today_str, verbose)
-        restored = self._db.restore_workout_batch(target['archived_at'], today_str)
+        restored, unhonored = self._db.restore_workout_batch(
+            target['archived_at'], today_str
+        )
         self._push_batch(
             restored,
             f"Restoring {len(restored)} archived workout(s) in Google Calendar...",
@@ -382,6 +386,9 @@ class WorkoutGenMixin:
             'archived_workouts': len(archived),
             'first_date': min((w['date'] for w in restored), default=None),
             'last_date': max((w['date'] for w in restored), default=None),
+            # The restored plan predates these honorings, so they are unhonored again and
+            # the caller says so (§8).
+            'unhonored': unhonored,
         }
 
     def workout_generate(
@@ -568,6 +575,11 @@ class WorkoutGenMixin:
             workouts=tuple(workouts),
             displaced=tuple(displaced),
             gen_start=gen_start_str,
+            # Checked against the range about to be WRITTEN, not the fetched set, which is
+            # open-ended (DESIGN_constraint_reschedule.md §8).
+            covered_constraint_ids=honoring.covered_ids(
+                constraints, gen_start_str, gen_end_str
+            ),
         )
 
     def workout_generate_apply(
@@ -612,4 +624,7 @@ class WorkoutGenMixin:
             f"Creating {len(saved_workouts)} new workout(s) in Google Calendar...",
             verbose,
         )
+
+        # The same warrant every other constraint this run built around gets (§8).
+        honoring.stamp(self._db, proposal.covered_constraint_ids)
         return saved_workouts

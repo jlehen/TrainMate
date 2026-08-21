@@ -163,6 +163,15 @@ class Config:
                              coach.get("replan_hard_span_days", 3)))
 
     @property
+    def accommodate_spill_days(self) -> int:
+        """How many days either side of a constraint's own dates `workout accommodate`
+        may reshuffle, so displaced load has somewhere to land (default 2).
+
+        See DESIGN_constraint_reschedule.md §5: the margin is the whole difference between
+        a reschedule and a re-periodization, so it is bounded and small on purpose."""
+        return int(self.get("coach", {}).get("accommodate_spill_days", 2))
+
+    @property
     def learning_confidence_thresholds(self) -> dict[str, int]:
         """Distinct net supporting weeks required to reach each confidence level
         (evidence-based confidence; see DESIGN_evidence_based_confidence.md §3).

@@ -87,7 +87,10 @@ it only once it was too late to act on.
 
 ## 5. Deliberately not done
 
-- **Extending the adaptation range past `meso_end`.** See §2.
+- **Extending the adaptation range past `meso_end`.** See §2. A constraint dated past the
+  boundary is reached instead by `workout accommodate`, which crosses it
+  without carrying the metrics-driven load judgement across with them
+  (DESIGN_constraint_reschedule.md §2). This entry stands: nothing extends *adapt's* range.
 - **Feeding the next block's concrete sessions to the model as read-only context.** The system
   prompt already lists every mesocycle's name, date range and focus
   (`coach/service/prompt.py::_get_active_strategy_and_meso_text`), which is enough to support

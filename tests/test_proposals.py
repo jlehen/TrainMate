@@ -13,9 +13,8 @@ from tests.helpers import clear_all_tables, rebind_test_db
 TEST_DB_PATH = os.path.join(os.path.dirname(__file__), "test_proposals.db")
 
 from trainmate.db import Database
-from trainmate.coach.proposals import (
-    AdaptProposal, PlanFingerprints, normalize_load_fields, pair_adaptations,
-)
+from trainmate.coach.proposals import RevisionProposal, PlanFingerprints
+from trainmate.coach.revisions import normalize_load_fields, pair_revisions
 
 test_db = Database(db_path=TEST_DB_PATH)
 rebind_test_db(test_db)
@@ -34,7 +33,7 @@ class TestPairAdaptations(unittest.TestCase):
         proposal = self._planned("2026-06-10", "running", "Easy Run")
         existing = self._planned("2026-06-10", "running", "Interval Session")
 
-        pairs, removals = pair_adaptations([proposal], [existing])
+        pairs, removals = pair_revisions([proposal], [existing])
 
         self.assertEqual(len(pairs), 1)
         self.assertEqual(pairs[0].original["title"], "Interval Session")
@@ -47,7 +46,7 @@ class TestPairAdaptations(unittest.TestCase):
         proposal = self._planned("2026-06-10", "yoga", "Restorative Yoga")
         existing = self._planned("2026-06-10", "strength", "Heavy Lower")
 
-        pairs, removals = pair_adaptations([proposal], [existing])
+        pairs, removals = pair_revisions([proposal], [existing])
 
         self.assertEqual(pairs[0].original["title"], "Heavy Lower")
         self.assertTrue(pairs[0].is_swap)
@@ -57,7 +56,7 @@ class TestPairAdaptations(unittest.TestCase):
         proposal = self._planned("2026-06-10", "strength_training", "Lighter Lift")
         existing = self._planned("2026-06-10", "strength", "Heavy Lower")
 
-        pairs, removals = pair_adaptations([proposal], [existing])
+        pairs, removals = pair_revisions([proposal], [existing])
 
         self.assertFalse(pairs[0].is_swap, "an alias is the same sport, not a swap")
         self.assertEqual(pairs[0].original["title"], "Heavy Lower")
@@ -71,7 +70,7 @@ class TestPairAdaptations(unittest.TestCase):
             self._planned("2026-06-10", "cycling", "Long Ride"),
         ]
 
-        pairs, removals = pair_adaptations([proposal], existing)
+        pairs, removals = pair_revisions([proposal], existing)
 
         self.assertEqual(len(pairs), 1)
         self.assertEqual(len(removals), 1)
@@ -79,7 +78,7 @@ class TestPairAdaptations(unittest.TestCase):
         self.assertNotEqual(removals[0]["title"], pairs[0].original["title"])
 
     def test_a_proposal_on_an_empty_date_has_no_original(self):
-        pairs, removals = pair_adaptations(
+        pairs, removals = pair_revisions(
             [self._planned("2026-06-11", "running", "Extra Run")], []
         )
         self.assertIsNone(pairs[0].original)
@@ -110,13 +109,13 @@ class TestLoadFieldsAreIntegers(unittest.TestCase):
         self.assertEqual(workouts[0], {"duration_minutes": 45, "tss": None})
 
 
-class TestAdaptProposalCarriesItsRange(unittest.TestCase):
+class TestRevisionProposalCarriesItsRange(unittest.TestCase):
     def test_the_range_is_the_window_evaluated_not_the_proposal_span(self):
         """The CLI used to rebuild the range from min/max of the proposal dates and hand
         that to apply, which deletes overridden sessions across it. A single proposal
         therefore produced a one-day range, so a session displaced later in the block
         was never removed — preview and apply disagreeing about what disappears."""
-        proposal = AdaptProposal(
+        proposal = RevisionProposal(
             reason="Ease the week",
             workouts=[{"date": "2026-06-10", "sport_type": "running", "title": "Easy"}],
             new_constraints=[],

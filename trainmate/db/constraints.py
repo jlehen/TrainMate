@@ -63,6 +63,55 @@ class ConstraintsMixin:
                 )
             return [dict(row) for row in cursor.fetchall()]  # type: ignore
 
+    # No `get_unhonored_constraints` here on purpose. "Does the plan reflect this yet, and
+    # is the window tier the right answer?" is a four-term rule that also has to ask
+    # whether the window holds any sessions, and this layer cannot import `coach`. It has
+    # one owner, `coach/honoring.py::needs_a_pass`; a SQL half-copy of it here is how the
+    # display paths and the sweep came to disagree (DESIGN_constraint_reschedule.md §8).
+
+    def clear_honored_after(
+        self, archived_at: str, from_date: str
+    ) -> List[Constraint]:
+        """Un-honors the constraints a plan restored from `archived_at` cannot reflect,
+        and returns them so the caller can say which (§8).
+
+        A constraint with `honored_at > archived_at` was honored into a plan NEWER than
+        the one coming back. Deliberately not re-honored by a roll forward: a false
+        "unhonored" costs a nudge and a cheap re-pass, a false "honored" hides a real gap.
+        """
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT * FROM constraints WHERE honored_at > ? AND end_date >= ? "
+                "ORDER BY start_date ASC",
+                (archived_at, from_date)
+            )
+            cleared = [dict(row) for row in cursor.fetchall()]
+            cursor.execute(
+                "UPDATE constraints SET honored_at = NULL "
+                "WHERE honored_at > ? AND end_date >= ?",
+                (archived_at, from_date)
+            )
+            conn.commit()
+            return cleared  # type: ignore
+
+    def mark_honored(self, constraint_id: int) -> None:
+        """Records that a coach pass covered this constraint's remaining window (§8)."""
+        with self._get_connection() as conn:
+            conn.cursor().execute(
+                "UPDATE constraints SET honored_at = ? WHERE id = ?",
+                (datetime.now(timezone.utc).isoformat(), constraint_id)
+            )
+            conn.commit()
+
+    def clear_honored(self, constraint_id: int) -> None:
+        """Re-arms the sweep: the window moved or the directive changed (§8)."""
+        with self._get_connection() as conn:
+            conn.cursor().execute(
+                "UPDATE constraints SET honored_at = NULL WHERE id = ?", (constraint_id,)
+            )
+            conn.commit()
+
     def get_constraint(self, constraint_id: int) -> Optional[Constraint]:
         """Fetches a constraint by its unique ID."""
         with self._get_connection() as conn:

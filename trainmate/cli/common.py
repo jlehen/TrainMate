@@ -3,7 +3,7 @@ from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
 from trainmate.config import config
 from trainmate.adherence import analyze_adherence, classify_adherence
-from trainmate.util import yellow, today_str as _today_str
+from trainmate.util import cyan, yellow, cmd, wrap_text, today_str as _today_str
 
 # `trainmate_cli` (the `db`/`garmin`/`calendar_syncer` facade) is imported lazily
 # inside the functions below: it imports this module, so a module-level import here
@@ -166,3 +166,43 @@ def mark_adherence_range(start_date: str, end_date: str) -> int:
         pending_from=today,
     )
     return mark_adherence_from_results(matching_results, today)
+
+
+def constraint_line(c: Dict[str, Any], needs_a_pass: bool = False) -> str:
+    """One-line rendering of a constraint, for `constraint list`/`show`/`add` and `status`.
+
+    Here rather than in `cli/constraints.py` because `status` also draws it, and its own
+    hand-rolled copy had already drifted (DESIGN_constraint_reschedule.md §11).
+
+    `needs_a_pass` is `coach/honoring.py`'s answer, passed in rather than re-derived: this
+    stays a renderer, and the one place that decides which tier owns a directive stays the
+    one place. Deciding it here is how the tag came to contradict the sweep (§8).
+    """
+    tags = ("no training" if c.get('rest') else "advisory") + (
+        " · plan-shaping" if c.get('replan') else ""
+    )
+    if c.get('honored_at'):
+        tags += " · honored"
+    elif needs_a_pass:
+        tags += " · not yet in the plan"
+    return (
+        f"ID: {c['id']} | {yellow(c['title'])}: "
+        f"{cyan(c['start_date'])} to {cyan(c['end_date'])} | {tags}"
+    )
+
+
+def report_unhonored(constraints: List[Dict[str, Any]]) -> None:
+    """Names the constraints a rollback just un-honored (§8).
+
+    The restored plan predates those honorings, so it cannot reflect them. Said after the
+    fact, not before the `y`: the cost of the flag being cleared is one nudge and a cheap
+    re-pass, which is not worth complicating a confirm over.
+    """
+    if not constraints:
+        return
+    names = ", ".join(f"[{c['id']}] {c['title']}" for c in constraints)
+    print(yellow(wrap_text(
+        f"{len(constraints)} constraint(s) the restored plan predates are no longer "
+        f"marked honored: {names}. Run " + cmd("workout accommodate") + " to re-check "
+        "them."
+    )))

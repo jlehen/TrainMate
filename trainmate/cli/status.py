@@ -9,7 +9,10 @@ from trainmate.util import (
     pmc_cells, pmc_warming_note, format_labeled_block, default_wrap_width, PMC_TSB_LAG_NOTE,
     today_str as _today_str, today_date as _today_date,
 )
-from trainmate.cli.common import fmt_date, ensure_recent_data, pmc_warmup_cutoff
+from trainmate.cli.common import (
+    constraint_line, fmt_date, ensure_recent_data, pmc_warmup_cutoff,
+)
+from trainmate.coach import honoring
 from trainmate.db.objectives import goal_state, GOAL_UPCOMING
 
 
@@ -86,6 +89,18 @@ def run_status(args) -> None:
                     "\nWarning: a plan-shaping input has changed since the "
                     f"active periodization plan was generated ({change_reason}).\nRun "
                     + cmd("plan generate") + " to regenerate."))
+
+            # Constraints the plan does not reflect yet are the same kind of fact — a
+            # directive on record that nothing has acted on (DESIGN_constraint_reschedule.md
+            # §10), so it belongs beside the staleness warning too. Counted through
+            # `honoring`, so this nag and the command that answers it cannot disagree (§8).
+            unhonored = honoring.constraints_needing_a_pass(runtime.db, _today_str())
+            if unhonored:
+                noun = "constraint" if len(unhonored) == 1 else "constraints"
+                print(yellow(
+                    f"Constraints: {len(unhonored)} {noun} your plan does not reflect — "
+                    + cmd("workout accommodate") + " honors them."
+                ))
 
             # Pending notes are a plan input too, so they belong beside the staleness
             # warning (DESIGN_plan_feedback.md §8).
@@ -329,18 +344,13 @@ def run_status(args) -> None:
             if g.get('description'):
                 print(format_labeled_block("  Description:", g['description']))
 
-        constraints = runtime.db.get_constraints(_today_str())
+        today = _today_str()
+        constraints = runtime.db.get_constraints(today)
         print(bold(cyan("\nActive Constraints:")))
         if not constraints:
             print("- None")
         for c in constraints:
-            kind = "no training" if c.get('rest') else "advisory"
-            print(
-                f"- ID: {c['id']} | {yellow(c['title'])}: "
-                f"{cyan(c['start_date'])} to {cyan(c['end_date'])} "
-                f"| {kind}"
-                + (" | plan-shaping" if c.get('replan') else "")
-            )
+            print(f"- {constraint_line(c, honoring.needs_a_pass(runtime.db, c, today))}")
             if c.get('description'):
                 print(format_labeled_block("  Details:", c['description']))
 

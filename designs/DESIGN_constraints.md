@@ -428,6 +428,13 @@ Nothing sets `replan = 1` or regenerates a plan without a human `y`. This is the
 same confirm-before-regen posture `plan generate` / `workout generate` already
 take — just constraint-triggered instead of pre-classified.
 
+**A third tier sits between the two fates above.** Honoring by daily `adapt` reaches
+only the current block, and a replan rewrites the whole plan; a directive that is too
+far off for the first and too small for the second is reshuffled inside its own dates
+by `workout accommodate`, with no regen and no escalation
+(DESIGN_constraint_reschedule.md §3). The magnitude heuristic below is unchanged, and
+that command never sets `replan = 1` on its own.
+
 **Magnitude heuristic (concrete).** Two independent triggers; **either** one
 firing proposes a replan. Both thresholds are config knobs (under `coach:`,
 alongside `metrics_lookback_days`), so the policy is tunable without a code

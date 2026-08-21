@@ -477,7 +477,9 @@ class PlanningMixin:
         self._db.set_active_macrocycle(target['id'])
 
         # 3. Resurrect the restored version's workouts and re-push them.
-        restored = self._db.restore_macrocycle_workouts(target['id'], today_str)
+        restored, unhonored = self._db.restore_macrocycle_workouts(
+            target['id'], today_str
+        )
         self._push_batch(
             restored,
             f"Restoring {len(restored)} archived workout(s) in Google Calendar...",
@@ -490,6 +492,8 @@ class PlanningMixin:
             'to': target,
             'restored_workouts': len(restored),
             'archived_workouts': len(archived),
+            # As in `workout rollback` (§8).
+            'unhonored': unhonored,
         }
 
     def replan(

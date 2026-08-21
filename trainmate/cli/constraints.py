@@ -14,9 +14,16 @@ from typing import Optional
 from trainmate import runtime
 from trainmate.util import (
     aside, bold, dim, green, red, yellow, cyan, gray, cmd, format_labeled_block,
-    today_str as _today_str,
+    wrap_text, today_str as _today_str,
 )
 from trainmate.cli.selectors import add_selector_args, has_selector, resolve_window
+from trainmate.cli.common import constraint_line
+from trainmate.coach import honoring
+
+
+def _needs_a_pass(c: dict) -> bool:
+    """`coach/honoring.py`'s tier question, at the four places this file renders it."""
+    return honoring.needs_a_pass(runtime.db, c, _today_str())
 
 
 def _resolve_dates(args: argparse.Namespace) -> tuple:
@@ -29,15 +36,75 @@ def _resolve_dates(args: argparse.Namespace) -> tuple:
     return start, end
 
 
-def _constraint_line(c: dict) -> str:
-    """One-line rendering of a constraint for `list` (and the `add` echo)."""
-    tags = ("no training" if c.get('rest') else "advisory") + (
-        " · plan-shaping" if c.get('replan') else ""
-    )
-    return (
-        f"ID: {c['id']} | {yellow(c['title'])}: "
-        f"{cyan(c['start_date'])} to {cyan(c['end_date'])} | {tags}"
-    )
+def _maybe_point_at_honor(constraint_id: int) -> None:
+    """Names the block a constraint lands in when it is past daily adapt's reach, and
+    offers the middle tier (DESIGN_constraint_reschedule.md §10).
+
+    Its own function called AFTER `_maybe_replan`, not a branch appended to it: that
+    function returns early on a magnitude below the threshold, which is exactly the case
+    this message exists for, so anything at its foot would be dead code here.
+    """
+    constraint = runtime.db.get_constraint(constraint_id)
+    if not constraint:
+        return
+    # The one owner of "is the window tier the right answer here?" — plan-shaping tier,
+    # nothing scheduled in the window, and the rest of §8's terms, decided in one place.
+    if not honoring.needs_a_pass(runtime.db, constraint, _today_str()):
+        return
+    active_meso = runtime.db.get_active_mesocycle(_today_str())
+    if not active_meso or constraint['end_date'] <= active_meso['end_date']:
+        return
+
+    honor = cmd(f"workout accommodate -c {constraint_id}")
+    # The days out of reach are the ones past the current block, so it is the block
+    # holding the constraint's END that names them. Asked of its START instead, a
+    # constraint straddling the boundary names the current block — the one adapt reaches
+    # today. The strict reader: a block that does not contain the date is not the answer.
+    landing = runtime.db.get_covering_mesocycle(constraint['end_date'])
+    if not landing:
+        _report_past_plan_end(constraint, honor)
+        return
+
+    # Straddling the boundary: adapt honors the near days from this block and the rest
+    # only once its window rolls on, so no single run ever sees the whole of it (§1).
+    if constraint['start_date'] <= active_meso['end_date']:
+        print(yellow(wrap_text(
+            f"Straddles the end of {active_meso['name']} ({active_meso['end_date']}): "
+            f"daily adapt honors the days up to there, {landing['name']} holds the rest, "
+            "and no one run sees both."
+        )))
+        print(yellow(wrap_text(f"Honor the whole of it in one pass with {honor}.")))
+        return
+
+    print(yellow(wrap_text(
+        f"Lands in {landing['name']} ({landing['start_date']} — {landing['end_date']}), "
+        "outside daily adapt's reach."
+    )))
+    # Adapt at date D reaches from D to the end of D's block, so it sees this constraint
+    # once its window rolls onto the landing block — i.e. on that block's first day.
+    print(yellow(wrap_text(
+        f"Honor it now with {honor}, or leave it — adapt reaches it on "
+        f"{landing['start_date']}."
+    )))
+
+
+def _report_past_plan_end(constraint: dict, honor: str) -> None:
+    """No block holds the constraint's last day. Whether anything can be done now turns
+    on its FIRST day: a window the plan covers in part is still honored — over the whole
+    of it (DESIGN_constraint_reschedule.md §5) — one it covers not at all is not."""
+    if runtime.db.get_covering_mesocycle(constraint['start_date']):
+        print(yellow(wrap_text(
+            f"Runs to {constraint['end_date']}, past the end of your plan. {honor} "
+            "still reshuffles the whole of it, but no block guides the days past the "
+            "plan; run " + cmd("plan generate")
+            + " to extend the periodization over the rest."
+        )))
+        return
+    print(yellow(wrap_text(
+        f"Starts {constraint['start_date']}, past the end of the plan — no block "
+        "governs it yet, so nothing can schedule around it."
+    )))
+    print(yellow("Extend the periodization with " + cmd("plan generate") + " first."))
 
 
 def _maybe_replan(constraint_id: int, title: str, replan_flag: Optional[bool]) -> None:
@@ -104,9 +171,10 @@ def run_constraint_add(args: argparse.Namespace) -> None:
     )
     constraint = runtime.db.get_constraint(cid)
     if constraint:
-        print(_constraint_line(constraint))
+        print(constraint_line(constraint, _needs_a_pass(constraint)))
     print(green("Constraint added successfully."))
     _maybe_replan(cid, title, args.replan)
+    _maybe_point_at_honor(cid)
 
 
 def run_constraint_edit(args: argparse.Namespace) -> None:
@@ -138,13 +206,21 @@ def run_constraint_edit(args: argparse.Namespace) -> None:
         kwargs['replan'] = 1 if args.replan else 0
 
     runtime.db.update_constraint(args.id, **kwargs)
+    # The window moved, or the directive itself changed — and for an advisory constraint
+    # the prose IS the enforcement mechanism (DESIGN_constraints.md §5), so new words are a
+    # new directive a previous honoring says nothing about (§8). `replan` alone does not
+    # clear: it escalates the tier, it does not restate what to work around.
+    if any(k in kwargs for k in ('start_date', 'end_date', 'rest', 'title', 'description')):
+        runtime.db.clear_honored(args.id)
+
     updated = runtime.db.get_constraint(args.id)
     if updated:
-        print(_constraint_line(updated))
+        print(constraint_line(updated, _needs_a_pass(updated)))
     print(green("Constraint updated successfully."))
 
     title = kwargs.get('title', constraint['title'])
     _maybe_replan(args.id, title, args.replan)
+    _maybe_point_at_honor(args.id)
 
 
 def run_constraint_list(args: argparse.Namespace) -> None:
@@ -170,7 +246,7 @@ def run_constraint_list(args: argparse.Namespace) -> None:
         print(dim("(none)"))
         return
     for c in constraints:
-        print(_constraint_line(c))
+        print(constraint_line(c, _needs_a_pass(c)))
         if args.verbose and c.get('description'):
             print(format_labeled_block("  Details:", c['description']))
 
@@ -181,7 +257,8 @@ def run_constraint_show(args: argparse.Namespace) -> None:
     if not constraint:
         print(red(f"Constraint with ID {args.id} not found."))
         return
-    print(_constraint_line(constraint))
+    needs_a_pass = _needs_a_pass(constraint)
+    print(constraint_line(constraint, needs_a_pass))
     if constraint.get('description'):
         print(format_labeled_block("  Details:", constraint['description']))
     src = constraint.get('source')
@@ -191,6 +268,17 @@ def run_constraint_show(args: argparse.Namespace) -> None:
         print(green("  Plan-shaping: built into the plan (replan)."))
     else:
         print(dim("  Plan-shaping: no — honored by daily 'workout adapt' only."))
+    # What `honored_at` means, stated the way §8 states it: a coach pass had this in scope
+    # with authority over every day of it still ahead. Not "the plan definitely changed".
+    # Labelled "Coach pass", not "Honored": the line above already uses that word for the
+    # plan-shaping tier, and this axis is a weaker claim than either — a pass had it in
+    # scope, which is not the same as the plan having changed.
+    if constraint.get('honored_at'):
+        print(gray(f"  Coach pass: covered it on "
+                   f"{str(constraint['honored_at'])[:10]}."))
+    elif needs_a_pass:
+        print(yellow("  Coach pass: none yet — run "
+                     + cmd(f"workout accommodate -c {constraint['id']}") + "."))
 
 
 def run_constraint_rm(args: argparse.Namespace) -> None:

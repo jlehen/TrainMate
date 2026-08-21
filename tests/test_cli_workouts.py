@@ -5,7 +5,8 @@ from unittest.mock import patch
 
 from tests.helpers import clear_all_tables, run_cli, rebind_test_db
 from trainmate.cli.common import fmt_date
-from trainmate.coach.proposals import AdaptPair, AdaptProposal, GenerateProposal
+from trainmate.coach.proposals import RevisionProposal, GenerateProposal
+from trainmate.coach.revisions import RevisionPair
 
 TEST_DB_PATH = os.path.join(os.path.dirname(__file__), "test_trainmate_cli_workouts.db")
 
@@ -66,13 +67,13 @@ class TestCliWorkouts(unittest.TestCase):
             "rpe": 5,
             "tss": 40.0,
         }
-        mock_coach.workout_adapt.return_value = AdaptProposal(
+        mock_coach.workout_adapt.return_value = RevisionProposal(
             reason="Metrics are green",
             workouts=[adapted],
             new_constraints=[],
             range_start="2026-06-03",
             range_end="2026-06-30",
-            pairs=(AdaptPair(proposal=adapted, original=None, is_swap=False),),
+            pairs=(RevisionPair(proposal=adapted, original=None, is_swap=False),),
         )
 
         exit_code, stdout, stderr = self.run_cli(["workout", "list"])
@@ -130,7 +131,7 @@ class TestCliWorkouts(unittest.TestCase):
     def test_adapt_reports_metric_day_count_not_values(self, mock_coach, _mock_ensure):
         # The coach still reads the full trajectory; the CLI only tells the athlete how
         # many days fed the decision and never prints the raw per-day numbers.
-        mock_coach.workout_adapt.return_value = AdaptProposal(
+        mock_coach.workout_adapt.return_value = RevisionProposal(
             reason="Metrics are green", workouts=[], new_constraints=[],
             range_start="2026-06-01", range_end="2026-06-30",
         )
@@ -833,7 +834,7 @@ class TestCliWorkouts(unittest.TestCase):
 
         mock_coach.workout_rollback.return_value = {
             "batch": stamp, "restored_workouts": 1, "archived_workouts": 0,
-            "first_date": future_str, "last_date": future_str,
+            "first_date": future_str, "last_date": future_str, "unhonored": [],
         }
         exit_code, stdout, _ = self.run_cli(["workout", "rollback", "-y"])
         self.assertEqual(exit_code, 0)

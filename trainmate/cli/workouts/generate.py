@@ -6,16 +6,16 @@ from trainmate import runtime
 from trainmate.config import config
 from trainmate.adherence import analyze_adherence, date_covered, format_discrepancies
 from trainmate.google_calendar import event_url
-from trainmate.sports import canonical_sport
 from trainmate.util import (
     bold, green, red, yellow, cyan, magenta, gray, cmd, aside, pad_visible, wrap_text,
-    format_labeled_block, render_table, today_str as _today_str, today_date as _today_date,
+    format_labeled_block, today_str as _today_str, today_date as _today_date,
     days_between,
 )
 from trainmate.cli.common import (
-    fmt_date, ensure_recent_data, mark_adherence_from_results,
+    fmt_date, ensure_recent_data, mark_adherence_from_results, report_unhonored,
 )
 from trainmate.coach.proposals import GenerateProposal
+from trainmate.cli.workouts.revisions import preview_and_confirm_revision
 
 from trainmate.cli.selectors import has_selector as _has_selector, resolve_window, split_targets
 from trainmate.cli.workouts._helpers import _fmt_ts, workout_line
@@ -108,63 +108,22 @@ def run_workout_adapt(args: argparse.Namespace) -> None:
             print(green(
                 "\nAll metrics are green and workout plan is on track. No changes recommended."
             ))
+            # The pass still had its constraints in scope, which is all `honored_at`
+            # claims — requiring a *change* would flag them forever (§8).
+            runtime.coach_service.workout_revision_record_no_change(proposal)
             return
 
-        print(bold(yellow("\nPROPOSED WORKOUT ADAPTATIONS:")))
-        headers = [
-            "Date", "Sport", "Original Workout", "Adapted Workout",
-            "Duration/RPE/TSS",
-        ]
-        rows = []
-
-        def _stats(w: dict) -> str:
-            return (
-                f"{w.get('duration_minutes') or 0}m/"
-                f"RPE{w.get('rpe') or 0}/"
-                f"TSS{w.get('tss') or 0}"
-            )
-
-        # The proposal already says which planned session each change replaces; render
-        # that rather than re-deriving it, so the preview cannot disagree with apply.
-        for pair in proposal.pairs:
-            pw, existing = pair.proposal, pair.original
-            orig_title = existing['title'] if existing else "[None]"
-            stats_diff = (
-                f"{_stats(existing)} -> {_stats(pw)}" if existing else _stats(pw)
-            )
-            sport_label = (
-                f"{existing['sport_type'].upper()}->{pw['sport_type'].upper()}"
-                if pair.is_swap else pw['sport_type'].upper()
-            )
-
-            rows.append([
-                cyan(pw['date']), magenta(sport_label), gray(orig_title),
-                green(pw['title']), yellow(stats_diff),
-            ])
-
-        # Sessions being deleted outright (overridden with no replacement proposal).
-        for ew in sorted(proposal.removals, key=lambda w: w['date']):
-            rows.append([
-                cyan(ew['date']), magenta(ew['sport_type'].upper()),
-                gray(ew['title']), red("[Removed]"),
-                yellow(f"{_stats(ew)} -> removed"),
-            ])
-
-        print(render_table(headers, rows))
-
-        if args.auto:
-            apply = True
-        else:
-            apply = runtime.prompt.confirm(
-                "Apply these adaptations to your training plan and sync to Calendar?"
-            )
-
-        if apply:
-            aside("\nApplying adaptations...")
-            runtime.coach_service.workout_adapt_apply(proposal)
-            print(green("Adaptations applied and synced to calendar successfully."))
-        else:
+        if not preview_and_confirm_revision(
+            proposal, "PROPOSED WORKOUT ADAPTATIONS:",
+            "Apply these adaptations to your training plan and sync to Calendar?",
+            auto=args.auto,
+        ):
             print("\nAdaptations discarded.")
+            return
+
+        aside("\nApplying adaptations...")
+        runtime.coach_service.workout_revision_apply(proposal)
+        print(green("Adaptations applied and synced to calendar successfully."))
 
     except ValueError as e:
         # A domain refusal (no active plan to adapt towards), not a failure: say it
@@ -461,6 +420,7 @@ def run_workout_rollback(args: argparse.Namespace) -> None:
         f"\nRestored {result['restored_workouts']} workout(s){span} and archived "
         f"{result['archived_workouts']}; Google Calendar updated."
     ))
+    report_unhonored(result['unhonored'])
     print(green(f"Run {cmd('workout list')} to review the restored sessions."))
 def _workouts_by_id(ids: list, sport_type: Optional[str], include_removed: bool) -> list:
     """Looks up the workout IDs named as positional targets, reporting the ones it can't."""

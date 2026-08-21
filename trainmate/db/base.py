@@ -8,7 +8,7 @@ from trainmate.config import config
 # migrations are idempotent, so this is a "skip the work" marker rather than a ledger of
 # steps to replay — TrainMate has one user and one database, and the alternative (a
 # numbered migration framework) would be more machinery than that warrants.
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 
 
 # How long a connection waits for a writer to finish before raising "database is
@@ -249,6 +249,15 @@ class BaseDB:
                 cursor.execute("ALTER TABLE constraints DROP COLUMN sport")
             if 'type' in ccols:
                 cursor.execute("ALTER TABLE constraints DROP COLUMN type")
+
+            # When a coach pass last had this constraint in scope with authority over
+            # every day of it still ahead (DESIGN_constraint_reschedule.md §8). NULL =
+            # the plan does not reflect it yet, which is what the `workout accommodate`
+            # sweep looks for. Not "the plan definitely changed".
+            self._add_column(
+                cursor, "constraints", "honored_at",
+                "ALTER TABLE constraints ADD COLUMN honored_at TEXT"
+            )
 
             # Workouts table
             cursor.execute("""

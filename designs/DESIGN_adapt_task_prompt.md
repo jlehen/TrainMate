@@ -72,10 +72,29 @@ Each rule earns its place by having been load-bearing in more than one section:
   `DO NOT COMPOUND A PRIOR ADAPTATION` exists at all. Stated once, both sections cite it in a
   clause ("By rule 5…", "Rule 5 again:") instead of re-explaining lag from scratch.
 
+**Rule 2's evidence clause is now a parameter.** The three signals it names — a depressed
+morning, a note, a drift reading — are the ones *adapt* receives. `workout accommodate`
+shares this section and receives none of them; copied verbatim the clause would argue
+against evidence that prompt never sees, and dropped, rule 2 would lose the half that does
+the work. So the clause takes its signal list as an argument
+(`coach/engine/workouts.py::_standing_rules_task`): adapt keeps its three, and the window
+pass names its own — *a constraint, however disruptive*. Rules 3-5 stay adapt's, since rule
+3's specifics live on the `change_reason` schema field either way and rules 4 and 5 speak to
+an adherence window and a metrics lag a window pass is never given
+(DESIGN_constraint_reschedule.md §9).
+
 **A rule does not displace a mechanic.** Where a section needs a *procedure* rather than a
-preference, it keeps it in full: `PROTECTING A BENCHMARK` still spells out that moving a test
-means emitting it on its new date plus a replacement on the old one, because rule 1 tells the
-model to prefer moving and says nothing about how to encode one. Likewise the drift section
+preference, it keeps it in full. That was true of `PROTECTING A BENCHMARK` spelling out that
+moving a test means emitting it on its new date plus a replacement on the old one, because
+rule 1 tells the model to prefer moving and says nothing about how to encode one — and the
+mechanic has since been promoted out of that section into `RE-FILLING A DATE YOU VACATE`, a
+named `###` of its own in both revision TASKs. Two reasons. A `###` scheme leaves no room for
+the rule to live as a clause tucked inside the benchmark text, which is where the encoding
+was stated *only* for tests, leaving an ordinary moved session to the model's inference by
+analogy. And the case is central rather than incidental for the command that shares this
+prompt: adapt's commonest action is easing a session in place, which vacates nothing, while
+for `workout accommodate` moving is the entire job — and a rule that fires on almost every
+pass should not be discoverable only by reading the benchmark section. Likewise the drift section
 keeps its escalation to `workout generate` (§9.2a's handoff) and the terminal window keeps
 "do not deepen a cut to carry the athlete into the next block" — both are specific
 consequences, not restatements.

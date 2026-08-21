@@ -7,7 +7,7 @@ from tests.helpers import clear_all_tables, run_cli, rebind_test_db
 
 TEST_DB_PATH = os.path.join(os.path.dirname(__file__), "test_trainmate_cli_dashless.db")
 
-from trainmate.coach.proposals import AdaptProposal
+from trainmate.coach.proposals import RevisionProposal
 from trainmate.db import Database
 import trainmate.db
 import trainmate_cli
@@ -138,6 +138,14 @@ class TestCommandPrefixResolution(unittest.TestCase):
             ("l s 4", ["learnings", "show", "4"]),
         ]:
             self.assertEqual(self._xlate(line), expected, line)
+
+    def test_the_new_verbs_do_not_disturb_the_prefixes_around_them(self):
+        # `workout accommodate` is spelled that way and not `reschedule` precisely so
+        # `w res` keeps resolving to `restore` (DESIGN_constraint_reschedule.md §4/§13);
+        # pinned here so a later verb change cannot quietly re-break it.
+        self.assertEqual(self._xlate("w res 3"), ["workout", "restore", "3"])
+        self.assertEqual(self._xlate("w ac"), ["workout", "accommodate"])
+        self.assertEqual(self._xlate("w a"), ["workout", "adapt"])
 
     def test_surviving_aliases_normalize_to_canonical(self):
         # Kept because they are not prefixes ('ctx', 'lm') or are ambiguous ones ('s').
@@ -272,7 +280,7 @@ class TestDashlessEndToEnd(unittest.TestCase):
     @patch("trainmate.runtime.garmin")
     @patch("trainmate.runtime.coach_service")
     def test_workout_adapt_message_and_no_pull(self, mock_coach, mock_garmin):
-        mock_coach.workout_adapt.return_value = AdaptProposal(
+        mock_coach.workout_adapt.return_value = RevisionProposal(
             reason="ok", workouts=[], new_constraints=[],
             range_start="2026-06-01", range_end="2026-06-30",
         )

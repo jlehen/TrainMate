@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
-from trainmate.types import Workout
+from typing import Any, Dict, List, Optional, Tuple
+from trainmate.types import Constraint, Workout
 from trainmate.sports import sport_aliases
 
 
@@ -294,7 +294,9 @@ class WorkoutsMixin:
                 b['restorable'] = counts.get(b['archived_at'], 0)
             return batches
 
-    def restore_workout_batch(self, archived_at: str, from_date: str) -> List[Workout]:
+    def restore_workout_batch(
+        self, archived_at: str, from_date: str
+    ) -> Tuple[List[Workout], List[Constraint]]:
         """Un-archives one archived batch, restricted to rows dated `from_date` onward.
 
         The date floor keeps restore symmetric with `archive_future_workouts`, which only
@@ -303,8 +305,12 @@ class WorkoutsMixin:
         archive step left alone. Restoring those would put two live workouts on the same
         date+sport and re-create Calendar events in the past, so they stay archived
         (see DESIGN_plan_rollback.md §9). Calendar handles were cleared at archival, so
-        the caller must re-push what comes back. Returns the restored rows."""
-        with self._get_connection() as conn:
+        the caller must re-push what comes back.
+
+        Returns `(restored rows, constraints un-honored by the restore)` — the restored
+        plan predates those honorings and cannot reflect them (§8). One transaction, so
+        the two cannot diverge; the constraints half is the constraints mixin's SQL."""
+        with self.transaction() as conn:
             cursor = conn.cursor()
             cursor.execute(
                 "SELECT * FROM workouts WHERE archived_at = ? AND date >= ?",
@@ -316,18 +322,18 @@ class WorkoutsMixin:
                 "WHERE archived_at = ? AND date >= ?",
                 (archived_at, from_date)
             )
-            conn.commit()
-            return restored
+            return restored, self.clear_honored_after(archived_at, from_date)
 
     def restore_macrocycle_workouts(
         self, macrocycle_id: int, from_date: str
-    ) -> List[Workout]:
+    ) -> Tuple[List[Workout], List[Constraint]]:
         """Un-archives the most recently archived batch of workouts for a plan version.
 
         A `plan rollback` to `macrocycle_id` resurrects the workouts that were live when
         that version was last superseded — i.e. the batch sharing the latest `archived_at`
-        among that version's archived rows, restored from `from_date` onward. Returns the
-        restored rows (empty if the version never had workouts). See DESIGN_plan_rollback.md."""
+        among that version's archived rows, restored from `from_date` onward. Returns what
+        `restore_workout_batch` returns (empty if the version never had workouts). See
+        DESIGN_plan_rollback.md."""
         with self._get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute(
@@ -338,7 +344,7 @@ class WorkoutsMixin:
             row = cursor.fetchone()
             batch = row['m'] if row else None
         if not batch:
-            return []
+            return [], []
         return self.restore_workout_batch(batch, from_date)
 
     def get_workout_by_id(self, workout_id: int) -> Optional[Workout]:

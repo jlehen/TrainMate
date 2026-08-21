@@ -187,6 +187,106 @@ def _planned_zone_fields(zone_currencies: Optional[Dict[str, str]]) -> str:
     )
 
 
+# The two STANDING RULES both revision prompts give the model, as constants because they
+# are SHARED (DESIGN_adapt_task_prompt.md §2). Adapt's other three are written inline at
+# its own call site: they go to one prompt only, so hoisting them buys no drift protection.
+RULE_MOVE_FIRST = (
+    "MOVE BEFORE YOU EASE, EASE BEFORE YOU DELETE. Rescheduling a session a day or two\n"
+    "   preserves the planned work; deleting it loses it."
+)
+
+# Rule 2's middle names the signals that are NOT evidence a block is too hard, and those
+# differ per command: adapt sees a morning, a note and a drift reading; a metric-blind
+# window pass sees none of the three and answers to a constraint instead
+# (DESIGN_constraint_reschedule.md §9).
+RULE_BLOCK_NOT_YOURS = (
+    "THE BLOCK IS NOT YOURS TO RESHAPE. You adapt the sessions inside it.\n"
+    "   {signals}\n"
+    "   is evidence the BLOCK is too hard, and none permanently re-cuts its planned\n"
+    "   volume/intensity. When you do believe the block itself is wrong, say so in\n"
+    "   \"reason\" and leave it alone."
+)
+ADAPT_BLOCK_SIGNALS = "No single day's signal — a depressed morning, a note, a drift reading —"
+WINDOW_BLOCK_SIGNALS = "No constraint, however disruptive,"
+
+
+def _standing_rules_task(*rules: str) -> str:
+    """The STANDING RULES section, numbered in the order given."""
+    body = "\n".join(f"{i}. {rule}" for i, rule in enumerate(rules, start=1))
+    return f"""
+### STANDING RULES
+These govern every section below, and none of them restates these rules:
+{body}
+"""
+
+
+def _vacate_task() -> str:
+    """The RE-FILLING A DATE YOU VACATE section, always-on in both revision TASKs.
+
+    Apply removes a displaced session only on dates the response covers, so a move that
+    emits only its destination leaves the original standing (DESIGN_constraint_reschedule.md
+    §9).
+    """
+    return """
+### RE-FILLING A DATE YOU VACATE
+Moving a session means emitting TWO entries: the session on its new date, and a replacement
+on the date it left. A date you vacate is never simply omitted — an omitted date keeps the
+session that is already on it, so the work ends up scheduled twice, on both days.
+The replacement is normally rest, and its "change_reason" says where the session went
+(e.g. "Long ride moved to Sunday — away Saturday."). Use an easy session instead only when
+the day should still carry work. Never leave the date empty: an empty date and a planned
+rest day mean different things to the athlete's adherence record, so a hole is never the
+right way to encode a move.
+"""
+
+
+def _benchmark_task(in_block: bool) -> str:
+    """The PROTECTING A BENCHMARK section, shared by adapt (`in_block=True`) and the
+    window pass (DESIGN_benchmark_workouts.md §4.2, DESIGN_constraint_reschedule.md §9).
+
+    Three phrases are scope-bound and move together. The third matters most: adapt's
+    postponement escape is honest because a block boundary really does bring a
+    `workout generate` that re-places the test; a mid-block window has no such guarantee.
+    """
+    later_day = (
+        "to a later day within THIS block" if in_block
+        else "to a later day within this window"
+    )
+    last_day = (
+        "it already sits on the block's LAST day and no later in-block day exists"
+        if in_block
+        else "it already sits on the window's LAST day and no later day in the window exists"
+    )
+    re_places = (
+        "The next generated block re-places the test when it is due." if in_block
+        else "The daily adapt or the next generated block re-places it."
+    )
+    return f"""
+### PROTECTING A BENCHMARK — RESCHEDULE, DON'T DILUTE
+A session tagged "[BENCHMARK ...]" is a fitness test: measurement, not stimulus, so the
+usual "ease the hard day" logic is exactly wrong for it — run tired it reads low and then
+mis-scales every workout after it. NEVER reduce, soften or shorten a benchmark, and never
+blank the flag on the session that still IS the test. If the athlete will not be fresh on
+test day (negative TSB / poor recovery), MOVE it intact — same content, same
+benchmark_type — {later_day} where they will be fresher, and lighten
+the days before it; emit the test on its new date and a replacement for its old one.
+If {last_day},
+POSTPONE it: replace it with an ordinary easy session (no benchmark_type) — a compromised
+maximal test sets a wrong anchor that mis-scales every session after it, so a skipped test
+costs a retest where a bad number costs a block.
+{re_places}
+A benchmark you are NOT changing need not be returned at all.
+
+benchmark_type says what a session IS, not which day it sits on — it travels with the test,
+not with the date. So any OTHER session you put on a test's date — the replacement left
+behind by a move, the easy day of a postponement, or something the athlete asked for
+instead — is NOT the test and MUST carry "benchmark_type": null. Copying the flag onto it
+files that session as a completed fitness test: a social ride is then read as an FTP
+result, and the block believes it has already tested and skips the real one. If you replace
+a test rather than move it, say so in the reason and leave the flag off.
+"""
+
+
 class WorkoutLogicMixin:
     """Part of :class:`CoachEngine` — see coach/engine/__init__.py."""
 
@@ -418,6 +518,22 @@ class WorkoutLogicMixin:
             "  recovery metrics are fine. A healthy athlete executing the wrong workout is\n"
             "  the case no other branch here covers.\n"
         )
+        # All five: adapt is the pass that sees the metrics, the adherence window and the
+        # athlete's note, so every rule has something to bind to here (§9). The last three
+        # are adapt's alone and live here rather than as hoisted constants.
+        standing_rules = _standing_rules_task(
+            RULE_MOVE_FIRST,
+            RULE_BLOCK_NOT_YOURS.format(signals=ADAPT_BLOCK_SIGNALS),
+            "NAME THE CAUSE. Every session you change carries a \"change_reason\" (see the\n"
+            "   schema); when something other than the metrics drove it, that cause belongs\n"
+            "   there.",
+            "NOT EVERY GAP IS A MISS. Activities listed as informational fell on dates no\n"
+            "   plan governed; sessions listed as deliberately removed are the athlete's own\n"
+            "   plan edits. Count both when judging load and intent — neither is an adherence\n"
+            "   failure.",
+            "RECOVERY METRICS LAG. A morning reflects what came before it, not what you\n"
+            "   schedule after it. Two sections below turn on this.",
+        )
         custom_task = f"""
 ## TASK
 Analyze the athlete's actual workout adherence and physiological metrics trajectory over
@@ -434,23 +550,7 @@ the active mesocycle block (from {target_date_str} to {meso_end_date_str}).
   volume without spiking the acute load too fast.
 - If they are fully recovered and on track, keep the plan as scheduled or make minor
   optimal adjustments.
-{drift_branch}
-### STANDING RULES
-These govern every section below, and none of them restates these rules:
-1. MOVE BEFORE YOU EASE, EASE BEFORE YOU DELETE. Rescheduling a session a day or two
-   preserves the planned work; deleting it loses it.
-2. THE BLOCK IS NOT YOURS TO RESHAPE. You adapt the sessions inside it. No single day's
-   signal — a depressed morning, a note, a drift reading — is evidence the BLOCK is too
-   hard, and none permanently re-cuts its planned volume/intensity. When you do believe the
-   block itself is wrong, say so in "reason" and leave it alone.
-3. NAME THE CAUSE. Every session you change carries a "change_reason" (see the schema);
-   when something other than the metrics drove it, that cause belongs there.
-4. NOT EVERY GAP IS A MISS. Activities listed as informational fell on dates no plan
-   governed; sessions listed as deliberately removed are the athlete's own plan edits.
-   Count both when judging load and intent — neither is an adherence failure.
-5. RECOVERY METRICS LAG. A morning reflects what came before it, not what you schedule
-   after it. Two sections below turn on this.
-
+{drift_branch}{standing_rules}
 ### WHAT YOU MAY NOT TOUCH
 Sessions tagged "[COMPLETED — locked history, not adaptable]" have already been performed,
 including any the athlete trained earlier on the evaluation date. Do NOT adapt them, and
@@ -481,31 +581,15 @@ already eased (see the tag), the higher your bar. Restoring load toward the orig
 athlete recovers is encouraged; deepening an already-fresh cut is not.
 """
 
-        # Why a test may never be softened, and why moving it is the model's call and not a
-        # deterministic pass: DESIGN_benchmark_workouts.md §4.
-        custom_task += """
-### PROTECTING A BENCHMARK — RESCHEDULE, DON'T DILUTE
-A session tagged "[BENCHMARK ...]" is a fitness test: measurement, not stimulus, so the
-usual "ease the hard day" logic is exactly wrong for it — run tired it reads low and then
-mis-scales every workout after it. NEVER reduce, soften or shorten a benchmark, and never
-blank the flag on the session that still IS the test. If the athlete will not be fresh on
-test day (negative TSB / poor recovery), MOVE it intact — same content, same
-benchmark_type — to a later day within THIS block where they will be fresher, and lighten
-the days before it; emit the test on its new date and a replacement for its old one. If it
-already sits on the block's LAST day and no later in-block day exists, POSTPONE it: replace
-it with an ordinary easy session (no benchmark_type) — a compromised maximal test sets a
-wrong anchor that mis-scales every session after it, so a skipped test costs a retest where
-a bad number costs a block. The next generated block re-places the test when it is due. A
-benchmark you are NOT changing need not be returned at all.
+        # How to encode a move at all — a rule that fires on almost every reschedule, so it
+        # is its own section rather than a clause inside the benchmark text
+        # (DESIGN_constraint_reschedule.md §9). Shared with `workout accommodate`.
+        custom_task += _vacate_task()
 
-benchmark_type says what a session IS, not which day it sits on — it travels with the test,
-not with the date. So any OTHER session you put on a test's date — the replacement left
-behind by a move, the easy day of a postponement, or something the athlete asked for
-instead — is NOT the test and MUST carry "benchmark_type": null. Copying the flag onto it
-files that session as a completed fitness test: a social ride is then read as an FTP
-result, and the block believes it has already tested and skips the real one. If you replace
-a test rather than move it, say so in the reason and leave the flag off.
-"""
+        # Why a test may never be softened, and why moving it is the model's call and not a
+        # deterministic pass: DESIGN_benchmark_workouts.md §4.2. Shared, scope-parametrized,
+        # so the two prompts that reschedule tests cannot drift apart.
+        custom_task += _benchmark_task(in_block=True)
 
         # Adapt owns execution, generate owns periodization (§9.2): changing what zone
         # Tuesday's run is prescribed at is adapt's call; changing how many hard sessions
@@ -755,3 +839,127 @@ keeping isn't lost for lack of being restated:
             system_prompt, user_content, label="workout_adapt"
         )
         return decision
+
+    def _workout_accommodate_logic(
+        self, range_start: str, range_end: str, constraint_titles: List[str],
+        planned_workouts: List[Workout], objectives: List[Objective],
+        constraints: List[Constraint], guidelines: str,
+        profile: Optional[Dict[str, Any]], strategy: str, meso_text: str, learnings: str
+    ) -> Dict[str, Any]:
+        """Queries the LLM to re-arrange the sessions in a constraint's own window.
+
+        A separate TASK rather than a branch inside `_workout_adapt_logic`, which already
+        carries one always-on body plus five conditional sections
+        (DESIGN_adapt_task_prompt.md §1 records what happens when they accumulate).
+
+        Deliberately metric-blind: no metrics, no PMC, no baseline, no adherence. The
+        trigger is a dated fact the athlete typed in, and that is the whole reason a command
+        may reach past the block boundary at all (DESIGN_constraint_reschedule.md §2/§6).
+        """
+        directives = "\n".join(f"  - {t}" for t in constraint_titles) or "  - (none)"
+        custom_task = f"""
+## TASK
+The athlete has declared one or more constraints that the daily adaptation cannot reach,
+and your job is to re-arrange the already-scheduled sessions between {range_start} and
+{range_end} so the plan reflects them.
+
+The directives in force over this window:
+{directives}
+Their full text is in ACTIVE CONSTRAINTS above; that section may list more than the one
+being honored, because a neighbouring directive can claim a day at the edge of this window.
+Honor all of them.
+
+The window is the constraint's own dates plus a small margin either side — room for work
+moved off a barred day to land on. That margin is the whole of your reach: move sessions
+within {range_start}..{range_end}, and change nothing outside it.
+
+You are given NO recovery metrics, and that is deliberate: this window is far enough ahead
+that today's readings say nothing about it. Make no judgement about the athlete's fatigue
+and cut no load on account of it. Act on what the athlete DECLARED, and leave how they are
+recovering to the daily adapt, which sees the data you do not.
+- A day the constraint bars entirely carries no training: move its work to a day in the
+  window that can take it, or, if none can, drop it and say so in "reason".
+- A day the constraint caps (time, intensity, venue, equipment) keeps a session that fits
+  inside the cap.
+- A day the constraint says nothing about keeps its session exactly as planned.
+"""
+        # Only the two shared rules: rule 3's specifics live on the "change_reason" schema
+        # field either way, and rules 4-5 speak to an adherence window and a metrics lag
+        # this pass is never given (§9).
+        custom_task += _standing_rules_task(
+            RULE_MOVE_FIRST, RULE_BLOCK_NOT_YOURS.format(signals=WINDOW_BLOCK_SIGNALS)
+        )
+        custom_task += _vacate_task()
+        custom_task += _benchmark_task(in_block=False)
+        custom_task += (
+            "\n## RESPONSE FORMAT\n"
+            "You MUST respond with a JSON object containing:\n{\n"
+            '  "change_needed": true | false,\n'
+            '  "reason": "Overall rationale for the whole reshuffle: which directive drove\n'
+            "    it and how the displaced work was re-placed, in AT MOST 3 SENTENCES\n"
+            "    (~60 words). This is the batch-level summary, shared by every session\n"
+            '    below — do NOT repeat it per session; keep per-session notes in\n'
+            '    "change_reason".",\n'
+            '  "revised_workouts": [\n'
+            "    // Include ONLY sessions you are actually changing, plus the replacement\n"
+            "    // for any date you vacate (see RE-FILLING A DATE YOU VACATE). Omit any\n"
+            "    // session that stays exactly as planned — it is preserved automatically,\n"
+            "    // so re-listing one unchanged is wrong. EXCEPTION: if you change one\n"
+            "    // session on a date that holds ANOTHER session of a different sport you\n"
+            "    // are keeping, include BOTH that day so the kept one is not dropped.\n"
+            "    {\n"
+            '      "date": "YYYY-MM-DD",\n'
+            + _SPORT_TYPE_ENUM +
+            '      "title": "Revised Workout Title",\n'
+            '      "change_reason": "One short sentence on why THIS specific session\n'
+            "        changed, naming the directive that drove it, e.g. \"Moved to Sunday —\n"
+            '        away Saturday.\" Keep it to a single sentence of at most 20 words; do\n'
+            "        not restate the overall reason.\",\n"
+            '      "description": "Start with the title on its own line in brackets followed by a\n'
+            '        newline, e.g. \"[Tempo Run]\\n\", then the session\'s intensity, duration,\n'
+            "        heart rate zones, and goals. Carry a moved session's specifics over\n"
+            "        unchanged — the point of a move is to preserve the work.\",\n"
+            '      "duration_minutes": 45,\n'
+            '      "rpe": 5,\n'
+            '      "tss": 30,\n'
+            '      "benchmark_type": null (Preserve VERBATIM on the row that still IS\n'
+            "        the test — a moved/kept test must stay a test. null on EVERY\n"
+            "        other session, including one that takes over a test's date.\n"
+            "        Never invent one here. See PROTECTING A BENCHMARK.)\n"
+            "    }\n"
+            "  ]\n"
+            "}\n"
+        )
+        system_prompt = self._build_system_prompt(
+            objectives=objectives,
+            constraints=constraints,
+            guidelines=guidelines,
+            strategy=strategy,
+            meso_text=meso_text,
+            learnings=learnings,
+            profile=profile,
+            custom_task=custom_task
+        )
+
+        planned_text = format_planned_workouts_detailed(planned_workouts) or (
+            "No sessions are scheduled in this window."
+        )
+        user_content = f"""
+Window: {range_start} to {range_end}
+
+## PLANNED WORKOUTS IN THE WINDOW
+Every session currently scheduled between {range_start} and {range_end}. Return a session
+in "revised_workouts" only if you are genuinely changing it, and a replacement for every
+date you empty.
+Each session below includes its full description so a moved session keeps its specifics —
+interval structure, heart-rate zones, rest/recovery durations — rather than being
+reinvented from its title:
+{planned_text}
+"""
+        aside(
+            f"Querying OpenRouter to honor the constraint(s) over "
+            f"{range_start} -> {range_end}...", cyan
+        )
+        return _eng.openrouter_client.complete(
+            system_prompt, user_content, label="workout_accommodate"
+        )

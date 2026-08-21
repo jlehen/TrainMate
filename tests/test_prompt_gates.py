@@ -25,6 +25,10 @@ NOTE_SCHEMA_MEMBER = '"new_constraints"'
 NOTE_CLAUSE = "constraint from the athlete's note drove the change"
 NOTE_DATA = "## ATHLETE'S NOTE FOR THIS ADAPTATION"
 
+import trainmate.coach.engine.workouts as wk
+
+VACATE_SECTION = "### RE-FILLING A DATE YOU VACATE"
+
 DRIFT_INSTRUCTIONS = "### CORRECTING EXECUTION DRIFT"
 DRIFT_BRANCH = "measured intensity distribution has diverged from its stated"
 DRIFT_DATA = "## MEASURED INTENSITY DISTRIBUTION OF THE ACTIVE BLOCK"
@@ -137,6 +141,94 @@ class TestTheSchemaStaysWellFormed(unittest.TestCase):
                 system, _ = build_prompt(**extra)
                 self.assertNotIn(",,", system)
                 self.assertNotIn(",\n}", system)
+
+
+class TestAlwaysOnSections(unittest.TestCase):
+    """Not every shared section is gated — the vacate rule fires on almost every pass,
+    so its failure mode is being absent, not being half-applied
+    (DESIGN_constraint_reschedule.md §9)."""
+
+    def test_the_vacate_rule_is_always_on_in_the_adapt_task(self):
+        for extra in ({}, {"athlete_message": "knee is sore"},
+                      {"intensity_context": "Base 2 — focus \"volume\""}):
+            with self.subTest(extra=sorted(extra)):
+                system, _user = build_prompt(**extra)
+                self.assertIn(VACATE_SECTION, system)
+
+    def test_the_vacate_rule_is_always_on_in_the_accommodate_task(self):
+        engine = CoachEngine()
+        with patch("trainmate.coach.engine.openrouter_client") as client:
+            client.complete.return_value = {}
+            with patch("builtins.print"):
+                engine._workout_accommodate_logic(
+                    range_start="2026-06-08", range_end="2026-06-22",
+                    constraint_titles=["Away"], planned_workouts=[],
+                    objectives=[], constraints=[], guidelines="G", profile={},
+                    strategy="S", meso_text="  - Base", learnings="L",
+                )
+            system = client.complete.call_args[0][0]
+        self.assertIn(wk._vacate_task(), system)
+
+
+class TestSharedSectionsAreParametrized(unittest.TestCase):
+    """The two revision prompts share their benchmark and standing-rules text, so the
+    thing worth pinning is that each renders ITS OWN scope (§9).
+
+    Asserted against the constants the prompt is built from, not against quoted prose:
+    rewording a rule should not break a test whose subject is which rules are present."""
+
+    def _accommodate_prompt(self):
+        engine = CoachEngine()
+        with patch("trainmate.coach.engine.openrouter_client") as client:
+            client.complete.return_value = {}
+            with patch("builtins.print"):
+                engine._workout_accommodate_logic(
+                    range_start="2026-06-08", range_end="2026-06-22",
+                    constraint_titles=["Away"], planned_workouts=[],
+                    objectives=[], constraints=[], guidelines="G", profile={},
+                    strategy="S", meso_text="  - Base", learnings="L",
+                )
+            return client.complete.call_args[0][0]
+
+    def test_adapt_gets_five_standing_rules_including_the_two_shared_ones(self):
+        system, _user = build_prompt()
+        self.assertIn(wk.RULE_MOVE_FIRST, system)
+        self.assertIn(
+            wk.RULE_BLOCK_NOT_YOURS.format(signals=wk.ADAPT_BLOCK_SIGNALS), system
+        )
+        # Adapt's own three are written inline at its call site — counted, not quoted, so
+        # rewording one does not break a test about how many rules the model is given.
+        rules = system.split("### STANDING RULES")[1].split("###")[0]
+        self.assertIn("\n5. ", rules)
+        self.assertNotIn("\n6. ", rules)
+
+    def test_the_window_pass_gets_only_the_two_that_bound_a_change(self):
+        # Rule 3's specifics ride on the "change_reason" schema field, and rules 4-5 speak
+        # to an adherence window and a metrics lag this pass is never given.
+        system = self._accommodate_prompt()
+        self.assertIn(wk.RULE_MOVE_FIRST, system)
+        self.assertIn(
+            wk.RULE_BLOCK_NOT_YOURS.format(signals=wk.WINDOW_BLOCK_SIGNALS), system
+        )
+        rules = system.split("### STANDING RULES")[1].split("###")[0]
+        self.assertNotIn("\n3. ", rules)
+
+    def test_each_prompt_gets_its_own_benchmark_scope(self):
+        # Adapt's postponement escape promises a block boundary that a mid-block window
+        # has no claim on, so the two wordings must not cross over.
+        adapt, _user = build_prompt()
+        window = self._accommodate_prompt()
+        self.assertIn(wk._benchmark_task(in_block=True), adapt)
+        self.assertIn(wk._benchmark_task(in_block=False), window)
+        self.assertNotIn(wk._benchmark_task(in_block=False), adapt)
+        self.assertNotIn(wk._benchmark_task(in_block=True), window)
+
+    def test_the_window_pass_is_metric_blind(self):
+        system = self._accommodate_prompt()
+        for absent in ("METRICS HISTORY", "BASELINE REFERENCE", "PRESCRIBING INTENSITY",
+                       "ADHERENCE DISCREPANCIES", "DO NOT COMPOUND"):
+            with self.subTest(absent=absent):
+                self.assertNotIn(absent, system)
 
 
 if __name__ == "__main__":
