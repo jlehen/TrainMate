@@ -1,6 +1,6 @@
 import os
 import yaml
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 CONFIG_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "config.yaml")
 
@@ -456,21 +456,56 @@ config = Config()
 # here so any legacy config that still carries them is excluded from the hash.
 PROFILE_THRESHOLD_FIELDS = ('max_hr', 'lthr', 'ftp')
 
+# Profile fields that reach every prompt but cannot shape the *periodization*, so editing
+# one must not flag the plan stale (DESIGN_plan_staleness.md §3).
+PROFILE_NON_PLAN_FIELDS = ('name', 'equipment')
+
+# Per-day `weekly_schedule` sub-keys that shape individual sessions but not the block
+# structure — swapping a day's kit changes what that day is, not the periodization
+# (DESIGN_plan_staleness.md §4). The day's hours/max_sessions/certainty_percent stay in.
+SCHEDULE_NON_PLAN_KEYS = ('equipment',)
+
 
 def plan_profile() -> Dict[str, Any]:
     """The user_profile fields that shape the periodization strategy.
 
-    Single source of truth for the config_hash fingerprint. Excludes the physiological
-    thresholds (tolerance-checked separately, see above); every other profile field —
-    availability, target hours, preferences, injuries, equipment — is plan-shaping.
+    Single source of truth for the config_hash fingerprint. The partition and its
+    rationale are DESIGN_plan_staleness.md §3–§4: thresholds are tolerance-checked
+    separately (see above), `name`/`equipment` and each day's `equipment` are excluded as
+    not plan-shaping, and everything else — availability, target hours, preferences,
+    injuries, sports — is. The exclusions are a denylist so a profile field added later
+    counts as plan-shaping until someone decides otherwise (§6).
+
     Deliberately NOT fingerprinted: prompt-context knobs such as
     `coach.metrics_lookback_days`, which change what the coach *sees*, not what the plan
     should be.
     """
-    return {
-        k: v for k, v in config.user_profile.items()
-        if k not in PROFILE_THRESHOLD_FIELDS
-    }
+    excluded = set(PROFILE_THRESHOLD_FIELDS) | set(PROFILE_NON_PLAN_FIELDS)
+    profile = {k: v for k, v in config.user_profile.items() if k not in excluded}
+    schedule = profile.get('weekly_schedule')
+    if isinstance(schedule, dict):
+        profile['weekly_schedule'] = {
+            day: (
+                {k: v for k, v in spec.items() if k not in SCHEDULE_NON_PLAN_KEYS}
+                if isinstance(spec, dict) else spec
+            )
+            for day, spec in schedule.items()
+        }
+    return profile
+
+
+def changed_plan_profile_fields(old_profile: Dict[str, Any]) -> List[str]:
+    """The plan-shaping profile fields that differ between `old_profile` (a snapshot taken
+    at plan generation) and the live config, so staleness can say *what* moved.
+
+    Names a field whether it was added, removed, or edited — the athlete needs to know
+    which input to look at, not which of the three happened to it (DESIGN_plan_staleness.md
+    §5)."""
+    current = plan_profile()
+    return sorted(
+        k for k in set(old_profile) | set(current)
+        if old_profile.get(k) != current.get(k)
+    )
 
 
 def plan_config_hash() -> str:

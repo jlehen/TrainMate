@@ -922,6 +922,159 @@ class TestPeriodization(unittest.TestCase):
             trainmate.coach.config.data["user_profile"] = original_profile
             trainmate.coach.config.data["coach"] = original_coach
 
+    def test_non_plan_shaping_profile_fields_do_not_flag_the_plan_stale(self):
+        """`name` and `equipment` reach every prompt but cannot shape the periodization,
+        so editing one must not propose a replan (DESIGN_plan_staleness.md §3)."""
+        original_profile = dict(trainmate.coach.config.data["user_profile"])
+        try:
+            profile = trainmate.coach.config.data["user_profile"]
+            profile["name"] = "Sam"
+            profile["equipment"] = ["carbon road bike"]
+            baseline = coach_service._get_config_hash()
+
+            profile["name"] = "Alex"
+            self.assertEqual(baseline, coach_service._get_config_hash())
+
+            profile["equipment"] = ["carbon road bike", "rowing machine"]
+            self.assertEqual(baseline, coach_service._get_config_hash())
+        finally:
+            trainmate.coach.config.data["user_profile"] = original_profile
+
+    def test_weekly_schedule_is_fingerprinted_per_sub_key(self):
+        """A day's kit shapes that day's session; its hours, session cap and certainty
+        are load structure (DESIGN_plan_staleness.md §4)."""
+        original_profile = dict(trainmate.coach.config.data["user_profile"])
+        try:
+            profile = trainmate.coach.config.data["user_profile"]
+            profile["weekly_schedule"] = {
+                "Monday": {
+                    "total_available_hours": 1.5, "max_sessions": 1,
+                    "certainty_percent": 100, "equipment": ["office gym"],
+                }
+            }
+            monday = profile["weekly_schedule"]["Monday"]
+            baseline = coach_service._get_config_hash()
+
+            monday["equipment"] = ["rowing machine"]
+            self.assertEqual(baseline, coach_service._get_config_hash())
+
+            for key, value in (("total_available_hours", 2.5),
+                               ("max_sessions", 2),
+                               ("certainty_percent", 50)):
+                with self.subTest(sub_key=key):
+                    restore = monday[key]
+                    monday[key] = value
+                    self.assertNotEqual(baseline, coach_service._get_config_hash())
+                    monday[key] = restore
+        finally:
+            trainmate.coach.config.data["user_profile"] = original_profile
+
+    def test_plan_shaping_profile_fields_still_flag_the_plan_stale(self):
+        """The other side of the partition — narrowing what triggers a replan must not
+        have cost us the fields that genuinely reshape a periodization (§3)."""
+        original_profile = dict(trainmate.coach.config.data["user_profile"])
+        try:
+            profile = trainmate.coach.config.data["user_profile"]
+            profile.update({
+                "birth_year": 1986, "weekly_target_hours": 8.0,
+                "sport_preferences": ["cycling"], "chronic_injuries": "none",
+                "preferences": "keep strength year-round",
+            })
+            baseline = coach_service._get_config_hash()
+
+            for key, value in (("birth_year", 1956),
+                               ("weekly_target_hours", 20.0),
+                               ("sport_preferences", ["cycling", "swimming"]),
+                               ("chronic_injuries", "left ACL reconstructed"),
+                               ("preferences", "endurance only")):
+                with self.subTest(field=key):
+                    restore = profile[key]
+                    profile[key] = value
+                    self.assertNotEqual(baseline, coach_service._get_config_hash())
+                    profile[key] = restore
+        finally:
+            trainmate.coach.config.data["user_profile"] = original_profile
+
+    def test_stale_reason_names_the_profile_fields_that_moved(self):
+        """config_hash answers "did something change", the snapshot answers "what" — so
+        the athlete can judge the proposal without diffing config.yaml by hand (§5)."""
+        original_profile = dict(trainmate.coach.config.data["user_profile"])
+        try:
+            profile = trainmate.coach.config.data["user_profile"]
+            profile["sport_preferences"] = ["cycling"]
+            profile["chronic_injuries"] = "none"
+            profile["preferences"] = "keep strength year-round"
+            macro = {
+                "config_hash": coach_service._get_config_hash(),
+                "config_snapshot": coach_service._get_config_snapshot(),
+                "profile_snapshot": coach_service._get_profile_snapshot(),
+            }
+            self.assertIsNone(coach_service.config_changed(macro))
+
+            profile["sport_preferences"] = ["cycling", "swimming"]
+            self.assertEqual(
+                coach_service.config_changed(macro),
+                "athlete profile changed: sport_preferences",
+            )
+
+            # Several at once are all named, in a stable order.
+            profile["preferences"] = "endurance only"
+            self.assertEqual(
+                coach_service.config_changed(macro),
+                "athlete profile changed: preferences, sport_preferences",
+            )
+
+            # A field that disappears is named the same way as one that was edited —
+            # the other two are put back so only the removal is left to report.
+            profile["sport_preferences"] = ["cycling"]
+            profile["preferences"] = "keep strength year-round"
+            del profile["chronic_injuries"]
+            self.assertEqual(
+                coach_service.config_changed(macro),
+                "athlete profile changed: chronic_injuries",
+            )
+
+            # A plan predating the snapshot column — or carrying an unreadable one —
+            # cannot attribute the change, so it says only that there was one (§5).
+            for snapshot in (None, "", "{not json"):
+                with self.subTest(snapshot=snapshot):
+                    self.assertEqual(
+                        coach_service.config_changed(
+                            dict(macro, profile_snapshot=snapshot)
+                        ),
+                        "athlete profile changed",
+                    )
+        finally:
+            trainmate.coach.config.data["user_profile"] = original_profile
+
+    def test_profile_snapshot_round_trips_through_the_database(self):
+        """The reason can only name fields if the snapshot survives save and reload."""
+        original_profile = dict(trainmate.coach.config.data["user_profile"])
+        try:
+            profile = trainmate.coach.config.data["user_profile"]
+            profile["sport_preferences"] = ["cycling"]
+            obj_id = test_db.add_objective(
+                title="Snapshot round trip", target_date=GOAL_DATE,
+                sport_type="cycling", priority=1,
+            )
+            test_db.save_macrocycle(
+                objective_id=obj_id, strategy="Build", goals_hash="g",
+                constraints_hash="c", mesocycles=[],
+                config_hash=coach_service._get_config_hash(),
+                config_snapshot=coach_service._get_config_snapshot(),
+                profile_snapshot=coach_service._get_profile_snapshot(),
+            )
+            macro = test_db.get_macrocycle_for_objective(obj_id)
+            self.assertIsNone(coach_service.config_changed(macro))
+
+            profile["sport_preferences"] = ["cycling", "hiking"]
+            self.assertEqual(
+                coach_service.config_changed(macro),
+                "athlete profile changed: sport_preferences",
+            )
+        finally:
+            trainmate.coach.config.data["user_profile"] = original_profile
+
     def test_config_changed_threshold_tolerance(self):
         # FTP now lives in the benchmark logbook, not config (DESIGN_benchmark_workouts
         # §3.4); drift is driven by recording newer results (latest row wins).
@@ -1030,6 +1183,20 @@ class TestPeriodization(unittest.TestCase):
         macro = test_db.get_macrocycle_for_objective(obj_id)
         self.assertEqual(macro["config_hash"], "confhash789")
         self.assertEqual(macro["config_snapshot"], '{"ftp": 220.0}')
+
+        test_db.update_macrocycle_config_hash(
+            macro_id, "confhashABC", '{"ftp": 230.0}', '{"birth_year": 1986}'
+        )
+        macro = test_db.get_macrocycle_for_objective(obj_id)
+        self.assertEqual(macro["profile_snapshot"], '{"birth_year": 1986}')
+
+        # Re-stamping only the hash leaves both snapshots standing, so the plan never
+        # loses what it was generated against.
+        test_db.update_macrocycle_config_hash(macro_id, "confhashDEF")
+        macro = test_db.get_macrocycle_for_objective(obj_id)
+        self.assertEqual(macro["config_hash"], "confhashDEF")
+        self.assertEqual(macro["config_snapshot"], '{"ftp": 230.0}')
+        self.assertEqual(macro["profile_snapshot"], '{"birth_year": 1986}')
 
     @patch("trainmate.coach.engine.openrouter_client")
     def test_plans_a_goal_only_weeks_away(self, mock_client):

@@ -2,7 +2,7 @@ import json
 from datetime import datetime
 from typing import Any, List, Optional, Tuple, Dict
 from trainmate import runtime
-from trainmate.config import config
+from trainmate.config import config, changed_plan_profile_fields, plan_profile
 from trainmate.prompt import Choice
 from trainmate.types import Objective, Constraint
 from trainmate.util import (
@@ -11,6 +11,28 @@ from trainmate.util import (
 from trainmate.coach.formatting import _load_science_guidelines
 from trainmate.coach.proposals import CoachContext
 import trainmate.coach.service as _svc
+
+
+_PROFILE_CHANGED = "athlete profile changed"
+
+
+def _profile_change_reason(snapshot_raw: Optional[str]) -> str:
+    """Why the profile fingerprint no longer matches, naming the fields when the plan
+    carries a snapshot to compare against (DESIGN_plan_staleness.md §5).
+
+    Falls back to the bare reason for a plan generated before the snapshot column, and for
+    the one-off mismatch every pre-existing plan sees when the plan-shaping partition
+    itself changes (§7) — in both cases the fields cannot be attributed honestly."""
+    if not snapshot_raw:
+        return _PROFILE_CHANGED
+    try:
+        old_profile = json.loads(snapshot_raw)
+    except (ValueError, TypeError):
+        return _PROFILE_CHANGED
+    if not isinstance(old_profile, dict):
+        return _PROFILE_CHANGED
+    fields = changed_plan_profile_fields(old_profile)
+    return f"{_PROFILE_CHANGED}: {', '.join(fields)}" if fields else _PROFILE_CHANGED
 
 
 class PromptConfigMixin:
@@ -51,6 +73,11 @@ class PromptConfigMixin:
         so config_changed() can judge later drift against real values."""
         return json.dumps(self.effective_thresholds(), sort_keys=True)
 
+    def _get_profile_snapshot(self) -> str:
+        """JSON of the current plan-shaping profile fields, persisted on the macrocycle so
+        config_changed() can name which field moved (DESIGN_plan_staleness.md §5)."""
+        return json.dumps(plan_profile(), sort_keys=True)
+
     def config_changed(self, macro: Dict[str, Any]) -> Optional[str]:
         """Whether config.yaml has drifted plan-shapingly since `macro` was generated.
 
@@ -61,6 +88,10 @@ class PromptConfigMixin:
         correction feeds the next workout generation without invalidating the
         periodization strategy. Macrocycles predating the threshold snapshot judge on
         the fingerprint alone.
+
+        The profile reason names the fields that moved when the macrocycle carries a
+        profile snapshot, and falls back to the unnamed "athlete profile changed" when it
+        predates that column (DESIGN_plan_staleness.md §5).
 
         Snapshot scope is uniform — every anchor kind on record joins it, ftp/lthr are not
         special (§3.5). A kind absent from the OLD snapshot is a *newly recorded* one (e.g.
@@ -75,7 +106,7 @@ class PromptConfigMixin:
         trips a replan.
         """
         if macro.get('config_hash') != self.engine._get_config_hash():
-            return "athlete profile changed"
+            return _profile_change_reason(macro.get('profile_snapshot'))
 
         snapshot_raw = macro.get('config_snapshot')
         if not snapshot_raw:

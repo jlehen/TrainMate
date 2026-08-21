@@ -163,6 +163,7 @@ class Macrocycle(TypedDict):
     constraints_hash: str
     config_hash: Optional[str]
     config_snapshot: Optional[str]
+    profile_snapshot: Optional[str]
     goals_snapshot: Optional[str]
     constraints_snapshot: Optional[str]
     all_constraints_snapshot: Optional[str]

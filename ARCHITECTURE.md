@@ -378,14 +378,22 @@ default the user layer overrides.
   either way still changes the hash ([§15](#goal-dates-event-vs-training-horizon)).
 - **`_get_goals_hash(objectives)`** — SHA-256 of the `_clean_goals` list.
 - **`_get_constraints_hash(constraints)`** — SHA-256 of the `_clean_constraints` list.
-- **`_get_config_hash()`** — SHA-256 of `_clean_profile()`: the `user_profile` block
-  minus the threshold anchors (`max_hr`/`lthr`/`ftp`). Thresholds are instead snapshotted
-  raw on the macrocycle (via `CoachService.effective_thresholds()`) and only flag the plan
-  stale past `coach.threshold_replan_pct` relative drift (default 5%) — see
+- **`_get_config_hash()`** — SHA-256 of `_clean_profile()`: the `user_profile` block minus
+  the threshold anchors (`max_hr`/`lthr`/`ftp`) and minus the fields that reach the prompt
+  but cannot shape a periodization — `name`, top-level `equipment`, and each day's
+  `equipment` within `weekly_schedule` (that day's hours, `max_sessions` and
+  `certainty_percent` stay in). The partition and its rationale are
+  `DESIGN_plan_staleness.md` §3–§4; the exclusions are a denylist so a profile field added
+  later counts as plan-shaping until someone decides otherwise (§6). Thresholds are instead
+  snapshotted raw on the macrocycle (via `CoachService.effective_thresholds()`) and only
+  flag the plan stale past `coach.threshold_replan_pct` relative drift (default 5%) — see
   `CoachService.config_changed()`. Trainable thresholds now live in the `benchmark_results`
   logbook, not config (`DESIGN_benchmark_workouts.md` §3.4); the service overlays them onto
   the profile for prompts and the drift snapshot. Prompt-context knobs
   (`metrics_lookback_days`) are not fingerprinted at all.
+  The macrocycle also stores `profile_snapshot` — the plan-shaping fields as JSON — so the
+  staleness reason can name what moved (`"athlete profile changed: sport_preferences"`)
+  rather than only that something did (`DESIGN_plan_staleness.md` §5).
 - **`_plan_generate_strategy(...)`** — LLM call → `{strategy, mesocycles}` covering the
   plan start through the goal date, whatever the horizon. Label `periodization_plan`.
   Branches on the goal's `date_type`: a `horizon` goal's task forbids pinning a
@@ -661,7 +669,8 @@ called by the UIs.
   analysis) passes that merged profile so zones are prescribed from live values.
 - **`_get_config_hash()`** — delegates to `CoachEngine._get_config_hash()`.
   **`_get_config_snapshot()`** — `effective_thresholds()` as JSON, snapshotted on the
-  macrocycle.
+  macrocycle. **`_get_profile_snapshot()`** — `config.plan_profile()` as JSON, snapshotted
+  alongside it so staleness can name the field that moved.
 - **`config_changed(macro)`** — the single staleness judgment used by the CLI
   (`plan generate`, `workout generate`, `status`) and the `plan_generate` reuse
   check. Returns a human-readable reason when the plan-shaping profile fingerprint
@@ -672,7 +681,9 @@ called by the UIs.
   deadlift PR after a squat PR reads as one anchor jumping ~70% and would invalidate a
   whole periodization — it still joins the snapshot and the prompt, it just never trips a
   replan (DESIGN_benchmark_workouts.md §3.3). Macrocycles without a snapshot (legacy)
-  judge on the fingerprint alone.
+  judge on the fingerprint alone. The profile half of the reason names the fields that
+  moved when the macrocycle carries a `profile_snapshot`, and degrades to a bare
+  "athlete profile changed" when it does not (`DESIGN_plan_staleness.md` §5).
 - **`_get_coach_system_prompt(objectives, constraints, ...)`** — builds the system
   prompt without making an LLM call (used by tests).
 
@@ -1220,12 +1231,17 @@ guarantee (re-citing a counted week is an `INSERT OR IGNORE` no-op). Full model:
 | `goals_hash`      | TEXT                  | SHA-256 of objectives at generation time         |
 | `constraints_hash`| TEXT                  | SHA-256 of the plan-shaping (replan=1) constraints at generation time (§7) |
 | `config_hash`     | TEXT                  | SHA-256 of the plan-shaping `user_profile`       |
-|                   |                       | fields (thresholds excluded)                     |
+|                   |                       | fields (thresholds, `name` and equipment excluded |
+|                   |                       | — `DESIGN_plan_staleness.md` §3)                  |
 | `config_snapshot` | TEXT                  | JSON of the effective threshold anchors (`max_hr` |
 |                   |                       | + logbook kinds) the plan was generated with;     |
 |                   |                       | staleness only past `coach.threshold_replan_pct`  |
 |                   |                       | drift. NULL on plans predating the column. Shown  |
 |                   |                       | by `plan show`, compared by `plan diff`.          |
+| `profile_snapshot`| TEXT                  | JSON of the plan-shaping profile fields the plan  |
+|                   |                       | was generated with, so the staleness reason can   |
+|                   |                       | name which one moved. NULL on plans predating the |
+|                   |                       | column — those get the unnamed reason (§5).       |
 | `goals_snapshot`  | TEXT                  | JSON of the goals the plan was generated from    |
 |                   |                       | (same cleaned data the hash covers); NULL on     |
 |                   |                       | plans predating the column. Shown by `plan show` |
@@ -1631,6 +1647,10 @@ Required fields:
 thresholds (`ftp`/`lthr`/…) are **not** here — they live in the `benchmark_results`
 logbook (`DESIGN_benchmark_workouts.md` §3.4); config keeps only quasi-fixed `max_hr`. A
 threshold-less profile is a valid cold start (the coach nudges, never refuses).
+
+Not every key flags the active plan stale when edited. `name`, `equipment` and each day's
+`equipment` reach the prompt but do not shape the periodization, so editing one proposes no
+replan; the rest of the block does (`DESIGN_plan_staleness.md` §3–§4).
 
 ---
 

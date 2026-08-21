@@ -8,7 +8,7 @@ from trainmate.config import config
 # migrations are idempotent, so this is a "skip the work" marker rather than a ledger of
 # steps to replay — TrainMate has one user and one database, and the alternative (a
 # numbered migration framework) would be more machinery than that warrants.
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 
 
 # How long a connection waits for a writer to finish before raising "database is
@@ -625,6 +625,7 @@ class BaseDB:
                     constraints_hash TEXT NOT NULL,
                     config_hash TEXT,
                     config_snapshot TEXT,
+                    profile_snapshot TEXT,
                     goals_snapshot TEXT,
                     constraints_snapshot TEXT,
                     all_constraints_snapshot TEXT,
@@ -687,6 +688,15 @@ class BaseDB:
             if 'config_snapshot' not in columns:
                 cursor.execute(
                     "ALTER TABLE macrocycles ADD COLUMN config_snapshot TEXT"
+                )
+            # The plan-shaping profile fields (config.plan_profile) the plan was generated
+            # with, as JSON. config_hash alone answers "did something change" but not
+            # "what", so the staleness reason could not name the field that moved
+            # (DESIGN_plan_staleness.md §5). NULL on macrocycles created before this
+            # column existed — those fall back to the unnamed reason.
+            if 'profile_snapshot' not in columns:
+                cursor.execute(
+                    "ALTER TABLE macrocycles ADD COLUMN profile_snapshot TEXT"
                 )
             # Plan-version axis (see DESIGN_plan_rollback.md). Regenerating a plan no
             # longer deletes the prior macrocycle: it is marked 'superseded' (with the

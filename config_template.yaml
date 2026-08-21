@@ -167,6 +167,10 @@ coach:
   #  low_load: 20.0
   #  high_load: 100.0
 
+# Editing most of this block flags the active periodization stale and offers a replan.
+# The exceptions — `name`, `equipment`, and each day's `equipment` below — reach the coach
+# but cannot reshape a periodization, so changing them is silent. See
+# designs/DESIGN_plan_staleness.md.
 user_profile:
   name: "Athlete"
   birth_year: 1980

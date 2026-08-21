@@ -93,7 +93,8 @@ def run_plan_generate(args: argparse.Namespace) -> None:
                         ))
                         runtime.db.update_macrocycle_config_hash(
                             macro['id'], runtime.coach_service._get_config_hash(),
-                            runtime.coach_service._get_config_snapshot()
+                            runtime.coach_service._get_config_snapshot(),
+                            runtime.coach_service._get_profile_snapshot()
                         )
 
     plan_kwargs = {'auto_apply': False}

@@ -409,7 +409,8 @@ class PeriodizationMixin:
         self, objective_id: int, strategy: str, goals_hash: str,
         constraints_hash: str, mesocycles: List[Dict[str, Any]],
         config_hash: str = "", config_snapshot: str = "", goals_snapshot: str = "",
-        constraints_snapshot: str = "", all_constraints_snapshot: str = ""
+        constraints_snapshot: str = "", all_constraints_snapshot: str = "",
+        profile_snapshot: str = ""
     ) -> int:
         """Saves a macrocycle and its nested mesocycles for the objective.
 
@@ -422,7 +423,9 @@ class PeriodizationMixin:
         `replan = 1` subset fingerprints the plan (DESIGN_constraints.md §7). config_snapshot
         is JSON of the physiological thresholds the plan was generated with, kept as raw
         values (not a hash) so staleness can be judged against a drift tolerance
-        (coach/service.config_changed).
+        (coach/service.config_changed). profile_snapshot is JSON of the plan-shaping
+        profile fields, kept for the same reason in reverse: the hash detects the change,
+        the snapshot names the field that moved (DESIGN_plan_staleness.md §5).
 
         The previously-active macrocycle for the objective is *superseded* rather than
         deleted (see DESIGN_plan_rollback.md): it and its mesocycles are kept so that
@@ -441,13 +444,13 @@ class PeriodizationMixin:
             cursor.execute("""
                 INSERT INTO macrocycles (
                     objective_id, strategy, goals_hash, constraints_hash, config_hash,
-                    config_snapshot, goals_snapshot, constraints_snapshot,
-                    all_constraints_snapshot, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    config_snapshot, profile_snapshot, goals_snapshot,
+                    constraints_snapshot, all_constraints_snapshot, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (objective_id, strategy, goals_hash, constraints_hash, config_hash,
-                  config_snapshot or None, goals_snapshot or None,
-                  constraints_snapshot or None, all_constraints_snapshot or None,
-                  created_at))
+                  config_snapshot or None, profile_snapshot or None,
+                  goals_snapshot or None, constraints_snapshot or None,
+                  all_constraints_snapshot or None, created_at))
             macrocycle_id = cursor.lastrowid
 
             for meso in mesocycles:
@@ -462,23 +465,27 @@ class PeriodizationMixin:
 
     def update_macrocycle_config_hash(
         self, macrocycle_id: int, config_hash: str,
-        config_snapshot: Optional[str] = None
+        config_snapshot: Optional[str] = None,
+        profile_snapshot: Optional[str] = None
     ) -> None:
-        """Updates the config hash (and, when provided, the threshold snapshot) for a
-        specific macrocycle — the "keep current plan, accept new config" path."""
+        """Updates the config hash (and, when provided, the threshold and profile
+        snapshots) for a specific macrocycle — the "keep current plan, accept new config"
+        path.
+
+        A snapshot left as None is not written, so a caller re-stamping only the hash
+        cannot blank out what the plan was generated against."""
+        sets, params = ["config_hash = ?"], [config_hash]
+        for column, value in (('config_snapshot', config_snapshot),
+                              ('profile_snapshot', profile_snapshot)):
+            if value is not None:
+                sets.append(f"{column} = ?")
+                params.append(value)
         with self._get_connection() as conn:
             cursor = conn.cursor()
-            if config_snapshot is not None:
-                cursor.execute(
-                    "UPDATE macrocycles SET config_hash = ?, config_snapshot = ? "
-                    "WHERE id = ?",
-                    (config_hash, config_snapshot, macrocycle_id)
-                )
-            else:
-                cursor.execute(
-                    "UPDATE macrocycles SET config_hash = ? WHERE id = ?",
-                    (config_hash, macrocycle_id)
-                )
+            cursor.execute(
+                f"UPDATE macrocycles SET {', '.join(sets)} WHERE id = ?",
+                (*params, macrocycle_id)
+            )
             conn.commit()
 
     def delete_macrocycle_for_objective(self, objective_id: int) -> None:

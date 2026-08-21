@@ -243,6 +243,7 @@ class PlanningMixin:
             constraints_hash=constraints_hash,
             config_hash=self.engine._get_config_hash(),
             config_snapshot=self._get_config_snapshot(),
+            profile_snapshot=self._get_profile_snapshot(),
             goals_snapshot=json.dumps(self.engine._clean_goals(objectives)),
             constraints_snapshot=json.dumps(
                 self.engine._clean_constraints(replan_constraints)
@@ -414,6 +415,7 @@ class PlanningMixin:
             constraints_hash=fingerprints.constraints_hash,
             config_hash=fingerprints.config_hash,
             config_snapshot=fingerprints.config_snapshot,
+            profile_snapshot=fingerprints.profile_snapshot,
             goals_snapshot=fingerprints.goals_snapshot,
             constraints_snapshot=fingerprints.constraints_snapshot,
             all_constraints_snapshot=fingerprints.all_constraints_snapshot,

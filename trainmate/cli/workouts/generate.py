@@ -266,7 +266,8 @@ def _confirm_out_of_date_plans(
             print("Proceeding. Updating configuration hash in database.")
             runtime.db.update_macrocycle_config_hash(
                 macro['id'], runtime.coach_service._get_config_hash(),
-                runtime.coach_service._get_config_snapshot()
+                runtime.coach_service._get_config_snapshot(),
+                runtime.coach_service._get_profile_snapshot()
             )
     return True
 
