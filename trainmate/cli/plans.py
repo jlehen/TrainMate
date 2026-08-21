@@ -88,8 +88,9 @@ def run_plan_generate(args: argparse.Namespace) -> None:
                         args.force = True
                     else:
                         print(wrap_text(
-                            "Keeping current periodization strategy. "
-                            "Updating configuration hash in database."
+                            "Keeping the current periodization strategy. It is now "
+                            "recorded against your current profile and thresholds, so "
+                            "this change won't be flagged again."
                         ))
                         runtime.db.update_macrocycle_config_hash(
                             macro['id'], runtime.coach_service._get_config_hash(),

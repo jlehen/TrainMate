@@ -263,7 +263,10 @@ def _confirm_out_of_date_plans(
         else:
             # Confirming accepts the out-of-date plan, so stamp the current config;
             # --force only skips the question and leaves the warning live for next run.
-            print("Proceeding. Updating configuration hash in database.")
+            print(wrap_text(
+                "Proceeding with the out-of-date plan. It is now recorded against your "
+                "current profile and thresholds, so this warning won't repeat."
+            ))
             runtime.db.update_macrocycle_config_hash(
                 macro['id'], runtime.coach_service._get_config_hash(),
                 runtime.coach_service._get_config_snapshot(),
