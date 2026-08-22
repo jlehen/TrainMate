@@ -1,8 +1,12 @@
 import argparse
 import sys
 from trainmate import runtime
-from trainmate.util import bold, green, red, yellow, cyan, gray, cmd, format_labeled_block
-from trainmate.db.objectives import goal_state, GOAL_UPCOMING
+from trainmate.util import (
+    bold, green, red, yellow, cyan, gray, cmd, format_labeled_block,
+    today_str as _today_str,
+)
+from trainmate.cli.common import fmt_date, report_unhonored
+from trainmate.db.objectives import goal_state, GOAL_UPCOMING, ARCHIVED
 from trainmate.sports import CANONICAL_SPORTS
 
 
@@ -81,14 +85,65 @@ def run_goal_edit(args: argparse.Namespace) -> None:
         print(yellow("No fields to update. Provide at least one field to change."))
         return
 
+    was_archived = goal.get('status') == ARCHIVED
     runtime.db.update_objective(args.id, **kwargs)
     updated = runtime.db.get_objective(args.id)
     if updated:
         _print_goal(updated)
+
+    now_archived = (updated or {}).get('status') == ARCHIVED
+    if now_archived and not was_archived:
+        _report_archived_sessions(runtime.coach_service.goal_archive(args.id))
+    elif was_archived and not now_archived:
+        _offer_reinstated_sessions(args.id)
+
     print(
         green("Goal updated successfully. Run " + cmd("plan generate")
               + " to regenerate training cycles if needed.")
     )
+
+
+def _report_archived_sessions(result: dict) -> None:
+    """Says what calling the goal off stood down, and what it deliberately left alone.
+
+    Untagged sessions belong to no plan version, so no goal can claim them (§14); saying
+    so beats both sweeping them and staying silent."""
+    if result['archived_workouts']:
+        print(green(
+            f"Stood down {result['archived_workouts']} upcoming session(s) "
+            f"({fmt_date(result['first_date'])} → {fmt_date(result['last_date'])}). "
+            "Reinstate the goal to bring them back."
+        ))
+    else:
+        print(gray("No upcoming sessions belonged to this goal."))
+    if result['untagged']:
+        print(yellow(
+            f"Left {result['untagged']} upcoming session(s) in place: they carry no plan "
+            "version, so no goal owns them. Remove them with " + cmd("workout rm")
+            + " if they were for this goal."
+        ))
+
+
+def _offer_reinstated_sessions(objective_id: int) -> None:
+    """Asks before resurrecting the sessions the goal's archival stood down (§14).
+
+    Always asked: a goal reinstated months later would otherwise silently re-push
+    sessions from a plan that no longer suits the athlete."""
+    if not runtime.prompt.confirm(
+        "Restore the upcoming sessions that were stood down when this goal was "
+        "called off?", default=True
+    ):
+        print(gray("Sessions left archived. " + cmd("workout batches") + " lists them."))
+        return
+    result = runtime.coach_service.goal_reinstate(objective_id)
+    if not result['restored_workouts']:
+        print(gray("No archived sessions were left to restore."))
+        return
+    print(green(
+        f"Restored {result['restored_workouts']} session(s) "
+        f"({fmt_date(result['first_date'])} → {fmt_date(result['last_date'])})."
+    ))
+    report_unhonored(result['unhonored'])
 
 
 def run_goal_list(args=None) -> None:
@@ -100,7 +155,43 @@ def run_goal_list(args=None) -> None:
 
 
 def run_goal_rm(args: argparse.Namespace) -> None:
-    """Deletes an objective goal by ID."""
+    """Deletes an objective goal by ID, with everything the delete cascades to.
+
+    The escape hatch for a goal entered by mistake, not the way to call one off — that is
+    `goal edit --status archived`, which keeps the history and is reversible (§14). The
+    inventory is printed first because the cascade reaches further than the goal row."""
+    goal = runtime.db.get_objective(args.id)
+    if not goal:
+        print(red(f"Goal with ID {args.id} not found."))
+        sys.exit(1)
+
+    versions = runtime.db.get_macrocycle_versions(args.id)
+    blocks = sum(
+        len(runtime.db.get_mesocycles_for_macrocycle(m['id'])) for m in versions
+    )
+    notes = sum(len(runtime.db.list_plan_feedback(m['id'])) for m in versions)
+    orphaned = runtime.db.count_future_workouts_for_macrocycles(
+        [m['id'] for m in versions], _today_str()
+    )
+
+    if not args.yes:
+        print(yellow(f"Removing goal '{goal['title']}' (ID {args.id}) also deletes:"))
+        print(f"  - {len(versions)} periodization plan version(s)")
+        print(f"  - {blocks} mesocycle block(s)")
+        print(f"  - {notes} plan feedback note(s)")
+        if orphaned:
+            print(yellow(
+                f"  and leaves {orphaned} upcoming session(s) with no plan to explain "
+                "them."
+            ))
+        print(gray(
+            "To call the goal off reversibly instead, use "
+            + cmd(f"goal edit {args.id} --status archived") + "."
+        ))
+        if not runtime.prompt.confirm("Delete it anyway?", danger=True):
+            print("Removal cancelled.")
+            return
+
     runtime.db.delete_objective(args.id)
     print(green(f"Goal with ID {args.id} removed successfully."))
 
@@ -181,9 +272,14 @@ def add_goal_parser(subparsers):
     )
     
     # goal rm
-    g_rm = goal_subparsers.add_parser("rm", help="Remove a goal by ID")
+    g_rm = goal_subparsers.add_parser(
+        "rm",
+        help="Delete a goal and its plan history (to call a goal off reversibly, "
+             "use 'goal edit --status archived')"
+    )
     g_rm.set_defaults(func=run_goal_rm)
     g_rm.add_argument("id", type=int, help="Goal ID to remove")
+    g_rm.add_argument("-y", "--yes", action="store_true", help="Skip confirmation prompt")
     
     # goal list
     _list_parser = goal_subparsers.add_parser("list", help="Show all goals")

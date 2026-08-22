@@ -1,6 +1,6 @@
 from contextlib import contextmanager
 from datetime import date, datetime, timedelta
-from typing import Any, Iterator, List, Optional, Tuple, Dict
+from typing import Any, Iterator, List, Optional, Sequence, Tuple, Dict
 from trainmate.config import config
 from trainmate.types import Constraint, Workout
 from trainmate.adherence import analyze_adherence
@@ -296,13 +296,18 @@ class WorkoutGenMixin:
                     f"days before it. If a test is due, consider regenerating."
                 ))
 
-    def _archive_and_teardown(self, from_date: str, verbose: bool = False) -> List[Workout]:
+    def _archive_and_teardown(
+        self, from_date: str, verbose: bool = False,
+        macrocycle_ids: Optional[Sequence[int]] = None
+    ) -> List[Workout]:
         """Archives every live workout from `from_date` on and deletes their Calendar events.
 
         The displaced rows keep their `macrocycle_id` tag and share one `archived_at` batch
         stamp, so a later rollback can resurrect exactly this set (DESIGN_plan_rollback.md).
+        `macrocycle_ids` narrows the sweep to those plan versions' sessions, which is how
+        calling one goal off spares its neighbours (DESIGN_backward_evaluation.md §14).
         Returns the rows as they were before archival."""
-        archived = self._db.archive_future_workouts(from_date)
+        archived = self._db.archive_future_workouts(from_date, macrocycle_ids)
         if not archived:
             return archived
         print(yellow(

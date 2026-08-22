@@ -913,7 +913,84 @@ is to notice, refuse to persist an empty read, and say which part it could not u
 
 ---
 
-## 14. Out of Scope
+## 14. Calling a goal off stands its sessions down
+
+§12 split the two questions `objectives.status` was conflating and left `archived`
+meaning exactly one thing: the athlete called this goal off. What it did *not*
+settle is what calling a goal off should do to the training already scheduled for
+it.
+
+### 14.1 Archiving hid the goal but left the calendar alone
+
+Setting `status = 'archived'` hides the goal, its macrocycle and its mesocycles
+from every planning reader — the objective filter in `get_governing_macrocycle`
+and the `o.status = 'active'` join in the four date-keyed block lookups. The plan
+rows themselves survive untouched, which is the point: `--status active`
+reinstates the goal and everything about it comes back.
+
+The sessions did not follow. `workouts` carries a `macrocycle_id` tag but no
+foreign key to it, so archiving a goal left its remaining workouts live, dated,
+and still on Google Calendar. The athlete called off a race and the calendar kept
+telling them to run 32k on Sunday.
+
+### 14.2 Why archive rather than delete
+
+`goal rm` deletes the objective row, and `ON DELETE CASCADE` carries away every
+macrocycle version, every mesocycle and the whole plan feedback log with it. That
+is a strictly worse answer to the same problem, for two reasons.
+
+The first is that this project already decided the question one level down. When
+a regeneration supersedes a plan, the prior macrocycle is **not** deleted — it is
+marked `superseded` and kept so `plan rollback` can restore it (`macrocycles.status`,
+`superseded_at`; DESIGN_plan_rollback.md). Destroying every one of those versions
+because the goal above them went away would undo that decision from the top.
+
+The second is that deletion does not even solve the calendar problem. The
+sessions are tagged with a macrocycle, not owned by it, so a cascade leaves them
+exactly as live as archiving did — only now nothing remains that could explain
+what they were for. Deletion strands the sessions *and* burns the history.
+
+So archiving is the normal path and it stands the sessions down; `goal rm` stays
+as the escape hatch for a goal entered by mistake.
+
+### 14.3 The sweep is scoped by plan version, not by date
+
+`archive_future_workouts` already existed for regeneration and `plan rollback`,
+and it takes every live workout from a date onward. That floor is right —
+a called-off race does not un-train the months already behind the athlete — but
+the date alone is the wrong *filter*: two goals' plans routinely have sessions in
+the same week, and a horizon long enough to cross from one goal's last block into
+the next is a case the generator explicitly supports.
+
+So the sweep takes an optional set of macrocycle IDs and archives only sessions
+tagged with them. Every version the goal owns is passed, not just the active one:
+a superseded version can still hold live rows.
+
+Untagged rows (`macrocycle_id IS NULL`, predating the tag) match no version and
+are therefore never swept. They are counted and reported instead. Guessing which
+goal a tagless session belonged to would be a coin flip, and silently sweeping it
+would be the same destructive move this section exists to avoid.
+
+### 14.4 Reinstating asks first
+
+Archival is not a prompt — it is reversible, and the summary line says what it
+took. Reinstating *is* a prompt, because it is the direction that can surprise:
+a goal picked back up months later would otherwise silently re-push sessions from
+a plan that no longer suits the athlete. The restore is floored at today by
+`restore_workout_batch`, so a late reinstate recovers only what is still ahead;
+declining leaves the batch archived and `workout batches` still lists it.
+
+### 14.5 `goal rm` says what it is about to take
+
+Deleting a goal remains possible and remains a cascade. It now prints the
+inventory first — plan versions, blocks, feedback notes, and the count of
+upcoming sessions it would strand — names `goal edit --status archived` as the
+reversible alternative, and asks. `-y` skips the prompt for scripted use, as on
+`goal wipe`.
+
+---
+
+## 15. Out of Scope
 
 - Backward evaluation in `workout adapt`.
 - Per-learning evidence provenance.

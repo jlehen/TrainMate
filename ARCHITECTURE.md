@@ -1475,8 +1475,8 @@ single read-only view that is its whole state (`model`), which acts bare instead
 | `help`       | —            | —        | Print every command and sub-command with its one-line help, recursing through the whole sub-parser tree (unlike `--help`, which only shows one level) |
 | `status`     | —            | `s`      | Show active goals, recent metrics, coach learnings                       |
 | `goal`       | `add`        | `g a`    | Add objective (`TITLE DATE SPORT…` positional, `--desc`, `--priority`)   |
-| `goal`       | `edit`       | `g e`    | Edit objective by ID                                                     |
-| `goal`       | `rm`         | `g r`    | Remove objective by ID                                                   |
+| `goal`       | `edit`       | `g e`    | Edit objective by ID. `--status archived` calls the goal off: it stands its upcoming sessions down and clears their Calendar events, keeping the plan, its versions and its feedback. `--status active` reinstates the goal and offers those sessions back, floored at today (DESIGN_backward_evaluation.md §14) |
+| `goal`       | `rm`         | `g r`    | Delete an objective and everything the cascade takes with it — every plan version, its blocks, and its feedback log. Prints that inventory plus the count of sessions it would strand, then asks; `-y` skips. To drop a goal reversibly use `goal edit --status archived` instead (§14) |
 | `goal`       | `list`       | `g l`    | List all objectives                                                      |
 | `goal`       | `wipe`       | —        | Delete all objectives                                                    |
 | `constraint` | `add`        | `cons a` | Author a directive (positional `TITLE`, `--start`, `--end`, `--desc`, `--rest`, `--replan`/`--no-replan`; never prompts — see DESIGN_cli_noargs.md §a2) |

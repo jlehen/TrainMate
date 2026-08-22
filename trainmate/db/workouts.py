@@ -1,5 +1,5 @@
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 from trainmate.types import Constraint, Workout
 from trainmate.sports import sport_aliases
 
@@ -223,7 +223,9 @@ class WorkoutsMixin:
             cursor.execute(query, params)
             return [dict(row) for row in cursor.fetchall()]  # type: ignore
 
-    def archive_future_workouts(self, from_date: str) -> List[Workout]:
+    def archive_future_workouts(
+        self, from_date: str, macrocycle_ids: Optional[Sequence[int]] = None
+    ) -> List[Workout]:
         """Archives (rather than deletes) every live workout on/after `from_date`.
 
         Returns the affected rows as they were *before* archival (so the caller still
@@ -231,22 +233,63 @@ class WorkoutsMixin:
         them `archived_at = now` and clears their Calendar handle/signature so a later
         restore re-pushes cleanly. Used when a regeneration or `plan rollback` displaces
         the current plan's workouts; they keep their `macrocycle_id` tag so the matching
-        rollback can resurrect them (see DESIGN_plan_rollback.md)."""
+        rollback can resurrect them (see DESIGN_plan_rollback.md).
+
+        `macrocycle_ids` narrows the sweep to the sessions those plan versions generated —
+        what calling one goal off must do, since a date-only sweep would also displace a
+        neighbouring goal's sessions in the same window (DESIGN_backward_evaluation.md
+        §14). Untagged legacy rows match no version, so they are never swept this way."""
         now = datetime.now(timezone.utc).isoformat()
+        where = "date >= ? AND archived_at IS NULL"
+        params: List[Any] = [from_date]
+        if macrocycle_ids is not None:
+            if not macrocycle_ids:
+                return []
+            where += f" AND macrocycle_id IN ({','.join('?' * len(macrocycle_ids))})"
+            params.extend(macrocycle_ids)
         with self._get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute(
-                "SELECT * FROM workouts WHERE date >= ? AND archived_at IS NULL",
-                (from_date,)
-            )
+            cursor.execute(f"SELECT * FROM workouts WHERE {where}", params)
             rows = [dict(r) for r in cursor.fetchall()]  # type: ignore
             cursor.execute(
                 "UPDATE workouts SET archived_at = ?, google_event_id = NULL, "
-                "pushed_signature = NULL WHERE date >= ? AND archived_at IS NULL",
-                (now, from_date)
+                f"pushed_signature = NULL WHERE {where}",
+                [now] + params
             )
             conn.commit()
             return rows
+
+    def count_future_workouts_for_macrocycles(
+        self, macrocycle_ids: Sequence[int], from_date: str
+    ) -> int:
+        """How many live workouts on/after `from_date` those plan versions generated.
+
+        What `goal rm` would strand: deleting the goal cascades the versions away but not
+        the sessions tagged with them (DESIGN_backward_evaluation.md §14)."""
+        if not macrocycle_ids:
+            return 0
+        with self._get_connection() as conn:
+            row = conn.cursor().execute(
+                "SELECT COUNT(*) AS n FROM workouts "
+                "WHERE date >= ? AND archived_at IS NULL "
+                f"AND macrocycle_id IN ({','.join('?' * len(macrocycle_ids))})",
+                [from_date] + list(macrocycle_ids)
+            ).fetchone()
+            return int(row['n']) if row else 0
+
+    def count_untagged_future_workouts(self, from_date: str) -> int:
+        """How many live workouts on/after `from_date` carry no `macrocycle_id`.
+
+        Those rows predate the plan-version tag, so no goal can claim them and calling a
+        goal off leaves them alone — reported rather than swept
+        (DESIGN_backward_evaluation.md §14)."""
+        with self._get_connection() as conn:
+            row = conn.cursor().execute(
+                "SELECT COUNT(*) AS n FROM workouts "
+                "WHERE date >= ? AND archived_at IS NULL AND macrocycle_id IS NULL",
+                (from_date,)
+            ).fetchone()
+            return int(row['n']) if row else 0
 
     def get_archived_batches(
         self, from_date: Optional[str] = None
@@ -325,21 +368,26 @@ class WorkoutsMixin:
             return restored, self.clear_honored_after(archived_at, from_date)
 
     def restore_macrocycle_workouts(
-        self, macrocycle_id: int, from_date: str
+        self, macrocycle_ids: Sequence[int], from_date: str
     ) -> Tuple[List[Workout], List[Constraint]]:
-        """Un-archives the most recently archived batch of workouts for a plan version.
+        """Un-archives the most recently archived batch of workouts for some plan versions.
 
-        A `plan rollback` to `macrocycle_id` resurrects the workouts that were live when
-        that version was last superseded — i.e. the batch sharing the latest `archived_at`
-        among that version's archived rows, restored from `from_date` onward. Returns what
-        `restore_workout_batch` returns (empty if the version never had workouts). See
+        A `plan rollback` to a version resurrects the workouts that were live when that
+        version was last superseded — i.e. the batch sharing the latest `archived_at`
+        among its archived rows, restored from `from_date` onward. Reinstating a goal
+        passes every version the goal owns, since the batch its archival stamped may span
+        more than one (DESIGN_backward_evaluation.md §14). Returns what
+        `restore_workout_batch` returns (empty if no version ever had workouts). See
         DESIGN_plan_rollback.md."""
+        if not macrocycle_ids:
+            return [], []
         with self._get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute(
                 "SELECT MAX(archived_at) AS m FROM workouts "
-                "WHERE macrocycle_id = ? AND archived_at IS NOT NULL",
-                (macrocycle_id,)
+                f"WHERE macrocycle_id IN ({','.join('?' * len(macrocycle_ids))}) "
+                "AND archived_at IS NOT NULL",
+                tuple(macrocycle_ids)
             )
             row = cursor.fetchone()
             batch = row['m'] if row else None

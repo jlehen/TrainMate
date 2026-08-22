@@ -58,6 +58,55 @@ class PlanningMixin:
         """Deletes the periodization plan for a specific objective."""
         self._db.delete_macrocycle_for_objective(objective_id)
 
+    def _objective_macrocycle_ids(self, objective_id: int) -> List[int]:
+        """Every plan version the goal owns, active and superseded alike.
+
+        Archival works off all of them because a superseded version can still own live
+        sessions (DESIGN_backward_evaluation.md §14)."""
+        return [m['id'] for m in self._db.get_macrocycle_versions(objective_id)]
+
+    def goal_archive(self, objective_id: int) -> Dict[str, Any]:
+        """Stands the goal's future sessions down and clears them from Calendar.
+
+        The plan, its versions and its feedback are untouched — calling a goal off hides
+        it from planning but must not destroy its history (DESIGN_backward_evaluation.md
+        §14). Past sessions stay put: a called-off race does not un-train the work already
+        done. Returns {archived_workouts, untagged, first_date, last_date}."""
+        today_str = _svc._today_str()
+        archived = self._archive_and_teardown(
+            today_str, macrocycle_ids=self._objective_macrocycle_ids(objective_id)
+        )
+        return {
+            'archived_workouts': len(archived),
+            'untagged': self._db.count_untagged_future_workouts(today_str),
+            'first_date': min((w['date'] for w in archived), default=None),
+            'last_date': max((w['date'] for w in archived), default=None),
+        }
+
+    def goal_reinstate(self, objective_id: int) -> Dict[str, Any]:
+        """Brings back the sessions `goal_archive` stood down, and re-pushes them.
+
+        The mirror of `goal_archive` (DESIGN_backward_evaluation.md §14): it restores the
+        batch that archival stamped, floored at today, so a goal reinstated months later
+        recovers only the sessions still ahead. Returns
+        {restored_workouts, unhonored, first_date, last_date}."""
+        today_str = _svc._today_str()
+        restored, unhonored = self._db.restore_macrocycle_workouts(
+            self._objective_macrocycle_ids(objective_id), today_str
+        )
+        self._push_batch(
+            restored,
+            f"Restoring {len(restored)} archived workout(s) in Google Calendar...",
+            verbose=False,
+        )
+        return {
+            'restored_workouts': len(restored),
+            # As in `plan rollback` (§8): the restored sessions predate these honorings.
+            'unhonored': unhonored,
+            'first_date': min((w['date'] for w in restored), default=None),
+            'last_date': max((w['date'] for w in restored), default=None),
+        }
+
     def constraint_plan_impact(self, constraint: Dict[str, Any]) -> Dict[str, Any]:
         """Magnitude of a directive against the active plan (DESIGN_constraints.md §7,
         concrete formula): the planned load it displaces, expressed as a percentage of the
@@ -478,7 +527,7 @@ class PlanningMixin:
 
         # 3. Resurrect the restored version's workouts and re-push them.
         restored, unhonored = self._db.restore_macrocycle_workouts(
-            target['id'], today_str
+            [target['id']], today_str
         )
         self._push_batch(
             restored,
