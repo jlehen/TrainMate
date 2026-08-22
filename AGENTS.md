@@ -1,3 +1,8 @@
+# Communication
+- Use plain language, short sentences.
+- Be explicit. Do not imply thing. Explain them clearly first.
+- Avoid jargony, dense or overly compressed phrasing.
+
 # Code
 - Read ARCHITECTURE.md to ramp up on the code structure.
 - When changing code, always update ARCHITECTURE.md if appropriate.
