@@ -165,11 +165,11 @@ class Config:
     @property
     def accommodate_spill_days(self) -> int:
         """How many days either side of a constraint's own dates `workout accommodate`
-        may reshuffle, so displaced load has somewhere to land (default 2).
+        may reshuffle, so displaced load has somewhere to land (default 3).
 
         See DESIGN_constraint_reschedule.md §5: the margin is the whole difference between
         a reschedule and a re-periodization, so it is bounded and small on purpose."""
-        return int(self.get("coach", {}).get("accommodate_spill_days", 2))
+        return int(self.get("coach", {}).get("accommodate_spill_days", 3))
 
     @property
     def learning_confidence_thresholds(self) -> dict[str, int]:

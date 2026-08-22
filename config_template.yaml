@@ -141,7 +141,7 @@ coach:
   # how many days either side of a constraint's own dates the pass may reshuffle, so
   # displaced load has somewhere to land. Bounded and small on purpose — a window it
   # may rebalance freely is a window in which it is re-periodizing.
-  #accommodate_spill_days: 2
+  #accommodate_spill_days: 3
   # Relative drift (percent) an effective threshold anchor (max_hr, or a logbook
   # anchor like ftp/lthr) may move from the value the active plan was generated with
   # before the plan is flagged stale. Small retest corrections flow into workout

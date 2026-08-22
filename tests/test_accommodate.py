@@ -95,7 +95,7 @@ class TestWindowArithmetic(AccommodateCase):
     def test_the_window_is_the_constraint_widened_by_the_spill_margin(self):
         self.assertEqual(
             honoring.constraint_window("2026-06-10", "2026-06-20", TODAY),
-            ("2026-06-08", "2026-06-22"),
+            ("2026-06-07", "2026-06-23"),
         )
 
     def test_a_window_already_under_way_is_clipped_to_tomorrow(self):
@@ -103,7 +103,7 @@ class TestWindowArithmetic(AccommodateCase):
         # must not race it there, and the past cannot be re-planned at all.
         self.assertEqual(
             honoring.constraint_window("2026-05-20", "2026-06-10", TODAY),
-            ("2026-06-02", "2026-06-12"),
+            ("2026-06-02", "2026-06-13"),
         )
 
     def test_a_constraint_ending_today_has_no_window_left(self):
@@ -328,13 +328,13 @@ class TestPasses(AccommodateCase):
         b = test_db.get_constraint(test_db.add_constraint(
             title="Course", start_date="2026-06-15", end_date="2026-06-17"))
         plan = self._plan_for(a, b)
-        # 06-08..06-14 and 06-13..06-19 overlap: a second pass over shared days would
+        # 06-07..06-15 and 06-12..06-20 overlap: a second pass over shared days would
         # preview a plan the first had not yet applied.
         self.assertEqual(plan.spent, ())
         self.assertEqual(plan.ungoverned, ())
         self.assertEqual(len(plan.passes), 1)
         one = plan.passes[0]
-        self.assertEqual((one.range_start, one.range_end), ("2026-06-08", "2026-06-19"))
+        self.assertEqual((one.range_start, one.range_end), ("2026-06-07", "2026-06-20"))
         self.assertEqual([c["id"] for c in one.constraints], [a["id"], b["id"]])
 
     def test_windows_that_do_not_overlap_stay_separate_passes(self):
@@ -344,7 +344,7 @@ class TestPasses(AccommodateCase):
             title="Course", start_date="2026-07-01", end_date="2026-07-03"))
         plan = self._plan_for(a, b)
         self.assertEqual([(p.range_start, p.range_end) for p in plan.passes],
-                         [("2026-06-08", "2026-06-14"), ("2026-06-29", "2026-07-05")])
+                         [("2026-06-07", "2026-06-15"), ("2026-06-28", "2026-07-06")])
 
     def test_a_constraint_with_nothing_left_of_it_is_named_not_swept(self):
         spent = test_db.get_constraint(test_db.add_constraint(
@@ -523,7 +523,7 @@ class TestTheWindowActuallyEvaluated(AccommodateCase):
         self.assertIn("The plan runs out on 2026-06-15", printed)
         # The verdict names the window's own end: every day of it was evaluated.
         verdict = printed[printed.index("already work around this") - 200:]
-        self.assertIn("2026-06-27", verdict)
+        self.assertIn("2026-06-28", verdict)
         # ...and a pass that saw the whole window records it, so the sweep does not
         # re-offer the constraint forever while the plan stays short (§8).
         self.assertIsNotNone(test_db.get_constraint(cid)["honored_at"])

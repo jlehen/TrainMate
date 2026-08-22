@@ -214,7 +214,7 @@ for a world that changed under the plan rather than as the ordinary path.
 ## 5. Scope — what it may touch
 
 The window is the constraint's own dates, widened by `config.accommodate_spill_days` (default
-**2**) on each side, clipped to **tomorrow** on the near side (`max(start, today + 1)`). The
+**3**) on each side, clipped to **tomorrow** on the near side (`max(start, today + 1)`). The
 past is excluded for the same reason §7 of DESIGN_constraints.md clips the displaced-load sum:
 a plan cannot be reshaped around what already happened. Today is excluded on this command's own
 grounds: today is the day `workout adapt` judges with the full metrics picture, and a
@@ -224,7 +224,7 @@ The spill margin exists because displaced load has to land somewhere, and the da
 after a three-day trip are usually where it goes. It is bounded and small on purpose. **Without a
 bound this command becomes the horizon flag wearing a different name** — any window it may
 rebalance freely is a window in which it is re-periodizing, which is §2's objection all over
-again. Two days either side can absorb a moved session; it cannot restructure a block.
+again. Three days either side can absorb a moved session; it cannot restructure a block.
 
 That clip is also why adapt's completed-session lock is not needed here: `completed_keys`
 guards the evaluation day the athlete may already have trained, and this window never contains
@@ -572,7 +572,7 @@ the rows the proposal changes.
 The block that draws adapt's table and runs its confirm (`cli/workouts/generate.py`, inline
 inside `run_workout_adapt` today) is extracted into a shared helper, and whole-window versus
 changed-rows is an argument to it rather than a fork. That is what makes this affordable: §5
-bounds the window to a constraint's dates plus two spill days either side, so "all of it" is a
+bounds the window to a constraint's dates plus three spill days either side, so "all of it" is a
 handful of rows. Adapt's range runs to `meso_end` — three or four weeks early in a block — and
 it runs *daily*, so a full render there would bury the one or two rows that matter. Adapt keeps
 its change-only table; `workout adapt --full` can opt into the other mode later, spelled after

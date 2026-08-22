@@ -1644,7 +1644,7 @@ Required fields:
 |                        |      | `service_account.json`)                                       |
 | `metrics_lookback_days`  | int  | Rolling window for adaptation (default: 15)                  |
 | `workout_generation_span_days` | int  | Default horizon for `workout generate` (default: 28)         |
-| `accommodate_spill_days` | int | Days either side of a constraint's own dates that `workout accommodate` may reshuffle, so displaced load has somewhere to land (default: 2). Bounded and small on purpose — a window it may rebalance freely is a window in which it is re-periodizing (DESIGN_constraint_reschedule.md §5) |
+| `accommodate_spill_days` | int | Days either side of a constraint's own dates that `workout accommodate` may reshuffle, so displaced load has somewhere to land (default: 3). Bounded and small on purpose — a window it may rebalance freely is a window in which it is re-periodizing (DESIGN_constraint_reschedule.md §5) |
 | `minor_activity_load_threshold`    | float| Workload score below which an activity is "minor"            |
 |                         |      | (default: 25). Controls rest-day violations and unplanned    |
 |                         |      | activity visibility (shown as gray/minor if below threshold,  |
