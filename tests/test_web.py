@@ -4,7 +4,7 @@ import unittest
 import unittest.mock
 from datetime import date, timedelta
 
-from tests.helpers import clear_all_tables, rebind_test_db
+from tests.helpers import clear_all_tables, rebind_test_db, save_workout
 
 TEST_DB_PATH = os.path.join(os.path.dirname(__file__), "test_trainmate_web.db")
 
@@ -66,7 +66,7 @@ class TestCompareEndpoint(unittest.TestCase):
 
     def test_matched_session_no_discrepancy(self):
         # Planned run with a closely-matching completed run -> matched, no discrepancy.
-        test_db.save_workout(
+        save_workout(test_db,
             date="2026-06-10", sport_type="running", title="Tempo Run",
             description="40min tempo", duration_minutes=40, tss=50,
         )
@@ -85,7 +85,7 @@ class TestCompareEndpoint(unittest.TestCase):
 
     def test_missed_session_is_discrepancy(self):
         # Planned run with no completed activity -> complete miss.
-        test_db.save_workout(
+        save_workout(test_db,
             date="2026-06-10", sport_type="running", title="Long Run",
             description="90min easy", duration_minutes=90, tss=80,
         )
@@ -133,7 +133,7 @@ class TestCompareEndpoint(unittest.TestCase):
         """The endpoint used to re-derive rest/violation inline, skipping
         canonical_sport() and the load threshold — so a "Rest" workout read as a normal
         sport and a light stroll read as a violation on the dashboard only."""
-        test_db.save_workout(
+        save_workout(test_db,
             date="2026-06-11", sport_type="Rest", title="Rest Day",
             description="full rest", duration_minutes=0, tss=0,
         )
@@ -145,7 +145,7 @@ class TestCompareEndpoint(unittest.TestCase):
         self.assertEqual(result["status"], "rest_violation")
 
     def test_light_activity_on_a_rest_day_is_not_a_violation(self):
-        test_db.save_workout(
+        save_workout(test_db,
             date="2026-06-12", sport_type="rest", title="Rest Day",
             description="full rest", duration_minutes=0, tss=0,
         )
@@ -238,27 +238,29 @@ class TestWorkoutBatchesEndpoint(unittest.TestCase):
     def setUp(self):
         clear_all_tables(test_db)
 
-    def test_batches_empty_when_nothing_archived(self):
+    def test_batches_empty_when_nothing_written(self):
         res = self.client.get("/api/workouts/batches")
         self.assertEqual(res.status_code, 200)
         self.assertEqual(res.get_json()["batches"], [])
 
-    def test_batches_reports_span_and_restorable_count(self):
+    def test_batches_reports_kind_span_and_upcoming_count(self):
         today = date.today()
         past = (today - timedelta(days=3)).strftime("%Y-%m-%d")
         future = (today + timedelta(days=3)).strftime("%Y-%m-%d")
-        for d in (past, future):
-            test_db.save_workout(
-                date=d, sport_type="running", title=f"Run {d}", description="x",
-            )
-        test_db.archive_future_workouts(past)
+        with test_db.workout_change(kind="generate", summary="v1") as change:
+            for d in (past, future):
+                change.append(date=d, sport_type="running", title=f"Run {d}",
+                              description="x")
 
         res = self.client.get("/api/workouts/batches")
         self.assertEqual(res.status_code, 200)
         batches = res.get_json()["batches"]
         self.assertEqual(len(batches), 1)
+        self.assertEqual(batches[0]["kind"], "generate")
         self.assertEqual(batches[0]["workouts"], 2)
-        # Only the future row would come back — the past one's slot may be occupied.
+        self.assertFalse(batches[0]["held"])
+        # Only the future revision is still in reach of an undo — the floor spares a day
+        # already trained (DESIGN_workout_revisions.md §10).
         self.assertEqual(batches[0]["restorable"], 1)
         self.assertEqual(batches[0]["first_date"], past)
         self.assertEqual(batches[0]["last_date"], future)
@@ -467,12 +469,13 @@ class TestTimelinePayload(unittest.TestCase):
 
     def test_plan_end_is_last_non_removed_generated_workout(self):
         _save_activity(test_db, "a1", "2026-06-10", "running", 3600, 40.0)
-        test_db.save_workout(date="2026-07-10", sport_type="running", title="Run",
+        save_workout(test_db, date="2026-07-10", sport_type="running", title="Run",
                              description="d", duration_minutes=60, tss=50)
-        later = test_db.save_workout(date="2026-07-20", sport_type="running",
+        later = save_workout(test_db, date="2026-07-20", sport_type="running",
                                      title="Run late", description="d",
                                      duration_minutes=60, tss=50)
-        test_db.mark_workout_removed(later, reason="cancelled")
+        with test_db.workout_change(kind="rm") as change:
+            change.void(date="2026-07-20", sport_type="running", reason="cancelled")
         self.assertEqual(self._payload()["plan_end"], "2026-07-10")
 
     def test_meso_bands_layers_inferred_and_plan(self):

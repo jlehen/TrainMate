@@ -54,35 +54,39 @@ class DailyContext(TypedDict):
     updated: Optional[str]
 
 class Workout(TypedDict):
-    """Represents a single planned or synced workout.
+    """One planned session, as `get_workouts()` returns it.
 
-    Field order follows the `workouts` table; test_types.py asserts the two stay in
-    step, so a new column must be declared here in the same commit that adds it.
+    Not a table row: `workouts` is an append-only revision log, and this is the live
+    revision hydrated with what its lineage derives — `original_*`, the adaptation tally,
+    `source` (DESIGN_workout_revisions.md §5). tests/test_types.py pins these keys against
+    a session written and read back, so a new key must be declared here in the same commit
+    that starts hydrating it.
     """
-    id: Optional[int]
+    id: Optional[int]  # the LINEAGE id: stable session identity, what `rm`/`swap` address
+    revision_id: Optional[int]  # the physical row; only history surfaces read it
     date: str
     sport_type: str
     title: str
     description: Optional[str]
-    original_description: Optional[str]
+    original_description: Optional[str]  # the lineage's first revision
     pushed_signature: Optional[str]  # hash of calendar fields at last push; freshness derived (trainmate.calendar_state)
-    marked_signature: Optional[str]  # calendar fields when adherence was last marked
-    modification_reason: Optional[str]  # non-None <=> modified; short per-workout note. Kind derived via trainmate.modification_state
-    adaptation_summary: Optional[str]  # set <=> from `workout adapt`; long batch rationale
+    adherence_pushed_signature: Optional[str]  # calendar fields + verdict at the last `compare --mark`
+    modification_reason: Optional[str]  # this revision's note; NULL on a void, where the note is removed_reason
+    adaptation_summary: Optional[str]  # the batch rationale of the change that appended this revision
+    change_kind: Optional[str]  # what kind of change this session's live form is (§7); replaces modification_state
     google_event_id: Optional[str]  # set <=> a Calendar event exists (may be stale)
-    removed: Optional[bool]
-    removed_reason: Optional[str]
-    source: Optional[str]  # origin, fixed at creation: 'generated'|'manual' (None = legacy)
+    removed: Optional[bool]  # the live revision is a void: no session this day (§3)
+    removed_reason: Optional[str]  # this revision's note, when it is a void
+    source: Optional[str]  # 'manual' <=> the lineage was started by `workout add`, else 'generated'
     duration_minutes: Optional[int]
     rpe: Optional[int]
     tss: Optional[int]
     macrocycle_id: Optional[int]  # plan version this session belongs to
-    archived_at: Optional[str]  # set <=> superseded by a regenerated plan (DESIGN_plan_rollback.md)
-    original_date: Optional[str]
-    created_at: Optional[str]
-    adapted_at: Optional[str]  # last `workout adapt` touch
-    adaptation_count: Optional[int]
-    original_duration_minutes: Optional[int]  # pre-adaptation values, kept for rollback
+    original_date: Optional[str]  # where the lineage's first revision put it
+    created_at: Optional[str]  # when the SESSION entered the plan, carried across revisions
+    adapted_at: Optional[str]  # the newest standing easing, walked over the lineage (§7)
+    adaptation_count: Optional[int]  # how many easings still describe this form (§7)
+    original_duration_minutes: Optional[int]  # the lineage's first revision
     original_tss: Optional[int]
     original_rpe: Optional[int]
     benchmark_type: Optional[str]  # set <=> a fitness test; creation-time intent (DESIGN_benchmark_workouts.md §3.1)

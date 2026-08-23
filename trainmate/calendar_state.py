@@ -20,13 +20,16 @@ import json
 from typing import Literal
 
 # Exactly the fields `google_calendar.sync_workout` renders into the event's
-# summary/description. Deliberately EXCLUDES rpe (never reaches Calendar, so
-# editing it must not mark a row stale) and the periodization footer (derives
-# deterministically from the date and effectively never changes).
+# summary/description. Deliberately EXCLUDES the periodization footer, which
+# derives deterministically from the date and effectively never changes.
+#
+# `revision_id` stands in for the whole lineage the event now renders as its
+# history: a lineage only changes by gaining a revision, so the live revision's
+# id moves exactly when the history block does (DESIGN_calendar_lineage.md §6).
 CALENDAR_FIELDS = (
-    "date", "sport_type", "title", "description", "original_description",
-    "modification_reason", "duration_minutes", "tss", "removed",
-    "removed_reason", "source",
+    "revision_id", "date", "sport_type", "title", "description",
+    "original_description", "modification_reason", "duration_minutes", "tss",
+    "rpe", "removed", "removed_reason", "source",
 )
 
 CalendarStatus = Literal["unpushed", "synced", "stale"]
@@ -51,7 +54,7 @@ def adherence_signature(workout, adherence) -> str:
     `mark_adherence_from_results` stores this on each adherence push and compares
     the prospective signature against it to skip a no-op Calendar update when the
     event already carries the same verdict. Kept distinct from `calendar_signature`
-    (and stored in its own `marked_signature` column) because the adherence verdict
+    (and stored in its own `adherence_pushed_signature` column) because the adherence verdict
     isn't a workout field — folding it into the freshness hash would make every
     marked past row read `stale`. `adherence` is the dict built in
     `mark_adherence_from_results`: ``{"status", "actual", "reasons"}``.

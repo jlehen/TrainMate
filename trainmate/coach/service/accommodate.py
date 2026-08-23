@@ -169,8 +169,8 @@ class AccommodateMixin:
             covered_constraint_ids=honoring.covered_ids(
                 honoring_now, range_start, range_end
             ),
-            # A reschedule is not an easing: stamping would raise the DO NOT COMPOUND bar
-            # for a session that was never cut (§7).
-            stamp_adapted_at=False,
+            # A reschedule is not an easing, and its own change kind is what says so —
+            # no flag to carry or forget (DESIGN_workout_revisions.md §7).
+            kind="accommodate",
             window_workouts=tuple(planned_workouts),
         )

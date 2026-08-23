@@ -50,10 +50,12 @@ class RevisionProposal:
     # Constraints this pass had authority over every remaining day of, so apply stamps
     # exactly the set decided at proposal time (§8). See `coach/honoring.py`.
     covered_constraint_ids: Tuple[int, ...] = ()
-    # Only a pass that EASES load may stamp `adapted_at`, which drives the DO NOT COMPOUND
-    # guard (§7). Carried here rather than passed to apply so the producer decides once and
-    # no call site can forget it.
-    stamp_adapted_at: bool = True
+    # Which change kind apply writes this pass under. It is what tells an easing from a
+    # reschedule: the adaptation tally counts `adapt` revisions only, so an accommodate
+    # cannot raise the DO NOT COMPOUND bar for a session it never cut
+    # (DESIGN_workout_revisions.md §7). Carried here rather than passed to apply so the
+    # producer decides once and no call site can forget it.
+    kind: str = "adapt"
     # Every session in the evaluated window, for a whole-window preview (§10). Carried so
     # the CLI renders the proposal rather than re-reading the rows behind it.
     window_workouts: Tuple[Dict[str, Any], ...] = ()

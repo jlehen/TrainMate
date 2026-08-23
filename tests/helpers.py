@@ -2,7 +2,7 @@ import io
 import os
 import sys
 from datetime import date
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 # The clock is imported by value (`from trainmate.util import today_str`), so each
 # binding site has to be pinned separately. These are the ones the planning window
@@ -57,12 +57,14 @@ def pin_clock(testcase, day: str) -> None:
         patcher.start()
         testcase.addCleanup(patcher.stop)
 
-# Delete children before parents to satisfy foreign-key constraints.
+# Delete children before parents to satisfy foreign-key constraints. `workouts` is
+# absent on purpose: it is append-only and guarded by a trigger, so it is reset through
+# `wipe_workouts`, which also clears its changes and Calendar state
+# (DESIGN_workout_revisions.md §14).
 _ALL_TABLES = [
     "plan_feedback",
     "mesocycles",
     "macrocycles",
-    "workouts",
     "completed_activities",
     "athlete_metrics_cache",
     "athlete_baselines",
@@ -78,6 +80,7 @@ _ALL_TABLES = [
 
 
 def clear_all_tables(db) -> None:
+    db.wipe_workouts()
     with db._get_connection() as conn:
         for table in _ALL_TABLES:
             conn.execute(f"DELETE FROM {table}")
@@ -104,11 +107,22 @@ _DB_BINDING_SITES = (
 
 
 def rebind_test_db(test_db) -> None:
-    """Points every imported handle at `test_db`.
+    """Points every imported handle at `test_db`, and the Calendar at a mock.
 
     Call after replacing the Database instance (setUpClass), not only at import: a
     module imported later in the run would otherwise keep the handle it captured.
+
+    Writing workouts now reaches Google Calendar on its own — the change handle
+    reconciles the lineages it touched (DESIGN_workout_revisions.md §8) — so isolating
+    a test from the real database means isolating it from the real calendar too. The
+    default mock is installed only when nothing is bound yet, so an active `@patch` on
+    `trainmate.runtime.calendar_syncer` still owns the handle for its test.
     """
+    from trainmate import runtime
+    if "calendar_syncer" not in vars(runtime):
+        runtime.calendar_syncer = MagicMock()
+    from trainmate.calendar_reconcile import reconcile
+    test_db.calendar_hook = reconcile
     for module_name, attr in _DB_BINDING_SITES:
         module = sys.modules.get(module_name)
         if module is None:
@@ -163,3 +177,86 @@ def run_cli(args: list, input_value: str = "n"):
             except SystemExit as e:
                 exit_code = e.code
     return exit_code, stdout_buf.getvalue(), stderr_buf.getvalue()
+
+
+def save_workout(
+    db, date, sport_type, title, description="",
+    duration_minutes=None, rpe=None, tss=None,
+    modification_reason=None, adaptation_summary=None,
+    source=None, adapted_at=None, macrocycle_id=None,
+    benchmark_type=None, clear_benchmark=False,
+    removed=False, removed_reason=None,
+    original_description=None, original_date=None,
+    original_duration_minutes=None, original_tss=None, original_rpe=None,
+    planned_zone_currency=None, planned_zone_sec=None,
+    google_event_id=None, pushed_signature="",
+    kind=None,
+):
+    """Writes one session through the change handle, the way a command would.
+
+    A fixture builder, not an app path: most tests need a plan to exist before they
+    exercise something else, and this keeps that setup one line long. It speaks the old
+    `save_workout` argument list, because that is what those fixtures say, and translates
+    it onto the revision model (DESIGN_workout_revisions.md §6):
+
+    * `kind` defaults to what the arguments imply — `add` for a manual session, `adapt`
+      when a reason or a batch summary says the session was revised, else `generate`.
+    * `original_*` describe a session that has since been walked down, so they are written
+      as a real FIRST revision under `generate`, and the arguments proper as the revision
+      after it. That is how the lineage derives them now.
+    * `removed=True` appends the void `workout rm` would.
+    * `google_event_id` lands in `workout_calendar_state`, keyed by the lineage (§8). The
+      signature defaults to one that matches nothing, so the session reads `[STALE]` —
+      what an event handle with no recorded push always meant.
+
+    Returns the session's lineage id — the id `workout list` prints.
+    """
+    if kind is None:
+        if source == 'manual':
+            kind = 'add'
+        elif adapted_at or adaptation_summary or modification_reason:
+            kind = 'adapt'
+        else:
+            kind = 'generate'
+
+    originals = {
+        'description': original_description,
+        'duration_minutes': original_duration_minutes,
+        'tss': original_tss,
+        'rpe': original_rpe,
+    }
+    lineage = None
+    if original_date or any(v is not None for v in originals.values()):
+        with db.workout_change(kind='generate') as change:
+            change.append(
+                date=original_date or date, sport_type=sport_type, title=title,
+                description=originals['description'] or description,
+                duration_minutes=(
+                    originals['duration_minutes']
+                    if originals['duration_minutes'] is not None else duration_minutes
+                ),
+                rpe=originals['rpe'] if originals['rpe'] is not None else rpe,
+                tss=originals['tss'] if originals['tss'] is not None else tss,
+                macrocycle_id=macrocycle_id,
+            )
+        seeded = db.get_workout(original_date or date, sport_type)
+        lineage = seeded['id'] if seeded else None
+
+    with db.workout_change(kind=kind, summary=adaptation_summary) as change:
+        change.append(
+            date=date, sport_type=sport_type, title=title, description=description,
+            duration_minutes=duration_minutes, rpe=rpe, tss=tss,
+            reason=modification_reason, benchmark_type=benchmark_type,
+            clear_benchmark=clear_benchmark, macrocycle_id=macrocycle_id,
+            planned_zone_currency=planned_zone_currency,
+            planned_zone_sec=planned_zone_sec,
+            lineage_id=lineage if original_date and original_date != date else None,
+        )
+    if google_event_id:
+        seeded = db.get_workout(date, sport_type)
+        db.mark_workout_pushed(seeded['id'], google_event_id, pushed_signature)
+    if removed:
+        with db.workout_change(kind='rm') as change:
+            change.void(date=date, sport_type=sport_type, reason=removed_reason)
+    saved = db.get_workout(date, sport_type)
+    return saved['id'] if saved else None

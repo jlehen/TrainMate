@@ -70,27 +70,30 @@ class ConstraintsMixin:
     # display paths and the sweep came to disagree (DESIGN_constraint_reschedule.md §8).
 
     def clear_honored_after(
-        self, archived_at: str, from_date: str
+        self, changed_at: str, from_date: str
     ) -> List[Constraint]:
-        """Un-honors the constraints a plan restored from `archived_at` cannot reflect,
-        and returns them so the caller can say which (§8).
+        """Un-honors the constraints a plan restored to the moment `changed_at` cannot
+        reflect, and returns them so the caller can say which (§8).
 
-        A constraint with `honored_at > archived_at` was honored into a plan NEWER than
-        the one coming back. Deliberately not re-honored by a roll forward: a false
+        A constraint with `honored_at > changed_at` was honored into a plan NEWER than the
+        one coming back. Deliberately not re-honored by a roll forward: a false
         "unhonored" costs a nudge and a cheap re-pass, a false "honored" hides a real gap.
+        `changed_at` is the `created_at` of the change being undone — the key moved with
+        the batch, from the timestamp stamped on dying rows to the one on the change that
+        created them (DESIGN_workout_revisions.md §10).
         """
         with self._get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute(
                 "SELECT * FROM constraints WHERE honored_at > ? AND end_date >= ? "
                 "ORDER BY start_date ASC",
-                (archived_at, from_date)
+                (changed_at, from_date)
             )
             cleared = [dict(row) for row in cursor.fetchall()]
             cursor.execute(
                 "UPDATE constraints SET honored_at = NULL "
                 "WHERE honored_at > ? AND end_date >= ?",
-                (archived_at, from_date)
+                (changed_at, from_date)
             )
             conn.commit()
             return cleared  # type: ignore

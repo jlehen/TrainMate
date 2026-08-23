@@ -3,7 +3,7 @@ import unittest
 from datetime import datetime
 from unittest.mock import patch
 
-from tests.helpers import clear_all_tables, rebind_test_db
+from tests.helpers import clear_all_tables, rebind_test_db, save_workout
 from trainmate.db import Database
 import trainmate.db
 import trainmate.coach
@@ -1060,7 +1060,7 @@ class TestPriorTrainingContext(unittest.TestCase):
         )
 
     def _planned_session(self, macro_id: int, date: str, tss: float) -> None:
-        test_db.save_workout(
+        save_workout(test_db,
             date=date, sport_type="cycling", title="Endurance",
             description="[Endurance]\n2h steady", duration_minutes=120, rpe=5, tss=tss,
             source="generated", macrocycle_id=macro_id,

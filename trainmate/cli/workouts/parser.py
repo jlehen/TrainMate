@@ -104,9 +104,11 @@ def add_workout_parser(subparsers, pull_bypass_parser, llm_debug_parser):
             "plan), '-d 4w' four weeks, '-m 5' to the end of block 5. With no horizon "
             "flag, generates config.workout_generation_span_days days ahead (28 by "
             f"default). The proposed sessions are listed as '{green('workout list')}' "
-            "shows them and nothing is written until you accept; on a yes the previous "
-            "plan's upcoming workouts are archived and the new ones pushed to Google "
-            f"Calendar, undoable with '{green('plan rollback')}'. This is a full rebuild, "
+            "shows them and nothing is written until you accept; on a yes the new "
+            "sessions are appended, days the plan no longer holds are cancelled, and "
+            "Google Calendar is brought into line — undoable with "
+            f"'{green('workout rollback')}', or '{green('plan rollback')}' to step the "
+            "strategy back with it. This is a full rebuild, "
             "not a fill-in: when upcoming sessions already exist it also asks before "
             "spending the LLM call (-f skips both prompts)."
         )
@@ -135,24 +137,24 @@ def add_workout_parser(subparsers, pull_bypass_parser, llm_debug_parser):
     # workout rollback
     w_rollback = workout_subparsers.add_parser(
         "rollback", aliases=["rb"],
-        help="Undo a workout regeneration by restoring a previously archived batch",
+        help="Undo a workout change, and every change made after it",
         description=(
-            "Restore a previously archived batch of workouts — the inverse of "
-            f"'{green('workout generate')}'. The upcoming sessions from today onward are "
-            "archived (their Calendar events torn down) and the target batch is "
-            "restored and re-pushed. Defaults to the most recently archived batch; "
-            f"list them with '{green('workout batches')}' and pick one with --batch. "
-            "The active periodization plan is left untouched — use "
-            f"'{green('plan rollback')}' to step the strategy back as well. This is "
-            f"unrelated to '{green('workout restore')}', which un-cancels a single "
-            "soft-removed session."
+            "Put the sessions back the way they were the moment before a change ran. "
+            "Any command that wrote workouts qualifies — a generation, an adapt, a swap, "
+            "a manual edit — and undoing one also undoes everything after it, which is "
+            "what stops a session ending up live on two days. Defaults to the newest "
+            f"change; list them with '{green('workout batches')}' and pick one with "
+            "--batch. Sessions dated before today are left alone. The active "
+            f"periodization plan is left untouched — use '{green('plan rollback')}' to "
+            f"step the strategy back as well. This is unrelated to "
+            f"'{green('workout restore')}', which un-cancels a single session."
         )
     )
     w_rollback.set_defaults(func=run_workout_rollback)
     w_rollback.add_argument(
         "--batch", type=int, metavar="N",
-        help="Which archived batch to restore, as numbered by 'workout batches' "
-             "(1 = the plan the live one displaced, the default)"
+        help="Which change to undo, as numbered by 'workout batches' "
+             "(1 = the newest, the default)"
     )
     w_rollback.add_argument(
         "-y", "--yes", action="store_true", help="Skip confirmation prompt"
@@ -166,14 +168,14 @@ def add_workout_parser(subparsers, pull_bypass_parser, llm_debug_parser):
     # workout batches
     _batches_parser = workout_subparsers.add_parser(
         "batches",
-        help="List archived workout batches that 'workout rollback' can restore",
+        help="List the workout changes that 'workout rollback' can undo",
         description=(
-            "List the archived batches of workouts, newest first. Each batch is the set "
-            "of upcoming sessions that was live when a regeneration or rollback replaced "
-            f"it; '{green('workout rollback --batch N')}' restores one. The numbered "
-            "entries are all past plans — the plan currently in force is shown above them "
-            f"as an unnumbered 'live' row (see '{green('workout list')}' for its "
-            "sessions), and #1 is the plan it displaced."
+            "List every command that wrote workouts, newest first: when it ran, what "
+            "kind of change it was, how many revisions it appended and over what dates. "
+            f"'{green('workout rollback --batch N')}' undoes one, and everything after "
+            "it. A pass that looked at the plan and changed nothing — an adapt that held "
+            "— is listed too, marked '(held)'. Every entry is undoable, #1 included: it "
+            "is the change that wrote the plan you are on now."
         )
     )
     _batches_parser.set_defaults(func=run_workout_batches)
@@ -228,11 +230,11 @@ def add_workout_parser(subparsers, pull_bypass_parser, llm_debug_parser):
 
     # workout restore
     w_restore = workout_subparsers.add_parser(
-        "restore", help="Restore a soft-removed workout by ID",
+        "restore", help="Bring a cancelled workout back by ID",
         description=(
-            "Un-cancel a single soft-removed session and put it back on the schedule. "
-            f"This is unrelated to '{green('workout rollback')}', which restores a whole "
-            "archived batch of workouts (DESIGN_plan_rollback.md §9)."
+            "Un-cancel a single session and put it back on the schedule, as it stood "
+            f"before it was removed. This is unrelated to '{green('workout rollback')}', "
+            "which undoes a whole change (DESIGN_workout_revisions.md §10)."
         )
     )
     w_restore.set_defaults(func=run_workout_restore)
@@ -393,7 +395,7 @@ def add_workout_parser(subparsers, pull_bypass_parser, llm_debug_parser):
             "Sweep the Google Calendar for TrainMate workout events that no workout in "
             "the database points at, and delete them. These orphans are what a fresh "
             "database, a restored backup, or a wipe that never reached Calendar leaves "
-            "behind. Events belonging to soft-removed workouts are kept (the row still "
+            "behind. Events belonging to cancelled workouts are kept (the session still "
             "claims them). With no date filter the whole calendar is swept; -d restricts "
             "it to a window, as on 'data wipe'. Use --dry-run to preview."
         )

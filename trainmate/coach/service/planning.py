@@ -68,40 +68,68 @@ class PlanningMixin:
     def goal_archive(self, objective_id: int) -> Dict[str, Any]:
         """Stands the goal's future sessions down and clears them from Calendar.
 
-        The plan, its versions and its feedback are untouched — calling a goal off hides
-        it from planning but must not destroy its history (DESIGN_backward_evaluation.md
-        §14). Past sessions stay put: a called-off race does not un-train the work already
-        done. Returns {archived_workouts, untagged, first_date, last_date}."""
+        One void per live session the goal's plan versions own, from today on, under one
+        `stand-down` change — the same row-level `macrocycle_id` scoping that spares a
+        neighbouring goal (DESIGN_workout_revisions.md §10). The plan, its versions and its
+        feedback are untouched: calling a goal off hides it from planning but must not
+        destroy its history (DESIGN_backward_evaluation.md §14). Past sessions stay put —
+        a called-off race does not un-train the work already done.
+
+        Returns {archived_workouts, untagged, first_date, last_date}."""
         today_str = _svc._today_str()
-        archived = self._archive_and_teardown(
-            today_str, macrocycle_ids=self._objective_macrocycle_ids(objective_id)
+        sessions = self._db.live_workouts_for_macrocycles(
+            self._objective_macrocycle_ids(objective_id), today_str
         )
+        if sessions:
+            with self._db.workout_change(
+                kind="stand-down", summary="Goal called off."
+            ) as change:
+                for w in sessions:
+                    change.void(
+                        date=w['date'], sport_type=w['sport_type'],
+                        reason="Goal called off",
+                    )
         return {
-            'archived_workouts': len(archived),
+            'archived_workouts': len(sessions),
             'untagged': self._db.count_untagged_future_workouts(today_str),
-            'first_date': min((w['date'] for w in archived), default=None),
-            'last_date': max((w['date'] for w in archived), default=None),
+            'first_date': min((w['date'] for w in sessions), default=None),
+            'last_date': max((w['date'] for w in sessions), default=None),
         }
 
     def goal_reinstate(self, objective_id: int) -> Dict[str, Any]:
         """Brings back the sessions `goal_archive` stood down, and re-pushes them.
 
-        The mirror of `goal_archive` (DESIGN_backward_evaluation.md §14): it restores the
-        batch that archival stamped, floored at today, so a goal reinstated months later
-        recovers only the sessions still ahead. Returns
-        {restored_workouts, unhonored, first_date, last_date}."""
+        The mirror of `goal_archive` (DESIGN_backward_evaluation.md §14), read off the live
+        view: every lineage still showing a `stand-down` void gets a copy of the revision
+        that void ended, floored at today, so a goal reinstated months later recovers only
+        the sessions still ahead. A slot regenerated or edited since no longer has that
+        void live and is left alone — something else owns it now
+        (DESIGN_workout_revisions.md §10).
+
+        Returns {restored_workouts, unhonored, first_date, last_date}."""
         today_str = _svc._today_str()
-        restored, unhonored = self._db.restore_macrocycle_workouts(
+        stood_down = self._db.stood_down_sessions(
             self._objective_macrocycle_ids(objective_id), today_str
         )
-        self._push_batch(
-            restored,
-            f"Restoring {len(restored)} archived workout(s) in Google Calendar...",
-            verbose=False,
+        if not stood_down:
+            return {
+                'restored_workouts': 0, 'unhonored': [],
+                'first_date': None, 'last_date': None,
+            }
+        with self._db.workout_change(
+            kind="reinstate", summary="Goal reinstated."
+        ) as change:
+            for revision in stood_down:
+                change.restore(revision)
+            appended = list(change.appended)
+        restored = self._db.hydrate_revisions(appended)
+        # As in `plan rollback` (§8): the restored sessions predate any honoring made
+        # while the goal was stood down, so they cannot reflect it.
+        unhonored = self._db.clear_honored_after(
+            max(r['stood_down_at'] for r in stood_down), today_str
         )
         return {
             'restored_workouts': len(restored),
-            # As in `plan rollback` (§8): the restored sessions predate these honorings.
             'unhonored': unhonored,
             'first_date': min((w['date'] for w in restored), default=None),
             'last_date': max((w['date'] for w in restored), default=None),
@@ -494,12 +522,11 @@ class PlanningMixin:
 
         Swaps the active macrocycle for `objective_id` (defaults to the next active goal)
         back to a superseded version — the chronologically previous one by default, or
-        `target_macrocycle_id` when given — then reconciles workouts and Calendar
-        symmetrically with eager generation: the current plan's future workouts are
-        archived (their events torn down) and the restored version's archived workouts are
-        resurrected and re-pushed (see DESIGN_plan_rollback.md).
+        `target_macrocycle_id` when given — then puts the workouts back the way they were
+        the moment just after that version last wrote, Calendar included (see
+        DESIGN_plan_rollback.md, DESIGN_workout_revisions.md §10).
 
-        Returns a summary dict: {from, to, restored_workouts, archived_workouts}.
+        Returns a summary dict: {objective, from, to, restored_workouts, unhonored}.
         Raises ValueError when there is nothing to roll back to.
         """
         if objective_id is not None:
@@ -534,28 +561,28 @@ class PlanningMixin:
 
         today_str = _svc._today_str()
 
-        # 1. Archive the current plan's future workouts and tear down their events.
-        archived = self._archive_and_teardown(today_str)
-
-        # 2. Flip the active version so date->plan lookups resolve to the restored plan.
+        # 1. Flip the active version so date->plan lookups resolve to the restored plan.
         self._db.set_active_macrocycle(target['id'])
 
-        # 3. Resurrect the restored version's workouts and re-push them.
-        restored, unhonored = self._db.restore_macrocycle_workouts(
-            [target['id']], today_str
-        )
-        self._push_batch(
-            restored,
-            f"Restoring {len(restored)} archived workout(s) in Google Calendar...",
-            verbose=False,
-        )
+        # 2. Undo every workout change made after the restored version's newest one. The
+        # restore is point-in-time and UNSCOPED, exactly the `workout rollback` primitive:
+        # restoring the whole moment is what keeps one session from being live twice
+        # (DESIGN_workout_revisions.md §10).
+        restored: List[Workout] = []
+        unhonored: List[Dict[str, Any]] = []
+        newest = self._db.newest_change_for_macrocycles([target['id']])
+        undo_from = self._db.next_change_after(newest) if newest is not None else None
+        if undo_from is not None:
+            restored, unhonored = self._db.rollback_to_change(
+                undo_from, today_str,
+                summary=f"Rolled the plan back to version {target['id']}.",
+            )
 
         return {
             'objective': objective,
             'from': current,
             'to': target,
             'restored_workouts': len(restored),
-            'archived_workouts': len(archived),
             # As in `workout rollback` (§8).
             'unhonored': unhonored,
         }

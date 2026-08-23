@@ -33,19 +33,14 @@ def structure_revision(
     """
     return [
         {
-            'id': None,
             'date': w['date'],
             'sport_type': w['sport_type'],
             'title': w['title'],
             'description': w['description'],
-            'original_description': w['description'],
-            # Per-workout note; the long batch rationale travels separately as `reason` and
-            # is stamped onto adaptation_summary at apply time. Falls back to the batch
-            # reason so a revised session is never left with a NULL modification_reason —
-            # the load-bearing "modified?" flag.
+            # This revision's own note; the long batch rationale travels separately as
+            # `reason` and lands on the change row (DESIGN_workout_revisions.md §3). Falls
+            # back to the batch reason so a revised session is never left without one.
             'modification_reason': w.get('change_reason') or reason,
-            'adaptation_summary': reason,
-            'google_event_id': None,
             'duration_minutes': w.get('duration_minutes'),
             'rpe': w.get('rpe'),
             'tss': w.get('tss'),

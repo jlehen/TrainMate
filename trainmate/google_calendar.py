@@ -9,8 +9,9 @@ from trainmate import runtime
 from trainmate.config import config
 from trainmate.types import Workout
 from trainmate.calendar_state import calendar_signature
+from trainmate import calendar_lineage
 from trainmate import intensity
-from trainmate.util import yellow, aside
+from trainmate.util import fmt_timestamp, yellow, aside
 
 # Events fetched per Calendar API page during a context sync (the response is paged
 # through with pageToken regardless, so this only tunes round-trips vs payload size).
@@ -59,18 +60,6 @@ class CalendarSyncer:
         self.service: Any = build('calendar', 'v3', credentials=self.creds)
         self.calendar_id: Optional[str] = config.google_calendar_id
 
-    @staticmethod
-    def _fmt_ts(iso: Optional[str]) -> str:
-        """Renders a stored UTC ISO timestamp as 'YYYY-MM-DD HH:MM' for the event footer.
-
-        Falls back to the raw string if it isn't parseable (e.g. a date-only legacy value)."""
-        if not iso:
-            return "?"
-        try:
-            return datetime.fromisoformat(iso).strftime("%Y-%m-%d %H:%M")
-        except ValueError:
-            return iso
-
     # Past-event adherence verdict -> title tag (see adherence.classify_adherence).
     _ADHERENCE_TAGS = {
         "done": "Done",
@@ -103,7 +92,6 @@ class CalendarSyncer:
         sport_type = workout['sport_type']
         title = workout['title']
         description = workout['description']
-        orig_description = workout.get('original_description') or description
         mod_reason = workout.get('modification_reason')
         google_event_id = workout.get('google_event_id')
 
@@ -112,9 +100,10 @@ class CalendarSyncer:
         end_date = start_date + timedelta(days=1)
         end_date_str = end_date.strftime("%Y-%m-%d")
 
-        # Format Summary and Description
+        # Format Summary and Description. The body is the session's CURRENT form only;
+        # every earlier form is rendered by the history block below
+        # (DESIGN_calendar_lineage.md §5).
         is_modified = bool(mod_reason)
-        content_changed = is_modified and orig_description != description
         is_manual = workout.get('source') == 'manual'
         if workout.get('removed'):
             summary = f"[Deleted] {title}"
@@ -122,16 +111,7 @@ class CalendarSyncer:
             removed_reason = workout.get('removed_reason')
             if removed_reason:
                 event_description = f"{event_description}\n\nReason:\n{removed_reason}"
-        elif content_changed:
-            summary = f"[Adapted] {title}"
-            event_description = (
-                f"Adapted:\n{description}\n\n"
-                f"Originally:\n{orig_description}\n\n"
-                f"Reason:\n{mod_reason}"
-            )
         elif is_modified:
-            # Date-only change (e.g. a swap): the content is unchanged, so showing
-            # "Adapted"/"Originally" with identical text is redundant. Show it once.
             summary = f"[Adapted] {title}"
             event_description = f"{description or ''}\n\nReason:\n{mod_reason}"
         else:
@@ -172,49 +152,29 @@ class CalendarSyncer:
                 event_description = prefix
 
         # The intensity target, rendered FROM the planned-zone columns here and never
-        # stored (DESIGN_intensity_distribution.md §9.8): `description` is in
-        # CALENDAR_FIELDS, so a stored sentence would mark the row stale and re-push the
-        # event on every regeneration that nudges a target by two minutes.
+        # stored, so the sentence cannot drift from the columns it describes
+        # (DESIGN_intensity_distribution.md §9.8).
         target = intensity.format_planned_zones(workout)
         if target:
             event_description = (
                 f"{event_description}\n\n{target}" if event_description else target
             )
 
-        # Provenance / lifecycle footer, sitting just above the technical ID line so the two
-        # read as one block at the bottom of the event:
-        #   * the load the session was *planned* with — shown only once it has actually
-        #     drifted from the current load (an adaptation), as a full snapshot;
-        #   * when it entered the plan (`created_at`, always), and when/how often it has been
-        #     eased (`adapted_at` / `adaptation_count`, only once adapted).
+        # Lifecycle footer, sitting just above the technical ID line so the two read as one
+        # block at the bottom of the event: when the session entered the plan
+        # (`created_at`, always), and when/how often it has been eased (`adapted_at` /
+        # `adaptation_count`, only once adapted). The load it was planned with is not
+        # repeated here — the oldest history entry carries it, with its date and target
+        # (DESIGN_calendar_lineage.md §5).
         footer_lines: List[str] = []
-        orig_d = workout.get('original_duration_minutes')
-        orig_t = workout.get('original_tss')
-        orig_r = workout.get('original_rpe')
-        load_changed = (
-            (orig_d is not None and orig_d != duration)
-            or (orig_t is not None and orig_t != tss)
-            or (orig_r is not None and orig_r != rpe)
-        )
-        if load_changed:
-            orig_parts = []
-            if orig_d is not None:
-                orig_parts.append(f"{orig_d}m")
-            if orig_t is not None:
-                orig_parts.append(f"TSS {orig_t}")
-            if orig_r is not None:
-                orig_parts.append(f"RPE {orig_r}")
-            if orig_parts:
-                footer_lines.append("Originally: " + " | ".join(orig_parts))
-
         lifecycle_parts = []
         created_at = workout.get('created_at')
         adapted_at = workout.get('adapted_at')
         adaptation_count = workout.get('adaptation_count') or 0
         if created_at:
-            lifecycle_parts.append(f"Planned: {self._fmt_ts(created_at)}")
+            lifecycle_parts.append(f"Planned: {fmt_timestamp(created_at)}")
         if adapted_at:
-            lifecycle_parts.append(f"Last adapted: {self._fmt_ts(adapted_at)}")
+            lifecycle_parts.append(f"Last adapted: {fmt_timestamp(adapted_at)}")
         if adaptation_count:
             lifecycle_parts.append(f"Adapted ×{adaptation_count}")
         if lifecycle_parts:
@@ -236,15 +196,11 @@ class CalendarSyncer:
         if id_parts:
             footer_lines.append(" | ".join(id_parts))
 
-        if footer_lines:
-            footer = "\n".join(footer_lines)
-            if event_description:
-                event_description = f"{event_description}\n\n{footer}"
-            else:
-                event_description = footer
+        footer = "\n".join(footer_lines)
 
         # Prepend the adherence header so the verdict + actual effort sit at the top
         # of a past event's description, above the planned Duration/TSS and body.
+        header = ""
         if adherence:
             status = adherence.get("status")
             tag = self._ADHERENCE_TAGS.get(status, status)
@@ -256,10 +212,18 @@ class CalendarSyncer:
             if reasons:
                 header_lines.append(f"Notes: {', '.join(reasons)}")
             header = "\n".join(header_lines)
-            if event_description:
-                event_description = f"{header}\n\n{event_description}"
-            else:
-                event_description = header
+
+        # Every earlier form of this session, newest first — the event is the only place
+        # the athlete can ask "what was this before?" without a terminal
+        # (DESIGN_calendar_lineage.md §2). Rendered last because it is the part that
+        # yields: it takes the space the rest of the event does not need, so a long
+        # prescription is never the thing that gets cut (§7).
+        spare = calendar_lineage.MAX_DESCRIPTION - len(header) - len(event_description)
+        history = calendar_lineage.for_workout(workout, budget=spare - len(footer) - 8)
+
+        event_description = "\n\n".join(
+            part for part in (header, event_description, history, footer) if part
+        )
 
         event_body = {
             'summary': summary,

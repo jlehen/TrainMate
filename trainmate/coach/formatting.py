@@ -5,23 +5,24 @@ from trainmate.types import Workout, CompletedActivity
 from trainmate.garmin import activity_load, load_ratio, rpe_divergence
 from trainmate.util import PMC_TSB_LAG_NOTE
 from trainmate.sports import canonical_sport
-from trainmate.modification_state import modification_status
 from trainmate import intensity
 
 
 def _adapt_recency_tag(workout: Workout, eval_date: Optional[str]) -> str:
-    """Tags an already-adapted session with how recently/often it was eased.
+    """Tags an already-eased session with how recently and how often it was eased.
 
-    Returns "" unless the session reads as `adapted` (see trainmate.modification_state)
-    AND carries an `adapted_at` stamp. The tag feeds the adaptation prompt a recency
-    signal so a re-run holds the already-eased form instead of compounding the cut on
-    still-lagging recovery metrics."""
-    if modification_status(workout) != "adapted":
+    Gated on the derived tally, NOT on the kind of the latest change: under revisions the
+    marker reflects the latest change, so an adapted-then-swapped session reads `swapped`,
+    and a kind gate would silence this tag in exactly the scenario the lineage exists to
+    protect (DESIGN_workout_revisions.md §7). The tag feeds the adaptation prompt a
+    recency signal so a re-run holds the already-eased form instead of compounding the cut
+    on still-lagging recovery metrics."""
+    count = workout.get("adaptation_count") or 0
+    if count < 1:
         return ""
     adapted_at = workout.get("adapted_at")
     if not adapted_at:
         return ""
-    count = workout.get("adaptation_count") or 1
     times = "once" if count == 1 else f"{count}x"
     when = ""
     if eval_date:

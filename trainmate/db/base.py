@@ -8,7 +8,7 @@ from trainmate.config import config
 # migrations are idempotent, so this is a "skip the work" marker rather than a ledger of
 # steps to replay — TrainMate has one user and one database, and the alternative (a
 # numbered migration framework) would be more machinery than that warrants.
-SCHEMA_VERSION = 7
+SCHEMA_VERSION = 8
 
 
 # How long a connection waits for a writer to finish before raising "database is
@@ -46,10 +46,18 @@ class _JoinedConnection:
 class BaseDB:
     """Connection management and schema initialization shared by all DB mixins."""
 
-    def __init__(self, db_path: Optional[str] = None) -> None:
-        """Initializes database path and sets up tables."""
+    def __init__(self, db_path: Optional[str] = None, calendar_hook=None) -> None:
+        """Initializes database path and sets up tables.
+
+        `calendar_hook` is what the §8 reconcile pass calls when a workout change closes:
+        `hook(db, lineage_ids)`. Left unset the pass is inert, which is what an isolated
+        unit test wants; `runtime._build_db` attaches the real one, so the running app
+        cannot write workouts without reconciling Calendar
+        (DESIGN_workout_revisions.md §8).
+        """
         self.db_path: str = db_path or config.db_path
         self._joined: Optional[_JoinedConnection] = None
+        self.calendar_hook = calendar_hook
         self._init_db()
 
     def _connect(self) -> sqlite3.Connection:
@@ -263,201 +271,101 @@ class BaseDB:
                 "ALTER TABLE constraints ADD COLUMN honored_at TEXT"
             )
 
-            # Workouts table
+            # Workouts — an append-only revision log (DESIGN_workout_revisions.md §2).
+            # A row is one revision of one session and is never updated or deleted; the
+            # highest `id` in a `(date, sport_canonical)` slot is the live one. The
+            # triggers at the end of this method are what enforce that (§14).
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS workouts (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    change_id INTEGER NOT NULL, -- the workout_changes row that appended this revision
+                    lineage_id INTEGER, -- stable session identity; equals id on a first revision (§4)
                     date TEXT NOT NULL,
-                    sport_type TEXT NOT NULL,
+                    sport_canonical TEXT NOT NULL, -- the slot key (trainmate.sports)
+                    sport_type TEXT NOT NULL, -- the spelling as written
                     title TEXT NOT NULL,
                     description TEXT,
-                    original_description TEXT,
-                    pushed_signature TEXT, -- hash of calendar fields at last push; NULL = never pushed. Freshness derived (see trainmate.calendar_state)
-                    marked_signature TEXT, -- hash of calendar fields + adherence verdict at last `compare --mark`; NULL = never marked (see trainmate.calendar_state.adherence_signature)
-                    modification_reason TEXT, -- non-NULL <=> adapted/swapped; short per-workout note
-                    adaptation_summary TEXT, -- batch-level adapt rationale, shared across the batch
-                    google_event_id TEXT,
-                    removed INTEGER DEFAULT 0, -- 1 <=> soft-deleted via `workout rm`
-                    removed_reason TEXT, -- athlete's reason for removal (optional)
-                    source TEXT -- origin, fixed at creation: 'generated'|'manual' (NULL = legacy)
+                    duration_minutes INTEGER,
+                    rpe INTEGER,
+                    tss INTEGER,
+                    void INTEGER NOT NULL DEFAULT 0, -- 1 <=> this slot holds no session as of this revision
+                    reason TEXT, -- per-revision note; why it changed, or why it was cancelled
+                    restored_from INTEGER, -- on a rollback/restore/reinstate copy: the revision copied (§7)
+                    macrocycle_id INTEGER, -- plan version this session belongs to
+                    created_at TEXT, -- when the SESSION entered the plan, carried across revisions
+                    benchmark_type TEXT, -- set <=> a fitness test (DESIGN_benchmark_workouts.md §3.1)
+                    planned_zone_currency TEXT, -- 'hr' | 'power' (DESIGN_intensity_distribution.md §9.8)
+                    planned_zone1_sec INTEGER,
+                    planned_zone2_sec INTEGER,
+                    planned_zone3_sec INTEGER,
+                    planned_zone4_sec INTEGER,
+                    planned_zone5_sec INTEGER,
+                    planned_zone6_sec INTEGER,
+                    planned_zone7_sec INTEGER
                 )
             """)
 
-            # Add new columns to workouts table if they don't exist
-            self._add_column(
-                cursor, "workouts", "duration_minutes",
-                "ALTER TABLE workouts ADD COLUMN duration_minutes INTEGER DEFAULT NULL"
-            )
-            self._add_column(
-                cursor, "workouts", "rpe",
-                "ALTER TABLE workouts ADD COLUMN rpe INTEGER DEFAULT NULL"
-            )
-            self._add_column(
-                cursor, "workouts", "tss",
-                "ALTER TABLE workouts ADD COLUMN tss INTEGER DEFAULT NULL"
-            )
-            # Soft-delete axis: a workout removed via `workout rm` is marked rather
-            # than deleted, so it can be excluded from reads yet still surfaced to the
-            # coach as a deliberate cancellation (distinct from a miss).
-            self._add_column(
-                cursor, "workouts", "removed",
-                "ALTER TABLE workouts ADD COLUMN removed INTEGER DEFAULT 0"
-            )
-            self._add_column(
-                cursor, "workouts", "removed_reason",
-                "ALTER TABLE workouts ADD COLUMN removed_reason TEXT"
-            )
-            # Split the adaptation rationale into two axes: modification_reason holds a
-            # short per-workout note, while adaptation_summary holds the long batch-level
-            # reason shared across every session in one `workout adapt` run (deduplicated
-            # at display). NULL on swaps/manual edits and on legacy adapted rows.
-            self._add_column(
-                cursor, "workouts", "adaptation_summary",
-                "ALTER TABLE workouts ADD COLUMN adaptation_summary TEXT"
-            )
-            # Origin axis: who authored the session, fixed at creation and never
-            # overwritten — 'generated' (plan/workout generate, or a session adapt
-            # newly introduces) or 'manual' (workout add). NULL on legacy rows
-            # predating this column. Lets the coach and analysis treat
-            # athlete-scheduled sessions distinctly from AI-authored ones; orthogonal
-            # to the synced/adaptation/removed axes (adapting a session keeps its
-            # origin — the change lands on modification_reason instead).
-            self._add_column(
-                cursor, "workouts", "source",
-                "ALTER TABLE workouts ADD COLUMN source TEXT"
-            )
-            # Plan-version axis (see DESIGN_plan_rollback.md): macrocycle_id tags the
-            # plan version a workout was created under, and archived_at marks workouts
-            # that belonged to a superseded plan version (set when a regeneration or a
-            # `plan rollback` displaces them). Archived rows are hidden from every read
-            # by default and have their Calendar event torn down, but are kept so that
-            # rolling back to their plan version can resurrect them. Distinct from
-            # `removed` (a deliberate athlete cancellation that still surfaces to the
-            # coach). NULL on legacy rows.
-            self._add_column(
-                cursor, "workouts", "macrocycle_id",
-                "ALTER TABLE workouts ADD COLUMN macrocycle_id INTEGER"
-            )
-            self._add_column(
-                cursor, "workouts", "archived_at",
-                "ALTER TABLE workouts ADD COLUMN archived_at TEXT"
-            )
-            # Migrate the very old conflated `status` enum into an orthogonal `synced`
-            # flag. Only relevant for DBs predating the `synced` column; guarded on the
-            # `status` column so it doesn't re-add `synced` after we drop it below.
-            if self._table_has_column(cursor, "workouts", "status"):
-                self._add_column(
-                    cursor, "workouts", "synced",
-                    "ALTER TABLE workouts ADD COLUMN synced INTEGER DEFAULT 0"
+            # One row per command invocation that wrote workouts (§3). `kind` is fixed at
+            # write time from the §3 vocabulary, `summary` is the batch rationale, and
+            # `macrocycle_id` is the plan version in force when the command ran — context
+            # for `workout batches`, distinct from the per-row tag on `workouts`.
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS workout_changes (
+                    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                    created_at    TEXT    NOT NULL,
+                    kind          TEXT    NOT NULL,
+                    summary       TEXT,
+                    macrocycle_id INTEGER
                 )
-                cursor.execute("UPDATE workouts SET synced = 1 WHERE status = 'synced'")
-            # Replace the hand-maintained `synced` flag with a derived freshness signal:
-            # store `pushed_signature` (hash of calendar-relevant fields) on each push and
-            # compare against the live hash to tell unpushed/synced/stale apart (see
-            # trainmate.calendar_state). Backfill: a row that was `synced=1` matched the
-            # calendar at push time, so its current content is its signature; everything
-            # else stays NULL (reads as unpushed/stale). Then drop the now-dead column.
-            self._add_column(
-                cursor, "workouts", "pushed_signature",
-                "ALTER TABLE workouts ADD COLUMN pushed_signature TEXT"
-            )
-            if self._table_has_column(cursor, "workouts", "synced"):
-                from trainmate.calendar_state import calendar_signature
-                cursor.execute("SELECT * FROM workouts WHERE synced = 1")
-                for row in cursor.fetchall():
-                    cursor.execute(
-                        "UPDATE workouts SET pushed_signature = ? WHERE id = ?",
-                        (calendar_signature(dict(row)), row["id"]),
-                    )
-                cursor.execute("ALTER TABLE workouts DROP COLUMN synced")
-            # Original date: remembers where a workout was first placed so that
-            # swapping it back clears the modification flag.
-            if not self._table_has_column(cursor, "workouts", "original_date"):
-                cursor.execute("ALTER TABLE workouts ADD COLUMN original_date TEXT")
-                cursor.execute(
-                    "UPDATE workouts SET original_date = date "
-                    "WHERE original_date IS NULL"
+            """)
+
+            # Calendar sync bookkeeping, keyed by lineage (§8). Off the row because a
+            # successful push is not a prescription change: leaving it there would make
+            # `workout push -f` append a revision per session.
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS workout_calendar_state (
+                    lineage_id                 INTEGER PRIMARY KEY,
+                    google_event_id            TEXT,
+                    pushed_signature           TEXT,
+                    adherence_pushed_signature TEXT
                 )
-            # Adaptation recency axis: `adapted_at` is the UTC ISO timestamp of the most
-            # recent `workout adapt` run that touched this row (NULL = never adapted), and
-            # `adaptation_count` counts how many distinct adapt runs have eased it. Unlike
-            # the *kind* of modification (derived in trainmate.modification_state), neither
-            # is derivable from any other column — they are facts of WHEN/HOW-OFTEN — so the
-            # daily adaptation surfaces them to the prompt as a real recency signal and
-            # avoids compounding a fresh cut onto a session it only just eased (recovery
-            # metrics lag, so the morning after an easing still looks depressed).
-            # Creation timestamp: UTC ISO of when this row first entered the plan, set
-            # once on INSERT and never overwritten. Distinct from `date` (the day the
-            # session is scheduled for) and `original_date` (its first scheduled day) —
-            # this is WHEN it was authored, the natural counterpart to `adapted_at` for
-            # showing a session's plan→adapt lifecycle. NULL on legacy rows.
-            self._add_column(
-                cursor, "workouts", "created_at",
-                "ALTER TABLE workouts ADD COLUMN created_at TEXT"
+            """)
+
+            # The first serves the live view, the second every lineage derivation (§3).
+            cursor.execute(
+                "CREATE INDEX IF NOT EXISTS idx_workouts_slot "
+                "ON workouts(date, sport_canonical, id)"
             )
-            self._add_column(
-                cursor, "workouts", "adapted_at",
-                "ALTER TABLE workouts ADD COLUMN adapted_at TEXT"
-            )
-            self._add_column(
-                cursor, "workouts", "adaptation_count",
-                "ALTER TABLE workouts ADD COLUMN adaptation_count INTEGER DEFAULT 0"
-            )
-            # Original load snapshot: the duration / TSS / RPE the session carried when it
-            # first entered the plan, captured once (set to the live value on INSERT, then
-            # COALESCE-preserved across every later UPDATE — the same once-only treatment as
-            # `original_description` / `original_date`). Lets the plan show how far an adapted
-            # session has been walked down from its planned load without parsing prose. NULL
-            # on legacy rows; their first adaptation backfills them from the pre-adapt value.
-            for col in (
-                "original_duration_minutes",
-                "original_tss",
-                "original_rpe",
-            ):
-                self._add_column(
-                    cursor, "workouts", col,
-                    f"ALTER TABLE workouts ADD COLUMN {col} INTEGER DEFAULT NULL"
-                )
-            # Adherence-mark freshness axis: hash of the calendar fields plus the
-            # backward-looking adherence verdict at the last `workout compare --mark`
-            # push. Lets compare skip a no-op Calendar update when the event already
-            # carries the same verdict (see trainmate.calendar_state.adherence_signature).
-            # Kept separate from `pushed_signature` on purpose: folding adherence into
-            # that hash would make every marked past row read `stale`. NULL = never marked.
-            self._add_column(
-                cursor, "workouts", "marked_signature",
-                "ALTER TABLE workouts ADD COLUMN marked_signature TEXT"
-            )
-            # Benchmark identity: a session whose PURPOSE is measurement, not stimulus
-            # (DESIGN_benchmark_workouts.md §3.1). Holds an anchor-kind slug
-            # (ftp_20min | run_5k_tt | e1rm | …) when the session is a fitness test, NULL
-            # otherwise. Creation-time intent like `source` (fixed when the session is
-            # created), NOT a derived kind-column — so it is a stored column, threaded
-            # through every save path and the model's generate/adapt output contracts so
-            # protecting a test never strips its identity.
-            self._add_column(
-                cursor, "workouts", "benchmark_type",
-                "ALTER TABLE workouts ADD COLUMN benchmark_type TEXT"
+            cursor.execute(
+                "CREATE INDEX IF NOT EXISTS idx_workouts_lineage "
+                "ON workouts(lineage_id, id)"
             )
 
-            # Planned time in zone (DESIGN_intensity_distribution.md §9.8): the intensity
-            # target of a session, stated by the coach as structured data at authoring
-            # time. NOT derived from `tss` — `tss ~ duration x IF^2` invites backing out an
-            # average intensity factor, which is §1 run backwards (TSS is the projection
-            # that destroyed the distribution and it cannot be un-projected) and circular
-            # besides, since planned zones computed from planned TSS make
-            # planned-vs-measured zones a restatement of the adherence percentage that
-            # already exists. HR sessions fill 1-5 and leave 6-7 NULL, mirroring what
-            # `garmin/sync.py` writes on the measured side; swimming (CSS) and strength
-            # (e1RM) yield no zone model and stay NULL throughout.
-            for col in (
-                ["planned_zone_currency TEXT"]
-                + [f"planned_zone{i}_sec INTEGER DEFAULT NULL" for i in range(1, 8)]
-            ):
-                self._add_column(
-                    cursor, "workouts", col.split()[0],
-                    f"ALTER TABLE workouts ADD COLUMN {col}"
+            # The live view (§5): `id` is AUTOINCREMENT and therefore monotonic, so the
+            # highest id in a slot is its newest revision. Void revisions are included on
+            # purpose — a cancelled session is still a fact readers must see.
+            cursor.execute("DROP VIEW IF EXISTS live_workouts")
+            cursor.execute("""
+                CREATE VIEW live_workouts AS
+                SELECT w.* FROM workouts w
+                WHERE w.id = (
+                    SELECT MAX(w2.id) FROM workouts w2
+                    WHERE w2.date = w.date AND w2.sport_canonical = w.sport_canonical
                 )
+            """)
+
+            # Append-only, enforced where it cannot be skipped (§14). The UPDATE trigger
+            # exempts exactly one transition — the post-insert lineage seeding of §4 — and
+            # pins the value it may write to the row's own id.
+            cursor.execute("""
+                CREATE TRIGGER IF NOT EXISTS workouts_no_update BEFORE UPDATE ON workouts
+                WHEN NOT (OLD.lineage_id IS NULL AND NEW.lineage_id = NEW.id)
+                BEGIN SELECT RAISE(ABORT, 'workouts is append-only: append a revision'); END
+            """)
+            cursor.execute("""
+                CREATE TRIGGER IF NOT EXISTS workouts_no_delete BEFORE DELETE ON workouts
+                BEGIN SELECT RAISE(ABORT, 'workouts is append-only: append a void revision'); END
+            """)
 
             # Benchmark results logbook (DESIGN_benchmark_workouts.md §3.2): a dated log of
             # fitness-test outcomes, one row per measurement. With config's `ftp`/`lthr`

@@ -1,6 +1,8 @@
 from typing import Optional
 from trainmate import runtime
 from trainmate.config import config
+# Read as `_svc._today_str()` by the mixins, so `pin_clock` has one place to
+# freeze the clock for a whole service.
 from trainmate.util import today_str as _today_str, today_date as _today_date
 from trainmate.coach.engine import CoachEngine
 
@@ -23,11 +25,10 @@ class CoachService(PmcContextMixin, PromptConfigMixin, PlanningMixin, WorkoutGen
     """Orchestrates sports science coaching by coordinating data I/O and business logic."""
 
     def __init__(
-        self, db_instance=None, calendar_syncer_instance=None,
-        engine: Optional[CoachEngine] = None, prompt_instance=None
+        self, db_instance=None, engine: Optional[CoachEngine] = None,
+        prompt_instance=None
     ):
         self._db_instance = db_instance
-        self._calendar_syncer_instance = calendar_syncer_instance
         self._prompt_instance = prompt_instance
         self.engine = engine or CoachEngine()
 
@@ -35,9 +36,9 @@ class CoachService(PmcContextMixin, PromptConfigMixin, PlanningMixin, WorkoutGen
     def _db(self):
         return self._db_instance or runtime.db
 
-    @property
-    def _calendar_syncer(self):
-        return self._calendar_syncer_instance or runtime.calendar_syncer
+    # No calendar handle here. Writing workouts reconciles Calendar on its own, from the
+    # change handle, so no command reaches the syncer any more
+    # (DESIGN_workout_revisions.md §8).
 
     @property
     def _prompt(self):

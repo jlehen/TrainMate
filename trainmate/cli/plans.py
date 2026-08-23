@@ -317,12 +317,14 @@ def _fmt_duration(minutes: float) -> str:
 
 
 def _plan_workouts(macrocycle: dict) -> List[dict]:
-    """Every workout (live or archived) the given plan version scheduled.
+    """Every revision the given plan version appended, live or since superseded.
 
-    Rows carry the `macrocycle_id` of the version that created them. A database wholly
-    predating that column has none, so its rows are matched on dates alone; once any row
-    is stamped, an unstamped one is nobody's rather than everybody's."""
-    rows = runtime.db.get_workouts(include_archived=True)
+    History rather than plan, so it reads the raw revisions instead of the live view: the
+    question is what this version scheduled, including what a later one displaced
+    (DESIGN_workout_revisions.md §5). Revisions carry the `macrocycle_id` of the version
+    that created them; a database wholly predating that column has none, so its rows are
+    matched on dates alone."""
+    rows = runtime.db.get_plan_revisions()
     if any(w.get('macrocycle_id') is not None for w in rows):
         return [w for w in rows if w.get('macrocycle_id') == macrocycle['id']]
     return rows
@@ -345,8 +347,10 @@ def _print_mesocycle_workouts(
         return
     for w in inside:
         tail = [f"{w.get('duration_minutes') or 0:.0f}min", f"load {planned_load(w):.0f}"]
-        if w.get('archived_at'):
-            tail.append("archived")
+        if not w.get('live'):
+            tail.append("superseded")
+        elif w.get('void'):
+            tail.append("cancelled")
         _print_hanging(
             f"{pad}  {cyan(fmt_date(w['date']))} ",
             f"[{w['sport_type']}] {w.get('title') or ''} ({' · '.join(tail)})", width, gray,

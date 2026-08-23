@@ -44,8 +44,17 @@ def _build_config():
 
 @_builder("db")
 def _build_db():
+    """The database handle, with the Calendar reconcile attached.
+
+    Attaching it here is what makes DESIGN_workout_revisions.md §8 unforgettable: every
+    workout change closes by reconciling the lineages it touched, and this is the one
+    place the running app builds a database, so no command can be missing the pass. A
+    handle built directly (an isolated unit test) has no hook and writes nothing to
+    Calendar.
+    """
     from trainmate.db import Database
-    return Database()
+    from trainmate.calendar_reconcile import reconcile
+    return Database(calendar_hook=reconcile)
 
 
 @_builder("garmin")

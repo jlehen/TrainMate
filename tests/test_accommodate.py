@@ -10,7 +10,7 @@ import unittest
 from contextlib import redirect_stdout
 from unittest.mock import patch
 
-from tests.helpers import clear_all_tables, pin_clock, rebind_test_db
+from tests.helpers import clear_all_tables, pin_clock, rebind_test_db, save_workout
 
 TEST_DB_PATH = os.path.join(os.path.dirname(__file__), "test_accommodate.db")
 
@@ -151,7 +151,7 @@ class TestScope(AccommodateCase):
             title="Surgery, no training", start_date="2026-06-14",
             end_date="2026-06-20", rest=1,
         )
-        test_db.save_workout("2026-06-14", "running", "Tempo", "40min",
+        save_workout(test_db, "2026-06-14", "running", "Tempo", "40min",
                              duration_minutes=40, rpe=6, tss=45)
         proposal = self._accommodate(
             {"change_needed": False, "reason": "ok"},
@@ -190,7 +190,7 @@ class TestScope(AccommodateCase):
             "name": "Base", "start_date": "2026-01-01", "end_date": "2026-06-15",
             "focus": "Aerobic base",
         }], target_date="2026-06-15")
-        test_db.save_workout("2026-06-20", "running", "Easy run", "40min",
+        save_workout(test_db, "2026-06-20", "running", "Easy run", "40min",
                              duration_minutes=40, rpe=3, tss=25)
         cid = test_db.add_constraint(
             title="Away", start_date="2026-06-12", end_date="2026-06-25", rest=1,
@@ -209,7 +209,7 @@ class TestWriteModel(AccommodateCase):
     """§7 — an adapt sibling: in-place, two-sided clamp, and never an easing."""
 
     def _one_move(self):
-        test_db.save_workout("2026-06-10", "cycling", "Long ride", "[Long ride]\n3h Z2",
+        save_workout(test_db, "2026-06-10", "cycling", "Long ride", "[Long ride]\n3h Z2",
                              duration_minutes=180, rpe=5, tss=140)
         cid = test_db.add_constraint(
             title="Away Wednesday", start_date="2026-06-10", end_date="2026-06-10", rest=0,
@@ -230,7 +230,7 @@ class TestWriteModel(AccommodateCase):
     def test_a_move_leaves_adapted_at_unstamped(self):
         cid, decision = self._one_move()
         proposal = self._accommodate(decision, "2026-06-08", "2026-06-12", [cid])
-        self.assertFalse(proposal.stamp_adapted_at)
+        self.assertEqual(proposal.kind, "accommodate")
         with redirect_stdout(io.StringIO()):
             coach_service.workout_revision_apply(proposal)
         # The trigger is not fatigue at all, so a reschedule must never make tomorrow's
@@ -242,7 +242,7 @@ class TestWriteModel(AccommodateCase):
 
     def test_an_adapt_still_stamps_adapted_at(self):
         # The opt-out rides on the proposal, so the shared path is unchanged for adapt.
-        test_db.save_workout("2026-06-10", "cycling", "Long ride", "3h",
+        save_workout(test_db, "2026-06-10", "cycling", "Long ride", "3h",
                              duration_minutes=180, rpe=5, tss=140)
         from trainmate.coach.proposals import RevisionProposal
         with redirect_stdout(io.StringIO()):
@@ -259,7 +259,7 @@ class TestWriteModel(AccommodateCase):
         self.assertIsNotNone(test_db.get_workout("2026-06-10", "cycling")["adapted_at"])
 
     def test_a_proposal_dated_today_is_dropped_by_the_two_sided_clamp(self):
-        test_db.save_workout(TODAY, "running", "Tempo", "40min",
+        save_workout(test_db, TODAY, "running", "Tempo", "40min",
                              duration_minutes=40, rpe=6, tss=45)
         cid = test_db.add_constraint(
             title="Away", start_date="2026-06-10", end_date="2026-06-10", rest=0,
@@ -288,7 +288,7 @@ class TestWriteModel(AccommodateCase):
         self.assertIn("moved", vacated["modification_reason"].lower())
 
     def test_a_benchmark_moves_intact_and_its_replacement_is_not_the_test(self):
-        test_db.save_workout("2026-06-10", "cycling", "FTP test", "20min test",
+        save_workout(test_db, "2026-06-10", "cycling", "FTP test", "20min test",
                              duration_minutes=60, rpe=9, tss=90, benchmark_type="ftp")
         cid = test_db.add_constraint(
             title="Away Wednesday", start_date="2026-06-10", end_date="2026-06-10", rest=0,
@@ -393,9 +393,9 @@ class TestPreview(AccommodateCase):
     """§10 — the preview renders the whole window, not only the rows that changed."""
 
     def _proposal_with_untouched_days(self):
-        test_db.save_workout("2026-06-09", "running", "Easy run", "40min",
+        save_workout(test_db, "2026-06-09", "running", "Easy run", "40min",
                              duration_minutes=40, rpe=3, tss=25)
-        test_db.save_workout("2026-06-10", "cycling", "Long ride", "3h",
+        save_workout(test_db, "2026-06-10", "cycling", "Long ride", "3h",
                              duration_minutes=180, rpe=5, tss=140)
         cid = test_db.add_constraint(
             title="Away Wednesday", start_date="2026-06-10", end_date="2026-06-10", rest=0,
@@ -477,7 +477,7 @@ class TestHonoringIsRecorded(AccommodateCase):
 
     def test_an_applied_pass_records_it_too(self):
         cid = self._constraint()
-        test_db.save_workout("2026-06-11", "running", "Tempo", "40min",
+        save_workout(test_db, "2026-06-11", "running", "Tempo", "40min",
                              duration_minutes=40, rpe=6, tss=45)
         self._run_pass({
             "change_needed": True, "reason": "Moved.",

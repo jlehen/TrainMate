@@ -197,7 +197,7 @@ a dated logbook of test results. One row per measurement:
 | `value`       | the number (e.g. 250)                                |
 | `unit`        | `W` \| `bpm` \| `min/km` \| `sec/100m` \| `kg` \| `km/h` |
 | `source`      | `test` \| `manual` \| `modeled`                      |
-| `workout_id`  | nullable link to the planned benchmark it satisfied  |
+| `workout_id`  | nullable link to the planned benchmark it satisfied — a **lineage** id, so it names the session rather than one of its revisions (DESIGN_workout_revisions.md §15) |
 | `note`        | free text (protocol, conditions)                     |
 
 The `unit` strings in that table are the *literal stored values* — they come from the one

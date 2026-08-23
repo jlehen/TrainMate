@@ -1,16 +1,17 @@
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from typing import Any, List, Optional, Dict
 from trainmate.config import config
 from trainmate.adherence import analyze_adherence, format_discrepancies
 from trainmate.sports import canonical_sport
 from trainmate import intensity
-from trainmate.util import yellow, red, cmd
+from trainmate.util import yellow, cmd
 from trainmate.coach.formatting import format_baseline
 from trainmate.coach import honoring
 from trainmate.coach.proposals import RevisionProposal
 from trainmate.coach.revisions import (
     normalize_load_fields, pair_revisions, structure_revision,
 )
+from trainmate.db.workouts import ATHLETE_VOID_KINDS
 import trainmate.coach.service as _svc
 
 
@@ -111,7 +112,13 @@ class AdaptationMixin:
             start_date=start_date_str, end_date=meso_end_date_str, include_removed=True
         )
         planned_workouts = [w for w in lookback_workouts if not w.get('removed')]
-        removed_workouts = [w for w in lookback_workouts if w.get('removed')]
+        # Only the cancellations the ATHLETE made. A day the plan simply stopped
+        # scheduling is a void too, and telling the coach it was cancelled would put words
+        # in the athlete's mouth (DESIGN_workout_revisions.md §3).
+        removed_workouts = [
+            w for w in lookback_workouts
+            if w.get('removed') and w.get('change_kind') in ATHLETE_VOID_KINDS
+        ]
 
         baseline = self._db.get_baseline(target_date_str)
         baseline_str = format_baseline(baseline)
@@ -287,161 +294,118 @@ class AdaptationMixin:
     def workout_revision_apply(
         self, proposal: RevisionProposal
     ) -> None:
-        """Saves a revision's workouts in place, cleans up overridden ones, syncs Calendar.
+        """Appends a revision's sessions under one change, and lets Calendar follow.
 
         Shared by `workout adapt` and `workout accommodate` (DESIGN_constraint_reschedule.md
-        §7): both edit rows where they stand rather than archiving and rebuilding, and both
-        need preview and apply to agree about what disappears. Takes the whole proposal so
-        the range and the displacement decisions are the ones the coach actually made, not
-        a reconstruction — including whether this pass may stamp `adapted_at` at all.
+        §7): both append rather than edit in place, and both need preview and apply to
+        agree about what disappears. Takes the whole proposal so the range and the
+        displacement decisions are the ones the coach actually made, not a reconstruction —
+        including which change kind this pass writes under.
+
+        A session the pass drops becomes a void revision rather than a `DELETE`, and one it
+        substitutes cross-sport becomes a void at the source plus a revision at the
+        destination carrying the same lineage — the swap shape, which is what keeps the
+        adaptation tally following the session (DESIGN_workout_revisions.md §4/§11). The
+        voids go first, so a moved session's newest revision is always the copy (§8).
         """
         proposed_workouts = proposal.workouts
-        reason = proposal.reason
         start_date, end_date = proposal.range_start, proposal.range_end
-        # 1. Fetch all existing workouts in the adaptation range
+        # Read before the change opens, so every decision below is made against the plan
+        # as it stood, not against rows this pass has already appended.
         existing_workouts = self._db.get_workouts(
             start_date=start_date, end_date=end_date
         )
+        by_slot = {
+            (w['date'], canonical_sport(w['sport_type'])): w for w in existing_workouts
+        }
 
-        # One timestamp for the whole run, stamped on every session it EASES (see the
-        # per-session `eased` test below). Lets a re-run see how recently (and how many
-        # times) each session was already adapted and hold back from compounding the cut
-        # (see save_workout / the adapt prompt).
-        adapted_at = datetime.now(timezone.utc).isoformat()
-
-        # Group proposed workouts by date
         proposed_by_date: Dict[str, List[Dict[str, Any]]] = {}
         for pw in proposed_workouts:
             proposed_by_date.setdefault(pw['date'], []).append(pw)
 
-        # 2. Find and delete existing workouts that are being replaced or removed.
-        # A cross-sport swap (e.g. strength -> yoga) deletes the planned session and
-        # inserts a fresh one, which would otherwise lose all trace of what was planned.
-        # Remember the displaced session per date so its replacement can carry the
-        # originally-planned description + load through to the Calendar event.
+        # The session displaced on each date, so a cross-sport substitution can carry its
+        # lineage to the sport it becomes.
         displaced_by_date: Dict[str, Dict[str, Any]] = {}
         for ew in existing_workouts:
-            ew_date = ew['date']
-            if ew_date in proposed_by_date:
-                # Compare canonically so a proposal for 'strength_training' is recognized
-                # as adapting an existing 'strength' session (not overriding/deleting it).
-                proposed_sports = {
-                    canonical_sport(p['sport_type']) for p in proposed_by_date[ew_date]
-                }
-                if canonical_sport(ew['sport_type']) not in proposed_sports:
-                    print(yellow(f"Removing overridden workout: {ew['title']} ({ew['sport_type']}) "
-                          f"on {ew_date}"))
-                    displaced_by_date.setdefault(ew_date, ew)
-                    if ew.get('google_event_id'):
-                        try:
-                            self._calendar_syncer.delete_workout_event(ew['google_event_id'])
-                        except Exception as e:
-                            print(red(f"Error deleting Google Calendar event: {e}"))
-                    self._db.delete_workout_by_id(ew['id'])
+            if ew['date'] not in proposed_by_date:
+                continue
+            # Compare canonically so a proposal for 'strength_training' is recognized as
+            # adapting an existing 'strength' session, not overriding it.
+            proposed_sports = {
+                canonical_sport(p['sport_type']) for p in proposed_by_date[ew['date']]
+            }
+            if canonical_sport(ew['sport_type']) not in proposed_sports:
+                displaced_by_date.setdefault(ew['date'], ew)
 
-        # 3. Save new adapted workouts and sync them
-        for w in proposed_workouts:
-            existing = self._db.get_workout(w['date'], w['sport_type'])
-            orig_desc = None
-            orig_dur = orig_tss = orig_rpe = None
-            ge_id = None
-            if existing:
-                orig_desc = existing['original_description'] or existing['description']
-                ge_id = existing['google_event_id']
-            else:
-                # No same-sport session to adapt: this proposal swapped in a new sport.
-                # If it displaced a planned session that day, inherit that session's
-                # initially-planned description and load as this one's "original" snapshot,
-                # so the Calendar event surfaces what was originally on the plan.
-                displaced = displaced_by_date.get(w['date'])
-                if displaced:
-                    orig_desc = (
-                        displaced.get('original_description') or displaced.get('description')
-                    )
-                    orig_dur = (
-                        displaced.get('original_duration_minutes')
-                        or displaced.get('duration_minutes')
-                    )
-                    orig_tss = displaced.get('original_tss') or displaced.get('tss')
-                    orig_rpe = displaced.get('original_rpe') or displaced.get('rpe')
-            # Origin is fixed at creation: preserve it when adapting an existing
-            # session (None + COALESCE keeps 'manual'/'generated'); only a session
-            # adapt newly introduces is coach-authored ('generated').
-            source = None if existing else 'generated'
+        with self._db.workout_change(
+            kind=proposal.kind, summary=proposal.reason
+        ) as change:
+            for ew in displaced_by_date.values():
+                print(yellow(
+                    f"Removing overridden workout: {ew['title']} ({ew['sport_type']}) "
+                    f"on {ew['date']}"
+                ))
+                change.void(
+                    date=ew['date'], sport_type=ew['sport_type'],
+                    reason=proposal.reason,
+                )
 
-            # A drift correction rewrites the prescription without touching the load, so it
-            # is not an easing — stamping it would raise the DO NOT COMPOUND bar for a
-            # session that was never cut (DESIGN_intensity_distribution.md §9.5). Decided
-            # here rather than in save_workout, which is a generic writer other callers
-            # rely on. Compared against `existing`, not `original_*`: a session already cut
-            # last week and merely re-worded today moved nothing now. A session adapt newly
-            # introduced counts as eased — there is no prior form to compound.
-            eased = not existing or (
-                float(w.get('duration_minutes') or 0)
-                != float(existing['duration_minutes'] or 0)
-                or float(w.get('tss') or 0) != float(existing['tss'] or 0)
-            )
-            # A reschedule never stamps (§7). `eased` cannot decide this alone: a session
-            # moved to a new date has no same-sport predecessor there, so `not existing`
-            # would read the move as an easing.
-            eased = eased and proposal.stamp_adapted_at
-            zone_currency, zone_sec = intensity.parse_planned_zones(w)
-
-            # The flag belongs to the TEST, not to the slot: a returned change on a
-            # benchmark's date that does not re-emit benchmark_type is the model saying this
-            # session is no longer that test, so blank it rather than let COALESCE resurrect
-            # it onto a replacement (DESIGN_benchmark_workouts.md §4.2).
-            clear_benchmark = bool(
-                existing and existing['benchmark_type'] and not w.get('benchmark_type')
-            )
-
-            self._db.save_workout(
-                date=w['date'],
-                sport_type=w['sport_type'],
-                title=w['title'],
-                description=w['description'],
-                original_description=orig_desc or w['description'],
-                original_duration_minutes=orig_dur,
-                original_tss=orig_tss,
-                original_rpe=orig_rpe,
-                modification_reason=w.get('modification_reason'),
-                adaptation_summary=reason,
-                google_event_id=ge_id,
-                duration_minutes=w.get('duration_minutes'),
-                rpe=w.get('rpe'),
-                tss=w.get('tss'),
-                source=source,
-                benchmark_type=w.get('benchmark_type'),
-                clear_benchmark=clear_benchmark,
-                adapted_at=adapted_at if eased else None,
-                # A drift correction rewrites HOW a session is prescribed, so its zone
-                # target moves with it; omitted, COALESCE preserves what the plan already
-                # held (DESIGN_intensity_distribution.md §9.8). Note this leaves §9.5's
-                # stopgap correct as written: `eased` compares duration and TSS only, so a
-                # correction that rewrites the zones while holding both stays unstamped —
-                # right, because nothing was cut.
-                planned_zone_currency=zone_currency,
-                planned_zone_sec=zone_sec
-            )
-
-            # Sync to Google Calendar
-            updated = self._db.get_workout(w['date'], w['sport_type'])
-            if updated:
-                try:
-                    self._calendar_syncer.sync_workout(updated)
-                except Exception as e:
-                    print(red(f"Error syncing {w['title']} to Google Calendar: {e}"))
+            for w in proposed_workouts:
+                slot = (w['date'], canonical_sport(w['sport_type']))
+                existing = by_slot.get(slot)
+                # No same-sport session to revise: this proposal swapped in a new sport.
+                # It IS the displaced session, in a different sport, so it carries that
+                # session's lineage — which is what keeps its originals and its tally (§4).
+                # Popped, not read: a date's displaced session can only become ONE of the
+                # sessions replacing it, and handing its lineage to two would leave one
+                # session live in two slots (§10). A second new-sport proposal that day is
+                # a session in its own right and starts its own lineage.
+                displaced = None if existing else displaced_by_date.pop(w['date'], None)
+                zone_currency, zone_sec = intensity.parse_planned_zones(w)
+                # The flag belongs to the TEST, not to the slot: a returned change on a
+                # benchmark's date that does not re-emit benchmark_type is the model saying
+                # this session is no longer that test, so blank it rather than let the
+                # carry-forward resurrect it onto a replacement
+                # (DESIGN_benchmark_workouts.md §4.2).
+                clear_benchmark = bool(
+                    existing and existing['benchmark_type'] and not w.get('benchmark_type')
+                )
+                change.append(
+                    date=w['date'],
+                    sport_type=w['sport_type'],
+                    title=w['title'],
+                    description=w['description'],
+                    duration_minutes=w.get('duration_minutes'),
+                    rpe=w.get('rpe'),
+                    tss=w.get('tss'),
+                    reason=w.get('modification_reason'),
+                    benchmark_type=w.get('benchmark_type'),
+                    clear_benchmark=clear_benchmark,
+                    lineage_id=displaced['id'] if displaced else None,
+                    # A drift correction rewrites HOW a session is prescribed, so its zone
+                    # target moves with it; omitted, the carry-forward preserves what the
+                    # plan already held (DESIGN_intensity_distribution.md §9.8).
+                    planned_zone_currency=zone_currency,
+                    planned_zone_sec=zone_sec,
+                )
 
         # Stamped on the athlete's `y`, never on a proposal they declined (§8).
         honoring.stamp(self._db, proposal.covered_constraint_ids)
 
     def workout_revision_record_no_change(self, proposal: RevisionProposal) -> None:
-        """Stamps a pass that proposed nothing. Every revision command's no-change branch
+        """Records a pass that proposed nothing. Every revision command's no-change branch
         calls this, and it is the only write on that path.
 
-        The pass still had the constraints in scope with authority over them, which is all
-        `honored_at` claims — requiring a *change* would leave "no adaptation needed"
+        Two writes, neither of them a workout. The change row is written even though it
+        appends nothing: an adapt that looked at the metrics and held is a real event, and
+        `workout batches` reads it back as `(held)` — a run of them then says what it is
+        rather than saying nothing (DESIGN_workout_revisions.md §3).
+
+        And the pass still had the constraints in scope with authority over them, which is
+        all `honored_at` claims — requiring a *change* would leave "no adaptation needed"
         flagged forever (§8). Separate from `workout_revision_apply` because there is
         nothing to apply, and outside the propose call because a propose writes nothing.
         """
+        with self._db.workout_change(kind=proposal.kind, summary=proposal.reason):
+            pass
         honoring.stamp(self._db, proposal.covered_constraint_ids)

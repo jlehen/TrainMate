@@ -3,7 +3,7 @@ import unittest
 from datetime import datetime, timedelta, timezone
 from unittest.mock import patch
 
-from tests.helpers import clear_all_tables, run_cli, rebind_test_db
+from tests.helpers import clear_all_tables, run_cli, rebind_test_db, save_workout
 
 TEST_DB_PATH = os.path.join(os.path.dirname(__file__), "test_trainmate_cli_goals.db")
 
@@ -263,7 +263,7 @@ class TestCliGoalArchival(unittest.TestCase):
             [{"name": "Base", "start_date": _days_out(0), "end_date": _days_out(30),
               "focus": "aerobic"}],
         )
-        test_db.save_workout(_days_out(3), "running", "Long run", "x",
+        save_workout(test_db, _days_out(3), "running", "Long run", "x",
                              macrocycle_id=mid)
         return oid, mid
 

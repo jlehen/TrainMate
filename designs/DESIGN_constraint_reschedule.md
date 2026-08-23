@@ -288,16 +288,21 @@ precisely where metrics are blind too.
 
 This is the mechanical fact that settles where the code lives.
 
-`workout_generate` is archive-and-rebuild: `_archive_and_teardown(from_date)` →
-`db.archive_future_workouts(from_date)`, with `restore_workout_batch(archived_at, from_date)`
-symmetric to it. Both are **"from a date onward"**, and DESIGN_plan_rollback.md §9 keeps them
-that way deliberately — the date floor is what stops a rollback resurrecting rows onto days that
-have since passed. A window-scoped rewrite has no representation in that model, and giving
-archival a start *and* an end would re-open a case that doc closed on purpose.
+*(Under DESIGN_workout_revisions.md there is now one write model — everything appends — so
+this section reads as the reason the two commands still share one apply, rather than as a
+contrast between two mechanisms. What follows is the original argument, with its conclusion
+intact.)*
 
-`workout_adapt_apply` has no such problem: it edits rows in place, stamps `modification_reason`
-per session and `adaptation_summary` per batch, deletes only sessions its own range overrides,
-and re-syncs Calendar per event. A reschedule is exactly that shape.
+`workout_generate` was archive-and-rebuild: `_archive_and_teardown(from_date)` →
+`db.archive_future_workouts(from_date)`, with `restore_workout_batch(archived_at, from_date)`
+symmetric to it. Both were **"from a date onward"**, and DESIGN_plan_rollback.md §9 kept them
+that way deliberately — the date floor is what stops a rollback resurrecting rows onto days that
+have since passed. A window-scoped rewrite had no representation in that model, and giving
+archival a start *and* an end would have re-opened a case that doc closed on purpose.
+
+`workout_adapt_apply` had no such problem: it rewrote sessions where they stood, noted the
+reason per session and the rationale per batch, removed only sessions its own range
+overrode, and re-synced Calendar. A reschedule is exactly that shape.
 
 So `workout accommodate` **reuses `workout_adapt_apply` unchanged**, handing it a proposal
 whose `range_start`/`range_end` are the §5 window. That inherits, for free, the reason those
@@ -314,30 +319,31 @@ filter is what enforces it.
 
 Two adjustments to the shared path:
 
-**It never stamps `adapted_at`.** That column drives the DO NOT COMPOUND guard — how recently and
-how often a session was *eased*, so repeated cuts do not stack. DESIGN_intensity_distribution.md
+**It never counts as an easing.** The DO NOT COMPOUND guard reads how recently and how
+often a session was *eased*, so repeated cuts do not stack. DESIGN_intensity_distribution.md
 §9.5 already established the principle for drift corrections: a rewrite that does not cut load is
-not an easing, and stamping it would raise the compounding bar for a session that was never cut.
+not an easing, and counting it would raise the compounding bar for a session that was never cut.
 A constraint-driven move is the same case, and more strongly so — the trigger is not fatigue at
-all, so a reschedule must never make tomorrow's genuine easing look like a compounded one. Note
-the existing `eased` test would get this wrong if inherited unchanged: a session moved to a new
-date has no same-sport predecessor there, and `eased = not existing` would stamp it. The cost is
-accepted knowingly: a reschedule that genuinely cuts a session — a "45 minutes only" constraint
-shrinking a 90-minute ride — leaves no [ALREADY EASED] tag for a later adapt to hold or restore
-against. `modification_reason` still names the cause, and a cut that fatigue did not drive is
-exactly the one the compounding guard has no business protecting.
+all, so a reschedule must never make tomorrow's genuine easing look like a compounded one. The
+cost is accepted knowingly: a reschedule that genuinely cuts a session — a "45 minutes only"
+constraint shrinking a 90-minute ride — leaves no [ALREADY EASED] tag for a later adapt to hold
+or restore against. The session's note still names the cause, and a cut that fatigue did not
+drive is exactly the one the compounding guard has no business protecting.
 
-The opt-out rides on the **proposal**, not on the apply signature: `RevisionProposal` carries
-`stamp_adapted_at: bool = True`, and the two commands differ only in what they construct. The
-reason is that the producer knows and the consumer does not: `workout_revision_apply` is called
-from two places, and an argument there is one each of them can forget, silently stamping. On the
-proposal it is decided once, where the command that built it is in scope, and no call site can get
-it wrong. The DB side needs nothing — `save_workout` already does
-`adapted_at = COALESCE(?, adapted_at)`, so passing `None` is a clean no-op.
+The distinction rides on the **proposal**, not on the apply signature: `RevisionProposal`
+carries `kind`, which is the `workout_changes` kind apply writes under — `adapt` or
+`accommodate`. The reason is that the producer knows and the consumer does not:
+`workout_revision_apply` is called from two places, and an argument there is one each of them
+can forget. On the proposal it is decided once, where the command that built it is in scope.
+Under DESIGN_workout_revisions.md §7 the tally counts `adapt` revisions only, so this is no
+longer a flag that has to be honoured at write time — the kind IS the exclusion, and there is
+nothing left to forget. That replaced an earlier `stamp_adapted_at: bool` flag, and the note
+that used to sit here about `eased = not existing` mis-stamping a moved session went with it:
+a moved session now keeps its lineage, so it has a predecessor to be compared against.
 
 **One rule keeps that from turning the record into a union of two commands: every field
 either producer does not fill has a default, so a producer names only what it has.** A
-per-command flag is fine — `stamp_adapted_at` is a fact about the pass that built the
+per-command field is fine — `kind` is a fact about the pass that built the
 proposal, and it is the producer that knows it. What is not fine is a field a producer has
 to explicitly opt out of: `new_constraints` (candidate directives extracted from the
 athlete's note) belongs to adapt alone, and a metric-blind window pass with no note to read

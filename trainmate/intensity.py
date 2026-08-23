@@ -400,13 +400,11 @@ def planned_zone_seconds(workout: Dict[str, Any]) -> Optional[Tuple[str, Tuple[i
 
 def format_planned_zones(workout: Dict[str, Any]) -> Optional[str]:
     """'Target: ~25min recovery, ~30min aerobic, ~10min threshold' — the prescription an
-    athlete can act on, rendered FROM the columns at display time and never stored.
+    athlete can act on, rendered FROM the columns at display time and never stored, so
+    the sentence cannot drift from the columns it describes (§9.8).
 
-    `description` is in `CALENDAR_FIELDS`, so storing this sentence would mark the row
-    stale and re-push the Calendar event on every regeneration that nudges a target by
-    two minutes (§9.8). Zone NAMES, not indices: `30 min aerobic` survives a ruler shift
-    in a way `30 min Z2` does not — the index is the join key, the name is the
-    prescription.
+    Zone NAMES, not indices: `30 min aerobic` survives a ruler shift in a way `30 min Z2`
+    does not — the index is the join key, the name is the prescription.
     """
     parsed = planned_zone_seconds(workout)
     if parsed is None:

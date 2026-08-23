@@ -38,10 +38,30 @@ class WipesMixin:
             conn.commit()
 
     def wipe_workouts(self) -> None:
-        """Deletes all workouts from the database."""
-        with self._get_connection() as conn:
-            conn.cursor().execute("DELETE FROM workouts")
-            conn.commit()
+        """Resets the whole workouts log: revisions, changes and Calendar state.
+
+        The one whole-table deletion the append-only rule exempts, because it is a reset
+        rather than a write path to convert (DESIGN_workout_revisions.md §14). It drops
+        the immutability triggers, clears the three tables together — a revision without
+        its change, or a Calendar handle without its lineage, would be worse than either
+        gone — and puts the triggers back.
+        """
+        with self.transaction() as conn:
+            cursor = conn.cursor()
+            cursor.execute("DROP TRIGGER IF EXISTS workouts_no_update")
+            cursor.execute("DROP TRIGGER IF EXISTS workouts_no_delete")
+            cursor.execute("DELETE FROM workouts")
+            cursor.execute("DELETE FROM workout_changes")
+            cursor.execute("DELETE FROM workout_calendar_state")
+            cursor.execute("""
+                CREATE TRIGGER workouts_no_update BEFORE UPDATE ON workouts
+                WHEN NOT (OLD.lineage_id IS NULL AND NEW.lineage_id = NEW.id)
+                BEGIN SELECT RAISE(ABORT, 'workouts is append-only: append a revision'); END
+            """)
+            cursor.execute("""
+                CREATE TRIGGER workouts_no_delete BEFORE DELETE ON workouts
+                BEGIN SELECT RAISE(ABORT, 'workouts is append-only: append a void revision'); END
+            """)
 
     @staticmethod
     def _delete_by_date(cursor, table: str, start: Optional[str], end: Optional[str]) -> None:

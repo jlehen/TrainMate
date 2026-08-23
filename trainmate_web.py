@@ -19,7 +19,7 @@ from trainmate import runtime
 from trainmate import benchmarks, garmin, intensity, llm_models, plan_diff, progression
 from trainmate.adherence import analyze_adherence, classify_adherence, date_covered
 from trainmate.calendar_state import calendar_status
-from trainmate.modification_state import modification_status
+from trainmate.cli.workouts._helpers import modification_markers
 from trainmate.config import config, plan_config_hash
 from trainmate.sports import canonical_sport
 from trainmate.util import today_str
@@ -55,14 +55,17 @@ def index() -> Any:
 # --- Helpers ---
 
 def _annotate_workout(workout: Dict[str, Any]) -> Dict[str, Any]:
-    """Adds the *derived* calendar + modification facts the CLI shows as
-    [SYNCED]/[STALE] and [ADAPTED]/[SWAPPED]/[REPLACED] markers (ARCHITECTURE.md
-    §5). These are computed from the row, never stored — so the frontend renders
-    them without re-deriving the rules (and risking drift from the writers)."""
+    """Adds the *derived* calendar fact the CLI shows as [SYNCED]/[STALE], and the
+    modification markers it shows as [ADAPTED ×2]/[SWAPPED]/… (ARCHITECTURE.md §5).
+
+    Both are computed here, never stored, so the frontend renders them without
+    re-deriving the rules (and risking drift from the writers). `modification_markers`
+    is the CLI's own renderer, shared rather than copied
+    (DESIGN_workout_revisions.md §7)."""
     return {
         **workout,
         "calendar_status": calendar_status(workout),
-        "modification_status": modification_status(workout),
+        "modification_markers": modification_markers(workout),
     }
 
 
@@ -184,7 +187,7 @@ def list_constraints() -> Any:
 @app.route("/api/workouts", methods=["GET"])
 def list_workouts() -> Any:
     """Workouts in a date range (mirrors `workout list`). Rows carry the derived
-    `calendar_status` + `modification_status` the CLI renders as markers."""
+    `calendar_status` + `modification_markers` the CLI renders as markers."""
     start_date = request.args.get("start_date")
     end_date = request.args.get("end_date")
     include_removed = request.args.get("include_removed", "").lower() in ("1", "true", "yes")
@@ -527,10 +530,10 @@ def plan_diff_versions() -> Any:
 
 @app.route("/api/workouts/batches", methods=["GET"])
 def workout_batches() -> Any:
-    """Lists the archived workout batches a `workout rollback` could restore (web
-    equivalent of `workout batches`, see DESIGN_plan_rollback.md §9). Restoring one is a
-    CLI action."""
-    return jsonify({"batches": runtime.db.get_archived_batches(from_date=today_str())})
+    """Lists the workout changes a `workout rollback` could undo (web equivalent of
+    `workout batches`, see DESIGN_workout_revisions.md §10). Undoing one is a CLI
+    action."""
+    return jsonify({"batches": runtime.db.get_workout_changes(from_date=today_str())})
 
 
 # --- Coach Learnings ---

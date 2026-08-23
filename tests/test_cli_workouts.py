@@ -3,7 +3,7 @@ import unittest
 from datetime import datetime, timedelta, timezone
 from unittest.mock import patch
 
-from tests.helpers import clear_all_tables, run_cli, rebind_test_db
+from tests.helpers import clear_all_tables, run_cli, rebind_test_db, save_workout
 from trainmate.cli.common import fmt_date
 from trainmate.coach.proposals import RevisionProposal, GenerateProposal
 from trainmate.coach.revisions import RevisionPair
@@ -101,12 +101,12 @@ class TestCliWorkouts(unittest.TestCase):
             "knee is sore, keep impact low",
         )
 
-        w_id = test_db.save_workout(
+        w_id = save_workout(test_db,
             date="2026-06-02",
             sport_type="running",
             title="Interval Session",
             description="5x800m",
-            
+
         )
         exit_code, stdout, stderr = self.run_cli(
             ["workout", "rm", str(w_id), "Travelling"]
@@ -154,9 +154,9 @@ class TestCliWorkouts(unittest.TestCase):
         mock_calendar.sync_multiple.assert_not_called()
 
         today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-        test_db.save_workout(
+        save_workout(test_db,
             date=today_str, sport_type="running", title="Tempo Run",
-            description="30 mins fast", 
+            description="30 mins fast",
         )
 
         exit_code, stdout, stderr = self.run_cli(["workout", "push"])
@@ -172,14 +172,14 @@ class TestCliWorkouts(unittest.TestCase):
         today = datetime.now(timezone.utc).date()
         past = (today - timedelta(days=4)).strftime("%Y-%m-%d")
 
-        wid = test_db.save_workout(
+        wid = save_workout(test_db,
             date=past, sport_type="running", title="Old Run", description="easy",
         )
         test_db.mark_workout_pushed(
             wid, "evt-past", calendar_signature(test_db.get_workout_by_id(wid))
         )
         # A push that never landed: content moves on, signature does not.
-        test_db.save_workout(
+        save_workout(test_db,
             date=past, sport_type="running", title="Old Run", description="HARD",
         )
 
@@ -196,7 +196,7 @@ class TestCliWorkouts(unittest.TestCase):
         """A past workout that is synced (or was never pushed) must not warn."""
         today = datetime.now(timezone.utc).date()
         past = (today - timedelta(days=4)).strftime("%Y-%m-%d")
-        test_db.save_workout(
+        save_workout(test_db,
             date=past, sport_type="running", title="Old Run", description="easy",
         )
         exit_code, stdout, stderr = self.run_cli(["workout", "push"])
@@ -217,11 +217,11 @@ class TestCliWorkouts(unittest.TestCase):
             {"id": 2, "title": "Ride B", "date": d1, "sport_type": "cycling",
              "duration_minutes": 60, "rpe": 4, "tss": 30},
         ]
-        a = test_db.save_workout(
+        a = save_workout(test_db,
             date=d1, sport_type="running", title="Run A",
             description="easy", rpe=4, tss=30,
         )
-        b = test_db.save_workout(
+        b = save_workout(test_db,
             date=d2, sport_type="cycling", title="Ride B",
             description="easy", rpe=4, tss=30,
         )
@@ -248,11 +248,11 @@ class TestCliWorkouts(unittest.TestCase):
         d2 = (today + timedelta(days=3)).strftime("%Y-%m-%d")
         mock_coach.workout_swap_validate.return_value = []
         mock_coach.workout_swap_apply.return_value = []
-        a = test_db.save_workout(
+        a = save_workout(test_db,
             date=d1, sport_type="running", title="Run A",
             description="easy", rpe=4, tss=30,
         )
-        b = test_db.save_workout(
+        b = save_workout(test_db,
             date=d2, sport_type="cycling", title="Ride B",
             description="easy", rpe=4, tss=30,
         )
@@ -274,11 +274,11 @@ class TestCliWorkouts(unittest.TestCase):
         d1 = (today + timedelta(days=1)).strftime("%Y-%m-%d")
         d2 = (today + timedelta(days=3)).strftime("%Y-%m-%d")
         mock_coach.workout_swap_validate.return_value = ["Creates 3 consecutive high days"]
-        a = test_db.save_workout(
+        a = save_workout(test_db,
             date=d1, sport_type="running", title="Run A",
             description="easy", rpe=8, tss=90,
         )
-        b = test_db.save_workout(
+        b = save_workout(test_db,
             date=d2, sport_type="cycling", title="Ride B",
             description="easy", rpe=8, tss=90,
         )
@@ -296,11 +296,11 @@ class TestCliWorkouts(unittest.TestCase):
         today = datetime.now(timezone.utc).date()
         past = (today - timedelta(days=2)).strftime("%Y-%m-%d")
         future = (today + timedelta(days=2)).strftime("%Y-%m-%d")
-        test_db.save_workout(
+        save_workout(test_db,
             date=past, sport_type="running", title="Run A",
             description="easy", rpe=4, tss=30,
         )
-        test_db.save_workout(
+        save_workout(test_db,
             date=future, sport_type="cycling", title="Ride B",
             description="easy", rpe=4, tss=30,
         )
@@ -340,20 +340,21 @@ class TestCliWorkouts(unittest.TestCase):
 
     @patch("trainmate.runtime.calendar_syncer")
     def test_workout_rm_synced(self, mock_calendar):
-        w_id = test_db.save_workout(
+        w_id = save_workout(test_db,
             date="2026-06-02", sport_type="running", title="Synced Run",
             description="30 mins", google_event_id="mock_event_123",
         )
+        mock_calendar.reset_mock()
         exit_code, stdout, stderr = self.run_cli(
             ["workout", "rm", str(w_id), "Travelling"]
         )
         self.assertEqual(exit_code, 0)
-        self.assertIn(
-            "Workout is synced to Google Calendar. Updating calendar event",
-            stdout,
-        )
         self.assertIn(f"Workout with ID {w_id} ('Synced Run') removed successfully", stdout)
+        # A deliberate cancellation KEEPS its event, retitled — the reconcile the change
+        # scheduled does that, so no command carries Calendar code (§8).
+        self.assertIn("Google Calendar updated", stdout)
         mock_calendar.sync_workout.assert_called_once()
+        mock_calendar.delete_workout_event.assert_not_called()
         synced_workout = mock_calendar.sync_workout.call_args[0][0]
         self.assertEqual(synced_workout['id'], w_id)
         self.assertTrue(synced_workout['removed'])
@@ -362,7 +363,7 @@ class TestCliWorkouts(unittest.TestCase):
     def test_workout_rm_soft_deletes(self, mock_calendar):
         """`workout rm` marks the row removed (kept in DB), hides it from reads, and
         updates its calendar event — but it stays retrievable for the coach."""
-        w_id = test_db.save_workout(
+        w_id = save_workout(test_db,
             date="2026-06-02", sport_type="running", title="Interval Session",
             description="5x800m", google_event_id="evt-1",
         )
@@ -413,13 +414,13 @@ class TestCliWorkouts(unittest.TestCase):
 
     @patch("trainmate.runtime.calendar_syncer")
     def test_workout_wipe(self, mock_calendar):
-        test_db.save_workout(
+        save_workout(test_db,
             date="2026-06-02", sport_type="running", title="Run 1",
             description="30 mins", google_event_id="ge_1",
         )
-        test_db.save_workout(
+        save_workout(test_db,
             date="2026-06-03", sport_type="running", title="Run 2",
-            description="30 mins", 
+            description="30 mins",
         )
         self.assertEqual(len(test_db.get_workouts()), 2)
 
@@ -435,7 +436,7 @@ class TestCliWorkouts(unittest.TestCase):
         mock_calendar.delete_workout_event.assert_called_once_with("ge_1")
 
         mock_calendar.reset_mock()
-        test_db.save_workout(
+        save_workout(test_db,
             date="2026-06-02", sport_type="running", title="Run 1",
             description="30 mins", google_event_id="ge_2",
         )
@@ -448,15 +449,16 @@ class TestCliWorkouts(unittest.TestCase):
     def test_workout_prune_calendar(self, mock_calendar):
         # One live workout, one soft-removed (keeps its event), and two calendar
         # events no row claims — the fresh-database case.
-        test_db.save_workout(
+        save_workout(test_db,
             date="2026-06-02", sport_type="running", title="Run 1",
             description="30 mins", google_event_id="ge_live",
         )
-        removed_id = test_db.save_workout(
+        removed_id = save_workout(test_db,
             date="2026-06-03", sport_type="running", title="Run 2",
             description="30 mins", google_event_id="ge_removed",
         )
-        test_db.mark_workout_removed(removed_id, "not today")
+        with test_db.workout_change(kind="rm") as change:
+            change.void(date="2026-06-03", sport_type="running", reason="not today")
 
         mock_calendar.list_workout_events.return_value = [
             {"id": "ge_live", "summary": "Run 1", "start": {"date": "2026-06-02"}},
@@ -502,7 +504,7 @@ class TestCliWorkouts(unittest.TestCase):
 
     @patch("trainmate.runtime.calendar_syncer")
     def test_workout_prune_calendar_nothing_to_do(self, mock_calendar):
-        test_db.save_workout(
+        save_workout(test_db,
             date="2026-06-02", sport_type="running", title="Run 1",
             description="30 mins", google_event_id="ge_live",
         )
@@ -545,21 +547,21 @@ class TestCliWorkouts(unittest.TestCase):
         past_str = (today_date - timedelta(days=5)).strftime("%Y-%m-%d")
         future_str = (today_date + timedelta(days=10)).strftime("%Y-%m-%d")
 
-        test_db.save_workout(
+        save_workout(test_db,
             date=today_str, sport_type="running", title="Today Run",
-            description="30 mins", 
+            description="30 mins",
         )
-        test_db.save_workout(
+        save_workout(test_db,
             date=tomorrow_str, sport_type="cycling", title="Tomorrow Ride",
-            description="60 mins", 
+            description="60 mins",
         )
-        test_db.save_workout(
+        save_workout(test_db,
             date=past_str, sport_type="yoga", title="Past Yoga",
-            description="15 mins", 
+            description="15 mins",
         )
-        test_db.save_workout(
+        save_workout(test_db,
             date=future_str, sport_type="strength_training", title="Future Lift",
-            description="45 mins", 
+            description="45 mins",
         )
 
         goal_id = test_db.add_objective(
@@ -659,12 +661,20 @@ class TestCliWorkouts(unittest.TestCase):
         self.assertIn("Future Lift", stdout)
 
     def test_workout_list_shows_repeat_adapt_count(self):
-        """A session eased once reads [ADAPTED]; eased again reads [ADAPTED ×2]."""
+        """A session eased once reads [ADAPTED]; eased again reads [ADAPTED ×2].
+
+        The count is walked over the lineage and only counts revisions that actually cut
+        the load, so the fixture walks the session down for real
+        (DESIGN_workout_revisions.md §7)."""
         today_str = datetime.now(timezone.utc).date().strftime("%Y-%m-%d")
-        test_db.save_workout(
+        save_workout(test_db,
             date=today_str, sport_type="running", title="Tempo",
-            description="orig", adaptation_summary="block too hard",
-            modification_reason="eased", adapted_at="2026-06-17T08:00:00+00:00",
+            description="orig", duration_minutes=60, tss=60,
+        )
+        save_workout(test_db,
+            date=today_str, sport_type="running", title="Tempo",
+            description="eased", duration_minutes=45, tss=45,
+            adaptation_summary="block too hard", modification_reason="eased",
         )
         exit_code, stdout, _ = self.run_cli(["workout", "list"])
         self.assertEqual(exit_code, 0)
@@ -677,13 +687,13 @@ class TestCliWorkouts(unittest.TestCase):
         exit_code, stdout_v, _ = self.run_cli(["workout", "list", "-v"])
         self.assertEqual(exit_code, 0)
         self.assertIn("Planned:", stdout_v)
-        self.assertIn("Last adapted: 2026-06-17 08:00", stdout_v)
+        self.assertIn(f"Last adapted: {today_str}", stdout_v)
 
-        # Second easing of the same slot bumps the count.
-        test_db.save_workout(
+        # Second easing of the same session bumps the count.
+        save_workout(test_db,
             date=today_str, sport_type="running", title="Tempo",
-            description="easier", adaptation_summary="still fatigued",
-            modification_reason="eased again", adapted_at="2026-06-18T08:00:00+00:00",
+            description="easier", duration_minutes=30, tss=30,
+            adaptation_summary="still fatigued", modification_reason="eased again",
         )
         exit_code, stdout, _ = self.run_cli(["workout", "list"])
         self.assertEqual(exit_code, 0)
@@ -700,15 +710,15 @@ class TestCliWorkouts(unittest.TestCase):
         # A run two days ago never done (a real miss — that day is over), a run
         # yesterday that was (will be matched), and a run today not done YET, which
         # is pending rather than missed: the day has not finished.
-        test_db.save_workout(
+        save_workout(test_db,
             date=two_days_ago_str, sport_type="running", title="Skipped Run",
             description="40 mins", duration_minutes=40, rpe=5, tss=30,
         )
-        test_db.save_workout(
+        save_workout(test_db,
             date=yesterday_str, sport_type="running", title="Easy Run",
             description="30 mins", duration_minutes=30, rpe=4, tss=20,
         )
-        test_db.save_workout(
+        save_workout(test_db,
             date=today_str, sport_type="running", title="Tempo Run",
             description="45 mins", duration_minutes=45, rpe=7, tss=50,
         )
@@ -783,64 +793,63 @@ class TestCliWorkouts(unittest.TestCase):
 
     @patch("trainmate.runtime.coach_service")
     def test_workout_batches_and_rollback(self, mock_coach):
-        """`workout batches` lists archived batches and `workout rollback` picks one
-        (see DESIGN_plan_rollback.md §9)."""
+        """`workout batches` lists every change and `workout rollback` picks one
+        (DESIGN_workout_revisions.md §10)."""
         exit_code, stdout, _ = self.run_cli(["workout", "batches"])
         self.assertEqual(exit_code, 0)
-        self.assertIn("No archived workouts", stdout)
+        self.assertIn("Nothing has written workouts yet", stdout)
 
-        # Nothing archived yet: rollback declines without reaching the service.
+        # Nothing written yet: rollback declines without reaching the service.
         exit_code, stdout, _ = self.run_cli(["workout", "rollback"])
         self.assertEqual(exit_code, 0)
-        self.assertIn("No archived workouts to roll back to", stdout)
+        self.assertIn("No workout changes to roll back", stdout)
         mock_coach.workout_rollback.assert_not_called()
 
         today = datetime.now(timezone.utc).date()
         future_str = (today + timedelta(days=2)).strftime("%Y-%m-%d")
-        test_db.save_workout(
-            date=future_str, sport_type="running", title="Archived Run",
+        save_workout(test_db,
+            date=future_str, sport_type="running", title="First Run",
             description="45 mins", duration_minutes=45,
         )
-        test_db.archive_future_workouts(today.strftime("%Y-%m-%d"))
-        stamp = test_db.get_archived_batches()[0]["archived_at"]
 
         exit_code, stdout, _ = self.run_cli(["workout", "batches"])
         self.assertEqual(exit_code, 0)
         self.assertIn("#1", stdout)
-        self.assertIn("1 workout(s)", stdout)
-        # Everything numbered is history: the archive above emptied the live plan, so no
-        # `live` row is printed alongside it.
+        self.assertIn("generate", stdout)
+        self.assertIn("1 revision(s)", stdout)
+        # The change that wrote the live plan is itself listed and itself undoable: there
+        # is no separate unnumbered "live" row any more (§10).
         self.assertNotIn("in force", stdout)
 
-        # With upcoming sessions again, they show as an unnumbered `live` row — the plan in
-        # force is never one of the restorable batches (DESIGN_plan_rollback.md §9).
-        test_db.save_workout(
-            date=future_str, sport_type="running", title="Current Run",
+        # An adapt is a change like any other, so it heads the list and is undoable alone.
+        save_workout(test_db,
+            date=future_str, sport_type="running", title="First Run",
             description="30 mins", duration_minutes=30,
+            adaptation_summary="eased", modification_reason="eased",
         )
         exit_code, stdout, _ = self.run_cli(["workout", "batches"])
         self.assertEqual(exit_code, 0)
-        live_row = next(ln for ln in stdout.splitlines() if "in force" in ln)
-        self.assertIn("live", live_row)
-        self.assertNotIn("#", live_row)  # never numbered: --batch cannot address it
-        self.assertIn("#1", stdout)
+        self.assertIn("adapt", stdout)
+        newest = next(ln for ln in stdout.splitlines() if "#1" in ln)
+        self.assertIn("adapt", newest)
 
-        # An out-of-range batch number is refused before anything is archived.
+        # An out-of-range number is refused before anything is written.
         exit_code, stdout, _ = self.run_cli(["workout", "rollback", "--batch", "9"])
         self.assertEqual(exit_code, 0)
-        self.assertIn("No archived batch #9", stdout)
+        self.assertIn("No change #9", stdout)
         mock_coach.workout_rollback.assert_not_called()
 
+        changes = test_db.get_workout_changes(from_date=today.strftime("%Y-%m-%d"))
         mock_coach.workout_rollback.return_value = {
-            "batch": stamp, "restored_workouts": 1, "archived_workouts": 0,
+            "change": changes[0], "restored_workouts": 1,
             "first_date": future_str, "last_date": future_str, "unhonored": [],
         }
         exit_code, stdout, _ = self.run_cli(["workout", "rollback", "-y"])
         self.assertEqual(exit_code, 0)
-        self.assertIn("Restored 1 workout(s)", stdout)
-        # The CLI resolves the positional #N to the batch's timestamp key.
+        self.assertIn("restored 1 session(s)", stdout)
+        # The CLI resolves the positional #N to the change id.
         self.assertEqual(
-            mock_coach.workout_rollback.call_args.kwargs.get("batch"), stamp
+            mock_coach.workout_rollback.call_args.kwargs.get("change_id"), changes[0]["id"]
         )
         # Calendar chatter is off by default (a count and a progress bar stand in for it)
         # and -v turns the per-event lines back on.
@@ -869,10 +878,10 @@ class TestCliWorkouts(unittest.TestCase):
         mock_prompt.confirm.assert_called_once()
         mock_coach.workout_generate.assert_called_once()
 
-        test_db.save_workout(
+        save_workout(test_db,
             date=d1, sport_type="running", title="Tempo", description="30 min",
         )
-        test_db.save_workout(
+        save_workout(test_db,
             date=d2, sport_type="running", title="Long", description="90 min",
             source="manual",
         )

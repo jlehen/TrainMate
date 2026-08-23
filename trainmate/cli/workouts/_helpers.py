@@ -2,44 +2,48 @@
 import argparse
 import re
 from datetime import datetime, timedelta
-from typing import Optional
 from trainmate import runtime
 from trainmate.calendar_state import calendar_status
-from trainmate.modification_state import modification_status
 from trainmate.util import (
     bold, green, red, yellow, cyan, blue, magenta, cmd, today_str as _today_str,
 )
 from trainmate.cli.common import fmt_date
 
 
+# The change kind of a session's live revision, as the athlete reads it
+# (DESIGN_workout_revisions.md §7). A `generate` is the plan saying what it says, so it
+# gets no marker, and a void carries [REMOVED] instead.
+_KIND_MARKERS = {
+    'adapt': 'ADAPTED',
+    'accommodate': 'ACCOMMODATED',
+    'swap': 'SWAPPED',
+    'add': 'REPLACED',
+}
 
-def _fmt_ts(iso: Optional[str]) -> str:
-    """Renders a stored UTC ISO timestamp as 'YYYY-MM-DD HH:MM' for the workout list.
 
-    Falls back to the raw string if it isn't parseable (e.g. a date-only legacy value)."""
-    if not iso:
-        return "?"
-    try:
-        return datetime.fromisoformat(iso).strftime("%Y-%m-%d %H:%M")
-    except ValueError:
-        return iso
+def modification_markers(w: dict) -> list:
+    """What has happened to a session: the kind of its latest change, plus the easings
+    that still stand.
+
+    Two facts rather than one, which is why there is no precedence rule any more: a
+    session eased twice and then swapped reads `[SWAPPED, ADAPTED ×2]` (§12)."""
+    kind = w.get('change_kind')
+    count = w.get('adaptation_count') or 0
+    eased = f"ADAPTED ×{count}" if count > 1 else ("ADAPTED" if count else "")
+    if kind == 'adapt':
+        # The tally is the whole story here; an adapt that eased nothing still reads
+        # [ADAPTED], because the prescription did change.
+        return [eased or "ADAPTED"]
+    return [m for m in (_KIND_MARKERS.get(kind), eased) if m]
+
+
 def workout_line(w: dict) -> str:
     """One-line rendering of a workout for `list` (and the `add` echo).
 
     Also renders a *proposed* session — a `workout generate` preview, which has no row and
     so no ID — so the plan being accepted reads exactly like the plan `list` will show."""
-    mod_marker = ""
-    mod_status = modification_status(w)
-    if mod_status == 'adapted':
-        # Surface repeat easings: a session adapted by more than one adapt run
-        # reads [ADAPTED ×N], flagging load that has been walked down multiple times.
-        count = w.get('adaptation_count') or 0
-        label = f" [ADAPTED ×{count}]" if count > 1 else " [ADAPTED]"
-        mod_marker = bold(yellow(label))
-    elif mod_status == 'swapped':
-        mod_marker = bold(yellow(" [SWAPPED]"))
-    elif mod_status == 'replaced':
-        mod_marker = bold(yellow(" [REPLACED]"))
+    markers = modification_markers(w)
+    mod_marker = bold(yellow(f" [{', '.join(markers)}]")) if markers else ""
     sync_marker = ""
     status = calendar_status(w)
     if status == 'synced':

@@ -663,6 +663,17 @@ then `adapted_at=adapted_at if eased else None`. Three things that wording settl
 - **A session `adapt` newly introduced (`not existing`) counts as eased.** There is no prior
   form to compound and no load to compare, so this preserves today's behaviour.
 
+**Resolved.** The append-only changelog this section asked for is
+DESIGN_workout_revisions.md, and it is now in force. The stopgap is gone with the column it
+guarded: `adapted_at` and `adaptation_count` are no longer stored, and "was this an easing?"
+is asked at read time, by walking the lineage and comparing each `adapt` revision against its
+own predecessor. The three points above survive the move intact but for the last: a session
+adapt introduces on an empty day starts a new lineage with nothing behind it, so it counts as
+nothing rather than as an easing — and the case that rule was really protecting, a
+cross-sport substitution, now keeps its lineage and so has a predecessor to be compared
+against. Five of the six denormalizations named above are derived; `original_date` is derived
+too, from the lineage's first revision.
+
 ### 9.6 `tm progress -z [sport ...]` — per sport, weekly grain
 
 `tm progress` (`DESIGN_progress_timeline.md`) is the fullest rendering anywhere of the
@@ -1238,11 +1249,13 @@ planned zones alone would leave them describing the prescription it has just rep
 future half of the table would grade the athlete against a target no longer on the page. So the
 fields join the adapt response schema alongside the generate one.
 
-**And that leaves §9.5's stopgap correct as written, which is worth saying out loud.** It decides
+**And that leaves §9.5's rule correct as written, which is worth saying out loud.** It decides
 "was this an easing?" by comparing `duration_minutes` and `tss` only, so a drift correction that
-rewrites the planned zones while holding both stays unstamped — right, because nothing was cut.
+rewrites the planned zones while holding both does not count — right, because nothing was cut.
 The rule predates this section; re-read with planned zones in the schema it still lands where it
-should, and the next reader should not have to re-derive that.
+should, and the next reader should not have to re-derive that. It survived the move to the
+revision log unchanged (DESIGN_workout_revisions.md §7), which is the same comparison asked at
+read time instead of write time.
 
 **Back-compat needs nothing, and `data pull` could not help if it did.** A pull re-fetches
 *completed activities* from Garmin; these columns sit on `workouts` and are authored by the coach,
@@ -1258,6 +1271,15 @@ allowlist, so the athlete-readable sentence — `Target: ~25min recovery, ~30min
 threshold, ~18min VO2max+` — must be **rendered from the columns at display time and never
 stored**, or every regeneration that nudges a target by two minutes marks the row stale and
 re-pushes the calendar event.
+
+**Amendment — the rendering rule stands, the freshness consequence does not.** Rendering the
+sentence at display time is still right, for the reason above. But a target-only change no
+longer leaves the event reading `synced`: `CALENDAR_FIELDS` now carries `revision_id`, so any
+appended revision — and a nudged target is one, zones being part of a prescription — marks the
+row stale (DESIGN_calendar_lineage.md §6). That is the correct answer to a question this
+paragraph got backwards: an event whose `Target:` line disagrees with the plan is a wrong
+event, not a saved round-trip. The `rpe` precedent went the same way, and for the same reason —
+it reaches Calendar now, on the `Duration | TSS | RPE` line.
 
 **Zone names, not indices.** `CURRENCIES` already carries them. `30 min aerobic` is what the
 athlete can act on, and it survives the ruler shift below in a way `30 min Z2` does not; the

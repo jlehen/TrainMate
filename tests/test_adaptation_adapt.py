@@ -2,12 +2,13 @@ import io
 import os
 import unittest
 from contextlib import redirect_stdout
-from unittest.mock import Mock, patch
+from unittest.mock import patch
 
-from tests.helpers import clear_all_tables, rebind_test_db
+from tests.helpers import clear_all_tables, rebind_test_db, save_workout
 
 TEST_DB_PATH = os.path.join(os.path.dirname(__file__), "test_adaptation_adapt.db")
 
+from trainmate import runtime
 from trainmate.db import Database
 import trainmate.db
 import trainmate.coach
@@ -102,21 +103,21 @@ class TestAdaptationAdapt(unittest.TestCase):
             test_db.save_metric_cache("2026-06-03", 56, 42, 60, 35, 14.0, 8.0, 1.75)
             test_db.save_baseline("2026-06-03", 50.0, 2.0, 60.0, 5.0, 80.0, 5.0)
 
-            test_db.save_workout(
+            save_workout(test_db,
                 "2026-06-01", "running", "Easy Run", "30 mins",
                 duration_minutes=30, rpe=4, tss=20,
             )
-            test_db.save_workout(
+            save_workout(test_db,
                 "2026-06-02", "cycling", "Tempo Ride", "60 mins",
                 duration_minutes=60, rpe=6, tss=40,
             )
             # Never trained, on a day that is over -> a real miss.
-            test_db.save_workout(
+            save_workout(test_db,
                 "2026-06-02", "running", "Skipped Recovery Jog", "20 mins",
                 duration_minutes=20, rpe=2, tss=10,
             )
             # On the evaluation date itself: not trained YET, so pending, not missed.
-            test_db.save_workout(
+            save_workout(test_db,
                 "2026-06-03", "running", "Interval Session", "45 mins",
                 duration_minutes=45, rpe=8, tss=60,
             )
@@ -446,11 +447,11 @@ class TestAdaptationAdapt(unittest.TestCase):
             test_db.save_baseline("2026-06-03", 50.0, 2.0, 60.0, 5.0, 80.0, 5.0)
 
             # Today's planned ride and a future running session.
-            test_db.save_workout(
+            save_workout(test_db,
                 "2026-06-03", "cycling", "Aerobic Base Endurance", "70 mins",
                 duration_minutes=70, rpe=4, tss=45,
             )
-            test_db.save_workout(
+            save_workout(test_db,
                 "2026-06-04", "running", "Interval Session", "45 mins",
                 duration_minutes=45, rpe=8, tss=60,
             )
@@ -533,15 +534,15 @@ class TestAdaptationAdapt(unittest.TestCase):
             test_db.save_metric_cache("2026-06-03", 50, 60, 80, 20, 10.0, 8.0, 1.1)
             test_db.save_baseline("2026-06-03", 50.0, 2.0, 60.0, 5.0, 80.0, 5.0)
 
-            test_db.save_workout(
+            save_workout(test_db,
                 "2026-06-04", "running", "Easy Run", "30 mins easy Z2",
                 duration_minutes=30, rpe=4, tss=20,
             )
-            test_db.save_workout(
+            save_workout(test_db,
                 "2026-06-05", "cycling", "Endurance Ride", "60 mins aerobic base",
                 duration_minutes=60, rpe=5, tss=40,
             )
-            test_db.save_workout(
+            save_workout(test_db,
                 "2026-06-06", "running", "Friday Tempo", "45 mins w/ tempo blocks",
                 duration_minutes=45, rpe=7, tss=55,
             )
@@ -558,7 +559,7 @@ class TestAdaptationAdapt(unittest.TestCase):
         """Applying an adaptation that MOVES THE LOAD stamps `adapted_at` and bumps
         `adaptation_count`; a second load-moving adapt of the same session bumps it
         again. Non-adapt saves leave both untouched."""
-        test_db.save_workout(
+        save_workout(test_db,
             "2026-06-20", "running", "Friday Tempo", "45 mins w/ tempo blocks",
             duration_minutes=45, rpe=7, tss=55,
         )
@@ -567,9 +568,7 @@ class TestAdaptationAdapt(unittest.TestCase):
         self.assertIsNone(row["adapted_at"])
         self.assertEqual(row["adaptation_count"], 0)
 
-        service = trainmate.coach.CoachService(
-            db_instance=test_db, calendar_syncer_instance=Mock()
-        )
+        service = trainmate.coach.CoachService(db_instance=test_db)
         proposed = [{
             "date": "2026-06-20", "sport_type": "running", "title": "Easy Tempo",
             "description": "Cut to Z2", "modification_reason": "Eased for fatigue",
@@ -657,13 +656,11 @@ class TestAdaptationAdapt(unittest.TestCase):
         NOT be stamped as an easing (DESIGN_intensity_distribution.md §9.5). Stamping it
         would raise the DO NOT COMPOUND bar for a session that was never cut, blunting
         adapt's fatigue response the next time the athlete is genuinely wrecked."""
-        test_db.save_workout(
+        save_workout(test_db,
             "2026-06-21", "running", "Easy Hour", "60 min conversational.",
             duration_minutes=60, rpe=4, tss=40,
         )
-        service = trainmate.coach.CoachService(
-            db_instance=test_db, calendar_syncer_instance=Mock()
-        )
+        service = trainmate.coach.CoachService(db_instance=test_db)
         # Same duration, same TSS (as a float against a stored int) — only the
         # prescription's wording sharpens, with an explicit HR guard rail.
         proposed = [{
@@ -697,14 +694,12 @@ class TestAdaptationAdapt(unittest.TestCase):
         test's date and does not re-emit benchmark_type must not inherit it, or a social
         ride is filed as an FTP result and the block believes it already tested
         (DESIGN_benchmark_workouts.md §4.2)."""
-        test_db.save_workout(
+        save_workout(test_db,
             "2026-06-24", "cycling", "FTP Test", "[FTP Test]\n20-min test or ramp.",
             duration_minutes=75, rpe=9, tss=90, benchmark_type="ftp_20min",
             source="generated",
         )
-        service = trainmate.coach.CoachService(
-            db_instance=test_db, calendar_syncer_instance=Mock()
-        )
+        service = trainmate.coach.CoachService(db_instance=test_db)
         proposed = [{
             "date": "2026-06-24", "sport_type": "cycling", "title": "Friends Group Ride",
             "description": "[Friends Group Ride]\n90 min social pace.",
@@ -723,14 +718,12 @@ class TestAdaptationAdapt(unittest.TestCase):
         """A move emits the test on its new date and a replacement on the old one. The
         test keeps its flag; the replacement left behind loses it
         (DESIGN_benchmark_workouts.md §4.2)."""
-        test_db.save_workout(
+        save_workout(test_db,
             "2026-06-24", "cycling", "FTP Test", "[FTP Test]\n20-min test or ramp.",
             duration_minutes=75, rpe=9, tss=90, benchmark_type="ftp_20min",
             source="generated",
         )
-        service = trainmate.coach.CoachService(
-            db_instance=test_db, calendar_syncer_instance=Mock()
-        )
+        service = trainmate.coach.CoachService(db_instance=test_db)
         proposed = [
             {
                 "date": "2026-06-24", "sport_type": "cycling", "title": "Easy Spin",
@@ -760,15 +753,13 @@ class TestAdaptationAdapt(unittest.TestCase):
         and inserts a yoga one. The new session should inherit the displaced strength
         session's description + load as its `original_*` snapshot, so the Calendar event
         can surface what was originally planned."""
-        test_db.save_workout(
+        save_workout(test_db,
             "2026-07-02", "strength_training", "Heavy Legs",
             "5x5 back squat + accessories.",
             duration_minutes=60, rpe=7, tss=70,
         )
 
-        service = trainmate.coach.CoachService(
-            db_instance=test_db, calendar_syncer_instance=Mock()
-        )
+        service = trainmate.coach.CoachService(db_instance=test_db)
         proposed = [{
             "date": "2026-07-02", "sport_type": "yoga", "title": "Easy Mobility",
             "description": "20 min easy mobility flow.",

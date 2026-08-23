@@ -3,7 +3,7 @@ import os
 import unittest
 from unittest.mock import patch
 
-from tests.helpers import clear_all_tables, run_cli, rebind_test_db
+from tests.helpers import clear_all_tables, run_cli, rebind_test_db, save_workout
 from trainmate.coach.proposals import GenerateProposal
 
 TEST_DB_PATH = os.path.join(os.path.dirname(__file__), "test_trainmate_cli_plans.db")
@@ -353,7 +353,7 @@ class TestCliPlans(unittest.TestCase):
             objective_id=second, strategy="Second plan", goals_hash="g",
             constraints_hash="c", mesocycles=[],
         )
-        test_db.save_workout(
+        save_workout(test_db,
             date="2026-06-02", sport_type="running", title="Easy Run",
             description="Zone 2", duration_minutes=60, rpe=3, tss=45,
             macrocycle_id=macro,

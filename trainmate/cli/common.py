@@ -97,7 +97,7 @@ def mark_adherence_from_results(
     Today's event is skipped only when no activity was matched — marking an
     unmatched today's session would falsely read as missed. Workouts without an
     existing Calendar event are skipped, as is any event already carrying this
-    exact verdict over unchanged content (matched via `marked_signature`), so
+    exact verdict over unchanged content (matched via `adherence_pushed_signature`), so
     re-running compare over a settled range issues no redundant Calendar writes.
     Best-effort per event: a Calendar failure degrades to a warning. Returns the
     number of events actually (re)marked; the caller owns any summary line."""
@@ -129,7 +129,7 @@ def mark_adherence_from_results(
         # identical update. Re-running compare over a settled past range is the
         # common case, so this avoids a burst of pointless API writes.
         signature = adherence_signature(w, adherence)
-        if w.get('marked_signature') == signature:
+        if w.get('adherence_pushed_signature') == signature:
             continue
         try:
             runtime.calendar_syncer.sync_workout(w, adherence=adherence)

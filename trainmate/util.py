@@ -47,6 +47,18 @@ def days_between(start: str, end: str) -> int:
     return (datetime.strptime(end, fmt).date() - datetime.strptime(start, fmt).date()).days
 
 
+def fmt_timestamp(iso: Optional[str]) -> str:
+    """Renders a stored UTC ISO timestamp as 'YYYY-MM-DD HH:MM'.
+
+    Falls back to the raw string if it isn't parseable (e.g. a date-only legacy value)."""
+    if not iso:
+        return "?"
+    try:
+        return datetime.fromisoformat(iso).strftime("%Y-%m-%d %H:%M")
+    except ValueError:
+        return iso
+
+
 def is_color_enabled() -> bool:
     """Checks if color output is supported and not explicitly disabled."""
     return sys.stdout.isatty() and not os.environ.get("NO_COLOR")

@@ -249,29 +249,35 @@ its own command — are indistinguishable to it: both batches carry the same
 `macrocycle_id`, and only the newest survives its `MAX(archived_at)` selector. So
 regenerating workouts twice without touching the strategy had no undo.
 
-### Batch = `archived_at`
+### Batch = `archived_at` → superseded by `change_id`
 
-No new state was needed. One `archive_future_workouts` call stamps every row it displaces
-with a single `archived_at` value, so that timestamp already *is* a batch identity: the
-set of sessions that were live at that moment, whatever plan version tagged them and
-however they got there (generated, manually added, adapted). `get_archived_batches()`
-groups on it; `restore_workout_batch(archived_at, from_date)` restores one.
-`restore_macrocycle_workouts` is now a thin wrapper — resolve the version's newest stamp,
-delegate — so both commands share one restore path.
+**This section is superseded by DESIGN_workout_revisions.md §10.** It is kept because the
+reasoning below is what led there, and because the date floor it introduced still holds.
 
-### Mechanics (`workout_rollback(batch=None)`)
-1. Resolve the target batch **before** archiving anything: the newest stamp by default, or
-   an explicit one. The archive in step 2 creates a newer batch that would otherwise
-   become the default and restore what it just displaced.
-2. `_archive_and_teardown(today)` — archive the live upcoming sessions, delete their
-   events (the shared helper `workout generate` and `plan rollback` also use).
-3. `restore_workout_batch(target, today)` + `sync_multiple` to re-push.
+The original design keyed a batch on `archived_at`: one `archive_future_workouts` call
+stamped every row it displaced with a single timestamp, so that timestamp *was* a batch
+identity. It cost no new state, and it had one blind spot that turned out to be decisive:
+it is stamped on the rows that **died**. `workout adapt` killed no rows, so it created no
+batch, so there was no "undo just the adapt" — rolling back after an adapt also reverted
+the generation beneath it.
 
-The active macrocycle is **not** touched: this is an undo of a workout generation, not of
-a plan decision. A restored row keeps the `macrocycle_id` of the version that created it,
-so it can be older than the active plan — harmless, since nothing reads workouts through
-that tag except `plan show`'s per-version listing. Like `plan rollback`, it is its own
-inverse: the batch it archives becomes the newest, so calling it again steps forward.
+Under revisions the batch is `change_id`, carried by the rows a command **created**. Every
+write is therefore a batch and every batch is undoable by one primitive. See
+DESIGN_workout_revisions.md §10 for the mechanics; the rest of this section describes what
+carried over.
+
+### Mechanics (`workout_rollback(change_id=None)`)
+
+`rollback_to_change(change_id, today)` is point-in-time: it reverts the target change and
+every change made after it, putting each affected slot back to the revision that was live
+just before the target ran. With no target it undoes the newest change, which is what
+makes an adapt undoable on its own.
+
+The active macrocycle is **not** touched: this is an undo of a workout write, not of a
+plan decision. A restored session keeps the `macrocycle_id` of the version that created
+it, so it can be older than the active plan — harmless, since nothing reads workouts
+through that tag except `plan show`'s per-version listing. It stays its own inverse: the
+rollback is itself a change, so calling it again undoes the undo.
 
 ### The date floor (bug fix)
 
@@ -281,30 +287,28 @@ week ago still contains rows for days that have since passed, and those slots ar
 live rows the archive step deliberately left alone. Restoring them wholesale put **two
 live workouts on the same `(date, sport_type)`** — breaking the uniqueness
 `get_workout`/`save_workout`'s upsert assume — and re-created Calendar events in the past.
-`plan rollback` had the same defect; the floor lives in the shared
-`restore_workout_batch`, so both are fixed. Rows below the floor stay archived.
+`plan rollback` had the same defect; the floor now lives in `rollback_to_change`, which
+both commands share, so both are fixed. Slots below the floor are left alone.
 
-`get_archived_batches(from_date)` reports `restorable` (rows at or after the floor)
-alongside the batch total, so the CLI and web can show what a restore would actually
-revive and refuse a batch that is wholly in the past instead of "restoring" nothing.
+`get_workout_changes(from_date)` reports `restorable` (revisions at or after the floor)
+alongside the change's total, so the CLI and web can show what an undo would actually
+reach and refuse a change that is wholly in the past instead of "restoring" nothing.
 
 ### CLI & Web
 
-- **`workout batches`** — lists batches newest first with a positional `#N`, archive time,
-  counts, date span, and plan version. Numbering is positional and shifts after a rollback;
-  the underlying key is the timestamp. Like `plan versions`, `workout b` resolves as an
-  unambiguous **prefix**, not a registered alias.
-  The plan **in force** carries no `archived_at`, so a listing of batches alone silently
-  omits the one thing a reader looks for first — and `#1`, the default rollback target,
-  then reads as "the current plan" when it is in fact the plan the current one displaced.
-  So the live sessions are counted separately (`_live_batch`) and printed above the
-  numbered rows in the same columns, labelled `live` rather than `#N`: shown because it is
-  the reference point, unnumbered because a rollback *archives* it rather than restoring
-  it. `--batch` only ever addresses the numbered rows.
-- **`workout rollback [--batch N] [-y]`** (registered alias `rb`) — restores batch `#N`,
-  default `#1`. Confirms interactively, naming both what comes back and what gets archived.
-- Not to be confused with **`workout restore <id>`**, which un-cancels a single
-  soft-removed session (the `removed` axis, ARCHITECTURE.md §5). Both help texts say so.
-- Web (read-only, like the plan panel above): `GET /api/workouts/batches` feeds an
-  "Archived workout batches" panel under the schedule; restoring one is `tm workout
-  rollback`, which the panel's footer names.
+- **`workout batches`** — lists changes newest first with a positional `#N`, when, kind,
+  revision count, date span, and plan version. Numbering is positional and shifts after
+  each change; the underlying key is the change id. Like `plan versions`, `workout b`
+  resolves as an unambiguous **prefix**, not a registered alias.
+  The unnumbered `live` row this section used to describe is gone, and its reason with it:
+  it existed because the plan in force carried no `archived_at` and so appeared nowhere in
+  a listing keyed on death. Keyed on birth, the change that wrote the plan in force is an
+  ordinary row at `#1` — and it is undoable like any other, which is precisely what the
+  `live` row had to explain was not the case.
+- **`workout rollback [--batch N] [-y]`** (registered alias `rb`) — undoes change `#N` and
+  every change after it, default `#1`. Confirms interactively, naming what it undoes.
+- Not to be confused with **`workout restore <id>`**, which un-cancels a single session
+  (the void axis, ARCHITECTURE.md §5). Both help texts say so.
+- Web (read-only, like the plan panel above): `GET /api/workouts/batches` feeds a
+  "Workout changes" panel under the schedule; undoing one is `tm workout rollback`, which
+  the panel's footer names.

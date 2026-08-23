@@ -1,3 +1,4 @@
+from tests.helpers import save_workout
 import os
 import unittest
 
@@ -35,61 +36,68 @@ class TestCalendarState(unittest.TestCase):
         self.db.mark_workout_pushed(wid, event_id, calendar_signature(self._row(wid)))
 
     def test_unpushed_until_first_push(self):
-        wid = self.db.save_workout(
+        wid = save_workout(self.db,
             date="2026-07-01", sport_type="running", title="Run", description="easy",
         )
         self.assertEqual(calendar_status(self._row(wid)), "unpushed")
 
     def test_synced_after_push(self):
-        wid = self.db.save_workout(
+        wid = save_workout(self.db,
             date="2026-07-01", sport_type="running", title="Run", description="easy",
         )
         self._push(wid)
         self.assertEqual(calendar_status(self._row(wid)), "synced")
 
     def test_content_edit_makes_stale(self):
-        wid = self.db.save_workout(
+        wid = save_workout(self.db,
             date="2026-07-01", sport_type="running", title="Run", description="easy",
         )
         self._push(wid)
         # Edit a calendar-relevant field through the normal write path.
-        self.db.save_workout(
+        save_workout(self.db,
             date="2026-07-01", sport_type="running", title="Run", description="HARD intervals",
         )
         self.assertEqual(calendar_status(self._row(wid)), "stale")
 
-    def test_rpe_edit_stays_synced(self):
-        """rpe never reaches Calendar, so changing it must NOT mark the row stale —
-        the win over the old `synced` flag, which save_workout would have reset."""
-        wid = self.db.save_workout(
+    def test_rpe_edit_makes_stale(self):
+        """rpe DOES reach Calendar — the event carries a `Duration | TSS | RPE` line — so
+        editing it leaves the event wrong until it is re-pushed
+        (DESIGN_calendar_lineage.md §6)."""
+        wid = save_workout(self.db,
             date="2026-07-01", sport_type="running", title="Run", description="easy", rpe=3,
         )
         self._push(wid)
-        self.db.save_workout(
+        save_workout(self.db,
             date="2026-07-01", sport_type="running", title="Run", description="easy", rpe=8,
         )
-        self.assertEqual(calendar_status(self._row(wid)), "synced")
+        self.assertEqual(calendar_status(self._row(wid)), "stale")
 
     def test_reschedule_makes_stale(self):
-        wid = self.db.save_workout(
+        wid = save_workout(self.db,
             date="2026-07-01", sport_type="running", title="Run", description="easy",
         )
         self._push(wid)
-        self.db.update_workout_date(wid, "2026-07-03", "Travelling")
+        with self.db.workout_change(kind="swap") as change:
+            change.append(
+                date="2026-07-03", sport_type="running", title="Run",
+                description="easy", lineage_id=wid, reason="Travelling",
+            )
         self.assertEqual(calendar_status(self._row(wid)), "stale")
 
     def test_remove_and_restore_toggle_stale(self):
-        wid = self.db.save_workout(
+        wid = save_workout(self.db,
             date="2026-07-01", sport_type="running", title="Run", description="easy",
         )
         self._push(wid)
-        self.db.mark_workout_removed(wid, reason="Sick")
-        # Removed rows are excluded from default reads; fetch by id.
+        with self.db.workout_change(kind="rm") as change:
+            change.void(date="2026-07-01", sport_type="running", reason="Sick")
+        # Cancelled sessions are excluded from default reads; fetch by id.
         self.assertEqual(calendar_status(self._row(wid)), "stale")
-        # Re-push the removed state, then restore: back to stale again.
+        # Re-push the cancelled state, then restore: back to stale again.
         self._push(wid)
         self.assertEqual(calendar_status(self._row(wid)), "synced")
-        self.db.restore_workout(wid)
+        with self.db.workout_change(kind="restore") as change:
+            change.restore(self.db.revision_before_live_void(wid))
         self.assertEqual(calendar_status(self._row(wid)), "stale")
 
     def test_generated_workout_synced_after_eager_push(self):
@@ -97,7 +105,7 @@ class TestCalendarState(unittest.TestCase):
         Regression: a hand-built sync dict once omitted `source`, so the push-time hash was
         computed with source=None while the stored row had 'generated' — every generated
         workout read stale the instant it synced. Pushing the row itself keeps them equal."""
-        wid = self.db.save_workout(
+        wid = save_workout(self.db,
             date="2026-07-01", sport_type="running", title="Run", description="easy",
             source="generated",
         )
@@ -106,11 +114,11 @@ class TestCalendarState(unittest.TestCase):
         self.assertEqual(calendar_status(self._row(wid)), "synced")
 
     def test_repush_returns_to_synced(self):
-        wid = self.db.save_workout(
+        wid = save_workout(self.db,
             date="2026-07-01", sport_type="running", title="Run", description="easy",
         )
         self._push(wid)
-        self.db.save_workout(
+        save_workout(self.db,
             date="2026-07-01", sport_type="running", title="Run", description="changed",
         )
         self.assertEqual(calendar_status(self._row(wid)), "stale")

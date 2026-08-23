@@ -10,7 +10,7 @@ import unittest
 from contextlib import redirect_stdout
 from unittest.mock import patch
 
-from tests.helpers import clear_all_tables, rebind_test_db, unstamp_schema
+from tests.helpers import clear_all_tables, rebind_test_db, unstamp_schema, save_workout
 
 TEST_DB_PATH = os.path.join(os.path.dirname(__file__), "test_trainmate_constraints.db")
 
@@ -213,11 +213,11 @@ class TestConstraintPlanImpact(unittest.TestCase):
     def test_displaced_load_trigger_fires_even_when_advisory(self):
         # Trailing week (2026-07-25..2026-07-31, the 7 days before the constraint
         # starts) carries 200 TSS of planned load.
-        test_db.save_workout(date="2026-07-28", sport_type="running",
+        save_workout(test_db, date="2026-07-28", sport_type="running",
                              title="Long Run", description="", tss=200)
         # The constraint's 3-day window overlaps 120 TSS — 60% of the trailing week,
         # over the default 50% threshold.
-        test_db.save_workout(date="2026-08-02", sport_type="running",
+        save_workout(test_db, date="2026-08-02", sport_type="running",
                              title="Tempo", description="", tss=120)
         c = {"rest": 0, "start_date": "2026-08-01",
              "end_date": "2026-08-03", "title": "big trip"}
@@ -226,9 +226,9 @@ class TestConstraintPlanImpact(unittest.TestCase):
         self.assertTrue(coach_service.constraint_is_plan_shaping(c, impact))
 
     def test_small_displaced_load_is_not_plan_shaping(self):
-        test_db.save_workout(date="2026-07-28", sport_type="running",
+        save_workout(test_db, date="2026-07-28", sport_type="running",
                              title="Long Run", description="", tss=200)
-        test_db.save_workout(date="2026-08-01", sport_type="running",
+        save_workout(test_db, date="2026-08-01", sport_type="running",
                              title="Easy", description="", tss=20)  # 10% of the trailing week
         c = {"rest": 0, "start_date": "2026-08-01",
              "end_date": "2026-08-01", "title": "no run"}
@@ -381,7 +381,7 @@ class TestHonoredAt(unittest.TestCase):
         # window tier for it (§8). Every case below is about some OTHER term of that rule,
         # so give them all a session to displace; `sessions=False` isolates this one.
         if sessions:
-            test_db.save_workout(end, "running", "Tempo", "40min", duration_minutes=40)
+            save_workout(test_db, end, "running", "Tempo", "40min", duration_minutes=40)
         return cid
 
     def test_a_constraint_with_nothing_scheduled_in_its_window_is_not_offered(self):
@@ -449,7 +449,7 @@ class TestHonoredAt(unittest.TestCase):
         the `y` — i.e. for `workout_revision_apply`."""
         self._plan("2026-06-01", "2026-06-30")
         cid = self._constraint("2026-06-10", "2026-06-20")
-        test_db.save_workout("2026-06-11", "running", "Tempo", "40min",
+        save_workout(test_db, "2026-06-11", "running", "Tempo", "40min",
                              duration_minutes=40, rpe=6, tss=45)
         mock_client.complete.return_value = {
             "change_needed": True, "reason": "Eased.",
@@ -467,21 +467,26 @@ class TestHonoredAt(unittest.TestCase):
             coach_service.workout_revision_apply(proposal)
         self.assertIsNotNone(test_db.get_constraint(cid)["honored_at"])
 
-    def test_a_rollback_clears_only_honorings_newer_than_the_restored_batch(self):
+    def test_a_rollback_clears_only_honorings_newer_than_the_undone_change(self):
         """A constraint honored INTO a plan newer than the one coming back cannot be
-        reflected by the restored rows; one honored BEFORE it already was."""
+        reflected by the restored sessions; one honored BEFORE it already was.
+
+        The comparison survived the move to revisions with its key changed: the batch is
+        now the change that CREATED the rows, so it is that change's `created_at` a
+        honoring is measured against (DESIGN_workout_revisions.md §10)."""
         older = self._constraint("2026-06-10", "2026-06-20", title="Older")
         newer = self._constraint("2026-06-10", "2026-06-20", title="Newer")
         test_db.mark_honored(older)
-        test_db.save_workout("2026-06-11", "running", "Tempo", "40min")
-        # `archive_future_workouts` returns the rows as they were BEFORE archival, so the
-        # batch stamp is read back rather than taken from what it returned.
-        test_db.archive_future_workouts("2026-06-01")
-        archived_at = test_db.get_archived_batches()[0]["archived_at"]
+        save_workout(test_db, "2026-06-11", "running", "Tempo", "40min")
+        # The change to undo: the one that rewrote the session after `older` was honored.
+        with test_db.workout_change(kind="generate") as change:
+            change.append(date="2026-06-11", sport_type="running", title="Tempo",
+                          description="60min")
+        rewrite = test_db.get_workout_changes()[0]["id"]
         test_db.mark_honored(newer)
 
-        # The restore reports what it un-honored, so the CLI can name it afterwards.
-        _restored, unhonored = test_db.restore_workout_batch(archived_at, "2026-06-01")
+        # The rollback reports what it un-honored, so the CLI can name it afterwards.
+        _restored, unhonored = test_db.rollback_to_change(rewrite, "2026-06-01")
         self.assertEqual([c["id"] for c in unhonored], [newer])
         self.assertIsNotNone(test_db.get_constraint(older)["honored_at"])
         self.assertIsNone(test_db.get_constraint(newer)["honored_at"])

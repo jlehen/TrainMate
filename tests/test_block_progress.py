@@ -4,7 +4,7 @@ import os
 import unittest
 from unittest.mock import patch
 
-from tests.helpers import clear_all_tables, rebind_test_db
+from tests.helpers import clear_all_tables, rebind_test_db, save_workout
 
 TEST_DB_PATH = os.path.join(os.path.dirname(__file__), "test_trainmate_block_progress.db")
 
@@ -70,7 +70,7 @@ class TestBlockProgressContext(unittest.TestCase):
         return coach_service._block_progress_context(as_of, gen_start)[0]
 
     def _planned(self, date: str, tss: float, **kwargs) -> int:
-        return test_db.save_workout(
+        return save_workout(test_db,
             date=date, sport_type=kwargs.pop("sport_type", "cycling"),
             title=kwargs.pop("title", "Threshold"),
             description="[Threshold]\n4x8min", duration_minutes=60, rpe=7, tss=tss,
@@ -272,7 +272,7 @@ class TestBlockCompositionContext(unittest.TestCase):
         )
 
     def _prescribed(self, date: str, zones) -> int:
-        return test_db.save_workout(
+        return save_workout(test_db,
             date=date, sport_type="cycling", title="Threshold",
             description="[Threshold]\n4x8min", duration_minutes=int(sum(zones) / 60),
             rpe=7, tss=100.0, source="generated", macrocycle_id=self.macro_id,

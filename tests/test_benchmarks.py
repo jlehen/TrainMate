@@ -1,7 +1,7 @@
 import os
 import unittest
 
-from tests.helpers import clear_all_tables, run_cli, rebind_test_db
+from tests.helpers import clear_all_tables, run_cli, rebind_test_db, save_workout
 
 TEST_DB_PATH = os.path.join(os.path.dirname(__file__), "test_trainmate_benchmarks.db")
 
@@ -108,7 +108,7 @@ class TestBenchmarkDB(unittest.TestCase):
         self.assertIsNone(test_db.get_latest_benchmark("ftp"))
 
     def test_workout_benchmark_type_persists_and_preserves(self):
-        wid = test_db.save_workout(
+        wid = save_workout(test_db,
             date="2026-08-05", sport_type="cycling", title="FTP Test",
             description="[FTP Test]", benchmark_type="ftp_20min", source="generated",
         )
@@ -116,7 +116,7 @@ class TestBenchmarkDB(unittest.TestCase):
             test_db.get_workout_by_id(wid)["benchmark_type"], "ftp_20min"
         )
         # A later same-row save that omits benchmark_type must preserve it (COALESCE).
-        test_db.save_workout(
+        save_workout(test_db,
             date="2026-08-05", sport_type="cycling", title="FTP Test v2",
             description="[FTP Test]",
         )
@@ -128,11 +128,11 @@ class TestBenchmarkDB(unittest.TestCase):
         """COALESCE must not make the flag unclearable: §4.2's POSTPONE fallback replaces a
         test with an ordinary session on the same row, and that row must stop being a test
         (DESIGN_benchmark_workouts.md §3.1)."""
-        wid = test_db.save_workout(
+        wid = save_workout(test_db,
             date="2026-08-05", sport_type="cycling", title="FTP Test",
             description="[FTP Test]", benchmark_type="ftp_20min", source="generated",
         )
-        test_db.save_workout(
+        save_workout(test_db,
             date="2026-08-05", sport_type="cycling", title="Easy Spin",
             description="[Easy Spin]", clear_benchmark=True,
         )
@@ -496,7 +496,7 @@ class TestBenchmarkPlacementGuards(unittest.TestCase):
         """Regenerating mid-boundary-week must not advise regenerating to recover a test
         the athlete has already done (DESIGN_block_progress.md §4.1)."""
         macro_id = self._macrocycle_with_boundary()
-        test_db.save_workout(
+        save_workout(test_db,
             date="2026-08-25", sport_type="cycling", title="FTP Test",
             description="[FTP Test]\n20-min test", benchmark_type="ftp_20min",
             macrocycle_id=macro_id,
@@ -518,7 +518,7 @@ class TestBenchmarkPlacementGuards(unittest.TestCase):
         """The stored-workout lookup is bounded below gen_start: the previous plan's future
         rows are still live when this check runs and must not answer for the new plan."""
         macro_id = self._macrocycle_with_boundary()
-        test_db.save_workout(
+        save_workout(test_db,
             date="2026-08-28", sport_type="cycling", title="FTP Test",
             description="[FTP Test]\n20-min test", benchmark_type="ftp_20min",
             macrocycle_id=macro_id,
@@ -537,7 +537,7 @@ class TestBenchmarkPlacementGuards(unittest.TestCase):
         """A test within MIN_RETEST_DAYS of the boundary means none is due there
         (benchmarks.md §1 floor) — warning would nag toward violating it."""
         macro_id = self._macrocycle_with_boundary()
-        test_db.save_workout(
+        save_workout(test_db,
             date="2026-08-10", sport_type="cycling", title="FTP Test",
             description="[FTP Test]\n20-min test", benchmark_type="ftp_20min",
             macrocycle_id=macro_id,
@@ -609,7 +609,7 @@ class TestBenchmarkPlacementGuards(unittest.TestCase):
             date="2026-07-31", sport_type="cycling", anchor_kind="ftp",
             value=220.0, unit="W", source="manual",
         )
-        test_db.save_workout(
+        save_workout(test_db,
             date="2026-08-10", sport_type="cycling", title="FTP Test",
             description="[FTP Test]\n20-min test", benchmark_type="ftp_20min",
             macrocycle_id=macro_id,

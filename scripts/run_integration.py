@@ -36,22 +36,32 @@ def main() -> None:
     tomorrow_str = (datetime.now(timezone.utc) + timedelta(days=1)).strftime("%Y-%m-%d")
     
     # Workout 1: Standard Planned session
-    db.save_workout(
-        date=today_str,
-        sport_type="running",
-        title="Aerobic Base Run",
-        description="45 minutes in HR Zone 2 (130-145 bpm). Steady flat pace.",
-    )
-    
-    # Workout 2: Modified session
-    db.save_workout(
-        date=tomorrow_str,
-        sport_type="cycling",
-        title="Active Recovery Spin",
-        description="30 minutes of light cycling. Keep heart rate below 110 bpm.",
-        original_description="90 minutes endurance road cycling with hill climbs.",
-        modification_reason="HRV average dropped 1.2 SD below chronic baseline."
-    )
+    with db.workout_change(kind="generate", summary="Integration fixture.") as change:
+        change.append(
+            date=today_str,
+            sport_type="running",
+            title="Aerobic Base Run",
+            description="45 minutes in HR Zone 2 (130-145 bpm). Steady flat pace.",
+        )
+        change.append(
+            date=tomorrow_str,
+            sport_type="cycling",
+            title="90 minutes endurance road cycling with hill climbs.",
+            description="90 minutes endurance road cycling with hill climbs.",
+        )
+
+    # Workout 2: the same session, eased — a second revision of the same lineage.
+    with db.workout_change(
+        kind="adapt", summary="HRV average dropped 1.2 SD below chronic baseline."
+    ) as change:
+        change.append(
+            date=tomorrow_str,
+            sport_type="cycling",
+            title="Active Recovery Spin",
+            description="30 minutes of light cycling. Keep heart rate below 110 bpm.",
+            reason="HRV average dropped 1.2 SD below chronic baseline.",
+        )
+
     
     print("Workouts created in local SQLite database.")
 
@@ -69,7 +79,7 @@ def main() -> None:
         print("Database verify sync status:")
         for w in synced_workouts:
             print(
-                f"- Date: {w['date']} | Synced: {w['synced']} | "
+                f"- Date: {w['date']} | Pushed: {bool(w['pushed_signature'])} | "
                 f"Adapted: {bool(w['modification_reason'])} | "
                 f"Google Event ID: {w['google_event_id']}"
             )

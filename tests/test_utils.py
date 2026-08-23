@@ -23,7 +23,7 @@ class TestUtils(unittest.TestCase):
             "limit such as thirty\n"
             "characters."
         )
-        
+
         list_text = (
             "  - This is an indented list item that will also wrap "
             "properly at a width of forty characters."
@@ -74,7 +74,7 @@ class TestUtils(unittest.TestCase):
             "          decision because the HRV\n"
             "          values are drop."
         )
-        
+
         # Test with color function
         with patch("trainmate.util.is_color_enabled", return_value=True):
             formatted_colored = format_labeled_text(label, text, width=40, color_fn=yellow)

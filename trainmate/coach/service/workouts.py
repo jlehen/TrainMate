@@ -1,6 +1,6 @@
-from contextlib import contextmanager
+from contextlib import nullcontext
 from datetime import date, datetime, timedelta
-from typing import Any, Iterator, List, Optional, Sequence, Tuple, Dict
+from typing import Any, List, Optional, Tuple, Dict
 from trainmate.config import config
 from trainmate.types import Constraint, Workout
 from trainmate.adherence import analyze_adherence
@@ -9,23 +9,10 @@ from trainmate.coach.proposals import GenerateProposal
 from trainmate.coach.revisions import normalize_load_fields
 from trainmate.sports import canonical_sport
 from trainmate.benchmarks import MIN_RETEST_DAYS
+from trainmate.calendar_reconcile import verbose_events
 from trainmate import intensity
-from trainmate.util import green, yellow, red, cmd, Progress
+from trainmate.util import green, yellow, cmd
 import trainmate.coach.service as _svc
-
-
-@contextmanager
-def _calendar_progress(total: int, verbose: bool) -> Iterator[Progress]:
-    """A batch of Calendar writes under one summary line and a bar; -v keeps the
-    per-event lines instead (and no bar, so they scroll undisturbed)."""
-    if verbose:
-        yield Progress(0)
-        return
-    # Imported here, not at module load: importing google_calendar builds the syncer
-    # singleton, which needs credentials (see runtime._build_calendar_syncer).
-    from trainmate.google_calendar import quiet_events
-    with quiet_events(), Progress(total) as bar:
-        yield bar
 
 
 class WorkoutGenMixin:
@@ -296,99 +283,41 @@ class WorkoutGenMixin:
                     f"days before it. If a test is due, consider regenerating."
                 ))
 
-    def _archive_and_teardown(
-        self, from_date: str, verbose: bool = False,
-        macrocycle_ids: Optional[Sequence[int]] = None
-    ) -> List[Workout]:
-        """Archives every live workout from `from_date` on and deletes their Calendar events.
-
-        The displaced rows keep their `macrocycle_id` tag and share one `archived_at` batch
-        stamp, so a later rollback can resurrect exactly this set (DESIGN_plan_rollback.md).
-        `macrocycle_ids` narrows the sweep to those plan versions' sessions, which is how
-        calling one goal off spares its neighbours (DESIGN_backward_evaluation.md §14).
-        Returns the rows as they were before archival."""
-        archived = self._db.archive_future_workouts(from_date, macrocycle_ids)
-        if not archived:
-            return archived
-        print(yellow(
-            f"Removing {len(archived)} previously planned workout(s) from Google Calendar..."
-        ))
-        stale = [ew for ew in archived if ew.get('google_event_id')]
-        with _calendar_progress(len(stale), verbose) as bar:
-            for ew in stale:
-                try:
-                    self._calendar_syncer.delete_workout_event(ew['google_event_id'])
-                except Exception as e:
-                    print(red(f"Error deleting Google Calendar event: {e}"))
-                bar.step()
-        return archived
-
-    def _push_batch(self, workouts: List[Workout], message: str, verbose: bool) -> None:
-        """Pushes a whole batch to Calendar under one summary line, bar or per-event lines."""
-        if not workouts:
-            return
-        print(green(message))
-        with _calendar_progress(len(workouts), verbose) as bar:
-            try:
-                for w in workouts:
-                    self._calendar_syncer.sync_workout(w)
-                    bar.step()
-            except Exception as e:
-                print(red(f"Error syncing to Google Calendar: {e}"))
-
     def workout_rollback(
-        self, batch: Optional[str] = None, verbose: bool = False
+        self, change_id: Optional[int] = None, verbose: bool = False
     ) -> Dict[str, Any]:
-        """Restores a previously archived batch of workouts, undoing a regeneration.
+        """Undoes a workout change — and every change made after it (§10).
 
-        The sibling of `plan_rollback` on the workout axis: it swaps the live upcoming
-        sessions for an archived batch — the most recent one by default, or the batch
-        stamped `batch` — without touching the active plan version, so it also undoes a
-        regeneration that never changed the strategy (see DESIGN_plan_rollback.md §9).
-        The current sessions are archived (their Calendar events torn down) and the
-        target batch is resurrected and re-pushed, from today onward.
+        The sibling of `plan_rollback` on the workout axis: it puts the sessions back the
+        way they were the moment before `change_id` ran, without touching the active plan
+        version, so it also undoes a regeneration that never changed the strategy. With no
+        target it undoes the newest change, which is what makes an adapt undoable on its
+        own — point-in-time reverts what came AFTER the target, never what came before
+        (DESIGN_plan_rollback.md §9, DESIGN_workout_revisions.md §10).
 
-        Returns {batch, restored_workouts, archived_workouts, first_date, last_date}.
-        Raises ValueError when there is no batch to restore.
+        Returns {change, restored_workouts, first_date, last_date, unhonored}.
+        Raises ValueError when there is nothing to undo.
         """
         today_str = _svc._today_str()
-        batches = self._db.get_archived_batches(from_date=today_str)
-        if not batches:
+        changes = self._db.get_workout_changes(from_date=today_str)
+        if not changes:
             raise ValueError(
-                "No archived workouts to roll back to — nothing has displaced the "
-                "current sessions yet."
+                "No workout changes to roll back — nothing has been written yet."
             )
+        if change_id is None:
+            change_id = changes[0]["id"]
+        target = next((c for c in changes if c["id"] == change_id), None)
+        if target is None:
+            raise ValueError(f"No workout change #{change_id}.")
 
-        # Resolved before anything is archived: the archive below stamps a newer batch,
-        # which would otherwise become the default target and restore what it just
-        # displaced.
-        if batch is not None:
-            target = next((b for b in batches if b['archived_at'] == batch), None)
-            if not target:
-                raise ValueError(f"No archived workout batch stamped {batch}.")
-        else:
-            target = batches[0]
-
-        if not target['restorable']:
-            raise ValueError(
-                f"Every workout in that batch ({target['first_date']}..."
-                f"{target['last_date']}) is in the past — there is nothing to restore."
+        with verbose_events() if verbose else nullcontext():
+            restored, unhonored = self._db.rollback_to_change(
+                change_id, today_str,
+                summary=f"Undo of change #{change_id} ({target['kind']}).",
             )
-
-        archived = self._archive_and_teardown(today_str, verbose)
-        restored, unhonored = self._db.restore_workout_batch(
-            target['archived_at'], today_str
-        )
-        self._push_batch(
-            restored,
-            f"Restoring {len(restored)} archived workout(s) in Google Calendar...",
-            verbose,
-        )
-
         return {
-            'batch': target['archived_at'],
+            'change': target,
             'restored_workouts': len(restored),
-            'archived_workouts': len(archived),
             'first_date': min((w['date'] for w in restored), default=None),
             'last_date': max((w['date'] for w in restored), default=None),
             # The restored plan predates these honorings, so they are unhonored again and
@@ -590,46 +519,79 @@ class WorkoutGenMixin:
     def workout_generate_apply(
         self, proposal: GenerateProposal, verbose: bool = False
     ) -> List[Workout]:
-        """Commits an accepted `workout generate` proposal: archive, save, push.
+        """Commits an accepted `workout generate` proposal: one change, then one reconcile.
 
-        Archives (rather than deletes) the displaced plan's future workouts so they can be
-        resurrected by `plan rollback` / `workout rollback` (DESIGN_plan_rollback.md), then
-        saves the proposed sessions and pushes them to Calendar eagerly, so the calendar
-        always mirrors the active plan. Returns the persisted rows."""
-        self._archive_and_teardown(proposal.gen_start, verbose)
+        Every day the new plan does not fill, from the generation start onward, gets a void
+        revision; every day it does fill gets a revision — unless the prescription is
+        identical to what is already live, in which case §9 suppresses it and the day is
+        left alone. The voids go first, so a session the plan drops is ended before
+        anything else can take its slot (§8). Calendar follows from the change handle's
+        reconcile pass, so nothing here pushes.
 
-        saved_workouts: List[Workout] = []
-        for w in proposal.workouts:
-            # The intensity target the coach stated while it still knew the intent
-            # (DESIGN_intensity_distribution.md §9.8) — validated, never rescaled.
-            zone_currency, zone_sec = intensity.parse_planned_zones(w)
-            wid = self._db.save_workout(
-                date=w['date'],
-                sport_type=w['sport_type'],
-                title=w['title'],
-                description=w['description'],
-                duration_minutes=w.get('duration_minutes'),
-                rpe=w.get('rpe'),
-                tss=w.get('tss'),
-                source='generated',
-                benchmark_type=w.get('benchmark_type'),
-                macrocycle_id=w.get('macrocycle_id'),
-                planned_zone_currency=zone_currency,
-                planned_zone_sec=zone_sec
-            )
-            # Sync from the persisted row, not a hand-built dict: the row's
-            # calendar_signature is what freshness is later derived against, so any field
-            # the dict omitted (e.g. source='generated') would make the push-time hash
-            # disagree and read STALE forever. Re-fetching also lets the eager event carry
-            # the same lifecycle footer a later re-push would (created_at, original load).
-            saved_workouts.append(self._db.get_workout_by_id(wid))
-
-        self._push_batch(
-            saved_workouts,
-            f"Creating {len(saved_workouts)} new workout(s) in Google Calendar...",
-            verbose,
+        Returns the sessions the plan now holds from the generation start onward.
+        """
+        proposed_slots = {
+            (w['date'], canonical_sport(w['sport_type'])) for w in proposal.workouts
+        }
+        summary = proposal.reasoning
+        # The plan version governing the span's start — context for `workout batches`,
+        # while each row keeps the per-date tag every scoping read uses (§3).
+        span_macro = next(
+            (w.get('macrocycle_id') for w in proposal.workouts
+             if w.get('macrocycle_id') is not None), None
         )
+        with (
+            verbose_events() if verbose else nullcontext(),
+            self._db.workout_change(
+                kind="generate", summary=summary, macrocycle_id=span_macro
+            ) as change,
+        ):
+            for live in self._db.get_workouts(start_date=proposal.gen_start):
+                if (live['date'], canonical_sport(live['sport_type'])) in proposed_slots:
+                    continue
+                change.void(
+                    date=live['date'], sport_type=live['sport_type'],
+                    reason="Not in the regenerated plan",
+                )
+            for w in proposal.workouts:
+                # The intensity target the coach stated while it still knew the intent
+                # (DESIGN_intensity_distribution.md §9.8) — validated, never rescaled.
+                zone_currency, zone_sec = intensity.parse_planned_zones(w)
+                change.append(
+                    date=w['date'],
+                    sport_type=w['sport_type'],
+                    title=w['title'],
+                    description=w['description'],
+                    duration_minutes=w.get('duration_minutes'),
+                    rpe=w.get('rpe'),
+                    tss=w.get('tss'),
+                    benchmark_type=w.get('benchmark_type'),
+                    macrocycle_id=w.get('macrocycle_id'),
+                    planned_zone_currency=zone_currency,
+                    planned_zone_sec=zone_sec,
+                )
+            replaced_manual = list(change.replaced_manual)
+            change_id = change.id
+
+        # The plan owns the horizon, so a regeneration may replace a session the athlete
+        # added — but it says which, and names the change to undo if they disagree (§12).
+        for w in replaced_manual:
+            print(yellow(
+                f"Replaced the session you added on {w['date']}: {w['title']} "
+                f"({w['sport_type']}). Run {cmd(f'workout rollback --batch {change_id}')} "
+                "to bring it back."
+            ))
 
         # The same warrant every other constraint this run built around gets (§8).
         honoring.stamp(self._db, proposal.covered_constraint_ids)
-        return saved_workouts
+
+        # The sessions the plan now holds in the slots it proposed — which is not the same
+        # as the revisions it appended, because §9 leaves an unchanged day alone.
+        dates = [w['date'] for w in proposal.workouts]
+        if not dates:
+            return []
+        live = self._db.get_workouts(start_date=min(dates), end_date=max(dates))
+        by_slot = {(w['date'], canonical_sport(w['sport_type'])): w for w in live}
+        return [by_slot[slot] for slot in
+                ((w['date'], canonical_sport(w['sport_type'])) for w in proposal.workouts)
+                if slot in by_slot]

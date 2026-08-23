@@ -9,7 +9,7 @@ from trainmate.google_calendar import event_url
 from trainmate.util import (
     bold, green, red, yellow, cyan, magenta, gray, cmd, aside, pad_visible, wrap_text,
     format_labeled_block, today_str as _today_str, today_date as _today_date,
-    days_between,
+    days_between, fmt_timestamp,
 )
 from trainmate.cli.common import (
     fmt_date, ensure_recent_data, mark_adherence_from_results, report_unhonored,
@@ -18,7 +18,7 @@ from trainmate.coach.proposals import GenerateProposal
 from trainmate.cli.workouts.revisions import preview_and_confirm_revision
 
 from trainmate.cli.selectors import has_selector as _has_selector, resolve_window, split_targets
-from trainmate.cli.workouts._helpers import _fmt_ts, workout_line
+from trainmate.cli.workouts._helpers import workout_line
 
 
 def _print_block_boundary_hint(date_str: str) -> None:
@@ -290,115 +290,85 @@ def run_workout_generate(args: argparse.Namespace) -> None:
     ))
 
 
-def _batch_line(label: str, when: str, batch: dict) -> str:
-    """One `workout batches` row: '<label>  <when>  <n> workouts · <span>  plan ID …'.
+def _change_line(label: str, change: dict) -> str:
+    """One `workout batches` row: '<label>  <when>  <kind>  <n> workouts · <span>  plan …'.
 
-    Shared by the archived rows and the unnumbered live one, so the plan in force and the
-    plans it replaced line up column for column (DESIGN_plan_rollback.md §9)."""
-    count = f"{batch['workouts']} workout(s)"
-    restorable = batch.get('restorable')
-    if restorable == 0:
-        count += gray(" — all in the past")
-    elif restorable is not None and restorable < batch['workouts']:
-        count += gray(f" ({restorable} restorable)")
-    macros = batch.get('macrocycle_ids') or []
+    Every change is listed, adapts and manual edits included, because every change is
+    undoable now (DESIGN_workout_revisions.md §10). A change that appended nothing — an
+    adapt that looked at the metrics and held — says so rather than being left out."""
+    when = fmt_timestamp(change['created_at'])
+    if change['held']:
+        count = gray("(held) — nothing changed")
+        span = ""
+    else:
+        count = f"{change['workouts']} revision(s)"
+        restorable = change.get('restorable')
+        if restorable == 0:
+            count += gray(" — all in the past")
+        elif restorable is not None and restorable < change['workouts']:
+            count += gray(f" ({restorable} upcoming)")
+        span = f"{fmt_date(change['first_date'])} → {fmt_date(change['last_date'])}"
+    macros = change.get('macrocycle_ids') or []
     plan = f"plan ID {', '.join(str(m) for m in macros)}" if macros else "unversioned"
-    span = f"{fmt_date(batch['first_date'])} → {fmt_date(batch['last_date'])}"
     return (
         f"{pad_visible(label, 5)} {pad_visible(when, 18)} "
-        f"{pad_visible(count, 32)} {gray(span)}  {gray(plan)}"
+        f"{pad_visible(change['kind'], 12)} {pad_visible(count, 32)} "
+        f"{gray(span)}  {gray(plan)}"
     )
-
-
-def _live_batch(today: str) -> Optional[dict]:
-    """The live upcoming sessions, shaped like an archived batch for `_batch_line`.
-
-    Only archived rows carry an `archived_at` to group on, so the plan in force is absent
-    from `get_archived_batches` and has to be counted separately."""
-    live = runtime.db.get_workouts(start_date=today)
-    if not live:
-        return None
-    return {
-        'workouts': len(live),
-        'first_date': live[0]['date'],
-        'last_date': live[-1]['date'],
-        'macrocycle_ids': sorted({w['macrocycle_id'] for w in live if w.get('macrocycle_id')}),
-    }
 
 
 def run_workout_batches(args: argparse.Namespace) -> None:
-    """Lists the archived workout batches a `workout rollback` can restore."""
+    """Lists the workout changes a `workout rollback` can undo."""
     today = _today_str()
-    batches = runtime.db.get_archived_batches(from_date=today)
-    live = _live_batch(today)
+    changes = runtime.db.get_workout_changes(from_date=today)
 
-    print(bold(cyan("\n=== WORKOUT BATCHES ===")))
-    # The live plan is shown but never numbered: it is what a rollback would displace, not
-    # something a rollback can restore.
-    if live:
-        print(gray("The plan you are on now — what a rollback would archive:"))
-        print(_batch_line(green("live"), green("in force"), live))
-        print()
-    else:
-        print(gray("No upcoming sessions are scheduled right now.\n"))
-    if not batches:
+    print(bold(cyan("\n=== WORKOUT CHANGES ===")))
+    if not changes:
         print(gray(
-            "No archived workouts yet — nothing has displaced a plan, so there is nothing "
-            "to roll back to."
+            "Nothing has written workouts yet — so there is nothing to roll back to."
         ))
         return
-    headline = (
-        "Past plans, newest first — each is the set of upcoming sessions that was live "
-        "until a regeneration or rollback replaced it."
-    )
-    if live:
-        headline += " The plan above is not one of them: #1 is the plan it displaced."
-    print(gray(wrap_text(headline) + "\n"))
-    for i, b in enumerate(batches, start=1):
-        print(_batch_line(cyan(f"#{i}"), _fmt_ts(b['archived_at']), b))
+    print(gray(wrap_text(
+        "Every command that wrote workouts, newest first. Undoing one puts the plan back "
+        "the way it was the moment before it ran, which also undoes every change made "
+        "after it."
+    ) + "\n"))
+    for i, change in enumerate(changes, start=1):
+        print(_change_line(cyan(f"#{i}"), change))
     print()
-    aside("Restore one with " + cmd("workout rollback [--batch N]")
-         + " (defaults to #1). Numbering is positional and shifts after a rollback.",
+    aside("Undo one with " + cmd("workout rollback [--batch N]")
+         + " (defaults to #1, the newest). Numbering is positional and shifts after "
+           "each change.",
          color_fn=gray)
 
 
 def run_workout_rollback(args: argparse.Namespace) -> None:
-    """Restores an archived batch of workouts, undoing a `workout generate`."""
+    """Undoes a workout change — and every change made after it."""
     today = _today_str()
-    batches = runtime.db.get_archived_batches(from_date=today)
-    if not batches:
+    changes = runtime.db.get_workout_changes(from_date=today)
+    if not changes:
         print(yellow(
-            "No archived workouts to roll back to — nothing has displaced the current "
-            "sessions yet."
+            "No workout changes to roll back — nothing has written workouts yet."
         ))
         return
 
     index = getattr(args, 'batch', None) or 1
-    if not 1 <= index <= len(batches):
+    if not 1 <= index <= len(changes):
         print(red(
-            f"No archived batch #{index} — there {'is' if len(batches) == 1 else 'are'} "
-            f"{len(batches)}."
+            f"No change #{index} — there {'is' if len(changes) == 1 else 'are'} "
+            f"{len(changes)}."
         ))
         print(green(f"Run {cmd('workout batches')} to list them."))
         return
-    target = batches[index - 1]
-
-    if not target['restorable']:
-        print(yellow(
-            f"Batch #{index} covers {fmt_date(target['first_date'])} → "
-            f"{fmt_date(target['last_date'])}, entirely in the past — there is nothing "
-            "to restore."
-        ))
-        print(green(f"Run {cmd('workout batches')} to pick another."))
-        return
+    target = changes[index - 1]
 
     if not getattr(args, 'yes', False):
         live = len(runtime.db.get_workouts(start_date=today))
         if not runtime.prompt.confirm(
-            f"Restore the {target['restorable']} upcoming workout(s) archived "
-            f"{_fmt_ts(target['archived_at'])}?\nThis archives the {live} currently "
-            "planned session(s) from today onward and updates Google Calendar. The "
-            "active plan version is unchanged.",
+            f"Undo change #{index} ({target['kind']}, {fmt_timestamp(target['created_at'])}) "
+            f"and everything after it?\nThis puts the {live} currently planned "
+            "session(s) from today onward back the way they were just before it ran, and "
+            "updates Google Calendar. The active plan version is unchanged.",
             danger=True,
         ):
             print("Rollback cancelled.")
@@ -406,7 +376,7 @@ def run_workout_rollback(args: argparse.Namespace) -> None:
 
     try:
         result = runtime.coach_service.workout_rollback(
-            batch=target['archived_at'], verbose=getattr(args, 'verbose', False)
+            change_id=target['id'], verbose=getattr(args, 'verbose', False)
         )
     except ValueError as e:
         print(red(str(e)))
@@ -417,8 +387,8 @@ def run_workout_rollback(args: argparse.Namespace) -> None:
         if result['first_date'] else ""
     )
     print(green(
-        f"\nRestored {result['restored_workouts']} workout(s){span} and archived "
-        f"{result['archived_workouts']}; Google Calendar updated."
+        f"\nUndid change #{index} ({target['kind']}): restored "
+        f"{result['restored_workouts']} session(s){span}."
     ))
     report_unhonored(result['unhonored'])
     print(green(f"Run {cmd('workout list')} to review the restored sessions."))
@@ -498,9 +468,9 @@ def run_workout_list(args: argparse.Namespace) -> None:
         # rows predating these columns, so the line is omitted when neither is known.
         lifecycle_parts = []
         if w.get('created_at'):
-            lifecycle_parts.append(f"Planned: {_fmt_ts(w['created_at'])}")
+            lifecycle_parts.append(f"Planned: {fmt_timestamp(w['created_at'])}")
         if w.get('adapted_at'):
-            lifecycle_parts.append(f"Last adapted: {_fmt_ts(w['adapted_at'])}")
+            lifecycle_parts.append(f"Last adapted: {fmt_timestamp(w['adapted_at'])}")
         if lifecycle_parts:
             print(gray("  " + "  ·  ".join(lifecycle_parts)))
         print(format_labeled_block("  Description:", w['description']))

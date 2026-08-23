@@ -3,7 +3,7 @@ import unittest
 from datetime import datetime, timedelta, timezone
 from unittest import mock
 
-from tests.helpers import clear_all_tables, pin_clock, unstamp_schema, rebind_test_db
+from tests.helpers import clear_all_tables, pin_clock, unstamp_schema, rebind_test_db, save_workout
 
 TEST_DB_PATH = os.path.join(os.path.dirname(__file__), "test_trainmate_db.db")
 
@@ -87,7 +87,7 @@ class TestDatabase(unittest.TestCase):
         self.assertEqual(activities[0]["tss"], 65.0)
 
     def test_workout_workload_fields(self):
-        w_id = test_db.save_workout(
+        w_id = save_workout(test_db,
             date="2026-06-03",
             sport_type="running",
             title="Tempo Run",
@@ -110,7 +110,7 @@ class TestDatabase(unittest.TestCase):
     def test_original_load_snapshot_preserved_across_adaptation(self):
         # The planned-load snapshot is captured once and survives later easings, so the
         # plan can always compare the current load against where the session started.
-        test_db.save_workout(
+        save_workout(test_db,
             date="2026-06-04",
             sport_type="running",
             title="Intervals",
@@ -120,7 +120,7 @@ class TestDatabase(unittest.TestCase):
             tss=90,
         )
         # First adaptation: load is walked down; originals must hold their planned values.
-        test_db.save_workout(
+        save_workout(test_db,
             date="2026-06-04",
             sport_type="running",
             title="Intervals",
@@ -137,7 +137,7 @@ class TestDatabase(unittest.TestCase):
         self.assertEqual(w["original_tss"], 90)
 
         # Second adaptation: still pinned to the original plan, not the intermediate cut.
-        test_db.save_workout(
+        save_workout(test_db,
             date="2026-06-04",
             sport_type="running",
             title="Intervals",
@@ -634,7 +634,7 @@ class TestPlannedZoneColumns(unittest.TestCase):
         clear_all_tables(test_db)
 
     def _save(self, **kwargs):
-        return test_db.save_workout(
+        return save_workout(test_db,
             date="2026-06-10", sport_type="running", title="Tempo Run",
             description="[Tempo Run]\nSteady.", **kwargs
         )
@@ -676,10 +676,11 @@ class TestPlannedZoneColumns(unittest.TestCase):
         self.assertIsNone(row["planned_zone_currency"])
         self.assertIsNone(row["planned_zone1_sec"])
 
-    def test_the_target_is_outside_the_calendar_freshness_hash(self):
-        """`CALENDAR_FIELDS` is an allowlist, so new columns are excluded by default —
-        and must stay that way, or every regeneration that nudges a target by two
-        minutes marks the row stale and re-pushes the event (§9.8)."""
+    def test_moving_the_target_marks_the_calendar_event_stale(self):
+        """The zone columns are still outside `CALENDAR_FIELDS`, but `revision_id` is in
+        it, so a target-only change moves the hash all the same — the event renders a
+        `Target:` line, and one that disagrees with the plan is a wrong event
+        (DESIGN_calendar_lineage.md §6, amending DESIGN_intensity_distribution.md §9.8)."""
         from trainmate.calendar_state import calendar_signature
         self._save(duration_minutes=60, planned_zone_sec=[300, 1800, 0, 0, 0],
                    planned_zone_currency="hr")
@@ -688,7 +689,7 @@ class TestPlannedZoneColumns(unittest.TestCase):
                    planned_zone_currency="hr")
         after = test_db.get_workout("2026-06-10", "running")
         self.assertEqual(after["planned_zone1_sec"], 420)
-        self.assertEqual(calendar_signature(after), before)
+        self.assertNotEqual(calendar_signature(after), before)
 
 
 class TestGoalStateIsDerived(unittest.TestCase):

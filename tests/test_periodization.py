@@ -6,7 +6,7 @@ import unittest
 from datetime import datetime, timedelta, timezone
 from unittest.mock import patch
 
-from tests.helpers import clear_all_tables, pin_clock, rebind_test_db
+from tests.helpers import clear_all_tables, pin_clock, rebind_test_db, save_workout
 
 TEST_DB_PATH = os.path.join(os.path.dirname(__file__), "test_trainmate_periodization.db")
 
@@ -606,7 +606,7 @@ class TestPeriodization(unittest.TestCase):
         tomorrow = (datetime.now(timezone.utc) + timedelta(days=1)).strftime("%Y-%m-%d")
 
         # Today's planned workout, already done (a matching Garmin run today).
-        test_db.save_workout(
+        save_workout(test_db,
             date=today, sport_type="running", title="Today Done",
             description="completed session", google_event_id="evt-today",
         )
@@ -657,7 +657,7 @@ class TestPeriodization(unittest.TestCase):
         # Simulate a stale workout from the old plan that was synced to Calendar.
         today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
         future = (datetime.now(timezone.utc) + timedelta(days=5)).strftime("%Y-%m-%d")
-        test_db.save_workout(
+        save_workout(test_db,
             date=future, sport_type="running", title="Old Plan Run",
             description="stale", google_event_id="evt-old-123",
         )
@@ -703,7 +703,7 @@ class TestPeriodization(unittest.TestCase):
         today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
         future = (datetime.now(timezone.utc) + timedelta(days=5)).strftime("%Y-%m-%d")
         # On the calendar (google_event_id) but pending re-push after an adaptation.
-        test_db.save_workout(
+        save_workout(test_db,
             date=future, sport_type="running", title="Adapted Run",
             description="adapted", google_event_id="evt-stale-456",
             modification_reason="swapped",
@@ -801,11 +801,10 @@ class TestPeriodization(unittest.TestCase):
         self.assertEqual(result["to"]["id"], v1_id)
         self.assertEqual(result["from"]["id"], v2_id)
         self.assertEqual(test_db.get_macrocycle_for_objective(obj_id)["strategy"], "v1")
-        # V1's workout is live again; V2's is archived.
+        # V1's workout is live again; V2's is an older sibling in the same slot.
         live = test_db.get_workouts(start_date=today)
         self.assertEqual([w["title"] for w in live], ["V1 Run"])
         self.assertEqual(result["restored_workouts"], 1)
-        self.assertEqual(result["archived_workouts"], 1)
         # The restored workout was re-pushed to Calendar.
         self.assertTrue(mock_calendar.sync_workout.called)
 
@@ -875,15 +874,14 @@ class TestPeriodization(unittest.TestCase):
             [w["title"] for w in test_db.get_workouts(start_date=today)], ["V1 Run"]
         )
         self.assertEqual(result["restored_workouts"], 1)
-        self.assertEqual(result["archived_workouts"], 1)
         self.assertTrue(mock_calendar.sync_workout.called)
 
     @patch("trainmate.runtime.calendar_syncer")
     @patch("trainmate.coach.engine.openrouter_client")
     def test_workout_rollback_within_one_plan_version(self, mock_client, mock_calendar):
-        """Two regenerations under the same plan are distinguished by their archive
-        batch, so a rollback undoes the second one (the case `plan rollback`'s
-        macrocycle-keyed restore cannot express)."""
+        """Two regenerations under the same plan are separate changes, so a rollback
+        undoes the second one (the case `plan rollback`'s version-keyed target cannot
+        express)."""
         mock_calendar.sync_workout.return_value = "evt-new"
         test_db.add_objective(
             title="Zurich Marathon", target_date=GOAL_DATE,
@@ -908,40 +906,42 @@ class TestPeriodization(unittest.TestCase):
         )
 
     def test_workout_rollback_without_archive_raises(self):
-        """Rolling back workouts with nothing archived is rejected."""
+        """Rolling back workouts with nothing written is rejected."""
         with self.assertRaises(ValueError):
             coach_service.workout_rollback()
 
-    def test_restore_workout_batch_skips_past_dated_rows(self):
-        """A batch reaching back before the restore floor keeps its past-dated rows
-        archived — their slots are held by live rows the archive step left alone
-        (see DESIGN_plan_rollback.md §9)."""
-        test_db.save_workout(
+    def test_rollback_leaves_slots_before_the_floor_alone(self):
+        """A rollback restores nothing dated before the floor.
+
+        Appending a copy into a past slot would silently make it the live session for a
+        day already trained — the same rule the archive-and-restore model had, keyed to
+        the change instead of the archive stamp (DESIGN_workout_revisions.md §10)."""
+        save_workout(test_db,
             date="2026-06-01", sport_type="running", title="Old Mon", description="x"
         )
-        test_db.save_workout(
+        save_workout(test_db,
             date="2026-06-05", sport_type="running", title="Old Fri", description="x"
         )
-        test_db.archive_future_workouts("2026-06-01")
-        # A later generation re-occupied the early slot; only that row is live now.
-        test_db.save_workout(
-            date="2026-06-01", sport_type="running", title="New Mon", description="x"
-        )
+        changes = test_db.get_workout_changes()
+        first_change = changes[-1]["id"]
+        # A later generation rewrites both slots.
+        with test_db.workout_change(kind="generate") as change:
+            change.append(date="2026-06-01", sport_type="running",
+                          title="New Mon", description="y")
+            change.append(date="2026-06-05", sport_type="running",
+                          title="New Fri", description="y")
+        rewrite = test_db.get_workout_changes()[0]["id"]
 
-        batches = test_db.get_archived_batches(from_date="2026-06-03")
-        self.assertEqual(len(batches), 1)
-        self.assertEqual(batches[0]["workouts"], 2)
-        self.assertEqual(batches[0]["restorable"], 1)
+        restored, _unhonored = test_db.rollback_to_change(rewrite, "2026-06-03")
 
-        restored, _unhonored = test_db.restore_workout_batch(
-            batches[0]["archived_at"], "2026-06-03"
-        )
         self.assertEqual([w["title"] for w in restored], ["Old Fri"])
-        # One live row per date+sport: the past-dated "Old Mon" stayed archived.
+        # One live session per slot: the past-dated Monday kept the newer session, because
+        # the floor is what stops a rollback rewriting a day already trained.
         self.assertEqual(
             [w["title"] for w in test_db.get_workouts(start_date="2026-06-01")],
             ["New Mon", "Old Fri"],
         )
+        self.assertGreater(rewrite, first_change)
 
     @patch("trainmate.runtime.config")
     def test_load_science_guidelines(self, mock_config):
@@ -1548,7 +1548,7 @@ class TestCompletedSeasonsReachTheReview(unittest.TestCase):
                          "end_date": "2026-07-04", "focus": "aerobic volume"}],
         )
         for i, day in enumerate(("2026-06-09", "2026-06-16")):
-            test_db.save_workout(
+            save_workout(test_db,
                 date=day, sport_type="cycling", title="Endurance",
                 description="[Endurance]\n2h", duration_minutes=120, rpe=5, tss=100.0,
                 source="generated", macrocycle_id=macro_id,
@@ -2091,9 +2091,9 @@ class TestGoalArchivalStandsSessionsDown(unittest.TestCase):
         _b_oid, b_mid = self._goal_with_plan(
             "Race B", _days_out(120), _days_out(31), _days_out(90)
         )
-        test_db.save_workout(_days_out(3), "running", "A session", "x",
+        save_workout(test_db, _days_out(3), "running", "A session", "x",
                              macrocycle_id=a_mid)
-        test_db.save_workout(_days_out(5), "cycling", "B session", "x",
+        save_workout(test_db, _days_out(5), "cycling", "B session", "x",
                              macrocycle_id=b_mid)
 
         result = coach_service.goal_archive(a_oid)
@@ -2110,9 +2110,9 @@ class TestGoalArchivalStandsSessionsDown(unittest.TestCase):
         oid, mid = self._goal_with_plan(
             "Race A", _days_out(60), _days_out(0), _days_out(30)
         )
-        test_db.save_workout(_days_out(3), "running", "Tagged", "x", macrocycle_id=mid)
+        save_workout(test_db, _days_out(3), "running", "Tagged", "x", macrocycle_id=mid)
         # Beyond every block, so save_workout finds no plan to tag it with.
-        test_db.save_workout(_days_out(45), "running", "Untagged", "x")
+        save_workout(test_db, _days_out(45), "running", "Untagged", "x")
 
         result = coach_service.goal_archive(oid)
 
@@ -2129,8 +2129,8 @@ class TestGoalArchivalStandsSessionsDown(unittest.TestCase):
         oid, mid = self._goal_with_plan(
             "Race A", _days_out(60), _days_out(-30), _days_out(30)
         )
-        test_db.save_workout(_days_out(-5), "running", "Done", "x", macrocycle_id=mid)
-        test_db.save_workout(_days_out(5), "running", "Ahead", "x", macrocycle_id=mid)
+        save_workout(test_db, _days_out(-5), "running", "Done", "x", macrocycle_id=mid)
+        save_workout(test_db, _days_out(5), "running", "Ahead", "x", macrocycle_id=mid)
 
         result = coach_service.goal_archive(oid)
 
@@ -2147,7 +2147,7 @@ class TestGoalArchivalStandsSessionsDown(unittest.TestCase):
             "Race A", _days_out(60), _days_out(0), _days_out(30)
         )
         test_db.add_plan_feedback(mid, "too much volume in week 3")
-        test_db.save_workout(_days_out(3), "running", "A session", "x",
+        save_workout(test_db, _days_out(3), "running", "A session", "x",
                              macrocycle_id=mid)
 
         coach_service.goal_archive(oid)
@@ -2163,7 +2163,7 @@ class TestGoalArchivalStandsSessionsDown(unittest.TestCase):
         oid, mid = self._goal_with_plan(
             "Race A", _days_out(60), _days_out(0), _days_out(30)
         )
-        test_db.save_workout(_days_out(3), "running", "A session", "x",
+        save_workout(test_db, _days_out(3), "running", "A session", "x",
                              macrocycle_id=mid)
         coach_service.goal_archive(oid)
         self.assertEqual(test_db.get_workouts(start_date=_days_out(0)), [])
@@ -2183,8 +2183,8 @@ class TestGoalArchivalStandsSessionsDown(unittest.TestCase):
         oid, mid = self._goal_with_plan(
             "Race A", _days_out(60), _days_out(-30), _days_out(30)
         )
-        test_db.save_workout(_days_out(2), "running", "Soon", "x", macrocycle_id=mid)
-        test_db.save_workout(_days_out(9), "cycling", "Later", "x", macrocycle_id=mid)
+        save_workout(test_db, _days_out(2), "running", "Soon", "x", macrocycle_id=mid)
+        save_workout(test_db, _days_out(9), "cycling", "Later", "x", macrocycle_id=mid)
         coach_service.goal_archive(oid)
 
         # The clock moves past the first session while the goal is archived.

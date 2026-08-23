@@ -588,25 +588,30 @@ function renderWorkoutCard(w) {
     const monthStr = dateObj.toLocaleDateString("en-US", { month: "short" });
     const weekdayStr = dateObj.toLocaleDateString("en-US", { weekday: "short" });
 
-    // Derived facts come from the API (calendar_status / modification_status),
+    // Derived facts come from the API (calendar_status / modification_markers),
     // mirroring the CLI markers (ARCHITECTURE.md §5).
-    const modStatus = w.modification_status || "unmodified";
+    const modMarkers = w.modification_markers || [];
     const calStatus = w.calendar_status || "unpushed";
     const isRemoved = !!w.removed;
     const isManual = w.source === "manual";
 
     let cardClass = "workout-card";
     if (isRemoved) cardClass += " removed";
-    else if (modStatus !== "unmodified") cardClass += " adapted";
+    else if (modMarkers.length) cardClass += " adapted";
     else if (calStatus === "synced") cardClass += " synced";
 
     const iconGlyph = SPORT_ICONS[w.sport_type] || "fa-dumbbell";
     const iconClass = `workout-sport-icon ${w.sport_type || "rest"}`;
 
     const badges = [];
-    if (modStatus === "adapted") badges.push(`<span class="wbadge adapted">ADAPTED</span>`);
-    else if (modStatus === "swapped") badges.push(`<span class="wbadge swapped">SWAPPED</span>`);
-    else if (modStatus === "replaced") badges.push(`<span class="wbadge replaced">REPLACED</span>`);
+    // One badge per marker: a session eased twice and then swapped shows both
+    // (DESIGN_workout_revisions.md §12).
+    for (const marker of modMarkers) {
+        const cls = marker.startsWith("ADAPTED") ? "adapted"
+            : marker === "SWAPPED" ? "swapped"
+            : marker === "REPLACED" ? "replaced" : "adapted";
+        badges.push(`<span class="wbadge ${cls}">${escapeHtml(marker)}</span>`);
+    }
     if (isManual) badges.push(`<span class="wbadge manual">MANUAL</span>`);
     if (calStatus === "synced") badges.push(`<span class="wbadge synced">SYNCED</span>`);
     else if (calStatus === "stale") badges.push(`<span class="wbadge stale">STALE</span>`);
@@ -1379,7 +1384,7 @@ document.getElementById("plan-versions").addEventListener("toggle", (e) => {
     if (e.target.open) loadPlanVersions();
 });
 
-// --- Archived workout batches (see DESIGN_plan_rollback.md §9; restoring one is
+// --- Workout changes (see DESIGN_workout_revisions.md §10; undoing one is
 //     `tm workout rollback`) ---
 
 async function loadWorkoutBatches() {
@@ -1391,32 +1396,36 @@ async function loadWorkoutBatches() {
         const data = await res.json();
         const batches = (data && data.batches) || [];
         if (!batches.length) {
-            listEl.innerHTML = `<div class="item-meta">No archived workouts yet. `
-                + `Regenerating keeps the displaced sessions here so you can roll back.</div>`;
+            listEl.innerHTML = `<div class="item-meta">Nothing has written workouts yet. `
+                + `Every command that does is listed here, and every one is undoable.</div>`;
             return;
         }
         listEl.innerHTML = batches.map(b => {
-            const when = new Date(b.archived_at).toLocaleString("en-US",
+            const when = new Date(b.created_at).toLocaleString("en-US",
                 { month: "short", day: "numeric", year: "numeric",
                   hour: "2-digit", minute: "2-digit" });
-            // A batch whose every session is in the past restores nothing, so it is
-            // labelled as such — the same guard the service raises on.
-            const state = b.restorable
-                ? `<span class="item-meta">${b.restorable} restorable</span>`
-                : `<span class="item-meta">all in the past</span>`;
+            // A change that appended nothing — an adapt that held — is listed as itself.
+            const state = b.held
+                ? `<span class="item-meta">held</span>`
+                : b.restorable
+                    ? `<span class="item-meta">${b.restorable} upcoming</span>`
+                    : `<span class="item-meta">all in the past</span>`;
             const plans = (b.macrocycle_ids || []).join(", ");
+            const span = b.first_date
+                ? `${escapeHtml(b.first_date)} → ${escapeHtml(b.last_date)}`
+                : "nothing changed";
             return `<div class="plan-version-row">`
                 + `<div class="plan-version-head">`
-                + `<span class="badge badge-info">${b.restorable} of ${b.workouts}</span> `
-                + `<span class="item-meta">archived ${escapeHtml(when)}`
+                + `<span class="badge badge-info">${escapeHtml(b.kind)}</span> `
+                + `<span class="item-meta">${escapeHtml(when)}`
                 + (plans ? ` · plan ID ${escapeHtml(plans)}` : "") + `</span>`
                 + `<span class="plan-version-action">${state}</span></div>`
-                + `<div class="si-desc">${escapeHtml(b.first_date)} → ${escapeHtml(b.last_date)}</div>`
+                + `<div class="si-desc">${span}</div>`
                 + `</div>`;
         }).join("");
         listEl.insertAdjacentHTML("beforeend",
             `<div class="cli-guidance"><i class="fa-solid fa-terminal"></i> `
-            + `Restore a batch with <code>tm workout rollback</code>.</div>`);
+            + `Undo a change with <code>tm workout rollback</code>.</div>`);
     } catch (e) {
         listEl.innerHTML = `<div class="item-meta">Failed to load batches: ${escapeHtml(e.message)}</div>`;
     }

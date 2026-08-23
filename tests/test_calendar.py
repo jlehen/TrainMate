@@ -35,8 +35,10 @@ class TestCalendarSync(unittest.TestCase):
         from tests.helpers import clear_all_tables, rebind_test_db
         clear_all_tables(test_db)
 
-    def test_sync_workout_adapted_description_order(self):
-        # Setup workout dictionary with adaptation details
+    def test_sync_workout_adapted_body_is_the_current_form_only(self):
+        """The body states what the session IS now, plus why. Every earlier form is the
+        history block's job (DESIGN_calendar_lineage.md §5), so the old
+        "Adapted:"/"Originally:" prose pair is gone."""
         workout = {
             "date": "2026-06-12",
             "sport_type": "running",
@@ -69,25 +71,19 @@ class TestCalendarSync(unittest.TestCase):
         self.assertEqual(len(insert_calls), 1)
         body = insert_calls[0].kwargs["body"]
         self.assertEqual(body.get("summary"), "[Adapted] Easy Run")
-        
-        # Verify the description order: Adapted first, then Originally, then Reason
+
         desc = body.get("description", "")
         self.assertIn("Duration: 20m | TSS: 15", desc)
-        self.assertIn("Adapted:\nShort 20 min recovery jog.", desc)
-        self.assertIn("Originally:\nLong 60 min intervals.", desc)
+        self.assertIn("Short 20 min recovery jog.", desc)
         self.assertIn("Reason:\nSwapped with yoga due to fatigue.", desc)
-        
-        # Check that "Adapted:" comes BEFORE "Originally:"
-        adapted_idx = desc.index("Adapted:")
-        originally_idx = desc.index("Originally:")
-        self.assertTrue(
-            adapted_idx < originally_idx,
-            "Adapted description should come first"
-        )
+        self.assertNotIn("Adapted:", desc)
+        self.assertNotIn("Originally:", desc)
+        self.assertNotIn("Long 60 min intervals.", desc)
 
-    def test_sync_workout_provenance_block(self):
-        # An adapted session whose load was walked down from its planned values should
-        # surface the original load snapshot plus its plan->adapt lifecycle in the footer.
+    def test_sync_workout_lifecycle_footer(self):
+        # An adapted session surfaces its plan->adapt lifecycle in the footer. The load it
+        # was planned with is NOT repeated here: the history block carries it, with its
+        # date and target (DESIGN_calendar_lineage.md §5).
         workout = {
             "date": "2026-06-12",
             "sport_type": "running",
@@ -121,18 +117,17 @@ class TestCalendarSync(unittest.TestCase):
 
         # Current load line now carries RPE too.
         self.assertIn("Duration: 20m | TSS: 15 | RPE: 4", desc)
-        # Full original-load snapshot, shown because the load drifted.
-        self.assertIn("Originally: 60m | TSS 80 | RPE 7", desc)
+        self.assertNotIn("Originally:", desc)
         # Lifecycle line: planned timestamp, last-adapted timestamp, ease count.
         self.assertIn("Planned: 2026-06-01 14:30", desc)
         self.assertIn("Last adapted: 2026-06-11 09:00", desc)
         self.assertIn("Adapted ×2", desc)
-        # Provenance sits above the technical ID footer.
-        self.assertTrue(desc.index("Originally: 60m") < desc.index("Workout: 42"))
+        # The lifecycle line sits above the technical ID footer.
+        self.assertTrue(desc.index("Planned: 2026-06-01") < desc.index("Workout: 42"))
 
     def test_sync_workout_unadapted_shows_planned_only(self):
-        # A session at its planned load shows the Planned line but no "Originally"
-        # snapshot and no last-adapted/count (it has never been eased).
+        # A session that has never been eased shows the Planned line and nothing else:
+        # no last-adapted timestamp and no count.
         workout = {
             "date": "2026-06-12",
             "sport_type": "running",
@@ -425,7 +420,7 @@ class TestCalendarSync(unittest.TestCase):
         with patch("trainmate.runtime.calendar_syncer") as mock_syncer, \
                 patch("trainmate.runtime.db") as mock_db:
             second = make_results()
-            second[0]["planned"]["marked_signature"] = signature
+            second[0]["planned"]["adherence_pushed_signature"] = signature
             marked = mark_adherence_from_results(second, today_str=today)
             self.assertEqual(marked, 0)
             mock_syncer.sync_workout.assert_not_called()
@@ -466,7 +461,7 @@ class TestCalendarSync(unittest.TestCase):
         self.assertEqual(len(update_calls), 1)
         body = update_calls[0].kwargs["body"]
         self.assertEqual(body.get("summary"), "[Deleted] Easy Run")
-        
+
         # Verify description contains Duration, TSS, and Reason
         desc = body.get("description", "")
         self.assertIn("Duration: 20m | TSS: 15", desc)

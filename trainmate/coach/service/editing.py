@@ -1,9 +1,9 @@
+from contextlib import nullcontext as _nothing
 from datetime import datetime, timedelta
 from typing import Any, List, Optional, Tuple, Dict
 from trainmate.types import Workout
+from trainmate.calendar_reconcile import no_calendar_sync
 from trainmate.sports import canonical_sport
-from trainmate.modification_state import SWAP_REASON_PREFIX, MANUAL_REPLACE_REASON_PREFIX
-from trainmate.util import red
 
 
 class WorkoutEditMixin:
@@ -135,34 +135,70 @@ class WorkoutEditMixin:
         self, swap_ops: List[Dict[str, Any]], no_sync: bool = False,
         reason: Optional[str] = None
     ) -> List[Dict[str, Any]]:
-        """Applies the date changes for a swap and syncs the moved workouts.
+        """Moves each named session to its new date, under one `swap` change.
 
-        Reads each workout's original date before moving it (ops reference distinct ids,
-        so reads stay correct across the loop). The athlete's optional `reason` is folded
-        into each moved workout's `modification_reason` so the coach sees why the swap
-        happened. Returns the updated workout records.
+        Each op is ``{'id': <lineage id>, 'new_date': 'YYYY-MM-DD'}``. A move appends a
+        copy of the session at its destination carrying its own lineage, which is what
+        makes the adaptation tally follow it across the move — the guard that stops the
+        coach cutting an already-cut session exists for exactly this
+        (DESIGN_workout_revisions.md §4). A source slot no other move fills is voided
+        first, so the departure is recorded rather than left implicit, and so the moved
+        session's newest revision is always the copy (§8).
+
+        Returns the moved sessions as they now stand.
         """
-        updated_workouts = []
+        moves = []
         for op in swap_ops:
             workout = self._db.get_workout_by_id(op['id'])
-            if not workout:
-                continue
-            mod_reason = f"{SWAP_REASON_PREFIX}{workout['date']} to {op['new_date']}"
-            if reason:
-                mod_reason += f". Reason given: {reason}"
-            self._db.update_workout_date(op['id'], op['new_date'], mod_reason)
-            moved = self._db.get_workout_by_id(op['id'])
-            if moved:
-                updated_workouts.append(moved)
+            if workout:
+                moves.append((workout, op['new_date']))
+        if not moves:
+            return []
 
-        if not no_sync:
-            for moved in updated_workouts:
-                try:
-                    self._calendar_syncer.sync_workout(moved)
-                except Exception as e:
-                    print(f"Error syncing {moved['title']} to Google Calendar: {e}")
+        filled = {
+            (new_date, canonical_sport(w['sport_type'])) for w, new_date in moves
+        }
+        with no_calendar_sync() if no_sync else _nothing():
+            with self._db.workout_change(kind="swap", summary=reason) as change:
+                for workout, _new_date in moves:
+                    if (workout['date'], canonical_sport(workout['sport_type'])) in filled:
+                        continue
+                    change.void(
+                        date=workout['date'], sport_type=workout['sport_type'],
+                        reason=self._swap_reason(workout, _new_date, reason),
+                    )
+                for workout, new_date in moves:
+                    change.append(
+                        date=new_date,
+                        sport_type=workout['sport_type'],
+                        title=workout['title'],
+                        description=workout['description'],
+                        duration_minutes=workout.get('duration_minutes'),
+                        rpe=workout.get('rpe'),
+                        tss=workout.get('tss'),
+                        benchmark_type=workout.get('benchmark_type'),
+                        reason=self._swap_reason(workout, new_date, reason),
+                        lineage_id=workout['id'],
+                        planned_zone_currency=workout.get('planned_zone_currency'),
+                        planned_zone_sec=[
+                            workout.get(f'planned_zone{i}_sec') for i in range(1, 8)
+                        ],
+                    )
+        return [
+            moved for moved in (
+                self._db.get_workout_by_id(w['id']) for w, _ in moves
+            ) if moved
+        ]
 
-        return updated_workouts
+    @staticmethod
+    def _swap_reason(
+        workout: Dict[str, Any], new_date: str, reason: Optional[str]
+    ) -> str:
+        """The note a moved session carries: where it came from, plus the athlete's why."""
+        note = f"Swapped from {workout['date']} to {new_date}"
+        if reason:
+            note += f". Reason given: {reason}"
+        return note
 
     def workout_add(
         self, date: str, sport_type: str, title: str, description: str,
@@ -176,16 +212,13 @@ class WorkoutEditMixin:
         sports scheduled that day are left untouched. Pass `replace_day=True` to instead
         replace every session that day regardless of sport.
 
-        When sessions are replaced, what was overwritten is recorded on the new
-        workout — and therefore on its calendar event — mirroring how `adapt`
-        annotates a changed session: the replaced description lands in
-        `original_description` (rendered as "Originally:") and each replaced session's
-        title plus duration/TSS/RPE are folded into `modification_reason` (rendered as
-        "Reason:"). The old rows are deleted before the insert so omitted stats don't
-        inherit a replaced session's values. The same-sport session's `google_event_id`
-        (if any) is carried onto the new row so its existing calendar event is updated
-        in place rather than orphaned; any other replaced sessions' calendar events are
-        deleted.
+        A manual session is a new session even over a live one, so it starts its own
+        lineage — which is what keeps `source` honest and stops it inheriting the replaced
+        session's load, its originals or its Calendar event
+        (DESIGN_workout_revisions.md §4). What was overwritten is recorded on the new
+        session's note, and therefore on its calendar event: each replaced session's title
+        plus duration/TSS/RPE, mirroring how `adapt` annotates a changed session. The
+        other-sport sessions are voided; the same-sport one is superseded by the append.
 
         Returns (saved_workout, list_of_replaced_workouts).
         """
@@ -198,68 +231,45 @@ class WorkoutEditMixin:
             same = self._db.get_workout(date, sport_type)
             existing_all = [same] if same else []
 
-        # The same-sport session (if any) lends its calendar event to the new workout.
-        primary = next(
-            (w for w in existing_all
-             if canonical_sport(w['sport_type']) == sport_type),
-            None,
-        )
-
-        orig_desc = description
-        ge_id = None
-        if primary:
-            orig_desc = primary['description']
-            ge_id = primary.get('google_event_id')
-
-        headers: List[str] = []
-        for w in existing_all:
-            stat_parts: List[str] = []
-            if w.get('duration_minutes') is not None:
-                stat_parts.append(f"{w['duration_minutes']}m")
-            if w.get('tss') is not None:
-                stat_parts.append(f"TSS {w['tss']}")
-            if w.get('rpe') is not None:
-                stat_parts.append(f"RPE {w['rpe']}")
-            header = w['title']
-            if w is not primary:
-                header = f"{w['sport_type']} {header}"
-            if stat_parts:
-                header += f" ({', '.join(stat_parts)})"
-            headers.append(header)
-            # Other-sport events can't be reused by the new (single) workout; drop them.
-            if w is not primary and w.get('google_event_id'):
-                try:
-                    self._calendar_syncer.delete_workout_event(w['google_event_id'])
-                except Exception as e:
-                    print(red(f"Error deleting replaced calendar event: {e}"))
-            self._db.delete_workout_by_id(w['id'])
-
-        mod_reason = None
+        headers = [
+            self._replaced_header(w, primary=canonical_sport(w['sport_type']) == sport_type)
+            for w in existing_all
+        ]
+        note = None
         if headers:
             label = "sessions" if len(headers) > 1 else "session"
-            mod_reason = f"{MANUAL_REPLACE_REASON_PREFIX}{label}: " + "; ".join(headers)
-            if reason:
-                mod_reason += f". Reason given: {reason}"
+            note = f"Manually replaced previous {label}: " + "; ".join(headers)
+        if reason:
+            note = f"{note}. Reason given: {reason}" if note else reason
 
-        self._db.save_workout(
-            date=date,
-            sport_type=sport_type,
-            title=title,
-            description=description,
-            original_description=orig_desc,
-            modification_reason=mod_reason,
-            google_event_id=ge_id,
-            duration_minutes=duration_minutes,
-            rpe=rpe,
-            tss=tss,
-            source='manual',
-        )
+        with self._db.workout_change(kind="add", summary=reason) as change:
+            for w in existing_all:
+                if canonical_sport(w['sport_type']) == sport_type:
+                    continue
+                change.void(date=date, sport_type=w['sport_type'], reason=note)
+            change.append(
+                date=date,
+                sport_type=sport_type,
+                title=title,
+                description=description,
+                duration_minutes=duration_minutes,
+                rpe=rpe,
+                tss=tss,
+                reason=note,
+            )
+        return self._db.get_workout(date, sport_type), existing_all
 
-        saved = self._db.get_workout(date, sport_type)
-        if saved:
-            try:
-                self._calendar_syncer.sync_workout(saved)
-                saved = self._db.get_workout(date, sport_type)
-            except Exception as e:
-                print(red(f"Error syncing {title} to Google Calendar: {e}"))
-        return saved, existing_all
+    @staticmethod
+    def _replaced_header(workout: Dict[str, Any], primary: bool) -> str:
+        """One replaced session, as the new session's note names it."""
+        stats = []
+        if workout.get('duration_minutes') is not None:
+            stats.append(f"{workout['duration_minutes']}m")
+        if workout.get('tss') is not None:
+            stats.append(f"TSS {workout['tss']}")
+        if workout.get('rpe') is not None:
+            stats.append(f"RPE {workout['rpe']}")
+        header = workout['title'] if primary else f"{workout['sport_type']} {workout['title']}"
+        if stats:
+            header += f" ({', '.join(stats)})"
+        return header
