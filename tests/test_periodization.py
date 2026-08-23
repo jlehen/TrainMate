@@ -227,6 +227,111 @@ class TestPeriodization(unittest.TestCase):
             system_prompt,
         )
 
+    def _plan_with_block_under_way(self, target_date: str = "2026-11-01") -> int:
+        """A goal whose active plan holds one block straddling the pinned today."""
+        obj_id = test_db.add_objective(
+            title="Zurich Marathon", target_date=target_date,
+            sport_type="running", priority=1,
+        )
+        test_db.save_macrocycle(
+            objective_id=obj_id,
+            strategy="Build aerobic base",
+            goals_hash="old_goals_hash",
+            constraints_hash="old_constraints_hash",
+            mesocycles=[{
+                "name": "Build", "start_date": "2026-08-03",
+                "end_date": "2026-08-30", "focus": "Threshold work",
+            }],
+        )
+        return obj_id
+
+    @patch("trainmate.coach.engine.openrouter_client")
+    def test_replan_offers_to_keep_the_block_under_way(self, mock_client):
+        """Mid-block, the replan may let that block finish — which means repeating its
+        ORIGINAL start date, since blocks own their sessions by date containment
+        (DESIGN_block_progress.md §7)."""
+        pin_clock(self, "2026-08-23")
+        self._plan_with_block_under_way()
+        mock_client.complete.return_value = {
+            "strategy": "Kept the Build block; it still fits.",
+            "mesocycles": [{
+                "name": "Build", "start_date": "2026-08-03",
+                "end_date": "2026-08-30", "focus": "Threshold work",
+            }],
+        }
+
+        coach_service.plan_generate(force=True)
+
+        prompt = mock_client.complete.call_args_list[0][0][0]
+        self.assertIn("### THE BLOCK ALREADY UNDER WAY", prompt)
+        self.assertIn('"Build" (2026-08-03 to 2026-08-30)', prompt)
+        self.assertIn("Already trained: 20 days of it, starting 2026-08-03.", prompt)
+        # The whole point of the change: keeping it means the original start date.
+        self.assertIn("ORIGINAL start date", prompt)
+        self.assertIn("(2026-08-03), its original end date (2026-08-30)", prompt)
+        self.assertIn("Do NOT re-date it to 2026-08-23", prompt)
+        # ...and the unconditional "start today" sentence is withdrawn while it applies.
+        self.assertNotIn("The first mesocycle must start on the start date", prompt)
+
+    @patch("trainmate.coach.engine.openrouter_client")
+    def test_block_starting_today_is_not_offered(self, mock_client):
+        """Nothing is under way yet, so there is nothing to let finish."""
+        pin_clock(self, "2026-08-03")
+        self._plan_with_block_under_way()
+        mock_client.complete.return_value = {"strategy": "s", "mesocycles": []}
+
+        coach_service.plan_generate(force=True)
+
+        prompt = mock_client.complete.call_args_list[0][0][0]
+        self.assertNotIn("### THE BLOCK ALREADY UNDER WAY", prompt)
+        self.assertIn(
+            "The first mesocycle must start on the start date (2026-08-03).", prompt
+        )
+
+    @patch("trainmate.coach.engine.openrouter_client")
+    def test_fresh_withholds_the_block_under_way(self, mock_client):
+        """A clean slate is not asked to finish the block it is departing from."""
+        pin_clock(self, "2026-08-23")
+        self._plan_with_block_under_way()
+        mock_client.complete.return_value = {"strategy": "s", "mesocycles": []}
+
+        coach_service.plan_generate(fresh=True)
+
+        prompt = mock_client.complete.call_args_list[0][0][0]
+        self.assertNotIn("### THE BLOCK ALREADY UNDER WAY", prompt)
+        self.assertIn(
+            "The first mesocycle must start on the start date (2026-08-23).", prompt
+        )
+
+    @patch("trainmate.coach.engine.openrouter_client")
+    def test_block_not_offered_when_plan_start_is_pinned_past_today(self, mock_client):
+        """A preceding goal's plan pins the start after today; reaching back past that
+        would overlap that goal's season, so the keep option is withheld."""
+        pin_clock(self, "2026-08-23")
+        early_id = test_db.add_objective(
+            title="Tune-up 10k", target_date="2026-09-15",
+            sport_type="running", priority=2,
+        )
+        test_db.save_macrocycle(
+            objective_id=early_id, strategy="Sharpen",
+            goals_hash="g", constraints_hash="c",
+            mesocycles=[{
+                "name": "Sharpen", "start_date": "2026-08-25",
+                "end_date": "2026-09-15", "focus": "Speed",
+            }],
+        )
+        obj_id = self._plan_with_block_under_way()
+        mock_client.complete.return_value = {"strategy": "s", "mesocycles": []}
+
+        # Named explicitly: the bare call would plan for the sooner tune-up goal.
+        coach_service.plan_generate(force=True, objective_id=obj_id)
+
+        prompt = mock_client.complete.call_args_list[0][0][0]
+        self.assertNotIn("### THE BLOCK ALREADY UNDER WAY", prompt)
+        self.assertIn(
+            "The first mesocycle must start on the start date (2026-09-16).", prompt
+        )
+
     @patch("trainmate.coach.engine.openrouter_client")
     def test_fresh_withholds_the_plan_in_place(self, mock_client):
         """`--fresh`: the intent is withheld, the evidence is not

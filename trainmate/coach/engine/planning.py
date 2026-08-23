@@ -1,3 +1,4 @@
+from datetime import datetime
 from typing import Any, List, Optional, Dict
 from trainmate.types import Objective, Constraint
 from trainmate.util import cyan, aside, wrap_text
@@ -14,6 +15,7 @@ class PlanStrategyMixin:
         plan_start_str: Optional[str] = None, athlete_feedback: Optional[str] = None,
         history_summary: Optional[str] = None, prior_training_text: Optional[str] = None,
         learnings: Optional[str] = None,
+        current_block: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """Queries LLM to determine the overall macrocycle strategy and mesocycle blocks.
 
@@ -40,8 +42,40 @@ mesocycles, it is acceptable to shorten/extend a block by a few days to align it
 recovery boundaries with the athlete's active constraints (e.g. aligning a deload week or phase
 change with a long travel block).
 Make sure there are no gaps between the end date of one mesocycle and the start date of the next.
-The first mesocycle must start on the start date ({plan_start}) and the last mesocycle must end
-on or around the goal date ({next_goal['target_date']}).
+The last mesocycle must end on or around the goal date ({next_goal['target_date']}).
+"""
+        # Keeping the in-flight block means repeating its ORIGINAL start date: blocks own
+        # their sessions by date containment, so one re-dated to today reads as empty
+        # (DESIGN_block_progress.md §7).
+        if current_block:
+            trained_days = (
+                datetime.strptime(today_str, "%Y-%m-%d").date()
+                - datetime.strptime(current_block['start_date'], "%Y-%m-%d").date()
+            ).days
+            custom_task += f"""
+### THE BLOCK ALREADY UNDER WAY
+The athlete is part-way through a block of the plan you are replacing:
+
+  "{current_block['name']}" ({current_block['start_date']} to {current_block['end_date']})
+  Focus: {current_block['focus']}
+  Already trained: {trained_days} days of it, starting {current_block['start_date']}.
+
+Decide whether that block still fits the plan you are now designing.
+
+- If it DOES, keep it: emit it as your FIRST mesocycle with its ORIGINAL start date
+  ({current_block['start_date']}), its original end date ({current_block['end_date']}),
+  its name and its focus, all unchanged. Do NOT re-date it to {plan_start}: the athlete
+  finishes the block they are in, and the days already trained stay part of it. Your
+  second mesocycle then starts the day after it ends.
+- If it does NOT, because the goals, the constraints or the athlete's profile have changed
+  enough that continuing it would be wrong, discard it and start your first mesocycle on
+  {plan_start}.
+
+State which of the two you chose, and why, in the strategy text.
+"""
+        else:
+            custom_task += f"""
+The first mesocycle must start on the start date ({plan_start}).
 """
         if is_horizon:
             custom_task += f"""
@@ -148,10 +182,14 @@ You MUST respond with a JSON object containing:
             )
         else:
             goal_phrase = f"'{next_goal['title']}' on {next_goal['target_date']}"
+        start_phrase = (
+            f"starting from {plan_start}, unless you keep the block already under way, "
+            f"which starts {current_block['start_date']}"
+            if current_block else f"starting from {plan_start}"
+        )
         user_content = (
             f"Today's date is {today_str}. The target goal is {goal_phrase}. "
-            "Please determine the macrocycle and mesocycle blocks starting from "
-            f"{plan_start}."
+            f"Please determine the macrocycle and mesocycle blocks {start_phrase}."
         )
 
         aside(wrap_text(

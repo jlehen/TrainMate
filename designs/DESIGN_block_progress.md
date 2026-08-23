@@ -209,3 +209,57 @@ from the last completed week describes a week that does not exist.
   The microcycle's weekday rhythm is visible in the completed-activity list generate already
   receives, and a second read-only-but-prompt-visible workout list is the cost
   DESIGN_block_boundary.md §5 declined for the same modest gain.
+
+## 7. Surviving a replan: keeping the block under way
+
+Everything above keys off `meso['start_date']`. `_block_progress_context` returns None when
+`elapsed_end < meso['start_date']`, and `intensity.block_report` measures its window from the
+same field. That is not incidental: **a block owns its sessions by date containment.** There is
+no column on `workouts` pointing at a mesocycle — `get_covering_mesocycle`,
+`get_governing_mesocycles` and `get_periodization_ids_for_date` all resolve by comparing the
+block's two dates against the day in question. A block re-dated to today therefore contains
+none of the sessions already trained under it.
+
+`plan generate` used to guarantee exactly that. Its task said, unconditionally, that the first
+mesocycle must start on the plan start date, and that date is today. So a replan run mid-block
+cut the block in flight and opened a fresh one today. The result was that this whole section
+went silent precisely when a plan had just changed, and §1's four consequences came back — the
+deload duplicated or dropped, the progression restarted, the boundary benchmark re-placed, a
+partly-missed block reading as a completed one.
+
+The task now branches. When a block is under way it is quoted to the coach with its dates,
+focus and days already trained, and the coach picks one of two outcomes: keep it as the first
+mesocycle **with its original start date**, or judge that it no longer fits and start fresh on
+the plan start date. It must state which it chose, and why, in the strategy text, so the choice
+is auditable afterwards from the plan itself.
+
+Naming the original start date is the load-bearing half. An instruction that only says "let the
+current block finish" is honoured by emitting the same name, focus and end date re-dated to
+today — which reads as continuity in `plan show` and delivers none of the machinery above. The
+two cases are indistinguishable to a reader and opposite to every consumer, so the date is
+stated explicitly and negatively as well (`Do NOT re-date it to …`).
+
+Three cases withhold the offer:
+
+- **The plan start is pinned past today.** A preceding goal's plan sets the start to the day
+  after that goal's target. Reaching back before it would overlap that goal's season.
+- **`--fresh`.** A clean slate is not asked to finish the block it is departing from
+  (DESIGN_backward_evaluation.md §6.1).
+- **The covering block starts today.** Nothing is under way, so there is nothing to finish.
+
+There is deliberately **no duration threshold** — no "only keep it if a week remains". The plan
+window itself has no minimum or maximum length for the same reason (ARCHITECTURE.md §10): how
+much of a block is worth finishing is a judgement the science guidelines inform, not one the app
+pre-empts with a number.
+
+### Deliberately not done
+
+- **De-duplicating the kept block across plan versions.** A kept block now exists as a row under
+  both the superseded macrocycle and the new one, over overlapping dates. `plan_lineage` dedupes
+  by macrocycle id, not by date span, so at the *next* replan the planned-vs-actual review
+  flattens both and reports the same trained days twice. It bites only from the second replan
+  on, and the fix (prefer the newest macrocycle's version of an overlapping span) is a change to
+  the lineage walk that the review's cross-season delta has its own opinions about.
+- **Restoring the block-over-block delta.** `_preceding_mesocycle` navigates by macrocycle id,
+  so a kept block — first in a fresh macrocycle — still has no predecessor there and reports no
+  delta. That is what happened before this change too; it is simply not fixed by it.

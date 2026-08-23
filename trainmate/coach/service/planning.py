@@ -355,6 +355,20 @@ class PlanningMixin:
                     f"- Mesocycles:\n{prev_meso_text or '  - None\n'}"
                 )
 
+            # The block the athlete is mid-way through, offered so the new plan may let it
+            # finish rather than cutting it at today (DESIGN_block_progress.md §7). Gated on
+            # the plan starting today: a start pinned after a preceding goal's target must
+            # not be reached back past, or the kept block would overlap that goal's season.
+            current_block = None
+            if existing_macro and not fresh and plan_start_date == today_date:
+                covering = self._db.get_covering_mesocycle(today_str)
+                if (
+                    covering
+                    and covering['macrocycle_id'] == existing_macro['id']
+                    and covering['start_date'] < today_str
+                ):
+                    current_block = covering
+
             # The pending log, verbatim and oldest first, so a later note reads as an
             # amendment of an earlier one. Filed notes carry the phase NAME: names
             # survive version churn, IDs do not (DESIGN_plan_feedback.md §7).
@@ -405,6 +419,7 @@ class PlanningMixin:
                 history_summary=history_summary,
                 prior_training_text=prior_training_text,
                 learnings=learnings,
+                current_block=current_block,
             )
             strategy = macro_data.get("strategy", "Endurance preparation strategy.")
             mesocycles = macro_data.get("mesocycles", [])

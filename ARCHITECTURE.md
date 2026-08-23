@@ -417,6 +417,12 @@ default the user layer overrides.
   Branches on the goal's `date_type`: a `horizon` goal's task forbids pinning a
   peak/taper/realization phase to the date and drops the `Peak & Taper, Race/Event`
   phase examples ([§15](#goal-dates-event-vs-training-horizon)).
+  Branches again on `current_block`, the mesocycle the athlete is mid-way through: when
+  one is offered, the task quotes it and lets the model either keep it as the first
+  mesocycle **at its original start date** or discard it and start on the plan start,
+  stating which in the strategy. A block re-dated to today would contain none of the
+  sessions already trained under it, since blocks own their sessions by date containment
+  (`DESIGN_block_progress.md` §7).
   Builds its own system prompt rather than calling `_build_system_prompt`, which states
   the ACTIVE strategy and blocks as settled fact — the very artifact this call produces;
   the plan prompt shows the *previous* strategy instead. It takes `learnings` explicitly
@@ -1702,6 +1708,11 @@ replan; the rest of the block does (`DESIGN_plan_staleness.md` §3–§4).
    strictly after the plan start). TrainMate never invents intermediate goals;
    an athlete who wants a tune-up event as a milestone adds it as a goal, and
    `plan_generate` then plans to whichever goal comes first.
+   The one way the window reaches *earlier* than the plan start is a kept in-flight
+   block: replanning mid-block, the model may carry that block over at its original
+   start date rather than cutting it at today (`DESIGN_block_progress.md` §7). Offered
+   only when the plan starts today, the covering block began before today, and this is
+   not a `--fresh` run.
 6. Saves new macrocycle + mesocycles to DB (old ones deleted via
    `save_macrocycle`).
 
