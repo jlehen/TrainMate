@@ -54,10 +54,9 @@ class TestCliGoals(unittest.TestCase):
             "goal", "add",
             "Zurich Marathon", "2026-10-15", "running",
             "--desc", "Target sub 3:30",
-            "--priority", "1",
         ])
         self.assertEqual(exit_code, 0)
-        self.assertIn("[UPCOMING] ID: 1 | Zurich Marathon (running) on 2026-10-15 (Priority: 1)", stdout)
+        self.assertIn("[UPCOMING] ID: 1 | Zurich Marathon (running) on 2026-10-15", stdout)
         self.assertIn("Description:", stdout)
         self.assertIn("Goal added successfully", stdout)
 
@@ -65,7 +64,6 @@ class TestCliGoals(unittest.TestCase):
             "goal", "add",
             "Morning Yoga Flow", "2026-10-20", "yoga",
             "--desc", "Daily mindfulness and flexibility",
-            "--priority", "2",
         ])
         self.assertEqual(exit_code, 0)
         self.assertIn("Morning Yoga Flow", stdout)
@@ -75,7 +73,6 @@ class TestCliGoals(unittest.TestCase):
             "goal", "add",
             "Hybrid Strength Endurance", "2026-11-30", "cycling", "strength_training",
             "--desc", "Aging well routine",
-            "--priority", "3",
         ])
         self.assertEqual(exit_code, 0)
         self.assertIn("Hybrid Strength Endurance", stdout)
@@ -86,7 +83,6 @@ class TestCliGoals(unittest.TestCase):
         self.assertIn("Zurich Marathon", stdout)
         self.assertIn("running", stdout)
         self.assertIn("2026-10-15", stdout)
-        self.assertIn("Priority: 1", stdout)
         self.assertIn("ID: 1", stdout)
         self.assertIn("Hybrid Strength Endurance", stdout)
         self.assertIn("cycling,strength_training", stdout)
@@ -155,7 +151,6 @@ class TestCliGoals(unittest.TestCase):
             "goal", "add",
             "Berlin Marathon", "2026-09-27", "running",
             "--desc", "Sub 3:15 goal",
-            "--priority", "2",
         ])
 
         goals = test_db.get_objectives()
@@ -168,13 +163,12 @@ class TestCliGoals(unittest.TestCase):
             "--target-date", "2026-09-28",
             "--sport", "running", "strength_training",
             "--desc", "Sub 3:10 elite goal",
-            "--priority", "1",
             "--status", "archived",
         ])
         self.assertEqual(exit_code, 0)
         self.assertIn(
             f"[ARCHIVED] ID: {g_id} | Berlin Marathon Elite "
-            "(running,strength_training) on 2026-09-28 (Priority: 1)",
+            "(running,strength_training) on 2026-09-28",
             stdout,
         )
         self.assertIn("Goal updated successfully", stdout)
@@ -184,7 +178,6 @@ class TestCliGoals(unittest.TestCase):
         self.assertEqual(edited["target_date"], "2026-09-28")
         self.assertEqual(edited["sport_type"], "running,strength_training")
         self.assertEqual(edited["description"], "Sub 3:10 elite goal")
-        self.assertEqual(edited["priority"], 1)
         self.assertEqual(edited["status"], "archived")
 
         exit_code, stdout, stderr = self.run_cli(["goal", "edit", "999", "--title", "Fail"])

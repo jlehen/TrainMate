@@ -183,7 +183,7 @@ class PlanningMixin:
     ) -> bool:
         """Concrete §7 magnitude heuristic for whether to *propose* a replan. Two
         independent triggers, either firing proposes a replan; deliberately no
-        per-session "importance" term (TrainMate has no per-workout priority field):
+        per-session "importance" term (TrainMate has no priority field at all):
 
         1. Displaced-load trigger (relative): the constraint's overlapping planned load
            is >= config.replan_displaced_load_pct of the plan's trailing weekly planned

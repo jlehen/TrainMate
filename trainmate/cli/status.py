@@ -339,7 +339,7 @@ def run_status(args) -> None:
                 title_disp = gray(g['title'])
             print(
                 f"- {status_disp} ID: {g['id']} | {title_disp} "
-                f"({sport_str}) on {cyan(g['target_date'])} (Priority: {g['priority']})"
+                f"({sport_str}) on {cyan(g['target_date'])}"
             )
             if g.get('description'):
                 print(format_labeled_block("  Description:", g['description']))

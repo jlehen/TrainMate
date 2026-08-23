@@ -473,9 +473,9 @@ Three choices make that formula reproducible (`coach/service/planning.py`'s
   the conservative direction: no reference week means no honest sense of scale.
 
 There is deliberately **no** per-session "importance" term: TrainMate has no
-per-workout importance/priority field (priority lives on *objectives*, not
-sessions), so a heuristic that leaned on "key sessions" would be inventing data
-the schema doesn't carry. Displaced load is the honest proxy. Start with the
+importance/priority field anywhere — not on sessions, and (since it was removed)
+not on goals either — so a heuristic that leaned on "key sessions" would be
+inventing data the schema doesn't carry. Displaced load is the honest proxy. Start with the
 defaults above (conservative — only multi-day rest windows or half-week-plus
 load displacements trip it) and tune the two knobs from there.
 

@@ -277,7 +277,7 @@ class TestMessageCapture(unittest.TestCase):
         # about the note, not the block, so give them one wide enough to ignore.
         obj_id = test_db.add_objective(
             title="Background goal", target_date="2026-12-31",
-            sport_type="running", priority=1,
+            sport_type="running",
         )
         test_db.save_macrocycle(
             objective_id=obj_id, strategy="General preparation.",
@@ -698,7 +698,7 @@ class TestHonoredAt(unittest.TestCase):
     @staticmethod
     def _plan_blocks(blocks):
         obj_id = test_db.add_objective(title="Goal", target_date="2026-12-31",
-                                       sport_type="running", priority=1)
+                                       sport_type="running")
         test_db.save_macrocycle(
             objective_id=obj_id, strategy="Prep.", goals_hash="h", constraints_hash="h",
             mesocycles=[{"name": name, "start_date": start, "end_date": end,

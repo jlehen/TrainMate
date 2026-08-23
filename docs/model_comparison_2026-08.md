@@ -17,6 +17,12 @@ The scenario, on a simulated "today" of 2026-08-18:
   A friendly showdown ~6 weeks out.
 - **Goal 2 (A, id 2)** — *Eastbridge Autumn Gravel Fondo* (~90 km / ~1800 m), 2026-11-22,
   priority 1, `event`. 8 weeks after goal 1, 14 weeks out.
+
+  > The `--priority` flag these two goals were set up with no longer exists — the field
+  > was removed (`DOMAIN_MODEL.md §2 "Goal"`). It changed nothing here even at the time:
+  > priority was never rendered into a prompt, so the A/B distinction reached the models
+  > only through the dates and the goal descriptions, exactly as it would today. The
+  > scenario is left as it was run.
 - Only **goal 2** is planned (`plan generate -g 2`). Because goal 1 has no plan of its
   own, the app builds one macrocycle spanning the full 14 weeks — so every model must
   periodize **through** the B-event on the way to the A-event. Whether it plans a

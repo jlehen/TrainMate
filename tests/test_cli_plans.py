@@ -46,7 +46,7 @@ class TestCliPlans(unittest.TestCase):
     ):
         far_id = test_db.add_objective(
             title="Ski Mountaineering", target_date="2027-04-30",
-            sport_type="ski_touring", priority=1,
+            sport_type="ski_touring",
         )
         mock_coach.plan_generate.return_value = {
             "strategy": "Long build strategy",
@@ -127,7 +127,6 @@ class TestCliPlans(unittest.TestCase):
             title="London Marathon",
             target_date="2026-09-20",
             sport_type="running",
-            priority=1,
         )
 
         exit_code, stdout, stderr = self.run_cli(["plan", "show"])
@@ -199,7 +198,7 @@ class TestCliPlans(unittest.TestCase):
         renders a specific superseded version (see DESIGN_plan_rollback.md)."""
         oid = test_db.add_objective(
             title="Versioned Goal", target_date="2026-12-15",
-            sport_type="running", priority=1,
+            sport_type="running",
         )
         meso = [{
             "name": "Base", "start_date": "2026-06-01",
@@ -230,7 +229,7 @@ class TestCliPlans(unittest.TestCase):
         # A version id from another goal is rejected.
         other = test_db.add_objective(
             title="Other Goal", target_date="2027-01-15",
-            sport_type="running", priority=1,
+            sport_type="running",
         )
         exit_code, stdout, _ = self.run_cli(
             ["plan", "show", "--goal", str(other), "--macrocycle", str(v1)]
@@ -241,7 +240,7 @@ class TestCliPlans(unittest.TestCase):
         """A goal with two plan versions differing in strategy, mesocycle dates and inputs."""
         oid = test_db.add_objective(
             title="Diffable Goal", target_date="2026-12-15",
-            sport_type="running", priority=1,
+            sport_type="running",
         )
         v1 = test_db.save_macrocycle(
             objective_id=oid, strategy="Build a wide aerobic base. Then sharpen.",
@@ -252,7 +251,9 @@ class TestCliPlans(unittest.TestCase):
                 {"name": "Dropped Block", "start_date": "2026-06-29",
                  "end_date": "2026-07-12", "focus": "Filler."},
             ],
-            goals_snapshot=json.dumps([{"id": oid, "title": "Diffable Goal", "priority": 1}]),
+            goals_snapshot=json.dumps(
+                [{"id": oid, "title": "Diffable Goal", "target_date": "2026-08-01"}]
+            ),
             constraints_snapshot=json.dumps([{"id": 7, "title": "Holiday", "rest": True}]),
             config_snapshot=json.dumps({"ftp": 200.0, "max_hr": 185.0}),
         )
@@ -263,7 +264,9 @@ class TestCliPlans(unittest.TestCase):
                 {"name": "Base", "start_date": "2026-06-01",
                  "end_date": "2026-07-05", "focus": "Aerobic volume."},
             ],
-            goals_snapshot=json.dumps([{"id": oid, "title": "Diffable Goal", "priority": 2}]),
+            goals_snapshot=json.dumps(
+                [{"id": oid, "title": "Diffable Goal", "target_date": "2026-08-15"}]
+            ),
             constraints_snapshot=json.dumps([]),
             config_snapshot=json.dumps({"ftp": 220.0, "max_hr": 185.0}),
         )
@@ -285,9 +288,9 @@ class TestCliPlans(unittest.TestCase):
         self.assertIn("2026-06-28", stdout)
         self.assertIn("2026-07-05", stdout)
         self.assertIn("Dropped Block", stdout)
-        # Inputs: the constraint went away, the goal's priority changed, ftp moved.
+        # Inputs: the constraint went away, the goal's date moved, ftp moved.
         self.assertIn("Holiday", stdout)
-        self.assertIn("priority", stdout)
+        self.assertIn("target_date", stdout)
         self.assertIn("200  =>  220", stdout)
         self.assertIn("+10.0%", stdout)
 

@@ -31,7 +31,7 @@ def _print_goal(g: dict) -> None:
         date_disp = f"on {cyan(g['target_date'])}"
     print(
         f"{status_disp} ID: {g['id']} | {title_disp} "
-        f"({sport_str}) {date_disp} (Priority: {g['priority']})"
+        f"({sport_str}) {date_disp}"
     )
     if g.get('description'):
         print(format_labeled_block("  Description:", g['description']))
@@ -45,7 +45,6 @@ def run_goal_add(args: argparse.Namespace) -> None:
         target_date=args.date,
         sport_type=sports_str,
         description=args.desc,
-        priority=args.priority,
         status='active',
         date_type=args.date_type
     )
@@ -74,8 +73,6 @@ def run_goal_edit(args: argparse.Namespace) -> None:
         kwargs['sport_type'] = ",".join(args.sport)
     if args.desc is not None:
         kwargs['description'] = args.desc
-    if args.priority is not None:
-        kwargs['priority'] = args.priority
     if args.status is not None:
         kwargs['status'] = args.status
     if args.date_type is not None:
@@ -230,7 +227,6 @@ def add_goal_parser(subparsers):
         help="Sport types, one or more: %(choices)s"
     )
     g_add.add_argument("--desc", default="", help="Description")
-    g_add.add_argument("--priority", type=int, default=1, help="Goal priority (1 = highest)")
     g_add.add_argument(
         "--date-type", dest="date_type", choices=["event", "horizon"], default="event",
         help="What the date means: 'event' = something happens on that day, so the plan "
@@ -256,7 +252,6 @@ def add_goal_parser(subparsers):
         help="New sport types, one or more: %(choices)s"
     )
     g_edit.add_argument("--desc", help="New description")
-    g_edit.add_argument("--priority", type=int, help="New priority (1 = highest)")
     # No 'completed': a goal whose date has passed is completed by that fact (§12). This
     # flag only says whether the goal was called off.
     g_edit.add_argument(

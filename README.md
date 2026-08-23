@@ -296,7 +296,7 @@ or just imitate their shape. Each names its sources:
 
 Add a goal:
 ```bash
-./tm goal add "Marathon Prep" "2026-10-15" running --priority 1
+./tm goal add "Marathon Prep" "2026-10-15" running
 ```
 By default the date is an **event** — race day — and the plan peaks and tapers
 for it. If nothing happens on the date itself ("get my FTP to 280 by next

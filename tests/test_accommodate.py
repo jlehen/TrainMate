@@ -69,7 +69,7 @@ class AccommodateCase(unittest.TestCase):
     @staticmethod
     def _save_plan(mesocycles, target_date="2026-12-31"):
         obj_id = test_db.add_objective(
-            title="Goal", target_date=target_date, sport_type="running", priority=1,
+            title="Goal", target_date=target_date, sport_type="running",
         )
         test_db.save_macrocycle(
             objective_id=obj_id, strategy="General preparation.",

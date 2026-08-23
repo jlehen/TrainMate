@@ -60,7 +60,7 @@ class TestGoalDateType(unittest.TestCase):
     def _add_goal(self, **overrides):
         kwargs = dict(
             title="Berlin Marathon", target_date=GOAL_DATE,
-            sport_type="running", priority=1,
+            sport_type="running",
         )
         kwargs.update(overrides)
         return test_db.add_objective(**kwargs)
@@ -77,7 +77,7 @@ class TestGoalDateType(unittest.TestCase):
         # field does not flag every existing plan stale (§4); a horizon goal must not.
         legacy = {
             "id": 1, "title": "Berlin Marathon", "target_date": GOAL_DATE,
-            "sport_type": "running", "description": "", "priority": 1,
+            "sport_type": "running", "description": "",
             "status": "active",
         }
         event = dict(legacy, date_type="event")

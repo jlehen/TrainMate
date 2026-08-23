@@ -59,7 +59,7 @@ class TestAdaptationAdapt(unittest.TestCase):
     def _save_background_plan():
         obj_id = test_db.add_objective(
             title="Background goal", target_date="2026-12-31",
-            sport_type="running", priority=1,
+            sport_type="running",
         )
         test_db.save_macrocycle(
             objective_id=obj_id, strategy="General preparation.",
@@ -246,7 +246,7 @@ class TestAdaptationAdapt(unittest.TestCase):
         self._clear_plans()
         obj_id = test_db.add_objective(
             title="Zurich Marathon", target_date="2026-10-15",
-            sport_type="running", priority=1,
+            sport_type="running",
         )
         test_db.save_macrocycle(
             objective_id=obj_id,
@@ -598,7 +598,7 @@ class TestAdaptationAdapt(unittest.TestCase):
         self._clear_plans()
         obj_id = test_db.add_objective(
             title="Autumn Half", target_date="2026-09-01",
-            sport_type="running", priority=1,
+            sport_type="running",
         )
         test_db.save_macrocycle(
             objective_id=obj_id, strategy="s", goals_hash="g", constraints_hash="c",

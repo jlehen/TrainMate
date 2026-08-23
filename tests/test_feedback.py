@@ -72,7 +72,7 @@ class FeedbackTestCase(unittest.TestCase):
         """A goal with an active plan; returns (goal_id, macrocycle_id, mesocycles)."""
         obj_id = test_db.add_objective(
             title="Zurich Marathon", target_date=GOAL_DATE,
-            sport_type="running", priority=1,
+            sport_type="running",
         )
         macro_id = test_db.save_macrocycle(
             objective_id=obj_id, strategy=strategy, goals_hash="ghash",
@@ -169,7 +169,7 @@ class TestFeedbackCapture(FeedbackTestCase):
 
         test_db.add_objective(
             title="Zurich Marathon", target_date=GOAL_DATE,
-            sport_type="running", priority=1,
+            sport_type="running",
         )
         exit_code, stdout, _ = self.run_cli(["plan", "feedback", "too hard"])
         self.assertEqual(exit_code, 1)
@@ -212,7 +212,7 @@ class TestFeedbackFiling(FeedbackTestCase):
         obj_id, macro_id, _ = self._plan()
         other_id = test_db.add_objective(
             title="Sierre-Zinal", target_date=_days_out(120),
-            sport_type="running", priority=2,
+            sport_type="running",
         )
         other_macro = test_db.save_macrocycle(
             objective_id=other_id, strategy="Other", goals_hash="g",

@@ -370,8 +370,7 @@ class TestAssembleTimeline(unittest.TestCase):
         self.assertIn("beyond_plan_end", self._codes(p))
 
     def test_plan_gap_is_structured_not_a_warning_string(self):
-        objectives = [{"id": 1, "title": "Marathon", "target_date": _d(60),
-                       "priority": 1, "status": "active"}]
+        objectives = [{"id": 1, "title": "Marathon", "target_date": _d(60), "status": "active"}]
         p = self._assemble(activities=[_act(-1, tss=30.0)],
                            workouts=[_w(2, tss=50)], objectives=objectives)
         self.assertEqual(p["plan_gap"]["objective"]["id"], 1)
@@ -380,8 +379,7 @@ class TestAssembleTimeline(unittest.TestCase):
         self.assertNotIn("plan_gap", self._codes(p))
 
     def test_no_plan_gap_when_every_objective_is_reached(self):
-        objectives = [{"id": 1, "title": "Marathon", "target_date": _d(1),
-                       "priority": 1, "status": "active"}]
+        objectives = [{"id": 1, "title": "Marathon", "target_date": _d(1), "status": "active"}]
         p = self._assemble(activities=[_act(-1, tss=30.0)],
                            workouts=[_w(2, tss=50)], objectives=objectives)
         self.assertIsNone(p["plan_gap"])

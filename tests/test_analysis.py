@@ -40,12 +40,12 @@ class TestWorkoutAnalysis(unittest.TestCase):
         # Earliest objective: 2026-07-01
         test_db.add_objective(
             title="Goal A", target_date="2026-07-01",
-            sport_type="running", priority=1, status="active"
+            sport_type="running", status="active"
         )
         # Preceding objective: 2026-06-01
         test_db.add_objective(
             title="Goal Preceding", target_date="2026-06-01",
-            sport_type="running", priority=1, status="active"
+            sport_type="running", status="active"
         )
 
         mock_client.complete.return_value = {
@@ -1049,7 +1049,7 @@ class TestPriorTrainingContext(unittest.TestCase):
         goal: str = "Gran Fondo", target: str = "2026-10-15",
     ) -> int:
         obj_id = test_db.add_objective(
-            title=goal, target_date=target, sport_type="cycling", priority=1
+            title=goal, target_date=target, sport_type="cycling"
         )
         return test_db.save_macrocycle(
             objective_id=obj_id, strategy="Build", goals_hash="g", constraints_hash="c",

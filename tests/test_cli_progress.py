@@ -305,8 +305,7 @@ def _payload(days, weeks=None, plan_end=None, objectives=None, warnings=None,
 
 
 class TestRenderProgress(unittest.TestCase):
-    MARATHON = {"id": 1, "title": "Marathon", "target_date": "2026-09-30",
-                "priority": 1, "status": "active"}
+    MARATHON = {"id": 1, "title": "Marathon", "target_date": "2026-09-30", "status": "active"}
     GAP = {"objective": MARATHON, "weeks_before": 9, "plan_end": "2026-07-31"}
 
     def test_plan_gap_banner_when_objective_not_reached(self):
@@ -336,8 +335,7 @@ class TestRenderProgress(unittest.TestCase):
         days = [_day("2026-07-03", 55, 61, -6, "actual"),
                 _day("2026-09-30", 68, 56, 12, "planned")]
         objs = [self.MARATHON,
-                {"id": 2, "title": "Ultra", "target_date": "2026-11-30",
-                 "priority": 1, "status": "active"}]
+                {"id": 2, "title": "Ultra", "target_date": "2026-11-30", "status": "active"}]
         gap = {"objective": objs[1], "weeks_before": 8, "plan_end": "2026-09-30"}
         text = "\n".join(render_progress(
             _payload(days, plan_end="2026-09-30", objectives=objs, plan_gap=gap), 8))
@@ -351,8 +349,7 @@ class TestRenderProgress(unittest.TestCase):
         days = [_day("2026-05-10", 48, 40, 8, "actual"),
                 _day("2026-07-03", 55, 61, -6, "actual"),
                 _day("2026-07-31", 61, 60, 1, "planned")]
-        old = {"id": 3, "title": "Old 10k", "target_date": "2026-05-10",
-               "priority": 2, "status": "completed"}
+        old = {"id": 3, "title": "Old 10k", "target_date": "2026-05-10", "status": "completed"}
         text = "\n".join(render_progress(
             _payload(days, plan_end="2026-07-31", objectives=[old]), 8))
         self.assertNotIn("Old 10k", text)

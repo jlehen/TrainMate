@@ -566,7 +566,6 @@ class TestCliWorkouts(unittest.TestCase):
             title="Berlin Marathon",
             target_date=(today_date + timedelta(days=20)).strftime("%Y-%m-%d"),
             sport_type="running",
-            priority=1,
             status="active",
         )
         test_db.save_macrocycle(
@@ -989,7 +988,7 @@ class TestCliWorkouts(unittest.TestCase):
         mock_coach.config_changed.return_value = "athlete profile changed"
         obj_id = test_db.add_objective(
             title="London Marathon", target_date="2026-09-20",
-            sport_type="running", priority=1,
+            sport_type="running",
         )
         test_db.save_macrocycle(
             objective_id=obj_id, strategy="Build then taper", goals_hash="g",
@@ -1024,7 +1023,7 @@ class TestCliWorkouts(unittest.TestCase):
             target_date=(
                 today_date + timedelta(days=target_days_out)
             ).strftime("%Y-%m-%d"),
-            sport_type="running", priority=1, status="active",
+            sport_type="running", status="active",
         )
         macro_id = test_db.save_macrocycle(
             objective_id=goal_id, strategy="Build", goals_hash="g", constraints_hash="c",

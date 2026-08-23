@@ -288,7 +288,7 @@ function renderStrategyInputs(macrocycle) {
         ? goals.map(g => `<li>`
             + `<span class="si-title">${escapeHtml(g.title || "")}</span> `
             + `<span class="si-meta">(${escapeHtml((g.sport_type || "").toUpperCase())}) `
-            + `· ${escapeHtml(g.target_date || "")} · priority ${escapeHtml(String(g.priority ?? ""))}</span>`
+            + `· ${escapeHtml(g.target_date || "")}</span>`
             + (g.description ? `<div class="si-desc">${escapeHtml(g.description)}</div>` : "")
             + `</li>`).join("")
         : `<li class="si-empty">None</li>`;
@@ -486,8 +486,7 @@ async function fetchObjectives() {
             item.innerHTML = `
                 <div class="item-info">
                     <span class="item-title">${escapeHtml(g.title)} (${escapeHtml(sportsList)})</span>
-                    <span class="item-meta">ID ${g.id} · Target: ${escapeHtml(g.target_date)} `
-                    + `· Priority: ${escapeHtml(String(g.priority))} · ${escapeHtml(g.status)}</span>
+                    <span class="item-meta">ID ${g.id} · Target: ${escapeHtml(g.target_date)} · ${escapeHtml(g.status)}</span>
                     ${g.description ? `<span class="si-desc">${escapeHtml(g.description)}</span>` : ""}
                 </div>`;
             container.appendChild(item);

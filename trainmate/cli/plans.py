@@ -265,7 +265,6 @@ def _print_considered_inputs(macrocycle: dict) -> None:
                 [
                     magenta(sport),
                     cyan(fmt_date(g.get('target_date'))),
-                    f"priority {g.get('priority')}",
                 ],
                 width,
             )

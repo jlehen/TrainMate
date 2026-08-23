@@ -301,7 +301,7 @@ class TestDashlessEndToEnd(unittest.TestCase):
         # this exercises live on `goal edit`, where every field is optional.
         gid = test_db.add_objective(
             title="Marathon", target_date="2026-10-15", sport_type="running",
-            description="", priority=1, status="active",
+            description="", status="active",
         )
         # Comma list expands to two sports.
         exit_code, stdout, _ = self.run_cli([

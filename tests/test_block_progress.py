@@ -54,7 +54,7 @@ class TestBlockProgressContext(unittest.TestCase):
     def _block(start: str = BLOCK_START, end: str = BLOCK_END) -> int:
         obj_id = test_db.add_objective(
             title="Gran Fondo", target_date="2026-10-15",
-            sport_type="cycling", priority=1,
+            sport_type="cycling",
         )
         return test_db.save_macrocycle(
             objective_id=obj_id, strategy="Build", goals_hash="g", constraints_hash="c",
@@ -249,7 +249,7 @@ class TestBlockCompositionContext(unittest.TestCase):
     def setUp(self):
         clear_all_tables(test_db)
         obj_id = test_db.add_objective(
-            title="Gran Fondo", target_date="2026-10-15", sport_type="cycling", priority=1,
+            title="Gran Fondo", target_date="2026-10-15", sport_type="cycling",
         )
         self.macro_id = test_db.save_macrocycle(
             objective_id=obj_id, strategy="Build", goals_hash="g", constraints_hash="c",
@@ -315,7 +315,7 @@ class TestBlockCompositionContext(unittest.TestCase):
     def test_no_delta_when_the_block_is_the_first_of_its_plan(self):
         clear_all_tables(test_db)
         obj_id = test_db.add_objective(
-            title="Gran Fondo", target_date="2026-10-15", sport_type="cycling", priority=1,
+            title="Gran Fondo", target_date="2026-10-15", sport_type="cycling",
         )
         self.macro_id = test_db.save_macrocycle(
             objective_id=obj_id, strategy="Build", goals_hash="g", constraints_hash="c",

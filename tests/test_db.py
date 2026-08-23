@@ -157,7 +157,6 @@ class TestDatabase(unittest.TestCase):
             title="Berlin Marathon",
             target_date="2026-09-27",
             sport_type="running",
-            priority=1,
         )
 
         self.assertIsNone(test_db.get_macrocycle_for_objective(obj_id))
@@ -720,7 +719,7 @@ class TestGoalStateIsDerived(unittest.TestCase):
 
     def _goal(self, title: str, target: str, status: str = "active") -> int:
         return test_db.add_objective(
-            title=title, target_date=target, sport_type="cycling", priority=1,
+            title=title, target_date=target, sport_type="cycling",
             status=status,
         )
 
@@ -801,8 +800,8 @@ class TestGoalStateIsDerived(unittest.TestCase):
         """One-off migration: the state left the column when it became derivable."""
         with test_db._get_connection() as conn:
             conn.execute(
-                "INSERT INTO objectives (title, target_date, sport_type, priority, status)"
-                " VALUES ('Legacy', '2026-07-04', 'cycling', 1, 'completed')"
+                "INSERT INTO objectives (title, target_date, sport_type, status)"
+                " VALUES ('Legacy', '2026-07-04', 'cycling', 'completed')"
             )
             conn.commit()
 

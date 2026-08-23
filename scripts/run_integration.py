@@ -14,7 +14,6 @@ def main() -> None:
         target_date="2026-10-15",
         sport_type="running",
         description="Target time: under 3:30:00",
-        priority=1
     )
     goals = db.get_objectives()
     print(f"Goal database test: Found {len(goals)} objectives.")

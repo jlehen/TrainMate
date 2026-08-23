@@ -153,7 +153,7 @@ class TestPlanFingerprintsSurviveTheAcceptStep(unittest.TestCase):
         never generated against, marking a stale plan current."""
         goal_id = test_db.add_objective(
             title="Autumn Marathon", target_date="2026-11-15",
-            sport_type="running", priority=1,
+            sport_type="running",
         )
         generated = PlanFingerprints(
             goals_hash="hash-at-generate-time",
@@ -188,7 +188,7 @@ class TestPlanFingerprintsSurviveTheAcceptStep(unittest.TestCase):
         "plan is current"."""
         goal_id = test_db.add_objective(
             title="Spring Race", target_date="2027-04-01",
-            sport_type="running", priority=1,
+            sport_type="running",
         )
         at_generate_time = coach_service.engine._get_goals_hash(
             test_db.upcoming_objectives()
@@ -206,7 +206,7 @@ class TestPlanFingerprintsSurviveTheAcceptStep(unittest.TestCase):
         # Passing the generate-time fingerprints is what preserves it.
         second_goal = test_db.add_objective(
             title="Summer Race", target_date="2027-07-01",
-            sport_type="running", priority=1,
+            sport_type="running",
         )
         before_edit = coach_service.engine._get_goals_hash(test_db.upcoming_objectives())
         test_db.update_objective(second_goal, title="Summer Race (moved)")

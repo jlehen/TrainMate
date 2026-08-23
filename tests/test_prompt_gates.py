@@ -47,7 +47,7 @@ BASE = dict(
     target_date_str="2026-06-03",
     meso_end_date_str="2026-06-28",
     objectives=[{"id": 1, "title": "Race", "target_date": "2026-09-01",
-                 "sport_type": "running", "priority": 1}],
+                 "sport_type": "running"}],
     guidelines="Guidelines text.",
     profile={"max_hr": 185},
     strategy="Build aerobic base.",

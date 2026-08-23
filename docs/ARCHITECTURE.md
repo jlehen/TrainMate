@@ -614,7 +614,7 @@ called by the UIs.
     triggers, either firing: displaced planned load ≥ `config.replan_displaced_load_pct`
     of the trailing week's planned load, or a `rest` window spanning ≥
     `config.replan_rest_span_days`. Deliberately **no key-session term** — TrainMate has
-    no per-workout priority field. Human-confirmed, never auto-regen.
+    no priority field at all. Human-confirmed, never auto-regen.
   - **Only-changes contract:** the prompt shows the whole forward plan through the
     mesocycle end but instructs the model to return **only sessions it is changing** —
     omitted sessions are preserved (apply never drops a date with no proposal).
@@ -897,7 +897,6 @@ one connection instead of one per day.
 | `target_date` | TEXT       | YYYY-MM-DD                                           |
 | `sport_type`  | TEXT       | Single or comma-separated (e.g. `running,cycling`) |
 | `status`      | TEXT       | `active` or `archived` **only** — see below           |
-| `priority`    | INTEGER    | 1 = highest                                          |
 | `description` | TEXT       |                                                      |
 | `date_type`   | TEXT       | `event` (default) or `horizon` — see below            |
 
@@ -1480,7 +1479,7 @@ single read-only view that is its whole state (`model`), which acts bare instead
 |--------------|--------------|----------|--------------------------------------------------------------------------|
 | `help`       | —            | —        | Print every command and sub-command with its one-line help, recursing through the whole sub-parser tree (unlike `--help`, which only shows one level) |
 | `status`     | —            | `s`      | Show active goals, recent metrics, coach learnings                       |
-| `goal`       | `add`        | `g a`    | Add objective (`TITLE DATE SPORT…` positional, `--desc`, `--priority`)   |
+| `goal`       | `add`        | `g a`    | Add objective (`TITLE DATE SPORT…` positional, `--desc`, `--date-type`)  |
 | `goal`       | `edit`       | `g e`    | Edit objective by ID. `--status archived` calls the goal off: it stands its upcoming sessions down and clears their Calendar events, keeping the plan, its versions and its feedback. `--status active` reinstates the goal and offers those sessions back, floored at today (DESIGN_backward_evaluation.md §14) |
 | `goal`       | `rm`         | `g r`    | Delete an objective and everything the cascade takes with it — every plan version, its blocks, and its feedback log. Prints that inventory plus the count of sessions it would strand, then asks; `-y` skips. To drop a goal reversibly use `goal edit --status archived` instead (§14) |
 | `goal`       | `list`       | `g l`    | List all objectives                                                      |

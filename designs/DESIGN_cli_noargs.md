@@ -73,7 +73,7 @@ about which arguments are the command's subject. So the rule is mechanical:
 `goal add TITLE DATE SPORT…`, `constraint add TITLE`, `context add METRIC [TEXT…]`,
 `learnings edit ID TEXT`, `workout add DATE SPORT TITLE`, `workout rm ID REASON`,
 `workout swap TARGET1 TARGET2 REASON`, `benchmark record SPORT --<anchor> VALUE`.
-Everything those commands can do without stays a flag, `--desc` and `--priority`
+Everything those commands can do without stays a flag, `--desc` and `--date-type`
 included. The same field is a positional where it is mandatory and a flag where it
 is not: `add` takes `TITLE` positionally, `edit` takes `--title` because an edit
 that only moves a date must not have to restate the title.

@@ -207,7 +207,6 @@ prescription the athlete trains from, and stays as complete as the session requi
                 'target_date': o.get('target_date'),
                 'sport_type': o.get('sport_type'),
                 'description': o.get('description'),
-                'priority': o.get('priority'),
                 'status': o.get('status')
             }
             # Only when it departs from the default, so pre-field plans keep their

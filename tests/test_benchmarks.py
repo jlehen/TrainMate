@@ -414,7 +414,7 @@ class TestBenchmarkPlacementGuards(unittest.TestCase):
     def _macrocycle_with_boundary(self):
         obj_id = test_db.add_objective(
             title="Gran Fondo", target_date="2026-10-15",
-            sport_type="cycling", priority=1,
+            sport_type="cycling",
         )
         return test_db.save_macrocycle(
             objective_id=obj_id, strategy="Build", goals_hash="g",
@@ -469,7 +469,7 @@ class TestBenchmarkPlacementGuards(unittest.TestCase):
         week is the goal's own: no test is asked for there (§4.1)."""
         obj_id = test_db.add_objective(
             title="Hill climb", target_date="2026-09-30",
-            sport_type="cycling", priority=1,
+            sport_type="cycling",
         )
         macro_id = test_db.save_macrocycle(
             objective_id=obj_id, strategy="Build", goals_hash="g",

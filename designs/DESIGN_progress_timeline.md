@@ -705,7 +705,7 @@ silently dropped.
                     // clip to their window (the CLI and the PNG renderer clip
                     // when drawing; the §8.5 interactive tab will re-window
                     // client-side — pre-filtering would drop flags)
-    {"id": 1, "title": "...", "target_date": "2026-09-30", "priority": 1}
+    {"id": 1, "title": "...", "target_date": "2026-09-30"}
   ],
   // Structured since rev 9, NOT a `warnings` string: the CLI draws it as a
   // three-line banner and the chart as a footer line, and neither should have to
@@ -739,12 +739,9 @@ column and the chart band:
    documented choice; later objectives' plans don't exist yet anyway.
    This lookup is a **new db helper** — nothing existing implements
    "earliest active objective that has a plan"; it is written for this
-   feature. (Deliberately different from two neighboring rules: Phase 2's
-   event selection `ORDER BY priority DESC, target_date ASC` — the coach's
-   event-day-TSB line (§8.4) may anchor a higher-priority *later* race —
-   and `db.get_active_objective()`'s earliest-active-plan-or-not. Meso
-   labels must follow whichever plan the current workouts implement; the
-   divergence is by design, not a bug.)
+   feature. (Deliberately different from `db.get_active_objective()`'s
+   earliest-active-plan-or-not. Meso labels must follow whichever plan the
+   current workouts implement; the divergence is by design, not a bug.)
 
    **AS BUILT — "active" here now means "still ahead", and there is a
    fallback.** Goal completion became a derived property of `target_date`
@@ -1160,9 +1157,9 @@ additive:
    Phase 2 (`DESIGN_pmc_fitness_fatigue.md`, end of doc): emit
    `Projected event-day TSB (from current plan): +12` into the plan/adapt
    prompts at prompt-assembly time. Once this feature ships it is one call
-   into the §5 fold (pick the event per Phase 2's
-   `ORDER BY priority DESC, target_date ASC` rule, read the folded TSB on
-   `target_date`, carry the §3 warnings verbatim); the projection math,
+   into the §5 fold (pick the nearest upcoming objective per Phase 2's
+   revised rule, read the folded TSB on `target_date`, carry the §3
+   warnings verbatim); the projection math,
    stale-anchor decay, and honesty guards all come from §4. Phase 2's
    zero-fill-to-event behavior (with its assumes-rest annotation) is the one
    piece not covered here, since this feature stops at plan end (§4).
@@ -1365,8 +1362,8 @@ Ordered by usage (CLI/bot before web), each step independently shippable:
   defined (§6.1); v1 draws flags for `active` and `completed` objectives
   whose `target_date` falls inside the *displayed* window — clipping is the
   renderer's job, the endpoint returns them all (§6) — later ones are simply
-  off-canvas until their plan exists; `priority` can gate flags if the panel
-  gets noisy. The CLI's *projection* lines clip harder than the chart's flags:
+  off-canvas until their plan exists. The CLI's *projection* lines clip harder
+  than the chart's flags:
   today..plan end, because a completed objective has a stored CTL but no
   projection (§7.1).
 - **Planned-today undercount** (§3 today rule; rev 2 mislabeled this

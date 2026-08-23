@@ -72,7 +72,6 @@ everything else is generated from it.
 | `date_type` | `event` (default) or `horizon` — see below. |
 | `sport_type` | One sport, or a comma-separated list (`running,cycling`). |
 | `status` | `active` or `archived` — **only those two**. |
-| `priority` | `1` = highest. |
 | `description` | Free text, read by the LLM. |
 
 **`date_type` is the field that says what the date *means*.** An `event` is a day
@@ -87,10 +86,13 @@ the event framing is structural. It is restated in the planning task, in the res
 format, and in the user message. A `description` saying "this date is indicative, not a
 race" loses that argument every time (`ARCHITECTURE.md §15 "Goal dates"`).
 
-**`priority` is stored, displayed and fingerprinted, but never rendered into a coach
-prompt.** `_render_goal_lines` emits title, date, sport and details — not priority. So
-priority changes the `goals_hash` (and therefore marks the plan stale), but the model
-never reads the number.
+**There is no priority field, and deliberately so.** One existed: it was stored,
+displayed and fingerprinted, but no code ever branched on it and
+`_render_goal_lines` never emitted it, so the coach never saw the number. All it did
+was change the `goals_hash` — marking the plan stale for a regeneration from a
+byte-identical prompt. Goals are ordered by date, and the system prompt says so:
+*"Focus scheduling on the NEXT CHRONOLOGICAL GOAL only."* A goal that matters more
+than its neighbours says so in `description`, which the model does read.
 
 ### Invariants
 
@@ -124,7 +126,7 @@ one by accident:
 
 | Command | What it does |
 |---|---|
-| `goal add TITLE DATE SPORT…` | Create. `--desc`, `--priority`. |
+| `goal add TITLE DATE SPORT…` | Create. `--desc`, `--date-type`. |
 | `goal edit ID` | Change any field. `--status archived` / `--status active` — see below. |
 | `goal list` | List all. |
 | `goal rm ID` | **Destructive.** Deletes the goal and cascades to every plan version, block and feedback note. Prints that inventory plus the number of upcoming sessions it would strand, then asks. |
@@ -657,7 +659,7 @@ An athlete has a marathon on 2026-11-15.
 **1. The goal.**
 
 ```
-./tm goal add "Autumn Marathon" 2026-11-15 running --priority 1
+./tm goal add "Autumn Marathon" 2026-11-15 running
 ```
 
 One row in `objectives`. `date_type` defaults to `event`, so the plan will peak and taper
@@ -753,7 +755,7 @@ Version 1's feedback notes are pending once more.
 
 ## 9. What happens when something changes
 
-### 9.1 The goal's date, title, description, sport or priority moves
+### 9.1 The goal's date, title, description or sport moves
 
 `goals_hash` changes → the plan reads stale → the next `plan generate` regenerates instead
 of reusing, and the staleness message names the field that moved (from `goals_snapshot`).
@@ -765,6 +767,14 @@ Nothing happens automatically.
 goal that predates the field — hashes exactly as it always did, and shipping the field did
 not flag existing plans stale. Flipping a goal either way adds or removes the key, changes
 `goals_hash`, and prompts the replan that change genuinely warrants.
+
+Removing `priority` (§2) was the opposite case, and deliberately so. Dropping the key from
+`_clean_goals` changed `goals_hash` for every plan generated before it, so every existing
+plan read stale once on upgrade. The alternative — keeping a vestigial `'priority': 1` in
+the fingerprint forever to preserve old hashes — buys one avoided replan at the cost of a
+constant nobody would dare delete later. One replan prompt was the cheaper side.
+`plan diff` across that boundary also reports `priority` disappearing from the goals
+snapshot; that is the same one-time artifact, not a bug.
 
 ### 9.3 A constraint is added
 

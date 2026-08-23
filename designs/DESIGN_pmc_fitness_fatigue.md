@@ -822,9 +822,9 @@ Added since (pinning contracts §3.2 gained for the forward fold):
 >
 > **Still genuinely unshipped — the whole remaining deliverable:**
 >
-> 1. **Event selection.** Nothing anywhere does
->    `ORDER BY priority DESC, target_date ASC LIMIT 1` over upcoming active
->    objectives. The "Event selection" paragraph below is still the spec.
+> 1. **Event selection.** Nothing anywhere picks the event to project to. The
+>    "Event selection" paragraph below is still the spec — but see its rev note:
+>    the `priority` column it was written against no longer exists.
 > 2. **The coach-facing prompt line.** No `Projected event-day TSB` line exists in any
 >    prompt. Given the shipped fold this is a *read*, not a computation: pick the event
 >    per (1), read the folded TSB on its `target_date`, and carry the fold's existing
@@ -847,13 +847,24 @@ Computed **on demand at prompt-assembly time** (now `coach/service/context.py`),
 date and is forward-looking, so it stays out of the pure, plan-independent
 backward pass. This is the one place PMC reads the plan, read-only.
 
-**Event selection.** Anchor to the athlete's **highest-priority upcoming active
-objective**, ties broken by nearest `target_date`. This is *not* what
-`get_active_objective()` returns (`target_date ASC LIMIT 1`, soonest-regardless);
-the projection needs `ORDER BY priority DESC, target_date ASC LIMIT 1` over
-`status='active' AND target_date >= today`. There is no "A-event" tier in the
-schema, so the `+5..+25` band is labeled as the coach's peak/taper target *for the
-chosen event*, not an unconditional gate.
+**Event selection.** Anchor to the athlete's **nearest upcoming active objective**
+— exactly what `get_active_objective()` returns, and what `upcoming_objectives()`
+lists first.
+
+> **Rev note — the `priority` tiebreak is gone.** This paragraph originally
+> specified `ORDER BY priority DESC, target_date ASC LIMIT 1`, anchoring to the
+> *highest-priority* upcoming objective rather than the nearest. That query was
+> never written, and the column it read was removed: `objectives.priority` was set
+> and displayed but never read by any logic and never rendered into a prompt, so it
+> was dropped (`DOMAIN_MODEL.md §2 "Goal"`). The sort was also inverted — with
+> `1 = highest`, `priority DESC` picks the *least* important goal — which is the
+> clearest evidence nobody ever ran it. Nearest-date is what every other reader
+> already does and what the system prompt tells the coach to do ("focus scheduling
+> on the NEXT CHRONOLOGICAL GOAL only"). If an A/B/C race tier is wanted later it
+> should be designed as one, not reconstructed from a dormant integer.
+
+There is no "A-event" tier in the schema, so the `+5..+25` band is labeled as the
+coach's peak/taper target *for the chosen event*, not an unconditional gate.
 
 Inputs: the latest metrics row's CTL/ATL as the anchor, the chosen objective's
 `target_date`, and planned `Workout.tss` for anchor→event. Walk §3.1's recurrence
@@ -889,5 +900,5 @@ that estimate quality is the only taper work left beyond Phase 2.
 Phase-2 tests: decay-only reproduces the closed-form `ctl·(1−1/τ)^d`; planned load
 raises the projection; `tss=None` triggers the annotation; plan ending early
 triggers the unplanned-tail annotation; no upcoming objective / no plan → no line;
-highest-priority selection with nearest-date tiebreak; stale-anchor decay;
+nearest-date event selection; stale-anchor decay;
 warm-up-anchor flag; NULL-anchor suppression.

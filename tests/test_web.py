@@ -189,7 +189,7 @@ class TestPlanVersionsEndpoint(unittest.TestCase):
     def test_plan_versions_lists_active_and_superseded(self):
         oid = test_db.add_objective(
             title="Web Goal", target_date="2026-12-15",
-            sport_type="running", priority=1,
+            sport_type="running",
         )
         meso = [{
             "name": "Base", "start_date": "2026-06-01",
@@ -291,7 +291,7 @@ class TestPlanDiffEndpoint(unittest.TestCase):
     def _seed(self):
         oid = test_db.add_objective(
             title="Diff Goal", target_date="2026-12-15",
-            sport_type="running", priority=1,
+            sport_type="running",
         )
         v1 = test_db.save_macrocycle(
             objective_id=oid, strategy="Base first. Then sharpen.",
@@ -658,7 +658,7 @@ class TestNewReadEndpoints(unittest.TestCase):
     def test_plan_show_returns_macro_and_mesocycles(self):
         goal_id = test_db.add_objective(
             title="A race", target_date="2026-09-01", sport_type="running",
-            description="", priority=1, status="active",
+            description="", status="active",
         )
         test_db.save_macrocycle(
             objective_id=goal_id, strategy="build then peak", goals_hash="g",

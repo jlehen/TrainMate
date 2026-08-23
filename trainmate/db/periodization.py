@@ -139,9 +139,9 @@ class PeriodizationMixin:
         is being looked at. Advancing used to be a side effect of marking the goal
         completed by hand; it is now the date's job (DESIGN_backward_evaluation.md §12).
 
-        Deliberately distinct from `get_active_objective()` (next goal, plan-or-not) and
-        from Phase 2's priority-ordered event pick: meso labels must follow whichever plan
-        the current workouts implement. Returns None when no goal has a macrocycle."""
+        Deliberately distinct from `get_active_objective()` (next goal, plan-or-not):
+        meso labels must follow whichever plan the current workouts implement. Returns
+        None when no goal has a macrocycle."""
         live = [o for o in self.get_objectives() if o.get('status') != ARCHIVED]
         today = today_date().strftime("%Y-%m-%d")
         ahead = [o for o in live if str(o['target_date']) >= today]   # ORDER BY date ASC
