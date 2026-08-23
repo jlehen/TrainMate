@@ -1,0 +1,880 @@
+# The TrainMate domain model
+
+**Goals, macrocycles, mesocycles, microcycles and workouts — what each one is, what
+must always be true about it, and what you can do to it.**
+
+This document describes the current state of the code. Where a rule has a rationale
+that is written down elsewhere, the pointer is given (`ARCHITECTURE.md §N`,
+`designs/DESIGN_*.md §N`) rather than restated.
+
+---
+
+## 1. The five levels in one page
+
+TrainMate organises training time as nested containers. Each level answers exactly one
+question, and each level is written by a different command.
+
+| Level | The question it answers | Where it is stored | Who writes it |
+|---|---|---|---|
+| **Goal** | What are we training for, and by when? | `objectives` table | The athlete (`goal add/edit`) |
+| **Macrocycle** | What is the overall strategy from now until that goal? | `macrocycles` table | `plan generate` (one LLM call) |
+| **Mesocycle** | What is this block of weeks *for*? | `mesocycles` table | `plan generate`, in the same call |
+| **Microcycle** | What does a typical week look like? | **Nothing. It is not stored.** | Implied by the workouts |
+| **Workout** | What do I actually do on Tuesday? | `workouts` table | `workout generate`, then `adapt` / `accommodate` / hand edits |
+
+Two things in that table are worth pausing on, because they are the two facts that
+explain most of the design.
+
+**The microcycle has no table.** It is a vocabulary word, not an entity. Section 6
+explains why, and what stands in for it.
+
+**"Plan" means the top two rows only.** In TrainMate, *the plan* is the periodization —
+one macrocycle plus its mesocycle blocks. The scheduled sessions are *workouts*, never
+"the plan". The `plan` and `workout` command families are split on exactly that line
+(`ARCHITECTURE.md §11`).
+
+### The shape of the data
+
+```
+  objectives (goal)
+      │  1 goal ──► N macrocycles, but only ONE is 'active'
+      ▼
+  macrocycles (one row = one PLAN VERSION)
+      │  ON DELETE CASCADE
+      ├──────────────► mesocycles (the blocks)      ON DELETE CASCADE
+      └──────────────► plan_feedback (notes)        ON DELETE CASCADE
+
+  workouts
+      │  macrocycle_id  ── a plain INTEGER tag, NOT a foreign key
+      └╌╌╌╌╌╌╌╌╌╌╌╌╌╌► macrocycles
+```
+
+The dashed line matters. `workouts.macrocycle_id` records which plan version produced a
+session, but there is no foreign key and therefore no cascade. Deleting a goal removes
+its plan versions, blocks and feedback, and leaves its sessions behind — which is why
+`goal rm` counts them and warns before it runs (§9.7).
+
+---
+
+## 2. Goal (`objectives`)
+
+### What it is
+
+A dated target. It is the only object in the system the athlete authors from nothing;
+everything else is generated from it.
+
+### The fields that carry meaning
+
+| Field | Notes |
+|---|---|
+| `title` | Free text. Reaches every coach prompt verbatim. |
+| `target_date` | `YYYY-MM-DD`. |
+| `date_type` | `event` (default) or `horizon` — see below. |
+| `sport_type` | One sport, or a comma-separated list (`running,cycling`). |
+| `status` | `active` or `archived` — **only those two**. |
+| `priority` | `1` = highest. |
+| `description` | Free text, read by the LLM. |
+
+**`date_type` is the field that says what the date *means*.** An `event` is a day
+something happens on, so the periodization peaks and tapers into it. A `horizon` is
+just how far out the athlete wants to train: the plan still ends around that date,
+but with an ordinary training block — no peak, no taper pinned to it — and the rule
+that forbids a fitness test in the goal's own week does not apply, because there is no
+event for a test to compete with.
+
+This exists as a *field* rather than as prose in `description` for a concrete reason:
+the event framing is structural. It is restated in the planning task, in the response
+format, and in the user message. A `description` saying "this date is indicative, not a
+race" loses that argument every time (`ARCHITECTURE.md §15 "Goal dates"`).
+
+**`priority` is stored, displayed and fingerprinted, but never rendered into a coach
+prompt.** `_render_goal_lines` emits title, date, sport and details — not priority. So
+priority changes the `goals_hash` (and therefore marks the plan stale), but the model
+never reads the number.
+
+### Invariants
+
+1. `title`, `target_date` and `sport_type` are `NOT NULL`.
+2. `status` is `active` or `archived`. Nothing else. A one-off migration rewrote every
+   legacy `completed` row to `active`.
+3. **Completion is never stored — it is derived.** A goal that is not archived and whose
+   `target_date` has passed *is* completed, by definition of the date. One function,
+   `db.objectives.goal_state()`, makes that call and returns
+   `upcoming | completed | archived`. Every surface — `goal list`, `status`, the web view
+   — renders that one function's answer, so no two of them can disagree
+   (`DESIGN_backward_evaluation.md §12`).
+4. A goal may own many macrocycles (plan versions), but at most one is `active`.
+5. Deleting a goal cascades to every plan version, every block, and every feedback note.
+   It does **not** cascade to workouts.
+
+### Three named ways to read goals
+
+The accessors are named after the question they ask, so a caller cannot pick the wrong
+one by accident:
+
+- **`upcoming_objectives()`** — not archived, date not yet passed. This is what "the
+  goals that matter" means at every planning and picker site.
+- **`get_active_objective()`** — with no ID, the *next* goal still ahead. With an ID, any
+  goal that is not archived, past or future.
+- **`get_preceding_objectives(date)`** — goals strictly before a date, **completed ones
+  very much included**, since they are the whole point of the lookup. Bounded by
+  `coach.goals_lookback_days` (default 90).
+
+### Operations
+
+| Command | What it does |
+|---|---|
+| `goal add TITLE DATE SPORT…` | Create. `--desc`, `--priority`. |
+| `goal edit ID` | Change any field. `--status archived` / `--status active` — see below. |
+| `goal list` | List all. |
+| `goal rm ID` | **Destructive.** Deletes the goal and cascades to every plan version, block and feedback note. Prints that inventory plus the number of upcoming sessions it would strand, then asks. |
+| `goal wipe` | Delete all goals. |
+
+**Archiving is not deleting, and the difference is the point.**
+
+`goal edit ID --status archived` *calls the goal off*. It stands down every upcoming
+session that the goal's plan versions generated (archives them, tears down their Calendar
+events) and keeps the plan, its versions and its feedback log completely intact. Past
+sessions stay put — a cancelled race does not un-train the work already done.
+
+`goal edit ID --status active` reinstates it: the stood-down sessions come back, floored
+at today, and are re-pushed to Calendar. A goal reinstated months later recovers only the
+sessions still ahead.
+
+The sweep is scoped by `macrocycle_id`, not by date. A date-only sweep would also displace
+a *neighbouring* goal's sessions in the same window. Sessions with no `macrocycle_id`
+(legacy rows) belong to no version, so they are reported rather than swept
+(`DESIGN_backward_evaluation.md §14`).
+
+---
+
+## 3. Macrocycle (`macrocycles`) — one row is one plan version
+
+### What it is
+
+The overall periodization strategy for one goal: a prose `strategy` field plus the set
+of mesocycle blocks hanging off it. **Every regeneration creates a new row.** The
+previous row is marked `superseded` and kept, never deleted.
+
+So "macrocycle" and "plan version" are the same thing. `plan versions` lists them;
+`plan show --macrocycle <id>` renders a specific one; `plan rollback` makes an old one
+active again.
+
+### The fields, in three groups
+
+**The content:**
+
+| Field | Notes |
+|---|---|
+| `objective_id` | FK → `objectives`, cascade delete. |
+| `strategy` | The LLM's prose explanation of the whole approach. |
+| `created_at`, `status`, `superseded_at` | `status` is `active` or `superseded`. |
+
+**The fingerprints** — SHA-256 of the inputs the strategy was generated from:
+
+| Field | Covers |
+|---|---|
+| `goals_hash` | Every upcoming goal, cleaned and stably ordered. |
+| `constraints_hash` | Only the **plan-shaping** (`replan = 1`) constraints. |
+| `config_hash` | The plan-shaping `user_profile` fields (thresholds, `name` and equipment excluded). |
+
+**The snapshots** — the inputs themselves, kept as JSON so a stale plan can say *what*
+changed rather than only *that* something did: `goals_snapshot`, `constraints_snapshot`,
+`all_constraints_snapshot`, `config_snapshot`, `profile_snapshot`.
+
+The hash detects the change; the snapshot names the field that moved.
+
+### Invariants
+
+1. **Exactly one active version per goal.** `save_macrocycle` supersedes the current
+   active row before inserting; `set_active_macrocycle` supersedes every other active row
+   before promoting its target. Readers filter on `COALESCE(status,'active') = 'active'`.
+2. **Regenerating never deletes.** The old version and its blocks survive so
+   `plan rollback` can restore them (`DESIGN_plan_rollback.md`).
+3. **The plan window is `plan_start … target_date`, and it must be non-empty.**
+   `plan_start` is the day after the most recent preceding goal that has a plan, floored
+   to today; today if there is no such goal. If `target_date <= plan_start`, generation
+   refuses: *"there is no window to plan in."*
+4. **No minimum or maximum plan length.** How to periodize a three-week run-in or a
+   two-year horizon is a question for the science guidelines, not for a threshold in the
+   app. The only check is that the window exists.
+5. **TrainMate never invents intermediate goals.** An athlete who wants a tune-up race as
+   a milestone adds it as a goal; `plan generate` then plans to whichever goal comes first.
+6. **Fingerprints are computed when the strategy is generated and carried verbatim to
+   apply.** They are never recomputed at accept time — a goal edited between generating
+   and accepting would otherwise be recorded as though the strategy had seen it, silently
+   defeating the staleness detector.
+7. **Only `replan = 1` constraints fingerprint the plan.** All active constraints reach
+   the prompt; a tactical "no run Thursday" must not trip the reuse-vs-regenerate decision
+   (`DESIGN_constraints.md §7`).
+
+### Derived state: is the plan stale?
+
+`plan generate` reuses the existing macrocycle — no LLM call — when **all** of these hold:
+
+- `goals_hash` matches, **and**
+- `constraints_hash` matches, **and**
+- `config_changed()` reports no drift (thresholds only past `coach.threshold_replan_pct`),
+  **and**
+- no plan feedback is pending, **and**
+- `--force` was not passed.
+
+Pending feedback opens the gate on its own: notes are a plan input, so they apply without
+`--force` (`DESIGN_plan_feedback.md §7`).
+
+**Pending** has no flag of its own. A note is pending when its `macrocycle_id` is the
+goal's *currently active* version. Supersession *is* the consumption event — which gives
+two behaviours for free: a regeneration previewed and declined leaves the notes pending,
+and a `plan rollback` makes an earlier version's notes pending again.
+
+### Operations
+
+| Command | What it does |
+|---|---|
+| `plan generate` | Generate or reuse. `-f` forces. `--fresh` withholds the plan in place from the prompt (a clean slate, not a revision — implies `-f`). `-g ID` targets a goal. |
+| `plan show` | Strategy, snapshotted inputs, block timeline with each block's session count / duration / load. `-M ID` for a superseded version, `-a` for every goal, `-w` to list each block's sessions. |
+| `plan versions` | Every kept version for a goal, active and superseded, with IDs and dates. |
+| `plan diff [A] [B]` | Compare two versions: strategy prose, attached feedback, blocks added/removed/renamed/re-dated, snapshot deltas. |
+| `plan rollback` | Make a superseded version active again, and reconcile the workouts with it. |
+| `plan feedback` | Append a note to the append-only log for the next version. `-m` files it to one block. `--rm ID` deletes one. `--replan` regenerates immediately. |
+| `plan rm` / `plan wipe` | Delete. |
+
+What `plan generate` reads before it calls the model: the science guidelines, the athlete
+profile, every upcoming goal, every active constraint, a 15-day training and metrics
+summary (including the current CTL / ATL / TSB block), a planned-vs-actual review of the
+prior plan, the active coach learnings, and the pending feedback log — which it **must**
+address note by note.
+
+What it does *not* do: touch coach learnings (read-only), or write any workouts.
+Generating a new strategy leaves the existing sessions exactly where they are until
+`workout generate` runs.
+
+---
+
+## 4. Mesocycle (`mesocycles`) — the block
+
+### What it is
+
+A phase of training with one job: *"Base Building, 2026-09-01 to 2026-10-05, Zone 2
+aerobic base, high volume."*
+
+That is genuinely all it is. The table has four meaningful columns:
+
+| Field | Notes |
+|---|---|
+| `macrocycle_id` | FK → `macrocycles`, cascade delete. |
+| `name` | e.g. "Base Building", "Peak & Taper". |
+| `start_date`, `end_date` | Inclusive `YYYY-MM-DD` bounds. |
+| `focus` | Prose: what this block is for. |
+
+There is **no** stored load target, no weekly hours, no intensity distribution, no deload
+flag. A block states what it is for, and the workout generator derives the rest from that
+sentence plus the science guidelines.
+
+### Invariants
+
+**Enforced by the code:**
+
+1. A mesocycle belongs to exactly one macrocycle, and dies with it.
+2. Blocks are always read in `start_date` order.
+3. Blocks are only reachable through an **active** macrocycle. Most readers additionally
+   require the owning goal to be non-archived. The one deliberate exception is
+   `get_mesocycle_ranges`, which ignores goal status — a since-completed goal still
+   planned its dates — while still excluding superseded *versions*, so an old version's
+   dates cannot double-count the active one's.
+
+**Asked of the model, but not enforced anywhere:**
+
+4. Blocks should be contiguous, with no gaps between one block's `end_date` and the
+   next's `start_date`.
+5. The first block should start on the plan start date, and the last should end on or
+   around the goal date.
+
+Points 4 and 5 live in the planning prompt only. `save_macrocycle` inserts whatever it is
+handed — it does not check contiguity, overlap, or coverage. The readers cope instead, by
+falling back and by tie-breaking (below). This is a deliberate soft spot, recorded in
+`DESIGN_block_boundary.md §6` as a "known asymmetry": *"Blocks are contiguous in practice."*
+
+### Reading blocks: a three-layer chain, not a menu
+
+Picking the wrong reader is how two commands come to disagree about which block you are
+in. So for a **window**, the readers are layered rather than offered as alternatives —
+each one adds exactly one decision to the one below it:
+
+```
+  get_mesocycles_in_range(start, end)    ← layer 1: the raw overlap query. No judgement.
+            │
+            │   + arbitrate between competing plans
+            ▼
+  get_covering_mesocycles(start, end)    ← layer 2: one plan to follow, or none.
+            │
+            │   + fall back when nothing overlaps
+            ▼
+  get_governing_mesocycles(start, end)   ← layer 3: never says "no plan" while one exists.
+```
+
+#### Layer 1 — `get_mesocycles_in_range` is the SQL, and nothing else
+
+One query: every block whose span touches the window, belonging to an active plan version
+of a non-archived goal, ordered by start date. `end_date=None` means no upper bound —
+"every block from here to the plan's end" — so no caller has to invent a far-future date.
+
+It answers a membership question and makes no decision. **It has exactly one caller in the
+whole codebase, and that caller is layer 2.** It is not a reader you would choose between;
+it is the unarbitrated first half of the one you would.
+
+#### Layer 2 — `get_covering_mesocycles` decides which *plan* to follow
+
+Layer 1 can hand back blocks from two different plans, and two plans cannot both be
+followed on the same day. Layer 2 is the arbitration:
+
+1. Group layer 1's blocks by `macrocycle_id`.
+2. Give each plan a **footprint** — the earliest start and latest end *among the blocks
+   that came back*, not the plan's full span.
+3. Walk the plans in priority order — `prefer_macro_id` first, then highest ID (most
+   recently created) first — keeping each plan whose footprint does not overlap a plan
+   already kept, and dropping the ones that do.
+
+It returns a **tuple**, not a list: `(kept_blocks, dropped_macrocycle_ids)`. The second
+half is a receipt, so the caller can say what it ignored and offer the override:
+
+```
+Plan ID 4 also covers part of this span; following the more recently generated plan
+instead. Pass -M 4 to follow that one.
+```
+
+Arbitrating on the *plan* rather than on the block has two consequences, both wanted:
+
+- **Whole plans are dropped, never individual blocks.** If a plan survives, every one of
+  its in-window blocks survives with it. You never get a half-followed plan.
+- **Sequential plans both survive.** Their footprints do not overlap, so nothing is
+  dropped — which is exactly what a long `-g` horizon needs when it runs out of one goal's
+  last block into the next goal's first.
+
+#### Layer 3 — `get_governing_mesocycles` refuses to answer "nothing"
+
+Same arguments, same tuple. It returns layer 2's answer whenever layer 2 found something,
+and only when layer 2 comes back empty does it fall back to `get_active_mesocycle`'s
+nearest block.
+
+#### The three layers on one window
+
+Two goals, two plans, both active:
+
+```
+  plan 3  ("Spring 10k")       Base    2026-08-22 → 2026-09-30
+  plan 4  ("Autumn Marathon")  Build   2026-08-22 → 2026-11-15
+
+  window asked about:  2026-09-01 → 2026-09-20
+
+  layer 1  →  [Base, Build]        both blocks touch the window; no opinion offered
+  layer 2  →  ([Build], [3])       footprints overlap → plan 4 is newer → plan 3 dropped
+  layer 3  →  ([Build], [3])       layer 2 found something, so nothing is added
+```
+
+And the full behaviour table:
+
+| The window has… | Layer 1 returns | Layer 2 returns | Layer 3 returns |
+|---|---|---|---|
+| one plan covering it | its blocks | its blocks, `dropped = []` | same as layer 2 |
+| two plans, **sequential** | every block of both | every block of both, `dropped = []` | same as layer 2 |
+| two plans, **same days** | every block of both, interleaved by date | the newer plan's blocks, `dropped = [older]` | same as layer 2 |
+| **no block at all** | `[]` | `([], [])` | the nearest block, `dropped = []` |
+
+That last row is the entire difference between layers 2 and 3, and it is a real fork:
+
+- **`workout accommodate` calls layer 2 directly.** A window that overlaps no block was
+  never planned against one, so there is nothing to reshuffle it *towards*, and the command
+  refuses. Being handed a block that does *not* cover the window would be worse than being
+  handed nothing.
+- **`workout generate` calls layer 3.** It lays sessions near a plan's edges, and it reads
+  an empty answer as "there is no plan at all — run `plan generate`". Layer 2's empty
+  answer would make it refuse for a plan that merely starts next week.
+
+The fork is two differently-named functions rather than one boolean flag because it used to
+be a by-hand re-check written out at five separate call sites: a flag's meaning has to be
+re-derived at every site, a name does not. Pinned by
+`test_the_covering_readers_answer_only_with_blocks_that_cover_the_window`.
+
+### The single-date readers
+
+The same strict-vs-lenient fork, one layer shallower — there is no plan arbitration here,
+because a single date resolves to at most one block anyway.
+
+| Reader | Answers |
+|---|---|
+| `get_covering_mesocycle(date)` | **Strict.** The active block containing that date, or `None`. |
+| `get_active_mesocycle(date)` | **Lenient.** Covering block → first block ending in the future → the absolute first block. |
+| `get_next_mesocycle(after)` | The earliest block starting strictly after a date. **Never falls back**: no block ahead means `None`. |
+| `get_periodization_ids_for_date(date)` | `(objective_id, macrocycle_id, mesocycle_id)`, for stamping a session with its provenance. Applies the same recency tie-break, per day. |
+
+**The governing plan.** `get_governing_macrocycle()` is "the plan the current workouts
+implement": the earliest goal still ahead that has a plan, falling back to the most recent
+*completed* goal's plan when nothing ahead has one. The day after a race, the months of
+training behind the athlete still belong to that plan, and dropping the labels then would
+blank the progress timeline exactly when it is being looked at.
+
+### The block boundary is a firewall
+
+`workout adapt` may only rewrite sessions **up to the end of the block containing the
+evaluation date**. It may not reach into the next block. Its runway therefore shrinks to
+nothing as a block ends.
+
+That is on purpose, and it is enforced on both sides:
+
+- **Read side:** workouts are fetched with the block end as the upper bound, so
+  post-boundary sessions never enter the prompt.
+- **Write side:** any proposal dated past the range end is dropped, so a hallucinated date
+  cannot be written. The apply range is derived from the *surviving* proposals, so it
+  cannot stretch past the block either.
+
+The reason is not the range, it is what would ride along with it. Adapt's whole input is a
+backward window of recovery metrics. A longer reach would give this morning's HRV authority
+over a session four weeks out, where it has no predictive claim. Periodization is authored
+by `plan generate` and `workout generate`; a daily readiness check must not rewrite it
+(`DESIGN_block_boundary.md §2`).
+
+Rather than widening the firewall, both sides are made aware of it. Inside
+`config.adapt_terminal_window_days` of a block's end, the adapt prompt gains a
+`THIS BLOCK IS ENDING` section, and the CLI prints the exact
+`workout generate -m ..<id>` invocation that re-plans the next block against current
+metrics.
+
+`workout accommodate` is the one command that legitimately crosses the boundary. It can,
+because it changes the question: **adapt reacts to something inferred; accommodate reacts
+to something declared.** A constraint is a dated fact the athlete typed in, so honouring it
+needs no metrics and makes no fitness judgement — which is exactly why the command reads no
+metrics at all. The moment it did, the firewall argument would apply to it too
+(`DESIGN_constraint_reschedule.md §2`).
+
+### Operations
+
+**There is no mesocycle CRUD.** Blocks are created only as a side effect of
+`plan generate`, and destroyed only by cascade. You cannot add, rename, re-date or delete
+one directly.
+
+What you *can* do with a block:
+
+| Operation | How |
+|---|---|
+| Select a window by block | `-m <id>` on any command taking range selectors: `workout list -m 5`, `workout generate -m ..7`, `constraint list -m 5`. |
+| File feedback against a block | `plan feedback -m [ATOM] "text"` — the atom is a block ID, a date it covers, or an infix of its name. Bare `-m` means the current block. |
+| Reshape a block | Change the goal, the constraints or the feedback, then `plan generate`. That is the only path. |
+| Re-plan a block's sessions | `workout generate -m ..<id>` (generation always starts today; only the selector's end is used). |
+
+A note filed to a block records the block's **name**, not just its ID, when it is later
+rendered — names survive version churn, IDs do not.
+
+---
+
+## 5. Microcycle — the level with no table
+
+There is no `microcycles` table, no `Microcycle` type, and no microcycle ID. Searching the
+codebase for the word turns up prompt text, CLI help strings, and the science
+vocabulary document — nothing else.
+
+### What a microcycle is, conceptually
+
+From `trainmate/science/periodization.md`, which is the vocabulary authority:
+
+> The repeating work/rest unit from which daily workouts are allocated. **Where a plan
+> document expresses doses per week ("2/week", "75% of the previous week"), the microcycle
+> is 7 days** unless that plan says otherwise.
+
+Three programming defaults come with it, and they apply unless a science document
+deliberately overrides them:
+
+- **The Fatigue Buffer** — high-intensity sessions are not scheduled on consecutive days.
+- **The Aerobic Anchor** — the week's *longest* session should be a low-intensity one, so
+  the greatest duration and the greatest intensity do not land on the same session.
+- **The Rest Mandate** — 1 to 2 complete rest or active-recovery days in any rolling
+  7-day equivalent.
+
+### Why it is not stored
+
+Because storing it would add nothing. A microcycle is fully described by the workouts that
+implement it: seven dated rows already say which days are hard, which are long, and which
+are rest. A `microcycles` row would either duplicate that or contradict it.
+
+So the concept lives in exactly three places:
+
+1. **The workout-generation prompt**, which asks for it by name: *"Ensure the weekly
+   schedules/microcycles are designed specifically to match the focus, target volume, and
+   intensity of the active mesocycle block(s)."* The model's `reasoning` field is asked to
+   describe *"the shape of the week and why"* — that is the microcycle design, returned as
+   prose rather than as data.
+2. **The science guidelines**, as the defaults above.
+3. **`progression.weekly_aggregates`**, the one place the app makes weeks concrete. It
+   aggregates planned-vs-actual load into **Monday-commencing** weeks and labels each week
+   with the mesocycle that has the majority overlap. `tm progress` and the block-progress
+   prompt section both read it, so the coach and the athlete can never read different
+   numbers.
+
+### The practical consequence
+
+You cannot query "the current microcycle". You query a date range. Every command that
+looks like it operates on a week — `workout list -d 7d`, `progress -w 8` — is operating on
+dates that happen to be a week long. The `-m` selector reaches a *block*; there is no
+selector that reaches a week, because there is no week object to reach.
+
+---
+
+## 6. Workout (`workouts`) — the session
+
+### What it is
+
+One prescribed session, on one date, for one sport. Rest days are workouts too, with
+`duration_minutes`, `rpe` and `tss` all zero.
+
+### The fields, by what kind of fact they carry
+
+**The prescription** — `date`, `sport_type`, `title`, `description`,
+`duration_minutes`, `rpe`, `tss`, and the seven `planned_zone*_sec` slots with their
+`planned_zone_currency` (`hr` or `power`).
+
+**Creation-time intent, fixed forever:**
+
+| Field | Meaning |
+|---|---|
+| `source` | `generated` (from `plan`/`generate`, or newly added by an adapt) or `manual` (`workout add`). |
+| `macrocycle_id` | The plan version this session belongs to. Set at insert, never overwritten. |
+| `benchmark_type` | Non-`NULL` ⟺ this session is a fitness test (`ftp_20min`, `run_5k_tt`, …). |
+| `created_at` | When the session first entered the plan. Distinct from `date`. |
+| `original_date`, `original_description`, `original_duration_minutes`, `original_tss`, `original_rpe` | What it was planned as, before anything moved or eased it. |
+
+**Modification history** — `modification_reason` (short, per-session),
+`adaptation_summary` (long, shared across one adapt run's whole batch), `adapted_at`,
+`adaptation_count`.
+
+**Lifecycle flags** — `removed` + `removed_reason` (soft delete), `archived_at`
+(displaced by a regeneration or rollback).
+
+**Calendar state** — `google_event_id`, `pushed_signature`, `marked_signature`.
+
+### Invariants
+
+1. **At most one *live* row per (date, canonical sport).** `save_workout` looks for an
+   existing non-archived row that day for that sport and updates it instead of inserting.
+   The lookup is **alias-aware**: regenerating a canonical `strength_training` updates an
+   existing `strength` row rather than creating a duplicate, and the stored row keeps its
+   original spelling. Archived rows are invisible to this lookup, so a fresh generation
+   inserts new rows rather than reviving old ones.
+2. **Creation-time facts never change on update.** `macrocycle_id`, `source`,
+   `created_at`, `original_*` and `benchmark_type` are all `COALESCE`-preserved, so a
+   partial re-save cannot read an omission as a deletion. `benchmark_type` has exactly one
+   escape hatch — `clear_benchmark=True` — used when an adaptation replaces a test with
+   something that is no longer that test. The flag belongs to the *test*, not to the date,
+   so a replacement session must not inherit it.
+3. **`save_workout` never touches Calendar freshness.** `pushed_signature` is left alone,
+   so any content change automatically reads as stale. Only a successful push, through
+   `mark_workout_pushed`, records a new signature.
+4. **`macrocycle_id` is a tag, not a foreign key.** No cascade. See §9.7.
+5. **Nothing is written by a `propose` method.** `workout_generate` returns a
+   `GenerateProposal`; only `workout_generate_apply` writes. This is enforced structurally:
+   `tests/test_service_invariants.py` parses the source and fails any method returning a
+   `*Proposal` that calls a database write, any proposal-taking method that fails to record
+   the pass, and any revision preview that reads the database instead of drawing the
+   proposal it was handed.
+
+### Workout state is four orthogonal axes, not one enum
+
+There is no `status` column. Four independent facts, three of them derived:
+
+| Axis | How you ask it |
+|---|---|
+| **Modified?** | `modification_reason IS NOT NULL`. The *kind* — `unmodified` / `adapted` / `swapped` / `replaced` — is derived in order by `modification_state.modification_status()`. There is no stored kind flag. |
+| **Removed?** | `removed = 1`, set by `workout rm`. Hidden from listings, comparisons, adaptation inputs and the Calendar push, but still shown to the coach as a deliberate *cancellation* — which is not the same thing as a miss. |
+| **Archived?** | `archived_at IS NOT NULL` — displaced by a regeneration or a rollback. Every row displaced in one call shares the timestamp, so it doubles as the **batch key** that `workout rollback` restores. |
+| **Pushed / fresh?** | Derived by comparing the live hash of the Calendar-relevant fields against `pushed_signature`. Never stored as a boolean. |
+
+`removed` and `archived_at` are deliberately distinct: one is the athlete cancelling a
+session, the other is the app displacing it.
+
+The rationale for deriving rather than storing is in `ARCHITECTURE.md §15 "Workout state"`.
+The short version: a stored enum has to be updated by every writer, and the day one writer
+forgets, the enum is lying with no way to tell.
+
+### Operations
+
+| Command | What it does |
+|---|---|
+| `workout list` | Show planned sessions. Default 7-day forward window. |
+| `workout compare` | Planned vs completed, with misses, rest violations and unplanned high load. Today's untrained sessions read *"(not yet — still ahead today)"* and are **not** misses. |
+| `workout generate` | Write the sessions for a horizon, from the blocks governing those days. |
+| `workout adapt` | Daily readiness adjustment, within the current block only. |
+| `workout accommodate` | Reshuffle around declared constraints, in each constraint's own window. |
+| `workout add` | Manually schedule one session. No LLM. Replaces the same-sport session that day (or, with `--replace-day`, every session that day), recording what it overwrote. Deliberately does **not** re-balance surrounding days — that is `adapt`'s job. |
+| `workout swap` | Exchange two sessions' dates, or move one onto a rest day. Mandatory reason. Validated first: warns about new >2-day hard streaks, weekly load spikes, and block-boundary crossings. Returning a session to its `original_date` clears `modification_reason` — it is no longer modified. |
+| `workout rm` / `restore` | Soft-delete one session and its Calendar event, and undo that. |
+| `workout rollback` / `batches` | Undo a regeneration by restoring an archived batch. `batches` lists what can be restored. |
+| `workout push` | Sync to Google Calendar. Only unsynced rows unless `-f`. |
+| `workout prune-calendar` | Delete Calendar events no local row references. |
+| `workout wipe` | Delete all. |
+
+---
+
+## 7. Who is allowed to write what
+
+This is the central discipline of the system. Each command owns one level, and a lower
+level may never rewrite a higher one.
+
+| Command | Writes | Horizon | Reads recovery metrics? | LLM calls |
+|---|---|---|---|---|
+| `plan generate` | macrocycle + mesocycles | plan start → goal date | 15-day summary + PMC block | 1 |
+| `workout generate` | workouts (archive & rebuild) | today → horizon flag, default 28 days | Yes — full `metrics_lookback_days` window | 1 |
+| `workout accommodate` | workouts (edit in place) | each constraint's dates ± `accommodate_spill_days` (default 3), clipped to **tomorrow** | **No — deliberately none** | 1 per pass |
+| `workout adapt` | workouts (edit in place) | evaluation date → **end of the current block** | Yes — full window, plus daily context | 1 |
+| `workout add` / `swap` / `rm` | one or two workouts | a single date | No | 0 |
+
+Read that table top to bottom as an authority ladder:
+
+- `plan generate` may reshape everything, and costs the most to run.
+- `workout generate` may rewrite sessions freely, but only within the blocks it was
+  handed. It cannot move a block boundary.
+- `workout accommodate` may cross a block boundary, but only inside a small declared
+  window, and it may not restructure anything — three days of spill can absorb a moved
+  session, it cannot re-periodize a block.
+- `workout adapt` may not cross a block boundary at all.
+- `workout add` / `swap` / `rm` touch exactly what you name and nothing else.
+
+Two write models, worth keeping straight:
+
+**Archive-and-rebuild** (`workout generate`, `plan rollback`, goal archive) is defined
+"from a date onward". It stamps every displaced row with one `archived_at` and inserts
+fresh rows.
+
+**Edit-in-place** (`workout adapt`, `workout accommodate`) rewrites the rows it touches.
+`accommodate` uses adapt's write path rather than generate's for a structural reason: a
+window-scoped rewrite has no representation in archive-and-rebuild, which only knows how to
+cut from a date forward (`DESIGN_plan_rollback.md §9`).
+
+---
+
+## 8. A worked example
+
+An athlete has a marathon on 2026-11-15.
+
+**1. The goal.**
+
+```
+./tm goal add "Autumn Marathon" 2026-11-15 running --priority 1
+```
+
+One row in `objectives`. `date_type` defaults to `event`, so the plan will peak and taper
+into that date. `goal_state()` reports `upcoming`. Nothing else exists yet.
+
+**2. The plan.**
+
+```
+./tm plan generate
+```
+
+The plan window runs from today to 2026-11-15. TrainMate assembles the science guidelines,
+the athlete profile, every upcoming goal, every active constraint, a 15-day training and
+metrics summary with the current CTL/ATL/TSB, a planned-vs-actual review of any earlier
+plan, and the coach learnings — one LLM call — and gets back a `strategy` plus a list of
+blocks:
+
+```
+- Base Building        (2026-08-22 → 2026-09-26)  Zone 2 aerobic base, high volume
+- Specific Preparation (2026-09-27 → 2026-10-24)  Threshold work, marathon pace
+- Build                (2026-10-25 → 2026-11-07)  Peak long runs, race simulation
+- Peak & Taper         (2026-11-08 → 2026-11-15)  Volume down, intensity held
+```
+
+One `macrocycles` row (`status = 'active'`), four `mesocycles` rows. **No workouts yet.**
+
+**3. The sessions.**
+
+```
+./tm workout generate
+```
+
+TrainMate resolves which blocks govern today → today+27 (that lands entirely in Base
+Building), reads the metrics window, builds the block-progress context, and asks the model
+for a schedule. It prints the proposed sessions and asks. On `y`, it archives any existing
+future sessions, writes the new rows tagged with the active `macrocycle_id`, and pushes
+them to Calendar.
+
+The weekly shape those 28 rows fall into *is* the microcycle. It is visible in the rows and
+described in the model's `reasoning` prose. It is stored as neither.
+
+**4. A bad morning.**
+
+```
+./tm workout adapt
+```
+
+HRV is down, sleep was poor. Adapt reads the backward metrics window and may rewrite
+sessions from today to **2026-09-26** — the end of Base Building — and no further. Each
+row it eases gets a `modification_reason`, the shared `adaptation_summary`, and an
+`adapted_at` stamp (the last only if the load actually moved, so a pure drift correction
+does not raise the "already eased" bar for next time).
+
+**5. A trip in October.**
+
+```
+./tm constraint add "Work trip, no bike" --start 2026-10-12 --end 2026-10-16
+./tm workout accommodate
+```
+
+The constraint is dated inside Specific Preparation — too far off for adapt to reach, too
+small to justify re-periodizing. `accommodate` opens a window of 2026-10-09 → 2026-10-19
+(the constraint's dates ± 3 days), previews the whole window, and on acceptance reshuffles
+the sessions in it. It reads no metrics. The constraint's `honored_at` is stamped, so the
+next bare sweep will not re-offer it.
+
+**6. Second thoughts about the plan.**
+
+```
+./tm plan feedback -m "Base Building" "This block is too long — I plateau after four weeks"
+./tm plan generate
+```
+
+The note goes into the append-only log against the active version. Because a note is
+pending, `plan generate` regenerates without `--force`, and the prompt requires the model
+to address every note. The result is macrocycle **version 2**, active; version 1 is now
+`superseded`, kept, and its feedback log is consumed by that supersession.
+
+The existing workouts are still tagged with version 1 and still sitting on the calendar.
+They only change when `workout generate` runs again.
+
+**7. Regret.**
+
+```
+./tm plan rollback
+```
+
+Version 1 becomes active again. The current future sessions are archived and their
+Calendar events torn down; version 1's archived sessions are resurrected and re-pushed.
+Version 1's feedback notes are pending once more.
+
+---
+
+## 9. What happens when something changes
+
+### 9.1 The goal's date, title, description, sport or priority moves
+
+`goals_hash` changes → the plan reads stale → the next `plan generate` regenerates instead
+of reusing, and the staleness message names the field that moved (from `goals_snapshot`).
+Nothing happens automatically.
+
+### 9.2 `date_type` flips between `event` and `horizon`
+
+`_clean_goals` includes the field **only when it is `horizon`**. So an event goal — every
+goal that predates the field — hashes exactly as it always did, and shipping the field did
+not flag existing plans stale. Flipping a goal either way adds or removes the key, changes
+`goals_hash`, and prompts the replan that change genuinely warrants.
+
+### 9.3 A constraint is added
+
+- With `--replan`: `constraints_hash` changes → the plan is stale → `plan generate`
+  rebuilds around it.
+- Without: no staleness at all. The constraint still reaches every coach prompt, and is
+  honoured by `workout accommodate`, `workout adapt` or the next `workout generate`,
+  whichever gets there first.
+
+At add time, a magnitude heuristic *proposes* escalation — when the constraint displaces at
+least `replan_displaced_load_pct` (default 50%) of a typical week's planned load, or is a
+rest window of at least `replan_rest_span_days` (default 3) days. It only ever proposes;
+escalation is the athlete's call.
+
+`honored_at` records when a coach pass last had the constraint in scope **with authority
+over every day of it still ahead**. `NULL` means the plan does not reflect it yet. It is
+deliberately *not* a claim that the plan changed. Editing a constraint's window or text
+clears it, and so does a rollback restoring a plan older than the honouring.
+
+### 9.4 A threshold or profile field changes
+
+`config_hash` changes, but thresholds are compared against `coach.threshold_replan_pct`
+drift rather than exact equality — a one-watt FTP change is not a reason to re-plan.
+Profile fields that cannot reshape a plan (`name`, equipment) are excluded from the hash
+entirely.
+
+### 9.5 The plan is regenerated
+
+The old macrocycle is superseded and kept, with its blocks and its feedback. A new active
+macrocycle is inserted. **Workouts are untouched** — they still carry the old version's
+`macrocycle_id` — until `workout generate` runs, which archives from today forward and
+rebuilds.
+
+### 9.6 A goal is archived and later reinstated
+
+Archiving stands down the upcoming sessions of *that goal's* plan versions and clears their
+Calendar events. The plan, its versions and its feedback survive intact. Past sessions stay.
+Reinstating restores the stood-down batch, floored at today, and re-pushes it.
+
+### 9.7 A goal is deleted
+
+The cascade takes every plan version, every block and every feedback note. It does **not**
+take the workouts, because `workouts.macrocycle_id` is a plain integer with no foreign key.
+Those sessions are left with no plan to explain them, which is why `goal rm` counts them
+first and says so:
+
+```
+Removing goal 'Autumn Marathon' (ID 3) also deletes:
+  - 2 periodization plan version(s)
+  - 8 mesocycle block(s)
+  - 3 plan feedback note(s)
+  and leaves 26 upcoming session(s) with no plan to explain them.
+```
+
+`goal edit --status archived` is the reversible alternative, and the one to reach for
+unless the goal was entered by mistake.
+
+---
+
+## 10. Invariant summary
+
+| # | Invariant | Enforced where |
+|---|---|---|
+| 1 | A goal's `status` is only `active` or `archived`; completion is derived from the date | `db/objectives.goal_state()`, one-off migration |
+| 2 | Exactly one active macrocycle per goal | `save_macrocycle`, `set_active_macrocycle`, every reader's `status` filter |
+| 3 | Regeneration supersedes, never deletes | `save_macrocycle` |
+| 4 | The plan window must be non-empty (`goal date > plan start`) | `plan_generate` raises |
+| 5 | Plan fingerprints are computed at generate time and carried to apply | `PlanFingerprints` passed through `plan_apply` |
+| 6 | Only `replan = 1` constraints fingerprint the plan | `plan_generate` filters before hashing |
+| 7 | A mesocycle belongs to one macrocycle and dies with it | FK `ON DELETE CASCADE` |
+| 8 | Adapt may not write past the end of the current block | Read bound + write-side filter |
+| 9 | Accommodate's window is the constraint's dates ± 3 days, never before tomorrow | `accommodation_plan` |
+| 10 | At most one live workout per (date, canonical sport) | `save_workout`'s alias-aware upsert |
+| 11 | Creation-time workout fields are never overwritten | `COALESCE` in the UPDATE branch |
+| 12 | A `propose` method never writes; an apply method always records the pass | `tests/test_service_invariants.py` (source-level) |
+| 13 | Workout state is derived from orthogonal axes, never a stored enum | `modification_state`, `calendar_state` |
+| 14 | Weeks are Monday-commencing everywhere | `progression.weekly_aggregates` |
+
+## 11. Deliberately not enforced
+
+Worth knowing, because each of these is a decision rather than an oversight:
+
+- **Mesocycle contiguity, non-overlap and full coverage.** Asked of the model in the
+  planning prompt; never validated on save. Readers absorb the consequences: the lenient
+  readers fall back, and overlapping plans are settled by recency.
+- **The relationship between a session's planned zone seconds and its duration.** Stored
+  exactly as the model emitted them. A session whose zone seconds do not sum to
+  `duration_minutes` is a prescription, not an accounting identity — silently scaling it
+  would put the app back in the business of correcting the model rather than aligning for it.
+- **A block having any load target at all.** A block states a name, a span and a focus.
+  Everything quantitative is derived downstream from the sessions.
+- **Workouts pointing at a real macrocycle.** No foreign key, so no cascade, so a deleted
+  goal strands its sessions — reported at `goal rm` time rather than prevented.
+- **The gap between blocks.** `get_active_mesocycle` snaps from "one day left" to "the whole
+  next block" across a calendar gap rather than tapering. Both features that read it gate on
+  `0 <= days_left <= N`, so neither misfires. Recorded in `DESIGN_block_boundary.md §6`
+  rather than fixed.
+
+---
+
+## Further reading
+
+| Topic | Document |
+|---|---|
+| Periodization vocabulary and defaults | `trainmate/science/periodization.md` |
+| Full schema and module map | `ARCHITECTURE.md` §5, §2 |
+| Plan vs workout terminology | `ARCHITECTURE.md` §11 |
+| Plan versioning and rollback | `designs/DESIGN_plan_rollback.md` |
+| The block firewall | `designs/DESIGN_block_boundary.md` |
+| The accommodate tier | `designs/DESIGN_constraint_reschedule.md` |
+| Constraints and the replan escalation | `designs/DESIGN_constraints.md` |
+| Plan feedback log | `designs/DESIGN_plan_feedback.md` |
+| Goal states and archiving | `designs/DESIGN_backward_evaluation.md` §12, §14 |
