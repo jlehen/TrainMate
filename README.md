@@ -112,7 +112,7 @@ and SQLite database:
    CLI commands from your phone (see [Running the Telegram bot](#running-the-telegram-bot)).
 
 For more deep-dive technical details on how the coaching logic and application
-internals work, see the [Architecture Document](ARCHITECTURE.md).
+internals work, see the [Architecture Document](docs/ARCHITECTURE.md).
 
 ## Getting Started
 

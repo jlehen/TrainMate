@@ -4,8 +4,8 @@
 - Avoid jargony, dense or overly compressed phrasing.
 
 # Code
-- Read ARCHITECTURE.md to ramp up on the code structure.
-- When changing code, always update ARCHITECTURE.md if appropriate.
+- Read docs/ARCHITECTURE.md to ramp up on the code structure.
+- When changing code, always update docs/ARCHITECTURE.md if appropriate.
 - When adding a new feature, always reflect if this needs to be integrated
   in each command and data flow.
 - When storing values in the database, always lean toward storing exact or
