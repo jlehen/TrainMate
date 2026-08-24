@@ -4,7 +4,8 @@ from trainmate.types import Objective, Constraint, Workout, CompletedActivity
 from trainmate.util import cyan, days_between, aside
 from trainmate.coach.formatting import (
     format_metrics_history, format_completed_activities, format_baseline,
-    format_planned_workouts_detailed, format_removed_workouts, format_daily_context,
+    format_planned_workouts, format_planned_workouts_detailed, format_removed_workouts,
+    format_daily_context,
 )
 import trainmate.coach.engine as _eng
 from trainmate.sports import CANONICAL_SPORTS
@@ -52,6 +53,39 @@ block, which you can neither adapt nor pre-empt.
 Hold the planned load unless the signal is one you would act on even if this were the
 block's very last session. Do not deepen a cut to "carry" the athlete into the next block:
 it is planned separately, against their metrics as they stand when it is generated.
+"""
+
+
+def _carried_adaptations_task(carried_workouts: Optional[List[Workout]]) -> str:
+    """The CARRYING OVER section of the generate TASK.
+
+    A regeneration rewrites the horizon from scratch, so without this the load a prior
+    `workout adapt` took off is handed straight back (DESIGN_workout_revisions.md §7.1).
+    Gated on there being such a session, so a horizon nothing has eased produces the
+    prompt it always did.
+    """
+    if not carried_workouts:
+        return ""
+    return """
+### CARRYING OVER AN ALREADY-EASED SESSION
+The user content includes a section titled "SESSIONS ALREADY EASED BY AN ADAPTATION": the
+sessions ahead whose current numbers are not the plan's original prescription but the reduced
+form a `workout adapt` already produced, against the athlete's state on the day it ran. Each
+tag says how often and how recently it was eased, and the note after it says why.
+
+For each of them, decide one of two things and nothing in between:
+
+- KEEP it. Return `{"date": ..., "sport_type": ..., "keep": true}` and no other field. The
+  session stays exactly as it stands, down to the interval structure and zone caps you were
+  not shown, and the athlete sees no change on that day. This is the default — an easing was
+  a considered answer to the athlete's state, and rewriting the day from the block's targets
+  hands back the exact load adapt took off, silently.
+- REPLACE it. Return it as an ordinary workout, fully written out. Do this when the metrics
+  in this prompt show the moment the easing answered has passed, or when the block's
+  remainder genuinely needs that day for something else — and say which in your reasoning.
+
+You cannot half-do it: there is no way to keep the session and adjust it, because a KEEP
+returns nothing to adjust. If you want the day changed at all, write it out in full.
 """
 
 
@@ -172,6 +206,23 @@ an accounting identity. HR sessions fill zones 1-5 and leave 6 and 7 null.
 """
 
 
+def _carried_keep_field(carried_workouts: Optional[List[Workout]]) -> str:
+    """The `keep` member of the generate response schema.
+
+    Third region on the same gate as CARRYING OVER and its data section: a schema that
+    offers `keep` where the prompt never explained it is exactly the half-application
+    `tests/test_prompt_gates.py` exists to catch.
+    """
+    if not carried_workouts:
+        return ""
+    return (
+        '      "keep": true (OMIT on an ordinary session. Present ONLY on a session listed\n'
+        "        in SESSIONS ALREADY EASED BY AN ADAPTATION that you are keeping as it\n"
+        '        stands — see CARRYING OVER — in which case "date" and "sport_type" are\n'
+        "        the only other fields to give and every other member here is omitted),\n"
+    )
+
+
 def _planned_zone_fields(zone_currencies: Optional[Dict[str, str]]) -> str:
     """The two response-schema members carrying §9.8's target, declared the way every
     other field is: a prose-annotated JSON example."""
@@ -286,7 +337,8 @@ class WorkoutLogicMixin:
         block_progress: Optional[str] = None,
         block_has_intensity: bool = False,
         zone_currencies: Optional[Dict[str, str]] = None,
-        anchor_history: Optional[str] = None
+        anchor_history: Optional[str] = None,
+        carried_workouts: Optional[List[Workout]] = None
     ) -> Dict[str, Any]:
         """Queries LLM to generate workouts for a given number of days based on active strategy.
 
@@ -341,6 +393,7 @@ class WorkoutLogicMixin:
             "they test), and never put it in a week the athlete's constraints put under full rest.\n"
             + _block_progress_task(block_progress)
             + _block_composition_task(block_progress, block_has_intensity)
+            + _carried_adaptations_task(carried_workouts)
             + _planned_zone_task(zone_currencies)
             + "\n"
             "## RESPONSE FORMAT\n"
@@ -364,7 +417,8 @@ class WorkoutLogicMixin:
             "      \"duration_minutes\": 60, (Estimated workout duration in minutes, integer. Use 0 for rest days)\n"
             "      \"rpe\": 6, (Expected Rate of Perceived Exertion, integer 1-10. Use 0 for rest days)\n"
             "      \"tss\": 45, (Expected Training Stress Score, integer. Use 0 for rest days)\n"
-            + _planned_zone_fields(zone_currencies) +
+            + _planned_zone_fields(zone_currencies)
+            + _carried_keep_field(carried_workouts) +
             '      "benchmark_type": null (Normally null. Set ONLY on a scheduled fitness\n'
             "        test — see BENCHMARK PLACEMENT — to the test kind, e.g. \"ftp_20min\" |\n"
             '        "ftp_ramp" | "run_threshold_30min" | "run_5k_tt" | "css_400_200" |\n'
@@ -432,6 +486,18 @@ class WorkoutLogicMixin:
             completed_text = format_completed_activities(completed_activities)
             history_text_parts.append(
                 f"## ACTUAL COMPLETED GARMIN ACTIVITIES IN WINDOW\n{completed_text}"
+            )
+
+        # Last, closest to where the model starts writing: unlike the sections above it
+        # is not context about the athlete but a claim on the output. Same gate as
+        # CARRYING OVER above, so the two never disagree about its presence.
+        if carried_workouts:
+            history_text_parts.append(
+                "## SESSIONS ALREADY EASED BY AN ADAPTATION\n"
+                "These are the only sessions you should try to carry over — every other "
+                "day in this\nwindow is yours to write from scratch, and a date this list "
+                "does not name is not\nspoken for.\n"
+                + format_planned_workouts(carried_workouts, eval_date=today_str)
             )
 
         if history_text_parts:

@@ -33,6 +33,11 @@ DRIFT_INSTRUCTIONS = "### CORRECTING EXECUTION DRIFT"
 DRIFT_BRANCH = "measured intensity distribution has diverged from its stated"
 DRIFT_DATA = "## MEASURED INTENSITY DISTRIBUTION OF THE ACTIVE BLOCK"
 
+CARRY_INSTRUCTIONS = "### CARRYING OVER AN ALREADY-EASED SESSION"
+CARRY_SCHEMA_MEMBER = '"keep": true'
+CARRY_DATA = "## SESSIONS ALREADY EASED BY AN ADAPTATION"
+CARRY_SCOPE = "These are the only sessions you should try to carry over"
+
 BASE = dict(
     history_days=7,
     start_date_str="2026-05-28",
@@ -68,6 +73,29 @@ def build_prompt(**extra):
             engine._workout_adapt_logic(**BASE, **extra)
         system, user = client.complete.call_args[0][0], client.complete.call_args[0][1]
     return system, user
+
+
+GENERATE_BASE = dict(
+    objectives=[{"id": 1, "title": "Race", "target_date": "2026-09-01",
+                 "sport_type": "running"}],
+    constraints=[],
+    today_str="2026-06-03",
+    guidelines="Guidelines text.",
+    profile={"max_hr": 185},
+    strategy="Build aerobic base.",
+    meso_text="  - Base (2026-06-01 to 2026-06-28): Aerobic\n",
+    learnings="No learnings.",
+)
+
+
+def build_generate_prompt(**extra):
+    """The (system, user) pair the generate call would send."""
+    engine = CoachEngine()
+    with patch("trainmate.coach.engine.openrouter_client") as client:
+        client.complete.return_value = {"reasoning": "ok", "workouts": []}
+        with patch("builtins.print"):
+            engine._workout_generate_logic(**GENERATE_BASE, **extra)
+        return client.complete.call_args[0][0], client.complete.call_args[0][1]
 
 
 class TestAthleteNoteGate(unittest.TestCase):
@@ -177,6 +205,77 @@ class TestTheStandingRules(unittest.TestCase):
         # section must reach the prompt intact rather than paraphrased.
         system, _user = build_prompt()
         self.assertIn(wk._benchmark_task(), system)
+
+
+class TestCarriedAdaptationsGate(unittest.TestCase):
+    """`workout generate` rewrites the horizon from scratch, so a session a prior adapt
+    eased survives only if it is carried in — and the instruction telling the model what
+    to do with the list must arrive with the list."""
+
+    EASED = [{
+        "date": "2026-06-05", "sport_type": "cycling", "title": "Easy Z2 Spin",
+        "description": "[Easy Z2 Spin]\n40 min ERG-locked, no surges.",
+        "duration_minutes": 40, "rpe": 3, "tss": 26,
+        "adaptation_count": 1, "adapted_at": "2026-06-01",
+        "modification_reason": "Cut to easy Z2 to shed intensity.",
+    }]
+
+    def test_a_carried_session_reaches_every_region_it_governs(self):
+        system, user = build_generate_prompt(carried_workouts=self.EASED)
+        for region in (CARRY_INSTRUCTIONS, CARRY_SCHEMA_MEMBER):
+            with self.subTest(region=region):
+                self.assertIn(region, system)
+        for region in (CARRY_DATA, CARRY_SCOPE):
+            with self.subTest(region=region):
+                self.assertIn(region, user)
+        self.assertIn("Easy Z2 Spin", user, "the session itself must be in the data")
+
+    def test_the_list_carries_the_easing_tag_and_its_reason(self):
+        """Load alone does not say the numbers are already reduced — the tag does, and
+        the reason is what lets the model judge whether the easing still applies."""
+        _system, user = build_generate_prompt(carried_workouts=self.EASED)
+        self.assertIn(
+            "[ALREADY EASED by a prior adaptation (once, most recently 2 days ago)", user
+        )
+        self.assertIn("Cut to easy Z2 to shed intensity.", user)
+
+    def test_the_description_is_not_shipped(self):
+        """A KEEP identifies the session rather than copying it, so the description stays
+        out — sending it would be paying for text the model is told not to reproduce."""
+        _system, user = build_generate_prompt(carried_workouts=self.EASED)
+        self.assertNotIn("ERG-locked, no surges.", user)
+
+    def test_without_a_carried_session_none_of_them_appear(self):
+        system, user = build_generate_prompt()
+        whole = system + user
+        for region in (CARRY_INSTRUCTIONS, CARRY_SCHEMA_MEMBER, CARRY_DATA, CARRY_SCOPE):
+            with self.subTest(region=region):
+                self.assertNotIn(region, whole)
+
+    def test_an_empty_carry_list_counts_as_none(self):
+        """Nothing eased in the horizon is the ordinary case; it must not open a section
+        that would then name no sessions."""
+        system, user = build_generate_prompt(carried_workouts=[])
+        self.assertNotIn(CARRY_INSTRUCTIONS, system + user)
+        self.assertNotIn(CARRY_SCHEMA_MEMBER, system)
+
+    def test_the_generate_schema_stays_well_formed_either_way(self):
+        """`keep` is spliced ahead of `benchmark_type`, so its own trailing comma is what
+        a bad splice loses and the block's last member runs on. (The schema mixes two
+        annotation styles — comma after the value, or after the closing paren — so the
+        member ahead of the splice is not asserted against one rule.)"""
+        for carried in ([], self.EASED):
+            with self.subTest(carried=bool(carried)):
+                system, _user = build_generate_prompt(carried_workouts=carried)
+                self.assertNotIn(",,", system)
+                self.assertNotIn(",\n}", system)
+
+        system, _user = build_generate_prompt(carried_workouts=self.EASED)
+        block = system.split('"workouts": [')[1].split("\n    }")[0]
+        member = block[block.index('"keep"'):].split('\n      "')[0]
+        self.assertTrue(member.rstrip().endswith(","), msg=repr(member))
+        self.assertIn('"benchmark_type"', block.split('"keep"')[1],
+                      "keep must sit ahead of the block's last member")
 
 
 if __name__ == "__main__":

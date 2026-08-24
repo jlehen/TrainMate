@@ -55,6 +55,10 @@ def workout_line(w: dict) -> str:
     src_marker = ""
     if w.get('source') == 'manual':
         src_marker = bold(magenta(" [MANUAL]"))
+    # Only a `workout generate` proposal carries this: the day is being left alone rather
+    # than rewritten, which the rest of the line cannot show
+    # (DESIGN_workout_revisions.md §7.1).
+    keep_marker = bold(green(" [KEPT]")) if w.get('keep') else ""
     # Benchmark identity is a stored column, orthogonal to the modification/sync/removed
     # axes (a benchmark can also be swapped), so it gets its own marker straight off the
     # column (DESIGN_benchmark_workouts.md §3.1/§6).
@@ -69,7 +73,7 @@ def workout_line(w: dict) -> str:
     return (
         f"{ident}{cyan(fmt_date(w['date']))} | {magenta(w['sport_type'].upper())} | "
         f"{bold(w['title'])}{bench_marker}{mod_marker}{sync_marker}{rem_marker}"
-        f"{src_marker}{duration_str}{tss_str}{rpe_str}"
+        f"{src_marker}{keep_marker}{duration_str}{tss_str}{rpe_str}"
     )
 def warn_stale_before(start_date: str) -> None:
     """Flags workouts left `stale` on days earlier than the window just pushed.

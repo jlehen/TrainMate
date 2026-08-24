@@ -2049,6 +2049,193 @@ class TestDateKeyedGeneration(unittest.TestCase):
         mock_client.complete.assert_not_called()
 
 
+class TestEasedSessionsAreCarriedIntoGeneration(unittest.TestCase):
+    """A regeneration rewrites the horizon from scratch, so a session `workout adapt`
+    already eased is handed back at full load unless it is carried into the prompt and
+    the model is given a way to say "leave this one" (DESIGN_workout_revisions.md §7.1).
+    Only the eased sessions are carried: the rest of the window is still the model's."""
+
+    @classmethod
+    def setUpClass(cls):
+        if os.path.exists(TEST_DB_PATH):
+            os.remove(TEST_DB_PATH)
+        global test_db
+        test_db = Database(db_path=TEST_DB_PATH)
+        rebind_test_db(test_db)
+
+    @classmethod
+    def tearDownClass(cls):
+        if os.path.exists(TEST_DB_PATH):
+            try:
+                os.remove(TEST_DB_PATH)
+            except OSError:
+                pass
+
+    def setUp(self):
+        clear_all_tables(test_db)
+        obj_id = test_db.add_objective(
+            title="Autumn Marathon", target_date=_days_out(90), sport_type="running",
+        )
+        test_db.save_macrocycle(
+            objective_id=obj_id, strategy="build", goals_hash="g", constraints_hash="c",
+            mesocycles=[{"name": "Base", "start_date": _days_out(0),
+                         "end_date": _days_out(60), "focus": "aerobic"}],
+        )
+
+    # --- fixtures -----------------------------------------------------------------
+
+    @staticmethod
+    def _eased(date_str, **extra):
+        """A session whose live numbers are the reduced form of an earlier prescription —
+        `original_*` is what makes the helper write the adapt revision over a generate
+        one, which is what the tally reads."""
+        save_workout(
+            test_db, date=date_str, sport_type="cycling", title="Easy Z2 Spin",
+            description="[Easy Z2 Spin]\n40 min ERG-locked, no surges.",
+            duration_minutes=40, rpe=3, tss=26,
+            original_duration_minutes=90, original_rpe=7, original_tss=110,
+            modification_reason="Cut to easy Z2 to shed intensity.", **extra,
+        )
+
+    @staticmethod
+    def _untouched(date_str):
+        save_workout(
+            test_db, date=date_str, sport_type="running", title="Steady Run",
+            description="[Steady Run]\n50 min", duration_minutes=50, rpe=5, tss=45,
+        )
+
+    @staticmethod
+    def _keep(date_str, sport="cycling"):
+        return {"date": date_str, "sport_type": sport, "keep": True}
+
+    @staticmethod
+    def _written(date_str, sport="running", title="Steady Run"):
+        return {
+            "date": date_str, "sport_type": sport, "title": title,
+            "description": f"[{title}]\n50 min", "duration_minutes": 50,
+            "rpe": 5, "tss": 45,
+        }
+
+    def _run(self, *entries):
+        """`workout generate` end to end against a fixed model response, as the CLI does
+        on a `y`. Returns the proposal and the user content the model was sent."""
+        with patch("trainmate.runtime.calendar_syncer"), \
+                patch("trainmate.coach.engine.openrouter_client") as client:
+            client.complete.return_value = {
+                "reasoning": "why", "workouts": list(entries),
+            }
+            proposal = coach_service.workout_generate()
+            user = client.complete.call_args.args[1]
+            coach_service.workout_generate_apply(proposal)
+        return proposal, user
+
+    # --- what reaches the prompt --------------------------------------------------
+
+    def test_an_eased_session_reaches_the_prompt_with_its_tag(self):
+        self._eased(_days_out(3))
+        _proposal, user = self._run()
+        self.assertIn("## SESSIONS ALREADY EASED BY AN ADAPTATION", user)
+        self.assertIn("Easy Z2 Spin", user)
+        self.assertIn("[ALREADY EASED by a prior adaptation", user)
+        self.assertIn("Cut to easy Z2 to shed intensity.", user)
+
+    def test_the_description_is_not_shipped(self):
+        """A KEEP names the session rather than copying it, so the prompt pays for the
+        metadata only."""
+        self._eased(_days_out(3))
+        _proposal, user = self._run()
+        self.assertNotIn("ERG-locked, no surges.", user)
+
+    def test_a_session_nothing_eased_is_not_carried(self):
+        """The section is the easings, not the plan: carrying the untouched days would
+        make generate a re-run of adapt."""
+        self._eased(_days_out(3))
+        self._untouched(_days_out(4))
+        _proposal, user = self._run()
+        self.assertIn("Easy Z2 Spin", user)
+        self.assertNotIn("Steady Run", user)
+
+    def test_nothing_eased_leaves_the_prompt_as_it_was(self):
+        self._untouched(_days_out(4))
+        _proposal, user = self._run()
+        self.assertNotIn("SESSIONS ALREADY EASED", user)
+
+    def test_a_cancelled_session_is_not_carried(self):
+        """`workout rm` ended the session; an easing it carried is not a claim on the
+        regenerated plan."""
+        self._eased(_days_out(3), removed=True, removed_reason="travelling")
+        _proposal, user = self._run()
+        self.assertNotIn("SESSIONS ALREADY EASED", user)
+
+    # --- what a KEEP does ---------------------------------------------------------
+
+    def test_a_kept_session_is_left_exactly_as_it_stands(self):
+        """The point of the action: no revision, so the prescription, the Calendar event
+        and — via §7's tally — the session's standing as already-eased all survive. A
+        rewrite that merely reproduced the load would reset the tally and the NEXT
+        regeneration would restore it to full."""
+        self._eased(_days_out(3))
+        before = test_db.get_workout(_days_out(3), "cycling")
+        self._run(self._keep(_days_out(3)))
+        after = test_db.get_workout(_days_out(3), "cycling")
+        self.assertEqual(after["revision_id"], before["revision_id"])
+        self.assertEqual(after["title"], "Easy Z2 Spin")
+        self.assertEqual(after["duration_minutes"], 40)
+        self.assertEqual(after["adaptation_count"], 1)
+
+    def test_a_kept_session_survives_a_second_regeneration(self):
+        """The durability the action buys, asserted rather than reasoned about."""
+        self._eased(_days_out(3))
+        before = test_db.get_workout(_days_out(3), "cycling")
+        self._run(self._keep(_days_out(3)))
+        _proposal, user = self._run(self._keep(_days_out(3)))
+        self.assertIn("Easy Z2 Spin", user, "still carried on the second pass")
+        after = test_db.get_workout(_days_out(3), "cycling")
+        self.assertEqual(after["revision_id"], before["revision_id"])
+
+    def test_the_rest_of_the_window_is_still_rewritten(self):
+        """A KEEP claims one slot, not the horizon."""
+        self._eased(_days_out(3))
+        self._untouched(_days_out(4))
+        self._run(self._keep(_days_out(3)), self._written(_days_out(5)))
+        self.assertTrue(test_db.get_workout(_days_out(4), "running")["removed"])
+        self.assertIsNotNone(test_db.get_workout(_days_out(5), "running"))
+
+    def test_writing_the_day_out_beats_keeping_it(self):
+        """The model may decide the easing has served its purpose; an explicit session
+        for the same slot is that decision, and it wins."""
+        self._eased(_days_out(3))
+        before = test_db.get_workout(_days_out(3), "cycling")
+        self._run(
+            self._keep(_days_out(3)),
+            self._written(_days_out(3), sport="cycling", title="Threshold 2x20"),
+        )
+        after = test_db.get_workout(_days_out(3), "cycling")
+        self.assertEqual(after["title"], "Threshold 2x20")
+        self.assertNotEqual(after["revision_id"], before["revision_id"])
+
+    def test_a_keep_naming_a_session_that_was_not_carried_is_dropped(self):
+        """It claims a slot nothing would then write. Dropping it archives the day like
+        any other the plan does not fill — a silently blank day is the worse failure."""
+        self._eased(_days_out(3))
+        self._untouched(_days_out(4))
+        self._run(self._keep(_days_out(4), sport="running"))
+        self.assertTrue(test_db.get_workout(_days_out(4), "running")["removed"])
+
+    def test_a_forced_rest_window_still_overrides_a_keep(self):
+        """The deterministic rest pass runs after the KEEP is resolved, so a barred date
+        is barred whatever the model asked to keep (DESIGN_constraints.md §6)."""
+        self._eased(_days_out(3))
+        test_db.add_constraint(
+            title="Travel", start_date=_days_out(3), end_date=_days_out(3), rest=1,
+        )
+        self._run(self._keep(_days_out(3)))
+        self.assertTrue(test_db.get_workout(_days_out(3), "cycling")["removed"])
+        rest = test_db.get_workout(_days_out(3), "rest")
+        self.assertIsNotNone(rest)
+        self.assertFalse(rest["removed"])
+
+
 class TestGoalArchivalStandsSessionsDown(unittest.TestCase):
     """Calling a goal off stands its future sessions down without destroying anything
     (DESIGN_backward_evaluation.md §14)."""

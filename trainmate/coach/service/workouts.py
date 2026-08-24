@@ -188,6 +188,36 @@ class WorkoutGenMixin:
             out.append(w)
         return out
 
+    @staticmethod
+    def _resolve_kept(
+        workouts: List[Dict[str, Any]], carried: List[Workout]
+    ) -> List[Dict[str, Any]]:
+        """Swaps each `keep` entry for the session it names, so every pass after this one
+        sees a uniform list of full sessions (DESIGN_workout_revisions.md §7.1).
+
+        A KEEP naming a slot no carried session occupies is dropped, and an explicit
+        session for the same slot beats a KEEP of it. The marker rides on the resolved
+        dict, so a pass that replaces the session drops the marker with it.
+        """
+        by_slot = {
+            (w['date'], canonical_sport(w['sport_type'])): w for w in carried
+        }
+        written = {
+            (w.get('date'), canonical_sport(w.get('sport_type', '')))
+            for w in workouts if not w.get('keep')
+        }
+        out: List[Dict[str, Any]] = []
+        for w in workouts:
+            if not w.get('keep'):
+                out.append(w)
+                continue
+            slot = (w.get('date'), canonical_sport(w.get('sport_type', '')))
+            live = by_slot.get(slot)
+            if live is None or slot in written:
+                continue
+            out.append({**live, 'keep': True})
+        return out
+
     def _event_date_for_macrocycle(self, macrocycle_id: int) -> Optional[date]:
         """The event date a macrocycle's boundary tests must keep clear of — None when
         unresolvable, and None for a horizon goal, whose date has no event a test could
@@ -423,6 +453,14 @@ class WorkoutGenMixin:
         block_progress, block_has_intensity = self._block_progress_context(
             today_str, gen_start_str
         )
+        # What a prior `workout adapt` already eased, so the regeneration does not hand
+        # back the load adapt took off (DESIGN_workout_revisions.md §7.1).
+        carried = [
+            w for w in self._db.get_workouts(
+                start_date=gen_start_str, end_date=gen_end_str
+            )
+            if (w.get('adaptation_count') or 0) > 0
+        ]
         plan_data = self.engine._workout_generate_logic(
             objectives=objectives,
             constraints=constraints,
@@ -442,7 +480,8 @@ class WorkoutGenMixin:
             block_progress=block_progress,
             block_has_intensity=block_has_intensity,
             zone_currencies=self._planning_zone_currencies(today_str),
-            anchor_history=self._anchor_history_text(gen_start_str)
+            anchor_history=self._anchor_history_text(gen_start_str),
+            carried_workouts=carried
         )
 
         # NOTE: workout generation is read-only w.r.t. coach learnings (see
@@ -451,6 +490,10 @@ class WorkoutGenMixin:
 
         # Save workouts to database
         workouts = plan_data.get("workouts", [])
+
+        # Each `keep` becomes the session it names, so every pass below sees one kind of
+        # entry (DESIGN_workout_revisions.md §7.1).
+        workouts = self._resolve_kept(workouts, carried)
 
         # Integers, before the preview and the save both read these numbers.
         normalize_load_fields(workouts)
@@ -524,7 +567,9 @@ class WorkoutGenMixin:
         Every day the new plan does not fill, from the generation start onward, gets a void
         revision; every day it does fill gets a revision — unless the prescription is
         identical to what is already live, in which case §9 suppresses it and the day is
-        left alone. The voids go first, so a session the plan drops is ended before
+        left alone. A day the plan KEEPS is claimed but not written: it is spared the void
+        and appends nothing, so the session and its Calendar event carry on untouched
+        (§7.1). The voids go first, so a session the plan drops is ended before
         anything else can take its slot (§8). Calendar follows from the change handle's
         reconcile pass, so nothing here pushes.
 
@@ -554,6 +599,10 @@ class WorkoutGenMixin:
                     reason="Not in the regenerated plan",
                 )
             for w in proposal.workouts:
+                # Claimed above, so it escaped the void; writing it again would churn a
+                # day that did not change (§7.1).
+                if w.get('keep'):
+                    continue
                 # The intensity target the coach stated while it still knew the intent
                 # (DESIGN_intensity_distribution.md §9.8) — validated, never rescaled.
                 zone_currency, zone_sec = intensity.parse_planned_zones(w)

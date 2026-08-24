@@ -149,8 +149,15 @@ def format_completed_activities(completed_activities: List[CompletedActivity]) -
     return "\n".join(completed_list)
 
 
-def format_planned_workouts(planned_workouts: List[Workout]) -> str:
-    """Formats planned workouts to a readable block for LLM prompts."""
+def format_planned_workouts(
+    planned_workouts: List[Workout], eval_date: Optional[str] = None
+) -> str:
+    """Formats planned workouts to a readable block for LLM prompts.
+
+    `eval_date` adds the "[ALREADY EASED ...]" tag dated against it. Used where the model
+    is asked to identify a session rather than rewrite it, so the description
+    :func:`format_planned_workouts_detailed` carries is not needed.
+    """
     planned_list = []
     for w in planned_workouts:
         line = (
@@ -158,6 +165,8 @@ def format_planned_workouts(planned_workouts: List[Workout]) -> str:
             f"Expected duration: {w.get('duration_minutes')}m, "
             f"RPE: {w.get('rpe')}, TSS: {w.get('tss')}"
         )
+        if eval_date:
+            line += _adapt_recency_tag(w, eval_date)
         mod_reason = w.get('modification_reason')
         if mod_reason:
             line += f" — {mod_reason}"

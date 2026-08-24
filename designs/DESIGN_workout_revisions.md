@@ -476,6 +476,76 @@ motivates the lineage. The gate becomes `adaptation_count > 0`: the tag renders 
 the walk finds standing easings, whatever the last change kind was. §14 pins the rendered
 tag, not just the count.
 
+### 7.1 `workout generate` carries the easings forward
+
+`workout generate` rewrites the horizon from scratch, and until this it was shown nothing
+about the sessions already standing in it. An easing `workout adapt` applied on Monday was
+therefore handed straight back at full load by any regeneration before the athlete trained
+it — silently, and often: over the three weeks to 2026-08-17 the change log holds 31
+`generate` changes against 13 `adapt` ones, so most easings met a regeneration first.
+
+**The forward window's eased sessions reach the prompt, and nothing else does.** The list is
+`get_workouts(gen_start..gen_end)` filtered to `adaptation_count > 0` — live rows only, so a
+cancelled session makes no claim, and the window is all-future, so nothing completed appears
+in it. Every other day stays the model's to write, which is what keeps `generate` a
+regeneration rather than a second `adapt`. The section header says exactly that, because a
+sparse list of four sessions out of twenty-four is otherwise read as a plan to build around.
+
+**Metadata only, plus a `keep` action.** Each session is rendered by
+`format_planned_workouts` — date, sport, title, load, the `[ALREADY EASED ...]` tag and the
+prior run's reason, ~280 characters — and the model answers with one of two things:
+
+```
+{"date": ..., "sport_type": ..., "keep": true}    leave it exactly as it stands
+{...an ordinary fully-written workout...}          replace it
+```
+
+`WorkoutGenMixin._resolve_kept` swaps each KEEP for the session it names before any other
+pass runs, so the preview, the guards and the save all see one uniform list of full sessions.
+`workout_generate_apply` then claims the slot — sparing it the void every unfilled slot gets
+— and appends nothing.
+
+The alternative was to ship each session's full description (786 characters per session,
+measured over a real 29-session adapt prompt) and ask the model to retype it verbatim, letting
+§9's no-op suppression notice that nothing moved. It is worse on every axis:
+
+| | description + §9 | metadata + `keep` |
+| --- | --- | --- |
+| prompt cost per session | ~790 chars | ~280 chars |
+| fidelity | whatever the model retypes | exact, by construction |
+| survives a second regeneration | only if byte-identical | always |
+
+The last row is why this is an action and not just a prompt section. §7's walk stops at the
+first `generate` revision, so a regeneration that rewrites the session — even to precisely the
+same load — resets `adaptation_count` to 0, and the *next* regeneration no longer carries it.
+Byte-identical reproduction is the only thing that avoids that, and a model asked to retype
+790 characters will not reliably manage it. A KEEP writes no revision at all, so the tally,
+the Calendar event and the prescription all survive untouched and the session stays carried
+until the model deliberately replaces it.
+
+**A KEEP is claimed, not obeyed.** `_resolve_kept` drops one naming a slot no carried session
+occupies — it would claim a day nothing then writes, and a silently blank day is the worse
+failure — and an explicit session for the same slot beats a KEEP of it. The marker rides on
+the resolved dict rather than in a set beside it, so a later pass that *replaces* the session
+(`_enforce_rest_windows_generate` forcing a rest day over its date) drops the marker with it
+and the slot reverts to an ordinary write.
+
+**Deliberately not done**
+
+- **Carrying athlete-added (`source == 'manual'`) sessions.** The same mechanism reaches them
+  — one more clause in the filter, no change to `keep` — but the prompt is advisory, and an
+  athlete's own session is not the model's to overrule. That one wants the deterministic
+  post-pass `_drop_benchmark_collisions` has, and is a separate decision.
+- **Carrying the rest of the forward plan.** `DESIGN_block_boundary.md` §5 and
+  `DESIGN_block_progress.md` §6 both decline a prompt-visible list of sessions the model may
+  not touch. These are not that: they are sessions `generate` is being asked to decide about,
+  and there is a handful of them rather than a horizon.
+- **Showing what the session was eased *from*.** The tag asserts the current form is the
+  reduced plan without showing the original. `original_*` above is derived and reaches only
+  `calendar_state.py`. Until it is shown, "restore load as the athlete recovers" is an
+  instruction the model has no target for — a real gap, but one that belongs to whichever
+  command is asked to do the restoring.
+
 ### Modification kind — `modification_state.py` is deleted
 
 The kind is the change kind of the live revision:
@@ -652,7 +722,7 @@ still has days ahead), and reports it exactly as today. Same comparison, new tim
 
 | Command | Change kind | What it appends |
 |---|---|---|
-| `workout generate` | `generate` | A revision per changed day in the horizon; a void for every live slot from the generation start onward that the new plan does not fill — open-ended past the horizon, matching today's `archive_future_workouts`, which has no end bound. |
+| `workout generate` | `generate` | A revision per changed day in the horizon; a void for every live slot from the generation start onward that the new plan does not fill — open-ended past the horizon, matching today's `archive_future_workouts`, which has no end bound. A slot the plan KEEPS (§7.1) gets neither: it is claimed, so no void, and left alone, so no revision. |
 | `workout adapt` | `adapt` | A revision per eased session; a void for a session it drops. A session it moves or substitutes cross-sport: a void at the source and a revision at the destination carrying the session's lineage — the swap shape (§4). **No more `DELETE`.** |
 | `workout swap` | `swap` | Two revisions (same sport) or four (cross-sport), per §4. |
 | `workout add` | `add` | One revision; with `--replace-day`, a void per other session that day. **No more `DELETE`.** |

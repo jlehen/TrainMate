@@ -208,7 +208,10 @@ from the last completed week describes a week that does not exist.
 - **Showing the elapsed part's planned *sessions*.** Only weekly loads cross into the prompt.
   The microcycle's weekday rhythm is visible in the completed-activity list generate already
   receives, and a second read-only-but-prompt-visible workout list is the cost
-  DESIGN_block_boundary.md §5 declined for the same modest gain.
+  DESIGN_block_boundary.md §5 declined for the same modest gain. This entry stands, and is
+  about the *elapsed* part: the forward sessions a prior adapt eased do reach the prompt
+  (DESIGN_workout_revisions.md §7.1), but those are days generate is being asked to decide
+  about rather than history it may only read.
 
 ## 7. Surviving a replan: keeping the block under way
 

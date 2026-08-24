@@ -159,18 +159,28 @@ def _confirm_regeneration(end_date: Optional[str]) -> bool:
 
 def _confirm_apply(proposal: GenerateProposal) -> bool:
     """Gates the write, once the athlete has read the proposed sessions."""
-    displaced = len(proposal.displaced)
-    if not displaced:
+    # A kept session is already live and is not rewritten, so it is not among what this
+    # archives. Every kept slot is in `displaced` by construction, so subtracting is
+    # exact — and the danger prompt must not overstate the loss.
+    kept = sum(1 for w in proposal.workouts if w.get('keep'))
+    held = (
+        f" {kept} session(s) a prior adaptation eased are kept exactly as they are."
+        if kept else ""
+    )
+    displaced = len(proposal.displaced) - kept
+    if displaced <= 0:
         return runtime.prompt.confirm(
-            f"Schedule these {len(proposal.workouts)} workout(s) and push them to "
-            "Google Calendar?"
+            wrap_text(
+                f"Schedule these {len(proposal.workouts)} workout(s) and push them to "
+                f"Google Calendar?{held}"
+            )
         )
     return runtime.prompt.confirm(
         wrap_text(
             f"Schedule these {len(proposal.workouts)} workout(s) and push them to Google "
             f"Calendar? This archives the {displaced} session(s) currently planned from "
             f"{fmt_date(proposal.gen_start)} onward and deletes their Calendar events; "
-            f"{cmd('workout rollback')} restores them."
+            f"{cmd('workout rollback')} restores them.{held}"
         ),
         danger=True,
     )
