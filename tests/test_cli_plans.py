@@ -1,6 +1,7 @@
 import json
 import os
 import unittest
+from datetime import datetime, timedelta, timezone
 from unittest.mock import patch
 
 from tests.helpers import clear_all_tables, run_cli, rebind_test_db, save_workout
@@ -63,6 +64,65 @@ class TestCliPlans(unittest.TestCase):
         self.assertEqual(exit_code, 0)
         args, kwargs = mock_coach.plan_apply.call_args
         self.assertEqual(args[0], far_id)
+
+    @patch("trainmate.runtime.garmin")
+    @patch("trainmate.runtime.coach_service")
+    def test_plan_generate_g_takes_the_shared_range_grammar(self, mock_coach, _garmin):
+        """One goal named plans that goal, bounded to its OWN span; a range plans every
+        goal it covers, in date order, one strategy call each
+        (DESIGN_cli_selectors.md §9)."""
+        today = datetime.now(timezone.utc).date()
+
+        def out(n):
+            return (today + timedelta(days=n)).strftime("%Y-%m-%d")
+
+        first = test_db.add_objective(
+            title="Autumn 10k", target_date=out(30), sport_type="running",
+        )
+        second = test_db.add_objective(
+            title="Winter Marathon", target_date=out(120), sport_type="running",
+        )
+        mock_coach.plan_generate.return_value = {
+            "strategy": "s", "mesocycles": [], "reused": False, "goal": None,
+        }
+
+        def _planned(argv):
+            mock_coach.plan_generate.reset_mock()
+            _, stdout, _ = self.run_cli(argv)
+            calls = [c.kwargs for c in mock_coach.plan_generate.call_args_list]
+            return calls, " ".join(stdout.split())
+
+        # One ID: that goal alone, opening the day after the goal before it.
+        calls, _ = _planned(["plan", "generate", "-g", str(second)])
+        self.assertEqual([c["objective_id"] for c in calls], [second])
+        self.assertEqual(calls[0]["start_date"], out(31))
+
+        # The earliest goal's own span starts today.
+        calls, _ = _planned(["plan", "generate", "-g", str(first)])
+        self.assertEqual([c["objective_id"] for c in calls], [first])
+        self.assertEqual(calls[0]["start_date"], out(0))
+
+        # `..2` is every goal through goal 2 — both are planned, in date order, each
+        # bounded to its own span.
+        calls, said = _planned(["plan", "generate", "-g", f"..{second}"])
+        self.assertEqual([c["objective_id"] for c in calls], [first, second])
+        self.assertEqual([c["start_date"] for c in calls], [out(0), out(31)])
+        self.assertIn("Planning 2 goals in date order", said)
+        self.assertIn("PLANNING 1/2", said)
+        self.assertIn("PLANNING 2/2", said)
+
+        # A closed range names the same set.
+        calls, _ = _planned(["plan", "generate", "-g", f"{first}..{second}"])
+        self.assertEqual([c["objective_id"] for c in calls], [first, second])
+
+        # An open end reaches forward instead.
+        calls, _ = _planned(["plan", "generate", "-g", f"{second}.."])
+        self.assertEqual([c["objective_id"] for c in calls], [second])
+
+        # Bare -g is the active goal, the same shorthand every other command gives it,
+        # and stays a single goal.
+        calls, _ = _planned(["plan", "generate", "-g"])
+        self.assertEqual([c["objective_id"] for c in calls], [first])
 
     @patch("trainmate.runtime.garmin")
     @patch("trainmate.runtime.coach_service")

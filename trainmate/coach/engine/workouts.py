@@ -345,9 +345,9 @@ class WorkoutLogicMixin:
     ) -> Dict[str, Any]:
         """Queries LLM to generate workouts for a given number of days based on active strategy.
 
-        `start_str` is the first day to schedule (defaults to today). It differs from today
-        only when today's session is already completed and must be preserved — generation
-        then begins tomorrow so the finished workout isn't overwritten.
+        `start_str` is the first day to schedule (defaults to today). It is later than
+        today when the selectors opened the span there, or when today's session is already
+        completed and must be preserved (DESIGN_cli_selectors.md §8).
         """
         start_str = start_str or today_str
         starting_phrase = "today" if start_str == today_str else start_str

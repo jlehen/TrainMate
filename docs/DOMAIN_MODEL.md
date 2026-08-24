@@ -439,7 +439,7 @@ by `plan generate` and `workout generate`; a daily readiness check must not rewr
 Rather than widening the firewall, both sides are made aware of it. Inside
 `config.adapt_terminal_window_days` of a block's end, the adapt prompt gains a
 `THIS BLOCK IS ENDING` section, and the CLI prints the exact
-`workout generate -m ..<id>` invocation that re-plans the next block against current
+`workout generate -m <id>` invocation that re-plans the next block against current
 metrics.
 
 Nothing crosses that boundary. A constraint dated past it is built in by the next
@@ -460,10 +460,10 @@ What you *can* do with a block:
 
 | Operation | How |
 |---|---|
-| Select a window by block | `-m <id>` on any command taking range selectors: `workout list -m 5`, `workout generate -m ..7`, `constraint list -m 5`. |
+| Select a window by block | `-m <id>` on any command taking range selectors: `workout list -m 5`, `workout generate -m 7`, `constraint list -m 5`. |
 | File feedback against a block | `plan feedback -m [ATOM] "text"` — the atom is a block ID, a date it covers, or an infix of its name. Bare `-m` means the current block. |
 | Reshape a block | Change the goal, the constraints or the feedback, then `plan generate`. That is the only path. |
-| Re-plan a block's sessions | `workout generate -m ..<id>` (generation always starts today; only the selector's end is used). |
+| Re-plan a block's sessions | `workout generate -m <id>` — the selector names the whole span to rebuild, so only that block's days are rewritten. A span never opens before today. |
 
 A note filed to a block records the block's **name**, not just its ID, when it is later
 rendered — names survive version churn, IDs do not.
@@ -669,8 +669,8 @@ level may never rewrite a higher one.
 
 | Command | Writes | Horizon | Reads recovery metrics? | LLM calls |
 |---|---|---|---|---|
-| `plan generate` | macrocycle + mesocycles | plan start → goal date | 15-day summary + PMC block | 1 |
-| `workout generate` | workout revisions | today → horizon flag, default 28 days | Yes — full `metrics_lookback_days` window | 1 |
+| `plan generate` | macrocycle + mesocycles | plan start → goal date (`-g <id>` opens it at the goal's own span) | 15-day summary + PMC block | 1 |
+| `workout generate` | workout revisions | the span `-d`/`-m`/`-M`/`-g` names, default today → 28 days | Yes — full `metrics_lookback_days` window | 1 |
 | `workout adapt` | workout revisions | evaluation date → **end of the current block** | Yes — full window, plus daily context | 1 |
 | `workout add` / `swap` / `rm` | one or two workout revisions | a single date | No | 0 |
 

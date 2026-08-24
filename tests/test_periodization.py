@@ -20,6 +20,7 @@ def _days_out(n: int) -> str:
 # (same rot 2a7cd71 fixed in test_constraints.py).
 GOAL_DATE = _days_out(71)
 
+from trainmate.config import config
 from trainmate.db import Database
 import trainmate.db
 import trainmate.coach
@@ -330,6 +331,63 @@ class TestPeriodization(unittest.TestCase):
         self.assertIn(
             "The first mesocycle must start on the start date (2026-09-16).", prompt
         )
+
+    @patch("trainmate.coach.engine.openrouter_client")
+    def test_a_named_goal_bounds_the_plan_to_its_own_span(self, mock_client):
+        """`plan generate -g N` opens N's plan after the goal before it, even when that
+        goal has no plan of its own yet — and says so, because the reading it replaces
+        swallowed those days into N's plan (DESIGN_cli_selectors.md §9)."""
+        pin_clock(self, "2026-08-23")
+        test_db.add_objective(
+            title="Tune-up 10k", target_date="2026-09-15", sport_type="running",
+        )
+        obj_id = test_db.add_objective(
+            title="Autumn Marathon", target_date="2026-12-06", sport_type="running",
+        )
+        mock_client.complete.return_value = {"strategy": "s", "mesocycles": []}
+
+        with patch("sys.stdout", new_callable=io.StringIO) as out:
+            coach_service.plan_generate(
+                force=True, objective_id=obj_id, auto_apply=False,
+                start_date="2026-09-16",
+            )
+        prompt = mock_client.complete.call_args_list[0][0][0]
+        self.assertIn(
+            "The first mesocycle must start on the start date (2026-09-16).", prompt
+        )
+        # The two readings differ here, so the run names both.
+        said = " ".join(out.getvalue().split())
+        self.assertIn("now plans this goal's own span", said)
+        self.assertIn("2026-09-16", said)
+        self.assertIn("2026-08-23", said)
+
+        # Unbounded, the tune-up's days are still swallowed — the old reading, which
+        # `-g ..N` keeps spellable.
+        mock_client.complete.reset_mock()
+        coach_service.plan_generate(
+            force=True, objective_id=obj_id, auto_apply=False
+        )
+        prompt = mock_client.complete.call_args_list[0][0][0]
+        self.assertIn(
+            "The first mesocycle must start on the start date (2026-08-23).", prompt
+        )
+
+    @patch("trainmate.coach.engine.openrouter_client")
+    def test_a_bound_the_derivation_already_agrees_with_says_nothing(self, mock_client):
+        """The notice is transitional, so it stays quiet when both readings pick the same
+        first day."""
+        pin_clock(self, "2026-08-23")
+        obj_id = test_db.add_objective(
+            title="Autumn Marathon", target_date="2026-12-06", sport_type="running",
+        )
+        mock_client.complete.return_value = {"strategy": "s", "mesocycles": []}
+
+        with patch("sys.stdout", new_callable=io.StringIO) as out:
+            coach_service.plan_generate(
+                force=True, objective_id=obj_id, auto_apply=False,
+                start_date="2026-08-23",
+            )
+        self.assertNotIn("own span", out.getvalue())
 
     @patch("trainmate.coach.engine.openrouter_client")
     def test_fresh_withholds_the_plan_in_place(self, mock_client):
@@ -2048,6 +2106,122 @@ class TestDateKeyedGeneration(unittest.TestCase):
         self.assertIn("plan generate", str(ctx.exception))
         mock_client.complete.assert_not_called()
 
+
+class TestGenerationSpanIsBounded(unittest.TestCase):
+    """The selectors pick the whole span `workout generate` writes, both ends of it
+    (DESIGN_cli_selectors.md §8). A bounded regeneration rebuilds the days it was given
+    and leaves every other day of the plan exactly as it was."""
+
+    @classmethod
+    def setUpClass(cls):
+        if os.path.exists(TEST_DB_PATH):
+            os.remove(TEST_DB_PATH)
+        global test_db
+        test_db = Database(db_path=TEST_DB_PATH)
+        rebind_test_db(test_db)
+
+    @classmethod
+    def tearDownClass(cls):
+        if os.path.exists(TEST_DB_PATH):
+            try:
+                os.remove(TEST_DB_PATH)
+            except OSError:
+                pass
+
+    def setUp(self):
+        clear_all_tables(test_db)
+        obj_id = test_db.add_objective(
+            title="Autumn Marathon", target_date=_days_out(90), sport_type="running",
+        )
+        test_db.save_macrocycle(
+            objective_id=obj_id, strategy="build", goals_hash="g", constraints_hash="c",
+            mesocycles=[{"name": "Base", "start_date": _days_out(0),
+                         "end_date": _days_out(90), "focus": "aerobic"}],
+        )
+
+    @staticmethod
+    def _response(*dates):
+        return {
+            "reasoning": "why",
+            "workouts": [
+                {"date": d, "sport_type": "running", "title": f"Run {d}",
+                 "description": f"[Run {d}]\n30 mins"}
+                for d in dates
+            ],
+        }
+
+    @staticmethod
+    def _existing(date_str, title):
+        save_workout(
+            test_db, date=date_str, sport_type="running", title=title,
+            description=f"[{title}]\n30 mins", duration_minutes=30,
+        )
+
+    @patch("trainmate.runtime.calendar_syncer")
+    @patch("trainmate.coach.engine.openrouter_client")
+    def test_the_span_opens_where_the_caller_put_it(self, mock_client, _mock_calendar):
+        """A block that starts next month is generated from its own first day: `-m` names
+        a span, not a horizon reaching back to today."""
+        mock_client.complete.return_value = self._response(_days_out(31))
+        proposal = coach_service.workout_generate(
+            start_date=_days_out(30), end_date=_days_out(40)
+        )
+
+        self.assertEqual(proposal.gen_start, _days_out(30))
+        self.assertEqual(proposal.gen_end, _days_out(40))
+        # The model is told which day to start on, so it does not lay sessions from today.
+        prompt = "".join(str(a) for a in mock_client.complete.call_args.args)
+        self.assertIn(f"starting from {_days_out(30)}", prompt)
+
+    @patch("trainmate.runtime.calendar_syncer")
+    @patch("trainmate.coach.engine.openrouter_client")
+    def test_the_span_never_opens_in_the_past(self, mock_client, _mock_calendar):
+        """A block already under way is regenerated from today: yesterday is history."""
+        mock_client.complete.return_value = self._response(_days_out(1))
+        proposal = coach_service.workout_generate(
+            start_date=_days_out(-10), end_date=_days_out(10)
+        )
+        self.assertEqual(proposal.gen_start, _days_out(0))
+        self.assertEqual(proposal.gen_end, _days_out(10))
+
+    @patch("trainmate.runtime.calendar_syncer")
+    @patch("trainmate.coach.engine.openrouter_client")
+    def test_only_the_sessions_inside_the_span_are_displaced(
+        self, mock_client, _mock_calendar
+    ):
+        """The days either side of the span keep the sessions they already have — before
+        §8 the rebuild ran from its start with no end and cancelled all of them."""
+        self._existing(_days_out(2), "Before")
+        self._existing(_days_out(35), "Inside")
+        self._existing(_days_out(50), "After")
+
+        mock_client.complete.return_value = self._response(_days_out(31))
+        proposal = coach_service.workout_generate(
+            start_date=_days_out(30), end_date=_days_out(40)
+        )
+        self.assertEqual([w["title"] for w in proposal.displaced], ["Inside"])
+
+        coach_service.workout_generate_apply(proposal)
+        live = {w["title"] for w in test_db.get_workouts(start_date=_days_out(0))}
+        self.assertIn("Before", live)
+        self.assertIn("After", live)
+        # A session the rebuilt span no longer holds is still cancelled inside it.
+        self.assertNotIn("Inside", live)
+        self.assertIn(f"Run {_days_out(31)}", live)
+
+    @patch("trainmate.runtime.calendar_syncer")
+    @patch("trainmate.coach.engine.openrouter_client")
+    def test_no_span_at_all_is_the_config_horizon_from_today(
+        self, mock_client, _mock_calendar
+    ):
+        """With no selector the span is still bounded at both ends, so the default run
+        behaves like every other one."""
+        mock_client.complete.return_value = self._response(_days_out(1))
+        proposal = coach_service.workout_generate()
+        self.assertEqual(proposal.gen_start, _days_out(0))
+        self.assertEqual(
+            proposal.gen_end, _days_out(config.workout_generation_span_days - 1)
+        )
 
 class TestEasedSessionsAreCarriedIntoGeneration(unittest.TestCase):
     """A regeneration rewrites the horizon from scratch, so a session `workout adapt`

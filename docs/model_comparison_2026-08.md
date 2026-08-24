@@ -28,6 +28,16 @@ The scenario, on a simulated "today" of 2026-08-18:
   periodize **through** the B-event on the way to the A-event. Whether it plans a
   mini-taper, a full (wrong) taper, or ignores the event entirely is the first thing
   this scenario measures.
+
+  > `-g 2` no longer spells this. It now plans goal 2's **own** span, opening the day
+  > after goal 1 (DESIGN_cli_selectors.md §9), and `workout generate -g 2` likewise writes
+  > only that span (§8). `plan generate -g ..2` is no longer the same thing either — it
+  > now plans goals 1 *and* 2, one strategy each. The single 14-week macrocycle this
+  > scenario measures is what you get from `plan generate -g 2` **while goal 1 has no plan
+  > of its own** — which was the app's default then and is now the thing `-g` was changed
+  > to stop doing. Re-running it as written means planning goal 2 alone against an
+  > unplanned goal 1; `workout generate -g ..2` still spells the 14-week schedule. The
+  > scenario is left as it was run.
 - **Work-travel week Oct 12–18**, added **before** planning: no bike, no kettlebells,
   hotel gym with dumbbells/machines/stationary bike, 45–60 min most mornings, and the
   athlete cannot run. Tests whether generation honors a constraint deep in the plan.

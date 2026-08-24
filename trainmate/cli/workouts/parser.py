@@ -96,20 +96,20 @@ def add_workout_parser(subparsers, pull_bypass_parser, llm_debug_parser):
         parents=[pull_bypass_parser, llm_debug_parser],
         help="Generate workouts (microcycles) based on the active strategy",
         description=(
-            "Generate workouts (microcycles) from today, driven by the periodization "
-            "blocks covering the days being generated — which plan applies is read off "
-            "the dates, so no goal has to be named. The horizon is the END of whatever "
-            "-d/-m/-M/-g selects: '-g' generates through a goal's target date (the whole "
-            "plan), '-d 4w' four weeks, '-m 5' to the end of block 5. With no horizon "
-            "flag, generates config.workout_generation_span_days days ahead (28 by "
-            f"default). The proposed sessions are listed as '{green('workout list')}' "
-            "shows them and nothing is written until you accept; on a yes the new "
-            "sessions are appended, days the plan no longer holds are cancelled, and "
-            "Google Calendar is brought into line — undoable with "
-            f"'{green('workout rollback')}', or '{green('plan rollback')}' to step the "
-            "strategy back with it. This is a full rebuild, "
-            "not a fill-in: when upcoming sessions already exist it also asks before "
-            "spending the LLM call (-f skips both prompts)."
+            "Generate workouts (microcycles), driven by the periodization blocks covering "
+            "the days being generated — which plan applies is read off the dates, so no "
+            "goal has to be named. -d/-m/-M/-g pick the whole span to write, both ends of "
+            "it: '-m 5' is block 5 from its first day to its last, '-g' is a goal's whole "
+            "plan, '-d 4w' is the next four weeks. A span never opens before today. With "
+            "no selector, generates config.workout_generation_span_days days from today "
+            f"(28 by default). The proposed sessions are listed as '{green('workout list')}' "
+            "shows them and nothing is written until you accept; on a yes the new sessions "
+            "are appended, days inside the span the plan no longer holds are cancelled, "
+            "sessions outside the span are left exactly as they are, and Google Calendar "
+            f"is brought into line — undoable with '{green('workout rollback')}', or "
+            f"'{green('plan rollback')}' to step the strategy back with it. This is a full "
+            "rebuild of the span, not a fill-in: when it already holds sessions it also "
+            "asks before spending the LLM call (-f skips both prompts)."
         )
     )
     p_w_gen.set_defaults(func=run_workout_generate)
@@ -123,13 +123,13 @@ def add_workout_parser(subparsers, pull_bypass_parser, llm_debug_parser):
         help="Name each Calendar event as it is deleted and created, instead of the "
              "progress bar"
     )
-    # Generation always starts today, so only the END of the resolved window is used as the
-    # horizon; the selectors are grouped because a horizon is one choice, not several. `-M`
-    # doubles as the tiebreaker when two plans cover the same days.
-    p_w_gen_horizon = p_w_gen.add_mutually_exclusive_group()
+    # The selectors name the span to write, both ends of it, and are grouped because a
+    # span is one choice, not several (DESIGN_cli_selectors.md §8). `-M` doubles as the
+    # tiebreaker when two plans cover the same days.
+    p_w_gen_span = p_w_gen.add_mutually_exclusive_group()
     add_selector_args(
         p_w_gen, meso=True, macro=True, goal=True, direction="forward", default=None,
-        group=p_w_gen_horizon, horizon=True,
+        group=p_w_gen_span, generates=True,
     )
 
 

@@ -231,12 +231,16 @@ class PlanningMixin:
 
     def plan_generate(
         self, force: bool = False, objective_id: Optional[int] = None,
-        auto_apply: bool = True, fresh: bool = False
+        auto_apply: bool = True, fresh: bool = False, start_date: Optional[str] = None
     ) -> PlanProposal:
         """Determines the macrocycle strategy and mesocycle blocks.
 
         With `auto_apply` the proposal is saved before returning; otherwise the caller
         hands it back to :meth:`plan_apply` once the athlete accepts it.
+
+        `start_date` is the caller's own bound on where the plan window opens, which is
+        how `plan generate -g N` plans N's OWN span rather than everything from today
+        (DESIGN_cli_selectors.md §9). Never earlier than today.
 
         `fresh` withholds the plan in place from the prompt, so the new strategy is not
         asked to continue it — a clean slate, not a revision. It implies `force`: there is
@@ -288,6 +292,25 @@ class PlanningMixin:
             plan_start_date = latest_preceding_target + timedelta(days=1)
             if plan_start_date < today_date:
                 plan_start_date = today_date
+
+        # A named goal bounds its own span, so the caller's start wins over the
+        # derivation above (DESIGN_cli_selectors.md §9). Transitional: the two readings
+        # differ only when the days before this goal were about to be swallowed into its
+        # plan, so that is the only time it is worth a word.
+        if start_date is not None:
+            requested = max(
+                datetime.strptime(start_date, "%Y-%m-%d").date(), today_date
+            )
+            if requested != plan_start_date:
+                print(yellow(wrap_text(
+                    "Note: -g now plans this goal's own span. This plan starts on "
+                    f"{requested.strftime('%Y-%m-%d')} — the day after the goal before "
+                    f"it. It used to start on {plan_start_date.strftime('%Y-%m-%d')}, "
+                    "swallowing that earlier goal's days into this plan. Plan that goal "
+                    "separately to cover them."
+                )))
+                print()
+            plan_start_date = requested
 
         # The plan window. There is no lower or upper bound on how long it may be: how a
         # three-week run-in or a two-year horizon should be periodized is a question the

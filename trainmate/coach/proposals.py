@@ -59,11 +59,15 @@ class GenerateProposal:
     already tagged with the `macrocycle_id` governing their date, and `displaced` is the
     live plan this would archive — both decided here, so the preview and the apply cannot
     disagree about what appears and what disappears.
+
+    `gen_start`/`gen_end` bound the rebuild at BOTH ends: the selectors pick a span, and
+    days outside it keep the sessions they already have (DESIGN_cli_selectors.md §8).
     """
     reasoning: str
     workouts: Tuple[Dict[str, Any], ...] = ()
     displaced: Tuple[Dict[str, Any], ...] = ()
     gen_start: str = ""
+    gen_end: str = ""
     # As on `RevisionProposal` (DESIGN_constraint_honoring.md §3). Decided where
     # `gen_start`/`gen_end` are both in scope, so the proposal carries the resulting ids
     # rather than a range to re-check.

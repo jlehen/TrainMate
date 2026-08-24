@@ -415,14 +415,16 @@ Two things to know when you regenerate:
   plan in place, and only that: the review of what you actually trained, your
   learnings and your plan feedback still go in, because a plan drawn blind to your
   training is a template, not a plan.
-- **`workout generate` archives and rebuilds all future workouts**, manual edits
-  included (they are recoverable via `workout rollback` or `plan rollback`, not
-  deleted; a session you've already completed today is preserved). Because it
-  replaces rather than fills in, it asks twice: once before spending the LLM call,
-  naming how many sessions are at stake and how many you added by hand, and again once
-  it can show you the coach's proposal — listed exactly as `workout list` would show it —
-  before anything is written. `-f/--force` skips both questions for unattended runs. So
-  make strategic changes *first*
+- **`workout generate` archives and rebuilds the workouts in the span you asked for**,
+  manual edits included (they are recoverable via `workout rollback` or `plan rollback`,
+  not deleted; a session you've already completed today is preserved). The selectors name
+  that span at both ends — `-m 5` is block 5's own days, `-g` is a goal's whole plan, and
+  with no flag it is today onward for 28 days — and sessions outside it are left exactly
+  as they are. Because it replaces rather than fills in, it asks twice: once before
+  spending the LLM call, naming how many sessions are at stake and how many you added by
+  hand, and again once it can show you the coach's proposal — listed exactly as
+  `workout list` would show it — before anything is written. `-f/--force` skips both
+  questions for unattended runs. So make strategic changes *first*
   (a plan-shaping `constraint` → `plan generate` → `workout generate`), then layer
   manual `add`/`swap` tweaks on top — not the other way around.
 

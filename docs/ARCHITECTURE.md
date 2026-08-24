@@ -306,7 +306,7 @@ flow for each lives in [§10](#10-key-data-flows).
 | Plan / strategy generation       | `coach/service/planning.py:plan_generate`, `coach/engine/planning.py:_plan_generate_strategy` ([§10](#plan-generation-plan-generate)) |
 | Plan version comparison / display | `trainmate/plan_diff.py` (comparison + snapshot parsing), `cli/plans.py` (text rendering), `/api/plan/diff` in `trainmate_web.py`, `loadPlanDiff()`/`render*` in `static/app.js` |
 | Plan feedback (the athlete's notes on the plan) | `db/periodization.py` (`add_/list_/get_/rm_plan_feedback` over the `plan_feedback` table), `cli/plans.py:run_plan_feedback` + `cli/selectors.py:resolve_meso_atom` (the `-m` atom), `coach/service/planning.py` (the regen gate disjunct + prompt assembly), `coach/engine/planning.py` (the prompt section), DESIGN_plan_feedback.md |
-| Workout generation horizon       | `coach/service/workouts.py:workout_generate`, `cli/workouts/parser.py` (flag parsing), `config.workout_generation_span_days` |
+| Workout generation span          | `coach/service/workouts.py:workout_generate`, `cli/workouts/generate.py:_resolve_span`, `cli/workouts/parser.py` (flag parsing), `config.workout_generation_span_days` |
 | Knowing whether the plan reflects a constraint | `coach/honoring.py` (**canonical** for `honored_at`: what it means, who may stamp it, the write, and `needs_a_pass` — whether the plan is missing a directive at all), `coach/proposals.py` (`covered_constraint_ids`, decided at proposal time on both proposal types so apply never re-derives it), `coach/service/adaptation.py` + `coach/service/workouts.py` (the two stamping commands), `cli/constraints.py:_maybe_point_at_honor` (the add-time message naming the block and the run that would build it in), `cli/status.py`, `cli/common.py:constraint_line`/`report_unhonored`, `db/constraints.py` (`mark_honored`, `clear_honored`, `clear_honored_after`), DESIGN_constraint_honoring.md. There is deliberately **no dedicated command** and no SQL half-copy of the predicate in `db/` — §5 of that doc records why |
 | Coach-learnings / confidence     | `db/learnings.py`, `coach/service/prompt.py` (`_apply_learning_updates`), model is **canonical** in [§3](#3-coach-package-architecture) |
 | Backward analysis (bootstrap/reflect) | `coach/service/analysis.py:_run_workout_analysis`, `coach/engine/analysis.py:_data_analyze_logic` ([§10](#data-analysis-data-bootstrap--data-reflect)) |
@@ -1548,7 +1548,7 @@ single read-only view that is its whole state (`model`), which acts bare instead
 | `learnings`  | `demote`     | —        | Accept a pending confidence downgrade by ID                            |
 | `learnings`  | `keep`       | —        | Dismiss + affirm a pending downgrade by ID                             |
 | `learnings`  | `wipe`       | —        | Delete all coach learnings                                             |
-| `plan`       | `generate`   | `pl g`   | Generate/reuse macrocycle+mesocycles (`-f` to force, `-g/--goal ID`, `--fresh` for a clean slate that withholds the plan in place from the prompt) |
+| `plan`       | `generate`   | `pl g`   | Generate/reuse macrocycle+mesocycles (`-f` to force, `--fresh` for a clean slate that withholds the plan in place from the prompt). `-g/--goal [RANGE]` takes the shared range grammar: one ID plans that goal alone, bounded to its own span (opening the day after the goal before it); a range plans every upcoming goal it covers, in date order, one strategy call each — `-g ..2` is everything through goal 2 (DESIGN_cli_selectors.md §9) |
 | `plan`       | `show`       | `pl s`   | Show a periodization plan: strategy, snapshotted inputs (goals, constraints, threshold anchors), mesocycle timeline with each block's workout count/duration/load. Flags: `-g/--goal ID` (any status, not just active), `-M/--macrocycle ID` for a superseded version — each plan version IS a macrocycle, `-a/--all` for every goal that has a plan, `-w/--workouts` to list each mesocycle's sessions |
 | `plan`       | `versions`   | `pl v`   | List a goal's kept plan versions — active + superseded — with IDs and dates (`-g/--goal ID`) |
 | `plan`       | `diff`       | `pl df`  | Compare two plan versions (`[PLAN_ID_A] [PLAN_ID_B]`, `-g/--goal ID`): strategy prose, each version's attached feedback notes, mesocycles added/removed/renamed/re-dated, and snapshotted input deltas. No ID → previous vs active; one ID → that vs active. Prose rewritten wholesale collapses to a note unless `--full`. Comparison logic in `trainmate/plan_diff.py`, shared with `/api/plan/diff` |
@@ -1559,7 +1559,7 @@ single read-only view that is its whole state (`model`), which acts bare instead
 | `progress`   | `[SPORT ...]` | `pr`    | Show the progress timeline: measured load to date, plan-projected forward (CTL/ATL/TSB), weekly planned-vs-actual bars (`-w/--weeks N`, `--chart [PATH]` for a PNG; DESIGN_progress_timeline.md). `-z`/`--zones` (implied by naming a sport) adds one weekly time-in-zone table per sport — measured behind today, prescribed ahead of it (`--blocks` for block grain, `--power`/`--hr` to force the currency; DESIGN_intensity_distribution.md §9.6/§9.8). The sport argument scopes the **zone tables only**: CTL/ATL/TSB, the projection and the load table stay whole-athlete |
 | `workout`    | `list`       | `w l`    | Show planned workouts. Defaults to a 7-day window from today. Positional `TARGET…` (workout IDs and/or date selectors, e.g. `wo li 12 15 -v`) plus the shared selectors `-d`/`-m`/`-M`/`-g` and `-t/--type TYPE`, `--removed` (DESIGN_cli_selectors.md). |
 | `workout`    | `compare`    | `w c`    | Compare planned vs completed (`analyze_adherence()`): prints PLANNED/ACTUAL per day, flags misses (red), rest violations (red), unplanned high-load (yellow), then a discrepancy summary. Today's untrained sessions read `(not yet — still ahead today)` and are not misses (`pending_from`, [§10](#10-key-data-flows)). Same selectors as `workout list`; default 14-day lookback; a bare span (`-d 7d`) looks *back*; end capped at today. |
-| `workout`    | `generate`   | `w g`    | Generate workouts from the plan blocks covering the days generated (the dates pick the plan, not a goal — DESIGN_cli_selectors.md §8). No horizon flag → `config.workout_generation_span_days` ahead (28 default). Horizon flags (mutually exclusive, only the END of the resolved window is used): `-g/--goal [ID]` = through the goal's target date, i.e. the whole plan; `-d`; `-m`; `-M` (which also settles which plan to follow where two cover the same days). Lists the proposed sessions the way `workout list` renders them and asks before writing; on a `y` it archives the previous plan's future workouts and pushes the new ones to Calendar immediately. `-f/-y` skips both prompts. |
+| `workout`    | `generate`   | `w g`    | Generate workouts from the plan blocks covering the days generated (the dates pick the plan, not a goal — DESIGN_cli_selectors.md §8). No selector → today for `config.workout_generation_span_days` (28 default). Span flags (mutually exclusive, **both** ends of the resolved window are used, and a span never opens before today): `-g/--goal [ID]` = the goal's whole plan span; `-d`; `-m` = that block's own days; `-M` (which also settles which plan to follow where two cover the same days). Lists the proposed sessions the way `workout list` renders them and asks before writing; on a `y` it archives the span's existing workouts, leaves the days outside it alone, and pushes the new ones to Calendar immediately. `-f/-y` skips both prompts. |
 | `workout`    | `rm`         | `w rm`   | Soft-remove by ID (`ID REASON`, both positional): marks `removed`, marks the Calendar event deleted; kept in DB, hidden from list/compare, shown to coach as a cancellation. |
 | `workout`    | `restore`    | `w res`  | Bring a cancelled session back by ID: appends a copy of the revision its void ended, and the reconcile removes the `[Deleted]` mark. Unrelated to `workout rollback`, which undoes a whole change. |
 | `workout`    | `rollback`   | `w rb`   | Undo a workout change **and every change after it**, putting the sessions back the way they were the moment before it ran (`--batch N` per `workout batches`, default #1 the newest; `-y`). Any change qualifies, an adapt included. Leaves the active plan version alone — unlike `plan rollback` (DESIGN_workout_revisions.md §10). Unrelated to `workout restore`. |
@@ -1694,7 +1694,7 @@ Required fields:
 | `service_account_file` | str  | Path to service account JSON (default:                        |
 |                        |      | `service_account.json`)                                       |
 | `metrics_lookback_days`  | int  | Rolling window for adaptation (default: 15)                  |
-| `workout_generation_span_days` | int  | Default horizon for `workout generate` (default: 28)         |
+| `workout_generation_span_days` | int  | Default span length for `workout generate` (default: 28)     |
 | `minor_activity_load_threshold`    | float| Workload score below which an activity is "minor"            |
 |                         |      | (default: 25). Controls rest-day violations and unplanned    |
 |                         |      | activity visibility (shown as gray/minor if below threshold,  |
@@ -1766,21 +1766,24 @@ flag (DESIGN_pmc_fitness_fatigue.md §5.2). Forward taper projection — project
 event-day TSB over the plan's own workouts — is a deferred Phase 2 follow-up.
 
 ### Workout Generation (`workout generate`)
-1. CLI resolves the generation horizon (end date): the END of whatever `-d`/`-m`/`-M`/`-g`
-   select (`-g 7` = through goal 7's target date, i.e. the whole plan; `-d 4w`;
-   `-d ..2026-09-01`; `-m 5` — generation always starts today, so a selector's start is
-   ignored), else `config.workout_generation_span_days` (default 28). One mutually
-   exclusive group: a horizon is one choice. See DESIGN_cli_selectors.md §8.
+1. CLI resolves the generation **span**, both ends of it (`_resolve_span`): whatever
+   `-d`/`-m`/`-M`/`-g` select (`-g 7` = goal 7's whole plan; `-d 4w`; `-m 5` = block 5's
+   own first-to-last day), with an unselected start meaning today and an unselected end
+   meaning `config.workout_generation_span_days` (default 28). A span never opens before
+   today. One mutually exclusive group: a span is one choice. `_warn_span_change` names
+   the days a run no longer touches while that reading is still new. See
+   DESIGN_cli_selectors.md §8.
 1b. Before spending the LLM call, the CLI confirms it when live workouts already exist
-   from today onward — a regen is archive-and-rebuild, not fill-in, so a repeat run
+   inside that span — a regen is archive-and-rebuild, not fill-in, so a repeat run
    would otherwise cost a call the athlete never meant to spend. The question names the
-   count, span, how many were hand-added, and the new horizon. `-f/--force` skips it
-   (and the apply gate at step 5, and the out-of-date-plan warning) for unattended runs.
-2. `CoachService.workout_generate(end_date=..., prefer_macro_id=...)` computes `num_days`
-   from `(end_date − today)`, then resolves the periodization blocks governing
-   `[gen_start, gen_end]` via `db.get_governing_mesocycles` — no goal is named, the dates
-   decide (DESIGN_cli_selectors.md §8). Sequential plans both apply; two plans over the
-   same days are settled by recency (or by `-M`), and a horizon past the last block is
+   count, span, how many were hand-added, and the span being rebuilt. `-f/--force` skips
+   it (and the apply gate at step 5, and the out-of-date-plan warning) for unattended runs.
+2. `CoachService.workout_generate(start_date=..., end_date=..., prefer_macro_id=...)`
+   clamps the start to today, computes `num_days` from `(end_date − gen_start)`, then
+   resolves the periodization blocks governing `[gen_start, gen_end]` via
+   `db.get_governing_mesocycles` — no goal is named, the dates decide
+   (DESIGN_cli_selectors.md §8). Sequential plans both apply; two plans over the same days
+   are settled by recency (or by `-M`), and a span reaching past the last block is
    reported. Raises "run `plan generate`" when no block governs the span at all.
 3. Fetches metrics history (last `metrics_lookback_days` days) + baseline.
 3b. `_block_progress_context(today, gen_start)` builds the elapsed part of the block whose
@@ -2043,9 +2046,9 @@ new schedule is simulated and the user is warned about newly-created >2-day
 high-intensity streaks, weekly load spikes (a relative-overload proxy — a pure
 weekly-TSS-delta heuristic), and mesocycle-boundary crossings.
 
-Plan must be generated before workouts. Workouts cover a rolling window from
-today whose length is controlled by the horizon flags on `workout generate`
-(default: `workout_generation_span_days` in `config.yaml`, falling back to 28 days).
+Plan must be generated before workouts. Workouts cover the span the selector flags on
+`workout generate` name, both ends of it — by default today onward for
+`workout_generation_span_days` (in `config.yaml`, falling back to 28 days).
 `replan()` calls `plan_generate` then `workout_generate` + `workout_generate_apply` in one
 step (always uses the config default, and applies without a preview — it is the
 unattended path).
@@ -2340,10 +2343,10 @@ date, so its runway shrinks to nothing as that block ends. Widening the range in
 next block would let a daily, lag-prone recovery signal rewrite periodization that
 `plan`/`workout generate` own. Instead both sides are made aware of the boundary: the
 prompt gains a terminal-window section, and the CLI points at
-`workout generate -m ..<id>` (`_print_block_boundary_hint` in
-`cli/workouts/generate.py`), which already re-reads the same recent-metrics window. Note
-that flag sets only an *end* date — generate still starts from today, so it also rewrites
-the ending block's remaining days.
+`workout generate -m <id>` (`_print_block_boundary_hint` in
+`cli/workouts/generate.py`), which already re-reads the same recent-metrics window. That
+flag names the next block's own span, so the ending block's remaining days are left as
+they stand (DESIGN_cli_selectors.md §8).
 
 The firewall is enforced on **both** sides: the read bound (`get_workouts` capped at the
 block end) and, on the write side, `workout_adapt` dropping any proposal dated past the
@@ -2356,7 +2359,7 @@ The firewall above is not about the *range*; it is about what would ride along w
 Adapt's whole input is a backward window of recovery metrics, so a longer reach would give
 this morning's HRV authority over a session four weeks out, where it has no predictive
 claim. A constraint dated past the boundary is therefore built in by the next
-`workout generate` whose horizon reaches it — which re-plans those days outright, against
+`workout generate` whose span reaches it — which re-plans those days outright, against
 the blocks that govern them, rather than carrying today's load judgement across to them.
 
 What was missing was not reach but *notice*: nothing said the plan had yet to reflect a
@@ -2457,7 +2460,7 @@ DESIGN_workout_revisions.md; the shape is in [§5](#workouts).
   -f` alone would double the table with rows that changed nothing an athlete would call a
   change. The event lifecycle used to piggyback on archival; it is now one reconcile pass
   per change, scheduled by the change handle rather than remembered by each command.
-- **No-op revisions are suppressed.** `workout generate` rebuilds a 28-day horizon every
+- **No-op revisions are suppressed.** `workout generate` rebuilds a 28-day span every
   run and most days come back unchanged. Without the rule, "what happened to Tuesday"
   answers with six identical rows and one real change. Storage was never the concern —
   legibility was.

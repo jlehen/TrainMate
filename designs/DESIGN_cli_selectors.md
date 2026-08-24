@@ -235,16 +235,45 @@ plan runs out on X, where before it just produced weeks with no block behind the
 
 ### What `-g` means now
 
-The horizon, like every other selector: generation always starts today, so it takes the
-**end** of whatever `-d`/`-m`/`-M`/`-g` resolves to. `-g` is a goal's plan-start-through-
-target-date span (§2), whose end is race day — so `workout generate -g` generates the whole
-plan, and `--until-goal` is retired into it. `-d 4w` still asks for four weeks, and `-g 7
--d 4w` cannot be spelled at all: the flags share a mutually exclusive group, because a
-horizon is one choice.
+A span, like every other selector: generation takes **both ends** of whatever
+`-d`/`-m`/`-M`/`-g` resolves to. `-g` is a goal's plan-start-through-target-date span (§2),
+so `workout generate -g` generates the whole plan and `--until-goal` is retired into it.
+`-d 4w` still asks for four weeks, and `-g 7 -d 4w` cannot be spelled at all: the flags
+share a mutually exclusive group, because a span is one choice.
 
 The staleness warning moved with it. It used to check the plan of the earliest upcoming
-goal; it now checks every plan governing the horizon, so a span crossing two of them warns
-about both.
+goal; it now checks every plan governing the span, so one crossing two of them warns about
+both.
+
+### The span has two ends, not one
+
+Generation used to start today whatever the selectors said, and take only their **end** as
+a horizon. So `workout generate -m 5` meant "today through the end of block 5", not "block
+5", and the sessions it wrote from today onward had no far edge at all: the apply pass
+voided every day from the start onward, so a horizon that stopped short cancelled
+everything beyond it.
+
+Both halves are now read off the same window `resolve_window` already builds:
+
+* **The start is the window's start**, clamped to today — yesterday is history, not a day
+  to re-plan. So `-m 5` on a block three weeks out opens there, and the days between are
+  left exactly as they are. A selection that *ends* before today is refused outright: a
+  block that has already run is history, and quietly regenerating today in its place is
+  not what was asked for.
+* **The end is the window's end**, and it bounds the *write* as well as the prompt.
+  `GenerateProposal` carries `gen_end` beside `gen_start`; `displaced` is read between
+  them, and the void sweep in `workout_generate_apply` stops there. A bounded regeneration
+  rebuilds the days it was given and leaves the rest of the plan alone — which is what
+  makes `workout generate -g 1` a way to re-plan the near goal without wiping the far one.
+
+With no selector at all the span is still bounded at both ends: today through
+`config.workout_generation_span_days`. There is no second rule for the default case.
+
+The change is not backwards compatible, so a run says which days it no longer touches:
+when the span opens later than today, or when live sessions sit past its end,
+`_warn_span_change` names both readings and points at `-d today..END` for the old one. It
+is transitional and fires only when the two would actually differ — which includes a bare
+`workout generate` whose plan already reaches past the default horizon.
 
 ### The cost this leaves standing
 
@@ -258,3 +287,55 @@ warning above is a nudge in the other direction, not a fix.
 `workout adapt` still resolves its strategy text the old way, through
 `_get_active_strategy_and_meso_text`. It is already date-scoped to one block, so the
 indirection costs it less; converting it is a separate change.
+
+## §9 — `plan generate -g`: the same grammar, the same reading
+
+`plan generate` took `-g` as a bare `type=int` goal ID — the one place `-g` was not the
+shared grammar. It now takes the same `A..B` range, and reads it the way §2 does: **a
+range is a slice of the goal timeline, and every goal in the slice gets planned.**
+
+Two things follow, one per end of the range.
+
+### A named goal is bounded to its own span
+
+`plan_generate` derives a plan start by walking back to the most recent preceding goal
+*that already has a plan* and opening the day after it, clamped to today. When the
+preceding goal has no plan yet that derivation falls through to today — and the new plan
+quietly swallows the days belonging to a goal nobody has planned for. `-g N` now bounds it
+to N's own span: the day after the goal before it, whether or not that goal has a plan.
+
+The CLI resolves the goal and the start (`_plan_targets`/`_goal_span_start` in
+trainmate/cli/plans.py) and the service takes `start_date` as a parameter, so the selector
+policy stays on the CLI side (§3). The service owns the notice, because only it holds both
+readings: it prints one when the caller's bound and its own derivation disagree, which is
+exactly when the days before the goal were about to be absorbed.
+
+### A range plans every goal it covers
+
+```
+plan generate -g 2      # goal 2 alone, opening after goal 1's target date
+plan generate -g ..2    # every upcoming goal through goal 2 — goals 1 AND 2
+plan generate -g 1..2   # the same set, spelled from both ends
+plan generate -g 2..    # goal 2 and everything after it
+plan generate -g        # the active goal alone
+plan generate           # unchanged: the next goal, the derivation above
+```
+
+The bounds are **target dates, not row IDs**: `..2` is every upcoming goal falling on or
+before goal 2's target date. Row IDs usually run in date order but nothing enforces it, and
+the thing being sliced is a season.
+
+Goals are planned oldest-first, which is also the order the chain needs: each goal's window
+opens after the one before it, and once goal 1 is applied goal 2's prompt sees it as the
+preceding plan. Each goal keeps its own staleness gate, its own preview and its own `y` —
+declining one does not stop the next, because the windows are bounded by the goal *dates*
+either way. `force` is a local per goal for that reason: raising it for the goal that was
+asked about must not raise it for the rest.
+
+One ID (and a bare `-g`) resolves the goal directly rather than through the upcoming list,
+so a completed or past goal stays reachable exactly as it was. Only a range is restricted
+to what is still ahead — there is no window to plan in behind us.
+
+The cost is real: `-g ..2` is one strategy call per goal. The run says so up front
+(`_announce_targets`) rather than gating it, since a range is an explicit request for
+exactly that, and each goal still previews before anything is written.

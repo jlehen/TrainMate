@@ -236,7 +236,7 @@ def parse_target(raw: str):
 
 def add_selector_args(
     parser, *, date=True, meso=False, macro=False, goal=False, sport=False,
-    direction="backward", default=None, span_days=7, group=None, horizon=False,
+    direction="backward", default=None, span_days=7, group=None, generates=False,
 ):
     """Registers this command's selector flags and records how it fills the gaps.
 
@@ -245,11 +245,11 @@ def add_selector_args(
     history (an open end is today), ``none`` sweeps everything it is not told to spare.
     ``default`` is a selector string used only when no dimension is given at all.
     ``group`` puts the flags in a mutually exclusive group while the policy still rides on
-    the parser (`workout generate`, where the horizon is one choice among several).
-    ``horizon`` says the same flags read as an end date rather than a filter — the command
-    always starts today and uses only the window's END (§8) — so the help says so."""
+    the parser (`workout generate`, where the span is one choice among several).
+    ``generates`` says the same flags name the span the command WRITES rather than a
+    filter it reads (§8), so the help says so."""
     target = group if group is not None else parser
-    lead = "Generate through the END of" if horizon else "Restrict to"
+    lead = "Generate" if generates else "Restrict to"
     if date:
         target.add_argument(
             "-d", "--date", dest="date_range", type=parse_date_range, metavar="RANGE",
@@ -270,16 +270,16 @@ def add_selector_args(
             help=f"{lead} a macrocycle range: ID, ID.., ..ID or ID..ID "
                  "(bare -M is the active plan). List IDs with 'plan versions'."
                  + (" Naming one plan also settles which to follow where two cover the "
-                    "same days." if horizon else "")
+                    "same days." if generates else "")
         )
     if goal:
         target.add_argument(
             "-g", "--goal", dest="goal_range", nargs="?", const=CURRENT,
             type=lambda raw: parse_id_range(raw, "goal"), metavar="RANGE",
             help=(
-                "Generate through a goal's target date — i.e. the whole plan: ID, ID.., "
-                "..ID or ID..ID (bare -g is the active goal)"
-                if horizon else
+                "Generate a goal's whole plan span, its plan start through its target "
+                "date: ID, ID.., ..ID or ID..ID (bare -g is the active goal)"
+                if generates else
                 "Restrict to the plan span of a goal range: ID, ID.., ..ID or ID..ID "
                 "(bare -g is the active goal)"
             )

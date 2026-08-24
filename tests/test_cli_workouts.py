@@ -22,6 +22,7 @@ PROPOSED_DATE = (datetime.now(timezone.utc).date() + timedelta(days=1)).strftime
 
 def _proposal(displaced=()):
     """One proposed session, as `workout generate` hands it to the CLI for preview."""
+    today = datetime.now(timezone.utc).date()
     return GenerateProposal(
         reasoning="Reasoning",
         workouts=({
@@ -29,7 +30,8 @@ def _proposal(displaced=()):
             "description": "45 min easy", "duration_minutes": 45, "tss": 40, "rpe": 4,
         },),
         displaced=tuple(displaced),
-        gen_start=datetime.now(timezone.utc).date().strftime("%Y-%m-%d"),
+        gen_start=today.strftime("%Y-%m-%d"),
+        gen_end=(today + timedelta(days=27)).strftime("%Y-%m-%d"),
     )
 
 
@@ -893,7 +895,9 @@ class TestCliWorkouts(unittest.TestCase):
         self.assertEqual(exit_code, 0)
         # The question is wrapped for the terminal; compare on a single logical line.
         question = " ".join(mock_prompt.confirm.call_args.args[0].split())
-        self.assertIn("You already have 2 upcoming workout(s) planned", question)
+        # Counted over the span about to be rebuilt, not "everything from today on" — a
+        # bounded regen only puts the sessions inside it at stake (§8).
+        self.assertIn("You already have 2 workout(s) planned in this span", question)
         self.assertIn(fmt_date(d1), question)
         self.assertIn(fmt_date(d2), question)
         self.assertIn("1 added by hand", question)
@@ -1050,22 +1054,26 @@ class TestCliWorkouts(unittest.TestCase):
     @patch("trainmate.cli.workouts.generate.ensure_recent_data")
     @patch("trainmate.runtime.prompt")
     @patch("trainmate.runtime.coach_service")
-    def test_generate_g_is_the_horizon_not_a_plan_selector(
+    def test_generate_g_is_the_span_not_a_plan_selector(
         self, mock_coach, mock_prompt, _ensure
     ):
-        """`-g` reads like it does everywhere else in the grammar: generate through this
-        goal's target date. It replaced `--until-goal`, and it no longer picks which plan
-        applies — the dates do that (DESIGN_cli_selectors.md §8)."""
+        """`-g` reads like it does everywhere else in the grammar: a goal's whole plan
+        span, its plan start through its target date. It replaced `--until-goal`, and it
+        no longer picks which plan applies — the dates do that (DESIGN_cli_selectors.md
+        §8)."""
         mock_coach.workout_generate.return_value = _proposal()
         mock_coach.config_changed.return_value = None
         goal_id, _ = self._goal_with_plan(target_days_out=100)
         target_date = test_db.get_objective(goal_id)["target_date"]
+        today = datetime.now(timezone.utc).date().strftime("%Y-%m-%d")
 
         exit_code, _, _ = self.run_cli(["workout", "generate", "-g", str(goal_id), "-f"])
         self.assertEqual(exit_code, 0)
-        self.assertEqual(
-            mock_coach.workout_generate.call_args.kwargs["end_date"], target_date
-        )
+        kwargs = mock_coach.workout_generate.call_args.kwargs
+        self.assertEqual(kwargs["end_date"], target_date)
+        # This plan starts today, so its span does too — and the START is now passed
+        # through rather than assumed.
+        self.assertEqual(kwargs["start_date"], today)
 
         # Bare -g is the active goal, the same shorthand every other command gives it.
         mock_coach.workout_generate.reset_mock()
@@ -1079,6 +1087,133 @@ class TestCliWorkouts(unittest.TestCase):
         exit_code, _, stderr = self.run_cli(["workout", "generate", "--until-goal"])
         self.assertNotEqual(exit_code, 0)
         self.assertIn("unrecognized arguments", stderr)
+
+    def _two_block_plan(self):
+        """A plan whose second block starts three weeks out, so a `-m` span on it opens
+        well after today."""
+        today_date = datetime.now(timezone.utc).date()
+
+        def out(n):
+            return (today_date + timedelta(days=n)).strftime("%Y-%m-%d")
+
+        goal_id = test_db.add_objective(
+            title="Autumn Marathon", target_date=out(90), sport_type="running",
+            status="active",
+        )
+        test_db.save_macrocycle(
+            objective_id=goal_id, strategy="Build", goals_hash="g", constraints_hash="c",
+            mesocycles=[
+                {"name": "Base", "start_date": out(0), "end_date": out(20),
+                 "focus": "Aerobic"},
+                {"name": "Build", "start_date": out(21), "end_date": out(45),
+                 "focus": "Threshold"},
+            ],
+        )
+        blocks = test_db.get_mesocycles_for_macrocycle(
+            test_db.get_macrocycle_for_objective(goal_id)["id"]
+        )
+        return {b["name"]: b for b in blocks}
+
+    @patch("trainmate.cli.workouts.generate.ensure_recent_data")
+    @patch("trainmate.runtime.prompt")
+    @patch("trainmate.runtime.coach_service")
+    def test_generate_m_writes_the_block_from_its_own_first_day(
+        self, mock_coach, mock_prompt, _ensure
+    ):
+        """`-m 5` generates block 5 and nothing else — both ends come from the block,
+        where the span used to reach back to today (DESIGN_cli_selectors.md §8)."""
+        mock_coach.workout_generate.return_value = _proposal()
+        mock_coach.config_changed.return_value = None
+        blocks = self._two_block_plan()
+        build = blocks["Build"]
+
+        exit_code, _, _ = self.run_cli(
+            ["workout", "generate", "-m", str(build["id"]), "-f"]
+        )
+        self.assertEqual(exit_code, 0)
+        kwargs = mock_coach.workout_generate.call_args.kwargs
+        self.assertEqual(kwargs["start_date"], build["start_date"])
+        self.assertEqual(kwargs["end_date"], build["end_date"])
+
+        # A plain date range is read the same way: both ends, not just the far one.
+        mock_coach.workout_generate.reset_mock()
+        exit_code, _, _ = self.run_cli(
+            ["workout", "generate", "-d", f"{build['start_date']}..{build['end_date']}",
+             "-f"]
+        )
+        self.assertEqual(exit_code, 0)
+        kwargs = mock_coach.workout_generate.call_args.kwargs
+        self.assertEqual(kwargs["start_date"], build["start_date"])
+        self.assertEqual(kwargs["end_date"], build["end_date"])
+
+    @patch("trainmate.cli.workouts.generate.ensure_recent_data")
+    @patch("trainmate.runtime.prompt")
+    @patch("trainmate.runtime.coach_service")
+    def test_generate_warns_only_when_the_old_reading_would_differ(
+        self, mock_coach, mock_prompt, _ensure
+    ):
+        """The span change is transitional, so the run says which days it no longer
+        touches — and stays quiet when the two readings agree."""
+        mock_coach.workout_generate.return_value = _proposal()
+        mock_coach.config_changed.return_value = None
+        blocks = self._two_block_plan()
+        base, build = blocks["Base"], blocks["Build"]
+
+        # The notice is wrapped for the terminal; compare on a single logical line.
+        def _said(argv):
+            exit_code, stdout, _ = self.run_cli(argv)
+            self.assertEqual(exit_code, 0)
+            return " ".join(stdout.split())
+
+        # A span opening later than today: the days before it are no longer rebuilt.
+        said = _said(["workout", "generate", "-m", str(build["id"]), "-f"])
+        self.assertIn("now rebuilds a bounded span", said)
+        self.assertIn(fmt_date(build["start_date"]), said)
+        self.assertIn("keeps the sessions it already has", said)
+        self.assertIn("to rebuild from today again", said)
+
+        # A session past the span's end: it is no longer cancelled either.
+        save_workout(test_db,
+            date=build["end_date"], sport_type="running", title="Later",
+            description="30 min",
+        )
+        said = _said(["workout", "generate", "-m", str(base["id"]), "-f"])
+        self.assertIn("keep their place instead of being cancelled", said)
+
+        # Nothing before the span and nothing after it — no warning to give.
+        said = _said(["workout", "generate", "-g", "-f"])
+        self.assertNotIn("now rebuilds a bounded span", said)
+
+    @patch("trainmate.cli.workouts.generate.ensure_recent_data")
+    @patch("trainmate.runtime.prompt")
+    @patch("trainmate.runtime.coach_service")
+    def test_generate_refuses_a_span_that_is_entirely_behind_us(
+        self, mock_coach, mock_prompt, _ensure
+    ):
+        """A block that has already run is history. Now that a selector names both ends,
+        naming a finished one has to be refused rather than quietly regenerating today."""
+        mock_coach.config_changed.return_value = None
+        today = datetime.now(timezone.utc).date()
+
+        def out(n):
+            return (today + timedelta(days=n)).strftime("%Y-%m-%d")
+
+        goal_id = test_db.add_objective(
+            title="Past 10k", target_date=out(-5), sport_type="running", status="active",
+        )
+        macro_id = test_db.save_macrocycle(
+            objective_id=goal_id, strategy="Build", goals_hash="g", constraints_hash="c",
+            mesocycles=[{"name": "Done", "start_date": out(-40), "end_date": out(-10),
+                         "focus": "Aerobic"}],
+        )
+        done = test_db.get_mesocycles_for_macrocycle(macro_id)[0]
+
+        exit_code, stdout, _ = self.run_cli(
+            ["workout", "generate", "-m", str(done["id"]), "-f"]
+        )
+        self.assertEqual(exit_code, 0)
+        self.assertIn("before today", " ".join(stdout.split()))
+        mock_coach.workout_generate.assert_not_called()
 
     @patch("trainmate.cli.workouts.generate.ensure_recent_data")
     @patch("trainmate.runtime.prompt")

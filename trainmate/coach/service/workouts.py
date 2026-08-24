@@ -356,13 +356,18 @@ class WorkoutGenMixin:
         }
 
     def workout_generate(
-        self, end_date: Optional[str] = None, prefer_macro_id: Optional[int] = None
+        self, start_date: Optional[str] = None, end_date: Optional[str] = None,
+        prefer_macro_id: Optional[int] = None
     ) -> GenerateProposal:
-        """Proposes workouts (microcycles) from the plan blocks governing the horizon.
+        """Proposes workouts (microcycles) from the plan blocks governing the span.
 
         Writes nothing: the caller previews the sessions and passes the proposal back to
         `workout_generate_apply` on a `y`, so a regeneration cannot archive the live plan
         for a proposal the athlete never saw.
+
+        `start_date` opens the span and never reaches into the past — the caller's
+        selectors pick which days are rebuilt, and the rest of the plan is left alone
+        (DESIGN_cli_selectors.md §8).
 
         Which plan applies is read off the dates being generated, not off a goal the
         caller names: the goal was only ever an indirection to the macrocycle, and the
@@ -389,12 +394,17 @@ class WorkoutGenMixin:
         )
         baseline = self._db.get_baseline(today_str)
 
-        # A regeneration normally replaces every workout from today onward, but a session
-        # the athlete has already completed should be preserved as history rather than
-        # overwritten. When today's planned workout is already in the books, start the
-        # regenerated plan tomorrow and leave today's row (and its Calendar event) intact.
-        gen_start_str = today_str
-        if self._today_workout_completed(today_str, completed_activities):
+        # The span opens where the selectors put it, never in the past: yesterday is
+        # history, not a day to re-plan (§8).
+        gen_start_str = max(start_date or today_str, today_str)
+
+        # A regeneration replaces every workout in the span, but a session the athlete has
+        # already completed should be preserved as history rather than overwritten. When
+        # today's planned workout is already in the books, start the regenerated plan
+        # tomorrow and leave today's row (and its Calendar event) intact.
+        if gen_start_str == today_str and self._today_workout_completed(
+            today_str, completed_activities
+        ):
             gen_start_str = (today_date_obj + timedelta(days=1)).strftime("%Y-%m-%d")
             print(green(
                 f"Today's workout is already completed — preserving it and regenerating "
@@ -404,10 +414,10 @@ class WorkoutGenMixin:
 
         if end_date is not None:
             end_date_obj = datetime.strptime(end_date, "%Y-%m-%d").date()
-            # Inclusive of end_date itself — a `-g` horizon reads as "through this
-            # goal's target date", so the race day belongs in the span (§8).
+            # Inclusive of end_date itself — a `-g` span reads as "through this goal's
+            # target date", so the race day belongs in it (§8).
             num_days = max(1, (end_date_obj - gen_start_obj).days + 1)
-            gen_end_str = end_date
+            gen_end_str = max(end_date, gen_start_str)
         else:
             num_days = config.workout_generation_span_days
             gen_end_str = (gen_start_obj + timedelta(days=num_days - 1)).strftime("%Y-%m-%d")
@@ -543,15 +553,18 @@ class WorkoutGenMixin:
         workouts.sort(key=lambda w: (w['date'], w.get('sport_type', '')))
 
         # The live plan this would displace, read here so the preview's warning and the
-        # apply's teardown are the same set. `include_removed` matches what
-        # `archive_future_workouts` actually takes.
-        displaced = self._db.get_workouts(start_date=gen_start_str, include_removed=True)
+        # apply's teardown are the same set. Bounded at both ends: days past the span keep
+        # the sessions they already have (§8).
+        displaced = self._db.get_workouts(
+            start_date=gen_start_str, end_date=gen_end_str, include_removed=True
+        )
 
         return GenerateProposal(
             reasoning=plan_data.get("reasoning", "Plan generated."),
             workouts=tuple(workouts),
             displaced=tuple(displaced),
             gen_start=gen_start_str,
+            gen_end=gen_end_str,
             # Checked against the range about to be WRITTEN, not the fetched set, which is
             # open-ended (DESIGN_constraint_honoring.md §2).
             covered_constraint_ids=honoring.covered_ids(
@@ -564,7 +577,7 @@ class WorkoutGenMixin:
     ) -> List[Workout]:
         """Commits an accepted `workout generate` proposal: one change, then one reconcile.
 
-        Every day the new plan does not fill, from the generation start onward, gets a void
+        Every day the new plan does not fill, *inside the generated span*, gets a void
         revision; every day it does fill gets a revision — unless the prescription is
         identical to what is already live, in which case §9 suppresses it and the day is
         left alone. A day the plan KEEPS is claimed but not written: it is spared the void
@@ -573,7 +586,10 @@ class WorkoutGenMixin:
         anything else can take its slot (§8). Calendar follows from the change handle's
         reconcile pass, so nothing here pushes.
 
-        Returns the sessions the plan now holds from the generation start onward.
+        The span is `gen_start`..`gen_end`, so sessions outside it survive a bounded
+        regeneration untouched (DESIGN_cli_selectors.md §8).
+
+        Returns the sessions the plan now holds in the slots it proposed.
         """
         proposed_slots = {
             (w['date'], canonical_sport(w['sport_type'])) for w in proposal.workouts
@@ -591,7 +607,9 @@ class WorkoutGenMixin:
                 kind="generate", summary=summary, macrocycle_id=span_macro
             ) as change,
         ):
-            for live in self._db.get_workouts(start_date=proposal.gen_start):
+            for live in self._db.get_workouts(
+                start_date=proposal.gen_start, end_date=proposal.gen_end or None
+            ):
                 if (live['date'], canonical_sport(live['sport_type'])) in proposed_slots:
                     continue
                 change.void(

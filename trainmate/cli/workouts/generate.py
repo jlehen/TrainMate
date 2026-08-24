@@ -131,27 +131,26 @@ def run_workout_adapt(args: argparse.Namespace) -> None:
         print(red(str(e)))
 
 
-def _confirm_regeneration(end_date: Optional[str]) -> bool:
-    """Gates the LLM call: a regen ultimately replaces the upcoming plan, manual edits
-    included, so name what is at stake before spending it (README §"Steering the plan").
-    Nothing is archived here — the proposal is shown first and `_confirm_apply` owns the
-    write.
+def _confirm_regeneration(span_start: str, span_end: str) -> bool:
+    """Gates the LLM call: a regen ultimately replaces the plan across the span, manual
+    edits included, so name what is at stake before spending it (README §"Steering the
+    plan"). Nothing is archived here — the proposal is shown first and `_confirm_apply`
+    owns the write.
 
     Returns True when there is nothing live to lose or the athlete confirmed."""
-    live = runtime.db.get_workouts(start_date=_today_str())
+    live = runtime.db.get_workouts(start_date=span_start, end_date=span_end)
     if not live:
         return True
 
     manual = sum(1 for w in live if w.get('source') == 'manual')
     hand_edited = f", {manual} added by hand" if manual else ""
-    horizon = f" through {fmt_date(end_date)}" if end_date else ""
     return runtime.prompt.confirm(
         wrap_text(
-            f"You already have {len(live)} upcoming workout(s) planned "
+            f"You already have {len(live)} workout(s) planned in this span "
             f"({fmt_date(live[0]['date'])} → {fmt_date(live[-1]['date'])}{hand_edited}). "
-            f"Regenerating rebuilds the plan{horizon} at the cost of one LLM call, and "
-            f"archives all of them if you accept the result; {cmd('workout rollback')} "
-            f"restores them. Regenerate?"
+            f"Regenerating rebuilds {fmt_date(span_start)} → {fmt_date(span_end)} at the "
+            f"cost of one LLM call, and archives all of them if you accept the result; "
+            f"{cmd('workout rollback')} restores them. Regenerate?"
         ),
         danger=True,
     )
@@ -179,8 +178,8 @@ def _confirm_apply(proposal: GenerateProposal) -> bool:
         wrap_text(
             f"Schedule these {len(proposal.workouts)} workout(s) and push them to Google "
             f"Calendar? This archives the {displaced} session(s) currently planned from "
-            f"{fmt_date(proposal.gen_start)} onward and deletes their Calendar events; "
-            f"{cmd('workout rollback')} restores them.{held}"
+            f"{fmt_date(proposal.gen_start)} to {fmt_date(proposal.gen_end)} and deletes "
+            f"their Calendar events; {cmd('workout rollback')} restores them.{held}"
         ),
         danger=True,
     )
@@ -244,6 +243,77 @@ def _confirm_out_of_date_plans(
     return True
 
 
+def _shift(date_str: str, days: int) -> str:
+    return (
+        datetime.strptime(date_str, "%Y-%m-%d").date() + timedelta(days=days)
+    ).strftime("%Y-%m-%d")
+
+
+def _resolve_span(args: argparse.Namespace) -> Optional[tuple[str, str]]:
+    """The days this run rebuilds: both ends of whatever `-d`/`-m`/`-M`/`-g` selected.
+
+    An unselected start is today and an unselected end is the config horizon, so the span
+    is always bounded (DESIGN_cli_selectors.md §8). None when the selection is entirely
+    behind us — a block that has already run is history, and silently regenerating today
+    instead is not what was asked for."""
+    today = _today_str()
+    start_date, end_date = resolve_window(args)
+    if end_date and end_date < today:
+        print(red(
+            f"That selection ends on {fmt_date(end_date)}, before today — there is "
+            f"nothing ahead of it to generate."
+        ))
+        return None
+    span_start = max(start_date or today, today)
+    span_end = end_date or _shift(
+        span_start, config.workout_generation_span_days - 1
+    )
+    return span_start, span_end
+
+
+def _warn_span_change(span_start: str, span_end: str) -> None:
+    """Names the days this run no longer touches, now that the selectors bound BOTH ends
+    of the span instead of only its end (DESIGN_cli_selectors.md §8).
+
+    Transitional: it fires only when the old reading and the new one differ."""
+    today = _today_str()
+    tail = runtime.db.get_workouts(start_date=_shift(span_end, 1))
+    if span_start <= today and not tail:
+        return
+
+    lead = (
+        "Note: generation now rebuilds a bounded span and leaves every day outside it "
+        "alone — -d/-m/-M/-g name both of its ends. "
+    )
+    if span_start > today:
+        lead += (
+            f"This run rebuilds {fmt_date(span_start)} → {fmt_date(span_end)}; before, it "
+            f"rebuilt today → {fmt_date(span_end)} and cancelled every session after that."
+        )
+    else:
+        lead += (
+            f"This run rebuilds today → {fmt_date(span_end)} and stops there; before, it "
+            "also cancelled every session after that."
+        )
+    print(yellow(wrap_text(lead)))
+    if span_start > today:
+        print(yellow(wrap_text(
+            f"  - {fmt_date(today)} → {fmt_date(_shift(span_start, -1))} keeps the "
+            f"sessions it already has."
+        )))
+    if tail:
+        print(yellow(wrap_text(
+            f"  - The {len(tail)} session(s) after {fmt_date(span_end)} keep their place "
+            f"instead of being cancelled."
+        )))
+    if span_start > today:
+        print(yellow(wrap_text(
+            "  Pass " + cmd(f"-d today..{span_end}", quote=False)
+            + " to rebuild from today again."
+        )))
+    print()
+
+
 def run_workout_generate(args: argparse.Namespace) -> None:
     """Executes the AI workout generation command based on active strategy."""
     force = getattr(args, 'force', False)
@@ -251,26 +321,23 @@ def run_workout_generate(args: argparse.Namespace) -> None:
         no_pull=args.no_pull, force_pull=getattr(args, 'force_pull', False)
     )
 
-    # Generation always starts today, so only the END of the resolved window is the
-    # horizon — which is what makes `-g` read as "through this goal's target date"
-    # (DESIGN_cli_selectors.md §8).
-    end_date = resolve_window(args)[1]
+    span = _resolve_span(args)
+    if span is None:
+        return
+    span_start, span_end = span
     prefer_macro_id = _preferred_macro_id(args)
+    _warn_span_change(span_start, span_end)
 
-    # The staleness check looks over the days about to be written, so the config default
-    # stands in when no selector bounded the horizon.
-    preview_end = end_date or (
-        _today_date() + timedelta(days=config.workout_generation_span_days - 1)
-    ).strftime("%Y-%m-%d")
-    if not _confirm_out_of_date_plans(_today_str(), preview_end, prefer_macro_id, force):
+    # The staleness check looks over the days about to be written.
+    if not _confirm_out_of_date_plans(span_start, span_end, prefer_macro_id, force):
         return
 
-    if not force and not _confirm_regeneration(end_date):
+    if not force and not _confirm_regeneration(span_start, span_end):
         print(yellow("Workout generation cancelled — your current plan is unchanged."))
         return
 
     proposal = runtime.coach_service.workout_generate(
-        end_date=end_date, prefer_macro_id=prefer_macro_id
+        start_date=span_start, end_date=span_end, prefer_macro_id=prefer_macro_id
     )
     print(bold(cyan("\n=== WORKOUTS PROPOSED BY COACH ===")))
     print(f"{bold('Reasoning')}:\n{wrap_text(proposal.reasoning)}\n")
@@ -292,7 +359,8 @@ def run_workout_generate(args: argparse.Namespace) -> None:
         proposal, verbose=getattr(args, 'verbose', False)
     )
     print(green(
-        f"\nScheduled {len(saved)} workout(s) from {fmt_date(proposal.gen_start)}."
+        f"\nScheduled {len(saved)} workout(s) from {fmt_date(proposal.gen_start)} to "
+        f"{fmt_date(proposal.gen_end)}."
     ))
     print(green(
         f"Run {cmd('workout rollback')} to undo this regeneration, or "

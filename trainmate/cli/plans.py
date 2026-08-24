@@ -1,7 +1,7 @@
 import textwrap
 import argparse
 import sys
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import List, Optional
 from trainmate import runtime
 from trainmate import plan_diff
@@ -12,7 +12,9 @@ from trainmate.util import (
     today_date as _today_date,
 )
 from trainmate.cli.common import fmt_date, ensure_recent_data, report_unhonored
-from trainmate.cli.selectors import CURRENT, SelectorError, resolve_meso_atom
+from trainmate.cli.selectors import (
+    CURRENT, IdRange, SelectorError, parse_id_range, resolve_meso_atom,
+)
 
 
 def _resolve_goal(goal_id: Optional[int]) -> Optional[dict]:
@@ -32,12 +34,105 @@ def _resolve_goal(goal_id: Optional[int]) -> Optional[dict]:
     return objectives[0]
 
 
+def _goal_span_start(goal: Optional[dict]) -> Optional[str]:
+    """The first day of a goal's OWN span: the day after the goal before it, never
+    earlier than today (DESIGN_cli_selectors.md §9)."""
+    if not goal:
+        return None
+    today = _today_date().strftime("%Y-%m-%d")
+    preceding = runtime.db.get_preceding_objectives(goal['target_date'])
+    if not preceding:
+        return today
+    day_after = (
+        datetime.strptime(preceding[0]['target_date'], "%Y-%m-%d").date()
+        + timedelta(days=1)
+    ).strftime("%Y-%m-%d")
+    return max(day_after, today)
+
+
+def _goals_in_range(rng) -> Optional[list]:
+    """Every upcoming goal a `-g` range covers, chronologically.
+
+    The range runs over the goal TIMELINE rather than over row IDs, so `..2` is every goal
+    falling on or before goal 2's target date (DESIGN_cli_selectors.md §9). None when an
+    ID does not resolve — the reason is printed here."""
+    bounds = []
+    for goal_id in (rng.start, rng.end):
+        if goal_id is None:
+            bounds.append(None)
+            continue
+        goal = runtime.db.get_objective(goal_id)
+        if not goal:
+            print(red(f"Goal with ID {goal_id} not found."))
+            return None
+        bounds.append(str(goal['target_date']))
+    start, end = bounds
+    goals = [
+        g for g in runtime.db.upcoming_objectives()
+        if (start is None or str(g['target_date']) >= start)
+        and (end is None or str(g['target_date']) <= end)
+    ]
+    goals.sort(key=lambda g: (str(g['target_date']), g['id']))
+    return goals
+
+
+def _plan_targets(args: argparse.Namespace) -> Optional[list]:
+    """The goals `plan generate` plans for, chronologically, each paired with the day its
+    own plan window opens.
+
+    `-g` reads as the shared range grammar does (DESIGN_cli_selectors.md §9): one goal
+    named plans that goal alone, a range plans every goal it covers — `-g ..2` is
+    "everything through goal 2", which is one strategy call per goal falling in it. The
+    no-flag default is `(None, None)`: the service picks the next goal itself. None when
+    the selection resolves to nothing, with the reason already printed."""
+    rng = getattr(args, "goal_range", None)
+    if rng is None:
+        return [(None, None)]
+    if rng.current:
+        goal = runtime.db.get_active_objective()
+        return [((goal['id'] if goal else None), _goal_span_start(goal))]
+    if rng.start is not None and rng.start == rng.end:
+        # One ID reaches any non-archived goal, a past one included, as it always did —
+        # only a range is restricted to what is still ahead.
+        goal = runtime.db.get_objective(rng.start)
+        if not goal:
+            print(red(f"Goal with ID {rng.start} not found."))
+            return None
+        return [(goal['id'], _goal_span_start(goal))]
+    goals = _goals_in_range(rng)
+    if goals is None:
+        return None
+    if not goals:
+        print(yellow("No upcoming goal falls in that range — nothing to plan."))
+        return None
+    return [(g['id'], _goal_span_start(g)) for g in goals]
+
+
+def _announce_targets(targets: list) -> None:
+    """Names the goals a range resolved to, and their order, before the first strategy
+    call is spent (DESIGN_cli_selectors.md §9)."""
+    named = []
+    for goal_id, _ in targets:
+        goal = runtime.db.get_objective(goal_id) if goal_id is not None else None
+        if goal:
+            named.append(f"{goal['title']} ({fmt_date(goal['target_date'])})")
+    aside(wrap_text(
+        f"Planning {len(targets)} goals in date order, one strategy call each: "
+        + "; ".join(named) + "."
+    ))
+
+
 def run_plan_generate(args: argparse.Namespace) -> None:
     """Executes the AI periodization strategy plan generation command."""
     # A clean slate is a regeneration by definition, so the staleness question below —
     # "an input changed, regenerate?" — is already answered.
     if args.fresh:
         args.force = True
+
+    # Resolved before the Garmin pull, so an unknown goal ID fails without one.
+    targets = _plan_targets(args)
+    if targets is None:
+        return
 
     # Make sure we have latest metrics cached
     ensure_recent_data(no_pull=args.no_pull, force_pull=getattr(args, 'force_pull', False))
@@ -57,13 +152,36 @@ def run_plan_generate(args: argparse.Namespace) -> None:
                 no_pull=args.no_pull, force_pull=getattr(args, 'force_pull', False)
             )
 
+    if len(targets) == 1:
+        _generate_one_plan(args, *targets[0])
+        return
+
+    # Each goal is its own strategy, its own preview and its own decision: declining one
+    # does not stop the next, whose window is bounded by the goal dates either way (§9).
+    _announce_targets(targets)
+    for index, (goal_id, span_start) in enumerate(targets, start=1):
+        goal = runtime.db.get_objective(goal_id) if goal_id is not None else None
+        title = goal['title'] if goal else f"goal {goal_id}"
+        print(bold(cyan(f"\n=== PLANNING {index}/{len(targets)}: {title} ===")))
+        _generate_one_plan(args, goal_id, span_start)
+
+
+def _generate_one_plan(
+    args: argparse.Namespace, goal_id: Optional[int], span_start: Optional[str]
+) -> None:
+    """One goal's strategy: the staleness gate, the LLM call, the preview and the save.
+
+    `force` is a local because the staleness gate raises it, and in a range that answer
+    belongs to the goal it was asked about, not to the ones planned after it."""
+    force = bool(args.force)
+
     # Bound before the branch: with no upcoming objectives the accept path below
     # still reads it, and an unbound name surfaced only as a NameError string.
     next_goal = None
     objectives = runtime.db.upcoming_objectives()
     if objectives:
-        if args.goal_id is not None:
-            target_goals = [o for o in objectives if o['id'] == args.goal_id]
+        if goal_id is not None:
+            target_goals = [o for o in objectives if o['id'] == goal_id]
             next_goal = target_goals[0] if target_goals else None
         else:
             objectives.sort(key=lambda x: str(x['target_date']))
@@ -79,13 +197,13 @@ def run_plan_generate(args: argparse.Namespace) -> None:
             macro = runtime.db.get_macrocycle_for_objective(next_goal['id'])
             if macro:
                 change_reason = runtime.coach_service.config_changed(macro)
-                if change_reason and not args.force:
+                if change_reason and not force:
                     if runtime.prompt.confirm(wrap_text(
                         "A plan-shaping input has changed since the last plan "
                         f"generation ({change_reason}).\n"
                         "Would you like to regenerate the periodization strategy?"
                     )):
-                        args.force = True
+                        force = True
                     else:
                         print(wrap_text(
                             "Keeping the current periodization strategy. It is now "
@@ -99,10 +217,12 @@ def run_plan_generate(args: argparse.Namespace) -> None:
                         )
 
     plan_kwargs = {'auto_apply': False}
-    if args.goal_id is not None:
-        plan_kwargs['objective_id'] = args.goal_id
+    if goal_id is not None:
+        plan_kwargs['objective_id'] = goal_id
+    if span_start is not None:
+        plan_kwargs['start_date'] = span_start
     proposal = runtime.coach_service.plan_generate(
-        force=bool(args.force), fresh=bool(args.fresh), **plan_kwargs
+        force=force, fresh=bool(args.fresh), **plan_kwargs
     )
     mesocycles = proposal['mesocycles']
 
@@ -911,7 +1031,7 @@ def _feedback_replan(goal: dict) -> None:
     print(green("Regenerating the periodization plan around your feedback..."))
     run_plan_generate(argparse.Namespace(
         no_pull=False, force_pull=False, auto=False,
-        goal_id=goal['id'], force=False, fresh=False,
+        goal_range=IdRange(start=goal['id'], end=goal['id']), force=False, fresh=False,
     ))
     aside("If you applied the new plan, run " + cmd("workout generate")
           + " to schedule it.")
@@ -1016,8 +1136,13 @@ def add_plan_parser(subparsers, pull_bypass_parser, llm_debug_parser):
         help="Apply proposed plan updates automatically without prompting"
     )
     p_gen.add_argument(
-        "-g", "--goal", "--goal-id", type=int, dest="goal_id",
-        help="Target goal ID to generate the periodization plan for"
+        "-g", "--goal", "--goal-id", dest="goal_range", nargs="?", const=CURRENT,
+        type=lambda raw: parse_id_range(raw, "goal"), metavar="RANGE",
+        help="Goal(s) to plan for, as the shared range grammar: ID, ID.., ..ID or "
+             "ID..ID (bare -g is the active goal). One ID plans that goal alone, bounded "
+             "to its own span — the day after the goal before it, through its target "
+             "date. A range plans every upcoming goal it covers, in date order, one "
+             "strategy call each: '-g ..2' is everything through goal 2"
     )
     
     # plan show
