@@ -871,7 +871,9 @@ methods whose behavior is *not* obvious from that convention are called out belo
   delegates to rather than inlining its own DELETE. See DESIGN_backward_evaluation.md §5.1.
 - **Macrocycles/Mesocycles** (`periodization.py`) — versioned: `save_macrocycle`
   **supersedes** the objective's existing active version (marks it `superseded`, keeps
-  it) and inserts the new active one; `set_active_macrocycle(id)` promotes a version
+  it) and inserts the new active one, running the blocks through
+  `repair_block_contiguity` on the way in so within-plan gaps and overlaps never reach
+  the table (DOMAIN_MODEL.md §4); `set_active_macrocycle(id)` promotes a version
   and supersedes the rest. `get_macrocycle_for_objective` returns the active version
   only, while `get_macrocycle(id)` / `get_macrocycle_versions` /
   `get_previous_macrocycle_version` reach any version for walk-back navigation.

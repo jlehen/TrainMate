@@ -22,6 +22,7 @@ GOAL_DATE = _days_out(71)
 
 from trainmate.config import config
 from trainmate.db import Database
+from trainmate.db.periodization import repair_block_contiguity
 import trainmate.db
 import trainmate.coach
 
@@ -2002,31 +2003,44 @@ class TestDateKeyedGeneration(unittest.TestCase):
             test_db.get_governing_mesocycles(_days_out(0), _days_out(27)), ([], [])
         )
 
-    def test_the_covering_readers_answer_only_with_blocks_that_cover_the_window(self):
+    def test_the_strict_readers_answer_only_with_blocks_that_cover_their_target(self):
         """The strict question, for every caller that goes on to treat the answer as
-        covering the days it asked about — a block that does not contain the window is not
-        something to name (DESIGN_constraint_honoring.md §4.1).
-
-        Its own NAME rather than a flag on the governing readers: a boolean whose meaning
-        each call site had to re-derive is how the same by-hand re-check came to be
-        written out at five separate sites.
+        covering what it asked about — a block that does not contain the target is not
+        something to name (DESIGN_constraint_honoring.md §4.1). The window form is
+        internal to get_governing_mesocycles; the single-date form is the public reader
+        the constraint messages use.
         """
         goal = self._goal("Spring 10k", _days_out(-5))
         self._plan(goal, "spring", [("Base", _days_out(-40), _days_out(-10))])
 
         self.assertEqual(
-            test_db.get_covering_mesocycles(_days_out(0), _days_out(27)),
+            test_db._get_covering_mesocycles(_days_out(0), _days_out(27)),
             ([], []),
         )
         self.assertIsNone(test_db.get_covering_mesocycle(_days_out(0)))
         # The governing readers still fall back, because `generate` depends on it.
         self.assertIsNotNone(test_db.get_active_mesocycle(_days_out(0)))
-        # And a window a block really does cover answers the same through either reader.
+        # And a window a block really does cover answers with it through either reader.
         covered = _days_out(-20)
         self.assertEqual(
-            [b["name"] for b in test_db.get_covering_mesocycles(covered, covered)[0]],
+            [b["name"] for b in test_db.get_governing_mesocycles(covered, covered)[0]],
             ["Base"],
         )
+
+    def test_single_date_readers_prefer_the_newest_plan_on_overlapping_days(self):
+        """Overlapping plans are settled by recency in every reader, so the block a
+        message names and the block a workout is stamped with are the same one."""
+        first = self._goal("Spring 10k", _days_out(40))
+        self._plan(first, "spring", [("Base", _days_out(0), _days_out(40))])
+        second = self._goal("Autumn Marathon", _days_out(90))
+        new = self._plan(second, "autumn", [("Build", _days_out(0), _days_out(90))])
+
+        covering = test_db.get_covering_mesocycle(_days_out(10))
+        self.assertEqual(covering["macrocycle_id"], new)
+        self.assertEqual(test_db.get_active_mesocycle(_days_out(10))["id"], covering["id"])
+        ids = test_db.get_periodization_ids_for_date(_days_out(10))
+        self.assertEqual(ids[1], new)
+        self.assertEqual(ids[2], covering["id"])
 
     # --- what generation actually does with it ------------------------------------
 
@@ -2566,6 +2580,82 @@ class TestGoalArchivalStandsSessionsDown(unittest.TestCase):
             [w["title"] for w in test_db.get_workouts(start_date=_days_out(-30))],
             ["Later"],
         )
+
+
+class TestBlockContiguityRepair(unittest.TestCase):
+    """Within one plan, blocks are contiguous by construction: save_macrocycle repairs
+    model-authored dates instead of trusting them (DOMAIN_MODEL.md §4). End dates stay
+    authoritative; starts are re-derived, and a swallowed block is dropped."""
+
+    @classmethod
+    def setUpClass(cls):
+        if os.path.exists(TEST_DB_PATH):
+            os.remove(TEST_DB_PATH)
+        global test_db
+        test_db = Database(db_path=TEST_DB_PATH)
+        rebind_test_db(test_db)
+
+    @classmethod
+    def tearDownClass(cls):
+        if os.path.exists(TEST_DB_PATH):
+            try:
+                os.remove(TEST_DB_PATH)
+            except OSError:
+                pass
+
+    def setUp(self):
+        clear_all_tables(test_db)
+
+    def _save(self, blocks):
+        obj = test_db.add_objective(
+            title="Goal", target_date=_days_out(90), sport_type="running",
+        )
+        macro = test_db.save_macrocycle(
+            objective_id=obj, strategy="s", goals_hash="g", constraints_hash="c",
+            mesocycles=[{"name": name, "start_date": start, "end_date": end,
+                         "focus": "f"} for name, start, end in blocks],
+        )
+        return test_db.get_mesocycles_for_macrocycle(macro)
+
+    def test_contiguous_blocks_are_stored_untouched(self):
+        stored = self._save([("Base", _days_out(0), _days_out(27)),
+                             ("Build", _days_out(28), _days_out(55))])
+        self.assertEqual([(b["start_date"], b["end_date"]) for b in stored],
+                         [(_days_out(0), _days_out(27)), (_days_out(28), _days_out(55))])
+
+    def test_a_gap_between_blocks_is_closed_at_save(self):
+        stored = self._save([("Base", _days_out(0), _days_out(27)),
+                             ("Build", _days_out(33), _days_out(55))])
+        self.assertEqual(stored[1]["start_date"], _days_out(28))
+        self.assertEqual(stored[1]["end_date"], _days_out(55))
+
+    def test_overlapping_blocks_are_redated_at_save(self):
+        stored = self._save([("Base", _days_out(0), _days_out(27)),
+                             ("Build", _days_out(20), _days_out(55))])
+        self.assertEqual(stored[1]["start_date"], _days_out(28))
+
+    def test_a_block_its_predecessor_swallows_is_dropped(self):
+        stored = self._save([("Base", _days_out(0), _days_out(27)),
+                             ("Blip", _days_out(10), _days_out(20)),
+                             ("Build", _days_out(28), _days_out(55))])
+        self.assertEqual([b["name"] for b in stored], ["Base", "Build"])
+
+    def test_repair_names_what_it_changed_and_is_idempotent(self):
+        blocks = [
+            {"name": "Base", "start_date": _days_out(0), "end_date": _days_out(27),
+             "focus": "f"},
+            {"name": "Build", "start_date": _days_out(33), "end_date": _days_out(55),
+             "focus": "f"},
+        ]
+        repaired, notes = repair_block_contiguity(blocks)
+        self.assertEqual(len(notes), 1)
+        self.assertIn("Build", notes[0])
+        self.assertIn("gap", notes[0])
+        again, no_notes = repair_block_contiguity(repaired)
+        self.assertEqual(no_notes, [])
+        self.assertEqual(again, repaired)
+        # The input list is not mutated: the caller may still display what the model said.
+        self.assertEqual(blocks[1]["start_date"], _days_out(33))
 
 
 if __name__ == "__main__":

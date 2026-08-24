@@ -6,6 +6,7 @@ from trainmate.types import PlanProposal, Workout
 from trainmate.coach.proposals import PlanFingerprints
 from trainmate.adherence import planned_load
 from trainmate.sports import canonical_sport
+from trainmate.db.periodization import repair_block_contiguity
 from trainmate.util import (
     aside, cyan, yellow, bold, cmd, wrap_text, format_labeled_block, default_wrap_width,
 )
@@ -503,6 +504,12 @@ class PlanningMixin:
         """
         if objective_id is None:
             return None
+
+        # Repair within-plan gaps/overlaps here, where the note can reach the user; the
+        # write boundary re-applies the same repair as a no-op (DOMAIN_MODEL.md §4).
+        mesocycles, repair_notes = repair_block_contiguity(mesocycles)
+        for note in repair_notes:
+            print(yellow(wrap_text(f"Note: block dates repaired — {note}.")))
 
         if fingerprints is None:
             today_str = _svc._today_str()

@@ -284,131 +284,96 @@ sentence plus the science guidelines.
    `get_mesocycle_ranges`, which ignores goal status — a since-completed goal still
    planned its dates — while still excluding superseded *versions*, so an old version's
    dates cannot double-count the active one's.
+4. Within one plan, blocks are contiguous: no gap and no overlap between one block's
+   `end_date` and the next's `start_date`. The model is asked for this, and
+   `save_macrocycle` repairs what comes back rather than trusting it
+   (`repair_block_contiguity`): end dates are authoritative, a start that disagrees with
+   its predecessor's end is re-dated to the day after it, and a block that ends inside
+   its predecessor is dropped. `plan apply` runs the same repair first and prints a note
+   per fix, so a repaired plan is never silently different from the one shown.
 
 **Asked of the model, but not enforced anywhere:**
 
-4. Blocks should be contiguous, with no gaps between one block's `end_date` and the
-   next's `start_date`.
 5. The first block should start on the plan start date, and the last should end on or
    around the goal date.
+6. Plans of *different* goals should not overlap. `plan generate` pins a new plan's
+   start to the day after the latest preceding goal that has a plan — but this is
+   best-effort: planning goals out of chronological order still produces two active
+   plans over the same dates. That state is legitimate and transient — adding the
+   earlier goal flags the later plan stale (its `goals_hash` covers every goal), and
+   regenerating it re-pins its start — and the readers settle it by recency in the
+   meantime (below).
 
-Points 4 and 5 live in the planning prompt only. `save_macrocycle` inserts whatever it is
-handed — it does not check contiguity, overlap, or coverage. The readers cope instead, by
-falling back and by tie-breaking (below). This is a deliberate soft spot, recorded in
-`DESIGN_block_boundary.md §6` as a "known asymmetry": *"Blocks are contiguous in practice."*
+Point 5 lives in the planning prompt only; the readers absorb a plan that starts late or
+ends early by falling back (below).
 
-### Reading blocks: a three-layer chain, not a menu
 
-Picking the wrong reader is how two commands come to disagree about which block you are
-in. So for a **window**, the readers are layered rather than offered as alternatives —
-each one adds exactly one decision to the one below it:
+### Reading blocks for a window: one reader
 
-```
-  get_mesocycles_in_range(start, end)    ← layer 1: the raw overlap query. No judgement.
-            │
-            │   + arbitrate between competing plans
-            ▼
-  get_covering_mesocycles(start, end)    ← layer 2: one plan to follow, or none.
-            │
-            │   + fall back when nothing overlaps
-            ▼
-  get_governing_mesocycles(start, end)   ← layer 3: never says "no plan" while one exists.
-```
-
-#### Layer 1 — `get_mesocycles_in_range` is the SQL, and nothing else
-
-One query: every block whose span touches the window, belonging to an active plan version
-of a non-archived goal, ordered by start date. `end_date=None` means no upper bound —
-"every block from here to the plan's end" — so no caller has to invent a far-future date.
-
-It answers a membership question and makes no decision. **It has exactly one caller in the
-whole codebase, and that caller is layer 2.** It is not a reader you would choose between;
-it is the unarbitrated first half of the one you would.
-
-#### Layer 2 — `get_covering_mesocycles` decides which *plan* to follow
-
-Layer 1 can hand back blocks from two different plans, and two plans cannot both be
-followed on the same day. Layer 2 is the arbitration:
-
-1. Group layer 1's blocks by `macrocycle_id`.
-2. Give each plan a **footprint** — the earliest start and latest end *among the blocks
-   that came back*, not the plan's full span.
-3. Walk the plans in priority order — `prefer_macro_id` first, then highest ID (most
-   recently created) first — keeping each plan whose footprint does not overlap a plan
-   already kept, and dropping the ones that do.
-
-It returns a **tuple**, not a list: `(kept_blocks, dropped_macrocycle_ids)`. The second
-half is a receipt, so the caller can say what it ignored and offer the override:
+`get_governing_mesocycles(start, end, prefer_macro_id=None)` is the only window reader:
+"which blocks govern these days". `end=None` means "to the plan's end", so no caller has
+to invent a far-future date. It returns a **tuple**, not a list:
+`(blocks, dropped_macrocycle_ids)` — the second half is a receipt, so the caller can say
+which plan it ignored and offer the override:
 
 ```
 Plan ID 4 also covers part of this span; following the more recently generated plan
 instead. Pass -M 4 to follow that one.
 ```
 
-Arbitrating on the *plan* rather than on the block has two consequences, both wanted:
+Internally it does three things, in order (the first two are
+`_get_covering_mesocycles`, its private strict half):
 
-- **Whole plans are dropped, never individual blocks.** If a plan survives, every one of
-  its in-window blocks survives with it. You never get a half-followed plan.
-- **Sequential plans both survive.** Their footprints do not overlap, so nothing is
-  dropped — which is exactly what a long `-g` horizon needs when it runs out of one goal's
-  last block into the next goal's first.
+1. **Overlap query.** Every block whose span touches the window, belonging to an active
+   plan version of a non-archived goal, in start-date order.
+2. **Plan arbitration.** The query can hand back blocks from two different plans, and
+   two plans cannot both be followed on the same day. Each plan gets a **footprint** —
+   the earliest start and latest end among *its blocks that came back*, not its full
+   span — and plans are walked in priority order (`prefer_macro_id` first, then most
+   recently created first), dropping any plan whose footprint overlaps one already kept.
+   Whole plans are dropped, never individual blocks, so a surviving plan is never
+   half-followed. Sequential plans both survive — their footprints do not overlap —
+   which is what a long horizon needs when it runs out of one goal's last block into the
+   next goal's first.
+3. **Fallback.** Only when nothing overlaps at all does it answer with
+   `get_active_mesocycle`'s nearest block instead. `workout generate` depends on this:
+   it lays sessions near a plan's edges and reads an empty answer as "there is no plan
+   at all — run `plan generate`", which must not happen for a plan that merely starts
+   next week.
 
-#### Layer 3 — `get_governing_mesocycles` refuses to answer "nothing"
+The behaviour on one window:
 
-Same arguments, same tuple. It returns layer 2's answer whenever layer 2 found something,
-and only when layer 2 comes back empty does it fall back to `get_active_mesocycle`'s
-nearest block.
+| The window has… | It returns |
+|---|---|
+| one plan covering it | that plan's blocks, `dropped = []` |
+| two plans, **sequential** | every block of both, `dropped = []` |
+| two plans, **same days** | the newer plan's blocks, `dropped = [older]` |
+| no block touching it, but a plan elsewhere in time | the nearest block, `dropped = []` |
+| no plan at all | `([], [])` |
 
-#### The three layers on one window
-
-Two goals, two plans, both active:
-
-```
-  plan 3  ("Spring 10k")       Base    2026-08-22 → 2026-09-30
-  plan 4  ("Autumn Marathon")  Build   2026-08-22 → 2026-11-15
-
-  window asked about:  2026-09-01 → 2026-09-20
-
-  layer 1  →  [Base, Build]        both blocks touch the window; no opinion offered
-  layer 2  →  ([Build], [3])       footprints overlap → plan 4 is newer → plan 3 dropped
-  layer 3  →  ([Build], [3])       layer 2 found something, so nothing is added
-```
-
-And the full behaviour table:
-
-| The window has… | Layer 1 returns | Layer 2 returns | Layer 3 returns |
-|---|---|---|---|
-| one plan covering it | its blocks | its blocks, `dropped = []` | same as layer 2 |
-| two plans, **sequential** | every block of both | every block of both, `dropped = []` | same as layer 2 |
-| two plans, **same days** | every block of both, interleaved by date | the newer plan's blocks, `dropped = [older]` | same as layer 2 |
-| **no block at all** | `[]` | `([], [])` | the nearest block, `dropped = []` |
-
-That last row is the entire difference between layers 2 and 3, and it is a real fork:
-
-- **The add-time constraint message calls layer 2 directly.** It asks which block holds a
-  constraint's last day, and a block that does *not* cover that date is not an answer — it
-  would name the wrong block and offer a date already behind the athlete. Being handed
-  nothing is what lets it say "past the end of your plan" instead.
-- **`workout generate` calls layer 3.** It lays sessions near a plan's edges, and it reads
-  an empty answer as "there is no plan at all — run `plan generate`". Layer 2's empty
-  answer would make it refuse for a plan that merely starts next week.
-
-The fork is two differently-named functions rather than one boolean flag because it used to
-be a by-hand re-check written out at five separate call sites: a flag's meaning has to be
-re-derived at every site, a name does not. Pinned by
-`test_the_covering_readers_answer_only_with_blocks_that_cover_the_window`.
 
 ### The single-date readers
 
-The same strict-vs-lenient fork, one layer shallower — there is no plan arbitration here,
-because a single date resolves to at most one block anyway.
+This is where the strict-vs-lenient fork lives: a strict reader answers only with a
+block that CONTAINS the date, a lenient one falls back to the nearest. The add-time
+constraint message is the strict caller (`cli/constraints.py`): it asks which block
+holds a constraint's last day, and a block that does not cover that date would name the
+wrong block and offer a date already behind the athlete — being handed `None` is what
+lets it say "past the end of your plan" instead. Strict and lenient are two named
+readers rather than one boolean flag, because a flag's meaning has to be re-derived at
+every call site and a name does not. Pinned by
+`test_the_strict_readers_answer_only_with_blocks_that_cover_their_target`.
+
+All of them settle overlapping plans the same way the window reader does — the most
+recently created plan wins — so no two commands name different blocks for one day.
 
 | Reader | Answers |
 |---|---|
 | `get_covering_mesocycle(date)` | **Strict.** The active block containing that date, or `None`. |
 | `get_active_mesocycle(date)` | **Lenient.** Covering block → first block ending in the future → the absolute first block. |
 | `get_next_mesocycle(after)` | The earliest block starting strictly after a date. **Never falls back**: no block ahead means `None`. |
-| `get_periodization_ids_for_date(date)` | `(objective_id, macrocycle_id, mesocycle_id)`, for stamping a session with its provenance. Applies the same recency tie-break, per day. |
+| `get_periodization_ids_for_date(date)` | `(objective_id, macrocycle_id, mesocycle_id)`, for stamping a session with its provenance. |
+
 
 **The governing plan.** `get_governing_macrocycle()` is "the plan the current workouts
 implement": the earliest goal still ahead that has a plan, falling back to the most recent
@@ -910,14 +875,18 @@ unless the goal was entered by mistake.
 | 13 | A `propose` method never writes; an apply method always records the pass | `tests/test_service_invariants.py` (source-level) |
 | 14 | Workout state is derived from orthogonal axes, never a stored enum | The change `kind`, the lineage tally, `calendar_state` |
 | 15 | Weeks are Monday-commencing everywhere | `progression.weekly_aggregates` |
+| 16 | Within one plan, blocks are contiguous — no gaps, no overlaps | `save_macrocycle` via `repair_block_contiguity` |
 
 ## 11. Deliberately not enforced
 
 Worth knowing, because each of these is a decision rather than an oversight:
 
-- **Mesocycle contiguity, non-overlap and full coverage.** Asked of the model in the
-  planning prompt; never validated on save. Readers absorb the consequences: the lenient
-  readers fall back, and overlapping plans are settled by recency.
+- **Cross-plan non-overlap and full coverage.** Within one plan, contiguity is repaired
+  on save (invariant 16); across plans and at a plan's edges the readers absorb the
+  consequences instead: the lenient readers fall back, and overlapping plans are settled
+  by recency. Enforcing it on save would mean rejecting the new plan or destructively
+  editing another goal's already-saved one; read-time recency keeps both intact and lets
+  regeneration heal the overlap.
 - **The relationship between a session's planned zone seconds and its duration.** Stored
   exactly as the model emitted them. A session whose zone seconds do not sum to
   `duration_minutes` is a prescription, not an accounting identity — silently scaling it
@@ -926,10 +895,11 @@ Worth knowing, because each of these is a decision rather than an oversight:
   Everything quantitative is derived downstream from the sessions.
 - **Workouts pointing at a real macrocycle.** No foreign key, so no cascade, so a deleted
   goal strands its sessions — reported at `goal rm` time rather than prevented.
-- **The gap between blocks.** `get_active_mesocycle` snaps from "one day left" to "the whole
-  next block" across a calendar gap rather than tapering. Both features that read it gate on
-  `0 <= days_left <= N`, so neither misfires. Recorded in `DESIGN_block_boundary.md §6`
-  rather than fixed.
+- **The gap between plans.** `get_active_mesocycle` snaps from "one day left" to "the whole
+  next block" across a calendar gap rather than tapering. Within one plan such a gap no
+  longer exists (invariant 16); one can still open between two goals' plans. Both features
+  that read it gate on `0 <= days_left <= N`, so neither misfires. Recorded in
+  `DESIGN_block_boundary.md §6` rather than fixed.
 
 ---
 

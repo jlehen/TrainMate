@@ -105,10 +105,12 @@ the next *future* block, then — if every block is already over — the absolut
 mesocycle. On a calendar gap between blocks the adaptation range therefore snaps from one day
 (the last day of a block) to the whole upcoming block, rather than tapering.
 
-Blocks are contiguous in practice. Both features here gate on `0 <= days_left <= N` against
-the returned block's end date, so neither misfires in either fallback: the future block's end
-is far away (`days_left` large), and a wholly-past block gives a negative `days_left`.
-Recorded rather than fixed.
+Within one plan, blocks are contiguous by construction — `save_macrocycle` repairs
+model-authored gaps and overlaps (`repair_block_contiguity`, DOMAIN_MODEL.md §4) — so a
+calendar gap can only open between two goals' plans. Both features here gate on
+`0 <= days_left <= N` against the returned block's end date, so neither misfires in either
+fallback: the future block's end is far away (`days_left` large), and a wholly-past block
+gives a negative `days_left`. Recorded rather than fixed.
 
 **No mesocycle at all — `adapt` refuses.** This case used to synthesize a range end of
 evaluation date + 6 days, which meant the prompt gate compared `days_left` against an

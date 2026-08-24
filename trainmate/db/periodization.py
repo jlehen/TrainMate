@@ -1,8 +1,50 @@
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Tuple
 from trainmate.types import Macrocycle, Mesocycle, PlanFeedback
 from trainmate.util import today_date
 from trainmate.db.objectives import ARCHIVED
+
+
+def repair_block_contiguity(
+    mesocycles: List[Dict[str, Any]]
+) -> Tuple[List[Dict[str, Any]], List[str]]:
+    """Sorts a plan's blocks and re-dates them so consecutive blocks are contiguous.
+
+    Contiguity is asked of the model; this repairs what came back so the stored plan
+    always holds it (DOMAIN_MODEL.md §4). End dates are authoritative: a block whose
+    start is not the day after its predecessor's end is re-dated to start there, and a
+    block ending inside its predecessor is dropped. Returns (blocks, notes), the notes
+    naming each repair — empty when nothing needed one. Idempotent, so the write
+    boundary re-applies it as a no-op after `plan_apply` has surfaced the notes."""
+    ordered = sorted(mesocycles, key=lambda b: (b['start_date'], b['end_date']))
+    repaired: List[Dict[str, Any]] = []
+    notes: List[str] = []
+    for block in ordered:
+        if not repaired:
+            repaired.append(dict(block))
+            continue
+        prev = repaired[-1]
+        expected = (
+            datetime.strptime(prev['end_date'], "%Y-%m-%d") + timedelta(days=1)
+        ).strftime("%Y-%m-%d")
+        if block['end_date'] < expected:
+            notes.append(
+                f"dropped '{block['name']}' ({block['start_date']} to "
+                f"{block['end_date']}): it ends inside '{prev['name']}'"
+            )
+            continue
+        if block['start_date'] != expected:
+            if block['start_date'] < expected:
+                how = f"overlapped '{prev['name']}'"
+            else:
+                how = f"left a gap after '{prev['name']}'"
+            notes.append(
+                f"moved the start of '{block['name']}' from {block['start_date']} to "
+                f"{expected}: it {how}, which ends {prev['end_date']}"
+            )
+            block = dict(block, start_date=expected)
+        repaired.append(dict(block))
+    return repaired, notes
 
 
 class PeriodizationMixin:
@@ -165,15 +207,20 @@ class PeriodizationMixin:
             )
             return [dict(row) for row in cursor.fetchall()]  # type: ignore
 
-    def get_mesocycles_in_range(
-        self, start_date: str, end_date: Optional[str] = None
-    ) -> List[Mesocycle]:
-        """Every active mesocycle overlapping the window, chronologically.
+    def _get_covering_mesocycles(
+        self, start_date: str, end_date: Optional[str] = None,
+        prefer_macro_id: Optional[int] = None
+    ) -> Tuple[List[Mesocycle], List[int]]:
+        """The blocks that ACTUALLY overlap a window — or none — plus the macrocycle IDs
+        dropped as conflicts. The strict half of `get_governing_mesocycles`, its one
+        caller: an empty answer means no block covers any of these days, which is what
+        lets the governing reader fall back only when it should.
 
-        The date-keyed counterpart of get_mesocycles_for_macrocycle: which blocks govern
-        these days, asked without naming a goal or a plan version
-        (DESIGN_cli_selectors.md §8). Same active-objective/active-version filter as
-        get_active_mesocycle, so the two never disagree about what is live.
+        Sequential plans both survive — a long span legitimately crosses from one goal's
+        last block into the next goal's first — but two plans covering the *same* dates
+        cannot both be followed, so the most recently created wins, the same tiebreak
+        get_periodization_ids_for_date makes per day. `prefer_macro_id` settles that
+        contest by hand instead.
 
         `end_date=None` means no upper bound — "every block from here to the plan's end",
         the form `get_constraints` already takes, so no caller has to invent a far-future
@@ -194,24 +241,7 @@ class PeriodizationMixin:
                   AND {' AND '.join(clauses)}
                 ORDER BY m.start_date ASC, m.id ASC
             """, params)
-            return [dict(row) for row in cursor.fetchall()]  # type: ignore
-
-    def get_covering_mesocycles(
-        self, start_date: str, end_date: Optional[str] = None,
-        prefer_macro_id: Optional[int] = None
-    ) -> Tuple[List[Mesocycle], List[int]]:
-        """The blocks that ACTUALLY overlap a window — or none — plus the macrocycle IDs
-        dropped as conflicts. The strict reader: an empty answer means no block covers
-        any of these days, and every caller that treats the answer as covering the
-        window wants this form (DESIGN_constraint_honoring.md §4.1).
-
-        Sequential plans both survive — a long span legitimately crosses from one goal's
-        last block into the next goal's first — but two plans covering the *same* dates
-        cannot both be followed, so the most recently created wins, the same tiebreak
-        get_periodization_ids_for_date makes per day. `prefer_macro_id` settles that
-        contest by hand instead.
-        """
-        mesos = self.get_mesocycles_in_range(start_date, end_date)
+            mesos = [dict(row) for row in cursor.fetchall()]
         if not mesos:
             return [], []
 
@@ -237,13 +267,16 @@ class PeriodizationMixin:
         self, start_date: str, end_date: Optional[str] = None,
         prefer_macro_id: Optional[int] = None
     ) -> Tuple[List[Mesocycle], List[int]]:
-        """`get_covering_mesocycles`, answering with get_active_mesocycle's nearest block
-        when nothing overlaps — so a plan that starts after the window still answers
-        rather than leaving the caller with no plan at all. What `generate` wants, since
-        it lays sessions near a plan's edges and reads an empty result as "no plan at
-        all"; a caller that would treat the answer as covering the window wants the
-        strict reader instead."""
-        mesos, dropped = self.get_covering_mesocycles(
+        """The blocks that govern a window, plus the macrocycle IDs dropped as
+        conflicts — the one window reader (DESIGN_cli_selectors.md §8).
+
+        Overlap and arbitration are `_get_covering_mesocycles`'s: whole plans survive or
+        drop, the most recently created wins, `prefer_macro_id` overrides. When nothing
+        overlaps at all, answers with get_active_mesocycle's nearest block instead — so
+        a plan that starts after the window still answers, and an empty result means
+        there is genuinely no plan. A caller that treats the answer as covering a *date*
+        wants the strict single-date reader, `get_covering_mesocycle`."""
+        mesos, dropped = self._get_covering_mesocycles(
             start_date, end_date, prefer_macro_id
         )
         if mesos:
@@ -317,7 +350,10 @@ class PeriodizationMixin:
     def get_covering_mesocycle(self, target_date: str) -> Optional[Mesocycle]:
         """The active mesocycle that actually CONTAINS this date, or None. The strict
         reader: what every caller wants that goes on to read the answer's dates as
-        covering the target. Only considers active objectives."""
+        covering the target. Only considers active objectives. When overlapping plans
+        both contain the date, the most recently created wins — the same tiebreak
+        get_periodization_ids_for_date makes, so no two readers name different blocks
+        for one day."""
         with self._get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("""
@@ -326,7 +362,7 @@ class PeriodizationMixin:
                 JOIN objectives o ON mac.objective_id = o.id
                 WHERE o.status = 'active' AND COALESCE(mac.status, 'active') = 'active'
                   AND m.start_date <= ? AND m.end_date >= ?
-                ORDER BY m.start_date ASC LIMIT 1
+                ORDER BY mac.id DESC, m.start_date ASC LIMIT 1
             """, (target_date, target_date))
             row = cursor.fetchone()
             return dict(row) if row else None  # type: ignore
@@ -349,7 +385,7 @@ class PeriodizationMixin:
                 JOIN objectives o ON mac.objective_id = o.id
                 WHERE o.status = 'active' AND COALESCE(mac.status, 'active') = 'active'
                   AND m.end_date >= ?
-                ORDER BY m.start_date ASC LIMIT 1
+                ORDER BY m.start_date ASC, mac.id DESC LIMIT 1
             """, (target_date,))
             row = cursor.fetchone()
             if row: return dict(row) # type: ignore
@@ -360,7 +396,7 @@ class PeriodizationMixin:
                 JOIN macrocycles mac ON m.macrocycle_id = mac.id
                 JOIN objectives o ON mac.objective_id = o.id
                 WHERE o.status = 'active' AND COALESCE(mac.status, 'active') = 'active'
-                ORDER BY m.start_date ASC LIMIT 1
+                ORDER BY m.start_date ASC, mac.id DESC LIMIT 1
             """)
             row = cursor.fetchone()
             return dict(row) if row else None # type: ignore
@@ -378,7 +414,7 @@ class PeriodizationMixin:
                 JOIN objectives o ON mac.objective_id = o.id
                 WHERE o.status = 'active' AND COALESCE(mac.status, 'active') = 'active'
                   AND m.start_date > ?
-                ORDER BY m.start_date ASC LIMIT 1
+                ORDER BY m.start_date ASC, mac.id DESC LIMIT 1
             """, (after_date,))
             row = cursor.fetchone()
             return dict(row) if row else None # type: ignore
@@ -465,7 +501,11 @@ class PeriodizationMixin:
         The previously-active macrocycle for the objective is *superseded* rather than
         deleted (see DESIGN_plan_rollback.md): it and its mesocycles are kept so that
         `plan rollback` can restore them, while the freshly-saved version becomes active.
+
+        Blocks pass through `repair_block_contiguity` before insertion, so within-plan
+        gaps and overlaps never reach the table (DOMAIN_MODEL.md §4).
         """
+        mesocycles, _ = repair_block_contiguity(mesocycles)
         created_at = datetime.now(timezone.utc).isoformat()
         with self._get_connection() as conn:
             cursor = conn.cursor()
