@@ -241,7 +241,7 @@ def format_planned_workouts_detailed(
         # A benchmark (fitness test) must be rescheduled intact, never softened — see the
         # adapt prompt's PROTECTING A BENCHMARK rule (DESIGN_benchmark_workouts.md §4.2).
         if w.get('benchmark_type'):
-            markers += f" [BENCHMARK: {w['benchmark_type']} — reschedule intact, do not dilute]"
+            markers += f" [BENCHMARK: {w['benchmark_type']} — if changed at all, move intact; never dilute]"
         header = _planned_summary(w, eval_date, easing_closer, markers)
         desc = (w.get('description') or '').strip()
         if desc:

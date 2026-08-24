@@ -448,10 +448,10 @@ due" — is honest only because a block boundary really does bring a `workout ge
 scope that carries no such guarantee may not repeat the promise; it would tell the model a
 postponement is cheaper than it is.
 
-The section's closing line — "a benchmark you are NOT changing need not be returned at all"
+The section's closing line — "a benchmark you are NOT changing is not returned at all"
 — travels with it and must: `workout_revision_apply` infers `clear_benchmark` from a
 returned change that drops the flag, and that inference is only sound because the prompt has
-told the model an unchanged test may be omitted.
+told the model an unchanged test is omitted.
 
 This is the one rule genuinely different from every other session, and it is
 enforced the way every other adapt behavior is: **by instructing the model, not
@@ -473,8 +473,11 @@ only (`garmin/pmc.py:47` — computed from *completed* load), so no deterministi
 pass can know which future day will be fresh; the model, which sees the TSB
 history and the planned load ahead, judges it. Fallback the model is told
 explicitly: when the benchmark sits on the last day of the block and no later
-in-block day exists, leave it in place and lighten the days before it —
-slightly-off freshness beats a lost test.
+in-block day exists, POSTPONE it — replace it with an ordinary easy session, no
+`benchmark_type` — because a compromised maximal test sets a wrong anchor that
+mis-scales every session after it: a skipped test costs a retest where a bad
+number costs a block. The next generated block re-places the test when it is
+due.
 
 A moved benchmark rides the normal apply path like any rescheduled session; the
 flag travels because it is part of the model's output contract (§3.1). No
@@ -499,7 +502,7 @@ The app-side half is not a guard on the model's judgement but the absence of one
 carried out however well the model followed it. `workout_adapt_apply` now passes
 `clear_benchmark` when a returned change lands on a benchmark row without re-emitting the
 flag (`coach/service/adaptation.py:401`). The signal is sound here specifically because
-adapt tells the model that *a benchmark it is not changing need not be returned at all* —
+adapt tells the model that *a benchmark it is not changing is not returned at all* —
 so a returned change that drops the flag is a statement, not an omission. The accepted
 cost is the mirror case: a model that softens a test *and* forgets the flag loses the
 test's identity rather than keeping a diluted test — the better of two failures, since the

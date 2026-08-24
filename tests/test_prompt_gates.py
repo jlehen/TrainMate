@@ -200,7 +200,7 @@ class TestTheStandingRules(unittest.TestCase):
         self.assertNotIn("\n6. ", rules)
 
     def test_the_benchmark_section_is_present_whole(self):
-        # Its closing line — that an unchanged benchmark need not be returned — is what
+        # Its closing line — that an unchanged benchmark is not returned — is what
         # makes `workout_revision_apply`'s `clear_benchmark` inference sound, so the
         # section must reach the prompt intact rather than paraphrased.
         system, _user = build_prompt()

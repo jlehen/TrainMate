@@ -294,7 +294,7 @@ def _benchmark_task() -> str:
     (DESIGN_benchmark_workouts.md §4.2).
 
     Its own function rather than inline prose because the closing line — that an unchanged
-    benchmark need not be returned — is what makes `workout_revision_apply`'s
+    benchmark is not returned — is what makes `workout_revision_apply`'s
     `clear_benchmark` inference sound, so the two must not drift apart.
     """
     return """
@@ -311,7 +311,7 @@ POSTPONE it: replace it with an ordinary easy session (no benchmark_type) — a 
 maximal test sets a wrong anchor that mis-scales every session after it, so a skipped test
 costs a retest where a bad number costs a block.
 The next generated block re-places the test when it is due.
-A benchmark you are NOT changing need not be returned at all.
+A benchmark you are NOT changing is not returned at all — like any unchanged session.
 
 benchmark_type says what a session IS, not which day it sits on — it travels with the test,
 not with the date. So any OTHER session you put on a test's date — the replacement left
@@ -392,7 +392,7 @@ class WorkoutLogicMixin:
             + goal_week_exception
             + " When you do place one: set \"benchmark_type\" to the test kind, precede it with an opener\n"
             "or easy day so the athlete is fresh (positive TSB) on test day, keep the title/description\n"
-            "venue-neutral (e.g. \"20-min FTP test or ramp test\" — the athlete's preferences say where\n"
+            "venue-neutral (e.g. \"20-min FTP test\" — the athlete's preferences say where\n"
             "they test), and never put it in a week the athlete's constraints put under full rest.\n"
             + _block_progress_task(block_progress)
             + _block_composition_task(block_progress, block_has_intensity)
@@ -641,8 +641,7 @@ athlete recovers is encouraged; deepening an already-fresh cut is not.
         custom_task += _vacate_task()
 
         # Why a test may never be softened, and why moving it is the model's call and not a
-        # deterministic pass: DESIGN_benchmark_workouts.md §4.2. Shared, scope-parametrized,
-        # so the two prompts that reschedule tests cannot drift apart.
+        # deterministic pass: DESIGN_benchmark_workouts.md §4.2.
         custom_task += _benchmark_task()
 
         # Adapt owns execution, generate owns periodization (§9.2): changing what zone
