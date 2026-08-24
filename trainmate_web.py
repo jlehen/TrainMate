@@ -627,7 +627,7 @@ def get_benchmarks() -> Any:
     })
 
 
-# --- Activities, Metrics & Daily Context ---
+# --- Activities, Metrics & Daily Signals ---
 
 @app.route("/api/activities", methods=["GET"])
 def get_activities() -> Any:
@@ -637,24 +637,24 @@ def get_activities() -> Any:
     return jsonify(runtime.db.get_completed_activities(start_date=start_date, end_date=end_date))
 
 
-@app.route("/api/daily-context", methods=["GET"])
-def get_daily_context() -> Any:
-    """External daily-context signals (alcohol/sleep/stress, ingested from Calendar or
-    authored with `context add`) over a date range — mirrors `context list`, see
+@app.route("/api/daily-signals", methods=["GET"])
+def get_daily_signals() -> Any:
+    """External daily signals (alcohol/sleep/stress, ingested from Calendar or
+    authored with `signal add`) over a date range — mirrors `signal list`, see
     ARCHITECTURE.md §13. Optional ?metric= restricts to one category."""
     start_date = request.args.get("start_date")
     end_date = request.args.get("end_date")
-    return jsonify(runtime.db.get_daily_context(
+    return jsonify(runtime.db.get_daily_signals(
         start_date=start_date, end_date=end_date,
         metric=request.args.get("metric") or None,
     ))
 
 
-@app.route("/api/daily-context/metrics", methods=["GET"])
-def get_context_metrics() -> Any:
-    """The distinct context metrics in use, with row counts and first/last dates
-    (mirrors `context list-metrics`) — the vocabulary behind the context charts."""
-    return jsonify({"metrics": runtime.db.list_context_metrics()})
+@app.route("/api/daily-signals/metrics", methods=["GET"])
+def get_signal_metrics() -> Any:
+    """The distinct signal metrics in use, with row counts and first/last dates
+    (mirrors `signal list-metrics`) — the vocabulary behind the signal charts."""
+    return jsonify({"metrics": runtime.db.list_signal_metrics()})
 
 
 @app.route("/api/metrics", methods=["GET"])

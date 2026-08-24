@@ -105,11 +105,11 @@ def format_metrics_history(
     return out
 
 
-def format_daily_context(daily_context: List[Dict[str, Any]]) -> str:
-    """Formats externally-logged daily context signals (alcohol, poor sleep, etc.)
+def format_daily_signals(daily_signals: List[Dict[str, Any]]) -> str:
+    """Formats externally-logged daily signals (alcohol, poor sleep, etc.)
     to a readable block for LLM prompts. One line per logged signal-day."""
     lines = []
-    for c in daily_context:
+    for c in daily_signals:
         line = f"- {c['date']}: {c['metric']}"
         if c.get('value') is not None:
             line += f"={c['value']:g}"

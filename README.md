@@ -65,7 +65,7 @@ does the coaching reasoning.
     one, is advisory — preferences the coach honors by judgement. Whether a constraint
     *reshapes the plan* is **derived** from its
     magnitude and confirmed by you — never a category you pick blind.
-  - *Daily context* adds **weighted signals** (alcohol, poor sleep, stress)
+  - *Daily signals* adds **weighted signals** (alcohol, poor sleep, stress)
     ingested automatically from tagged Google Calendar events. These don't
     reshape the plan; they help the daily adaptation tell lifestyle noise from
     training fatigue, and feed long-term analysis.
@@ -87,7 +87,7 @@ does the coaching reasoning.
   from Garmin Connect, with a watermark so reads auto-refresh recent data.
 - **Google Calendar sync** — schedules and updates planned workouts as calendar
   events, tags them with adherence verdicts after the fact, and ingests tagged
-  context events back in.
+  signal events back in.
 - **Adherence tracking** — compares planned vs. completed and flags misses,
   load/duration mismatches, and rest-day violations.
 - **Time in zone, per sport** — a single load number like TSS blends volume
@@ -396,7 +396,7 @@ choice, with a fourth for the plan itself:
 | Channel | Reach for it when… |
 | --- | --- |
 | `constraint add` | You're asking the coach to *work around* something — "no run Thursday", "only 45 min today", a trip, an injury layoff. One object covers every horizon: a blanket `hard` constraint deterministically rests those dates, while a sport-scoped `hard` and every `soft` one stay advisory. If it's big enough to reshape the plan, TrainMate **derives** that from its magnitude and asks to regenerate — or pass `--replan` to say so up front. |
-| `context add` (or tagged Calendar events) | You're *reporting* something that happened — alcohol, poor sleep, stress — so a rough morning reads as lifestyle noise, not "the block is too hard." Signals never reshape the plan. |
+| `signal add` (or tagged Calendar events) | You're *reporting* something that happened — alcohol, poor sleep, stress — so a rough morning reads as lifestyle noise, not "the block is too hard." Signals never reshape the plan. |
 | `workout adapt --message "…"` | Quick capture in the moment. A durable, constraint-shaped note ("away, no gym Thursday") is saved as a real `constraint` you can inspect and `rm`; a one-off nudge ("felt flat, ease today") is folded into that session's adaptation reason. |
 | `plan feedback "…"` | You have an *opinion about the plan itself* — "drop the second FTP test", "the Friday sessions should progress duration, not surges". Notes pile up against the current plan (nothing is overwritten, nothing calls the LLM, so capture is instant) and the next `plan generate` reads them all and must address each one. `-m` files a note to one block by name, date or ID; `--rm ID` drops one; `--replan` regenerates on the spot. |
 
@@ -443,11 +443,11 @@ it is safe to leave running and cannot race the CLI or the bot. Six tabs: Dashbo
 (status, metrics, objectives, constraints, strategy, active model), Workouts (schedule
 + plan-vs-actual compare), Progress (the timeline chart + per-sport time in zone),
 Benchmarks (thresholds + logbook), Learnings (with evidence), and History (activities,
-recovery metrics, and a daily-context heat strip).
+recovery metrics, and a daily-signal heat strip).
 
 Anything that changes something is a CLI command, and each panel names the one it
 wants — `tm goal add`, `tm plan generate`, `tm workout swap`, `tm learnings demote`,
-`tm benchmark record`, `tm context add`, `tm model set`, `tm data pull`.
+`tm benchmark record`, `tm signal add`, `tm model set`, `tm data pull`.
 
 ## Running the Telegram bot
 

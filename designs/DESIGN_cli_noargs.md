@@ -70,7 +70,7 @@ about which arguments are the command's subject. So the rule is mechanical:
 
 **If a command cannot run without it, it is a positional. If it can, it is a flag.**
 
-`goal add TITLE DATE SPORT…`, `constraint add TITLE`, `context add METRIC [TEXT…]`,
+`goal add TITLE DATE SPORT…`, `constraint add TITLE`, `signal add METRIC [TEXT…]`,
 `learnings edit ID TEXT`, `workout add DATE SPORT TITLE`, `workout rm ID REASON`,
 `workout swap TARGET1 TARGET2 REASON`, `benchmark record SPORT --<anchor> VALUE`.
 Everything those commands can do without stays a flag, `--desc` and `--date-type`
@@ -95,7 +95,7 @@ for an argument the invocation should have carried.
 
 ## §a3 — A bare command group prints its own help, in chat too
 
-`goal`, `constraint`, `benchmark`, `context`, `learnings`, `workout`, `data`,
+`goal`, `constraint`, `benchmark`, `signal`, `learnings`, `workout`, `data`,
 `plan` — and the root command itself — take a sub-command, and a bare run prints
 that level's full help and exits **1** (trainmate_cli.py, one guard per group).
 
@@ -170,8 +170,8 @@ the shorthand is a second vocabulary to memorize, and it is arbitrary — `res` 
 **A token that is a prefix of exactly one command at its level *is* that command.**
 `st` is `status`, `wo li` is `workout list`, `constr ed` is `constraint edit`. No
 registration, no list to maintain: the command names themselves are the vocabulary.
-An ambiguous prefix is refused by name — `c` prints `Ambiguous command 'c' —
-matches: constraint, context` and exits 2, the same shape as argparse's own errors.
+An ambiguous prefix is refused by name — `p` prints `Ambiguous command 'p' —
+matches: plan, progress` and exits 2, the same shape as argparse's own errors.
 Hidden `advanced=True` commands take part in matching, since they dispatch like any
 other.
 
@@ -188,9 +188,9 @@ freezes a spelling that is only valid until the next sibling command lands.
 
 That leaves exactly two reasons for an explicit alias to survive:
 
-* it is **not a prefix** of its command — `ctx`, `lm`, `df`, `rb`, `sm`, `sa`, `use`;
+* it is **not a prefix** of its command — `lm`, `df`, `rb`, `sm`, `sa`, `use`;
 * it **picks the winner** among an ambiguous prefix — `s` is `status` (not `shell`),
-  `workout a` is `adapt` (not `add`), `context l` is `list` (not `list-metrics`),
+  `workout a` is `adapt` (not `add`), `signal l` is `list` (not `list-metrics`),
   `data b` is `bootstrap` (not `backfill-tss`), `workout p` is `push` (not
   `prune-calendar`).
 

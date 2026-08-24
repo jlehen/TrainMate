@@ -71,19 +71,19 @@ class DataAnalysisMixin:
 
     # Channels of the per-day z, mapping the metric column to its baseline mean/std keys.
     # Sign convention (documented for the LLM): +hrv better, +rhr worse, +sleep better
-    # (DESIGN_quantitative_context_impact.md §3).
+    # (DESIGN_quantitative_signal_impact.md §3).
     _RESPONSE_Z_CHANNELS = (
         ("rhr", "rhr", "rhr_baseline_mean", "rhr_baseline_std"),
         ("hrv", "hrv", "hrv_baseline_mean", "hrv_baseline_std"),
         ("sleep", "sleep_score", "sleep_baseline_mean", "sleep_baseline_std"),
     )
 
-    # Response channels to omit for a context signal whose own construct overlaps them,
+    # Response channels to omit for a signal whose own construct overlaps them,
     # so the LLM cannot "discover" that bad sleep predicts bad sleep — an echo, not an
-    # impact (DESIGN_quantitative_context_impact.md §3.2). Keyed by a substring of the
+    # impact (DESIGN_quantitative_signal_impact.md §3.2). Keyed by a substring of the
     # opaque, free-form metric name; the common signals (alcohol, meals) match nothing
     # and exclude nothing.
-    _CONTEXT_CHANNEL_EXCLUSIONS = (
+    _SIGNAL_CHANNEL_EXCLUSIONS = (
         ("sleep", {"sleep"}),
     )
 
@@ -308,10 +308,10 @@ class DataAnalysisMixin:
     ) -> Dict[str, Optional[float]]:
         """Baseline-relative z-score `(value - mean) / std` for ONE morning's rhr/hrv/sleep
         — the shared definition of "notches from normal" used by both the weekly feature
-        (averaged over the week) and the context-impact alignment (per morning). A channel
+        (averaged over the week) and the signal-impact alignment (per morning). A channel
         is None when its metric value is missing, the baseline mean/std is missing, or std
         is zero (undefined). Unrounded; callers round as they emit
-        (DESIGN_quantitative_context_impact.md §3)."""
+        (DESIGN_quantitative_signal_impact.md §3)."""
         out: Dict[str, Optional[float]] = {}
         for channel, metric_key, mean_key, std_key in DataAnalysisMixin._RESPONSE_Z_CHANNELS:
             mean = baseline.get(mean_key) if baseline else None
@@ -369,16 +369,16 @@ class DataAnalysisMixin:
         return int(f) if f.is_integer() else round(f, 2)
 
     @staticmethod
-    def _context_days(
-        daily_context: List[Dict[str, Any]],
+    def _signal_days(
+        daily_signals: List[Dict[str, Any]],
         metrics: List[Dict[str, Any]],
         activities: List[Dict[str, Any]],
         baseline_for,
         k: int,
         min_signal_days: int = 1,
     ) -> Dict[str, List[Dict[str, Any]]]:
-        """Deterministic per-episode alignment of external context signals against the
-        mornings that bracket them (DESIGN_quantitative_context_impact.md §3–§4). NO
+        """Deterministic per-episode alignment of external signals against the
+        mornings that bracket them (DESIGN_quantitative_signal_impact.md §3–§4). NO
         statistics: pure clustering + join + the existing per-day z.
 
         For each signal category it (1) clusters the logged signal-days into *episodes* —
@@ -407,7 +407,7 @@ class DataAnalysisMixin:
         # Aggregate signal magnitude per (category, date): a day may carry more than one
         # row of the same category (combined dose); None when no row supplies a value.
         per_cat: Dict[str, Dict[str, Optional[float]]] = {}
-        for c in daily_context:
+        for c in daily_signals:
             cat = c.get('metric')
             if not cat:
                 continue
@@ -427,7 +427,7 @@ class DataAnalysisMixin:
 
             excluded: set = set()
             cat_l = cat.lower()
-            for sub, chans in DataAnalysisMixin._CONTEXT_CHANNEL_EXCLUSIONS:
+            for sub, chans in DataAnalysisMixin._SIGNAL_CHANNEL_EXCLUSIONS:
                 if sub in cat_l:
                     excluded |= chans
 
@@ -522,32 +522,32 @@ class DataAnalysisMixin:
         # so the model doesn't misattribute them to training. get_constraints(start, end)
         # already returns only overlapping rows (DESIGN_constraints.md §6).
         constraints = self._db.get_constraints(from_str, until_str)
-        # External daily context signals (alcohol, sleep, stress, …) ingested from the
+        # External daily signals (alcohol, sleep, stress, …) ingested from the
         # calendar; they explain recovery anomalies the same way constraints explain load
-        # ones (DESIGN_calendar_context_ingest.md §7).
-        daily_context = self._db.get_daily_context(start_date=from_str, end_date=until_str)
+        # ones (DESIGN_calendar_signal_ingest.md §7).
+        daily_signals = self._db.get_daily_signals(start_date=from_str, end_date=until_str)
 
-        # Quantitative context-impact rows (alcohol, big meal, …): episode-aligned dose
+        # Quantitative signal-impact rows (alcohol, big meal, …): episode-aligned dose
         # sequences + bracketing morning strips. These cover the athlete's FULL history of
         # signal-days, not just [from,until] — the point is to let the LLM see the whole
         # pattern, and an incremental reflect window contains almost no drinking history
-        # (DESIGN_quantitative_context_impact.md §6). So they are fetched independently of
+        # (DESIGN_quantitative_signal_impact.md §6). So they are fetched independently of
         # the analysis window, and computed before the fingerprint because they are hashed
         # into it (§8).
-        context_days = self._context_days(
-            daily_context=self._db.get_daily_context(),
+        signal_days = self._signal_days(
+            daily_signals=self._db.get_daily_signals(),
             metrics=self._db.get_metrics_cache(),
             activities=self._db.get_completed_activities(),
             baseline_for=self._db.get_baseline,
-            k=config.context_days_lookahead,
-            min_signal_days=config.context_days_min_signal_days,
+            k=config.signal_days_lookahead,
+            min_signal_days=config.signal_days_min_days,
         )
 
         # Reuse path: if the evidence is unchanged since the last analysis, return the
         # cached reconstruction instead of paying for another LLM pass (unless --force).
         fingerprint = self.engine._get_evidence_fingerprint(
-            completed_activities, metrics, from_str, until_str, constraints, daily_context,
-            context_days
+            completed_activities, metrics, from_str, until_str, constraints, daily_signals,
+            signal_days
         )
         cached = self._db.get_analysis_cache(horizon)
         evidence_unchanged = bool(cached and cached.get("fingerprint") == fingerprint)
@@ -568,7 +568,7 @@ class DataAnalysisMixin:
                     "days": [],
                     "metrics": [],
                     "activities": [],
-                    "daily_context": []
+                    "daily_signals": []
                 }
             weeks_data[monday_str]["days"].append(current_day)
             current_day += timedelta(days=1)
@@ -581,12 +581,12 @@ class DataAnalysisMixin:
             if monday_str in weeks_data:
                 weeks_data[monday_str]["metrics"].append(m)
 
-        for ctx in daily_context:
-            c_date = datetime.strptime(ctx['date'], "%Y-%m-%d").date()
+        for sig in daily_signals:
+            c_date = datetime.strptime(sig["date"], "%Y-%m-%d").date()
             monday = c_date - timedelta(days=c_date.weekday())
             monday_str = monday.strftime("%Y-%m-%d")
             if monday_str in weeks_data:
-                weeks_data[monday_str]["daily_context"].append(ctx)
+                weeks_data[monday_str]["daily_signals"].append(sig)
 
         for act in completed_activities:
             act_date = datetime.strptime(act['date'], "%Y-%m-%d").date()
@@ -681,13 +681,13 @@ class DataAnalysisMixin:
             baseline = self._db.get_baseline(week_end.strftime("%Y-%m-%d"))
             response = self._week_response_features(w_metrics, baseline)
             week_events = self._week_constraints(constraints, week_start, week_end)
-            # All context signals for the week, handed to the LLM verbatim (no collapsing
-            # of multiple metrics/day — DESIGN_calendar_context_ingest.md §7).
-            week_context = sorted(
+            # All signals for the week, handed to the LLM verbatim (no collapsing
+            # of multiple metrics/day — DESIGN_calendar_signal_ingest.md §7).
+            week_signals = sorted(
                 (
                     {"date": c["date"], "metric": c["metric"],
                      "value": c["value"], "text": c.get("text")}
-                    for c in w_info["daily_context"]
+                    for c in w_info["daily_signals"]
                 ),
                 key=lambda r: (r["date"], r["metric"]),
             )
@@ -749,8 +749,8 @@ class DataAnalysisMixin:
             if "vs_baseline_z" in response:
                 summary["vs_baseline_z"] = response["vs_baseline_z"]
             # Emitted only when present so its absence reads as "no signals logged".
-            if week_context:
-                summary["daily_context"] = week_context
+            if week_signals:
+                summary["daily_signals"] = week_signals
             weekly_summaries.append(summary)
 
         # Fetch relevant objectives (occurring on or after from_date)
@@ -768,7 +768,7 @@ class DataAnalysisMixin:
             guidelines=guidelines,
             profile=profile,
             weekly_summaries=weekly_summaries,
-            context_days=context_days,
+            signal_days=signal_days,
             learnings=self._get_learnings_text(),
             context=context,
             label=label,

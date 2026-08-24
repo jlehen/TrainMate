@@ -551,7 +551,7 @@ class TestReadOnly(unittest.TestCase):
 
 class TestNewReadEndpoints(unittest.TestCase):
     """The CLI-only features the demotion brought over as views: the benchmark logbook,
-    the daily-context vocabulary, the model menu, plan show and the zone tables."""
+    the daily-signal vocabulary, the model menu, plan show and the zone tables."""
 
     @classmethod
     def setUpClass(cls):
@@ -628,13 +628,13 @@ class TestNewReadEndpoints(unittest.TestCase):
         data = self.client.get("/api/benchmarks?sport=cycling").get_json()
         self.assertEqual([r["sport_type"] for r in data["results"]], ["cycling"])
 
-    def test_context_metrics_vocabulary(self):
+    def test_signal_metrics_vocabulary(self):
         for d, val in (("2026-06-01", 2), ("2026-06-03", 1)):
-            test_db.upsert_daily_context_by_event(
+            test_db.upsert_daily_signal_by_event(
                 google_event_id=f"e{d}", date=d, metric="alcohol",
                 value=val, text="drinks",
             )
-        data = self.client.get("/api/daily-context/metrics").get_json()
+        data = self.client.get("/api/daily-signals/metrics").get_json()
         self.assertEqual(len(data["metrics"]), 1)
         row = data["metrics"][0]
         self.assertEqual(row["metric"], "alcohol")
@@ -642,12 +642,12 @@ class TestNewReadEndpoints(unittest.TestCase):
         self.assertEqual(row["first_date"], "2026-06-01")
         self.assertEqual(row["last_date"], "2026-06-03")
 
-    def test_daily_context_filters_by_metric(self):
-        test_db.upsert_daily_context_by_event(
+    def test_daily_signals_filters_by_metric(self):
+        test_db.upsert_daily_signal_by_event(
             google_event_id="e1", date="2026-06-01", metric="alcohol", value=2, text="")
-        test_db.upsert_daily_context_by_event(
+        test_db.upsert_daily_signal_by_event(
             google_event_id="e2", date="2026-06-01", metric="stress", value=7, text="")
-        rows = self.client.get("/api/daily-context?metric=stress").get_json()
+        rows = self.client.get("/api/daily-signals?metric=stress").get_json()
         self.assertEqual([r["metric"] for r in rows], ["stress"])
 
     def test_models_menu_marks_the_active_entry(self):

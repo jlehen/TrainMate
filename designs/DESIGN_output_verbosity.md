@@ -20,7 +20,7 @@ Five lines of preamble before the table the athlete asked for. On the cached pat
 different five words with the same shape:
 
 ```
-Calendar context is fresh (last sync 26m ago); using cache. Pass --force-pull to refresh now.
+Calendar signals is fresh (last sync 26m ago); using cache. Pass --force-pull to refresh now.
 ```
 
 None of it is wrong. In a terminal it is genuinely useful: the command takes eight seconds
@@ -98,7 +98,7 @@ front-end" via `trainmate.prompt.is_json_frontend` — the one place `TRAINMATE_
 interpreted, so the transport decision is not re-derived here.
 
 It is called `aside` and not `note` because this app already spends "note" four ways: plan
-feedback notes, the athlete's `-m` note, daily-context notes, and `PMC_TSB_LAG_NOTE`. One
+feedback notes, the athlete's `-m` note, daily-signal notes, and `PMC_TSB_LAG_NOTE`. One
 of those is even a local variable (`trainmate/cli/plans.py`, `_feedback_rm`) that would
 have shadowed the import.
 

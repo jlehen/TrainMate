@@ -103,8 +103,8 @@ class WipesMixin:
             if start is None and end is None:
                 # Full wipe: drop the Garmin watermark and the coach-analysis
                 # watermarks that index this evidence. The calendar token is owned by
-                # wipe_calendar_context and left alone here.
-                cursor.execute("DELETE FROM sync_state WHERE key != 'calendar_context'")
+                # wipe_calendar_signals and left alone here.
+                cursor.execute("DELETE FROM sync_state WHERE key != 'calendar_signals'")
 
         # Deleted load stays baked into later days' CTL/ATL until the EWMAs are walked
         # again, so the sweep belongs to the wipe rather than to whoever remembers to
@@ -114,25 +114,25 @@ class WipesMixin:
         from trainmate.garmin.pmc import recompute_derived
         recompute_derived(dbh=self)
 
-    def wipe_calendar_context(
+    def wipe_calendar_signals(
         self, start: Optional[str] = None, end: Optional[str] = None
     ) -> None:
-        """Deletes ingested daily-context signals and resets the Calendar sync token so
-        the next pull re-pulls context in full. The Calendar sync is incremental (it
+        """Deletes ingested daily signals and resets the Calendar sync token so
+        the next pull re-pulls signals in full. The Calendar sync is incremental (it
         replays only events changed since the stored token), so deleted rows cannot
         otherwise return; resetting the token forces a full re-pull. A [start, end]
         window restricts which rows are deleted now, but that subsequent full re-pull
-        still restores the whole history (DESIGN_calendar_context_ingest.md §6).
+        still restores the whole history (DESIGN_calendar_signal_ingest.md §6).
         """
         with self._get_connection() as conn:
             cursor = conn.cursor()
-            self._delete_by_date(cursor, "daily_context", start, end)
-            cursor.execute("DELETE FROM sync_state WHERE key = 'calendar_context'")
+            self._delete_by_date(cursor, "daily_signals", start, end)
+            cursor.execute("DELETE FROM sync_state WHERE key = 'calendar_signals'")
             conn.commit()
 
     def wipe_metrics(self) -> None:
-        """Full reset of all Garmin evidence and ingested daily context (and every sync
+        """Full reset of all Garmin evidence and ingested daily signals (and every sync
         watermark). Convenience wrapper over the scoped `wipe_garmin_data` /
-        `wipe_calendar_context` for callers that want the whole lot gone."""
+        `wipe_calendar_signals` for callers that want the whole lot gone."""
         self.wipe_garmin_data()
-        self.wipe_calendar_context()
+        self.wipe_calendar_signals()

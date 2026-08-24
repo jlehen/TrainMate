@@ -24,7 +24,7 @@ from trainmate.db import Database
 TYPE_TABLES = {
     "Objective": "objectives",
     "Constraint": "constraints",
-    "DailyContext": "daily_context",
+    "DailySignal": "daily_signals",
     "CompletedActivity": "completed_activities",
     "AthleteMetric": "athlete_metrics_cache",
     "AthleteBaseline": "athlete_baselines",

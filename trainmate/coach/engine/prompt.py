@@ -279,14 +279,14 @@ prescription the athlete trains from, and stays as complete as the session requi
         self, completed_activities: List[CompletedActivity],
         metrics: List[Dict[str, Any]], window_start: str, window_end: str,
         constraints: Optional[List[Constraint]] = None,
-        daily_context: Optional[List[Dict[str, Any]]] = None,
-        context_days: Optional[Dict[str, Any]] = None
+        daily_signals: Optional[List[Dict[str, Any]]] = None,
+        signal_days: Optional[Dict[str, Any]] = None
     ) -> str:
         """Fingerprints the *evidence* a backward evaluation reconstructs from — the
         completed activities + daily metrics (+ overlapping constraints) within a window —
         so a re-run over unchanged data can be detected (see DESIGN_backward_evaluation.md
-        §5, §8). `context_days` is the *full-history* episode block, hashed as computed
-        because it is built outside the window (DESIGN_quantitative_context_impact.md §8).
+        §5, §8). `signal_days` is the *full-history* episode block, hashed as computed
+        because it is built outside the window (DESIGN_quantitative_signal_impact.md §8).
 
         We hash the load-bearing fields (not just activity ids) so that a re-pull which
         *corrects* a value also shifts the fingerprint. Hashing the concrete activity-id
@@ -323,16 +323,16 @@ prescription the athlete trains from, and stays as complete as the session requi
              c.get('title'), c.get('description'))
             for c in (constraints or [])
         )
-        # Daily context feeds the analysis input, so an added/edited/deleted signal must
-        # shift the fingerprint (DESIGN_calendar_context_ingest.md §7).
-        ctx_digest = sorted(
+        # Daily signals feed the analysis input, so an added/edited/deleted signal must
+        # shift the fingerprint (DESIGN_calendar_signal_ingest.md §7).
+        sig_digest = sorted(
             (c.get('date'), c.get('metric'), c.get('value'), c.get('text'))
-            for c in (daily_context or [])
+            for c in (daily_signals or [])
         )
         serialized = json.dumps(
             {'window': [window_start, window_end],
              'activities': act_digest, 'metrics': met_digest, 'constraints': evt_digest,
-             'daily_context': ctx_digest, 'context_days': context_days or {}},
+             'daily_signals': sig_digest, 'signal_days': signal_days or {}},
             sort_keys=True
         )
         return hashlib.sha256(serialized.encode('utf-8')).hexdigest()

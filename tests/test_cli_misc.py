@@ -222,7 +222,7 @@ class TestCliMisc(unittest.TestCase):
              "All periodization plans wiped successfully."),
             (["data", "wipe"], seed_data, count_data,
              "Wiped Garmin metrics, baselines, and activities and "
-             "ingested daily-context signals."),
+             "ingested daily signals."),
         ]
 
         for args, seed, count, message in cases:

@@ -1,4 +1,4 @@
-# Design: Quantitative Context Impact
+# Design: Quantitative Signal Impact
 
 **Status:** Implemented · **Date:** 2026-06-14 · **Branch:** main
 
@@ -10,8 +10,8 @@
 > rows are dropped. See §3, §4, §10.
 
 This is the build-out of the **"Later (quantitative)"** path deferred in
-`DESIGN_calendar_context_ingest.md` §7. Today the coach uses external daily
-context signals (alcohol, a big meal, …) **qualitatively**, but the way they reach
+`DESIGN_calendar_signal_ingest.md` §7. Today the coach uses external daily
+signals (alcohol, a big meal, …) **qualitatively**, but the way they reach
 the LLM is lossy: they ride inside **weekly aggregates** (`DESIGN_richer_analysis_evidence.md`),
 so "alcohol: 2" on a Tuesday is averaged into a week, not paired with **Wednesday
 morning's** recovery, and never shown next to **that day's training load** — the
@@ -35,8 +35,8 @@ confidence machinery; no domain knowledge about what any signal *means*.
 
 ## 1. Motivation
 
-The `daily_context.value` column (the drink count) was added by
-`DESIGN_calendar_context_ingest.md` precisely to keep this path open, and is
+The `daily_signals.value` column (the drink count) was added by
+`DESIGN_calendar_signal_ingest.md` precisely to keep this path open, and is
 currently unused by logic. The qualitative path has two limits this addresses:
 
 - **Wrong granularity and wrong alignment.** Signals are folded into weekly
@@ -51,7 +51,7 @@ currently unused by logic. The qualitative path has two limits this addresses:
   worse, if Monday falls in the *next* ISO week, the signal and its lingering effect
   sit in different buckets entirely, and nothing connects them.
 
-The raw material to fix all three is already in the DB: the signal (`daily_context`),
+The raw material to fix all three is already in the DB: the signal (`daily_signals`),
 the following mornings' recovery (`athlete_metrics_cache` + `athlete_baselines`), and
 daily training load (`completed_activities.tss`). This design **joins and aligns**
 them per signal-day and shows the result to the LLM.
@@ -112,7 +112,7 @@ carries:
 | `days` | one entry per signal-day in the episode | the **dose sequence**: each `{date, value, load_tss}` — the signal magnitude (drinks, shown raw) and that day's training load |
 | `surrounding_mornings` | mornings spanning the episode | the recovery strip **before, during, and after** the run; per morning: recovery-vs-normal **and** that morning's *preceding* day's load |
 
-**The look-ahead `k` is configurable, default 3** (`context_days_lookahead`). It sets
+**The look-ahead `k` is configurable, default 3** (`signal_days_lookahead`). It sets
 both how far *before* the first signal-day and how far *after* the last we surface
 mornings — far enough to watch a heavy session/night clear (~2 days), not so far the
 edges are dominated by intervening training. The morning strip spans
@@ -196,7 +196,7 @@ Two scope rules keep the facts honest:
 
 - **External signals are for what Garmin cannot see.** `sleep_score` and `stress`
   are already columns in `athlete_metrics_cache` — they are **response channels**,
-  not external signals. The context channel is for the unmeasured: alcohol, a big or
+  not external signals. The signal channel is for the unmeasured: alcohol, a big or
   late meal, caffeine, a skipped meal, a work deadline, an argument, travel, a
   broken night. Logging a subjective copy of something Garmin already records just
   half-duplicates a metric.
@@ -218,7 +218,7 @@ A compact block beside `weekly_summaries`: per signal category, the aligned
 strip. Nothing is fitted or summarized.
 
 ```json
-"context_days": {
+"signal_days": {
   "alcohol": [
     {
       "days": [
@@ -266,7 +266,7 @@ reference-day open question; §10). The one thing before-mornings do not guarant
 high-load *no-drink* day when the athlete only ever drinks on rest days; we accept
 that corner rather than build load-stratified sampling.
 
-The prompt instructs: treat each `context_days` row as one episode of paired daily
+The prompt instructs: treat each `signal_days` row as one episode of paired daily
 evidence for whether a logged signal precedes worse recovery; weigh the **number of
 distinct episodes** and the spread of doses within them (few episodes ⇒ weak); read
 each morning's preceding-day **dose** (via `days`) and `prev_day_load_tss`
@@ -274,7 +274,7 @@ each morning's preceding-day **dose** (via `days`) and `prev_day_load_tss`
 after arc to judge how long the effect lasts and whether consecutive days stack; treat
 a missing channel/morning as "no data," never as zero.
 
-**Both the block and its prompt guide are gated on a non-empty `context_days`.** When
+**Both the block and its prompt guide are gated on a non-empty `signal_days`.** When
 nothing is logged (or every category sits below the floor, §5) neither is rendered, so
 the absence reads as "nothing logged" rather than "logged and unremarkable," and the
 model is never given instructions for a section it wasn't handed.
@@ -290,7 +290,7 @@ Honesty now rests on **what we show** plus the LLM's instructed caution:
   signal-days) back each category; the prompt tells it that a handful is weak
   evidence. Grouping makes the count coarser — a three-night bender is one episode,
   not three trials — which is the honest direction. (A `min_signal_days` floor —
-  `context_days_min_signal_days`, counting **signal-days** not episodes — gates whether
+  `signal_days_min_days`, counting **signal-days** not episodes — gates whether
   a category is worth including at all. It ships at **default 1**, i.e. "show whatever
   exists and let the LLM weigh the visible count"; raise it to suppress prompting on one
   stray night. One small knob, not a model parameter; §10.)
@@ -309,7 +309,7 @@ Honesty now rests on **what we show** plus the LLM's instructed caution:
 
 The rows cover **all signal-days available** (full history), not just the analysis
 window — the whole point is to let the LLM see the entire pattern. So
-`_context_days` **fetches its own full-history data independently of the analysis
+`_signal_days` **fetches its own full-history data independently of the analysis
 window** (`from_str`/`until_str`); it does *not* reuse the window-scoped data loaded
 for the weekly summaries. A windowed fetch would be wrong: on an incremental
 `data reflect` the window is only the new weeks, containing almost none of the
@@ -337,7 +337,7 @@ has exactly two entry points; those are the only flows this change touches:
 
 | Command | Behaviour change |
 |---------|------------------|
-| `data bootstrap` | builds `context_days` over full history; feeds it to the analysis prompt |
+| `data bootstrap` | builds `signal_days` over full history; feeds it to the analysis prompt |
 | `data reflect`   | **same** — rebuilds over full history (§6), not just the new weeks |
 
 `plan generate` and `status` are unaffected: they read durable *learnings*, not the
@@ -346,8 +346,8 @@ facts, so they inherit the conclusions for free.
 **`workout adapt` is the one place the conclusion alone is not enough.** The durable
 learning ("alcohol suppresses next-day HRV") is general; to act on it at the daily
 load decision the adaptation must also see the *per-day* fact that a signal was logged
-yesterday — which the episode-aligned `context_days` block (an analysis-pass input)
-does not give it. So `workout adapt` reads the raw windowed `daily_context` rows
+yesterday — which the episode-aligned `signal_days` block (an analysis-pass input)
+does not give it. So `workout adapt` reads the raw windowed `daily_signals` rows
 directly (alongside metrics) and is instructed to attribute a depressed morning to
 lifestyle noise vs training fatigue, separating *why* recovery is low from *what* to do
 today. A signal the day before a bad morning is transient suppression, **not**
@@ -369,8 +369,8 @@ shows the LLM the whole history, even though it only analyses the newest weeks.
 
 Two distinct objects, and only one is persisted as a learning:
 
-- **The aligned rows (`context_days`)** — **not** stored as a learning. They are a
-  pure function of `daily_context` + `athlete_metrics_cache` + `athlete_baselines` +
+- **The aligned rows (`signal_days`)** — **not** stored as a learning. They are a
+  pure function of `daily_signals` + `athlete_metrics_cache` + `athlete_baselines` +
   `completed_activities`, recomputed each run, like a baseline. Persisting them would
   only risk staleness.
 - **The conclusion the LLM draws** ("alcohol hurts next-day HRV") — **yes**, an
@@ -387,25 +387,25 @@ that learning earns confidence over time.**
 ## 8. Caching / fingerprint
 
 `CoachEngine._get_evidence_fingerprint` (`coach/engine/prompt.py`) hashes the
-`completed_activities`, `metrics`, `constraints` and `daily_context` of the analysis
-**window**. That is not enough for this block: `context_days` is built over **full
+`completed_activities`, `metrics`, `constraints` and `daily_signals` of the analysis
+**window**. That is not enough for this block: `signal_days` is built over **full
 history** (§6), so a signal, activity or metric added, edited or deleted *outside*
 `[from, until]` changes the prompt the LLM sees. Under a window-scoped hash alone the
 fingerprint would not move and `data reflect` would silently reuse a reconstruction
 built from a now-stale block — precisely the case §6 says matters, since an incremental
 window contains almost none of the signal history.
 
-So **the computed `context_days` block is itself folded into the fingerprint**. It is
+So **the computed `signal_days` block is itself folded into the fingerprint**. It is
 built *before* the reuse check and hashed as-is, which keeps the project invariant
 exact — everything rendered into the analysis prompt is hashed — with no field-by-field
-mirror of `_context_days`' inputs to drift out of date: if the block the LLM would see
+mirror of `_signal_days`' inputs to drift out of date: if the block the LLM would see
 differs, the fingerprint differs, whatever moved (a drink logged last spring, a
 re-pulled load on a bracketing morning, a changed `k`). Conversely a change that leaves
 the block identical costs nothing. The extra work is three unbounded reads plus the
 alignment on the reuse path — local SQLite, negligible against the LLM call it guards.
 
 **Accepted consequence: the two knobs of §5 are now fingerprinted, transitively.**
-`context_days_lookahead` and `context_days_min_signal_days` shape the block, so editing
+`signal_days_lookahead` and `signal_days_min_days` shape the block, so editing
 either changes the hash and forces a recompute on the next `data bootstrap` /
 `data reflect`. That is a deliberate exception to the project's general stance that
 config values are not hashed into this cache (`_get_config_hash` / `plan_config_hash`
@@ -419,7 +419,7 @@ at the time of the change, once.
 
 The **deliberate baseline-recompute omission** noted in
 `DESIGN_richer_analysis_evidence.md` §5 still applies to the *weekly* evidence
-(`--force` is the escape hatch); inside `context_days` it does not, since the per-morning
+(`--force` is the escape hatch); inside `signal_days` it does not, since the per-morning
 z values are hashed as computed.
 
 ---
@@ -431,7 +431,7 @@ z values are hashed as computed.
     (shared per-day z; pure, unit-testable). `_week_response_features` then averages
     it over the week's days; the alignment uses it per morning.
   - **Add**
-    `_context_days(daily_context, metrics, activities, baseline_for, k, min_signal_days=1)`
+    `_signal_days(daily_signals, metrics, activities, baseline_for, k, min_signal_days=1)`
     `-> dict`. `baseline_for` is a **callable**, not a list of rows: `db.get_baseline`,
     which returns the baseline valid on (or closest prior to) a given morning, so each
     morning is normalized against the baseline in force *then*.
@@ -443,22 +443,22 @@ z values are hashed as computed.
     **No statistics** — pure clustering + join + the existing z. No separate
     reference rows (the leading mornings are the contrast; §4). The `min_signal_days`
     floor is applied here (§5); the most-recent-N-episode cap is not built (§6, §10).
-  - Render `context_days` into the analysis payload next to `weekly_summaries`, and
+  - Render `signal_days` into the analysis payload next to `weekly_summaries`, and
     build it **before** the cache-reuse check so it can be hashed (§8).
-- `coach/engine/prompt.py::_get_evidence_fingerprint` — take `context_days` and hash it
+- `coach/engine/prompt.py::_get_evidence_fingerprint` — take `signal_days` and hash it
   alongside the windowed evidence (§8).
-- `coach/engine/analysis.py::_data_analyze_logic` — accept a `context_days` argument,
+- `coach/engine/analysis.py::_data_analyze_logic` — accept a `signal_days` argument,
   render it into the user content beside `weekly_summaries` (both the block and the
   guide gated on it being non-empty; §4), and add one TASK paragraph (§4):
   read each morning's preceding-day dose (via `days`) and `prev_day_load_tss`
   together; read the before→during→after arc for persistence and the cumulative cost
   of consecutive days; weigh the episode count; missing = no data, not zero.
-- **Config loader** — `context_days_lookahead` (**k**, default 3; §3) and the
-  `context_days_min_signal_days` floor (default 1; §5), mirroring the
+- **Config loader** — `signal_days_lookahead` (**k**, default 3; §3) and the
+  `signal_days_min_days` floor (default 1; §5), mirroring the
   `high_intensity_*` / `coach` sub-dict accessors.
 - `ARCHITECTURE.md` (+ this doc's status) — per the standing rule to keep
   ARCHITECTURE.md in sync with behavioural change.
-- **Optional debug surface:** a thin `context report` that prints `context_days`
+- **Optional debug surface:** a thin `signal report` that prints `signal_days`
   with no LLM call (the athlete's own eyeball of the same rows). Add only if wanted.
 
 **No new dependency.** Because nothing is fitted, there is no numpy/statsmodels
@@ -473,7 +473,7 @@ need; it's a join plus the z arithmetic already in the codebase.
   any synergy (replaces the earlier app-fitted regression/synergy proposal). Decided
   2026-06-14.
 - **Multi-day lag is surfaced, not deferred.** Each episode unrolls a before/during/
-  after morning strip (`k` configurable via `context_days_lookahead`, default 3) — so
+  after morning strip (`k` configurable via `signal_days_lookahead`, default 3) — so
   lingering and cross-week effects are explicit and dated, not buried in a weekly
   aggregate (§1, §3). Decided 2026-06-14.
 - **Consecutive / near-consecutive signal-days → one episode.** Runs of signal-days
@@ -483,7 +483,7 @@ need; it's a join plus the z arithmetic already in the codebase.
   dose, not an unlabelled confound in a neighbour's window) and exposes cumulative
   cost. Decided 2026-06-14 (§3, §3.0).
 - **`min_signal_days` floor — shipped as a knob, defaulted open.** Both branches were
-  buildable; the knob won (`context_days_min_signal_days`, counting signal-days) but its
+  buildable; the knob won (`signal_days_min_days`, counting signal-days) but its
   **default is 1**, so the shipped behaviour is "always show what exists and let the LLM
   judge from the visible count." Raising it is a one-line config change if one stray
   night ever proves distracting (§5).
@@ -503,7 +503,7 @@ need; it's a join plus the z arithmetic already in the codebase.
 **Deferred (noted, not built):**
 - **App-modelled lag decay** — we *show* the morning strip; fitting an actual decay
   curve or "effect lasts N days" stays out (the LLM reads persistence off the arc).
-- **`context report` CLI** — ship only if the eyeball view is wanted.
+- **`signal report` CLI** — ship only if the eyeball view is wanted.
 
 ---
 
@@ -513,7 +513,7 @@ The app groups each external signal's days into **episodes** (consecutive or
 near-consecutive runs) and joins each episode to **its dose sequence** (per day:
 signal magnitude + training load) and a **before/during/after morning strip** (`k`
 mornings each side, `k` configurable, default 3), each morning as recovery-vs-normal
-tagged with its own preceding-day load (`DESIGN_calendar_context_ingest.md` §7's
+tagged with its own preceding-day load (`DESIGN_calendar_signal_ingest.md` §7's
 quantitative path). It does the **grouping, alignment, and baseline-normalization** —
 the bookkeeping — and **no statistics**: the LLM reads load and dose together to judge
 the signal's effect, its dose-response, **how many days it persists**, the cumulative

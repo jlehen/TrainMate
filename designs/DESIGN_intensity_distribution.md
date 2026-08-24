@@ -304,7 +304,7 @@ more than the merged view does.
 
 ## 7. Measurement caveats are emitted, not corrected
 
-The app aligns; the LLM reasons (`DESIGN_quantitative_context_impact.md`). Each artifact that
+The app aligns; the LLM reasons (`DESIGN_quantitative_signal_impact.md`). Each artifact that
 would mislead a model reading the numbers naively is stated as a fact beside them:
 
 - **Coverage.** `config.hr_zone_coverage_min` exists because low HR coverage means the effort

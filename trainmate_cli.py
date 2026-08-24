@@ -33,12 +33,12 @@ PREFIX_HINT = "Any prefix that matches one command is that command: 'wo li' = 'w
 
 COMMAND_ORDER = {
     "": ["status", "workout", "progress", "plan", "goal",
-         "constraint", "benchmark", "context", "learnings", "data", "model", "shell", "help"],
+         "constraint", "benchmark", "signal", "learnings", "data", "model", "shell", "help"],
     "model": ["list", "set", "reset"],
     "goal": ["list", "add", "edit", "rm"],
     "constraint": ["list", "show", "add", "edit", "rm"],
     "benchmark": ["list", "record", "rm"],
-    "context": ["list", "list-metrics", "add", "rm"],
+    "signal": ["list", "list-metrics", "add", "rm"],
     "learnings": ["list", "show", "edit", "demote", "keep", "rm"],
     "plan": ["show", "generate", "feedback", "versions", "diff", "rollback"],
     "workout": ["list", "adapt", "compare", "generate", "swap", "add",
@@ -77,15 +77,15 @@ from trainmate.cli.data import (
     run_data_pull, run_data_bootstrap, run_data_reflect, run_data_backfill_tss,
     run_data_show_metrics, run_data_show_activities, run_data_wipe,
 )
-from trainmate.cli.context import (
-    run_context_add, run_context_rm, run_context_list, run_context_list_metrics,
+from trainmate.cli.signals import (
+    run_signal_add, run_signal_rm, run_signal_list, run_signal_list_metrics,
 )
 from trainmate.cli.status import add_status_parser
 from trainmate.cli.progress import add_progress_parser
 from trainmate.cli.goals import add_goal_parser
 from trainmate.cli.constraints import add_constraint_parser
 from trainmate.cli.benchmarks import add_benchmark_parser
-from trainmate.cli.context import add_context_parser
+from trainmate.cli.signals import add_signal_parser
 from trainmate.cli.learnings import add_learnings_parser
 from trainmate.cli.plans import add_plan_parser
 from trainmate.cli.workouts import add_workout_parser
@@ -171,7 +171,7 @@ def build_parser():
     goal_parser = add_goal_parser(subparsers)
     constraint_parser = add_constraint_parser(subparsers)
     benchmark_parser = add_benchmark_parser(subparsers)
-    context_parser = add_context_parser(subparsers)
+    signal_parser = add_signal_parser(subparsers)
     learnings_parser = add_learnings_parser(subparsers)
     plan_parser = add_plan_parser(subparsers, pull_bypass_parser, llm_debug_parser)
     workout_parser = add_workout_parser(subparsers, pull_bypass_parser, llm_debug_parser)
@@ -182,7 +182,7 @@ def build_parser():
         "goal": goal_parser,
         "constraint": constraint_parser,
         "benchmark": benchmark_parser,
-        "context": context_parser,
+        "signal": signal_parser,
         "learnings": learnings_parser,
         "plan": plan_parser,
         "workout": workout_parser,

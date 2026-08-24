@@ -68,7 +68,7 @@ def run_data_backfill_tss(args: argparse.Namespace) -> None:
 
 def run_data_wipe(args: argparse.Namespace) -> None:
     """Wipes locally cached data after confirmation. --garmin / --calendar scope the
-    wipe to Garmin evidence or ingested daily context respectively (neither flag = both);
+    wipe to Garmin evidence or ingested daily signals respectively (neither flag = both);
     -d restricts it to a date window."""
     garmin = getattr(args, "garmin", False)
     calendar = getattr(args, "calendar", False)
@@ -82,7 +82,7 @@ def run_data_wipe(args: argparse.Namespace) -> None:
     if garmin:
         scope_parts.append("Garmin metrics, baselines, and activities")
     if calendar:
-        scope_parts.append("ingested daily-context signals")
+        scope_parts.append("ingested daily signals")
     scope = " and ".join(scope_parts)
 
     if start and end:
@@ -106,7 +106,7 @@ def run_data_wipe(args: argparse.Namespace) -> None:
         # to remember (see db/wipes.py).
         runtime.db.wipe_garmin_data(start, end)
     if calendar:
-        runtime.db.wipe_calendar_context(start, end)
+        runtime.db.wipe_calendar_signals(start, end)
     print(green(f"Wiped {scope}{window}."))
 
 
@@ -657,13 +657,13 @@ def add_data_parser(subparsers, pull_bypass_parser, llm_debug_parser):
     # data pull
     d_pull = data_subparsers.add_parser(
         "pull",
-        help="Fetch Garmin activities/metrics and Google Calendar context",
+        help="Fetch Garmin activities/metrics and Google Calendar signals",
         description=(
             "Fetch activities and daily metrics directly from Garmin Connect into the "
             "local cache, advancing the sync watermark. With no range, pulls the last "
             "2 days ending today (-d 7d for a different window, or -d A..B for an "
             "explicit range). Pulls both metrics and activities unless "
-            "--metrics-only/--activities-only is given. Also syncs tagged daily-context "
+            "--metrics-only/--activities-only is given. Also syncs tagged daily-signal "
             "events (alcohol, sleep, stress, …) from Google Calendar into the local cache. "
             "Past Calendar events in the pulled range are stamped with the adherence "
             "verdict unless --no-mark is given."
@@ -851,10 +851,10 @@ def add_data_parser(subparsers, pull_bypass_parser, llm_debug_parser):
     # data wipe
     d_wipe = data_subparsers.add_parser(
         "wipe", advanced=True,
-        help="Wipe locally cached Garmin data and/or daily context from the database",
+        help="Wipe locally cached Garmin data and/or daily signals from the database",
         description=(
             "Delete locally cached data. With no scope flag, wipes everything (Garmin "
-            "metrics, baselines, activities, and ingested daily-context signals) and "
+            "metrics, baselines, activities, and ingested daily signals) and "
             "resets the sync watermarks. --garmin or --calendar narrow the scope; -d "
             "restricts it to a date window (the next 'data pull' re-fetches what was "
             "removed)."
@@ -866,8 +866,8 @@ def add_data_parser(subparsers, pull_bypass_parser, llm_debug_parser):
         help="Wipe only Garmin evidence (metrics, baselines, activities, analysis cache)"
     )
     d_wipe.add_argument(
-        "--calendar", "--context", action="store_true", dest="calendar",
-        help="Wipe only ingested daily-context signals and reset the Calendar sync token"
+        "--calendar", "--signals", action="store_true", dest="calendar",
+        help="Wipe only ingested daily signals and reset the Calendar sync token"
     )
     add_selector_args(d_wipe, direction="none")
     d_wipe.add_argument("-y", "--yes", action="store_true", help="Skip confirmation prompt")

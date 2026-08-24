@@ -1,14 +1,14 @@
-# Design: Calendar-Sourced Daily Context
+# Design: Calendar-Sourced Daily Signals
 
 **Status:** Implemented · **Date:** 2026-06-14 · **Branch:** `richer-analysis-evidence-claude`
 
 This document captures the agreed design for letting TrainMate ingest **external
-daily context signals** (alcohol intake, sleep quality, stress, big meals, …)
+daily signals** (alcohol intake, sleep quality, stress, big meals, …)
 without TrainMate understanding any of those domains specifically. Signals arrive
 on the **existing Google Calendar** as tagged all-day events; TrainMate reads
-them, persists them locally, and feeds them to the coach as context.
+them, persists them locally, and feeds them to the coach.
 
-Implemented on this branch (schema, `db/dailycontext.py`, calendar `sync_context`,
+Implemented on this branch (schema, `db/signals.py`, calendar `sync_signals`,
 the `garmin` bridge, and the coach analysis wiring). This doc is the spec; see
 ARCHITECTURE.md §13 for the as-built summary.
 
@@ -37,11 +37,11 @@ signal-day; TrainMate ingests them.
 ## 2. Goals / Non-Goals
 
 **Goals**
-- A **single** calendar carries both TrainMate's workouts and external context
+- A **single** calendar carries both TrainMate's workouts and external signals
   events; the two are unambiguously distinguishable.
-- TrainMate ingests context events into its **own DB** so the coach reads
+- TrainMate ingests signal events into its **own DB** so the coach reads
   locally and doesn't hit Google on every run.
-- Ingestion is a **sync, not an append**: edits and deletions of a context event
+- Ingestion is a **sync, not an append**: edits and deletions of a signal event
   are reflected (a corrected "2 drinks" → "3 drinks" updates in place; a deleted
   event removes the row).
 - TrainMate stays **domain-agnostic**: it knows "there is a signal of category X
@@ -56,13 +56,13 @@ signal-day; TrainMate ingests them.
 - The external syncer itself is **out of scope** — separate repo. This doc only
   fixes the *contract* (the calendar tag) it must honor. (TrainMate later became a
   *first-party* producer of the same tagged events for ad-hoc signals via the
-  `context` command — see `DESIGN_context_authoring.md`.)
+  `signal` command — see `DESIGN_signal_authoring.md`.)
 - No per-signal logic in TrainMate (no "alcohol is bad" rule).
 - No correlation / quantitative analysis built now — only the storage that would
   permit it later (§7). (**Superseded:** the generic, still category-agnostic
   quantitative path was built afterwards — see
-  `DESIGN_quantitative_context_impact.md` and §7 below.)
-- The coarse life-event channel is not replaced; daily context is a distinct,
+  `DESIGN_quantitative_signal_impact.md` and §7 below.)
+- The coarse life-event channel is not replaced; daily signals is a distinct,
   finer-grained thing (§5). (That channel was `lifeevents` when this was written;
   it has since been dropped and superseded by `constraints`, see
   `DESIGN_constraints.md`.)
@@ -77,11 +77,11 @@ With one shared calendar there are **three** classes of events, not two:
 | Class | Origin | TrainMate action |
 |-------|--------|------------------|
 | Workouts | TrainMate (`extendedProperties.private.source = "TrainMate"`) | written by us; ignore on read |
-| Context signals | external syncer (tagged, see §4) | **ingest** |
+| Signals | external syncer (tagged, see §4) | **ingest** |
 | Ordinary life events | the user, by hand (dentist, a flight) | ignore |
 
 Reading "everything that isn't ours" is wrong — it would ingest the dentist
-appointment as a recovery signal. So context events need a **positive** marker.
+appointment as a recovery signal. So signal events need a **positive** marker.
 We use `extendedProperties.private` rather than a title convention (e.g.
 `[ctx]`) because:
 
@@ -95,17 +95,17 @@ We use `extendedProperties.private` rather than a title convention (e.g.
 **Privacy: what the tag actually guarantees.** The server-side filter is *not*
 available on the steady-state path. Google Calendar makes `privateExtendedProperty`
 and `syncToken` mutually exclusive, so the code drops the filter whenever a sync
-token is set (`google_calendar.py`, `sync_context`). Concretely:
+token is set (`google_calendar.py`, `sync_signals`). Concretely:
 
 - **Full pull** (first run, or 410 token expiry) — filter applied; only tagged
-  context events are fetched.
+  signal events are fetched.
 - **Incremental** (`syncToken`, i.e. nearly every run) — filter *not* applied;
   **every** changed event on the calendar comes back, workouts and the user's
   private appointments included.
 
 So on the incremental path the user's private appointments **are** fetched into
 process memory. What protects them is the **client-side tag guard**: an event whose
-`extendedProperties.private.source` is not the context tag is discarded before any
+`extendedProperties.private.source` is not the signal tag is discarded before any
 parsing, so nothing untagged is ever stored, rendered, or sent to an LLM. The honest
 claim is *"untagged events are never ingested"*, not *"never fetched"*.
 
@@ -124,15 +124,18 @@ One **all-day** event per signal-day per metric, on the configured calendar:
   the LLM verbatim (e.g. summary `"Alcohol: 2 drinks"`).
 - `extendedProperties.private`:
   - `source = "trainmate-context"` — **required** positive marker. The string is
-    configurable (`google.calendar_context_tag` in YAML, `config.calendar_context_tag`
+    configurable (`google.calendar_signal_tag` in YAML, `config.calendar_signal_tag`
     in code); `"trainmate-context"` is the default and the contract above assumes it.
     Both the read filter and TrainMate's own authoring path use the configured value,
-    so changing it orphans previously-written events until they are re-tagged.
+    so changing it orphans previously-written events until they are re-tagged. That is
+    why the `context` → `signal` rename left this **string** alone while renaming the
+    config key around it: the tag is a contract with the external syncer and with every
+    event already on the calendar, not internal vocabulary.
   - `metric = "<category>"` — **required** free-form category string, e.g.
     `"alcohol"`, `"sleep_quality"`, `"stress"`. TrainMate treats it as opaque.
     "Required" is a contract on the syncer, not an ingest-time validation: an event
     that is correctly `source`-tagged but carries no `metric` is **not** rejected —
-    it lands under the literal metric `'context'`. Deliberate, so a syncer bug
+    it lands under the literal metric `'signal'`. Deliberate, so a syncer bug
     loses the category but not the day.
   - `value = "<number>"` — **optional** numeric magnitude as a string, e.g.
     `"2"`. Best-effort parsed to a float; absent/unparseable → `NULL`.
@@ -142,17 +145,17 @@ its own concern.
 
 ---
 
-## 5. Storage: a new `daily_context` table
+## 5. Storage: a new `daily_signals` table
 
-Daily context is **not** a coarse life-event row (`lifeevents` then, `constraints`
+Daily signals is **not** a coarse life-event row (`lifeevents` then, `constraints`
 now — the table was renamed and reshaped by `DESIGN_constraints.md`). Those are
 coarse multi-day spans with a type and an impact paragraph, consumed at *plan/meso*
-granularity. Daily context is fine-grained (one row per day per metric), carries an optional
+granularity. Daily signals is fine-grained (one row per day per metric), carries an optional
 number, and must be reconciled against a calendar event id. Different shape,
 different cardinality, different lifecycle → its own table.
 
 ```sql
-CREATE TABLE IF NOT EXISTS daily_context (
+CREATE TABLE IF NOT EXISTS daily_signals (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
     date            TEXT NOT NULL,           -- YYYY-MM-DD (event start.date)
     metric          TEXT NOT NULL,           -- opaque category, e.g. 'alcohol'
@@ -161,7 +164,7 @@ CREATE TABLE IF NOT EXISTS daily_context (
     google_event_id TEXT NOT NULL UNIQUE,    -- reconciliation key
     updated         TEXT                     -- event 'updated' RFC3339 (debug)
 );
-CREATE INDEX IF NOT EXISTS idx_daily_context_date ON daily_context(date);
+CREATE INDEX IF NOT EXISTS idx_daily_signals_date ON daily_signals(date);
 ```
 
 - `google_event_id` is the natural key (same approach as `workouts`), making
@@ -171,14 +174,14 @@ CREATE INDEX IF NOT EXISTS idx_daily_context_date ON daily_context(date);
 - `value` is nullable now and unused by logic; it exists so the quantitative
   path (§7) needs no migration.
 
-The existing life-event mixin is the model for the new `db/dailycontext.py` one.
-As built it carries `upsert_daily_context_by_event`, `get_daily_context(start, end,
-metric)` and `delete_daily_context_by_event` for the sync path, plus
-`get_daily_context_by_id`, `delete_daily_context` and `list_context_metrics` added
-later for the `context` CLI (`DESIGN_context_authoring.md`). Table creation goes in
+The existing life-event mixin is the model for the new `db/signals.py` one.
+As built it carries `upsert_daily_signal_by_event`, `get_daily_signals(start, end,
+metric)` and `delete_daily_signal_by_event` for the sync path, plus
+`get_daily_signal_by_id`, `delete_daily_signal` and `list_signal_metrics` added
+later for the `signal` CLI (`DESIGN_signal_authoring.md`). Table creation goes in
 `db/base.py` alongside the others.
 
-`delete_daily_context_by_event` returns whether a row actually went away. That
+`delete_daily_signal_by_event` returns whether a row actually went away. That
 matters because a cancelled event reaches us stripped of its
 `extendedProperties` — the tag guard cannot run on it — so "did this delete
 anything" is the only way to tell one of our signals from a cancelled workout or
@@ -189,7 +192,7 @@ a cancelled private appointment on the unfiltered incremental stream (§3, §6).
 ## 6. The pull path (sync, not append)
 
 Folded into the existing `data pull` **and** the auto-ensure-before-read path
-(`garmin.ensure_data`), so context refreshes whenever metrics do — no separate
+(`garmin.ensure_data`), so signals refresh whenever metrics do — no separate
 command to remember. The two directions have different cadences:
 
 - **Forward / incremental** (steady state): rides along with `data pull` and
@@ -203,13 +206,13 @@ command to remember. The two directions have different cadences:
 created/changed/**cancelled** since. This gives edit- and delete-detection
 natively:
 
-1. Load the stored context sync token (see §6.1).
+1. Load the stored signal sync token (see §6.1).
 2. `events().list(calendarId=..., syncToken=<stored>)`, paging through results.
    The `privateExtendedProperty` filter is **not** passed here: the API rejects it
    alongside a `syncToken`, so it is passed **only** on the full pull (§3). The
    two shapes are:
    - with a token → `syncToken=<stored>`, everything changed comes back;
-   - without one → `privateExtendedProperty="source=<context tag>"`, tagged
+   - without one → `privateExtendedProperty="source=<signal tag>"`, tagged
      events only.
    - No stored token (first run) or `410 GONE` (token expired) → fall back to a
      **full pull of all tagged events** (no date window), then resume
@@ -219,11 +222,11 @@ natively:
      couple of cheap calls. Old events the coach's window doesn't cover just sit
      harmlessly in the DB.
 3. For each returned event:
-   - `status == "cancelled"` → `delete_daily_context_by_event(event_id)`; it
+   - `status == "cancelled"` → `delete_daily_signal_by_event(event_id)`; it
      counts as a change only if it removed a row (§5).
    - otherwise → **check the `source` tag first** and drop anything that is not
      ours, then parse tag (`metric`, `value`), date, text →
-     `upsert_daily_context_by_event(...)`.
+     `upsert_daily_signal_by_event(...)`.
 4. Persist `nextSyncToken`.
 
 The client-side tag guard in step 3 is not belt-and-braces — on the incremental
@@ -233,7 +236,7 @@ is a no-op there.
 
 **Ride-along throttling.** The ensure-before-read path (`ensure_data`) does *not*
 sync unconditionally: it runs at most **once per process**, and skips entirely
-when the last context sync is younger than `config.data_refresh_minutes` (the
+when the last signal sync is younger than `config.data_refresh_minutes` (the
 same "how fresh is fresh enough" window the Garmin metric refresh uses).
 `data pull` and `--force-pull` bypass both gates. The whole thing is best-effort:
 no configured calendar is a silent no-op and every Calendar error is swallowed
@@ -248,23 +251,23 @@ with a warning, so a read never blocks on Google being down.
 sync_state(key TEXT PRIMARY KEY, through_date TEXT, last_pull_utc TEXT)
 ```
 
-Add a row `key="calendar_context"` rather than a new table, and add a **nullable
+Add a row `key="calendar_signals"` rather than a new table, and add a **nullable
 `sync_token TEXT` column** for the opaque `nextSyncToken` (neither existing
 column fits an opaque token — `through_date` is a forward *date* high-water
-mark). The column is populated only by the context row; `through_date` stays
-`NULL` for it; `last_pull_utc` records when context last synced. Chosen over a
+mark). The column is populated only by the signal row; `through_date` stays
+`NULL` for it; `last_pull_utc` records when signals last synced. Chosen over a
 separate `settings` kv so there's a single "sync progress" concept;
 `get_sync_state`/`set_sync_state` gain a `sync_token` field.
 
-**Re-ingesting / wiping context.** `data wipe --calendar` (db `wipe_calendar_context`)
-deletes the `daily_context` rows and **resets the Calendar sync token**. The token
+**Re-ingesting / wiping signals.** `data wipe --calendar` (db `wipe_calendar_signals`)
+deletes the `daily_signals` rows and **resets the Calendar sync token**. The token
 reset is mandatory: because the sync is incremental (only events changed since the
 token are replayed), deleting rows without it would leave them gone until each event
 happened to change again — so the next pull would not restore them. Clearing the
 token forces a full re-pull of all tagged events. This is how you recover from a
 syncer that wrote malformed events (e.g. missing `metric`/`value` tags) after the
 syncer is fixed: wipe, then pull. Note that such events were *ingested*, not
-rejected — a missing `metric` lands as `'context'` (§4) — so the wipe is what
+rejected — a missing `metric` lands as `'signal'` (§4) — so the wipe is what
 clears them, not the ingest path.
 
 ---
@@ -273,7 +276,7 @@ clears them, not the ingest path.
 
 **Now (qualitative).** Where the analysis path already pulls per-window `metrics`
 and constraints (`coach/service/analysis.py` — `service.py` is a package now),
-also pull `get_daily_context(from, until)` and render it into the prompt next to
+also pull `get_daily_signals(from, until)` and render it into the prompt next to
 the daily metrics. The LLM reads "alcohol: 2 on 2026-06-13" beside the trashed
 2026-06-14 HRV/Body Battery and attributes the dip correctly. The meaning lives
 in the model, not in TrainMate.
@@ -284,28 +287,28 @@ morning from genuine training fatigue and not cut load on an artifact. Its windo
 starts **one day before** the metrics window: recovery lags the signal by a day,
 so the first morning in range needs the *preceding* day's signal to be explicable.
 
-**Fingerprint invariant.** Everything context-derived that reaches the analysis
+**Fingerprint invariant.** Everything signal-derived that reaches the analysis
 prompt is hashed into the **evidence fingerprint**
 (`_get_evidence_fingerprint`, `coach/engine/prompt.py`), so a changed, added or
 deleted signal invalidates the cached reconstruction. That is two things, not one:
-the window-scoped `daily_context` rows, *and* the `context_days` block below —
+the window-scoped `daily_signals` rows, *and* the `signal_days` block below —
 which deliberately reads the athlete's full history, not `[from, until]`, and so
 is hashed **as computed** rather than via its inputs. Hashing only the
 window-scoped rows would have left a signal edited outside the window changing the
 prompt without changing the fingerprint. See
-`DESIGN_quantitative_context_impact.md` §8.
+`DESIGN_quantitative_signal_impact.md` §8.
 
-**Quantitative — built, see `DESIGN_quantitative_context_impact.md`.** This
+**Quantitative — built, see `DESIGN_quantitative_signal_impact.md`.** This
 section originally deferred the quantitative use of `value` ("not built now"); it
 has since been built, and this paragraph supersedes that. Because each row carries
 a category and an optional number, TrainMate asks a **category-agnostic** question
 — "for metric X, does a higher `value` on day D precede worse recovery on D+1?" —
-and runs it identically for `alcohol`, `sleep`, `stress`. `_context_days`
+and runs it identically for `alcohol`, `sleep`, `stress`. `_signal_days`
 (`coach/service/analysis.py`) clusters signal-days into per-category episodes,
 builds dose sequences with the day's training load, and brackets each with
 baseline-relative morning strips; the result is rendered into the analysis prompt.
 Still zero domain logic: "alcohol hurts HRV" is a *result*, never a coded rule.
-Tunable via `coach.context_days_lookahead` and `coach.context_days_min_signal_days`.
+Tunable via `coach.signal_days_lookahead` and `coach.signal_days_min_days`.
 It can also feed the evidence-based confidence machinery
 (`DESIGN_evidence_based_confidence.md`). The only thing that kept this option alive
 was the `value` column existing from day one.
@@ -315,24 +318,24 @@ was the `value` column existing from day one.
 ## 8. Resolved decisions & remaining questions
 
 **Resolved:**
-- **Sync-state storage** → reuse `sync_state` with `key="calendar_context"` + a
+- **Sync-state storage** → reuse `sync_state` with `key="calendar_signals"` + a
   nullable `sync_token` column (§6.1).
 - **Full-pull horizon** → none; full pull fetches *all* tagged events. The
   horizon question dissolves because Calendar `list` is bulk/paginated and tagged
   events are sparse (§6).
 - **CLI surface** → *ingest* stays silent inside `data pull` / `ensure_data`; no
   dedicated sync command. (**Superseded for authoring/inspection:** the thin
-  `context list` this section left as an option was built, and more — the
-  `context` command (alias `ctx`) now carries `add`, `list`, `list-metrics` and
+  `signal list` this section left as an option was built, and more — the
+  `signal` command now carries `add`, `list`, `list-metrics` and
   `rm`, with TrainMate writing the same tagged events itself. See
-  `DESIGN_context_authoring.md`. The web UI adds read-only views:
-  `GET /api/daily-context` and `GET /api/daily-context/metrics`, behind a
+  `DESIGN_signal_authoring.md`. The web UI adds read-only views:
+  `GET /api/daily-signals` and `GET /api/daily-signals/metrics`, behind a
   per-metric calendar heat strip.)
 
 **Doc-mandated implementation task:**
 - **Update command help.** `d_pull`'s description (`trainmate_cli.py`, currently
   "...directly from Garmin Connect ... 2 days ending today") must state it also
-  syncs tagged calendar context. Touch any other help text that describes the
+  syncs tagged calendar signals. Touch any other help text that describes the
   pull/ensure path.
 
 **Resolved:**
@@ -344,11 +347,11 @@ was the `value` column existing from day one.
 
 External sources drop **tagged all-day events** (`source=trainmate-context`,
 `metric`, optional `value`) on the **single existing calendar**. TrainMate
-**incrementally syncs** them via `syncToken` into a new **`daily_context`** table,
+**incrementally syncs** them via `syncToken` into a new **`daily_signals`** table,
 reconciling edits and deletions by event id. The server-side tag filter applies to
 the full pull only — the incremental stream is filtered **client-side**, which is
 what keeps untagged events out of the database (§3). The coach reads the signals
 **qualitatively**, and the optional `value` column carries the **generic
 quantitative** path that was later built on top
-(`DESIGN_quantitative_context_impact.md`) with no migration — and TrainMate still
+(`DESIGN_quantitative_signal_impact.md`) with no migration — and TrainMate still
 never learns what any single signal *means*.

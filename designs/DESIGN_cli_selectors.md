@@ -16,7 +16,7 @@ in another. Each command then re-implemented its own "no filter means…" defaul
 handler, in prose in its `description=`, and nowhere else.
 
 The same `-d` meant "N days" on eight commands and nothing on the rest; `-m` meant
-`--message` under `workout adapt` and `--metric` under `context`; `--date` was a single day
+`--message` under `workout adapt` and `--metric` under `signal`; `--date` was a single day
 on `workout adapt`, a stored field on `goal edit`, and absent everywhere else.
 
 ## §1 — The grammar
@@ -87,7 +87,7 @@ there.
 | direction | Missing start | Missing end | Bare span `7d` | Commands |
 | --- | --- | --- | --- | --- |
 | `forward` | today | stays open | today → +6d | `workout list`, `workout push`, `constraint list` |
-| `backward` | `default_span` before the end | today | −6d → today | `workout compare`, `data show-*`, `data pull`, `context list` |
+| `backward` | `default_span` before the end | today | −6d → today | `workout compare`, `data show-*`, `data pull`, `signal list` |
 | `none` | stays open | stays open | −6d → today | `data wipe`, `workout prune-calendar`, `data backfill-tss`, `data bootstrap`/`reflect` |
 
 `default` (a selector string like `7d`, `14d`, `today..`) applies **only when no dimension
@@ -102,7 +102,7 @@ never given.
 
 `workout list` takes any number of targets, each an ID or a date selector — `wo li 12 15 -v`
 is how you read two sessions in full without inventing a window that happens to contain
-them. `context rm` takes the same shape, with a metric name in place of a date.
+them. `signal rm` takes the same shape, with a metric name in place of a date.
 
 A bare integer is an ID, anything else is a date selector (`parse_target`); the same
 classification `workout swap` has always made between its two targets. IDs are looked up
@@ -121,19 +121,19 @@ a violation would fail silently, with the wrong flag simply resolving.
 The renames that rule forced:
 
 * `learnings list --sport` → `-t/--type` (also `--sport`, `--sport-type`);
-* `context list`/`rm`: `--metric` loses `-m`, and the metric becomes the positional —
+* `signal list`/`rm`: `--metric` loses `-m`, and the metric becomes the positional —
   which is what §a2 of DESIGN_cli_noargs.md says a command's subject should be anyway;
 * `goal edit --date` → `--target-date`.
 
 Two deliberate exceptions, each because the command cannot mean the reserved thing:
 
-* **`workout adapt -m`** stays `--message`, and **`context add`** takes no `-m`/`-M`: both
+* **`workout adapt -m`** stays `--message`, and **`signal add`** takes no `-m`/`-M`: both
   act on days, not on blocks, so a mesocycle is not a slice they could take. `-d` there is
   a single date (`parse_single_date`), as it is on `benchmark record`. Work that *does* need
   a block selector takes a verb that already reads the reserved vocabulary — `workout
   generate -m 7` — rather than retiring this exception.
 * **`goal edit --target-date`, `constraint add/edit --start/--end`** name a *stored field*,
-  not a filter. The line: a command that acts over a span of days takes `-d` (`context add`
+  not a filter. The line: a command that acts over a span of days takes `-d` (`signal add`
   writes one row per day); a command that writes one row whose own columns are a start and
   an end keeps those columns as named flags.
 

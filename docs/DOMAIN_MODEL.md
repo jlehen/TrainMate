@@ -636,7 +636,7 @@ level may never rewrite a higher one.
 |---|---|---|---|---|
 | `plan generate` | macrocycle + mesocycles | plan start → goal date (`-g <id>` opens it at the goal's own span) | 15-day summary + PMC block | 1 |
 | `workout generate` | workout revisions | the span `-d`/`-m`/`-M`/`-g` names, default today → 28 days | Yes — full `metrics_lookback_days` window | 1 |
-| `workout adapt` | workout revisions | evaluation date → **end of the current block** | Yes — full window, plus daily context | 1 |
+| `workout adapt` | workout revisions | evaluation date → **end of the current block** | Yes — full window, plus daily signals | 1 |
 | `workout add` / `swap` / `rm` | one or two workout revisions | a single date | No | 0 |
 
 Read that table top to bottom as an authority ladder:

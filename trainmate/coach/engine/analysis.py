@@ -15,7 +15,7 @@ class AnalysisLogicMixin:
         weekly_summaries: List[Dict[str, Any]],
         learnings: str,
         context: Optional[str] = None,
-        context_days: Optional[Dict[str, List[Dict[str, Any]]]] = None,
+        signal_days: Optional[Dict[str, List[Dict[str, Any]]]] = None,
         label: str = "workout_analysis",
         horizon: str = "long"
     ) -> Dict[str, Any]:
@@ -46,7 +46,7 @@ class AnalysisLogicMixin:
             "  those to training adaptation; avoid authoring a training learning from a week\n"
             "  whose anomaly a constraint already explains. A constraint may only explain an\n"
             "  anomaly away — never cite one as supporting evidence for a learning.\n"
-            "- 'daily_context': externally-logged daily signals (e.g. alcohol, poor sleep,\n"
+            "- 'daily_signals': externally-logged daily signals (e.g. alcohol, poor sleep,\n"
             "  high stress), each with a 'metric', an optional numeric 'value', and free\n"
             "  'text'. Present only on days one was logged. Treat these the same way as\n"
             "  constraints: a signal the day before (recovery lags) is a likely\n"
@@ -62,11 +62,11 @@ class AnalysisLogicMixin:
             "\n"
         )
 
-        # Gate this reading guide on the same context_days that gates the DATA block below,
+        # Gate this reading guide on the same signal_days that gates the DATA block below,
         # so the guide never describes a section the model wasn't given.
-        if context_days:
+        if signal_days:
             custom_task += (
-                "### READING 'context_days' (quantitative context impact, full history)\n"
+                "### READING 'signal_days' (quantitative signal impact, full history)\n"
                 "- A separate block, per external signal category (e.g. alcohol), of aligned\n"
                 "  EPISODES. An episode is a run of one or more signal-days; each has a 'days'\n"
                 "  dose sequence ({date, value, load_tss} — the signal magnitude and that day's\n"
@@ -151,14 +151,14 @@ class AnalysisLogicMixin:
         user_content += "## WEEKLY TRAINING SUMMARIES\n"
         user_content += json.dumps(weekly_summaries, indent=2)
 
-        # Quantitative context-impact rows ride beside the weekly summaries, covering the
-        # athlete's full signal-day history (DESIGN_quantitative_context_impact.md §4, §6).
+        # Quantitative signal-impact rows ride beside the weekly summaries, covering the
+        # athlete's full signal-day history (DESIGN_quantitative_signal_impact.md §4, §6).
         # Emitted only when some category has rows, so its absence reads as "nothing logged".
-        if context_days:
+        if signal_days:
             user_content += (
-                "\n\n## QUANTITATIVE CONTEXT IMPACT (full signal-day history, episode-aligned)\n"
+                "\n\n## QUANTITATIVE SIGNAL IMPACT (full signal-day history, episode-aligned)\n"
             )
-            user_content += json.dumps(context_days, indent=2)
+            user_content += json.dumps(signal_days, indent=2)
 
         if context:
             user_content += f"\n\n## ATHLETE SUBJECTIVE CONTEXT FOR THIS PERIOD\n{context}\n"

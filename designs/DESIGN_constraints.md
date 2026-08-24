@@ -1,7 +1,7 @@
 # Design: Unified Directives (`constraint` command)
 
 **Status:** Draft (rev 6) · **Date:** 2026-07-10 · **Supersedes:** the `lifeevent`
-command · **Companion to:** `DESIGN_context_authoring.md`,
+command · **Companion to:** `DESIGN_signal_authoring.md`,
 `DESIGN_backward_evaluation.md`
 
 *Rev 6 (2026-07-10, after use): the authoring surface is collapsed to a single
@@ -75,7 +75,7 @@ A single first-class object — a **constraint** — for everything the athlete
 *asks the coach to work around*, at any horizon: "no run Thursday", "only 45 min
 Tuesday", "prefer easy this week", or "3-week injury layoff". It replaces the
 `lifeevent` command and gives `workout adapt --message` a typed home to land in.
-Observations (`context`, daily signals) are deliberately **not** merged in — see
+Observations (`signal`, daily signals) are deliberately **not** merged in — see
 §2.
 
 ---
@@ -86,8 +86,8 @@ TrainMate accreted three ways for the world to touch the plan, and they feel
 disparate because each is "special" for a *different, non-semantic* reason:
 
 - **Life events** are special by **horizon** (they reshape the plan).
-- **Daily context** is special by **storage** (it lives in Google Calendar — an
-  artifact of the author's alcohol-in-a-spreadsheet history, `DESIGN_context_authoring.md`).
+- **Daily signals** is special by **storage** (it lives in Google Calendar — an
+  artifact of the author's alcohol-in-a-spreadsheet history, `DESIGN_signal_authoring.md`).
 - **`workout adapt --message`** is special by **durability** (ephemeral by
   design, its effect smuggled into a session's `change_reason`).
 
@@ -119,7 +119,7 @@ message) are an **orthogonal I/O concern**, never a property of meaning.
 
 | | Observation (evidence) | Directive (bound) |
 |---|---|---|
-| **home** | `context` / `daily_context` (+ Garmin) | **`constraint`** (this doc) |
+| **home** | `signal` / `daily_signals` (+ Garmin) | **`constraint`** (this doc) |
 | **coach uses it to** | interpret readiness; feed learnings | bound `generate` + `adapt`; discount anomalies (§6) |
 | **may become evidence?** | yes (cited weeks) | **no** — may only *discount* it (§6) |
 
@@ -132,7 +132,7 @@ away** (a travel week is not a fitness-loss signal), never to *support* a
 learning — this is what life events already do for the backward evaluation
 today, and constraints inherit that feed unchanged (§6). Any object that blurred
 the supporting direction would be wrong. So this doc unifies **only**
-directives; `context` is untouched.
+directives; `signal` is untouched.
 
 ---
 
@@ -151,10 +151,10 @@ directives; `context` is untouched.
 
 **Non-Goals**
 
-- Merging observations (`context`) into directives (§2).
-- Decoupling `daily_context` from Google Calendar storage — a separate refactor.
+- Merging observations (`signal`) into directives (§2).
+- Decoupling `daily_signals` from Google Calendar storage — a separate refactor.
 - Per-type intelligence. `type` is an **opaque, user-vocabulary label** (like
-  `daily_context.metric` — `DESIGN_context_authoring.md` §1); no code ever
+  `daily_signals.metric` — `DESIGN_signal_authoring.md` §1); no code ever
   branches on a specific value. The free-text fields carry specifics; TrainMate
   stays domain-agnostic (§5).
 - Auto-triggering a regen without a human `y` (§7).
@@ -168,7 +168,7 @@ New top-level **`constraint`**. The standard CRUD six — no seventh verb; the
 
 **Nothing in this surface prompts for a field value (corrected).** Rev 4 specified
 an `add` that prompted interactively for anything the command line omitted, on a
-prompt-over-flags reading of `DESIGN_context_authoring.md` §4. Project policy has
+prompt-over-flags reading of `DESIGN_signal_authoring.md` §4. Project policy has
 since ruled that out and `add` was never built that way: a prompt is for a
 *decision*, never for an argument the invocation should have carried —
 `DESIGN_cli_noargs.md` §a2, which is the authority on this. `TITLE` is mandatory, so
@@ -229,16 +229,16 @@ constraint add TITLE [--start YYYY-MM-DD] [--end YYYY-MM-DD] [--desc TEXT]
   **every** constraint is shown — a fresh user has only a handful, and there is
   no block to scope to.
 
-### Disambiguation: `context` alias `c` → `ctx`
+### Disambiguation: the observation command's short alias
 
-To keep `cons` (constraint) and context from colliding in the head and at the
-prompt, the `context` command's canonical short alias becomes **`ctx`**; the
-single-letter `c` is retired. No data or schema change — parser config only.
+To keep `cons` (constraint) and the observation command from colliding in the head
+and at the prompt, that command's single-letter `c` alias was retired in favour of
+a registered **`ctx`**. No data or schema change — parser config only.
 
-`ctx` is the one genuinely *registered* alias in this area — it is not a prefix of
-`context`, so it cannot fall out of the name and has to be declared. A bare `c` is
-now ambiguous between `constraint` and `context` and is refused by name
-(`DESIGN_cli_noargs.md` §d).
+**Superseded.** The observation command has since been renamed `context` → `signal`
+(`DESIGN_signal_authoring.md` §3), which dissolves the collision outright: `sig` is
+an ordinary unambiguous prefix, so the group needs no registered alias at all and
+`ctx` is gone. `c` now resolves straight to `constraint`.
 
 ---
 
@@ -719,7 +719,8 @@ through the one current read path rather than stranding them.
 5. `--message` classification with the two-confirmation flow (§8).
 6. ~~`lifeevent` → forwarder + deprecation notice.~~ **Done, then undone by step 8** —
    the forwarder shipped and has since been removed (§9).
-7. `context` alias `c` → `ctx` (§4).
+7. Observation-command alias `c` → `ctx` (§4; since superseded by the
+   `context` → `signal` rename, which drops the alias entirely).
 8. ~~Later release: remove the `lifeevent` forwarder; drop the `lifeevents` table.~~
    **Done** — the forwarder is gone and `_init_db` unconditionally drops `lifeevents`
    (and its older `life_events` name), `db/base.py`.

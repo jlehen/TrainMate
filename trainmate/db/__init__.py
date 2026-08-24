@@ -10,7 +10,7 @@ working unchanged.
 from trainmate.db.base import BaseDB
 from trainmate.db.objectives import ObjectivesMixin
 from trainmate.db.constraints import ConstraintsMixin
-from trainmate.db.dailycontext import DailyContextMixin
+from trainmate.db.signals import DailySignalsMixin
 from trainmate.db.benchmarks import BenchmarksMixin
 from trainmate.db.workouts import WorkoutsMixin
 from trainmate.db.activities import ActivitiesMixin
@@ -34,7 +34,7 @@ from trainmate.db.wipes import WipesMixin
 class Database(
     ObjectivesMixin,
     ConstraintsMixin,
-    DailyContextMixin,
+    DailySignalsMixin,
     BenchmarksMixin,
     WorkoutsMixin,
     ActivitiesMixin,

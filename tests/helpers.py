@@ -71,7 +71,7 @@ _ALL_TABLES = [
     "coach_learnings",
     "analysis_cache",
     "sync_state",
-    "daily_context",
+    "daily_signals",
     "constraints",
     "benchmark_results",
     "objectives",

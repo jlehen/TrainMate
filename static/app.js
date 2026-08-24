@@ -999,7 +999,7 @@ window.toggleEvidence = async function(id) {
     } catch (e) { box.innerHTML = `<span class="log-line error">${escapeHtml(e.message)}</span>`; }
 };
 
-// --- HISTORY (activities / metrics / context) ---
+// --- HISTORY (activities / metrics / signals) ---
 
 function buildTable(rows, columns, emptyMsg) {
     if (!rows || !rows.length) return `<div class="item-meta">${emptyMsg}</div>`;
@@ -1049,46 +1049,46 @@ async function fetchHistory() {
         ], "No metrics in range.");
     } catch (e) { logConsole(`Metrics load error: ${e.message}`, "error"); }
 
-    // Daily context — vocabulary, calendar strips, then the raw rows.
+    // Daily signals — vocabulary, calendar strips, then the raw rows.
     try {
-        const [ctxRes, vocabRes] = await Promise.all([
-            fetch(`${API_BASE}/api/daily-context?${range}`),
-            fetch(`${API_BASE}/api/daily-context/metrics`),
+        const [sigRes, vocabRes] = await Promise.all([
+            fetch(`${API_BASE}/api/daily-signals?${range}`),
+            fetch(`${API_BASE}/api/daily-signals/metrics`),
         ]);
-        const ctx = await ctxRes.json();
+        const sigs = await sigRes.json();
         const vocab = await vocabRes.json();
-        renderContextVocab(vocab.metrics || []);
-        renderContextChart(ctx);
-        document.getElementById("context-table").innerHTML = buildTable(ctx, [
+        renderSignalVocab(vocab.metrics || []);
+        renderSignalChart(sigs);
+        document.getElementById("signal-table").innerHTML = buildTable(sigs, [
             { label: "Date", key: "date" },
             { label: "Metric", key: "metric" },
             { label: "Value", key: "value" },
             { label: "Note", key: "text" },
-        ], "No daily-context signals in range.");
-    } catch (e) { logConsole(`Context load error: ${e.message}`, "error"); }
+        ], "No daily signals in range.");
+    } catch (e) { logConsole(`Signal load error: ${e.message}`, "error"); }
 }
 
-/** `context list-metrics`: which signals exist at all, how many rows each has and the
+/** `signal list-metrics`: which signals exist at all, how many rows each has and the
  *  span it covers — the vocabulary behind the strips below. */
-function renderContextVocab(metrics) {
-    const el = document.getElementById("context-vocab");
+function renderSignalVocab(metrics) {
+    const el = document.getElementById("signal-vocab");
     if (!el) return;
     if (!metrics.length) {
-        el.innerHTML = `<div class="item-meta">No context signals recorded. `
-            + `Add one with 'tm context add'.</div>`;
+        el.innerHTML = `<div class="item-meta">No signals recorded. `
+            + `Add one with 'tm signal add'.</div>`;
         return;
     }
     el.innerHTML = metrics.map(m =>
-        `<span class="ctx-chip" title="${escapeHtml(m.first_date)} → ${escapeHtml(m.last_date)}">`
-        + `${escapeHtml(m.metric)} <span class="ctx-chip-count">${m.count}</span></span>`).join("");
+        `<span class="sig-chip" title="${escapeHtml(m.first_date)} → ${escapeHtml(m.last_date)}">`
+        + `${escapeHtml(m.metric)} <span class="sig-chip-count">${m.count}</span></span>`).join("");
 }
 
 /** One row per metric, one cell per day in the loaded range: a calendar strip whose
  *  shading is the value's rank within that metric (metrics have no shared scale — sleep
  *  hours and units of alcohol cannot share a ramp). Days with no signal stay blank. */
-function renderContextChart(rows) {
-    const el = document.getElementById("context-chart");
-    const badge = document.getElementById("context-window-badge");
+function renderSignalChart(rows) {
+    const el = document.getElementById("signal-chart");
+    const badge = document.getElementById("signal-window-badge");
     if (!el) return;
     if (!rows || !rows.length) {
         el.innerHTML = "";
@@ -1119,7 +1119,7 @@ function renderContextChart(rows) {
         const max = values.length ? Math.max(...values) : 0;
         const cells = days.map(day => {
             const row = byDate.get(day);
-            if (!row) return `<span class="ctx-cell" title="${escapeHtml(day)}: —"></span>`;
+            if (!row) return `<span class="sig-cell" title="${escapeHtml(day)}: —"></span>`;
             const v = Number(row.value);
             // A metric whose values never vary still deserves a visible mark, so a flat
             // series pins to full intensity rather than dividing by a zero span.
@@ -1128,14 +1128,14 @@ function renderContextChart(rows) {
                 : 5;
             const label = [day, row.value != null ? `value ${row.value}` : null, row.text]
                 .filter(Boolean).join(" · ");
-            return `<span class="ctx-cell lvl${level}" title="${escapeHtml(label)}"></span>`;
+            return `<span class="sig-cell lvl${level}" title="${escapeHtml(label)}"></span>`;
         }).join("");
-        return `<div class="ctx-row"><span class="ctx-label">${escapeHtml(metric)}</span>`
-            + `<span class="ctx-strip">${cells}</span></div>`;
+        return `<div class="sig-row"><span class="sig-label">${escapeHtml(metric)}</span>`
+            + `<span class="sig-strip">${cells}</span></div>`;
     }).join("");
 
     el.innerHTML = html
-        + `<div class="item-meta ctx-axis">${escapeHtml(days[0])} → ${escapeHtml(days[days.length - 1])}`
+        + `<div class="item-meta sig-axis">${escapeHtml(days[0])} → ${escapeHtml(days[days.length - 1])}`
         + ` · shading is each signal's own range</div>`;
 }
 

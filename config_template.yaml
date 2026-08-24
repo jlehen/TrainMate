@@ -11,7 +11,7 @@ llm:
   #request_timeout_seconds: 120
 
 # Minimum minutes before an automatic refresh re-pulls — gates both Garmin hits and
-# Calendar-context syncs; within this window reads reuse the local cache. Bypass a single
+# Calendar-signal syncs; within this window reads reuse the local cache. Bypass a single
 # run with --force-pull.
 #refresh_minutes: 120
 
@@ -68,8 +68,8 @@ google:
   service_account_file: "service_account.json"
   # Google Calendar that planned workouts are written to / read from.
   calendar_id: "YOUR_CALENDAR_ID@group.calendar.google.com"
-  # Source tag for calendar events containing daily context.
-  #calendar_context_tag: "trainmate-context"
+  # Source tag for calendar events containing daily signals.
+  #calendar_signal_tag: "trainmate-context"
 
 garmin:
   email: "you@example.com"
@@ -145,12 +145,12 @@ coach:
   # Thresholds to compute high intensity workouts.
   #high_intensity_rpe_threshold: 8
   #high_intensity_tss_threshold: 120.0
-  # Quantitative context-impact alignment (alcohol, big meal, …). 'lookahead' (k) is
+  # Quantitative signal-impact alignment (alcohol, big meal, …). 'lookahead' (k) is
   # how many mornings bracket each signal episode before/after, and the drink-free gap
-  # below which two signal runs merge into one episode. 'min_signal_days' is the floor
+  # below which two signal runs merge into one episode. 'min_days' is the floor
   # of total signal-days a category needs before its rows are shown to the coach.
-  #context_days_lookahead: 3
-  #context_days_min_signal_days: 1
+  #signal_days_lookahead: 3
+  #signal_days_min_days: 1
   # Workload score below which an activity counts as "minor": widens the
   # planned-vs-actual mismatch tolerance and labels unplanned activities as minor.
   #minor_activity_load_threshold: 25.0

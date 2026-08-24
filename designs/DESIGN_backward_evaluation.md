@@ -199,8 +199,8 @@ instead of paying for a second backward pass (see §9).
   everything the analysis prompt is shown must move the hash: per activity the
   load-bearing *fields* too (`date`, type, `duration_sec`, `tss`, `rpe`,
   `zone1..5_sec`) so a corrected re-pull invalidates; the overlapping
-  **constraints** (DESIGN_constraints.md §6); and the ingested **daily-context**
-  signals (DESIGN_calendar_context_ingest.md §7). The deliberate omissions are
+  **constraints** (DESIGN_constraints.md §6); and the ingested **daily-signal**
+  signals (DESIGN_calendar_signal_ingest.md §7). The deliberate omissions are
   unchanged — see §11.
 - **Cache key** = (window/horizon, evidence fingerprint). Hashing the concrete
   activity-id set — not merely the date range — narrows the overlapping-window

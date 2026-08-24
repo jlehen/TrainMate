@@ -146,14 +146,14 @@ class TestCommandPrefixResolution(unittest.TestCase):
         self.assertEqual(self._xlate("w a"), ["workout", "adapt"])
 
     def test_surviving_aliases_normalize_to_canonical(self):
-        # Kept because they are not prefixes ('ctx', 'lm') or are ambiguous ones ('s').
-        self.assertEqual(self._xlate("ctx lm"), ["context", "list-metrics"])
+        # Kept because they are not prefixes ('lm') or are ambiguous ones ('s').
+        self.assertEqual(self._xlate("sig lm"), ["signal", "list-metrics"])
         self.assertEqual(self._xlate("s"), ["status"])
         self.assertEqual(self._xlate("data sm"), ["data", "show-metrics"])
 
     def test_ambiguous_prefix_is_rejected(self):
         # 'rm' gets no tiebreaker alias on purpose: no one-letter destructive command.
-        for line, expected in [("c", "constraint, context"), ("workout ad", "adapt, add"),
+        for line, expected in [("p", "plan, progress"), ("workout ad", "adapt, add"),
                                ("workout r", "restore, rm, rollback"),
                                ("benchmark r", "record, rm")]:
             with patch("sys.stderr", io.StringIO()) as err:

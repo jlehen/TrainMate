@@ -470,70 +470,70 @@ class TestDatabase(unittest.TestCase):
             test_db.wipe_garmin_data("2026-03-01", "2026-03-31")
         wiper.assert_called_once_with()
 
-    def test_daily_context_upsert_get_delete(self):
-        """Context signals upsert by event id (edits replace in place), query by date
-        window, and delete on cancellation (DESIGN_calendar_context_ingest.md §5)."""
-        test_db.upsert_daily_context_by_event(
+    def test_daily_signals_upsert_get_delete(self):
+        """Signals upsert by event id (edits replace in place), query by date
+        window, and delete on cancellation (DESIGN_calendar_signal_ingest.md §5)."""
+        test_db.upsert_daily_signal_by_event(
             google_event_id="evt-a", date="2026-06-13", metric="alcohol",
             value=2.0, text="2 drinks", updated="2026-06-13T20:00:00Z",
         )
-        test_db.upsert_daily_context_by_event(
+        test_db.upsert_daily_signal_by_event(
             google_event_id="evt-b", date="2026-06-14", metric="stress",
             value=None, text="rough day", updated=None,
         )
-        rows = test_db.get_daily_context(start_date="2026-06-13", end_date="2026-06-14")
+        rows = test_db.get_daily_signals(start_date="2026-06-13", end_date="2026-06-14")
         self.assertEqual([(r["metric"], r["value"]) for r in rows],
                          [("alcohol", 2.0), ("stress", None)])
 
         # Re-ingesting the same event id corrects in place (no duplicate row).
-        test_db.upsert_daily_context_by_event(
+        test_db.upsert_daily_signal_by_event(
             google_event_id="evt-a", date="2026-06-13", metric="alcohol",
             value=3.0, text="3 drinks", updated="2026-06-13T21:00:00Z",
         )
-        rows = test_db.get_daily_context()
+        rows = test_db.get_daily_signals()
         self.assertEqual(len(rows), 2)
         alcohol = next(r for r in rows if r["google_event_id"] == "evt-a")
         self.assertEqual((alcohol["value"], alcohol["text"]), (3.0, "3 drinks"))
 
         # Window excludes out-of-range dates.
-        self.assertEqual(test_db.get_daily_context(start_date="2026-06-14"),
+        self.assertEqual(test_db.get_daily_signals(start_date="2026-06-14"),
                          [r for r in rows if r["date"] == "2026-06-14"])
 
         # Cancellation deletes the row.
-        test_db.delete_daily_context_by_event("evt-a")
-        remaining = test_db.get_daily_context()
+        test_db.delete_daily_signal_by_event("evt-a")
+        remaining = test_db.get_daily_signals()
         self.assertEqual([r["google_event_id"] for r in remaining], ["evt-b"])
 
-        # wipe_metrics clears context alongside the evidence it contextualizes.
+        # wipe_metrics clears signals alongside the evidence they contextualize.
         test_db.wipe_metrics()
-        self.assertEqual(test_db.get_daily_context(), [])
+        self.assertEqual(test_db.get_daily_signals(), [])
 
-    def _seed_garmin_and_context(self):
-        """Seeds two dated metric/activity/context rows plus both sync watermarks."""
+    def _seed_garmin_and_signals(self):
+        """Seeds two dated metric/activity/signal rows plus both sync watermarks."""
         for d in ("2026-01-10", "2026-02-10"):
             test_db.save_metric_cache(d, rhr=50, hrv=60, sleep_score=80, stress=30)
             test_db.save_completed_activity(
                 f"act-{d}", d, None, "Run", "running", 3600, 10, 50, 140, 160, None, 50
             )
-        test_db.upsert_daily_context_by_event(
+        test_db.upsert_daily_signal_by_event(
             google_event_id="g-jan", date="2026-01-10", metric="alcohol",
             value=2.0, text="2 drinks",
         )
-        test_db.upsert_daily_context_by_event(
+        test_db.upsert_daily_signal_by_event(
             google_event_id="g-feb", date="2026-02-10", metric="alcohol",
             value=3.0, text="3 drinks",
         )
         test_db.set_sync_state(through_date="2026-02-10", last_pull_utc="t", key="garmin")
         test_db.set_sync_state(
-            through_date=None, last_pull_utc="t", key="calendar_context", sync_token="tok"
+            through_date=None, last_pull_utc="t", key="calendar_signals", sync_token="tok"
         )
 
     def test_wipe_garmin_data_scope_and_watermark(self):
         """--garmin wipes only Garmin evidence; a full wipe also resets the garmin/coach
         watermarks but never the calendar token, and a dated wipe leaves watermarks be."""
-        self._seed_garmin_and_context()
+        self._seed_garmin_and_signals()
 
-        # Dated wipe removes only in-range Garmin rows; context + watermarks untouched.
+        # Dated wipe removes only in-range Garmin rows; signals + watermarks untouched.
         test_db.wipe_garmin_data("2026-02-01", "2026-02-28")
         self.assertEqual(
             [m["date"] for m in test_db.get_metrics_cache()], ["2026-01-10"]
@@ -541,45 +541,45 @@ class TestDatabase(unittest.TestCase):
         self.assertEqual(
             [a["date"] for a in test_db.get_completed_activities()], ["2026-01-10"]
         )
-        self.assertEqual(len(test_db.get_daily_context()), 2)  # calendar untouched
+        self.assertEqual(len(test_db.get_daily_signals()), 2)  # calendar untouched
         self.assertIsNotNone(test_db.get_sync_state("garmin"))  # watermark kept
 
         # Full Garmin wipe clears the rest + the garmin watermark, sparing the calendar.
         test_db.wipe_garmin_data()
         self.assertEqual(test_db.get_metrics_cache(), [])
         self.assertIsNone(test_db.get_sync_state("garmin"))
-        self.assertIsNotNone(test_db.get_sync_state("calendar_context"))
-        self.assertEqual(len(test_db.get_daily_context()), 2)
+        self.assertIsNotNone(test_db.get_sync_state("calendar_signals"))
+        self.assertEqual(len(test_db.get_daily_signals()), 2)
 
-    def test_wipe_calendar_context_scope_and_token(self):
-        """--calendar wipes daily context and always resets the Calendar token (full or
+    def test_wipe_calendar_signals_scope_and_token(self):
+        """--calendar wipes daily signals and always resets the Calendar token (full or
         dated), but leaves Garmin evidence and its watermark alone."""
-        self._seed_garmin_and_context()
+        self._seed_garmin_and_signals()
 
-        # Dated wipe drops only the in-range context row, yet still resets the token so
+        # Dated wipe drops only the in-range signal row, yet still resets the token so
         # the next pull re-syncs in full.
-        test_db.wipe_calendar_context("2026-01-01", "2026-01-31")
+        test_db.wipe_calendar_signals("2026-01-01", "2026-01-31")
         self.assertEqual(
-            [c["date"] for c in test_db.get_daily_context()], ["2026-02-10"]
+            [c["date"] for c in test_db.get_daily_signals()], ["2026-02-10"]
         )
-        self.assertIsNone(test_db.get_sync_state("calendar_context"))
+        self.assertIsNone(test_db.get_sync_state("calendar_signals"))
         self.assertEqual(len(test_db.get_metrics_cache()), 2)  # Garmin untouched
         self.assertIsNotNone(test_db.get_sync_state("garmin"))
 
-        # Full calendar wipe clears the remaining context row.
-        test_db.wipe_calendar_context()
-        self.assertEqual(test_db.get_daily_context(), [])
+        # Full calendar wipe clears the remaining signal row.
+        test_db.wipe_calendar_signals()
+        self.assertEqual(test_db.get_daily_signals(), [])
 
     def test_sync_state_token_is_per_key(self):
-        """The calendar_context row carries a sync_token; the garmin row keeps its
+        """The calendar_signals row carries a sync_token; the garmin row keeps its
         date watermark. Distinct keys never clobber each other's columns."""
         test_db.set_sync_state(through_date="2026-06-14", last_pull_utc="t1", key="garmin")
         test_db.set_sync_state(
-            through_date=None, last_pull_utc="t2", key="calendar_context",
+            through_date=None, last_pull_utc="t2", key="calendar_signals",
             sync_token="tok-123",
         )
         garmin = test_db.get_sync_state(key="garmin")
-        ctx = test_db.get_sync_state(key="calendar_context")
+        ctx = test_db.get_sync_state(key="calendar_signals")
         self.assertEqual(garmin["through_date"], "2026-06-14")
         self.assertIsNone(garmin["sync_token"])
         self.assertEqual(ctx["sync_token"], "tok-123")
@@ -587,10 +587,10 @@ class TestDatabase(unittest.TestCase):
 
         # Updating the token preserves the per-key isolation.
         test_db.set_sync_state(
-            through_date=None, last_pull_utc="t3", key="calendar_context",
+            through_date=None, last_pull_utc="t3", key="calendar_signals",
             sync_token="tok-456",
         )
-        self.assertEqual(test_db.get_sync_state(key="calendar_context")["sync_token"],
+        self.assertEqual(test_db.get_sync_state(key="calendar_signals")["sync_token"],
                          "tok-456")
         self.assertEqual(test_db.get_sync_state(key="garmin")["through_date"], "2026-06-14")
 

@@ -268,8 +268,8 @@ def add_workout_parser(subparsers, pull_bypass_parser, llm_debug_parser):
             "won't override clear fatigue signals. The note itself isn't stored, but if "
             "it drives a session change its cause is recorded in that session's reason so "
             "a later run understands the tactical change; it stays a one-off and never "
-            "becomes durable block evidence. For persistent context (alcohol, sleep, "
-            "stress) use 'context add' instead."
+            "becomes durable block evidence. For persistent signals (alcohol, sleep, "
+            "stress) use 'signal add' instead."
         )
     )
     w_adapt.add_argument(

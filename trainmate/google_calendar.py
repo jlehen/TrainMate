@@ -13,7 +13,7 @@ from trainmate import calendar_lineage
 from trainmate import intensity
 from trainmate.util import fmt_timestamp, yellow, aside
 
-# Events fetched per Calendar API page during a context sync (the response is paged
+# Events fetched per Calendar API page during a signal sync (the response is paged
 # through with pageToken regardless, so this only tunes round-trips vs payload size).
 CALENDAR_SYNC_PAGE_SIZE = 250
 
@@ -313,22 +313,22 @@ class CalendarSyncer:
         return synced_ids
 
     # ------------------------------------------------------------------
-    # Inbound: external daily-context signals (alcohol, sleep, stress, …)
+    # Inbound: external daily signals (alcohol, sleep, stress, …)
     # ------------------------------------------------------------------
-    def sync_context(self) -> int:
-        """Pulls tagged daily-context events from the calendar into `daily_context`.
+    def sync_signals(self) -> int:
+        """Pulls tagged signal events from the calendar into `daily_signals`.
 
         Incremental via `syncToken` (edit and delete detection come for free); falls
         back to a full pull of *all* tagged events on first run or when the token has
         expired (HTTP 410). The server-side `privateExtendedProperty` filter applies to
         the full pull only — the API forbids it alongside `syncToken`, so the incremental
         stream carries every changed event and is filtered client-side. Returns the number
-        of rows upserted or deleted (DESIGN_calendar_context_ingest.md §3, §6).
+        of rows upserted or deleted (DESIGN_calendar_signal_ingest.md §3, §6).
         """
         if not self.calendar_id:
             return 0
 
-        state = runtime.db.get_sync_state(key="calendar_context")
+        state = runtime.db.get_sync_state(key="calendar_signals")
         use_token: Optional[str] = state.get("sync_token") if state else None
 
         changed = 0
@@ -346,7 +346,7 @@ class CalendarSyncer:
             if use_token:
                 params['syncToken'] = use_token
             else:
-                params['privateExtendedProperty'] = f"source={config.calendar_context_tag}"
+                params['privateExtendedProperty'] = f"source={config.calendar_signal_tag}"
 
             if page_token:
                 params['pageToken'] = page_token
@@ -361,7 +361,7 @@ class CalendarSyncer:
                     continue
                 raise
             for event in resp.get('items', []):
-                changed += self._ingest_context_event(event)
+                changed += self._ingest_signal_event(event)
             page_token = resp.get('nextPageToken')
             if not page_token:
                 next_sync_token = resp.get('nextSyncToken')
@@ -370,13 +370,13 @@ class CalendarSyncer:
         runtime.db.set_sync_state(
             through_date=None,
             last_pull_utc=datetime.now(timezone.utc).isoformat(),
-            key="calendar_context",
+            key="calendar_signals",
             sync_token=next_sync_token,
         )
         return changed
 
-    def _ingest_context_event(self, event: dict) -> int:
-        """Reconciles a single context event into `daily_context`. A cancelled event
+    def _ingest_signal_event(self, event: dict) -> int:
+        """Reconciles a single signal event into `daily_signals`. A cancelled event
         deletes its row; otherwise the row is upserted by event id. Returns 1 if the DB
         changed, else 0."""
         event_id = event.get('id')
@@ -385,12 +385,12 @@ class CalendarSyncer:
         if event.get('status') == 'cancelled':
             # Cancelled events arrive stripped of extendedProperties, so the tag guard
             # below can't run: a deleted row is the proof it was ours (§6).
-            return 1 if runtime.db.delete_daily_context_by_event(event_id) else 0
+            return 1 if runtime.db.delete_daily_signal_by_event(event_id) else 0
 
         private = (event.get('extendedProperties', {}) or {}).get('private', {}) or {}
         # On the incremental path this is the *only* filter (no server-side one is
         # allowed with a syncToken) — skip anything not actually ours (§3).
-        if private.get('source') != config.calendar_context_tag:
+        if private.get('source') != config.calendar_signal_tag:
             return 0
 
         start = event.get('start', {}) or {}
@@ -398,12 +398,12 @@ class CalendarSyncer:
         if not date:
             return 0
 
-        runtime.db.upsert_daily_context_by_event(
+        runtime.db.upsert_daily_signal_by_event(
             google_event_id=event_id,
             date=date,
-            metric=private.get('metric') or 'context',
+            metric=private.get('metric') or 'signal',
             value=self._parse_float(private.get('value')),
-            text=self._context_text(event),
+            text=self._signal_text(event),
             updated=event.get('updated'),
         )
         return 1
@@ -419,20 +419,20 @@ class CalendarSyncer:
             return None
 
     @staticmethod
-    def _context_text(event: dict) -> Optional[str]:
+    def _signal_text(event: dict) -> Optional[str]:
         """The human blurb handed to the coach: summary then description, trimmed."""
         parts = [event.get('summary'), event.get('description')]
         text = "\n".join(p.strip() for p in parts if p and p.strip())
         return text or None
 
-    def add_context_event(
+    def add_signal_event(
         self, date: str, metric: str, value: Optional[float],
         text: Optional[str], existing_event_id: Optional[str] = None
     ) -> Optional[str]:
-        """Authors (or updates) a tagged daily-context event for a single day.
+        """Authors (or updates) a tagged signal event for a single day.
 
-        TrainMate becomes the first-party producer of the same `source=<context_tag>`
-        events the external syncer writes (DESIGN_context_authoring.md). All-day, end
+        TrainMate becomes the first-party producer of the same `source=<signal_tag>`
+        events the external syncer writes (DESIGN_signal_authoring.md). All-day, end
         exclusive = start + 1 day, matching workouts. When `existing_event_id` is given
         the event is updated in place (the idempotent upsert-by-(date,metric) path);
         otherwise a new one is inserted. Returns the event id, or None if no calendar
@@ -444,7 +444,7 @@ class CalendarSyncer:
         end_date_str = (
             datetime.strptime(date, "%Y-%m-%d").date() + timedelta(days=1)
         ).strftime("%Y-%m-%d")
-        private = {'source': config.calendar_context_tag, 'metric': metric}
+        private = {'source': config.calendar_signal_tag, 'metric': metric}
         if value is not None:
             private['value'] = str(value)
         event_body = {
@@ -522,28 +522,28 @@ class CalendarSyncer:
 calendar_syncer = CalendarSyncer()
 
 
-# Per-process memo: a single CLI command syncs context at most once.
-_context_synced: bool = False
+# Per-process memo: a single CLI command syncs signals at most once.
+_signals_synced: bool = False
 
 
-def sync_calendar_context(force: bool = False) -> None:
-    """Refreshes daily context from the calendar, gating/throttling the actual sync.
+def sync_calendar_signals(force: bool = False) -> None:
+    """Refreshes daily signals from the calendar, gating/throttling the actual sync.
 
     Rides along with `data pull` (force=True) and the auto-ensure-before-read path
     (force=False, where it runs at most once per process and skips entirely while the
     last sync is still fresh). Best-effort: no calendar configured is a silent no-op,
     and any Calendar error is swallowed with a warning so a data read never blocks
-    (DESIGN_calendar_context_ingest.md §6).
+    (DESIGN_calendar_signal_ingest.md §6).
     """
-    global _context_synced
+    global _signals_synced
     if not config.google_calendar_id:
         return
     if not force:
-        if _context_synced:
+        if _signals_synced:
             return
         # Skip if a recent sync already covers the freshness window (shared with the
         # Garmin metric-refresh cadence — "how fresh is fresh enough").
-        state = runtime.db.get_sync_state(key="calendar_context")
+        state = runtime.db.get_sync_state(key="calendar_signals")
         if state and state.get("last_pull_utc"):
             try:
                 age = datetime.now(timezone.utc) - datetime.fromisoformat(
@@ -551,16 +551,16 @@ def sync_calendar_context(force: bool = False) -> None:
                 )
                 if age <= timedelta(minutes=config.data_refresh_minutes):
                     aside(
-                        f"Calendar context is fresh (last sync "
+                        f"Calendar signals is fresh (last sync "
                         f"{int(age.total_seconds() // 60)}m ago); using cache. "
                         "Pass --force-pull to refresh now."
                     )
-                    _context_synced = True
+                    _signals_synced = True
                     return
             except (ValueError, TypeError):
                 pass
     try:
-        calendar_syncer.sync_context()
-        _context_synced = True
+        calendar_syncer.sync_signals()
+        _signals_synced = True
     except Exception as e:
-        print(yellow(f"Warning: calendar context sync skipped: {e}"))
+        print(yellow(f"Warning: calendar signal sync skipped: {e}"))

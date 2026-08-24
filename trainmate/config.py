@@ -252,7 +252,7 @@ class Config:
     @property
     def data_refresh_minutes(self) -> int:
         """Minimum minutes before an automatic refresh re-pulls — gating both Garmin hits
-        and Calendar-context syncs; within this window reads reuse the local cache
+        and Calendar-signal syncs; within this window reads reuse the local cache
         (top-level `refresh_minutes`, default 120)."""
         return int(self.get("refresh_minutes", 120))
 
@@ -344,9 +344,11 @@ class Config:
         return self._load_window_days("pmc_atl_days", 7)
 
     @property
-    def calendar_context_tag(self) -> str:
-        """Gets the source tag for calendar events."""
-        return self.get("google", {}).get("calendar_context_tag", "trainmate-context")
+    def calendar_signal_tag(self) -> str:
+        """Gets the source tag for calendar events. The default keeps the pre-rename
+        string: it is written into events the external syncer also produces, so changing
+        it orphans every event already tagged (DESIGN_calendar_signal_ingest.md §4)."""
+        return self.get("google", {}).get("calendar_signal_tag", "trainmate-context")
 
     @property
     def high_intensity_rpe_threshold(self) -> int:
@@ -359,20 +361,20 @@ class Config:
         return float(self.get("coach", {}).get("high_intensity_tss_threshold", 120.0))
 
     @property
-    def context_days_lookahead(self) -> int:
-        """The look-ahead `k` for quantitative context-impact alignment: how many mornings
+    def signal_days_lookahead(self) -> int:
+        """The look-ahead `k` for quantitative signal-impact alignment: how many mornings
         bracket each signal episode (before and after) and the drink-free gap below which
-        two signal runs merge into one episode (DESIGN_quantitative_context_impact.md §3,
+        two signal runs merge into one episode (DESIGN_quantitative_signal_impact.md §3,
         §3.0). Default 3."""
-        return int(self.get("coach", {}).get("context_days_lookahead", 3))
+        return int(self.get("coach", {}).get("signal_days_lookahead", 3))
 
     @property
-    def context_days_min_signal_days(self) -> int:
-        """Minimum total signal-days a context category must have before its aligned rows
+    def signal_days_min_days(self) -> int:
+        """Minimum total signal-days a signal category must have before its aligned rows
         are shown to the coach at all — a floor against prompting on one stray night
-        (DESIGN_quantitative_context_impact.md §5). Counts signal-days, not episodes.
+        (DESIGN_quantitative_signal_impact.md §5). Counts signal-days, not episodes.
         Default 1 (show whatever exists; the LLM judges from the visible count)."""
-        return int(self.get("coach", {}).get("context_days_min_signal_days", 1))
+        return int(self.get("coach", {}).get("signal_days_min_days", 1))
 
     @property
     def telegram_bot_token(self) -> Optional[str]:

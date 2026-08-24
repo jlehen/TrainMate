@@ -238,7 +238,7 @@ class ActivitiesMixin:
     # --- Sync watermark ---
     def get_sync_state(self, key: str = "garmin") -> Optional[Dict[str, Any]]:
         """Returns the {through_date, last_pull_utc, sync_token} state for a source,
-        or None. sync_token is the opaque Calendar nextSyncToken (calendar_context row);
+        or None. sync_token is the opaque Calendar nextSyncToken (calendar_signals row);
         through_date is the Garmin forward high-water mark."""
         with self._get_connection() as conn:
             cursor = conn.cursor()
@@ -256,7 +256,7 @@ class ActivitiesMixin:
     ) -> None:
         """Upserts the watermark. through_date only ever advances (forward high-water
         mark); a backward backfill passes the existing value through unchanged.
-        sync_token carries the Calendar nextSyncToken for the calendar_context row;
+        sync_token carries the Calendar nextSyncToken for the calendar_signals row;
         rows that don't use it pass None. Each source owns a distinct key, so the
         unused columns simply stay NULL per row."""
         with self._get_connection() as conn:

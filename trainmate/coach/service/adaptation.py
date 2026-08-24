@@ -80,14 +80,14 @@ class AdaptationMixin:
             start_date=start_date_str, end_date=target_date_str
         )
 
-        # External daily-context signals over the window, so the adaptation can tell a
+        # External daily signals over the window, so the adaptation can tell a
         # lifestyle-suppressed morning (alcohol/poor sleep the day before) from genuine
         # training fatigue and avoid cutting load on a non-training artifact. Recovery
         # lags the signal by a day, so reach one day before the metrics window to cover
         # the first morning's preceding-day signal.
-        context_start_str = (start_date_obj - timedelta(days=1)).strftime("%Y-%m-%d")
-        daily_context = self._db.get_daily_context(
-            start_date=context_start_str, end_date=target_date_str
+        signal_start_str = (start_date_obj - timedelta(days=1)).strftime("%Y-%m-%d")
+        daily_signals = self._db.get_daily_signals(
+            start_date=signal_start_str, end_date=target_date_str
         )
 
         # Determine mesocycle end date for the adaptation range. The plan we adapt runs
@@ -205,7 +205,7 @@ class AdaptationMixin:
             discrepancies=format_discrepancies(discrepancies),
             informational=informational,
             removed_workouts=removed_workouts,
-            daily_context=daily_context,
+            daily_signals=daily_signals,
             completed_keys=completed_keys,
             athlete_message=message,
             constraints=constraints,

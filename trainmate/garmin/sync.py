@@ -166,22 +166,22 @@ def pull(
             last_pull_utc=datetime.now(timezone.utc).isoformat(),
         )
 
-    # An explicit pull also refreshes external calendar context (best-effort).
-    _sync_calendar_context(force=True)
+    # An explicit pull also refreshes external calendar signals (best-effort).
+    _sync_calendar_signals(force=True)
     return f"Garmin {start_date}..{end_date}: " + (", ".join(landed) or "nothing requested") + "."
 # Process-level memo: the widest [start, end] window already ensured this run, so
 # repeated reads (coach.py touches metrics/activities many times) cost nothing and
 # we never log into Garmin twice per command.
 _ensured: Optional[Tuple[str, str]] = None
-def _sync_calendar_context(force: bool) -> None:
-    """Bridge to the calendar module's context sync, lazily imported so a missing
+def _sync_calendar_signals(force: bool) -> None:
+    """Bridge to the calendar module's signal sync, lazily imported so a missing
     service-account file (calendar unconfigured) can never break a Garmin read. The
     gating, throttling, and error handling all live in google_calendar."""
     try:
         from trainmate import google_calendar
     except Exception:
         return  # Calendar not importable/configured — nothing to sync.
-    google_calendar.sync_calendar_context(force=force)
+    google_calendar.sync_calendar_signals(force=force)
 def _pull_command(start: str, end: str) -> str:
     return f"python trainmate_cli.py data pull -d {start}..{end}"
 def _contiguous_regions(missing: List[str]) -> List[Tuple[str, str]]:
@@ -200,14 +200,14 @@ def ensure_data(start_date: str, end_date: str, force: bool = False) -> None:
     blocks. Call once at command entry with the window the command will read.
 
     `force` (from --force-pull) bypasses the refresh-minutes throttle: the recent
-    mutable zone is re-fetched and Calendar context re-synced even if a refresh ran
+    mutable zone is re-fetched and Calendar signals re-synced even if a refresh ran
     within the freshness window.
     """
     global _ensured
-    # Refresh external calendar context alongside the data read (independent of Garmin
+    # Refresh external calendar signals alongside the data read (independent of Garmin
     # auth; throttled + memoized inside, best-effort). Done first so it still runs even
     # when Garmin credentials are absent.
-    _sync_calendar_context(force=force)
+    _sync_calendar_signals(force=force)
 
     # No credentials → we can't pull anyway. Stay silent rather than warn on every
     # read; manual `data pull` reports the missing-credentials error explicitly.

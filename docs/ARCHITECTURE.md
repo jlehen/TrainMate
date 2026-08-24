@@ -29,7 +29,7 @@ has **one canonical home**; other sections point to it instead of paraphrasing
 10. [Key Data Flows](#10-key-data-flows) — [Plan gen](#plan-generation-plan-generate) · [Workout gen](#workout-generation-workout-generate) · [Adaptation](#daily-adaptation-workout-adapt) · [Data pull](#data-pull-data-pull-and-auto-ensure) · [Analysis](#data-analysis-data-bootstrap--data-reflect)
 11. [Terminology: Plans vs. Workouts](#11-terminology-plans-vs-workouts)
 12. [Sports Science & Coaching Mathematics](#12-sports-science--coaching-mathematics)
-13. [Daily Context (Calendar Ingest)](#13-daily-context-calendar-ingest)
+13. [Daily Signals (Calendar Ingest)](#13-daily-signal-calendar-ingest)
 14. [Testing](#14-testing)
 15. [Design Rationale & History](#15-design-rationale--history)
 
@@ -87,7 +87,7 @@ classes themselves.
   ([§6](#6-singletons)), which handlers read directly, so nothing under `trainmate/`
   imports this module.
 - **`trainmate/cli/`** — per-command-family handler modules (`run_*()`): `status`,
-  `progress`, `goals`, `constraints`, `benchmarks`, `context`, `learnings`,
+  `progress`, `goals`, `constraints`, `benchmarks`, `signal`, `learnings`,
   `plans`, `data`, `models`, the `workouts/` package, plus shared `common`.
 - **`trainmate_web.py`** — Flask REST API behind the dashboard. **Read-only**: GET
   handlers over `db` and the shared pure modules, no writes, no Garmin, no LLM, no
@@ -200,12 +200,12 @@ classes themselves.
 |                      |                      | `load_ratio`, `recompute_derived`, `backfill_tss` |
 |                      |                      | (see §12); `sync.py` = `pull`/`ensure_data`, the  |
 |                      |                      | `sync_state` watermark, the per-process memo, and |
-|                      |                      | the bridge that rides a Calendar daily-context    |
+|                      |                      | the bridge that rides a Calendar daily-signal    |
 |                      |                      | sync along with every pull (§13).                 |
 | `google_calendar.py` | `calendar_syncer`    | Creates/updates/deletes all-day Google Calendar  |
 |                      |                      | events for workouts (outbound), and ingests       |
-|                      |                      | tagged daily-context events into `daily_context` |
-|                      |                      | (inbound — `sync_calendar_context`, see §13).    |
+|                      |                      | tagged signal events into `daily_signals` |
+|                      |                      | (inbound — `sync_calendar_signals`, see §13).    |
 | `calendar_reconcile.py` | —                 | The pass that makes Calendar agree with the      |
 |                      |                      | workouts log after a change commits: per lineage, |
 |                      |                      | push, retitle `[Deleted]`, or tear the event down |
@@ -314,7 +314,7 @@ flow for each lives in [§10](#10-key-data-flows).
 | Progress timeline / PMC projection | `trainmate/progression.py` (pure math), `trainmate/timeline.py` (shared row-fetch), `trainmate/chart.py` (PNG), `cli/progress.py` (text), `/api/timeline.png` in `trainmate_web.py`, see [§12](#fitnessfatigueform-pmc-model), DESIGN_progress_timeline.md |
 | Intensity distribution / time in zone | `trainmate/intensity.py` (aggregation + prompt-width rendering + which sports qualify and in which currency — `window_sport_stats`/`select_zone_sports`/`zone_currency`, shared by the CLI tables and `/api/zones`), `coach/service/context.py` (`_intensity_block_context` for adapt, `_intensity_history_context` for the strategy prompt, `_block_progress_context` for workout generate — the only consumer passing `block_report`'s `previous=` and `fetch_workouts=`, since block-over-block creep and measured-vs-prescribed attribution are periodization questions (§9.2a), `_planning_zone_currencies` for §9.8), `cli/status.py`, `cli/progress.py` (the weekly grid — it shares the load table's week column and 48-column budget), `progression.weekly_aggregates` (where the rows join the payload), `cli/data.py` (`--zones`), `/api/zones` + the Progress tab's tables in `static/app.js`, DESIGN_intensity_distribution.md. Undercount markers are proportional: `intensity.judgeable` (`config.zone_min_activity_minutes`) withholds a too-short session's vote, and the coverage bar is per sport (`intensity.COVERAGE_MIN_BY_SPORT`, overridable via `config.zone_coverage_display_min_by_sport`) because rest between sets is not a failed recording. Both maps' keys must be **canonical** sports — `coverage_display_min()` canonicalizes before the lookup, so an alias key is dead and silently reverts to the global bar |
 | Planned time in zone (a session's intensity target) | `db/base.py` (`planned_zone_currency`, `planned_zone1..7_sec` on `workouts`), `db/workouts.py:WorkoutChange.append`, `intensity.parse_planned_zones` / `format_planned_zones`, `coach/engine/workouts.py` (`_planned_zone_task`, `_planned_zone_fields` — both prompts), `google_calendar.py` + `coach/formatting.py` (rendered from the columns, never stored), DESIGN_intensity_distribution.md §9.8 |
-| Calendar push / daily-context ingest | `trainmate/google_calendar.py`, see [§13](#13-daily-context-calendar-ingest) |
+| Calendar push / daily-signal ingest | `trainmate/google_calendar.py`, see [§13](#13-daily-signal-calendar-ingest) |
 | Workout state (modified/calendar/removed) | `trainmate/calendar_state.py`, `db/workouts.py`, `cli/workouts/_helpers.py::modification_markers` ([§5](#workout-state--three-orthogonal-axes-not-one-enum)) |
 | A CLI command                    | `trainmate/cli/<family>.py` (`run_*`), dispatcher in `trainmate_cli.py` ([§7](#7-cli-commands-reference)) |
 | A message telling the athlete to run something | wrap the command in `util.cmd()`, nested *inside* the line's colour call, so it renders as the bright shade of that colour — and emit it with `util.aside`, not `print`: a "you could now run X" hint is side information |
@@ -341,8 +341,8 @@ three submodules:
   sessions `[COMPLETED — locked history, not adaptable]` from the adherence
   `completed_keys`, and tags already-eased sessions `[ALREADY EASED …]` with
   recency/count from `adapted_at`/`adaptation_count` so a re-run doesn't compound
-  the cut), `format_removed_workouts`, `format_daily_context`
-  (renders the window's `daily_context` rows into the adapt prompt),
+  the cut), `format_removed_workouts`, `format_daily_signals`
+  (renders the window's `daily_signals` rows into the adapt prompt),
   `format_baseline`, `_load_science_guidelines`.
 - `engine/` — `CoachEngine` (prompt construction, hashing, LLM calls), assembled
   from mixins (`prompt`, `planning`, `workouts`, `analysis`). Owns the
@@ -739,7 +739,7 @@ from trainmate.coach import coach_service
 
 `Database` is composed from per-domain mixins — `base.py` (`BaseDB`:
 connection + schema setup), `objectives.py`, `constraints.py`,
-`dailycontext.py`, `workouts.py`, `activities.py`, `learnings.py`, `analysis.py`,
+`signals.py`, `workouts.py`, `activities.py`, `learnings.py`, `analysis.py`,
 `periodization.py`, `wipes.py` — all re-exported from `__init__.py` so
 `from trainmate.db import ...` is unchanged.
 
@@ -819,9 +819,9 @@ methods whose behavior is *not* obvious from that convention are called out belo
 - **Constraints** (`constraints.py`) — the unified directive object. Beyond the CRUD
   convention: `get_constraints(start, end)` returns rows overlapping a window (open-ended
   when `end` is None — the plan form).
-- **Daily Context** (`dailycontext.py`) — external signals are reconciled **by
+- **Daily Signals** (`signals.py`) — external signals are reconciled **by
   Calendar event id**, so the writer/deleter are `*_by_event(google_event_id, …)`
-  variants alongside the id-based ones used by the `context` command. Cleared by
+  variants alongside the id-based ones used by the `signal` command. Cleared by
   `wipe_metrics` (see §13).
 - **Workouts** (`workouts.py`) — the naming convention does not apply here, because the
   table is a log rather than a set of rows to edit. The whole write side is
@@ -844,7 +844,7 @@ methods whose behavior is *not* obvious from that convention are called out belo
   `wipe_garmin_data(start, end)` also clears the evidence-derived `analysis_cache`
   and, on a *full* wipe, resets the garmin/reflect/bootstrap watermarks (a dated wipe
   leaves them, since re-pull detects gaps by row presence);
-  `wipe_calendar_context(start, end)` always resets the Calendar sync token (the
+  `wipe_calendar_signals(start, end)` always resets the Calendar sync token (the
   incremental sync otherwise can't backfill deleted rows); `wipe_metrics()` = both.
   `wipe_garmin_data` runs `garmin.recompute_derived()` **itself**, after its own
   transaction commits: deleted load stays baked into every later day's CTL/ATL EWMA
@@ -1189,17 +1189,17 @@ sweep run after every pull).
 Per-source sync progress, one row per `key`. The `garmin` row holds the pull
 watermark: `through_date` is the forward high-water mark (local YYYY-MM-DD) and
 only ever advances; `last_pull_utc` is an instant compared against now for the
-freshness interval. The `calendar_context` row instead holds `sync_token` (the
+freshness interval. The `calendar_signals` row instead holds `sync_token` (the
 opaque Calendar `nextSyncToken`) with `through_date` NULL. Each source populates
-only the columns it uses. See §10 (Data Pull), §13 (Daily Context),
-`DESIGN_garmin_direct_pull.md`, and `DESIGN_calendar_context_ingest.md`.
+only the columns it uses. See §10 (Data Pull), §13 (Daily Signals),
+`DESIGN_garmin_direct_pull.md`, and `DESIGN_calendar_signal_ingest.md`.
 
 | Column          | Type    | Notes                                            |
 |-----------------|---------|--------------------------------------------------|
-| `key`           | TEXT PK | Source key: `garmin` or `calendar_context`       |
+| `key`           | TEXT PK | Source key: `garmin` or `calendar_signals`       |
 | `through_date`  | TEXT    | Garmin forward high-water mark (local YYYY-MM-DD)|
 | `last_pull_utc` | TEXT    | ISO instant of last successful sync              |
-| `sync_token`    | TEXT    | Calendar `nextSyncToken` (calendar_context row)  |
+| `sync_token`    | TEXT    | Calendar `nextSyncToken` (calendar_signals row)  |
 
 ### settings
 App preferences that outlive one invocation but aren't training data — a generic
@@ -1213,12 +1213,12 @@ key: `llm_model`, the chosen LLM identifier. See `DESIGN_model_selection.md` §2
 | `value`      | TEXT    | Stored value (an OpenRouter model identifier)      |
 | `updated_at` | TEXT    | UTC ISO instant of the last write                  |
 
-### daily_context
-External daily context signals (alcohol, sleep, stress, …) ingested from tagged
+### daily_signals
+External daily signals (alcohol, sleep, stress, …) ingested from tagged
 Google Calendar events. TrainMate is domain-agnostic: `metric` is an opaque
 category and `value` an optional numeric magnitude. Reconciled by
 `google_event_id` (upsert on edit, delete on cancellation). See §13 and
-`DESIGN_calendar_context_ingest.md`.
+`DESIGN_calendar_signal_ingest.md`.
 
 | Column            | Type        | Notes                                          |
 |-------------------|-------------|------------------------------------------------|
@@ -1395,7 +1395,7 @@ prompt reads, so the `data reflect` it points at is a command that can clear it
 |------------------|------------|----------------------------------------------------|
 | `id`             | INTEGER PK |                                                    |
 | `horizon`        | TEXT       | `long` \| `short` — UNIQUE; the cache slot         |
-| `fingerprint`    | TEXT       | Hash of the per-activity load fields (`date`, type, `duration_sec`, `tss`, `rpe`, `zone1..5_sec` — not merely the id set, so a corrected re-pull invalidates the cache) + metrics + overlapping constraints + the window's `daily_context` + the full-history `context_days` block as computed + window |
+| `fingerprint`    | TEXT       | Hash of the per-activity load fields (`date`, type, `duration_sec`, `tss`, `rpe`, `zone1..5_sec` — not merely the id set, so a corrected re-pull invalidates the cache) + metrics + overlapping constraints + the window's `daily_signals` + the full-history `signal_days` block as computed + window |
 | `window_start`   | TEXT       | YYYY-MM-DD                                         |
 | `window_end`     | TEXT       | YYYY-MM-DD                                         |
 | `reconstruction` | TEXT       | JSON: inferred cycles + physiological insights     |
@@ -1484,7 +1484,7 @@ Invoked as `python trainmate_cli.py [--llm-model MODEL] <command> [subcommand] [
 patchable singletons; the handler functions, named
 `run_<command>_<subcommand>()`, live in the `trainmate/cli/` package
 (one module per command family: `status`, `progress`, `goals`, `constraints`,
-`benchmarks`, `context`, `learnings`, `plans`, `data`, `models`, plus the
+`benchmarks`, `signal`, `learnings`, `plans`, `data`, `models`, plus the
 `workouts/` **package** — `parser`/`generate`/`edit`/`_helpers`; `selectors.py` holds the
 shared range grammar and `argparse_ext.py` the parser/help extensions). `help` is the one
 exception — it just introspects the parser tree (`_print_command_tree` in
@@ -1493,11 +1493,11 @@ exception — it just introspects the parser tree (`_print_command_tree` in
 **Short forms** (DESIGN_cli_noargs.md §d): any prefix that matches exactly one
 command at its level *is* that command — `pl g` is `plan generate`, `constr ed` is
 `constraint edit` — so the "Short form" column below lists examples, not a closed
-set. An ambiguous prefix (`p` → `plan`/`progress`, `c` → `constraint`/`context`)
+set. An ambiguous prefix (`p` → `plan`/`progress`)
 is refused, naming the candidates. Only shorthands that are *not* prefixes
-(`ctx`, `lm`, `df`, `rb`, `sm`, `sa`, `use`) or that pick a winner among an
+(`lm`, `df`, `rb`, `sm`, `sa`, `use`) or that pick a winner among an
 ambiguous set (`s` → `status`, `workout a` → `adapt`, `workout p` → `push`,
-`context l` → `list`, `data b` → `bootstrap`) stay registered as real aliases.
+`signal l` → `list`, `data b` → `bootstrap`) stay registered as real aliases.
 `rm` deliberately gets no winner — `r` stays ambiguous rather than shortening the
 destructive command. Anything in the column that is *not* in those two registered
 sets is a prefix, and a prefix silently breaks the day a sibling with the same first
@@ -1516,7 +1516,7 @@ one block an atom names — mesocycle ID, a date it covers, or an infix of its n
 resolved against one plan's blocks, which is what `plan feedback -m` files a note to
 (DESIGN_plan_feedback.md §5).
 
-**A bare command group** (`goal`, `constraint`, `benchmark`, `context`, `learnings`,
+**A bare command group** (`goal`, `constraint`, `benchmark`, `signal`, `learnings`,
 `workout`, `data`, `plan`, and the root) prints that level's full help and exits 1. This
 is *not* argparse's missing-argument path, so it gets neither the "the following
 arguments are required" line nor the chat short form — under `TRAINMATE_FRONTEND=json`
@@ -1539,10 +1539,10 @@ single read-only view that is its whole state (`model`), which acts bare instead
 | `constraint` | `list`       | `cons l` | List directives from the current mesocycle onward (`-a`/`--all`, `-v`, selectors `-d`/`-m`/`-M`/`-g`; default anchor: active mesocycle start, else show all) |
 | `constraint` | `show`       | `cons s` | Show a directive in detail (incl. plan-shaping status and whether a coach pass has honored it) |
 | `constraint` | `wipe`       | —        | Delete all constraints                                                  |
-| `context`    | `add`        | `ctx a`  | Author daily-context signal(s) (positional `METRIC [TEXT…]` or `-l/--label`, `--value N`, `-d RANGE` — no `-m`/`-M`, a signal spans days not blocks; one tagged all-day event per day) |
-| `context`    | `rm`         | `ctx r`  | Remove signal(s) by positional ID(s) or metric, and/or selectors `-d`/`-m`/`-M`/`-g` (deletes calendar event + local row) |
-| `context`    | `list`       | `ctx l`  | List signals (positional `METRIC` or `--metric`, selectors `-d`/`-m`/`-M`/`-g`; default window `metrics_lookback_days`) |
-| `context`    | `list-metrics` | `ctx lm` | Show distinct metrics in use with counts and date span                   |
+| `signal`     | `add`        | `sig a`  | Author daily signal(s) (positional `METRIC [TEXT…]` or `-l/--label`, `--value N`, `-d RANGE` — no `-m`/`-M`, a signal spans days not blocks; one tagged all-day event per day) |
+| `signal`     | `rm`         | `sig r`  | Remove signal(s) by positional ID(s) or metric, and/or selectors `-d`/`-m`/`-M`/`-g` (deletes calendar event + local row) |
+| `signal`     | `list`       | `sig l`  | List signals (positional `METRIC` or `--metric`, selectors `-d`/`-m`/`-M`/`-g`; default window `metrics_lookback_days`) |
+| `signal`     | `list-metrics` | `sig lm` | Show distinct metrics in use with counts and date span                   |
 | `learnings`  | `list`       | `l`      | Show coach learnings (`-t/--type/--sport`, `--confidence`, `--dormant`)            |
 | `learnings`  | `show`       | —        | Show a learning's full text + per-week evidence basis by ID             |
 | `learnings`  | `edit`       | —        | Edit a learning's text (`ID TEXT`, both positional)                     |
@@ -1571,14 +1571,14 @@ single read-only view that is its whole state (`model`), which acts bare instead
 | `workout`    | `swap`       | `w s`    | Swap two workouts by dates (`<date> <date>`) or IDs (`<id> <id>`), same kind on both sides, plus a mandatory positional `REASON`. Runs recovery checks (consecutive hard days, load spikes, mesocycle crossings), prompts on warnings unless `-f`; syncs unless `--no-sync`; the reason is folded into `modification_reason`. |
 | `workout`    | `wipe`       | —        | Delete all workouts                                                      |
 | `workout`    | `prune-calendar` | —    | Delete Calendar workout events that no local row references — the orphans a fresh DB, a restored backup, or a wipe that never reached Calendar leaves behind. Ownership read from the `source=TrainMate` tag, not from stored ids; events of soft-removed workouts are kept. `-d RANGE` windows it (as on `data wipe`), `-n`/`--dry-run` previews, `-y` skips the prompt |
-| `data`       | `pull`       | `d p`    | Fetch Garmin activities/metrics and Google Calendar context (`-d RANGE`/`--metrics-only`/`--activities-only`/`--sleep`). Defaults to the last 2 days ending today. |
+| `data`       | `pull`       | `d p`    | Fetch Garmin activities/metrics and Google Calendar signals (`-d RANGE`/`--metrics-only`/`--activities-only`/`--sleep`). Defaults to the last 2 days ending today. |
 | `data`       | `bootstrap`  | `d b`    | Cold-start reconstruction over the full backlog; seeds evidence-based learnings, sets the reflect watermark. Flags: `-d RANGE`, `--context`, `--force`, `--inspect-only`, `--auto`. No date filter → window auto-detected (since previous goal, else 12 wk). |
 | `data`       | `reflect`    | `d r`    | Incremental analysis since the reflect watermark; updates learnings + physiological insights (no cycle inference — §10.3) and resolves pending demotions (same flags as `bootstrap`). Window ends on the last completed week unless an end date is given, so a mid-week run with nothing complete costs nothing. `--auto`: unattended — staleness demotions auto-apply, contradiction ones stay queued. |
 | `data`       | `show-metrics` | `d sm` | Show athlete metrics over a date range (default 7-day lookback). Selectors `-d`/`-m`/`-M`/`-g` plus `-a`/`--all`, `--no-pull`, `--csv`. |
 | `data`       | `show-activities` | `d sa` | Show completed activities over a date range (default 7-day lookback). Selectors `-d`/`-m`/`-M`/`-g` plus `-a`/`--all`, `-t/--type` filter, `--no-pull`, `--csv`. |
 | `data`       | `show-analysis` | `d san` | Show the reconstruction stored by the last `bootstrap` — inferred macro focus, the mesocycle blocks `progress` draws as `~` bands, physiological insights. Strictly read-only (renders the slot; never calls the LLM, unlike `bootstrap --inspect-only`). `--short` reads `reflect`'s slot instead; flags when activities post-date the slot's window. |
 | `data`       | `backfill-tss` | —      | Recompute the measured `tss` for all stored activities under the current zone model (no Garmin calls), then refresh derived workload |
-| `data`       | `wipe`       | `--garmin`, `--calendar`, `-d RANGE`, `-y` | Delete cached data. No scope flag = everything (Garmin evidence + daily context) and reset watermarks; `--garmin`/`--calendar` narrow the scope; date flags restrict to a window |
+| `data`       | `wipe`       | `--garmin`, `--calendar`, `-d RANGE`, `-y` | Delete cached data. No scope flag = everything (Garmin evidence + daily signals) and reset watermarks; `--garmin`/`--calendar` narrow the scope; date flags restrict to a window |
 | `model`      | `list`       | `model l` | List the models configured under `llm.models`, numbered, active one marked. A bare `model` does the same — the documented exception to the bare-group rule (DESIGN_cli_noargs.md §a3, applied by DESIGN_model_selection.md §4) |
 | `model`      | `set`        | `model s`, `model use` | Choose the model, by list number (`model set 3`) or full identifier. Stored in `settings.llm_model`; survives restarts |
 | `model`      | `reset`      | —        | Forget the stored choice and fall back to the first `llm.models` entry |
@@ -1598,7 +1598,7 @@ fails if any route is registered with one.
 
 That is a deliberate demotion from the previous contract ("the API tracks the CLI feature
 set"), which decayed silently: parity was achieved once, in June 2026, and every feature
-added CLI-first afterwards — daily-context authoring, the benchmark logbook, model
+added CLI-first afterwards — daily-signal authoring, the benchmark logbook, model
 selection — was simply missing from the web with nothing to signal it. A surface that
 only reads has no parity to lose. New CLI commands add a *view* here when their data is
 worth looking at, and cost nothing when it is not.
@@ -1631,8 +1631,8 @@ top-level tabs, all lazy-loaded on first show:
   each row carrying its direction-aware delta against the previous row of the same kind
   (DESIGN_benchmark_workouts.md §3.2/§6).
 - **Learnings** — filterable list with per-week evidence.
-- **History** — activities and recovery-metric tables, and the **daily-context**
-  visualisation: the metric vocabulary (`context list-metrics`) as chips, then one
+- **History** — activities and recovery-metric tables, and the **daily-signal**
+  visualisation: the metric vocabulary (`signal list-metrics`) as chips, then one
   calendar strip per metric shaded within that metric's own range, over the raw rows.
 
 Panels that used to carry a button now name the command that does the job
@@ -1667,14 +1667,14 @@ exactly that reason.
 | GET    | `/api/learnings/<id>/evidence`  | Per-week evidence basis (supporting/contra)  |
 | GET    | `/api/timeline.png`             | Progress timeline as a PNG image (same §7.2 renderer as the bot photo): merged past/planned load + projected CTL/ATL/TSB. `?weeks=N` (default 8, ≥1 else 400; `all` = full history) re-windows the past half. Not cached. matplotlib absent → 503 with install hint |
 | GET    | `/api/activities`               | Completed activities (`?start_date=&end_date=`) |
-| GET    | `/api/daily-context`            | Daily-context signals (`context list`; `?start_date=&end_date=&metric=`) |
-| GET    | `/api/daily-context/metrics`    | Distinct context metrics with counts + first/last date (`context list-metrics`) |
+| GET    | `/api/daily-signals`            | Daily-signals (`signal list`; `?start_date=&end_date=&metric=`) |
+| GET    | `/api/daily-signals/metrics`    | Distinct signal metrics with counts + first/last date (`signal list-metrics`) |
 | GET    | `/api/metrics`                  | Cached metrics (range, else last 30 days)    |
 | GET    | `/api/models`                   | Configured LLM menu with the active entry marked (`model list`) → `{models, active, source, set_at}` |
 
 Every other verb on every path returns **405** `{error, method, path}`.
 
-Writes live in the CLI: `goal`/`constraint`/`context`/`benchmark` authoring,
+Writes live in the CLI: `goal`/`constraint`/`signal`/`benchmark` authoring,
 `plan generate`/`rollback`/`feedback`, `workout add`/`swap`/`rm`/`restore`/`adapt`/
 `generate`/`push`/`rollback`, `learnings edit`/`demote`/`keep`/`rm`, `model set`, and
 `data pull`/`bootstrap`/`reflect`.
@@ -1691,7 +1691,7 @@ Required fields:
 | `llm.models`           | list | Models the `model` command lists and switches between, in display order; first entry is the default until `model set` picks another. Absent/empty → `google/gemini-3.5-flash` alone (DESIGN_model_selection.md §1) |
 | `google_calendar_id`   | str  | Target calendar ID                                            |
 | `garmin_email` / `garmin_password` | str | Garmin login; config.yaml only (kept out of the environment) |
-| `data_refresh_minutes` | int | Throttle window shared by Garmin pulls **and** Calendar-context syncs; reads inside it reuse the cache. Top-level config key `refresh_minutes` (default 120) |
+| `data_refresh_minutes` | int | Throttle window shared by Garmin pulls **and** Calendar-signal syncs; reads inside it reuse the cache. Top-level config key `refresh_minutes` (default 120) |
 | `garmin_mutable_days` / `garmin_backfill_prompt_days` / `garmin_initial_backfill_days` / `garmin_throttle_seconds` | — | Auto-ensure tuning (see [§10 Data Pull](#data-pull-data-pull-and-auto-ensure)) |
 | `service_account_file` | str  | Path to service account JSON (default:                        |
 |                        |      | `service_account.json`)                                       |
@@ -1833,14 +1833,14 @@ event-day TSB over the plan's own workouts — is a deferred Phase 2 follow-up.
    `include_removed=True` and partitioned into active (planned) vs `removed`;
    removed ones are passed to `_workout_adapt_logic` and rendered in the prompt as
    deliberate cancellations (not misses). It also fetches the window's
-   `daily_context` rows (reaching one day before the metrics window, since recovery
+   `daily_signals` rows (reaching one day before the metrics window, since recovery
    lags the signal) so the LLM can attribute a depressed morning to lifestyle noise
    (alcohol/poor sleep the day before) vs genuine training fatigue. It may still ease or
    **reschedule** today's hard session for acute readiness, but must not read a
    lifestyle-suppressed morning as evidence the *block* is too hard (no permanent cut to
    planned volume, not counted as training fatigue). This is what makes the
-   quantitative-context learning actually move a decision rather than stay inert at the
-   daily load call (DESIGN_quantitative_context_impact.md §6.1). An optional `-m/--message`
+   quantitative-signal learning actually move a decision rather than stay inert at the
+   daily load call (DESIGN_quantitative_signal_impact.md §6.1). An optional `-m/--message`
    athlete note for this run is passed through verbatim and rendered as a bounded prompt
    section (advisory, ephemeral — see `workout_adapt` in
    [§3](#3-coach-package-architecture)).
@@ -1920,7 +1920,7 @@ large backfills** (cold start, big forward/backward gaps), always continuing wit
 cached data. Gaps lying entirely *before* the requested window — derivation-pad
 warm-up data the user never asked to view, bounded by the pad itself — always pull
 automatically, so widening the pad in an upgrade self-heals instead of nagging. The same entry point also
-rides along a best-effort Calendar daily-context sync (`google_calendar.sync_calendar_context`),
+rides along a best-effort Calendar daily-signal sync (`google_calendar.sync_calendar_signals`),
 gated by the same `data_refresh_minutes` throttle. When that throttle keeps a read on
 cached data (Garmin or Calendar), a one-line note says so. These commands support
 `--no-pull` to bypass the sync entirely (cache-only) and `--force-pull` to refresh even
@@ -1952,10 +1952,10 @@ The shared core then:
 1. Queries completed activities, physiological metrics, and constraints
    overlapping the window (discounting context only — a constraint may explain an
    anomaly away, never support a learning).
-2. Builds the `context_days` block (step 3a below — it moves *ahead* of the cache check,
+2. Builds the `signal_days` block (step 3a below — it moves *ahead* of the cache check,
    because it is hashed), then computes the evidence fingerprint (per-activity load
-   fields + metrics + overlapping constraints + the window's `daily_context` + the
-   full-history `context_days` block as computed) and checks `analysis_cache[horizon]`.
+   fields + metrics + overlapping constraints + the window's `daily_signals` + the
+   full-history `signal_days` block as computed) and checks `analysis_cache[horizon]`.
    If the fingerprint matches and `--force` is absent → returns the cached
    reconstruction (no LLM call). `--force` recomputes regardless. The check lives only
    here, in the *writing* flow; the readers of the cache never re-verify it.
@@ -1968,10 +1968,10 @@ The shared core then:
    rolling baseline, omitted when unsupported). All deterministic — no extra LLM
    call. The per-day z is computed by the shared `_day_response_z(metric_row,
    baseline)` static; `_week_response_features` averages it over the week.
-3a. Builds `context_days` — episode-aligned external-signal impact rows
-   (`_context_days`, DESIGN_quantitative_context_impact.md). Per signal category it
+3a. Builds `signal_days` — episode-aligned external-signal impact rows
+   (`_signal_days`, DESIGN_quantitative_signal_impact.md). Per signal category it
    clusters logged signal-days into *episodes* (runs separated by fewer than `k`
-   drink-free days, `k = context_days_lookahead`, default 3) and emits, per episode,
+   drink-free days, `k = signal_days_lookahead`, default 3) and emits, per episode,
    a `days` dose sequence ({date, value, day-of `load_tss`}) plus a
    `surrounding_mornings` strip spanning `(first − k + 1) … (last + k)` — each
    morning tagged with its preceding day's load and the `_day_response_z` recovery
@@ -1979,7 +1979,7 @@ The shared core then:
    clustering + join + the existing z — **no statistics**. Unlike the weekly
    summaries this is fetched over the athlete's **full signal-day history** (not the
    analysis window), so the LLM sees the whole pattern even on an incremental
-   reflect; categories below `context_days_min_signal_days` (default 1 — show whatever
+   reflect; categories below `signal_days_min_days` (default 1 — show whatever
    exists) are dropped, same-day same-category rows are summed into one dose, and the
    block plus its prompt guide are rendered only when non-empty. Because the block is
    built before step 2 and hashed **as computed**, a signal or activity edited *outside*
@@ -1987,7 +1987,7 @@ The shared core then:
    recomputed each run (never stored as a learning); only the LLM's conclusion
    becomes a `coach_learnings` row, citing the in-window weeks the signal-days fall
    in (DESIGN_evidence_based_confidence.md §6).
-4. Queries `CoachEngine._data_analyze_logic()` (now also handed `context_days`) -> LLM ->
+4. Queries `CoachEngine._data_analyze_logic()` (now also handed `signal_days`) -> LLM ->
    `{macrocycle_summary, inferred_macrocycle, inferred_mesocycles[],
    physiological_insights[], learning_updates[]}`.
 5. Unless `--inspect-only`: applies `learning_updates` deltas — the LLM attributes
@@ -2147,7 +2147,7 @@ all three; only the delivery differs.
   overtraining
 - `workout adapt` acts on these signals over the rolling
   `metrics_lookback_days` window, but first discounts a depressed morning that a
-  logged `daily_context` signal the day before explains (lifestyle noise, not training
+  logged `daily_signals` signal the day before explains (lifestyle noise, not training
   fatigue): today's session may still be eased or rescheduled for acute readiness, but
   the block's planned load is not cut on a non-training artifact.
 
@@ -2162,81 +2162,81 @@ all three; only the delivery differs.
 
 ---
 
-## 13. Daily Context (Calendar Ingest)
+## 13. Daily Signals (Calendar Ingest)
 
 External daily signals the coach should factor in — alcohol, sleep quality,
 stress, big meals, a heatwave — reach TrainMate through the **single existing
 Google Calendar**, not through app-specific features. Producers write one all-day
 event per signal-day, tagged in `extendedProperties.private`:
 `source=trainmate-context` (the positive marker, configurable via
-`calendar_context_tag`), `metric` (opaque category), and an optional numeric
+`calendar_signal_tag`), `metric` (opaque category), and an optional numeric
 `value`. Two producers exist: a separate syncer (out of scope, mirroring
-`GarminScraper`) for spreadsheet-backed streams, and TrainMate's own `context`
+`GarminScraper`) for spreadsheet-backed streams, and TrainMate's own `signal`
 command (outbound, below) for ad-hoc signals. Full specs:
-`DESIGN_calendar_context_ingest.md` (ingest) and `DESIGN_context_authoring.md`
+`DESIGN_calendar_signal_ingest.md` (ingest) and `DESIGN_signal_authoring.md`
 (authoring).
 
 **Inbound flow:**
 
 ```
-Calendar (tagged events) ──► google_calendar.sync_calendar_context
-   ──► calendar_syncer.sync_context (syncToken; server-side filtered on the full
+Calendar (tagged events) ──► google_calendar.sync_calendar_signals
+   ──► calendar_syncer.sync_signals (syncToken; server-side filtered on the full
                                      pull only, client-side otherwise)
-   ──► db.upsert/delete_daily_context_by_event ──► daily_context table
-   ──► coach analysis weekly summaries (per-week `daily_context`)
+   ──► db.upsert/delete_daily_signal_by_event ──► daily_signals table
+   ──► coach analysis weekly summaries (per-week `daily_signals`)
 ```
 
 - **Distinguishing events:** TrainMate writes workouts tagged `source=TrainMate` and
   ingests only events tagged `source=trainmate-context` (or the configured
-  `calendar_context_tag`). The server-side `privateExtendedProperty` filter applies to
+  `calendar_signal_tag`). The server-side `privateExtendedProperty` filter applies to
   the **full pull only** — the API forbids it alongside a `syncToken` — so the
   incremental stream carries every changed event and is filtered **client-side** before
   anything is parsed. The guarantee is "untagged events are never *ingested*", not
   "never fetched".
 - **Sync, not append:** incremental via Calendar `syncToken` — edits upsert by
   `google_event_id`, cancellations delete. A cancelled event arrives stripped of its
-  extended properties, so the tag guard cannot run on it: `_ingest_context_event` counts
-  it as a change only when `delete_daily_context_by_event` actually removed a row —
+  extended properties, so the tag guard cannot run on it: `_ingest_signal_event` counts
+  it as a change only when `delete_daily_signal_by_event` actually removed a row —
   otherwise cancelled workouts and cancelled private appointments would inflate the
   reported count on the unfiltered incremental path. First run / expired token (HTTP 410)
   falls back to a full pull of all tagged events (no date horizon needed; the
-  list is bulk and sparse). Token persisted in `sync_state[calendar_context]`.
+  list is bulk and sparse). Token persisted in `sync_state[calendar_signals]`.
 - **Cadence:** rides along `data pull` (force) and the auto-ensure-before-read
-  path (`garmin.ensure_data` → bridge `_sync_calendar_context`, throttled to the
+  path (`garmin.ensure_data` → bridge `_sync_calendar_signals`, throttled to the
   Garmin refresh window and memoized once per process). Best-effort: a missing
   calendar config or any Calendar error is swallowed with a warning. The gating
-  and error handling live in `google_calendar.sync_calendar_context`; `garmin/sync.py`
+  and error handling live in `google_calendar.sync_calendar_signals`; `garmin/sync.py`
   only bridges to it via a guarded lazy import.
 - **Coach use:** two complementary paths. (1) *Qualitative* — each week's summary
-  carries a `daily_context` list (all rows, no collapsing) the LLM reads beside the
+  carries a `daily_signals` list (all rows, no collapsing) the LLM reads beside the
   metrics, the same way `constraints` contextualize anomalies. (2) *Quantitative*
-  (`context_days`, step 3a above; DESIGN_quantitative_context_impact.md) — the
+  (`signal_days`, step 3a above; DESIGN_quantitative_signal_impact.md) — the
   optional numeric `value` is aligned per-episode against the bracketing mornings'
   recovery and day-of load, full-history, so the LLM can read dose-response,
   persistence, and the drink-and-hard-day confound. Both are hashed into the analysis
   evidence fingerprint, so an added/edited/deleted signal invalidates the cached
   reconstruction **unconditionally** — in-window rows are hashed as fields, and rows
-  outside the window reach the hash through the full-history `context_days` block, which
+  outside the window reach the hash through the full-history `signal_days` block, which
   is hashed as computed (§10, step 2/3a). Because that block is hashed as computed,
-  `context_days_lookahead` and `context_days_min_signal_days` are fingerprinted
+  `signal_days_lookahead` and `signal_days_min_days` are fingerprinted
   transitively: editing either invalidates the cached reconstruction. That is a
   deliberate, narrow exception to config values not being hashed here — a different knob
   produces a different prompt, so the cached answer is not an answer to the current
-  question (DESIGN_quantitative_context_impact.md §8).
+  question (DESIGN_quantitative_signal_impact.md §8).
 
-**Outbound flow (first-party authoring — `context` command, alias `ctx`):** for
+**Outbound flow (first-party authoring — the `signal` command):** for
 ad-hoc signals where standing up a syncer is overkill (a heatwave), the user can
 author the same tagged events directly, since the private-property tag is
-unsettable from the Calendar UI. `context add` writes one tagged all-day event
-per day in a range (`add_context_event`, idempotent upsert-by-(date, metric)) and
-mirrors the rows locally via `upsert_daily_context_by_event` so they appear before
-the next pull. `context rm` deletes the **calendar event** (`delete_event`) before
+unsettable from the Calendar UI. `signal add` writes one tagged all-day event
+per day in a range (`add_signal_event`, idempotent upsert-by-(date, metric)) and
+mirrors the rows locally via `upsert_daily_signal_by_event` so they appear before
+the next pull. `signal rm` deletes the **calendar event** (`delete_event`) before
 the local row, so a full re-pull (`data wipe --calendar`) can't resurrect it.
-`context list` (default window: `metrics_lookback_days`, the coach's context-read
-window) and `context list-metrics` inspect what's recorded. Authored events are
-indistinguishable from synced ones downstream — `sync_context`, the analysis
-prompt, and the evidence fingerprint are untouched. Handlers: `cli/context.py`;
-spec: `DESIGN_context_authoring.md`.
+`signal list` (default window: `metrics_lookback_days`, the coach's metrics-lookback
+window) and `signal list-metrics` inspect what's recorded. Authored events are
+indistinguishable from synced ones downstream — `sync_signals`, the analysis
+prompt, and the evidence fingerprint are untouched. Handlers: `cli/signals.py`;
+spec: `DESIGN_signal_authoring.md`.
 
 ---
 
@@ -2304,7 +2304,7 @@ venv/bin/python -m unittest discover -s tests -p "test_*.py"
 |                                | fold reproduces the unsplit series exactly, full-precision output |
 | `tests/test_web.py`            | (also) the read-only invariant (every route GET-only, mutating   |
 |                                | verbs 405, no Calendar/LLM import), the read views added with it |
-|                                | (benchmarks, context vocabulary, models, plan show, zones), and  |
+|                                | (benchmarks, signal vocabulary, models, plan show, zones), and  |
 |                                | `GET /api/timeline.png`: PNG magic bytes, `?weeks` validation,   |
 |                                | matplotlib-absent 503, payload shape via the shared builder      |
 | `tests/test_utils.py`          | `util.py` helpers (text wrapping, ANSI width, `color_load_ratio`,|

@@ -69,10 +69,10 @@ refreshes recent data (and bootstraps/backfills on request) as commands read it.
 - No configurable athlete timezone override yet (machine-local only — §12).
 - Google **Calendar** integration is untouched; it keeps the service account.
   *(Rev. 2: still true of the workout-sync side, but no longer of the pull path.
-  `pull()` and `ensure_data()` now both call `_sync_calendar_context()` so daily-context
+  `pull()` and `ensure_data()` now both call `_sync_calendar_signals()` so daily-signal
   events ride along with a Garmin read, and `data pull` stamps adherence onto past
   Calendar events — a later, separately-designed feature. See
-  DESIGN_calendar_context_ingest.md and §9.)*
+  DESIGN_calendar_signal_ingest.md and §9.)*
 
 ---
 
@@ -178,8 +178,8 @@ CREATE TABLE IF NOT EXISTS sync_state (
 ```
 
 *Rev. 2 — the table went multi-tenant.* It was designed for one row but the `key` column
-did its job: four sources now share it — `garmin` (this design), `calendar_context`
-(DESIGN_calendar_context_ingest.md, the only user of the added `sync_token` column),
+did its job: four sources now share it — `garmin` (this design), `calendar_signals`
+(DESIGN_calendar_signal_ingest.md, the only user of the added `sync_token` column),
 `reflect` and `bootstrap` (the coach's analysis watermarks). Each source owns a key and
 leaves the columns it doesn't use NULL. Accessors are
 `db.get_sync_state(key="garmin")` / `db.set_sync_state(through_date, last_pull_utc,
@@ -357,9 +357,9 @@ After a successful manual pull, run the derived recompute (§10) and advance
 
 *Calendar ride-along.* With fresh activity data in hand, `data pull` stamps the adherence
 verdict onto past Calendar events over the pulled range, and `pull()` force-syncs daily
-calendar context. Both are best-effort: a Calendar failure never breaks the pull, and it
+calendar signals. Both are best-effort: a Calendar failure never breaks the pull, and it
 all no-ops when no calendar is configured. `--no-mark` opts out of the adherence stamp.
-This is a later feature layered onto the pull — DESIGN_calendar_context_ingest.md — so
+This is a later feature layered onto the pull — DESIGN_calendar_signal_ingest.md — so
 read the flag list here as the Garmin surface, not the whole command.
 
 *Global throttle-bypass pair.* `--force-pull` and `--no-pull` are mutually exclusive

@@ -91,7 +91,7 @@ MENU_COMMANDS = [
     ("plan", "Show/generate periodization plans"),
     ("goal", "Manage training goals"),
     ("data", "Pull/show Garmin metrics & activities"),
-    ("context", "Author daily-context signals"),
+    ("signal", "Author daily signals"),
     ("learnings", "Inspect coach learnings"),
     ("constraint", "Manage directives the coach works around"),
     ("model", "List/choose the LLM model"),

@@ -77,7 +77,7 @@ class TestSchemaStamping(unittest.TestCase):
         fingerprint = hashlib.sha256("\n".join(columns).encode()).hexdigest()[:16]
 
         self.assertEqual(
-            (SCHEMA_VERSION, fingerprint), (8, "cf40a5bd782fa425"),
+            (SCHEMA_VERSION, fingerprint), (9, "1383aa78facded86"),
             "the schema changed without a matching SCHEMA_VERSION bump — existing "
             "databases would skip the migration",
         )
@@ -96,6 +96,51 @@ class TestSchemaStamping(unittest.TestCase):
                 "SELECT name FROM sqlite_master WHERE type='table'"
             )}
         self.assertIn("workouts", tables)
+
+    def test_the_signal_rename_carries_the_rows_and_the_sync_token(self):
+        """`daily_context` → `daily_signals` runs once, against the only database that
+        exists, so the rows and the Calendar syncToken have to survive it — a fresh
+        CREATE TABLE instead of the ALTER would silently empty the signal history and
+        force a full re-pull (DESIGN_calendar_signal_ingest.md §6.1)."""
+        db = Database(db_path=self.path)
+        with db._get_connection() as conn:
+            conn.execute("DROP TABLE daily_signals")
+            conn.execute("""
+                CREATE TABLE daily_context (
+                    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                    date            TEXT NOT NULL,
+                    metric          TEXT NOT NULL,
+                    value           REAL,
+                    text            TEXT,
+                    google_event_id TEXT NOT NULL UNIQUE,
+                    updated         TEXT
+                )
+            """)
+            conn.execute(
+                "INSERT INTO daily_context (date, metric, value, text, google_event_id) "
+                "VALUES ('2026-06-10', 'alcohol', 2.0, 'Alcohol: 2.0', 'evt-1')"
+            )
+            conn.execute(
+                "INSERT INTO sync_state (key, sync_token) VALUES ('calendar_context', 'tok')"
+            )
+            conn.commit()
+        unstamp_schema(db)
+
+        Database(db_path=self.path)
+
+        with db._get_connection() as conn:
+            tables = {r[0] for r in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            )}
+            rows = conn.execute(
+                "SELECT metric, value FROM daily_signals"
+            ).fetchall()
+            token = conn.execute(
+                "SELECT sync_token FROM sync_state WHERE key = 'calendar_signals'"
+            ).fetchone()
+        self.assertNotIn("daily_context", tables)
+        self.assertEqual([tuple(r) for r in rows], [("alcohol", 2.0)])
+        self.assertEqual(token[0], "tok")
 
 
 class TestTransaction(unittest.TestCase):

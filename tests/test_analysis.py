@@ -633,10 +633,10 @@ class TestWeekResponseFeatures(unittest.TestCase):
         self.assertNotIn("vs_baseline_z", f)  # no values -> all None -> omitted
 
 
-class TestContextDays(unittest.TestCase):
-    """Pure unit tests for the quantitative context-impact alignment (no DB, no LLM):
+class TestSignalDays(unittest.TestCase):
+    """Pure unit tests for the quantitative signal-impact alignment (no DB, no LLM):
     episode grouping, the bracketing morning strip, load attribution, channel exclusion,
-    and the inclusion floor (DESIGN_quantitative_context_impact.md §3–§5)."""
+    and the inclusion floor (DESIGN_quantitative_signal_impact.md §3–§5)."""
 
     BASELINE = {
         "rhr_baseline_mean": 50.0, "rhr_baseline_std": 4.0,
@@ -671,7 +671,7 @@ class TestContextDays(unittest.TestCase):
         ctx = [{"date": "2026-05-10", "metric": "alcohol", "value": 4.0}]
         metrics = [{"date": "2026-05-11", "rhr": 58, "hrv": 70, "sleep_score": 62}]
         acts = [self._act("2026-05-10", 85)]
-        out = coach_service._context_days(
+        out = coach_service._signal_days(
             ctx, metrics, acts, self._baseline_for, k=3, min_signal_days=1
         )
         eps = out["alcohol"]
@@ -700,7 +700,7 @@ class TestContextDays(unittest.TestCase):
             {"date": "2026-05-11", "metric": "alcohol", "value": 3},
             {"date": "2026-05-14", "metric": "alcohol", "value": 1},
         ]
-        out = coach_service._context_days(
+        out = coach_service._signal_days(
             ctx, [], [], self._baseline_for, k=3, min_signal_days=1
         )
         eps = out["alcohol"]
@@ -718,14 +718,14 @@ class TestContextDays(unittest.TestCase):
             {"date": "2026-05-10", "metric": "alcohol", "value": 2},
             {"date": "2026-05-14", "metric": "alcohol", "value": 2},
         ]
-        out = coach_service._context_days(
+        out = coach_service._signal_days(
             ctx, [], [], self._baseline_for, k=3, min_signal_days=1
         )
         self.assertEqual(len(out["alcohol"]), 2)
 
     def test_min_signal_days_floor_omits_category(self):
         ctx = [{"date": "2026-05-10", "metric": "alcohol", "value": 2}]
-        out = coach_service._context_days(
+        out = coach_service._signal_days(
             ctx, [], [], self._baseline_for, k=3, min_signal_days=2
         )
         self.assertNotIn("alcohol", out)
@@ -733,7 +733,7 @@ class TestContextDays(unittest.TestCase):
     def test_sleep_construct_excludes_sleep_channel(self):
         ctx = [{"date": "2026-05-10", "metric": "poor_sleep", "value": 1}]
         metrics = [{"date": "2026-05-11", "rhr": 58, "hrv": 70, "sleep_score": 62}]
-        out = coach_service._context_days(
+        out = coach_service._signal_days(
             ctx, metrics, [], self._baseline_for, k=3, min_signal_days=1
         )
         m11 = next(
@@ -746,7 +746,7 @@ class TestContextDays(unittest.TestCase):
 
     def test_presence_only_value_stays_none(self):
         ctx = [{"date": "2026-05-10", "metric": "big_meal", "value": None}]
-        out = coach_service._context_days(
+        out = coach_service._signal_days(
             ctx, [], [], self._baseline_for, k=3, min_signal_days=1
         )
         self.assertIsNone(out["big_meal"][0]["days"][0]["value"])
@@ -756,7 +756,7 @@ class TestContextDays(unittest.TestCase):
             {"date": "2026-05-10", "metric": "alcohol", "value": 2},
             {"date": "2026-05-10", "metric": "alcohol", "value": 3},
         ]
-        out = coach_service._context_days(
+        out = coach_service._signal_days(
             ctx, [], [], self._baseline_for, k=3, min_signal_days=1
         )
         self.assertEqual(out["alcohol"][0]["days"][0]["value"], 5)
@@ -849,11 +849,11 @@ class TestRicherEvidenceIntegration(unittest.TestCase):
         self.assertIn("avg_stress", user_content)
 
     @patch("trainmate.coach.engine.openrouter_client")
-    def test_context_days_reaches_the_prompt(self, mock_client):
-        """A logged external signal (alcohol) surfaces as an episode-aligned context_days
-        block in the analysis user content (DESIGN_quantitative_context_impact.md §4)."""
+    def test_signal_days_reaches_the_prompt(self, mock_client):
+        """A logged external signal (alcohol) surfaces as an episode-aligned signal_days
+        block in the analysis user content (DESIGN_quantitative_signal_impact.md §4)."""
         self._seed_week()
-        test_db.upsert_daily_context_by_event(
+        test_db.upsert_daily_signal_by_event(
             "evt1", "2026-06-02", "alcohol", value=4.0, text="Alcohol: 4 drinks"
         )
         mock_client.complete.return_value = {"macrocycle_summary": "s", "learning_updates": []}
@@ -861,7 +861,7 @@ class TestRicherEvidenceIntegration(unittest.TestCase):
             from_date_str="2026-06-01", until_date_str="2026-06-07", no_pull=True
         )
         user_content = mock_client.complete.call_args[0][1]
-        self.assertIn("QUANTITATIVE CONTEXT IMPACT", user_content)
+        self.assertIn("QUANTITATIVE SIGNAL IMPACT", user_content)
         self.assertIn("surrounding_mornings", user_content)
         self.assertIn("alcohol", user_content)
 
@@ -904,18 +904,18 @@ class TestRicherEvidenceIntegration(unittest.TestCase):
         self.assertEqual(mock_client.complete.call_count, 1)  # cached reconstruction reused
 
     @patch("trainmate.coach.engine.openrouter_client")
-    def test_out_of_window_context_signal_invalidates_the_cache(self, mock_client):
-        """`context_days` is built full-history, so a signal logged OUTSIDE [from,until]
+    def test_out_of_window_signal_invalidates_the_cache(self, mock_client):
+        """`signal_days` is built full-history, so a signal logged OUTSIDE [from,until]
         still changes the prompt — and must therefore shift the fingerprint
-        (DESIGN_quantitative_context_impact.md §8)."""
+        (DESIGN_quantitative_signal_impact.md §8)."""
         self._seed_week()
         mock_client.complete.return_value = {"macrocycle_summary": "s", "learning_updates": []}
         coach_service.data_bootstrap(
             from_date_str="2026-06-01", until_date_str="2026-06-07", no_pull=True
         )
         # Two months before the analysis window: invisible to the windowed evidence, but
-        # it adds a whole episode to the context_days block the LLM is shown.
-        test_db.upsert_daily_context_by_event(
+        # it adds a whole episode to the signal_days block the LLM is shown.
+        test_db.upsert_daily_signal_by_event(
             "evt-old", "2026-04-02", "alcohol", value=4.0, text="Alcohol: 4 drinks"
         )
         with patch("builtins.input", return_value="y"):

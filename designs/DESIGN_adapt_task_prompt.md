@@ -68,7 +68,7 @@ Each rule earns its place by having been load-bearing in more than one section:
   the plan never governed, and a session the athlete deliberately removed. Neither is an
   adherence failure; both still count toward load and intent.
 - **Rule 5** is the mechanism behind two otherwise-unrelated sections: it is why
-  `ATTRIBUTING A DEPRESSED MORNING` reads yesterday's context signal, and why
+  `ATTRIBUTING A DEPRESSED MORNING` reads yesterday's signal, and why
   `DO NOT COMPOUND A PRIOR ADAPTATION` exists at all. Stated once, both sections cite it in a
   clause ("By rule 5…", "Rule 5 again:") instead of re-explaining lag from scratch.
 

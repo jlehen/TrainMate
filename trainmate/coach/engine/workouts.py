@@ -5,7 +5,7 @@ from trainmate.util import cyan, days_between, aside
 from trainmate.coach.formatting import (
     EASED_DO_NOT_RESTORE, format_metrics_history, format_completed_activities,
     format_baseline, format_planned_workouts, format_planned_workouts_detailed,
-    format_removed_workouts, format_daily_context,
+    format_removed_workouts, format_daily_signals,
 )
 import trainmate.coach.engine as _eng
 from trainmate.sports import CANONICAL_SPORTS
@@ -524,7 +524,7 @@ class WorkoutLogicMixin:
         meso_text: str, learnings: str, discrepancies: List[str],
         informational: Optional[List[CompletedActivity]] = None,
         removed_workouts: Optional[List[Workout]] = None,
-        daily_context: Optional[List[Dict[str, Any]]] = None,
+        daily_signals: Optional[List[Dict[str, Any]]] = None,
         completed_keys: Optional[set] = None,
         athlete_message: Optional[str] = None,
         pmc_warmup_cutoff: Optional[str] = None,
@@ -613,7 +613,7 @@ still ahead. Sessions tagged "[athlete-added]" are the athlete's own deliberate 
 preserve them as planned unless fatigue or injury risk clearly warrants easing.
 
 ### ATTRIBUTING A DEPRESSED MORNING — TRAINING FATIGUE vs LIFESTYLE NOISE
-By rule 5, read the externally-logged daily-context signal from the DAY BEFORE a depressed
+By rule 5, read the externally-logged daily signal from the DAY BEFORE a depressed
 morning: if one (e.g. alcohol, a bad night, high stress) explains the dip, that suppression
 is transient lifestyle noise, NOT accumulated training fatigue.
 That changes WHY, not WHAT TO DO TODAY: a suppressed body trains a hard session poorly and
@@ -630,7 +630,7 @@ the morning after an easing still looks depressed from the very fatigue you alre
 on, and reading that as "still too hard" spirals the load down without ever letting it
 rebound. Default to HOLDING the already-eased form. Cut further only if the metrics have
 clearly WORSENED since it was eased, or a genuinely NEW signal (a hard completed session, a
-fresh constraint/context event) warrants it — and the more recently and more times it was
+fresh constraint/signal event) warrants it — and the more recently and more times it was
 already eased (see the tag), the higher your bar. Restoring load toward the original as the
 athlete recovers is encouraged; deepening an already-fresh cut is not.
 """
@@ -801,9 +801,9 @@ evidence-backed observations are authored only by the weekly history analysis
         # fatigue trajectory (§5.2).
         if pmc_context:
             metrics_text += "\n" + pmc_context
-        context_text = (
-            format_daily_context(daily_context) if daily_context
-            else "No external daily-context signals logged in this window."
+        signals_text = (
+            format_daily_signals(daily_signals) if daily_signals
+            else "No external daily signals logged in this window."
         )
         discrepancy_text = (
             "\n".join(discrepancies) if discrepancies
@@ -859,8 +859,8 @@ Adaptation Range: {target_date_str} to {meso_end_date_str}
 ## ATHLETE'S METRICS HISTORY (PAST {history_days} DAYS)
 {metrics_text}
 
-## EXTERNALLY-LOGGED DAILY CONTEXT (alcohol, poor sleep, stress, etc.)
-{context_text}
+## EXTERNALLY-LOGGED DAILY SIGNALS (alcohol, poor sleep, stress, etc.)
+{signals_text}
 
 ## BASELINE REFERENCE
 {baseline_str}

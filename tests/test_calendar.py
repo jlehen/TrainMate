@@ -468,11 +468,11 @@ class TestCalendarSync(unittest.TestCase):
         self.assertIn("Short recovery jog.", desc)
         self.assertIn("Reason:\nInjury flare-up", desc)
 
-    def test_sync_context_ingests_tagged_events(self):
-        """sync_context upserts tagged events, deletes cancelled ones, skips untagged
-        events, and persists the nextSyncToken (DESIGN_calendar_context_ingest.md §6)."""
+    def test_sync_signals_ingests_tagged_events(self):
+        """sync_signals upserts tagged events, deletes cancelled ones, skips untagged
+        events, and persists the nextSyncToken (DESIGN_calendar_signal_ingest.md §6)."""
         # Pre-seed a row that an incoming cancelled event will delete.
-        test_db.upsert_daily_context_by_event(
+        test_db.upsert_daily_signal_by_event(
             google_event_id="evt-old", date="2026-06-10", metric="alcohol",
             value=1.0, text="1 drink", updated=None,
         )
@@ -505,11 +505,11 @@ class TestCalendarSync(unittest.TestCase):
 
         with patch.object(calendar_syncer, "service", mock_service), \
                 patch.object(calendar_syncer, "calendar_id", "cal-test"):
-            changed = calendar_syncer.sync_context()
+            changed = calendar_syncer.sync_signals()
 
         # evt-1 upserted + evt-old deleted; evt-foreign skipped.
         self.assertEqual(changed, 2)
-        rows = test_db.get_daily_context()
+        rows = test_db.get_daily_signals()
         self.assertEqual([r["google_event_id"] for r in rows], ["evt-1"])
         self.assertEqual(rows[0]["metric"], "alcohol")
         self.assertEqual(rows[0]["value"], 2.0)
@@ -517,21 +517,21 @@ class TestCalendarSync(unittest.TestCase):
 
         # Token persisted for the next incremental sync.
         self.assertEqual(
-            test_db.get_sync_state(key="calendar_context")["sync_token"], "tok-next"
+            test_db.get_sync_state(key="calendar_signals")["sync_token"], "tok-next"
         )
-        # The list query used the server-side context filter.
+        # The list query used the server-side signal filter.
         _, kwargs = mock_service.events().list.call_args
         self.assertEqual(kwargs.get("privateExtendedProperty"), "source=trainmate-context")
 
-    def test_sync_context_ignores_cancelled_events_that_are_not_ours(self):
+    def test_sync_signals_ignores_cancelled_events_that_are_not_ours(self):
         """On the incremental path the stream carries every cancelled event, not just
         tagged ones; a cancellation that deletes no row must not count as a change
-        (DESIGN_calendar_context_ingest.md §6)."""
+        (DESIGN_calendar_signal_ingest.md §6)."""
         test_db.set_sync_state(
-            through_date=None, last_pull_utc="t0", key="calendar_context",
+            through_date=None, last_pull_utc="t0", key="calendar_signals",
             sync_token="tok-prev",
         )
-        test_db.upsert_daily_context_by_event(
+        test_db.upsert_daily_signal_by_event(
             google_event_id="evt-ctx", date="2026-06-10", metric="alcohol",
             value=1.0, text="1 drink", updated=None,
         )
@@ -548,21 +548,21 @@ class TestCalendarSync(unittest.TestCase):
 
         with patch.object(calendar_syncer, "service", mock_service), \
                 patch.object(calendar_syncer, "calendar_id", "cal-test"):
-            changed = calendar_syncer.sync_context()
+            changed = calendar_syncer.sync_signals()
 
         self.assertEqual(changed, 1)
-        self.assertEqual(test_db.get_daily_context(), [])
+        self.assertEqual(test_db.get_daily_signals(), [])
         # The incremental query cannot carry the server-side filter alongside the token.
         _, kwargs = mock_service.events().list.call_args
         self.assertEqual(kwargs.get("syncToken"), "tok-prev")
         self.assertNotIn("privateExtendedProperty", kwargs)
 
-    def test_sync_context_expired_token_falls_back_to_full_pull(self):
+    def test_sync_signals_expired_token_falls_back_to_full_pull(self):
         """A 410 on the stored syncToken discards it and restarts with a full pull."""
         from googleapiclient.errors import HttpError
 
         test_db.set_sync_state(
-            through_date=None, last_pull_utc="t0", key="calendar_context",
+            through_date=None, last_pull_utc="t0", key="calendar_signals",
             sync_token="stale-tok",
         )
 
@@ -589,14 +589,14 @@ class TestCalendarSync(unittest.TestCase):
 
         with patch.object(calendar_syncer, "service", mock_service), \
                 patch.object(calendar_syncer, "calendar_id", "cal-test"):
-            changed = calendar_syncer.sync_context()
+            changed = calendar_syncer.sync_signals()
 
         self.assertEqual(changed, 1)
-        rows = test_db.get_daily_context()
+        rows = test_db.get_daily_signals()
         self.assertEqual([r["metric"] for r in rows], ["sleep_quality"])
         self.assertIsNone(rows[0]["value"])  # no value tag -> NULL
         self.assertEqual(
-            test_db.get_sync_state(key="calendar_context")["sync_token"], "fresh-tok"
+            test_db.get_sync_state(key="calendar_signals")["sync_token"], "fresh-tok"
         )
 
     def test_list_workout_events_pages_and_filters_by_tag(self):

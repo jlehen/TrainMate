@@ -38,8 +38,8 @@ class Constraint(TypedDict):
     # ALTER, and test_types.py pins declaration order against PRAGMA table_info.
     honored_at: Optional[str]
 
-class DailyContext(TypedDict):
-    """An external daily context signal ingested from a tagged Calendar event.
+class DailySignal(TypedDict):
+    """An external daily signal ingested from a tagged Calendar event.
 
     TrainMate is domain-agnostic about these: `metric` is an opaque category
     (e.g. 'alcohol'), `value` an optional numeric magnitude, `text` the human

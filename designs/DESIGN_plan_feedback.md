@@ -50,7 +50,7 @@ Where this sits among the real-world-context channels (the boundary lines do not
 | Channel | Carries |
 | --- | --- |
 | `constraint add` | Directives the coach must work around |
-| `context add` | Observations (alcohol, poor sleep, stress) that explain mornings |
+| `signal add` | Observations (alcohol, poor sleep, stress) that explain mornings |
 | `workout adapt -m` | In-the-moment capture, classified into constraint or one-off nudge |
 | `plan feedback` | **Opinions about the plan itself**, consumed at the next regeneration |
 

@@ -840,7 +840,7 @@ different guarantee from an alias and can be broken by any future sibling
 command. DESIGN_cli_noargs.md §d is the canonical statement of that distinction.
 The top-level `p` alias for
 `plan` (trainmate_cli.py:708) is **removed in the same change** — following
-the recent removal of the deprecated `c` alias for `context` — so the two
+the recent removal of the deprecated `c` alias for `signal` — so the two
 command names can't be confused mid-typing. Follows the standard **auto-ensure**
 convention (`cli/common.py`): fresh Garmin data is pulled under the usual
 `data_refresh_minutes` throttle before rendering, with `--no-pull` /

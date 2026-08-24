@@ -19,6 +19,6 @@ from trainmate.garmin.pmc import (
     backfill_tss
 )
 from trainmate.garmin.sync import (
-    _ingest_activities, _ingest_metrics, _int_or_none, pull, _sync_calendar_context,
+    _ingest_activities, _ingest_metrics, _int_or_none, pull, _sync_calendar_signals,
     _pull_command, _contiguous_regions, ensure_data, _warn_manual, _remember, reset_memo
 )

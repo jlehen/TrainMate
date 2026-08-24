@@ -8,7 +8,7 @@ from trainmate.config import config
 # migrations are idempotent, so this is a "skip the work" marker rather than a ledger of
 # steps to replay — TrainMate has one user and one database, and the alternative (a
 # numbered migration framework) would be more machinery than that warrants.
-SCHEMA_VERSION = 8
+SCHEMA_VERSION = 9
 
 
 # How long a connection waits for a writer to finish before raising "database is
@@ -114,6 +114,14 @@ class BaseDB:
         """Returns True if `table` currently has `column` (via PRAGMA table_info)."""
         cursor.execute(f"PRAGMA table_info({table})")
         return any(row[1] == column for row in cursor.fetchall())
+
+    @staticmethod
+    def _table_exists(cursor: sqlite3.Cursor, table: str) -> bool:
+        """Returns True if `table` is present in the database."""
+        cursor.execute(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?", (table,)
+        )
+        return cursor.fetchone() is not None
 
     @classmethod
     def _add_column(
@@ -712,7 +720,7 @@ class BaseDB:
             # backward backfill never regresses it. last_pull_utc is an INSTANT
             # (UTC ISO) compared against now for the freshness interval. sync_token
             # is the opaque Calendar nextSyncToken — populated only by the
-            # 'calendar_context' row (DESIGN_calendar_context_ingest.md §6.1).
+            # 'calendar_signals' row (DESIGN_calendar_signal_ingest.md §6.1).
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS sync_state (
                     key            TEXT PRIMARY KEY,
@@ -727,13 +735,24 @@ class BaseDB:
             if "sync_token" not in sync_state_cols:
                 cursor.execute("ALTER TABLE sync_state ADD COLUMN sync_token TEXT")
 
-            # External daily context signals (alcohol, sleep, stress, …) ingested from
+            # One-off: `daily_context` and its sync_state row are the pre-rename names of
+            # the daily-signal store (DESIGN_calendar_signal_ingest.md §5). Renaming the
+            # table keeps the rows and the Calendar sync token, so no re-pull is needed.
+            if self._table_exists(cursor, "daily_context"):
+                cursor.execute("ALTER TABLE daily_context RENAME TO daily_signals")
+                cursor.execute("DROP INDEX IF EXISTS idx_daily_context_date")
+                cursor.execute(
+                    "UPDATE sync_state SET key = 'calendar_signals' "
+                    "WHERE key = 'calendar_context'"
+                )
+
+            # External daily signals (alcohol, sleep, stress, …) ingested from
             # tagged Google Calendar events. TrainMate stays domain-agnostic: metric is
             # an opaque category, value an optional numeric magnitude, text the human
             # blurb for the LLM. google_event_id is the reconciliation key so ingestion
-            # is an upsert with edit/delete detection (DESIGN_calendar_context_ingest.md §5).
+            # is an upsert with edit/delete detection (DESIGN_calendar_signal_ingest.md §5).
             cursor.execute("""
-                CREATE TABLE IF NOT EXISTS daily_context (
+                CREATE TABLE IF NOT EXISTS daily_signals (
                     id              INTEGER PRIMARY KEY AUTOINCREMENT,
                     date            TEXT NOT NULL,
                     metric          TEXT NOT NULL,
@@ -744,7 +763,7 @@ class BaseDB:
                 )
             """)
             cursor.execute(
-                "CREATE INDEX IF NOT EXISTS idx_daily_context_date ON daily_context(date)"
+                "CREATE INDEX IF NOT EXISTS idx_daily_signals_date ON daily_signals(date)"
             )
 
             # App preferences that outlive one invocation but aren't training data. Generic

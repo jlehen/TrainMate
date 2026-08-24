@@ -1,10 +1,10 @@
-# Design: First-Party Daily-Context Authoring (`context` command)
+# Design: First-Party Daily-Signal Authoring (`signal` command)
 
-**Status:** Implemented · **Date:** 2026-06-28 · **Companion to:** `DESIGN_calendar_context_ingest.md`
+**Status:** Implemented · **Date:** 2026-06-28 · **Companion to:** `DESIGN_calendar_signal_ingest.md`
 
-A top-level `context` command that lets TrainMate **author, list, and remove**
-the same tagged daily-context events it already ingests. The ingest design
-(`DESIGN_calendar_context_ingest.md`) only ever *read* tagged events; the sole
+A top-level `signal` command that lets TrainMate **author, list, and remove**
+the same tagged signal events it already ingests. The ingest design
+(`DESIGN_calendar_signal_ingest.md`) only ever *read* tagged events; the sole
 producer was an out-of-scope external syncer. This adds the **first-party
 producer** for ad-hoc ambient signals (e.g. a heatwave) where standing up a
 syncer is overkill.
@@ -14,9 +14,9 @@ syncer is overkill.
 ## 1. Motivation
 
 A severe heatwave tanks recovery the same way alcohol does — it's ambient
-**daily context**, not a coarse `constraint` (the command that absorbed the
+**daily signals**, not a coarse `constraint` (the command that absorbed the
 former `lifeevent`, DESIGN_constraints.md §9). The ingest channel already exists,
-but the context tag lives in `extendedProperties.private` precisely so it is
+but the signal tag lives in `extendedProperties.private` precisely so it is
 **invisible and unsettable from the Google Calendar UI** (ingest §3). So a human
 *cannot* hand-author a properly-tagged event; today only the external syncer
 can. For one-off signals we want TrainMate itself to be that producer.
@@ -34,7 +34,7 @@ free text (`"heat"`, `"sleep"`, …); no per-signal logic, no weather lookups.
   can't be folded into an automatic pull — there's nothing to mirror until you
   say a thing happened.
 
-The calendar stays the **single source of truth** in both directions. `context`
+The calendar stays the **single source of truth** in both directions. `signal`
 writes a tagged event to Google, then mirrors the row locally; the next
 `data pull` re-confirms it idempotently by event id. Nothing in the ingest path
 or schema changes.
@@ -43,7 +43,7 @@ or schema changes.
 
 ## 3. Command surface
 
-Top-level `context` (alias `ctx`), with subcommands:
+Top-level `signal`, with subcommands:
 
 | Subcommand | Short form | Purpose |
 |---|---|---|
@@ -52,34 +52,35 @@ Top-level `context` (alias `ctx`), with subcommands:
 | `list`         | `l`  | List signals, date-filtered and/or metric-filtered |
 | `list-metrics` | `lm` | Show distinct metrics already in use |
 
-`ctx` is a genuine registered alias, and so are `l`/`lm` — they have to be,
-because `l` alone is an *ambiguous* prefix over `list` and `list-metrics`. The
-other short forms are **not** registered aliases: `a` and `r` are simply
-unambiguous prefixes, which resolve to the canonical name for free
-(DESIGN_cli_noargs.md §d). Don't go grepping for an `aliases=["a"]`.
+`l`/`lm` are genuine registered aliases — they have to be, because `l` alone is
+an *ambiguous* prefix over `list` and `list-metrics`. The group itself has no
+alias: `sig` is an unambiguous prefix of `signal`. The other short forms are
+**not** registered aliases either: `a` and `r` are simply unambiguous prefixes,
+which resolve to the canonical name for free (DESIGN_cli_noargs.md §d). Don't go
+grepping for an `aliases=["a"]`.
 
 `add` never prompts: its one mandatory field is positional and the rest default
 (DESIGN_cli_noargs.md §a2), so a signal is one line to author.
 
-### `context add` (`a`)
+### `signal add` (`a`)
 ```
-context add METRIC [TEXT] [-d RANGE] [--value N] [-l LABEL]
+signal add METRIC [TEXT] [-d RANGE] [--value N] [-l LABEL]
 ```
 - `-d` takes the shared selector grammar (DESIGN_cli_selectors.md), defaulting to
   **today**; it must stay bounded, since an open-ended range has no last day to
   write. No `-m`/`-M` here: a signal spans days, not blocks. One **all-day event
   per day** in the range —
-  one event ⇒ one `daily_context` row, so it round-trips through the existing
+  one event ⇒ one `daily_signals` row, so it round-trips through the existing
   per-day ingest with zero schema change.
 - `METRIC` (positional): opaque category, mandatory. `list-metrics` shows the
   ones already in use, to discourage `heat` vs `heatwave` drift.
 - `--value`: optional **free numeric** the user supplies (severity, °C, count —
   TrainMate doesn't interpret it). Free text alone is also fine. This was
   originally written as storage-only, "kept for the future quantitative path";
-  that path has since **shipped** — `_context_days`
+  that path has since **shipped** — `_signal_days`
   (`coach/service/analysis.py`) clusters valued signal-days into per-category
   episodes and renders them into the analysis prompt
-  (`DESIGN_quantitative_context_impact.md`; ingest §7). So an authored `--value`
+  (`DESIGN_quantitative_signal_impact.md`; ingest §7). So an authored `--value`
   is **actively consumed**, not inert — still with zero domain logic about what
   the number means.
 - `TEXT` (trailing positional) or `-l/--label`: the human/LLM blurb, optional.
@@ -93,13 +94,13 @@ context add METRIC [TEXT] [-d RANGE] [--value N] [-l LABEL]
   than create a duplicate. The schema deliberately doesn't enforce
   `UNIQUE(date,metric)` (ingest §5) — as the first-party producer we own this
   dedup, exactly as the syncer owns its own.
-- After each write, **mirror locally** via `upsert_daily_context_by_event` using
+- After each write, **mirror locally** via `upsert_daily_signal_by_event` using
   the returned event id, so signals show up before the next pull.
 
-### `context rm` (`r`)
+### `signal rm` (`r`)
 ```
-context rm <id> [<id> ...]
-context rm [METRIC] [-d RANGE] [-m|-M|-g RANGE] [--metric M] [-y]
+signal rm <id> [<id> ...]
+signal rm [METRIC] [-d RANGE] [-m|-M|-g RANGE] [--metric M] [-y]
 ```
 - Deleting must remove the **calendar event** too, not just the local row:
   otherwise the event sits visible on the calendar and a token-reset recovery
@@ -107,51 +108,51 @@ context rm [METRIC] [-d RANGE] [-m|-M|-g RANGE] [--metric M] [-y]
   then the row (mirrors the ingest's cancelled-event → delete path).
 - Range/metric form deletes all matches; confirm `[y/N]` when >1 row matches,
   which `-y/--yes` skips for scripted use.
-- A bare `context rm` — no ids, no metric **and** no selector — is
+- A bare `signal rm` — no ids, no metric **and** no selector — is
   **refused** (exit 1) rather than treated as "everything": the destructive
   default has to be typed, not fallen into.
 
-### `context list` (`l`)
+### `signal list` (`l`)
 ```
-context list [METRIC] [-d RANGE] [-m|-M|-g RANGE]
+signal list [METRIC] [-d RANGE] [-m|-M|-g RANGE]
 ```
 - Defaults to the last `config.metrics_lookback_days` days when unbounded (15
-  by default) — the **same window the coach reads context over** in the analysis
+  by default) — the **same window the coach reads signals over** in the analysis
   path, so `list` shows what the coach sees, from one config knob. The positional
   `METRIC` (or `--metric`) filters. Prints `id · date · metric · value · text`.
 
-### `context list-metrics` (`lm`)
-- Distinct `metric`s in `daily_context` with **count** and **first/last date**,
+### `signal list-metrics` (`lm`)
+- Distinct `metric`s in `daily_signals` with **count** and **first/last date**,
   so you can see and reuse what you've already logged.
 
 ---
 
 ## 4. Code touch points
 
-**`trainmate/cli/context.py`** (new, modeled on `cli/constraints.py`):
-`run_context_add/_rm/_list/_list_metrics`. Subparsers + dispatch wired into
+**`trainmate/cli/signals.py`** (new, modeled on `cli/constraints.py`):
+`run_signal_add/_rm/_list/_list_metrics`. Subparsers + dispatch wired into
 `trainmate_cli.py` next to the other top-level commands; range filtering comes from
 the shared `add_selector_args`/`resolve_window` pair (DESIGN_cli_selectors.md).
 
 **`trainmate/google_calendar.py`** — two methods on `CalendarSyncer`:
-- `add_context_event(date, metric, value, text, existing_event_id=None) -> str`
+- `add_signal_event(date, metric, value, text, existing_event_id=None) -> str`
   — builds the body with `extendedProperties.private = {source:
-  <calendar_context_tag>, metric, value?}`, all-day (`end = start + 1 day`);
+  <calendar_signal_tag>, metric, value?}`, all-day (`end = start + 1 day`);
   `update` when `existing_event_id` is set, else `insert`. Returns the id.
 - reuse/generalize `delete_workout_event` → a plain `delete_event(event_id)`
   (it's already source-agnostic) for `rm`.
 
-**`trainmate/db/dailycontext.py`** — small read/delete helpers:
-- `get_daily_context(...)` gains an optional `metric` filter.
-- `get_daily_context_by_id(id)` and `delete_daily_context(id)` for `rm`.
-- `list_context_metrics() -> [{metric, count, first_date, last_date}]` for `lm`.
+**`trainmate/db/signals.py`** — small read/delete helpers:
+- `get_daily_signals(...)` gains an optional `metric` filter.
+- `get_daily_signal_by_id(id)` and `delete_daily_signal(id)` for `rm`.
+- `list_signal_metrics() -> [{metric, count, first_date, last_date}]` for `lm`.
 
-No table/column changes. No change to `sync_context`, the analysis prompt, or
+No table/column changes. No change to `sync_signals`, the analysis prompt, or
 the evidence fingerprint — authored events are indistinguishable from synced
 ones downstream.
 
 **Docs:** add an ARCHITECTURE.md note (per the keep-in-sync rule) and a line in
-`DESIGN_calendar_context_ingest.md` pointing here as the first-party producer —
+`DESIGN_calendar_signal_ingest.md` pointing here as the first-party producer —
 it landed in that doc's §2 (Non-Goals), next to the "the syncer is out of scope"
 bullet it qualifies, rather than in the resolved-decisions section.
 
@@ -159,13 +160,15 @@ bullet it qualifies, rather than in the resolved-decisions section.
 
 ## 5. Resolved decisions
 
-1. **Group alias** → `ctx`. (Originally decided as `c`; the prefix-matching
-   rework dropped colliding single-letter aliases, and `c` is now an *ambiguous*
-   prefix — `constraint` vs `context` — which errors out. See
+1. **Group alias** → none. (Originally `c`, then `ctx` while the group was named
+   `context`: `c` collided with `constraint`, and `ctx` was not a prefix of the
+   name so it had to be registered. Renaming the group to `signal` removed the
+   need for either — `sig` is an ordinary unambiguous prefix, which the
+   prefix-matching rework prefers over a registered alias. See
    DESIGN_cli_noargs.md §d.)
 2. **`value`** → free numeric the user supplies; TrainMate never interprets it
    *semantically* — but it is read quantitatively, see §3.
 3. **`list` default window** → `config.metrics_lookback_days` (15), matching the
-   coach's context-read window.
+   coach's metrics-lookback window.
 4. **Multi-day `rm`** → range + metric form only; **no** logical-signal grouping.
    A multi-day signal is just N per-day rows; remove them by `METRIC -d A..B`.

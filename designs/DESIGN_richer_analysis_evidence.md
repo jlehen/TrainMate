@@ -112,7 +112,7 @@ records an intention, not a measurement. "I couldn't train Thursday" is not phys
 data that the block is too hard, so letting it flow into the evidence/confidence machinery
 would manufacture durable learnings out of scheduling. Discounting is the one sanctioned
 crossing because it only ever *removes* unwarranted confidence, which is safe in a way the
-supporting direction is not. Observations (`context` / `daily_context`) are the objects
+supporting direction is not. Observations (`signal` / `daily_signals`) are the objects
 allowed to support a learning; constraints are not.
 
 Practically this means a week whose only notable feature is a constraint should yield **no**
@@ -135,7 +135,7 @@ week — not per day — is enough and keeps this O(weeks)). For each metric `x`
 {rhr, hrv, sleep} with a usable baseline (`std` present and > 0), compute a per-day
 z `(value − mean)/std`, then average the week's days. The per-day z now lives in the
 shared static `_day_response_z(metric_row, baseline)` (§7) — the single definition of
-"notches from normal", also used per-morning by the context-impact path:
+"notches from normal", also used per-morning by the signal-impact path:
 
 ```json
 "vs_baseline_z": { "rhr": +1.4, "hrv": -1.1, "sleep": -0.6 }
@@ -191,9 +191,9 @@ author *no* learning for the week, not to author one citing the constraint.
 **Not the complete shape — see also.** The example shows only what *this* design adds.
 Later designs put more fields on the same weekly summary: `power_zone_distribution_sec`
 (DESIGN_intensity_distribution.md), `end_ctl` / `week_ramp` / `min_tsb`
-(DESIGN_pmc_fitness_fatigue.md), and an optional `daily_context` list
-(DESIGN_calendar_context_ingest.md). A separate full-history `context_days` block rides
-*beside* the summaries in the same user content (DESIGN_quantitative_context_impact.md).
+(DESIGN_pmc_fitness_fatigue.md), and an optional `daily_signals` list
+(DESIGN_calendar_signal_ingest.md). A separate full-history `signal_days` block rides
+*beside* the summaries in the same user content (DESIGN_quantitative_signal_impact.md).
 `trainmate/coach/service/analysis.py` is the authority on the emitted shape.
 
 ---
@@ -213,8 +213,8 @@ The hashed tuples, as implemented (this list governs cache correctness, so keep 
 | `activities` | `activity_id, date, activity_type, duration_sec, tss, rpe, zone1..zone5_sec` |
 | `metrics` | `date, rhr, hrv, sleep_score, stress, ctl, atl, tsb` |
 | `constraints` | `id, start_date, end_date, rest, title, description` |
-| `daily_context` | `date, metric, value, text` |
-| `context_days` | the assembled block itself, hashed as computed |
+| `daily_signals` | `date, metric, value, text` |
+| `signal_days` | the assembled block itself, hashed as computed |
 
 plus the `[window_start, window_end]` pair. Each digest is a sorted set/list, serialized
 with `sort_keys=True` and SHA-256'd.
@@ -225,9 +225,9 @@ analysis input, so hashing them would invalidate the cache for a change the mode
 see. `rest` **is** hashed (as `int(rest or 0)`), since a hard-rest constraint changes how a
 week must be read.
 
-`daily_context` and `context_days` are later additions (DESIGN_calendar_context_ingest.md
-§7, DESIGN_quantitative_context_impact.md §8), not part of this design's cut; they are
-listed because the method now takes them and the reader needs the whole tuple. `context_days`
+`daily_signals` and `signal_days` are later additions (DESIGN_calendar_signal_ingest.md
+§7, DESIGN_quantitative_signal_impact.md §8), not part of this design's cut; they are
+listed because the method now takes them and the reader needs the whole tuple. `signal_days`
 is *full-history*, so unlike every other input a change **outside** `[from, until]` still
 shifts the fingerprint — correctly, because it changes the prompt (§8).
 
@@ -270,8 +270,8 @@ unit-testable in isolation:
   `vs_baseline_z`).
 - `_day_response_z(metric_row, baseline) -> dict` — the per-day `(value − mean)/std` for
   rhr/hrv/sleep, extracted out of `_week_response_features` by
-  DESIGN_quantitative_context_impact.md so the weekly feature and the per-morning
-  context-impact strip share one definition. It is the single source of truth for the z;
+  DESIGN_quantitative_signal_impact.md so the weekly feature and the per-morning
+  signal-impact strip share one definition. It is the single source of truth for the z;
   `_week_response_features` just averages its output over the week. The channel/column
   mapping lives beside it in `_RESPONSE_Z_CHANNELS`.
 
@@ -288,7 +288,7 @@ In `tests/test_analysis.py`:
 - Fingerprint (`TestRicherEvidenceIntegration`): editing an overlapping constraint
   shifts the hash, so the next run recomputes; a constraint lying entirely **outside**
   `[from, until]` does not, because `get_constraints` never returns it. Contrast with
-  `context_days`, which *is* full-history: an out-of-window daily-context signal **does**
+  `signal_days`, which *is* full-history: an out-of-window daily signal **does**
   shift the hash (§5) and has its own test.
 - Integration: the per-week `constraints` entry and `vs_baseline_z` / `avg_stress` appear
   in the JSON handed to `openrouter_client.complete` (assert on `call_args`).

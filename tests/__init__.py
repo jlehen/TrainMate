@@ -55,8 +55,8 @@ def _remove_test_databases() -> None:
 
 # The Calendar ride-along inside ensure_data ran against the real account: it created
 # events and consumed the incremental sync token that `data pull` needs
-# (DESIGN_calendar_context_ingest.md §6). Stub the bridge, not the callers.
-mock.patch("trainmate.garmin.sync._sync_calendar_context", lambda *a, **k: None).start()
+# (DESIGN_calendar_signal_ingest.md §6). Stub the bridge, not the callers.
+mock.patch("trainmate.garmin.sync._sync_calendar_signals", lambda *a, **k: None).start()
 
 _LOOPBACK = {"127.0.0.1", "::1", "localhost", ""}
 _real_connect = socket.socket.connect

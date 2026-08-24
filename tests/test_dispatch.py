@@ -52,7 +52,7 @@ class TestEveryCommandHasAHandler(unittest.TestCase):
         """`tm goal` with no sub-command should say what it offers, not exit silently."""
         from tests.helpers import run_cli
 
-        for name in ("goal", "constraint", "benchmark", "context", "learnings",
+        for name in ("goal", "constraint", "benchmark", "signal", "learnings",
                      "plan", "workout", "data"):
             with self.subTest(group=name):
                 exit_code, stdout, _ = run_cli([name])

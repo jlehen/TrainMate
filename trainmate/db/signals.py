@@ -1,24 +1,24 @@
 from typing import List, Optional
-from trainmate.types import DailyContext
+from trainmate.types import DailySignal
 
 
-class DailyContextMixin:
-    """CRUD for external daily context signals ingested from tagged Calendar events.
+class DailySignalsMixin:
+    """CRUD for external daily signals ingested from tagged Calendar events.
 
     Ingestion is an upsert keyed on the Google Calendar event id, so editing a
     signal updates its row in place and a cancelled event deletes it
-    (DESIGN_calendar_context_ingest.md §5–§6).
+    (DESIGN_calendar_signal_ingest.md §5–§6).
     """
 
-    def upsert_daily_context_by_event(
+    def upsert_daily_signal_by_event(
         self, google_event_id: str, date: str, metric: str,
         value: Optional[float], text: Optional[str], updated: Optional[str] = None
     ) -> None:
-        """Inserts or updates a context signal, reconciled by its Calendar event id."""
+        """Inserts or updates a signal, reconciled by its Calendar event id."""
         with self._get_connection() as conn:
             conn.cursor().execute(
                 """
-                INSERT INTO daily_context
+                INSERT INTO daily_signals
                     (google_event_id, date, metric, value, text, updated)
                 VALUES (?, ?, ?, ?, ?, ?)
                 ON CONFLICT(google_event_id) DO UPDATE SET
@@ -32,25 +32,25 @@ class DailyContextMixin:
             )
             conn.commit()
 
-    def delete_daily_context_by_event(self, google_event_id: str) -> bool:
-        """Removes the context signal for a (cancelled/deleted) Calendar event id.
+    def delete_daily_signal_by_event(self, google_event_id: str) -> bool:
+        """Removes the signal for a (cancelled/deleted) Calendar event id.
 
         Returns True only when a row actually went away: cancelled events reach the
         ingest path untagged, so "did this delete anything" is the only way to tell
-        one of ours from a cancelled workout (DESIGN_calendar_context_ingest.md §6)."""
+        one of ours from a cancelled workout (DESIGN_calendar_signal_ingest.md §6)."""
         with self._get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute(
-                "DELETE FROM daily_context WHERE google_event_id = ?", (google_event_id,)
+                "DELETE FROM daily_signals WHERE google_event_id = ?", (google_event_id,)
             )
             conn.commit()
             return cursor.rowcount > 0
 
-    def get_daily_context(
+    def get_daily_signals(
         self, start_date: Optional[str] = None, end_date: Optional[str] = None,
         metric: Optional[str] = None
-    ) -> List[DailyContext]:
-        """Returns context signals within [start_date, end_date] (inclusive), ordered
+    ) -> List[DailySignal]:
+        """Returns signals within [start_date, end_date] (inclusive), ordered
         by date then metric. Either bound may be omitted for an open-ended range; an
         optional `metric` restricts to a single category."""
         clauses = []
@@ -68,31 +68,31 @@ class DailyContextMixin:
         with self._get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute(
-                f"SELECT * FROM daily_context {where} ORDER BY date ASC, metric ASC",
+                f"SELECT * FROM daily_signals {where} ORDER BY date ASC, metric ASC",
                 params,
             )
             return [dict(row) for row in cursor.fetchall()]  # type: ignore
 
-    def get_daily_context_by_id(self, context_id: int) -> Optional[DailyContext]:
-        """Returns a single context signal by its local row id, or None."""
+    def get_daily_signal_by_id(self, signal_id: int) -> Optional[DailySignal]:
+        """Returns a single signal by its local row id, or None."""
         with self._get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute("SELECT * FROM daily_context WHERE id = ?", (context_id,))
+            cursor.execute("SELECT * FROM daily_signals WHERE id = ?", (signal_id,))
             row = cursor.fetchone()
             return dict(row) if row else None  # type: ignore
 
-    def delete_daily_context(self, context_id: int) -> None:
-        """Removes a context signal by its local row id (the calendar event must be
+    def delete_daily_signal(self, signal_id: int) -> None:
+        """Removes a signal by its local row id (the calendar event must be
         deleted separately so a full re-pull can't resurrect it)."""
         with self._get_connection() as conn:
             conn.cursor().execute(
-                "DELETE FROM daily_context WHERE id = ?", (context_id,)
+                "DELETE FROM daily_signals WHERE id = ?", (signal_id,)
             )
             conn.commit()
 
-    def list_context_metrics(self) -> List[dict]:
+    def list_signal_metrics(self) -> List[dict]:
         """Returns the distinct metrics in use with a row count and first/last date,
-        ordered by most-recently-seen. Powers `context list-metrics`."""
+        ordered by most-recently-seen. Powers `signal list-metrics`."""
         with self._get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute(
@@ -101,7 +101,7 @@ class DailyContextMixin:
                        COUNT(*)  AS count,
                        MIN(date) AS first_date,
                        MAX(date) AS last_date
-                FROM daily_context
+                FROM daily_signals
                 GROUP BY metric
                 ORDER BY last_date DESC, metric ASC
                 """

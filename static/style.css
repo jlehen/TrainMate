@@ -1526,33 +1526,33 @@ header {
 .bm-delta.up { color: var(--accent-green); }
 .bm-delta.down { color: var(--accent-red); }
 
-/* --- DAILY CONTEXT VISUALISATION (`context list`) --- */
-.context-vocab { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-bottom: 0.9rem; }
-.ctx-chip {
+/* --- DAILY SIGNALS VISUALISATION (`signal list`) --- */
+.signal-vocab { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-bottom: 0.9rem; }
+.sig-chip {
     padding: 0.2rem 0.55rem; border-radius: 999px; font-size: 0.75rem;
     background: rgba(255,255,255,0.04); border: 1px solid var(--card-border);
     color: var(--text-secondary); cursor: help;
 }
-.ctx-chip-count { color: var(--accent-cyan); font-weight: 600; margin-left: 0.2rem; }
-.context-chart { margin-bottom: 0.75rem; }
-.ctx-row { display: flex; align-items: center; gap: 0.6rem; margin-bottom: 0.3rem; }
-.ctx-label {
+.sig-chip-count { color: var(--accent-cyan); font-weight: 600; margin-left: 0.2rem; }
+.signal-chart { margin-bottom: 0.75rem; }
+.sig-row { display: flex; align-items: center; gap: 0.6rem; margin-bottom: 0.3rem; }
+.sig-label {
     flex: 0 0 7.5rem; font-size: 0.78rem; color: var(--text-secondary);
     text-align: right; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
-.ctx-strip { display: flex; gap: 2px; flex: 1 1 auto; overflow-x: auto; }
-.ctx-cell {
+.sig-strip { display: flex; gap: 2px; flex: 1 1 auto; overflow-x: auto; }
+.sig-cell {
     flex: 1 0 6px; height: 15px; border-radius: 3px;
     background: rgba(255,255,255,0.04); cursor: help;
 }
 /* Each metric is shaded within its own range: sleep hours and units of alcohol share
    no scale, so one global ramp would be a false comparison. */
-.ctx-cell.lvl1 { background: rgba(56,189,248,0.25); }
-.ctx-cell.lvl2 { background: rgba(56,189,248,0.42); }
-.ctx-cell.lvl3 { background: rgba(56,189,248,0.60); }
-.ctx-cell.lvl4 { background: rgba(56,189,248,0.78); }
-.ctx-cell.lvl5 { background: rgba(56,189,248,0.95); }
-.ctx-axis { margin-top: 0.4rem; }
+.sig-cell.lvl1 { background: rgba(56,189,248,0.25); }
+.sig-cell.lvl2 { background: rgba(56,189,248,0.42); }
+.sig-cell.lvl3 { background: rgba(56,189,248,0.60); }
+.sig-cell.lvl4 { background: rgba(56,189,248,0.78); }
+.sig-cell.lvl5 { background: rgba(56,189,248,0.95); }
+.sig-axis { margin-top: 0.4rem; }
 
 /* --- PLAN / BLOCK FEEDBACK (read-only log; written with `tm plan feedback`) --- */
 .strategy-feedback { margin: 0.5rem 0 0.75rem 0; }
