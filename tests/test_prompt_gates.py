@@ -239,6 +239,14 @@ class TestCarriedAdaptationsGate(unittest.TestCase):
         )
         self.assertIn("Cut to easy Z2 to shed intensity.", user)
 
+    def test_the_tag_closes_on_generates_risk_not_adapts(self):
+        """Both prompts read the same easing tally against opposite risks: adapt may cut
+        the session again, generate may write the day back at its original load. The two
+        closers must not drift back into one (DESIGN_workout_revisions.md §7.1)."""
+        _system, user = build_generate_prompt(carried_workouts=self.EASED)
+        self.assertIn("do not silently restore it", user)
+        self.assertNotIn("do not compound", user)
+
     def test_the_description_is_not_shipped(self):
         """A KEEP identifies the session rather than copying it, so the description stays
         out — sending it would be paying for text the model is told not to reproduce."""

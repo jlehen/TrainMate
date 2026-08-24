@@ -179,7 +179,7 @@ because you can count the chain instead of maintaining a counter. **That deletio
 if the chain follows the session, and a swap moves a session to a different date.**
 
 The failure is not cosmetic. It breaks a live safety guard.
-`coach/formatting.py::_adapt_recency_tag` injects this into the adapt prompt, per session:
+`coach/formatting.py::_easing_recency_tag` injects this into the adapt prompt, per session:
 
 ```
 [ALREADY EASED by a prior adaptation (3x, most recently 2 days ago) —
@@ -188,6 +188,8 @@ The failure is not cosmetic. It breaks a live safety guard.
 
 Its job is to stop the coach cutting an already-cut session again while recovery metrics are
 still lagging. Without it, three bad mornings walk a 90-minute ride down to nothing.
+`workout generate` reads the same tag against the opposite risk and closes it
+`do not silently restore it` instead (§7.1).
 
 Now watch it fail with slot chains alone. Tuesday has a long ride, 90 minutes. Thursday has
 an easy spin, 45. Two bad mornings, two adapts, then a swap on Wednesday:
@@ -467,7 +469,7 @@ This deletes `AdaptProposal.stamp_adapted_at`. That flag existed so a load reduc
 by something other than fatigue would not count as an easing — and under this model the
 change kind decides that, with no flag to carry or forget.
 
-**The guard reads the tally, not the marker.** `coach/formatting.py::_adapt_recency_tag`
+**The guard reads the tally, not the marker.** `coach/formatting.py::_easing_recency_tag`
 currently returns `""` unless the session's modification status is `adapted` — which works
 today only because of the `adapted`-beats-`swapped` precedence rule §12 retires. Under this
 model the marker reflects the *latest* change, so an adapted-then-swapped session reads
@@ -879,7 +881,7 @@ migration function.
 - The DO NOT COMPOUND guard survives a swap **end to end**. Build the §4 example — two
   adapts on Tuesday, a swap to Thursday — and assert the *rendered prompt tag* for the
   Thursday session says `ALREADY EASED` with `2x`. Asserting only `adaptation_count == 2`
-  would pass at the db layer while a status-gated `_adapt_recency_tag` still returned `""`
+  would pass at the db layer while a status-gated `_easing_recency_tag` still returned `""`
   (§7); the tag is the behaviour this design exists to protect. This test fails on slot
   chains alone, and it fails on a status-gated tag.
 - An adapt undone by rollback stops counting: adapt, roll it back, assert
@@ -960,7 +962,7 @@ To be made when this is implemented, not before:
 | `docs/DOMAIN_MODEL.md` §10 | Invariant 11 is replaced by the immutability trigger; a new invariant covers the lineage. **Done.** |
 | `DESIGN_plan_rollback.md` §9 | The batch key moves from `archived_at` to `change_id`. |
 | `DESIGN_benchmark_workouts.md` | `benchmark_results.workout_id` names a lineage. |
-| `trainmate/coach/formatting.py` | `_adapt_recency_tag` gates on the derived tally (`adaptation_count > 0`), not on the modification marker (§7). |
+| `trainmate/coach/formatting.py` | `_easing_recency_tag` gates on the derived tally (`adaptation_count > 0`), not on the modification marker (§7). |
 | `trainmate/modification_state.py` | Deleted, with its test and the two prefix constants. |
 | `trainmate/db/wipes.py` | `wipe_workouts` drops the triggers, wipes the three workout tables, recreates the triggers (§14). |
 | `trainmate/db/constraints.py` | `clear_honored_after` keyed on the target change's `created_at`, not `archived_at` (§10). |

@@ -160,7 +160,7 @@ class TestTheGuardSurvivesASwap(unittest.TestCase):
     def test_the_rendered_prompt_tag_still_says_already_eased(self):
         """The tag is the behaviour this design exists to protect, so the tag is what is
         asserted: checking `adaptation_count == 2` alone would pass at the db layer while
-        a kind-gated `_adapt_recency_tag` still returned "" (§7)."""
+        a kind-gated `_easing_recency_tag` still returned "" (§7)."""
         moved = self.db.get_workout("2026-09-03", "cycling")
         self.assertEqual(moved["title"], "Long ride")
         self.assertEqual(moved["adaptation_count"], 2)

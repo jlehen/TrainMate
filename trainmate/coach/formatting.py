@@ -8,15 +8,25 @@ from trainmate.sports import canonical_sport
 from trainmate import intensity
 
 
-def _adapt_recency_tag(workout: Workout, eval_date: Optional[str]) -> str:
+# The tag's closing clause names the risk the reading command runs, and the two commands
+# run opposite ones: `adapt` may cut the session again, `generate` may write the day back
+# at its original load (DESIGN_workout_revisions.md §7.1).
+EASED_DO_NOT_COMPOUND = "do not compound"
+EASED_DO_NOT_RESTORE = "do not silently restore it"
+
+
+def _easing_recency_tag(
+    workout: Workout, eval_date: Optional[str],
+    closer: str = EASED_DO_NOT_COMPOUND,
+) -> str:
     """Tags an already-eased session with how recently and how often it was eased.
 
     Gated on the derived tally, NOT on the kind of the latest change: under revisions the
     marker reflects the latest change, so an adapted-then-swapped session reads `swapped`,
     and a kind gate would silence this tag in exactly the scenario the lineage exists to
-    protect (DESIGN_workout_revisions.md §7). The tag feeds the adaptation prompt a
-    recency signal so a re-run holds the already-eased form instead of compounding the cut
-    on still-lagging recovery metrics."""
+    protect (DESIGN_workout_revisions.md §7). Shared by the adaptation and generation
+    prompts, which read the same recency signal against opposite risks — `closer` is the
+    one clause that differs."""
     count = workout.get("adaptation_count") or 0
     if count < 1:
         return ""
@@ -40,7 +50,7 @@ def _adapt_recency_tag(workout: Workout, eval_date: Optional[str]) -> str:
             when = ""
     return (
         f" [ALREADY EASED by a prior adaptation ({times}{when}) — current form is the "
-        f"reduced plan, not the original; do not compound]"
+        f"reduced plan, not the original; {closer}]"
     )
 
 
@@ -150,13 +160,15 @@ def format_completed_activities(completed_activities: List[CompletedActivity]) -
 
 
 def format_planned_workouts(
-    planned_workouts: List[Workout], eval_date: Optional[str] = None
+    planned_workouts: List[Workout], eval_date: Optional[str] = None,
+    easing_closer: str = EASED_DO_NOT_COMPOUND,
 ) -> str:
     """Formats planned workouts to a readable block for LLM prompts.
 
-    `eval_date` adds the "[ALREADY EASED ...]" tag dated against it. Used where the model
-    is asked to identify a session rather than rewrite it, so the description
-    :func:`format_planned_workouts_detailed` carries is not needed.
+    `eval_date` adds the "[ALREADY EASED ...]" tag dated against it, closed by
+    `easing_closer`. Used where the model is asked to identify a session rather than
+    rewrite it, so the description :func:`format_planned_workouts_detailed` carries is not
+    needed.
     """
     planned_list = []
     for w in planned_workouts:
@@ -166,7 +178,7 @@ def format_planned_workouts(
             f"RPE: {w.get('rpe')}, TSS: {w.get('tss')}"
         )
         if eval_date:
-            line += _adapt_recency_tag(w, eval_date)
+            line += _easing_recency_tag(w, eval_date, easing_closer)
         mod_reason = w.get('modification_reason')
         if mod_reason:
             line += f" — {mod_reason}"
@@ -178,6 +190,7 @@ def format_planned_workouts_detailed(
     planned_workouts: List[Workout],
     completed_keys: Optional[Set[Tuple[str, str]]] = None,
     eval_date: Optional[str] = None,
+    easing_closer: str = EASED_DO_NOT_COMPOUND,
 ) -> str:
     """Like format_planned_workouts but includes each session's full description.
 
@@ -215,7 +228,7 @@ def format_planned_workouts_detailed(
         # adapt prompt's PROTECTING A BENCHMARK rule (DESIGN_benchmark_workouts.md §4.2).
         if w.get('benchmark_type'):
             header += f" [BENCHMARK: {w['benchmark_type']} — reschedule intact, do not dilute]"
-        header += _adapt_recency_tag(w, eval_date)
+        header += _easing_recency_tag(w, eval_date, easing_closer)
         mod_reason = w.get('modification_reason')
         if mod_reason:
             header += f" — {mod_reason}"

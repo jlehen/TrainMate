@@ -3,9 +3,9 @@ from trainmate.config import config
 from trainmate.types import Objective, Constraint, Workout, CompletedActivity
 from trainmate.util import cyan, days_between, aside
 from trainmate.coach.formatting import (
-    format_metrics_history, format_completed_activities, format_baseline,
-    format_planned_workouts, format_planned_workouts_detailed, format_removed_workouts,
-    format_daily_context,
+    EASED_DO_NOT_RESTORE, format_metrics_history, format_completed_activities,
+    format_baseline, format_planned_workouts, format_planned_workouts_detailed,
+    format_removed_workouts, format_daily_context,
 )
 import trainmate.coach.engine as _eng
 from trainmate.sports import CANONICAL_SPORTS
@@ -497,7 +497,10 @@ class WorkoutLogicMixin:
                 "These are the only sessions you should try to carry over — every other "
                 "day in this\nwindow is yours to write from scratch, and a date this list "
                 "does not name is not\nspoken for.\n"
-                + format_planned_workouts(carried_workouts, eval_date=today_str)
+                + format_planned_workouts(
+                    carried_workouts, eval_date=today_str,
+                    easing_closer=EASED_DO_NOT_RESTORE,
+                )
             )
 
         if history_text_parts:
