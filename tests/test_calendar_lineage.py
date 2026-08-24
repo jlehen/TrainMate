@@ -129,6 +129,23 @@ class TestCalendarLineage(unittest.TestCase):
         self.assertIn("Second easing", desc.split("History · ", 1)[0] + "")
         self.assertIn("First easing", entries(desc)["[2/3]"])
 
+    def test_footer_sits_above_the_history(self):
+        # The lifecycle + id lines describe the session as it stands today, so they read
+        # directly under the current prescription rather than past the earlier forms
+        # (DESIGN_calendar_lineage.md §5).
+        lineage = self._plan()
+        with self.db.workout_change(kind="adapt") as change:
+            change.append(
+                date="2026-08-31", sport_type="cycling", title="Long ride",
+                description="90min easy.", duration_minutes=90, tss=95, rpe=4,
+                lineage_id=lineage, reason="Eased",
+            )
+
+        desc = self._description(lineage)
+        self.assertLess(desc.index("90min easy."), desc.index("Planned: "))
+        self.assertLess(desc.index("Planned: "), desc.index(f"Workout: {lineage}"))
+        self.assertLess(desc.index(f"Workout: {lineage}"), desc.index("History · "))
+
     def test_a_session_that_never_changed_has_no_history(self):
         desc = self._description(self._plan())
         self.assertNotIn("History", desc)

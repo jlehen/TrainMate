@@ -150,6 +150,13 @@ and two of them go:
    tally deliberately ignores easings that were later undone and adaptations that did not
    actually lower the load (DESIGN_workout_revisions.md §7).
 
+It sits, with the `Goal / Macro / Meso / Workout` id line under it, **directly below the
+current prescription and above the history** — both lines describe the session as it stands
+today, so they belong with the form they describe rather than stranded past a block of
+earlier ones. Placement and sizing are separate questions: the history is laid out last but
+still budgeted last too (§7), so a long lineage yields to the footer rather than pushing it
+off the end.
+
 ## 6. Freshness — the signature has to see the lineage
 
 `pushed_signature` is a hash of exactly the fields that determine the rendered event

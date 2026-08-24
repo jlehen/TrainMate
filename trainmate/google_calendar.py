@@ -161,11 +161,12 @@ class CalendarSyncer:
             )
 
         # Lifecycle footer, sitting just above the technical ID line so the two read as one
-        # block at the bottom of the event: when the session entered the plan
+        # block directly under the current prescription — before the history, because it
+        # describes this form of the session, not the earlier ones
+        # (DESIGN_calendar_lineage.md §5). It carries when the session entered the plan
         # (`created_at`, always), and when/how often it has been eased (`adapted_at` /
         # `adaptation_count`, only once adapted). The load it was planned with is not
-        # repeated here — the oldest history entry carries it, with its date and target
-        # (DESIGN_calendar_lineage.md §5).
+        # repeated here — the oldest history entry carries it, with its date and target.
         footer_lines: List[str] = []
         lifecycle_parts = []
         created_at = workout.get('created_at')
@@ -215,14 +216,14 @@ class CalendarSyncer:
 
         # Every earlier form of this session, newest first — the event is the only place
         # the athlete can ask "what was this before?" without a terminal
-        # (DESIGN_calendar_lineage.md §2). Rendered last because it is the part that
-        # yields: it takes the space the rest of the event does not need, so a long
-        # prescription is never the thing that gets cut (§7).
+        # (DESIGN_calendar_lineage.md §2). Placed last and sized last because it is the
+        # part that yields: it takes the space the rest of the event does not need, so a
+        # long prescription is never the thing that gets cut (§7).
         spare = calendar_lineage.MAX_DESCRIPTION - len(header) - len(event_description)
         history = calendar_lineage.for_workout(workout, budget=spare - len(footer) - 8)
 
         event_description = "\n\n".join(
-            part for part in (header, event_description, history, footer) if part
+            part for part in (header, event_description, footer, history) if part
         )
 
         event_body = {
