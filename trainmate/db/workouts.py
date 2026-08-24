@@ -17,7 +17,7 @@ from trainmate.sports import canonical_sport
 
 # One value per command invocation, fixed at write time (§3).
 CHANGE_KINDS = (
-    "generate", "adapt", "accommodate", "swap", "add", "rm",
+    "generate", "adapt", "swap", "add", "rm",
     "restore", "rollback", "stand-down", "reinstate",
 )
 

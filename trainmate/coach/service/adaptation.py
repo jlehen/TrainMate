@@ -288,7 +288,6 @@ class AdaptationMixin:
             covered_constraint_ids=honoring.covered_ids(
                 constraints, target_date_str, meso_end_date_str
             ),
-            window_workouts=tuple(window_workouts),
         )
 
     def workout_revision_apply(
@@ -296,11 +295,8 @@ class AdaptationMixin:
     ) -> None:
         """Appends a revision's sessions under one change, and lets Calendar follow.
 
-        Shared by `workout adapt` and `workout accommodate` (DESIGN_constraint_reschedule.md
-        §7): both append rather than edit in place, and both need preview and apply to
-        agree about what disappears. Takes the whole proposal so the range and the
-        displacement decisions are the ones the coach actually made, not a reconstruction —
-        including which change kind this pass writes under.
+        Takes the whole proposal so the range and the displacement decisions are the ones
+        the coach actually made, not a reconstruction.
 
         A session the pass drops becomes a void revision rather than a `DELETE`, and one it
         substitutes cross-sport becomes a void at the source plus a revision at the
@@ -338,7 +334,7 @@ class AdaptationMixin:
                 displaced_by_date.setdefault(ew['date'], ew)
 
         with self._db.workout_change(
-            kind=proposal.kind, summary=proposal.reason
+            kind="adapt", summary=proposal.reason
         ) as change:
             for ew in displaced_by_date.values():
                 print(yellow(
@@ -406,6 +402,6 @@ class AdaptationMixin:
         flagged forever (§8). Separate from `workout_revision_apply` because there is
         nothing to apply, and outside the propose call because a propose writes nothing.
         """
-        with self._db.workout_change(kind=proposal.kind, summary=proposal.reason):
+        with self._db.workout_change(kind="adapt", summary=proposal.reason):
             pass
         honoring.stamp(self._db, proposal.covered_constraint_ids)

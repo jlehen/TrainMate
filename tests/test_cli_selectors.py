@@ -188,7 +188,6 @@ class TestSelectorVocabularyInvariants(unittest.TestCase):
         "-M": {"--macrocycle"},
         "-g": {"--goal"},
         "-t": {"--type"},
-        "-c": {"--constraint"},
     }
 
     def _walk(self, parser, path=""):
@@ -230,20 +229,6 @@ class TestSelectorVocabularyInvariants(unittest.TestCase):
             clash = retired & set(action.option_strings)
             self.assertFalse(clash, f"'{path}' still registers {sorted(clash)}")
 
-    def test_accommodate_takes_the_reserved_vocabulary(self):
-        """`workout accommodate` is a plain selector command (§4): -d/-m/-M/-g mean here
-        exactly what they mean everywhere, and the tree walk above covers it for free —
-        this pins that they are actually registered."""
-        import trainmate_cli
-        parser, _ = trainmate_cli.build_parser()
-        registered = {
-            o
-            for path, action in self._walk(parser) if path == "workout accommodate"
-            for o in action.option_strings
-        }
-        for flag in ("-d", "-m", "-M", "-g"):
-            self.assertIn(flag, registered)
-
     def test_every_range_command_declares_a_policy(self):
         import trainmate_cli
         parser, _ = trainmate_cli.build_parser()
@@ -260,25 +245,6 @@ class TestSelectorVocabularyInvariants(unittest.TestCase):
                 "_selector_policy", sub._defaults,
                 f"'{path}' takes -d but declares no direction/default",
             )
-
-
-class TestOneDoorOntoTheAccommodationFlow(unittest.TestCase):
-    """The window-scoped reshuffle has exactly one command
-    (DESIGN_constraint_reschedule.md §4). A second door onto the same LLM call is what
-    let `--show-llm-prompt-only` land on one and not the other."""
-
-    def test_constraint_has_no_honor_subcommand(self):
-        import trainmate_cli
-        parser, _ = trainmate_cli.build_parser()
-        constraint = next(
-            a.choices["constraint"] for a in parser._actions
-            if isinstance(a, argparse._SubParsersAction) and "constraint" in a.choices
-        )
-        verbs = {
-            name for action in constraint._actions
-            if isinstance(action, argparse._SubParsersAction) for name in action.choices
-        }
-        self.assertNotIn("honor", verbs)
 
 
 if __name__ == "__main__":

@@ -1,21 +1,19 @@
-"""Which coach pass owns a constraint, and whether one has happened yet.
+"""Whether the plan reflects a constraint yet, and who may say that it does.
 
 `constraints.honored_at` means: *a coach pass had this directive in scope, with authority
-over every day of it still ahead* (DESIGN_constraint_reschedule.md §8). Two rules follow
+over every day of it still ahead* (DESIGN_constraint_honoring.md §2). Two rules follow
 from it and both live here rather than being restated at each site:
 
-* **who may stamp** — three commands claim the column over three different ranges
-  (`covers`/`covered_ids`/`stamp`); the shape that let `workout accommodate`'s no-change
-  path ship with no stamp at all.
-* **whether the window tier is worth offering** — `needs_a_pass`, asked by the sweep, the
-  `status` line, `constraint list`/`show` and the add-time nudge. Five hand-written copies
-  is how `constraint show` came to recommend `workout accommodate` for exactly the
-  plan-shaping directives the sweep deliberately skips.
+* **who may stamp** — `workout adapt` and `workout generate` claim the column over two
+  different ranges (`covers`/`covered_ids`/`stamp`).
+* **whether the plan is missing it** — `needs_a_pass`, asked by the `status` line,
+  `constraint list`/`show` and the add-time nudge. Hand-written copies of that rule are
+  how `constraint show` came to flag exactly the plan-shaping directives the `status`
+  line deliberately skips.
 """
 from datetime import datetime, timedelta
 from typing import Any, Iterable, List, Optional, Tuple
 
-from trainmate.config import config
 from trainmate.types import Constraint
 
 
@@ -30,31 +28,27 @@ def _iso(day) -> str:
 def constraint_window(
     start_date: str, end_date: str, today: str
 ) -> Optional[Tuple[str, str]]:
-    """The §5 window a `workout accommodate` pass would evaluate for this constraint: its
-    own dates ± `config.accommodate_spill_days`, clipped to TOMORROW — today is adapt's,
-    and a metric-blind pass must not race it there.
+    """The days of this constraint a future pass could still act on: its own dates,
+    clipped to TOMORROW — today belongs to `workout adapt`, which runs with the full
+    metrics picture.
 
     None when the constraint ends today or earlier: only adapt's own day is left of it.
-
-    Here rather than on the service because `needs_a_pass` below has to ask the same
-    question, and both the CLI and the service already ask it.
     """
     tomorrow = _day(today) + timedelta(days=1)
     if _day(end_date) < tomorrow:
         return None
-    spill = timedelta(days=config.accommodate_spill_days)
-    window_start = max(_day(start_date) - spill, tomorrow)
-    return _iso(window_start), _iso(_day(end_date) + spill)
+    return _iso(max(_day(start_date), tomorrow)), end_date
 
 
 def needs_a_pass(db: Any, constraint: Constraint, today: str) -> bool:
-    """Whether the window tier is worth offering for this directive (§8/§10).
+    """Whether the plan is missing this directive and something could still be done about
+    it (DESIGN_constraint_honoring.md §2).
 
-    Four terms, cheapest first. Already stamped and there is nothing to offer. A
-    `replan = 1` directive belongs to the plan-shaping tier — `workout generate` stamps it
-    when its horizon reaches it, so it is unstamped but not unhandled. A window with
-    nothing left of it is adapt's day only. And a window holding no sessions has nothing
-    to reshuffle, so naming it would be a nudge the athlete can act on in no way at all.
+    Four terms, cheapest first. Already stamped and there is nothing to report. A
+    `replan = 1` directive is built into the plan by `plan generate`, so it is unstamped
+    but not unhandled. A window with nothing left of it is adapt's day only. And a window
+    holding no sessions has nothing to reshuffle, so naming it would be a nudge the
+    athlete can act on in no way at all.
     """
     if constraint.get('honored_at'):
         return False
@@ -67,10 +61,10 @@ def needs_a_pass(db: Any, constraint: Constraint, today: str) -> bool:
 
 
 def constraints_needing_a_pass(db: Any, today: str) -> List[Constraint]:
-    """Every directive the window tier should be offered for, oldest first.
+    """Every directive the plan does not reflect yet, oldest first.
 
-    The sweep's subject and the `status` line's count come from this one call, so the
-    screen that nags and the command that acts can never disagree about the set.
+    The `status` count comes from this one call, so every screen that reports the gap
+    reports the same set.
     """
     return [c for c in db.get_constraints(start=today) if needs_a_pass(db, c, today)]
 
@@ -91,7 +85,7 @@ def covered_ids(
     constraints: Iterable[Constraint], range_start: str, range_end: str
 ) -> Tuple[int, ...]:
     """The ids a pass over this range may stamp. Decided at proposal time and carried on
-    the proposal, so apply never re-derives it from a set edited since (§8)."""
+    the proposal, so apply never re-derives it from a set edited since (§3)."""
     return tuple(
         c['id'] for c in constraints if covers(c, range_start, range_end)
     )

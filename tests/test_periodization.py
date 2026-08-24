@@ -1947,7 +1947,7 @@ class TestDateKeyedGeneration(unittest.TestCase):
     def test_the_covering_readers_answer_only_with_blocks_that_cover_the_window(self):
         """The strict question, for every caller that goes on to treat the answer as
         covering the days it asked about — a block that does not contain the window is not
-        something to reshuffle towards (DESIGN_constraint_reschedule.md §5).
+        something to name (DESIGN_constraint_honoring.md §4.1).
 
         Its own NAME rather than a flag on the governing readers: a boolean whose meaning
         each call site had to re-derive is how the same by-hand re-check came to be

@@ -42,7 +42,7 @@ def _db_writes(fn: ast.AST):
 class TestProposingNeverWrites(unittest.TestCase):
     """A method that returns a *Proposal* has not been accepted yet, so it must not
     touch the database — the whole point of handing the caller a proposal is that the
-    write waits for the athlete's `y` (DESIGN_constraint_reschedule.md §7/§8).
+    write waits for the athlete's `y` (DESIGN_constraint_honoring.md §2).
 
     Keyed on the return annotation, so a new propose method is covered the day it is
     written rather than the day someone remembers to list it here.
@@ -63,8 +63,8 @@ class TestProposingNeverWrites(unittest.TestCase):
 class TestApplyingAlwaysStamps(unittest.TestCase):
     """The mirror of the rule above, and the half that actually shipped broken: a method
     that TAKES a *Proposal* is acting on the athlete's `y`, so it must record the coach
-    pass — `honoring.stamp` — or the sweep re-offers the constraint forever at one LLM
-    call a run (DESIGN_constraint_reschedule.md §8).
+    pass — `honoring.stamp` — or every surface goes on reporting the constraint as one the
+    plan does not reflect (DESIGN_constraint_honoring.md §2).
 
     Keyed on the parameter annotation, the same way `TestProposingNeverWrites` is keyed on
     the return annotation, so an apply method written tomorrow is covered tomorrow.

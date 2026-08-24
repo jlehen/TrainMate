@@ -41,7 +41,7 @@ COMMAND_ORDER = {
     "context": ["list", "list-metrics", "add", "rm"],
     "learnings": ["list", "show", "edit", "demote", "keep", "rm"],
     "plan": ["show", "generate", "feedback", "versions", "diff", "rollback"],
-    "workout": ["list", "adapt", "accommodate", "compare", "generate", "swap", "add",
+    "workout": ["list", "adapt", "compare", "generate", "swap", "add",
                 "restore", "rm", "rollback", "batches"],
     "data": ["pull", "reflect", "show-metrics", "show-activities"],
 }
@@ -68,7 +68,6 @@ from trainmate.cli.plans import (
     run_plan_rollback, run_plan_versions, run_plan_diff,
 )
 from trainmate.cli.workouts import (
-    run_workout_accommodate,
     run_workout_list, run_workout_compare, run_workout_generate, run_workout_rm,
     run_workout_restore, run_workout_adapt, run_workout_push, run_workout_swap,
     run_workout_add, run_workout_wipe, run_workout_batches, run_workout_rollback,

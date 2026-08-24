@@ -14,7 +14,6 @@ from trainmate.cli.workouts.generate import (
     run_workout_adapt, run_workout_batches, run_workout_compare,
     run_workout_generate, run_workout_list, run_workout_rollback,
 )
-from trainmate.cli.workouts.accommodate import run_workout_accommodate
 
 
 
@@ -278,49 +277,6 @@ def add_workout_parser(subparsers, pull_bypass_parser, llm_debug_parser):
         help="Apply proposed adaptations automatically without prompting"
     )
     
-    # workout accommodate
-    # The verb is `accommodate` and not `reschedule` because of the prefix namespace:
-    # `workout` already holds `restore`, and `reschedule` would make `re`/`res` ambiguous
-    # and break the `w res` spelling ARCHITECTURE.md §7 documents
-    # (DESIGN_constraint_reschedule.md §4). `ac` is free; `a` stays `adapt`.
-    w_acc = workout_subparsers.add_parser(
-        "accommodate",
-        parents=[llm_debug_parser],
-        help="Reshuffle sessions around constraints the daily adapt cannot reach",
-        description=(
-            "Honor the constraints your plan does not reflect yet, each in its own window "
-            "— the middle tier between the daily "
-            f"'{green('workout adapt')}', which only reaches the current block, and "
-            "--replan, which rebuilds the whole plan. A window is a constraint's own "
-            "dates plus a small margin either side for displaced work to land in, and the "
-            "sessions in it are re-arranged in place; the whole window is shown before "
-            "anything is written. With no selector this sweeps every constraint the plan "
-            "does not reflect, from today to the end of the plan — the case that matters, "
-            "since you rarely know which block a constraint landed in. -d/-m/-M/-g "
-            "restrict it to the constraints overlapping that window instead, and -c "
-            "honors the ones you name whether or not the plan already reflects them, "
-            "which is how you re-honor one after editing its sessions by hand. Reads no "
-            "recovery metrics: it acts on what you declared, not on how you are "
-            f"recovering, which is '{green('workout adapt')}'s job."
-        ),
-    )
-    w_acc.set_defaults(func=run_workout_accommodate)
-    # No span default: the no-argument case is not "the next 7 days" but the sweep
-    # (DESIGN_constraint_reschedule.md §4).
-    add_selector_args(
-        w_acc, meso=True, macro=True, goal=True, direction="forward", default=None,
-    )
-    # Names the subject directly instead of a window to find it in, so it is exclusive
-    # with the selectors above rather than another dimension of them (§4).
-    w_acc.add_argument(
-        "-c", "--constraint", type=int, nargs="+", metavar="ID",
-        help="Honor these constraint IDs, whether or not the plan already reflects them"
-    )
-    w_acc.add_argument(
-        "-y", "--yes", "--auto", action="store_true", dest="auto",
-        help="Apply the proposed reshuffle automatically without prompting"
-    )
-
     # workout push
     w_push = workout_subparsers.add_parser(
         "push", aliases=["p"], advanced=True,

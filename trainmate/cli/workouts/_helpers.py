@@ -15,7 +15,6 @@ from trainmate.cli.common import fmt_date
 # gets no marker, and a void carries [REMOVED] instead.
 _KIND_MARKERS = {
     'adapt': 'ADAPTED',
-    'accommodate': 'ACCOMMODATED',
     'swap': 'SWAPPED',
     'add': 'REPLACED',
 }

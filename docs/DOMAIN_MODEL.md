@@ -20,7 +20,7 @@ question, and each level is written by a different command.
 | **Macrocycle** | What is the overall strategy from now until that goal? | `macrocycles` table | `plan generate` (one LLM call) |
 | **Mesocycle** | What is this block of weeks *for*? | `mesocycles` table | `plan generate`, in the same call |
 | **Microcycle** | What does a typical week look like? | **Nothing. It is not stored.** | Implied by the workouts |
-| **Workout** | What do I actually do on Tuesday? | `workouts` table | `workout generate`, then `adapt` / `accommodate` / hand edits |
+| **Workout** | What do I actually do on Tuesday? | `workouts` table | `workout generate`, then `adapt` / hand edits |
 
 Two things in that table are worth pausing on, because they are the two facts that
 explain most of the design.
@@ -385,10 +385,10 @@ And the full behaviour table:
 
 That last row is the entire difference between layers 2 and 3, and it is a real fork:
 
-- **`workout accommodate` calls layer 2 directly.** A window that overlaps no block was
-  never planned against one, so there is nothing to reshuffle it *towards*, and the command
-  refuses. Being handed a block that does *not* cover the window would be worse than being
-  handed nothing.
+- **The add-time constraint message calls layer 2 directly.** It asks which block holds a
+  constraint's last day, and a block that does *not* cover that date is not an answer — it
+  would name the wrong block and offer a date already behind the athlete. Being handed
+  nothing is what lets it say "past the end of your plan" instead.
 - **`workout generate` calls layer 3.** It lays sessions near a plan's edges, and it reads
   an empty answer as "there is no plan at all — run `plan generate`". Layer 2's empty
   answer would make it refuse for a plan that merely starts next week.
@@ -442,12 +442,13 @@ Rather than widening the firewall, both sides are made aware of it. Inside
 `workout generate -m ..<id>` invocation that re-plans the next block against current
 metrics.
 
-`workout accommodate` is the one command that legitimately crosses the boundary. It can,
-because it changes the question: **adapt reacts to something inferred; accommodate reacts
-to something declared.** A constraint is a dated fact the athlete typed in, so honouring it
-needs no metrics and makes no fitness judgement — which is exactly why the command reads no
-metrics at all. The moment it did, the firewall argument would apply to it too
-(`DESIGN_constraint_reschedule.md §2`).
+Nothing crosses that boundary. A constraint dated past it is built in by the next
+`workout generate` whose horizon reaches it — which re-plans those days against the blocks
+that govern them, rather than carrying today's readings across to them. What the athlete
+gets in the meantime is *notice*: `constraints.honored_at` records whether any pass has had
+the directive in scope, so `status`, `constraint list`/`show` and the message printed at add
+time can say the plan does not reflect it yet and name the run that would
+(`DESIGN_constraint_honoring.md`).
 
 ### Operations
 
@@ -620,7 +621,7 @@ There is no `status` column. Three independent facts, all derived:
 
 | Axis | How you ask it |
 |---|---|
-| **Modified?** | The `kind` of the change that wrote the live revision — `generate` / `adapt` / `accommodate` / `swap` / `add` / … There is no stored flag and no precedence rule: the kind says what last happened, and the derived tally says how often the session has been eased, so one walked down twice and then moved reads `[SWAPPED, ADAPTED ×2]`. |
+| **Modified?** | The `kind` of the change that wrote the live revision — `generate` / `adapt` / `swap` / `add` / … There is no stored flag and no precedence rule: the kind says what last happened, and the derived tally says how often the session has been eased, so one walked down twice and then moved reads `[SWAPPED, ADAPTED ×2]`. |
 | **Removed?** | The live revision is a **void**. `workout rm` appends one carrying the athlete's reason; nothing is deleted, and every revision before the void is still in the log. Hidden from listings, comparisons, adaptation inputs and the Calendar push, but still shown to the coach as a deliberate *cancellation* — which is not the same thing as a miss. |
 | **Pushed / fresh?** | Comparing the live hash of the Calendar-relevant fields against `pushed_signature`. Never stored as a boolean. |
 
@@ -651,7 +652,6 @@ one writer forgets, the enum is lying with no way to tell.
 | `workout compare` | Planned vs completed, with misses, rest violations and unplanned high load. Today's untrained sessions read *"(not yet — still ahead today)"* and are **not** misses. |
 | `workout generate` | Write the sessions for a horizon, from the blocks governing those days. |
 | `workout adapt` | Daily readiness adjustment, within the current block only. |
-| `workout accommodate` | Reshuffle around declared constraints, in each constraint's own window. |
 | `workout add` | Manually schedule one session. No LLM. Replaces the same-sport session that day (or, with `--replace-day`, every session that day), recording what it overwrote. Deliberately does **not** re-balance surrounding days — that is `adapt`'s job. |
 | `workout swap` | Exchange two sessions' dates, or move one onto a rest day. Mandatory reason. Validated first: warns about new >2-day hard streaks, weekly load spikes, and block-boundary crossings. Returning a session to its `original_date` clears `modification_reason` — it is no longer modified. |
 | `workout rm` / `restore` | Soft-delete one session and its Calendar event, and undo that. |
@@ -671,7 +671,6 @@ level may never rewrite a higher one.
 |---|---|---|---|---|
 | `plan generate` | macrocycle + mesocycles | plan start → goal date | 15-day summary + PMC block | 1 |
 | `workout generate` | workout revisions | today → horizon flag, default 28 days | Yes — full `metrics_lookback_days` window | 1 |
-| `workout accommodate` | workout revisions | each constraint's dates ± `accommodate_spill_days` (default 3), clipped to **tomorrow** | **No — deliberately none** | 1 per pass |
 | `workout adapt` | workout revisions | evaluation date → **end of the current block** | Yes — full window, plus daily context | 1 |
 | `workout add` / `swap` / `rm` | one or two workout revisions | a single date | No | 0 |
 
@@ -680,14 +679,11 @@ Read that table top to bottom as an authority ladder:
 - `plan generate` may reshape everything, and costs the most to run.
 - `workout generate` may rewrite sessions freely, but only within the blocks it was
   handed. It cannot move a block boundary.
-- `workout accommodate` may cross a block boundary, but only inside a small declared
-  window, and it may not restructure anything — three days of spill can absorb a moved
-  session, it cannot re-periodize a block.
 - `workout adapt` may not cross a block boundary at all.
 - `workout add` / `swap` / `rm` touch exactly what you name and nothing else.
 
 **There is one write model, and every command uses it.** There used to be two —
-archive-and-rebuild for `workout generate`, edit-in-place for `adapt` and `accommodate` —
+archive-and-rebuild for `workout generate`, edit-in-place for `adapt` —
 and they disagreed about what a change *was*, which is why undo could reach one and not
 the other. Under the revision log both are the same act: append. A command that empties a
 day appends a void; a command that changes a session appends its new form; a command that
@@ -776,14 +772,15 @@ does not raise the "already eased" bar for next time).
 
 ```
 ./tm constraint add "Work trip, no bike" --start 2026-10-12 --end 2026-10-16
-./tm workout accommodate
+./tm workout generate -m 7
 ```
 
 The constraint is dated inside Specific Preparation — too far off for adapt to reach, too
-small to justify re-periodizing. `accommodate` opens a window of 2026-10-09 → 2026-10-19
-(the constraint's dates ± 3 days), previews the whole window, and on acceptance reshuffles
-the sessions in it. It reads no metrics. The constraint's `honored_at` is stamped, so the
-next bare sweep will not re-offer it.
+small to trip the replan heuristic. So `constraint add` says so, naming the block it lands
+in and the run that would cover it; until then `status` and `constraint list` both mark it
+*not yet in the plan*. The generate re-plans from today through that block's end, building
+around the trip like any other stored directive, and stamps the constraint's `honored_at`
+because its whole remaining window sat inside what was written.
 
 **6. Second thoughts about the plan.**
 
@@ -840,8 +837,9 @@ snapshot; that is the same one-time artifact, not a bug.
 - With `--replan`: `constraints_hash` changes → the plan is stale → `plan generate`
   rebuilds around it.
 - Without: no staleness at all. The constraint still reaches every coach prompt, and is
-  honoured by `workout accommodate`, `workout adapt` or the next `workout generate`,
-  whichever gets there first.
+  honoured by `workout adapt` or the next `workout generate`, whichever gets there first.
+  Until one of them has, `honored_at` is NULL and every surface that lists the constraint
+  says so.
 
 At add time, a magnitude heuristic *proposes* escalation — when the constraint displaces at
 least `replan_displaced_load_pct` (default 50%) of a typical week's planned load, or is a
@@ -905,7 +903,7 @@ unless the goal was entered by mistake.
 | 6 | Only `replan = 1` constraints fingerprint the plan | `plan_generate` filters before hashing |
 | 7 | A mesocycle belongs to one macrocycle and dies with it | FK `ON DELETE CASCADE` |
 | 8 | Adapt may not write past the end of the current block | Read bound + write-side filter |
-| 9 | Accommodate's window is the constraint's dates ± 3 days, never before tomorrow | `accommodation_plan` |
+| 9 | A pass may stamp `honored_at` only for a constraint whose whole remaining window it wrote | `honoring.covers`, checked at proposal time |
 | 10 | At most one live workout per (date, canonical sport) | By construction: the live row is the highest `id` in the slot (`live_workouts`) |
 | 11 | `workouts` is append-only — no row is ever updated or deleted | Two SQL triggers, `RAISE(ABORT)` |
 | 12 | A session's identity is its `lineage_id`, and it survives both edits and date moves | `WorkoutChange._lineage_for`; the adaptation tally walks it |
@@ -944,7 +942,7 @@ Worth knowing, because each of these is a decision rather than an oversight:
 | Plan vs workout terminology | `ARCHITECTURE.md` §11 |
 | Plan versioning and rollback | `designs/DESIGN_plan_rollback.md` |
 | The block firewall | `designs/DESIGN_block_boundary.md` |
-| The accommodate tier | `designs/DESIGN_constraint_reschedule.md` |
+| Whether the plan reflects a constraint | `designs/DESIGN_constraint_honoring.md` |
 | Constraints and the replan escalation | `designs/DESIGN_constraints.md` |
 | Plan feedback log | `designs/DESIGN_plan_feedback.md` |
 | Goal states and archiving | `designs/DESIGN_backward_evaluation.md` §12, §14 |

@@ -203,7 +203,7 @@ class PeriodizationMixin:
         """The blocks that ACTUALLY overlap a window — or none — plus the macrocycle IDs
         dropped as conflicts. The strict reader: an empty answer means no block covers
         any of these days, and every caller that treats the answer as covering the
-        window wants this form (DESIGN_constraint_reschedule.md §5).
+        window wants this form (DESIGN_constraint_honoring.md §4.1).
 
         Sequential plans both survive — a long span legitimately crosses from one goal's
         last block into the next goal's first — but two plans covering the *same* dates

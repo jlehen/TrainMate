@@ -301,8 +301,9 @@ class TestAdaptationAdapt(unittest.TestCase):
 
     @patch("trainmate.coach.engine.openrouter_client")
     def test_the_shared_revision_sections_render_adapts_scope(self, mock_client):
-        """Two sections are now shared with `workout accommodate`, so what has to hold here
-        is that adapt still gets ITS wording (DESIGN_constraint_reschedule.md §9)."""
+        """The benchmark and vacate sections are built by helpers rather than written
+        inline, so what has to hold here is that adapt gets their wording in full
+        (DESIGN_adapt_task_prompt.md §2)."""
         with patch.dict(trainmate.coach.config.data, {
             "user_profile": {"lthr": 165, "max_hr": 185},
             "coach": {"metrics_lookback_days": 3, "minor_activity_load_threshold": 10.0},

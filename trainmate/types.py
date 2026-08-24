@@ -34,7 +34,7 @@ class Constraint(TypedDict):
     created: Optional[str]
     # When a coach pass last had this constraint in scope with authority over every day
     # of it still ahead — NULL = the plan does not reflect it yet
-    # (DESIGN_constraint_reschedule.md §8). Declared last: the column is appended by an
+    # (DESIGN_constraint_honoring.md §2). Declared last: the column is appended by an
     # ALTER, and test_types.py pins declaration order against PRAGMA table_info.
     honored_at: Optional[str]
 

@@ -140,11 +140,9 @@ class TestCommandPrefixResolution(unittest.TestCase):
             self.assertEqual(self._xlate(line), expected, line)
 
     def test_the_new_verbs_do_not_disturb_the_prefixes_around_them(self):
-        # `workout accommodate` is spelled that way and not `reschedule` precisely so
-        # `w res` keeps resolving to `restore` (DESIGN_constraint_reschedule.md §4/§13);
-        # pinned here so a later verb change cannot quietly re-break it.
+        # Pinned so a later verb change cannot quietly re-break the spellings
+        # ARCHITECTURE.md documents.
         self.assertEqual(self._xlate("w res 3"), ["workout", "restore", "3"])
-        self.assertEqual(self._xlate("w ac"), ["workout", "accommodate"])
         self.assertEqual(self._xlate("w a"), ["workout", "adapt"])
 
     def test_surviving_aliases_normalize_to_canonical(self):

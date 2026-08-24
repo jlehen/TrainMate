@@ -361,7 +361,7 @@ class TestMessageCapture(unittest.TestCase):
 
 class TestHonoredAt(unittest.TestCase):
     """`constraints.honored_at` — the signal the §4.1 sweep reads
-    (DESIGN_constraint_reschedule.md §8). It means: a coach pass had this constraint in
+    (DESIGN_constraint_honoring.md §2). It means: a coach pass had this constraint in
     scope, with authority over every day of it still ahead. Not "the plan definitely
     changed"."""
 
@@ -540,7 +540,7 @@ class TestHonoredAt(unittest.TestCase):
         self.assertIsNotNone(test_db.get_constraint(cid)["honored_at"])
 
     def test_the_add_time_message_fires_when_the_window_outruns_the_block(self):
-        """§10: below the replan threshold nothing used to say WHEN a constraint takes
+        """§4: below the replan threshold nothing used to say WHEN a constraint takes
         effect. Fires for a window landing beyond the active block AND for one straddling
         its boundary, which daily adapt honors only in part."""
         self._plan_blocks([
@@ -559,9 +559,8 @@ class TestHonoredAt(unittest.TestCase):
                 with patch("trainmate.cli.constraints._today_str", return_value="2026-06-01"), \
                         redirect_stdout(buf):
                     _maybe_point_at_honor(cid)
-                self.assertEqual(
-                    "workout accommodate -c" in buf.getvalue(), should_fire
-                )
+                out = " ".join(buf.getvalue().split())
+                self.assertEqual("workout generate -m" in out, should_fire)
 
     def test_the_add_time_message_names_the_landing_block_and_when_adapt_reaches_it(self):
         """Adapt at date D reaches to the end of D's block, so it sees the constraint once
@@ -598,15 +597,18 @@ class TestHonoredAt(unittest.TestCase):
         out = " ".join(buf.getvalue().split())
         self.assertIn("Straddles the end of Build 1 (2026-09-14)", out)
         self.assertIn("Build 2 holds the rest", out)
-        self.assertIn(f"workout accommodate -c {cid}", out)
+        # One run covers both blocks, because generation starts today and runs through
+        # the end of the block it is given — so it is Build 2 that must be named.
+        build_2 = test_db.get_covering_mesocycle("2026-09-20")
+        self.assertIn(f"workout generate -m {build_2['id']}", out)
         # The two ways it used to be wrong: the current block named as out of reach, and
         # a date already behind the athlete offered as when adapt arrives.
         self.assertNotIn("Lands in Build 1", out)
         self.assertNotIn("2026-08-15", out)
 
     def test_a_constraint_running_off_the_plans_end_is_offered_its_governed_days(self):
-        """Its last day is ungoverned but its first is not, so a pass still has days to
-        work with — §5 honors the governed part and leaves the rest."""
+        """Its last day is ungoverned but its first is not, so there are still governed
+        days to build around — named, with `plan generate` for the rest."""
         self._plan_blocks([("Build 1", "2026-08-15", "2026-09-14")])
         from trainmate.cli.constraints import _maybe_point_at_honor
         cid = self._constraint("2026-09-10", "2026-09-25")
@@ -616,7 +618,7 @@ class TestHonoredAt(unittest.TestCase):
             _maybe_point_at_honor(cid)
         out = " ".join(buf.getvalue().split())
         self.assertIn("past the end of your plan", out)
-        self.assertIn(f"workout accommodate -c {cid}", out)
+        self.assertIn("workout generate", out)
         self.assertIn("plan generate", out)
         # It does not start past the plan's end, so it must not be described that way.
         self.assertNotIn("Starts 2026-09-10", out)
@@ -634,10 +636,10 @@ class TestHonoredAt(unittest.TestCase):
         out = " ".join(buf.getvalue().split())
         self.assertIn("past the end of the plan", out)
         self.assertIn("plan generate", out)
-        self.assertNotIn("workout accommodate -c", out)
+        self.assertNotIn("workout generate", out)
 
     def test_the_add_time_message_stays_quiet_on_a_plan_shaping_constraint(self):
-        # It is being built into the plan, so "honor it now" points at the wrong tier.
+        # It is being built into the plan, so pointing at a rebuild is the wrong tier.
         self._plan("2026-06-01", "2026-06-30")
         from trainmate.cli.constraints import _maybe_point_at_honor
         cid = self._constraint("2026-07-05", "2026-07-10")
@@ -650,7 +652,7 @@ class TestHonoredAt(unittest.TestCase):
 
     def test_a_pass_that_ended_before_the_range_never_covered_it(self):
         # `covers` is the one owner of who may stamp, so it may not lean on its callers
-        # having pre-filtered to an overlapping set (§8).
+        # having pre-filtered to an overlapping set (§3).
         past = {"start_date": "2026-05-01", "end_date": "2026-05-10"}
         self.assertFalse(honoring.covers(past, "2026-06-01", "2026-07-31"))
         ahead = {"start_date": "2026-08-01", "end_date": "2026-08-05"}
@@ -661,10 +663,10 @@ class TestHonoredAt(unittest.TestCase):
     def test_every_surface_agrees_on_which_tier_owns_a_directive(self):
         """A rule that spans files gets a test that spans them (AGENTS.md).
 
-        The sweep, the one-line rendering, the `show` detail and the add-time nudge each
-        answer "should the window tier be offered here?" — and each one used to answer it
-        for itself, which is how `constraint show` came to recommend
-        `workout accommodate` for a plan-shaping directive the sweep skips (§8).
+        The `status` count, the one-line rendering, the `show` detail and the add-time
+        nudge each answer "does the plan reflect this yet?" — and each one used to answer
+        it for itself, which is how `constraint show` came to flag a plan-shaping
+        directive the count deliberately skips (§2).
         """
         from trainmate.cli.constraints import _maybe_point_at_honor, run_constraint_show
         self._plan_blocks([("Base 2", "2026-06-01", "2026-06-30"),
@@ -694,7 +696,7 @@ class TestHonoredAt(unittest.TestCase):
                 # All four surfaces say the same thing, whatever that thing is.
                 self.assertEqual("not yet in the plan" in line, offered)
                 self.assertEqual("Coach pass: none yet" in buf.getvalue(), offered)
-                self.assertEqual("workout accommodate -c" in buf.getvalue(), offered)
+                self.assertEqual("workout generate" in buf.getvalue(), offered)
 
     @classmethod
     def _plan(cls, start, end):

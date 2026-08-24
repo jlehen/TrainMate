@@ -441,18 +441,12 @@ session cannot slip past a `cycling` benchmark on a spelling.
 
 ### 4.2 Adapt — "reschedule, don't dilute"
 
-**It is no longer adapt's section.** `workout accommodate` reschedules sessions in a
-constraint's own window and can land on a test day, so the section is now a shared,
-scope-parametrized helper (`coach/engine/workouts.py::_benchmark_task`) that both TASKs
-append. The argument below is unchanged; what changed is that two commands now rely on it,
-and that three phrases move with the scope — "a later day within THIS block" becomes "within
-this window", the last-day fallback names the window's last day, and adapt's postponement
-escape ("the next generated block re-places the test when it is due") becomes "the daily
-adapt or the next generated block re-places it". That third one is the load-bearing
-difference: adapt's promise is honest because a block boundary really does bring a
-`workout generate`, and a window sitting mid-block has no such guarantee, so repeating it
-would tell the model a postponement is cheaper than it is
-(DESIGN_constraint_reschedule.md §9).
+**It is its own helper** (`coach/engine/workouts.py::_benchmark_task`) rather than prose
+inline in the TASK, because of the closing line below: the two must not drift apart. Note
+that adapt's postponement escape — "the next generated block re-places the test when it is
+due" — is honest only because a block boundary really does bring a `workout generate`. A
+scope that carries no such guarantee may not repeat the promise; it would tell the model a
+postponement is cheaper than it is.
 
 The section's closing line — "a benchmark you are NOT changing need not be returned at all"
 — travels with it and must: `workout_revision_apply` infers `clear_benchmark` from a

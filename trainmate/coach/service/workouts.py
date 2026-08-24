@@ -510,7 +510,7 @@ class WorkoutGenMixin:
             displaced=tuple(displaced),
             gen_start=gen_start_str,
             # Checked against the range about to be WRITTEN, not the fetched set, which is
-            # open-ended (DESIGN_constraint_reschedule.md §8).
+            # open-ended (DESIGN_constraint_honoring.md §2).
             covered_constraint_ids=honoring.covered_ids(
                 constraints, gen_start_str, gen_end_str
             ),

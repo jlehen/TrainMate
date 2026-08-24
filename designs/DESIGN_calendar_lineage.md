@@ -97,7 +97,6 @@ session's life, not a category:
 |---|---|---|
 | `generate` | Planned | Dropped from the plan |
 | `adapt` | Adapted | Dropped by the adaptation |
-| `accommodate` | Accommodated | Dropped to fit a constraint |
 | `swap` | Moved | Moved away |
 | `add` | Added by hand | — |
 | `rm` | — | Cancelled |

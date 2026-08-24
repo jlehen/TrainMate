@@ -1,8 +1,7 @@
 """How an in-place revision is computed — the pure helpers behind a `RevisionProposal`.
 
 Kept apart from `proposals.py`, which holds only the frozen records the coach hands the
-CLI: this is the logic that fills them in, and both `workout adapt` and
-`workout accommodate` run it (DESIGN_constraint_reschedule.md §7).
+CLI: this is the logic that fills them in.
 """
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
@@ -27,7 +26,7 @@ def structure_revision(
 ) -> List[Dict[str, Any]]:
     """The row shape `workout_revision_apply` consumes, built from the model's response.
 
-    One builder for both revision commands (DESIGN_constraint_reschedule.md §7): the rules
+    One builder for every revision the coach proposes: the rules
     about how a returned change becomes a row — the `modification_reason` fallback below
     above all — are written once rather than copied into each propose method.
     """

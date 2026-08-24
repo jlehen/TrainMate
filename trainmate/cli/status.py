@@ -91,15 +91,16 @@ def run_status(args) -> None:
                     + cmd("plan generate") + " to regenerate."))
 
             # Constraints the plan does not reflect yet are the same kind of fact — a
-            # directive on record that nothing has acted on (DESIGN_constraint_reschedule.md
-            # §10), so it belongs beside the staleness warning too. Counted through
-            # `honoring`, so this nag and the command that answers it cannot disagree (§8).
+            # directive on record that nothing has acted on
+            # (DESIGN_constraint_honoring.md §4), so it belongs beside the staleness
+            # warning too. Counted through `honoring`, so this nag and the surfaces that
+            # render the same question cannot disagree (§2).
             unhonored = honoring.constraints_needing_a_pass(runtime.db, _today_str())
             if unhonored:
                 noun = "constraint" if len(unhonored) == 1 else "constraints"
                 print(yellow(
                     f"Constraints: {len(unhonored)} {noun} your plan does not reflect — "
-                    + cmd("workout accommodate") + " honors them."
+                    + cmd("workout generate") + " builds them in."
                 ))
 
             # Pending notes are a plan input too, so they belong beside the staleness

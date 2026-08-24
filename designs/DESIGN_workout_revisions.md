@@ -16,7 +16,7 @@ That mismatch shows up in four places.
 | Path | What it does to the previous version |
 |---|---|
 | `workout generate`, `plan rollback`, goal archive | Archive and rebuild — the old row is kept |
-| `workout adapt`, `workout accommodate` | Edit in place — the old values are overwritten |
+| `workout adapt` | Edit in place — the old values are overwritten |
 | Adapt displacing a session, `workout add --replace-day` | Hard `DELETE` — the old row is gone |
 
 The third one is unrecoverable data loss on a normal day's use
@@ -43,7 +43,7 @@ preceded it (DESIGN_plan_rollback.md §9).
 ## 2. Decision
 
 **`workouts` becomes append-only. A row is a revision and is never updated or deleted.**
-Every change — generate, adapt, accommodate, swap, add, remove, restore, rollback — appends
+Every change — generate, adapt, swap, add, remove, restore, rollback — appends
 new rows. The most recent revision in a slot is the live one. Everything else is history.
 
 Six parts:
@@ -83,7 +83,7 @@ CREATE TABLE workout_changes (
 
 **Kind vocabulary** — one value per command, fixed at write time:
 
-`generate` · `adapt` · `accommodate` · `swap` · `add` · `rm` · `restore` · `rollback` ·
+`generate` · `adapt` · `swap` · `add` · `rm` · `restore` · `rollback` ·
 `stand-down` (goal archived) · `reinstate` (goal reactivated).
 
 There is no `legacy` kind. Every pre-migration row classifies into one of today's four
@@ -227,7 +227,7 @@ Inheriting from the slot's live revision is the common case, but it is not uncon
 would corrupt every lineage-derived field. The rules:
 
 - **A revision continues the slot's lineage** when it modifies the session live there:
-  `adapt`, `accommodate`, a `generate` refreshing its own generated session,
+  `adapt`, a `generate` refreshing its own generated session,
   `rollback`/`restore` copies, `stand-down`/`reinstate`.
 - **A revision starts a new lineage** when it introduces a different session:
   - the slot is empty, or its live revision is a **void** — appending over a void is a new
@@ -459,14 +459,13 @@ A generate starts a fresh tally:
   adaptation_count = 0  — easings of the old prescription do not describe the new one
 ```
 
-The remaining kinds are walked past without effect: `accommodate` reduces load without
-counting as an easing (that is its point, above), `restore` and `reinstate` copies jump
+The remaining kinds are walked past without effect: `restore` and `reinstate` copies jump
 via `restored_from` exactly as rollback's do, and `swap`, `rm` voids and `stand-down`
 are not easings at all. `add` starts a new lineage (§4), so it never appears mid-walk.
 
-This deletes `AdaptProposal.stamp_adapted_at`. That flag exists so `workout accommodate` can
-reduce load without its reductions counting as easings — and under this model accommodate is
-excluded by its change kind, with no flag to carry or forget.
+This deletes `AdaptProposal.stamp_adapted_at`. That flag existed so a load reduction driven
+by something other than fatigue would not count as an easing — and under this model the
+change kind decides that, with no flag to carry or forget.
 
 **The guard reads the tally, not the marker.** `coach/formatting.py::_adapt_recency_tag`
 currently returns `""` unless the session's modification status is `adapted` — which works
@@ -487,7 +486,6 @@ The kind is the change kind of the live revision:
 | `adapt` | adapted |
 | `swap` | swapped |
 | `add` | replaced |
-| `accommodate` | accommodated *(new — today it is misreported as adapted)* |
 
 No string prefixes, no `date != original_date`, no legacy catch-all. The two magic constants
 `SWAP_REASON_PREFIX` and `MANUAL_REPLACE_REASON_PREFIX`, the writer-side test that pins them,
@@ -656,7 +654,6 @@ still has days ahead), and reports it exactly as today. Same comparison, new tim
 |---|---|---|
 | `workout generate` | `generate` | A revision per changed day in the horizon; a void for every live slot from the generation start onward that the new plan does not fill — open-ended past the horizon, matching today's `archive_future_workouts`, which has no end bound. |
 | `workout adapt` | `adapt` | A revision per eased session; a void for a session it drops. A session it moves or substitutes cross-sport: a void at the source and a revision at the destination carrying the session's lineage — the swap shape (§4). **No more `DELETE`.** |
-| `workout accommodate` | `accommodate` | Same, within the constraint window. |
 | `workout swap` | `swap` | Two revisions (same sport) or four (cross-sport), per §4. |
 | `workout add` | `add` | One revision; with `--replace-day`, a void per other session that day. **No more `DELETE`.** |
 | `workout rm` | `rm` | One void revision carrying the athlete's reason. |
@@ -687,9 +684,6 @@ because a session adapted and later swapped keeps its `adaptation_summary` and w
 otherwise be misread. That precedence is a workaround for shared columns. With revisions the
 marker reflects the latest change and the count comes from the lineage, so a session eased
 twice and then swapped renders `[SWAPPED, ADAPTED ×2]`. More information, no rule.
-
-**`accommodate` gets its own marker.** Today an accommodated session reads `[ADAPTED]`,
-because it goes through adapt's write path. It now reads `[ACCOMMODATED]`.
 
 **Workout ids stop churning.** They were already stable in practice; they stay stable by
 construction, and `workout rm` / `swap` can no longer address a dead revision.
@@ -895,7 +889,6 @@ To be made when this is implemented, not before:
 | `docs/DOMAIN_MODEL.md` §7 | "Two write models" collapses to one: everything appends. **Done.** |
 | `docs/DOMAIN_MODEL.md` §10 | Invariant 11 is replaced by the immutability trigger; a new invariant covers the lineage. **Done.** |
 | `DESIGN_plan_rollback.md` §9 | The batch key moves from `archived_at` to `change_id`. |
-| `DESIGN_constraint_reschedule.md` §7 | Accommodate is no longer "adapt's write path"; both simply append. |
 | `DESIGN_benchmark_workouts.md` | `benchmark_results.workout_id` names a lineage. |
 | `trainmate/coach/formatting.py` | `_adapt_recency_tag` gates on the derived tally (`adaptation_count > 0`), not on the modification marker (§7). |
 | `trainmate/modification_state.py` | Deleted, with its test and the two prefix constants. |

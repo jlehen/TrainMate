@@ -1,7 +1,6 @@
 """Workout CLI handlers, split by verb group; all re-exported so
 ``from trainmate.cli.workouts import run_workout_*`` keeps working."""
 from trainmate.cli.workouts._helpers import _resolve_swap_ops
-from trainmate.cli.workouts.accommodate import run_workout_accommodate
 from trainmate.cli.workouts.generate import (run_workout_adapt,
     run_workout_generate, run_workout_list, run_workout_compare, run_workout_batches,
     run_workout_rollback)

@@ -26,9 +26,9 @@ from trainmate.coach.revisions import RevisionPair
 class RevisionProposal:
     """An in-place rewrite of the sessions in a window, before it has been accepted.
 
-    The shape `workout adapt` and `workout accommodate` share: rows edited where they
-    stand rather than archived and rebuilt (DESIGN_constraint_reschedule.md §7). Both are
-    applied by `workout_revision_apply`.
+    `workout adapt`'s shape: rows revised where they stand rather than rebuilt from a
+    date onward, which is what separates it from `GenerateProposal` below. Applied by
+    `workout_revision_apply`.
 
     `range_start`/`range_end` are the window the coach actually evaluated, not the span of
     the proposals it happened to return. Apply deletes overridden sessions across this
@@ -41,63 +41,13 @@ class RevisionProposal:
     range_end: str
     pairs: Tuple[RevisionPair, ...] = ()
     removals: Tuple[Dict[str, Any], ...] = ()
-    # Everything below is defaulted, and that is the rule this record keeps: a producer
-    # names only what it actually has. `workout adapt` extracts candidate directives from
-    # the athlete's note and `workout accommodate` has no note to extract from, so the
-    # second one says nothing rather than declaring an empty list — a field a producer has
-    # to opt out of is how a shared record turns into a union of two.
+    # Candidate directives extracted from the athlete's note, raw and unconfirmed
+    # (DESIGN_constraints.md §8).
     new_constraints: Tuple[Dict[str, Any], ...] = ()
     # Constraints this pass had authority over every remaining day of, so apply stamps
-    # exactly the set decided at proposal time (§8). See `coach/honoring.py`.
+    # exactly the set decided at proposal time (DESIGN_constraint_honoring.md §3). See
+    # `coach/honoring.py`.
     covered_constraint_ids: Tuple[int, ...] = ()
-    # Which change kind apply writes this pass under. It is what tells an easing from a
-    # reschedule: the adaptation tally counts `adapt` revisions only, so an accommodate
-    # cannot raise the DO NOT COMPOUND bar for a session it never cut
-    # (DESIGN_workout_revisions.md §7). Carried here rather than passed to apply so the
-    # producer decides once and no call site can forget it.
-    kind: str = "adapt"
-    # Every session in the evaluated window, for a whole-window preview (§10). Carried so
-    # the CLI renders the proposal rather than re-reading the rows behind it.
-    window_workouts: Tuple[Dict[str, Any], ...] = ()
-
-
-@dataclass(frozen=True)
-class AccommodationPass:
-    """One §5 window and the directives it honors — the unit `workout accommodate` runs.
-
-    Several constraints when their spill-widened windows overlapped and were merged: a
-    second pass over shared days would preview a plan the first had not yet applied
-    (DESIGN_constraint_reschedule.md §4.1).
-
-    `blocks` are the governing blocks, resolved once at plan time (§4.2): the pass runs
-    over its whole window whenever any of it is governed, so the propose call and the
-    CLI's "plan runs out" warning both read this list rather than asking again.
-    """
-    range_start: str
-    range_end: str
-    constraints: Tuple[Dict[str, Any], ...] = ()
-    blocks: Tuple[Dict[str, Any], ...] = ()
-
-
-@dataclass(frozen=True)
-class AccommodationPlan:
-    """What can and cannot be done about a set of directives, decided before any of it is.
-
-    Every refusal is a populated field rather than a message the caller inferred. The CLI
-    used to work these out for itself — a plan horizon from all blocks covering today, a
-    `start_date > plan_end` test for "too far out" — while the service worked out its own
-    from the blocks overlapping each window. Two computations of one fact, so a constraint
-    landing in a GAP between blocks passed the caller's test, became a pass, and was
-    refused mid-loop with "no active periodization strategy found" — which was not true
-    (§4.1, §5).
-    """
-    plan_end: Optional[str]
-    passes: Tuple[AccommodationPass, ...] = ()
-    # No block covers their window, so there is nothing to reshuffle them towards: past
-    # the plan's end, or inside a gap in it. One bucket, because the answer is the same.
-    ungoverned: Tuple[Dict[str, Any], ...] = ()
-    # Nothing left of their window but today, which belongs to `workout adapt` (§5).
-    spent: Tuple[Dict[str, Any], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -114,8 +64,9 @@ class GenerateProposal:
     workouts: Tuple[Dict[str, Any], ...] = ()
     displaced: Tuple[Dict[str, Any], ...] = ()
     gen_start: str = ""
-    # As on `RevisionProposal` (§8). Decided where `gen_start`/`gen_end` are both in
-    # scope, so the proposal carries the resulting ids rather than a range to re-check.
+    # As on `RevisionProposal` (DESIGN_constraint_honoring.md §3). Decided where
+    # `gen_start`/`gen_end` are both in scope, so the proposal carries the resulting ids
+    # rather than a range to re-check.
     covered_constraint_ids: Tuple[int, ...] = ()
 
 

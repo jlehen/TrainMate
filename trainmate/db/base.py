@@ -263,9 +263,8 @@ class BaseDB:
                 cursor.execute("ALTER TABLE constraints DROP COLUMN type")
 
             # When a coach pass last had this constraint in scope with authority over
-            # every day of it still ahead (DESIGN_constraint_reschedule.md §8). NULL =
-            # the plan does not reflect it yet, which is what the `workout accommodate`
-            # sweep looks for. Not "the plan definitely changed".
+            # every day of it still ahead (DESIGN_constraint_honoring.md §2). NULL = the
+            # plan does not reflect it yet. Not "the plan definitely changed".
             self._add_column(
                 cursor, "constraints", "honored_at",
                 "ALTER TABLE constraints ADD COLUMN honored_at TEXT"

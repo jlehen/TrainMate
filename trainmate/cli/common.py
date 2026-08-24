@@ -172,7 +172,7 @@ def constraint_line(c: Dict[str, Any], needs_a_pass: bool = False) -> str:
     """One-line rendering of a constraint, for `constraint list`/`show`/`add` and `status`.
 
     Here rather than in `cli/constraints.py` because `status` also draws it, and its own
-    hand-rolled copy had already drifted (DESIGN_constraint_reschedule.md §11).
+    hand-rolled copy had already drifted (DESIGN_constraint_honoring.md §4).
 
     `needs_a_pass` is `coach/honoring.py`'s answer, passed in rather than re-derived: this
     stays a renderer, and the one place that decides which tier owns a directive stays the
@@ -203,6 +203,6 @@ def report_unhonored(constraints: List[Dict[str, Any]]) -> None:
     names = ", ".join(f"[{c['id']}] {c['title']}" for c in constraints)
     print(yellow(wrap_text(
         f"{len(constraints)} constraint(s) the restored plan predates are no longer "
-        f"marked honored: {names}. Run " + cmd("workout accommodate") + " to re-check "
-        "them."
+        f"marked honored: {names}. Run " + cmd("workout generate") + " to build them "
+        "back in."
     )))

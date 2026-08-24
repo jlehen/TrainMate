@@ -38,7 +38,7 @@ def _resolve_dates(args: argparse.Namespace) -> tuple:
 
 def _maybe_point_at_honor(constraint_id: int) -> None:
     """Names the block a constraint lands in when it is past daily adapt's reach, and
-    offers the middle tier (DESIGN_constraint_reschedule.md §10).
+    says what would build it into the plan now (DESIGN_constraint_honoring.md §4).
 
     Its own function called AFTER `_maybe_replan`, not a branch appended to it: that
     function returns early on a magnitude below the threshold, which is exactly the case
@@ -47,33 +47,40 @@ def _maybe_point_at_honor(constraint_id: int) -> None:
     constraint = runtime.db.get_constraint(constraint_id)
     if not constraint:
         return
-    # The one owner of "is the window tier the right answer here?" — plan-shaping tier,
-    # nothing scheduled in the window, and the rest of §8's terms, decided in one place.
+    # The one owner of "does the plan not reflect this yet?" — plan-shaping tier, nothing
+    # scheduled in the window, and the rest of §2's terms, decided in one place.
     if not honoring.needs_a_pass(runtime.db, constraint, _today_str()):
         return
     active_meso = runtime.db.get_active_mesocycle(_today_str())
     if not active_meso or constraint['end_date'] <= active_meso['end_date']:
         return
 
-    honor = cmd(f"workout accommodate -c {constraint_id}")
     # The days out of reach are the ones past the current block, so it is the block
     # holding the constraint's END that names them. Asked of its START instead, a
     # constraint straddling the boundary names the current block — the one adapt reaches
     # today. The strict reader: a block that does not contain the date is not the answer.
     landing = runtime.db.get_covering_mesocycle(constraint['end_date'])
     if not landing:
-        _report_past_plan_end(constraint, honor)
+        _report_past_plan_end(constraint)
         return
 
+    # Generation runs from today to the end of the block it is given, so the block
+    # holding the last day is the one to name — it covers every block before it too,
+    # which is what makes one run enough for a straddling constraint.
+    build = cmd(f"workout generate -m {landing['id']}")
+
     # Straddling the boundary: adapt honors the near days from this block and the rest
-    # only once its window rolls on, so no single run ever sees the whole of it (§1).
+    # only once its window rolls on, so no single run ever sees the whole of it.
     if constraint['start_date'] <= active_meso['end_date']:
         print(yellow(wrap_text(
             f"Straddles the end of {active_meso['name']} ({active_meso['end_date']}): "
             f"daily adapt honors the days up to there, {landing['name']} holds the rest, "
             "and no one run sees both."
         )))
-        print(yellow(wrap_text(f"Honor the whole of it in one pass with {honor}.")))
+        print(yellow(wrap_text(
+            f"Build the whole of it in with {build} — that rebuilds the plan from today "
+            f"through {landing['end_date']}."
+        )))
         return
 
     print(yellow(wrap_text(
@@ -83,20 +90,20 @@ def _maybe_point_at_honor(constraint_id: int) -> None:
     # Adapt at date D reaches from D to the end of D's block, so it sees this constraint
     # once its window rolls onto the landing block — i.e. on that block's first day.
     print(yellow(wrap_text(
-        f"Honor it now with {honor}, or leave it — adapt reaches it on "
-        f"{landing['start_date']}."
+        f"Leave it — adapt reaches it on {landing['start_date']} — or build it in now "
+        f"with {build}, which rebuilds the plan from today through that block's end."
     )))
 
 
-def _report_past_plan_end(constraint: dict, honor: str) -> None:
+def _report_past_plan_end(constraint: dict) -> None:
     """No block holds the constraint's last day. Whether anything can be done now turns
-    on its FIRST day: a window the plan covers in part is still honored — over the whole
-    of it (DESIGN_constraint_reschedule.md §5) — one it covers not at all is not."""
+    on its FIRST day: a plan covering part of the window can still be built around it,
+    one covering none of it cannot."""
     if runtime.db.get_covering_mesocycle(constraint['start_date']):
         print(yellow(wrap_text(
-            f"Runs to {constraint['end_date']}, past the end of your plan. {honor} "
-            "still reshuffles the whole of it, but no block guides the days past the "
-            "plan; run " + cmd("plan generate")
+            f"Runs to {constraint['end_date']}, past the end of your plan. "
+            + cmd("workout generate") + " builds the days your plan covers around it; "
+            "run " + cmd("plan generate")
             + " to extend the periodization over the rest."
         )))
         return
@@ -278,7 +285,7 @@ def run_constraint_show(args: argparse.Namespace) -> None:
                    f"{str(constraint['honored_at'])[:10]}."))
     elif needs_a_pass:
         print(yellow("  Coach pass: none yet — run "
-                     + cmd(f"workout accommodate -c {constraint['id']}") + "."))
+                     + cmd("workout generate") + " to build it into the plan."))
 
 
 def run_constraint_rm(args: argparse.Namespace) -> None:

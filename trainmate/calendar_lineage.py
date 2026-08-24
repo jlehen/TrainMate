@@ -33,7 +33,6 @@ _INDENT = " " * 6
 _KIND_LABELS = {
     "generate": "Planned",
     "adapt": "Adapted",
-    "accommodate": "Accommodated",
     "swap": "Moved",
     "add": "Added by hand",
     "rm": "Cancelled",
@@ -48,7 +47,6 @@ _KIND_LABELS = {
 _VOID_LABELS = {
     "generate": "Dropped from the plan",
     "adapt": "Dropped by the adaptation",
-    "accommodate": "Dropped to fit a constraint",
     "swap": "Moved away",
     "rm": "Cancelled",
     "rollback": "Undone",

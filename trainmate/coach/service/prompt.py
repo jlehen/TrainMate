@@ -249,9 +249,8 @@ class PromptConfigMixin:
                     f"  {mark} {m['name']} ({m['start_date']} to "
                     f"{m['end_date']}): {m['focus']}"
                 )
-        # "this window", not "this generation window": `workout accommodate` reaches this
-        # same assembler through `blocks=` and generates nothing
-        # (DESIGN_constraint_reschedule.md §11).
+        # "this window", not "this generation window": callers that pass `blocks=`
+        # reach this same assembler and generate nothing.
         meso_parts.append(
             "  ('>' marks the blocks this window falls in; '-' blocks are "
             "context, outside it.)"

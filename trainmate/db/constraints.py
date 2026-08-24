@@ -67,7 +67,7 @@ class ConstraintsMixin:
     # is the window tier the right answer?" is a four-term rule that also has to ask
     # whether the window holds any sessions, and this layer cannot import `coach`. It has
     # one owner, `coach/honoring.py::needs_a_pass`; a SQL half-copy of it here is how the
-    # display paths and the sweep came to disagree (DESIGN_constraint_reschedule.md §8).
+    # display paths came to disagree (DESIGN_constraint_honoring.md §4).
 
     def clear_honored_after(
         self, changed_at: str, from_date: str
