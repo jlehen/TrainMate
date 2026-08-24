@@ -71,15 +71,18 @@ def _carried_adaptations_task(carried_workouts: Optional[List[Workout]]) -> str:
 The user content includes a section titled "SESSIONS ALREADY EASED BY AN ADAPTATION": the
 sessions ahead whose current numbers are not the plan's original prescription but the reduced
 form a `workout adapt` already produced, against the athlete's state on the day it ran. Each
-tag says how often and how recently it was eased, and the note after it says why.
+tag says how often and how recently it was eased, the note after it says why, and the
+"Target:" line under it is that session's prescribed time in zone.
 
 For each of them, decide one of two things and nothing in between:
 
 - KEEP it. Return `{"date": ..., "sport_type": ..., "keep": true}` and no other field. The
-  session stays exactly as it stands, down to the interval structure and zone caps you were
-  not shown, and the athlete sees no change on that day. This is the default — an easing was
-  a considered answer to the athlete's state, and rewriting the day from the block's targets
-  hands back the exact load adapt took off, silently.
+  session stays exactly as it stands, down to the interval structure and prose you were not
+  shown, and the athlete sees no change on that day. Count its target toward the week's
+  intensity distribution when you write the days around it, but do not restate it: a KEEP
+  carries no "planned_zone_sec" and anything else attached to one is discarded. This is the
+  default — an easing was a considered answer to the athlete's state, and rewriting the day
+  from the block's targets hands back the exact load adapt took off, silently.
 - REPLACE it. Return it as an ordinary workout, fully written out. Do this when the metrics
   in this prompt show the moment the easing answered has passed, or when the block's
   remainder genuinely needs that day for something else — and say which in your reasoning.

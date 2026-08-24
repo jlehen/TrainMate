@@ -159,6 +159,35 @@ def format_completed_activities(completed_activities: List[CompletedActivity]) -
     return "\n".join(completed_list)
 
 
+def _planned_summary(
+    w: Workout, eval_date: Optional[str], easing_closer: str, markers: str = "",
+) -> str:
+    """What both planned-workout renderings share: identity, load, why it was last
+    changed, and the intensity target under it.
+
+    `markers` are the caller's own bracketed tags, spliced between the load and the
+    already-eased tag; :func:`format_planned_workouts_detailed` appends the description
+    below what this returns.
+    """
+    line = (
+        f"- {w['date']} ({w['sport_type'].upper()}): {w['title']} | "
+        f"Expected duration: {w.get('duration_minutes')}m, "
+        f"RPE: {w.get('rpe')}, TSS: {w.get('tss')}"
+        f"{markers}"
+    )
+    line += _easing_recency_tag(w, eval_date, easing_closer)
+    mod_reason = w.get('modification_reason')
+    if mod_reason:
+        line += f" — {mod_reason}"
+    # The stated intensity target (DESIGN_intensity_distribution.md §9.8) — duration and
+    # TSS fold intensity away, and both prompts are asked to weigh a session against the
+    # block's hard/easy split (DESIGN_workout_revisions.md §7.1).
+    target = intensity.format_planned_zones(w)
+    if target:
+        line += f"\n  {target}"
+    return line
+
+
 def format_planned_workouts(
     planned_workouts: List[Workout], eval_date: Optional[str] = None,
     easing_closer: str = EASED_DO_NOT_COMPOUND,
@@ -166,24 +195,13 @@ def format_planned_workouts(
     """Formats planned workouts to a readable block for LLM prompts.
 
     `eval_date` adds the "[ALREADY EASED ...]" tag dated against it, closed by
-    `easing_closer`. Used where the model is asked to identify a session rather than
-    rewrite it, so the description :func:`format_planned_workouts_detailed` carries is not
-    needed.
+    `easing_closer`. Used where the model is asked to weigh a session rather than rewrite
+    it, so it carries the intensity target but not the description
+    :func:`format_planned_workouts_detailed` adds.
     """
-    planned_list = []
-    for w in planned_workouts:
-        line = (
-            f"- {w['date']} ({w['sport_type'].upper()}): {w['title']} | "
-            f"Expected duration: {w.get('duration_minutes')}m, "
-            f"RPE: {w.get('rpe')}, TSS: {w.get('tss')}"
-        )
-        if eval_date:
-            line += _easing_recency_tag(w, eval_date, easing_closer)
-        mod_reason = w.get('modification_reason')
-        if mod_reason:
-            line += f" — {mod_reason}"
-        planned_list.append(line)
-    return "\n".join(planned_list)
+    return "\n".join(
+        _planned_summary(w, eval_date, easing_closer) for w in planned_workouts
+    )
 
 
 def format_planned_workouts_detailed(
@@ -215,29 +233,16 @@ def format_planned_workouts_detailed(
     completed_keys = completed_keys or set()
     blocks = []
     for w in planned_workouts:
-        header = (
-            f"- {w['date']} ({w['sport_type'].upper()}): {w['title']} | "
-            f"Expected duration: {w.get('duration_minutes')}m, "
-            f"RPE: {w.get('rpe')}, TSS: {w.get('tss')}"
-        )
+        markers = ""
         if (w['date'], canonical_sport(w['sport_type'])) in completed_keys:
-            header += " [COMPLETED — locked history, not adaptable]"
+            markers += " [COMPLETED — locked history, not adaptable]"
         if w.get('source') == 'manual':
-            header += " [athlete-added]"
+            markers += " [athlete-added]"
         # A benchmark (fitness test) must be rescheduled intact, never softened — see the
         # adapt prompt's PROTECTING A BENCHMARK rule (DESIGN_benchmark_workouts.md §4.2).
         if w.get('benchmark_type'):
-            header += f" [BENCHMARK: {w['benchmark_type']} — reschedule intact, do not dilute]"
-        header += _easing_recency_tag(w, eval_date, easing_closer)
-        mod_reason = w.get('modification_reason')
-        if mod_reason:
-            header += f" — {mod_reason}"
-        # The stated intensity target beside the prose that describes it
-        # (DESIGN_intensity_distribution.md §9.8) — so an adapt rewriting how a session is
-        # prescribed can see what it is rewriting, and preserve the part it is not.
-        target = intensity.format_planned_zones(w)
-        if target:
-            header += f"\n  {target}"
+            markers += f" [BENCHMARK: {w['benchmark_type']} — reschedule intact, do not dilute]"
+        header = _planned_summary(w, eval_date, easing_closer, markers)
         desc = (w.get('description') or '').strip()
         if desc:
             indented = "\n".join("    " + ln for ln in desc.splitlines())

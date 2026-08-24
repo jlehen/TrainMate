@@ -216,6 +216,8 @@ class TestCarriedAdaptationsGate(unittest.TestCase):
         "date": "2026-06-05", "sport_type": "cycling", "title": "Easy Z2 Spin",
         "description": "[Easy Z2 Spin]\n40 min ERG-locked, no surges.",
         "duration_minutes": 40, "rpe": 3, "tss": 26,
+        "planned_zone_currency": "power",
+        "planned_zone1_sec": 600, "planned_zone2_sec": 1800,
         "adaptation_count": 1, "adapted_at": "2026-06-01",
         "modification_reason": "Cut to easy Z2 to shed intensity.",
     }]
@@ -246,6 +248,19 @@ class TestCarriedAdaptationsGate(unittest.TestCase):
         _system, user = build_generate_prompt(carried_workouts=self.EASED)
         self.assertIn("do not silently restore it", user)
         self.assertNotIn("do not compound", user)
+
+    def test_the_list_carries_the_intensity_target(self):
+        """Duration and TSS fold intensity away — 40min steady and 12min hard inside 40min
+        read the same. REPLACE turns on whether the block needs the day for something
+        else, which is a question about zones (DESIGN_workout_revisions.md §7.1)."""
+        _system, user = build_generate_prompt(carried_workouts=self.EASED)
+        self.assertIn("Target: ~10min recovery, ~30min endurance", user)
+
+    def test_a_keep_is_told_not_to_restate_the_target(self):
+        """Showing the target invites a revised one back on a KEEP. `_resolve_kept`
+        discards it, so the only cost is tokens — say so rather than pay it."""
+        system, _user = build_generate_prompt(carried_workouts=self.EASED)
+        self.assertIn('carries no "planned_zone_sec"', system)
 
     def test_the_description_is_not_shipped(self):
         """A KEEP identifies the session rather than copying it, so the description stays

@@ -494,8 +494,9 @@ regeneration rather than a second `adapt`. The section header says exactly that,
 sparse list of four sessions out of twenty-four is otherwise read as a plan to build around.
 
 **Metadata only, plus a `keep` action.** Each session is rendered by
-`format_planned_workouts` — date, sport, title, load, the `[ALREADY EASED ...]` tag and the
-prior run's reason, ~280 characters — and the model answers with one of two things:
+`format_planned_workouts` — date, sport, title, load, the `[ALREADY EASED ...]` tag, the
+prior run's reason and the session's intensity target, ~360 characters — and the model
+answers with one of two things:
 
 ```
 {"date": ..., "sport_type": ..., "keep": true}    leave it exactly as it stands
@@ -513,7 +514,7 @@ measured over a real 29-session adapt prompt) and ask the model to retype it ver
 
 | | description + §9 | metadata + `keep` |
 | --- | --- | --- |
-| prompt cost per session | ~790 chars | ~280 chars |
+| prompt cost per session | ~790 chars | ~360 chars |
 | fidelity | whatever the model retypes | exact, by construction |
 | survives a second regeneration | only if byte-identical | always |
 
@@ -524,6 +525,29 @@ Byte-identical reproduction is the only thing that avoids that, and a model aske
 790 characters will not reliably manage it. A KEEP writes no revision at all, so the tally,
 the Calendar event and the prescription all survive untouched and the session stays carried
 until the model deliberately replaces it.
+
+**The intensity target is part of the metadata, and the description is not.** Duration and
+TSS fold intensity away — 40min steady and 12min of VO2max inside 40min carry the same two
+numbers — so without the zones the KEEP/REPLACE call is made blind to what the day
+contributes. It is not an abstract loss: REPLACE turns on whether "the block's remainder
+genuinely needs that day for something else", the block's composition is defined to the model
+in zones (`JUDGING THE BLOCK'S COMPOSITION`), and `generate` authors `planned_zone_sec` for
+every session it writes, so a kept day is otherwise a hole in the distribution it is
+balancing. `intensity.format_planned_zones` renders it from the columns at display time
+(`DESIGN_intensity_distribution.md` §9.8), and it costs ~54 characters per session, measured
+over the 45 live non-rest sessions from 2026-08-01 — of which 42 carry the columns at all.
+The rest render no line: a rest day has nothing to prescribe, and a sport whose recordings do
+not cover a currency is not given one to plan in (§9.8's coverage rule).
+
+Showing the target invites a revised one back on a KEEP, so `CARRYING OVER` says a KEEP
+carries no `planned_zone_sec`. Nothing depends on the model obeying that: `_resolve_kept`
+rebuilds the entry from the live session and discards whatever else was attached.
+
+The rendering both prompts share — identity, load, the already-eased tag, the change reason,
+the target — is `formatting.py::_planned_summary`; `format_planned_workouts_detailed` passes
+its own `[COMPLETED]`/`[athlete-added]`/`[BENCHMARK]` markers into it and appends the
+description below. The two prompts were drifting apart line by line, and the target was the
+line that made them differ in what they *knew*, not just in how much they said.
 
 **A KEEP is claimed, not obeyed.** `_resolve_kept` drops one naming a slot no carried session
 occupies — it would claim a day nothing then writes, and a silently blank day is the worse
@@ -962,7 +986,7 @@ To be made when this is implemented, not before:
 | `docs/DOMAIN_MODEL.md` §10 | Invariant 11 is replaced by the immutability trigger; a new invariant covers the lineage. **Done.** |
 | `DESIGN_plan_rollback.md` §9 | The batch key moves from `archived_at` to `change_id`. |
 | `DESIGN_benchmark_workouts.md` | `benchmark_results.workout_id` names a lineage. |
-| `trainmate/coach/formatting.py` | `_easing_recency_tag` gates on the derived tally (`adaptation_count > 0`), not on the modification marker (§7). |
+| `trainmate/coach/formatting.py` | `_easing_recency_tag` gates on the derived tally (`adaptation_count > 0`), not on the modification marker (§7). `_planned_summary` is the rendering both planned-workout formatters share (§7.1). |
 | `trainmate/modification_state.py` | Deleted, with its test and the two prefix constants. |
 | `trainmate/db/wipes.py` | `wipe_workouts` drops the triggers, wipes the three workout tables, recreates the triggers (§14). |
 | `trainmate/db/constraints.py` | `clear_honored_after` keyed on the target change's `created_at`, not `archived_at` (§10). |

@@ -2093,6 +2093,7 @@ class TestEasedSessionsAreCarriedIntoGeneration(unittest.TestCase):
             test_db, date=date_str, sport_type="cycling", title="Easy Z2 Spin",
             description="[Easy Z2 Spin]\n40 min ERG-locked, no surges.",
             duration_minutes=40, rpe=3, tss=26,
+            planned_zone_currency="power", planned_zone_sec=[600, 1800, 0, 0, 0, 0, 0],
             original_duration_minutes=90, original_rpe=7, original_tss=110,
             modification_reason="Cut to easy Z2 to shed intensity.", **extra,
         )
@@ -2139,6 +2140,13 @@ class TestEasedSessionsAreCarriedIntoGeneration(unittest.TestCase):
         self.assertIn("[ALREADY EASED by a prior adaptation", user)
         self.assertIn("Cut to easy Z2 to shed intensity.", user)
 
+    def test_the_intensity_target_reaches_the_prompt(self):
+        """The zone columns are what let the model weigh a carried day against the week
+        it is writing around it; duration and TSS cannot (§7.1)."""
+        self._eased(_days_out(3))
+        _proposal, user = self._run()
+        self.assertIn("Target: ~10min recovery, ~30min endurance", user)
+
     def test_the_description_is_not_shipped(self):
         """A KEEP names the session rather than copying it, so the prompt pays for the
         metadata only."""
@@ -2181,6 +2189,7 @@ class TestEasedSessionsAreCarriedIntoGeneration(unittest.TestCase):
         self.assertEqual(after["revision_id"], before["revision_id"])
         self.assertEqual(after["title"], "Easy Z2 Spin")
         self.assertEqual(after["duration_minutes"], 40)
+        self.assertEqual(after["planned_zone2_sec"], 1800)
         self.assertEqual(after["adaptation_count"], 1)
 
     def test_a_kept_session_survives_a_second_regeneration(self):
