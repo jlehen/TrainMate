@@ -1,6 +1,6 @@
 # Design: Simple Bot Front-End ("companion mode")
 
-**Status:** Proposed (draft for review — no code yet) · **Date:** 2026-08-25 ·
+**Status:** Proposed (markup round 1 folded in — no code yet) · **Date:** 2026-08-25 ·
 **Branch:** worktree-config-env-and-frontend-design
 
 ## 1. Motivation
@@ -94,16 +94,22 @@ A new hidden CLI family (`tm bot ...`, hidden like other maintenance commands):
   the instance's database; the bot process stays stateless across restarts, which is
   what lets `/restart` and crashes stay boring (DESIGN_bot_restart.md).
 
+When `telegram.push.adapt_first: true` (default **off**), `tm bot morning` first runs
+the daily adaptation non-interactively (`workout adapt -y`, so no prompt can strand a
+scheduled run) and then renders the result — the push reflects overnight signals, and
+an applied change surfaces as its one reason line ("Eased today — rough night."). Off,
+the schedule renders as-is and "Feeling tired" stays the trigger for adaptation.
+
 ### 4.3 Scheduling
 
 An asyncio task inside the bot (`python-telegram-bot` is installed without the
 job-queue extra, and a sleep-until-next-fire loop needs no dependency): compute the next
-`telegram.push.morning_time` (default `07:00`), sleep, spawn `tm bot morning` through
+`telegram.push.morning_time` (default `08:00`), sleep, spawn `tm bot morning` through
 the ordinary `_start_command` path, repeat. Missed fires (machine asleep, bot down) are
 caught up on startup/wake by the same rule: run it if the time is past but before
-`telegram.push.morning_deadline` (default `11:00`), otherwise skip the day — a workout
-briefing at 9 PM is noise. Both knobs sit under `telegram.push:`; `enabled: false`
-turns the push off regardless of ui mode.
+`telegram.push.morning_deadline` (default `15:00`), otherwise skip the day — a workout
+briefing at 9 PM is noise. These knobs sit under `telegram.push:` beside `adapt_first`
+(§4.2); `enabled: false` turns the push off regardless of ui mode.
 
 The push must not collide with an in-flight command's polling pause: it uses the same
 one-session-per-chat gate as typed commands (`sessions` dict) and simply retries a few
@@ -234,16 +240,14 @@ Each phase ships alone; her onboarding starts at phase 1.
 - Router model is a config role, not a menu entry (§5.4).
 - Second athlete = second instance via `TRAINMATE_CONFIG`; no in-bot multi-athlete.
 - Bot-initiated messages are in scope (morning push first).
+- Push timing: send at 08:00, catch up until a 15:00 deadline (2026-08-25). A day with
+  no session gets the one-line rest message whatever the reason it is empty — no
+  `weekly_schedule` special-casing.
+- Strings are English; no locale table (2026-08-25).
+- `telegram.push.adapt_first` runs the daily adaptation (non-interactive, `-y`) before
+  rendering the push; default off (2026-08-25, §4.2).
+- `📈 Progress` keeps its keyboard slot — to be judged in practice (2026-08-25).
 
-**Open — mark up before implementation**
-1. Push timing: is 07:00/11:00 right, and should rest days push at all (current draft:
-   yes, one line)? Should the push skip days `weekly_schedule` marks unavailable?
-2. Language: the simple-mode strings above are English. Does she want French? If so,
-   simple-mode strings should live in one table with a locale switch from day one —
-   retrofitting scattered strings is the expensive path.
-3. Should the morning push run `workout adapt` (signals-aware) before rendering, or
-   render the schedule as-is and let "Feeling tired" trigger adaptation? Draft says
-   as-is: cheaper, faster, and adaptation stays an explicit act.
-4. Button set: is `📈 Progress` worth a slot for a receiving-first athlete, or should
-   slot four be something else ("What's next?", nothing)?
-5. Router echo: always show "→ …", or only when confidence is low? Draft: always.
+**Open**
+1. Router echo: always show "→ …", or only when confidence is low? Draft: always;
+   applies unless objected to before phase 3 (rollout §9).
