@@ -314,10 +314,14 @@ class SimpleKeyboardTest(unittest.TestCase):
 
 
 class GuardrailTest(unittest.TestCase):
-    """§7: buttons and router intents only reach read-only views and `adapt -m` —
-    nothing destructive, plan-shaping or expensive is reachable without typing."""
+    """§7: buttons and router intents only reach read-only views, `adapt -m`, and the
+    §5.5 constraints view (whose picker offers single-ID `constraint rm` — pinned in
+    tests/test_cli_bot.py) — nothing plan-shaping or expensive is reachable without
+    typing."""
 
-    ALLOWED_PREFIXES = {("workout", "list"), ("progress", "--chart")}
+    ALLOWED_PREFIXES = {
+        ("workout", "list"), ("progress", "--chart"), ("bot", "constraints"),
+    }
 
     def test_keyboard_argv_stays_read_only(self):
         for label, argv in bot.SIMPLE_KEYBOARD:
@@ -353,8 +357,8 @@ class RouterTablesTest(unittest.TestCase):
     argv in trainmate_bot.py (what each intent runs) — a rule that spans files, pinned
     here so the two tables cannot drift (§5.3)."""
 
-    # Intents the bot answers itself rather than mapping to argv.
-    SPECIAL = {"coach_message", "help", "unclear"}
+    # Intents the bot answers itself or maps with the athlete's text attached.
+    SPECIAL = {"coach_message", "add_constraint", "help", "unclear"}
 
     def test_every_cli_intent_lands_somewhere_in_the_bot(self):
         from trainmate.cli.bot import ROUTER_INTENTS

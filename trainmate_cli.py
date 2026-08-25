@@ -93,7 +93,9 @@ from trainmate.cli.data import add_data_parser
 from trainmate.cli.models import (
     add_model_parser, run_model_list, run_model_reset, run_model_set,
 )
-from trainmate.cli.bot import add_bot_parser, run_bot_morning, run_bot_route
+from trainmate.cli.bot import (
+    add_bot_parser, run_bot_constraints, run_bot_morning, run_bot_route,
+)
 
 
 def build_parser():

@@ -163,11 +163,12 @@ maps the intent back to argv **from its own table** and runs it. The model picks
 intent and slots; it never authors argv, so a hostile or confused message cannot reach
 flags the table doesn't expose.
 
-Intent table (initial): `show_today`, `show_week`, `show_progress`,
-`coach_message` (→ `adapt -m`, carrying the original text), `help`, `unclear`.
-`unclear` renders a gentle fallback with the keyboard as the suggestion. The routed
-command is echoed in one short italic line ("→ showing your week") so she learns the
-vocabulary and misroutes are visible immediately.
+Intent table: `show_today`, `show_week`, `show_progress`, `coach_message` (→ `adapt
+-m`, carrying the original text), `add_constraint` (→ the same `adapt -m` inbox, §5.5),
+`show_constraints` / `remove_constraint` (→ `bot constraints`, §5.5), `help`,
+`unclear`. `unclear` renders a gentle fallback with the keyboard as the suggestion. The
+routed command is echoed in one short italic line ("→ showing your week") so she learns
+the vocabulary and misroutes are visible immediately.
 
 Routing through a CLI subcommand rather than in-process keeps every OpenRouter call —
 client, retries, exchange logs under `logs/llm_exchanges/` — on the one existing path,
@@ -180,6 +181,19 @@ coaching model (no surprise second model on an unconfigured install). This is a 
 *role*, not a menu entry: `model list` / `model set` and the stored DB choice keep
 meaning the coaching model (DESIGN_model_selection.md), and `model list` gains one
 annotation line naming the router model when configured.
+
+### 5.5 Constraints in chat
+
+"Show my rules" / "I can run again" route to a hidden `tm bot constraints`: the
+current-and-upcoming directives in companion prose (day words, no IDs or tier tags)
+plus a §4.4 button picker whose leaves each send the deterministic `constraint rm
+<id>`. The model only ever picks the *intent*; which row is removed is decided by the
+athlete's tap on a button the CLI built from real IDs.
+
+Adding needs no new machinery: `add_constraint` lands in the same `workout adapt -m`
+inbox as `coach_message` — the two-confirmation capture flow there
+(DESIGN_constraints.md §8) already extracts the rule and asks before persisting it — so
+a state-vs-rule misroute between the two intents is harmless by construction.
 
 ## 6. Simple rendering
 
@@ -200,11 +214,13 @@ dashboard are the audit surface, chat is the encouragement surface.
 
 ## 7. Guardrails
 
-- The router's intent table only reaches read-only views and `adapt -m`. Nothing
-  destructive, plan-shaping, or expensive is routable: `plan generate`, `workout
-  generate`, every `rm`/rollback/wipe, `model set`, `restart` require the typed expert
-  vocabulary. (Typed commands still work in simple mode, so the operator can drive an
-  instance from its own chat when allowlisted there.)
+- The router's intent table only reaches read-only views, `adapt -m`, and the §5.5
+  constraints view. Nothing plan-shaping or expensive is routable: `plan generate`,
+  `workout generate`, rollback/wipe, `model set`, `restart` require the typed expert
+  vocabulary. The one destructive action a tap can reach is `constraint rm <id>`, and
+  only through the §5.5 picker: single ID, offered by the CLI, chosen by the athlete —
+  never by the model. (Typed commands still work in simple mode, so the operator can
+  drive an instance from its own chat when allowlisted there.)
 - Free text reaching the router or `adapt -m` is data, not instructions, and the argv
   table bounds its blast radius; the exposure is the same one `adapt -m` already has
   today.
@@ -219,7 +235,7 @@ dashboard are the audit surface, chat is the encouragement surface.
 |---|---|
 | `trainmate_bot.py` | ui-mode switch, reply keyboard + label→argv table, armed-capture chat state, `ui:` callback namespace, `TM-BUTTONS` parsing, push scheduler task |
 | `trainmate/prompt.py` | `BUTTONS_SENTINEL` + `emit_buttons()` (mirror of `emit_photo`) |
-| `trainmate/cli/bot.py` | new hidden family: `bot morning`, `bot route` |
+| `trainmate/cli/bot.py` | new hidden family: `bot morning`, `bot route`, `bot constraints` |
 | `trainmate/config.py` | `telegram_ui`, `telegram.push.*` knobs, `router_llm_model` |
 | `trainmate/cli/common.py` | simple renderer helper + `TRAINMATE_RENDER` interpretation |
 | `docs/ARCHITECTURE.md` | §2 entry points, §9 config keys, bot section |
@@ -254,6 +270,9 @@ Each phase ships alone; her onboarding starts at phase 1.
 - In simple mode a leading `/` is the expert path; bare non-slash text is the companion
   surface (labels → capture → router). Bare `help` gets the companion card; `/help
   <cmd>` still reaches the CLI tree (implementation, 2026-08-25).
+- Constraints are routable (2026-08-25, §5.5): `add_constraint` rides the `adapt -m`
+  capture flow; `show_constraints`/`remove_constraint` map to `bot constraints`, whose
+  rm picker is the only destructive action buttons can reach — single-ID, tap-chosen.
 
 **Open**
 1. Router echo: always show "→ …", or only when confidence is low? Draft: always;

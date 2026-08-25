@@ -140,6 +140,41 @@ class ProgressLinesTest(unittest.TestCase):
         self.assertIn("25%", lines[0])
 
 
+class ConstraintLinesTest(unittest.TestCase):
+    """simple_constraint_lines — the §5.5 companion constraints view: day words, no
+    IDs or tier tags, and an empty list that reads as a clean slate."""
+
+    TODAY = "2026-08-25"
+
+    def _line(self, **kw):
+        c = {"title": "no run Thursday", "start_date": "2026-08-27",
+             "end_date": "2026-08-27", "rest": 0}
+        c.update(kw)
+        return common.simple_constraint_lines([c], self.TODAY)[1]
+
+    def test_empty_is_a_clean_slate(self):
+        [line] = common.simple_constraint_lines([], self.TODAY)
+        self.assertIn("Nothing on the list", line)
+
+    def test_single_day_reads_as_the_day(self):
+        self.assertEqual(self._line(), "• no run Thursday — Thu Aug 27")
+
+    def test_today_reads_as_today(self):
+        line = self._line(start_date=self.TODAY, end_date=self.TODAY)
+        self.assertTrue(line.endswith("— today"), line)
+
+    def test_range_names_both_ends(self):
+        self.assertIn("Thu Aug 27 to Fri Sep 04", self._line(end_date="2026-09-04"))
+
+    def test_rest_gets_the_sleep_bullet(self):
+        self.assertTrue(self._line(rest=1).startswith("🛌"))
+
+    def test_no_expert_ids_leak(self):
+        line = self._line()
+        self.assertNotIn("ID", line)
+        self.assertNotIn("advisory", line)
+
+
 class CompanionConfigKnobsTest(unittest.TestCase):
     """`telegram.ui`, `telegram.push.*` and `llm.router_model` — defaults and set
     values (§3, §4.3, §5.4)."""

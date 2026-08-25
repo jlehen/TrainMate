@@ -17,7 +17,7 @@ from trainmate.util import (
     wrap_text, today_str as _today_str,
 )
 from trainmate.cli.selectors import add_selector_args, has_selector, resolve_window
-from trainmate.cli.common import constraint_line
+from trainmate.cli.common import constraint_line, is_simple_render
 from trainmate.coach import honoring
 
 
@@ -294,6 +294,11 @@ def run_constraint_rm(args: argparse.Namespace) -> None:
         print(yellow(f"No constraint with ID {args.id}."))
         return
     runtime.db.delete_constraint(args.id)
+    # The §5.5 picker's leaves land here; companion prose over the expert ID echo
+    # (DESIGN_bot_simple_frontend.md §6).
+    if is_simple_render():
+        print(green("Done — I've dropped that one and will stop working around it 👍"))
+        return
     print(green(f"Constraint [{args.id}] removed."))
 
 

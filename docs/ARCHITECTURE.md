@@ -150,7 +150,10 @@ classes themselves.
     (`SIMPLE_KEYBOARD`); "💬 Tell my coach" arms one free-text message for
     `workout adapt -m`; other unarmed free text is classified by `tm bot route`
     (a hidden CLI command calling `llm.router_model`) and mapped to argv from the bot's
-    own `ROUTER_INTENT_ARGV` table — the model picks an intent, never argv. Subprocesses
+    own `ROUTER_INTENT_ARGV` table — the model picks an intent, never argv. Constraints
+    are part of that surface: adding rides the `adapt -m` capture flow, and
+    showing/removing map to `tm bot constraints`, whose button picker offers single-ID
+    `constraint rm` taps (DESIGN_bot_simple_frontend.md §5.5). Subprocesses
     additionally get `TRAINMATE_RENDER=simple` (interpreted by
     `cli/common.is_simple_render`) so opted-in commands render companion prose, sent
     plain instead of `<pre>`. A third one-way sentinel, `BUTTONS_SENTINEL`/
@@ -1501,7 +1504,8 @@ patchable singletons; the handler functions, named
 `run_<command>_<subcommand>()`, live in the `trainmate/cli/` package
 (one module per command family: `status`, `progress`, `goals`, `constraints`,
 `benchmarks`, `signal`, `learnings`, `plans`, `data`, `models`, `bot` (hidden:
-`bot morning`/`bot route`, spawned by the Telegram bot — DESIGN_bot_simple_frontend.md),
+`bot morning`/`bot route`/`bot constraints`, spawned by the Telegram bot —
+DESIGN_bot_simple_frontend.md),
 plus the
 `workouts/` **package** — `parser`/`generate`/`edit`/`_helpers`; `selectors.py` holds the
 shared range grammar and `argparse_ext.py` the parser/help extensions). `help` is the one

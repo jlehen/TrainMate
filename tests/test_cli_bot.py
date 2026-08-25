@@ -190,6 +190,72 @@ class RouteCommandTest(unittest.TestCase):
             self.assertEqual(openrouter_client.model, "main/model")
 
 
+class ConstraintsViewTest(unittest.TestCase):
+    """`bot constraints` — §5.5: the companion list plus the remove picker, whose
+    leaves stay pinned to single-ID `constraint rm` (the §7 guardrail's one
+    routable-by-tap mutation)."""
+
+    def setUp(self):
+        rebind_test_db(test_db)  # an earlier module may have rebound the handles
+        clear_all_tables(test_db)
+
+    def _add(self, title, start=None, end=None, rest=0):
+        start = start or today_str()
+        return test_db.add_constraint(
+            title=title, start_date=start, end_date=end or start,
+            rest=rest, description=None, replan=0, source="manual",
+        )
+
+    def test_empty_list_is_a_clean_slate_without_buttons(self):
+        code, out, _ = run_cli(["bot", "constraints"])
+        self.assertEqual(code, 0)
+        self.assertIn("Nothing on the list", out)
+        self.assertNotIn(BUTTONS_SENTINEL, out)
+
+    def test_lists_titles_and_offers_the_picker(self):
+        cid = self._add("no run Thursday")
+        code, out, _ = run_cli(["bot", "constraints"])
+        self.assertEqual(code, 0)
+        self.assertIn("no run Thursday", out)
+        self.assertIn(BUTTONS_SENTINEL, out)
+        self.assertIn(f"constraint rm {cid}", out)
+
+    def test_past_constraints_stay_out_of_the_view(self):
+        self._add("old rule", start="2020-01-01", end="2020-01-02")
+        _, out, _ = run_cli(["bot", "constraints"])
+        self.assertNotIn("old rule", out)
+        self.assertIn("Nothing on the list", out)
+
+    def test_picker_leaves_reach_only_single_id_rm(self):
+        from trainmate.cli.bot import constraint_rm_buttons
+
+        def leaves(buttons):
+            for b in buttons:
+                if b.get("menu"):
+                    yield from leaves(b["menu"])
+                else:
+                    yield b
+
+        today = today_str()
+        buttons = constraint_rm_buttons([
+            {"id": 7, "title": "x" * 60, "start_date": today, "end_date": today},
+            {"id": 9, "title": "short", "start_date": today, "end_date": today},
+        ])
+        sends = [b["send"] for b in leaves(buttons) if b.get("send")]
+        self.assertEqual(sends, ["constraint rm 7", "constraint rm 9"])
+        # Long titles shrink to a recognisable label, never a truncated utterance.
+        self.assertTrue(all(len(b["label"]) <= 32 for b in leaves(buttons)))
+
+    def test_rm_in_simple_render_stays_companion_prose(self):
+        cid = self._add("no run Thursday")
+        with patch.dict(os.environ, {"TRAINMATE_RENDER": "simple"}):
+            code, out, _ = run_cli(["constraint", "rm", str(cid)])
+        self.assertEqual(code, 0)
+        self.assertIn("dropped", out)
+        self.assertNotIn(f"Constraint [{cid}]", out)
+        self.assertIsNone(test_db.get_constraint(cid))
+
+
 class SimpleListRenderTest(unittest.TestCase):
     """`workout list` under TRAINMATE_RENDER=simple: companion prose, expert form
     untouched otherwise (§6)."""

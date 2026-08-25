@@ -287,6 +287,29 @@ def simple_week_lines(workouts: List[Dict[str, Any]]) -> List[str]:
     return lines
 
 
+def simple_constraint_lines(constraints: List[Dict[str, Any]], today: str) -> List[str]:
+    """Simple rendering of the directives the coach works around: one bullet per
+    constraint, dates as day words, no IDs or tier tags (the expert `constraint list`
+    keeps those). Empty reads as a clean slate, not a gap (§6 tone rule)."""
+    if not constraints:
+        return ["Nothing on the list — no rules to work around right now. "
+                "Just tell me when something comes up 💬"]
+
+    def day_word(date_str: str) -> str:
+        if date_str == today:
+            return "today"
+        return datetime.strptime(date_str, "%Y-%m-%d").strftime("%a %b %d")
+
+    lines = ["📌 I'm working around:"]
+    for c in constraints:
+        span = day_word(c["start_date"])
+        if c["end_date"] != c["start_date"]:
+            span = f"{span} to {day_word(c['end_date'])}"
+        bullet = "🛌" if c.get("rest") else "•"
+        lines.append(f"{bullet} {c['title']} — {span}")
+    return lines
+
+
 def simple_progress_lines(payload: Dict[str, Any], today: str) -> List[str]:
     """The two-line simple `progress` summary: a fitness-trend sentence (from the
     CTL series, ~28 days back) and a chart legend. Every branch keeps the §6 tone

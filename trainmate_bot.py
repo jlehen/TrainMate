@@ -143,12 +143,15 @@ SIMPLE_KEYBOARD = [
 
 # The router's intent → argv table (§5.3): the model (via `tm bot route`) only picks
 # an intent from trainmate.cli.bot.ROUTER_INTENTS; this table owns the argv, so a
-# hostile or confused message cannot reach flags it doesn't expose. coach_message
-# carries the athlete's original text; help/unclear are answered by the bot itself.
+# hostile or confused message cannot reach flags it doesn't expose. coach_message and
+# add_constraint carry the athlete's original text into the `adapt -m` inbox;
+# help/unclear are answered by the bot itself.
 ROUTER_INTENT_ARGV = {
     "show_today": ["workout", "list", "-d", "today"],
     "show_week": ["workout", "list"],
     "show_progress": ["progress", "--chart"],
+    "show_constraints": ["bot", "constraints"],
+    "remove_constraint": ["bot", "constraints"],
 }
 
 # One short italic echo per routed intent, so the athlete learns the vocabulary and a
@@ -158,6 +161,9 @@ ROUTER_ECHO = {
     "show_week": "showing your week",
     "show_progress": "showing your progress",
     "coach_message": "passing that on to your coach",
+    "add_constraint": "noting that rule for your coach",
+    "show_constraints": "showing what I'm working around",
+    "remove_constraint": "showing your rules — tap the one to drop",
 }
 
 # Simple mode trims the Telegram command menu to what the athlete needs; every CLI
@@ -775,7 +781,10 @@ def main() -> None:
         should run; otherwise echoes the routed action and returns the argv."""
         intent = await _route_intent(text)
         _log(chat_id, "  ", f"routed: {intent}")
-        if intent == "coach_message":
+        # add_constraint shares coach_message's inbox: the `adapt -m` capture flow
+        # (§8 in DESIGN_constraints.md) already confirms and persists the rule, so a
+        # state-vs-rule misroute is harmless by construction (§5.5).
+        if intent in ("coach_message", "add_constraint"):
             argv = ["workout", "adapt", "-m", text]
         elif intent in ROUTER_INTENT_ARGV:
             argv = list(ROUTER_INTENT_ARGV[intent])
