@@ -195,6 +195,25 @@ inbox as `coach_message` — the two-confirmation capture flow there
 (DESIGN_constraints.md §8) already extracts the rule and asks before persisting it — so
 a state-vs-rule misroute between the two intents is harmless by construction.
 
+### 5.6 The `/ui` runtime switch
+
+`/ui` flips the persona of a running bot: bare `/ui` toggles, `/ui simple` / `/ui
+expert` (aliases `on`/`off`) set it explicitly, anything else prints usage. The flip is
+**in-memory only** — `telegram.ui` in config.yaml is authoritative again at the next
+restart — which makes it a friction-free test switch for the operator while keeping the
+config the single source of truth for the wife-instance.
+
+Mechanically, the persona flag becomes mutable process state and everything derived
+from it is computed at use time: rendering env (`TRAINMATE_RENDER`), wrap width, router
+vs argv parsing, plain-vs-`<pre>` replies, and the morning-push gate (the scheduler
+task always runs when config enables pushes; the persona is checked per tick). The
+switch itself swaps the `set_my_commands` menu and confirms with a message that
+attaches the reply keyboard on the way into simple and sends `ReplyKeyboardRemove` on
+the way out — Telegram clients keep the old keyboard until told otherwise.
+
+Only the expert menu advertises `/ui`; the simple menu stays the athlete's two entries,
+and the confirmation lines teach the way back.
+
 ## 6. Simple rendering
 
 Simple mode sets `TRAINMATE_RENDER=simple` in the subprocess env (beside
@@ -233,7 +252,7 @@ dashboard are the audit surface, chat is the encouragement surface.
 
 | File | Change |
 |---|---|
-| `trainmate_bot.py` | ui-mode switch, reply keyboard + label→argv table, armed-capture chat state, `ui:` callback namespace, `TM-BUTTONS` parsing, push scheduler task |
+| `trainmate_bot.py` | ui-mode switch (config at start, `/ui` flips it live, §5.6), reply keyboard + label→argv table, armed-capture chat state, `ui:` callback namespace, `TM-BUTTONS` parsing, push scheduler task |
 | `trainmate/prompt.py` | `BUTTONS_SENTINEL` + `emit_buttons()` (mirror of `emit_photo`) |
 | `trainmate/cli/bot.py` | new hidden family: `bot morning`, `bot route`, `bot constraints` |
 | `trainmate/config.py` | `telegram_ui`, `telegram.push.*` knobs, `router_llm_model` |
@@ -273,6 +292,8 @@ Each phase ships alone; her onboarding starts at phase 1.
 - Constraints are routable (2026-08-25, §5.5): `add_constraint` rides the `adapt -m`
   capture flow; `show_constraints`/`remove_constraint` map to `bot constraints`, whose
   rm picker is the only destructive action buttons can reach — single-ID, tap-chosen.
+- `/ui` flips the persona at runtime, in-memory only (2026-08-25, §5.6): a test switch
+  for the operator; config.yaml stays authoritative across restarts.
 
 **Open**
 1. Router echo: always show "→ …", or only when confidence is low? Draft: always;

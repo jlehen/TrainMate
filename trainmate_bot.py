@@ -11,7 +11,9 @@ With ``telegram.ui: simple`` the same pipeline gains a companion persona
 argv, unarmed free text goes through an intent router (``tm bot route``), a morning
 scheduler spawns ``tm bot morning``, and replies arrive as plain prose
 (``TRAINMATE_RENDER=simple``) instead of ``<pre>`` blocks. Expert mode (the default)
-is untouched; slash-prefixed text stays the expert path in both modes.
+is untouched; slash-prefixed text stays the expert path in both modes. ``/ui`` flips
+between the two personae at runtime, in memory only — ``telegram.ui`` rules again at
+the next restart (DESIGN_bot_simple_frontend.md §5.6).
 
 Interactive commands work over chat via a structured-prompt protocol. The CLI is
 launched with ``TRAINMATE_FRONTEND=json`` so its prompt broker
@@ -105,6 +107,7 @@ MENU_COMMANDS = [
     ("learnings", "Inspect coach learnings"),
     ("constraint", "Manage directives the coach works around"),
     ("model", "List/choose the LLM model"),
+    ("ui", "Switch simple/expert chat UI (until restart)"),
     ("cancel", "Abort the command awaiting your answer"),
     ("restart", "Restart the bot process (picks up new code)"),
     ("help", "Show command help"),
@@ -186,6 +189,34 @@ def keyboard_action(text: str) -> Optional[Tuple[str, Optional[List[str]]]]:
         if stripped == label:
             return ("run", list(argv)) if argv else ("capture", None)
     return None
+
+
+# --- The /ui runtime persona switch (§5.6) ---
+# Advertised in the expert menu only; the confirmation lines teach the way back, so
+# the switch stays reachable from simple mode without cluttering the athlete's menu.
+
+UI_USAGE = "Usage: /ui [simple|expert] — bare /ui flips the mode."
+UI_SIMPLE_ON = (
+    "Simple mode on 🙌 — buttons below, free text goes through the router.\n"
+    "Send /ui to switch back; a restart returns to what config.yaml says."
+)
+UI_EXPERT_ON = (
+    "Expert mode on — full command vocabulary, monospace output, keyboard removed.\n"
+    "Send /ui to switch back; a restart returns to what config.yaml says."
+)
+
+
+def parse_ui_switch(text: str, simple_now: bool) -> Optional[bool]:
+    """The /ui argument → target persona: True = simple, False = expert, None = show
+    usage. Bare /ui flips the current mode (§5.6)."""
+    parts = text.split()
+    if len(parts) == 1:
+        return not simple_now
+    if len(parts) > 2:
+        return None
+    return {"simple": True, "on": True, "expert": False, "off": False}.get(
+        parts[1].lower()
+    )
 
 
 def next_push_delay(
@@ -490,16 +521,20 @@ def main() -> None:
         )
     prompt_timeout = config.telegram_prompt_timeout
     command_timeout = config.telegram_command_timeout
-    # Simple mode sends prose the client flows itself, so hard-wrapping at phone
-    # width would only add ragged mid-sentence breaks — wrap far past any real line
-    # instead (DESIGN_bot_simple_frontend.md §6).
+    # The persona starts from config but /ui may flip it live (§5.6, in-memory
+    # only), so everything derived from it is computed at use time, never captured.
     simple_ui = config.telegram_ui == "simple"
-    wrap_width = 900 if simple_ui else config.telegram_wrap_width
+
+    def _wrap_width() -> int:
+        # Simple mode sends prose the client flows itself, so hard-wrapping at phone
+        # width would only add ragged mid-sentence breaks — wrap far past any real
+        # line instead (§6).
+        return 900 if simple_ui else config.telegram_wrap_width
 
     try:
         from telegram import (
             BotCommand, InlineKeyboardButton, InlineKeyboardMarkup, KeyboardButton,
-            ReplyKeyboardMarkup, Update,
+            ReplyKeyboardMarkup, ReplyKeyboardRemove, Update,
         )
         from telegram.constants import ParseMode
         from telegram.ext import (
@@ -519,13 +554,16 @@ def main() -> None:
     armed: Dict[int, float] = {}
     ui_actions: Dict[int, Tuple[str, List[dict]]] = {}
 
-    # The persistent §5.1 reply keyboard, 2×2. Re-asserted on every simple-mode
-    # message so the athlete can never lose it.
+    # The persistent §5.1 reply keyboard, 2×2 — built unconditionally, attached (and
+    # re-asserted on every message) only while the persona is simple.
     reply_keyboard = ReplyKeyboardMarkup(
         [[KeyboardButton(SIMPLE_KEYBOARD[0][0]), KeyboardButton(SIMPLE_KEYBOARD[1][0])],
          [KeyboardButton(SIMPLE_KEYBOARD[2][0]), KeyboardButton(SIMPLE_KEYBOARD[3][0])]],
         resize_keyboard=True, is_persistent=True,
-    ) if simple_ui else None
+    )
+
+    def _keyboard():
+        return reply_keyboard if simple_ui else None
 
     def _log(chat_id: int, direction: str, msg: str) -> None:
         ts = datetime.datetime.now().strftime("%H:%M:%S")
@@ -562,7 +600,7 @@ def main() -> None:
         for part in format_reply(text, simple=simple_ui):
             sent = await bot.send_message(
                 chat_id=session.chat_id, text=part, parse_mode=ParseMode.HTML,
-                reply_markup=reply_keyboard,
+                reply_markup=_keyboard(),
             )
             session.last_message_id = sent.message_id
         _log(session.chat_id, "<<", f"{text.count(chr(10)) + 1} line(s)")
@@ -733,7 +771,7 @@ def main() -> None:
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.STDOUT,
-            env=_cli_env(wrap_width, simple=simple_ui),
+            env=_cli_env(_wrap_width(), simple=simple_ui),
             cwd=os.path.dirname(CLI_PATH),
         )
         session = _Session(chat_id, proc, secrets.token_hex(4), quiet=quiet)
@@ -790,12 +828,12 @@ def main() -> None:
             argv = list(ROUTER_INTENT_ARGV[intent])
         elif intent == "help":
             await bot.send_message(
-                chat_id=chat_id, text=SIMPLE_HELP, reply_markup=reply_keyboard
+                chat_id=chat_id, text=SIMPLE_HELP, reply_markup=_keyboard()
             )
             return None
         else:
             await bot.send_message(
-                chat_id=chat_id, text=ROUTER_FALLBACK, reply_markup=reply_keyboard
+                chat_id=chat_id, text=ROUTER_FALLBACK, reply_markup=_keyboard()
             )
             return None
         echo = ROUTER_ECHO.get(intent)
@@ -827,6 +865,27 @@ def main() -> None:
             except ProcessLookupError:
                 pass
         return "Cancelling…"
+
+    async def _set_ui(chat_id: int, target: bool) -> None:
+        """Flips the persona in place (§5.6): swaps the command menu, then confirms —
+        attaching the reply keyboard on the way into simple, removing it on the way
+        out. In-memory only; config.telegram_ui rules again at the next restart."""
+        nonlocal simple_ui
+        simple_ui = target
+        commands = SIMPLE_MENU_COMMANDS if target else MENU_COMMANDS
+        try:
+            await bot.set_my_commands([BotCommand(n, d) for n, d in commands])
+        except Exception:
+            pass  # the menu is cosmetic — never let it block the switch
+        if target:
+            await bot.send_message(
+                chat_id=chat_id, text=UI_SIMPLE_ON, reply_markup=reply_keyboard
+            )
+        else:
+            await bot.send_message(
+                chat_id=chat_id, text=UI_EXPERT_ON, reply_markup=ReplyKeyboardRemove()
+            )
+        _log(chat_id, "  ", f"ui: {'simple' if target else 'expert'}")
 
     async def _restart(chat_id: int) -> None:
         """Tears down, replies, then hard-exits with RESTART_EXIT_CODE for the tm-bot
@@ -860,17 +919,24 @@ def main() -> None:
             return
         if token_low == "start":
             if simple_ui:
-                await message.reply_text(SIMPLE_WELCOME, reply_markup=reply_keyboard)
+                await message.reply_text(SIMPLE_WELCOME, reply_markup=_keyboard())
             else:
                 await message.reply_text(WELCOME)
             return
         if token_low == "help" and simple_ui:
             # Bare help gets the companion card; `/help <cmd>` still reaches the CLI
             # tree for the operator (§5.1).
-            await message.reply_text(SIMPLE_HELP, reply_markup=reply_keyboard)
+            await message.reply_text(SIMPLE_HELP, reply_markup=_keyboard())
             return
         if token_low == "restart":
             await _restart(chat.id)
+            return
+        if token_low == "ui" or token_low.startswith("ui "):
+            target = parse_ui_switch(token_low, simple_ui)
+            if target is None:
+                await message.reply_text(UI_USAGE)
+                return
+            await _set_ui(chat.id, target)
             return
 
         session = sessions.get(chat.id)
@@ -895,7 +961,7 @@ def main() -> None:
             action = keyboard_action(text)
             if action is not None and action[0] == "capture":
                 armed[chat.id] = time.monotonic()
-                await message.reply_text(CAPTURE_PROMPT, reply_markup=reply_keyboard)
+                await message.reply_text(CAPTURE_PROMPT, reply_markup=_keyboard())
                 return
             if action is not None:
                 argv = list(action[1])
@@ -1025,9 +1091,9 @@ def main() -> None:
     # The morning push goes to the first allowlisted chat — the single-athlete
     # instance model makes that the athlete (§4.3).
     push_chat_id = allowed_ids[0] if allowed_ids else None
-    push_enabled = (
-        simple_ui and config.telegram_push_enabled and push_chat_id is not None
-    )
+    # Gated on config and a target chat only; the persona is checked per tick
+    # inside the loop instead, so a /ui flip (§5.6) turns the push on and off live.
+    push_enabled = config.telegram_push_enabled and push_chat_id is not None
 
     async def _push_loop() -> None:
         """Fires `bot morning` inside the [morning_time, deadline] window, once per
@@ -1042,7 +1108,7 @@ def main() -> None:
                 now, config.telegram_push_morning_time,
                 config.telegram_push_morning_deadline,
             )
-            if delay <= 0 and fired != now.date().isoformat():
+            if delay <= 0 and simple_ui and fired != now.date().isoformat():
                 if sessions.get(push_chat_id) is not None:
                     # §4.3: never collide with an in-flight command — retry shortly.
                     await asyncio.sleep(180)

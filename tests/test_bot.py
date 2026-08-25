@@ -278,6 +278,31 @@ class MenuCommandsTest(unittest.TestCase):
         self.assertIn("cancel", names)
 
 
+class UiSwitchTest(unittest.TestCase):
+    """The /ui runtime persona switch (§5.6): bare form flips, explicit form sets,
+    anything else reads as usage (None)."""
+
+    def test_bare_ui_flips_the_current_mode(self):
+        self.assertIs(bot.parse_ui_switch("ui", simple_now=False), True)
+        self.assertIs(bot.parse_ui_switch("ui", simple_now=True), False)
+
+    def test_explicit_arguments_set_the_mode_regardless_of_current(self):
+        self.assertIs(bot.parse_ui_switch("ui simple", simple_now=True), True)
+        self.assertIs(bot.parse_ui_switch("ui expert", simple_now=False), False)
+        self.assertIs(bot.parse_ui_switch("ui on", simple_now=True), True)
+        self.assertIs(bot.parse_ui_switch("ui off", simple_now=False), False)
+
+    def test_unknown_or_extra_arguments_read_as_usage(self):
+        self.assertIsNone(bot.parse_ui_switch("ui blorp", simple_now=False))
+        self.assertIsNone(bot.parse_ui_switch("ui simple please", simple_now=False))
+
+    def test_only_the_expert_menu_advertises_the_switch(self):
+        # The simple menu stays the athlete's two entries; the §5.6 confirmation
+        # lines teach the way back instead.
+        self.assertIn("ui", [n for n, _ in bot.MENU_COMMANDS])
+        self.assertNotIn("ui", [n for n, _ in bot.SIMPLE_MENU_COMMANDS])
+
+
 class SimpleKeyboardTest(unittest.TestCase):
     """The §5.1 reply keyboard: labels map onto a fixed argv table, nothing else."""
 

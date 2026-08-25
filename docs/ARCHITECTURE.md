@@ -162,7 +162,9 @@ classes themselves.
     utterance back through the normal pipeline. An asyncio scheduler (`_push_loop`)
     spawns `tm bot morning` inside the `telegram.push.morning_time`→`morning_deadline`
     window; idempotency lives in the `settings` row `push_morning_last`, so the bot
-    process stays stateless. Slash-prefixed text is always the expert path.
+    process stays stateless. Slash-prefixed text is always the expert path, and `/ui`
+    flips the persona of a running bot in memory — `telegram.ui` decides again at the
+    next restart (DESIGN_bot_simple_frontend.md §5.6).
   - **Output is quieter here than on a terminal.** Because `_drive` buffers the whole
     run and flushes it as one message, progress narration arrives *after* the work it
     describes, ahead of the answer. So `TRAINMATE_FRONTEND=json` also switches off
