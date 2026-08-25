@@ -13,6 +13,7 @@ from trainmate.util import (
 )
 from trainmate.cli.common import (
     fmt_date, ensure_recent_data, mark_adherence_from_results, report_unhonored,
+    is_simple_render, simple_day_lines, simple_week_lines,
 )
 from trainmate.coach.proposals import GenerateProposal
 from trainmate.cli.workouts.revisions import preview_and_confirm_revision
@@ -102,12 +103,21 @@ def run_workout_adapt(args: argparse.Namespace) -> None:
             else:
                 print("Discarded — not saved as a constraint.")
 
-        print(f"\n{bold('Decision Summary')}:\n{wrap_text(reason)}")
+        # Simple mode drops the report-style header and softens the no-change line —
+        # the reason itself is already prose (DESIGN_bot_simple_frontend.md §6).
+        if is_simple_render():
+            print(f"\n{wrap_text(reason)}")
+        else:
+            print(f"\n{bold('Decision Summary')}:\n{wrap_text(reason)}")
 
         if not proposed_workouts:
-            print(green(
-                "\nAll metrics are green and workout plan is on track. No changes recommended."
-            ))
+            if is_simple_render():
+                print(green("\nAll clear — the plan stands as it is. 💪"))
+            else:
+                print(green(
+                    "\nAll metrics are green and workout plan is on track. "
+                    "No changes recommended."
+                ))
             # The pass still had its constraints in scope, which is all `honored_at`
             # claims — requiring a *change* would flag them forever (§8).
             runtime.coach_service.workout_revision_record_no_change(proposal)
@@ -514,6 +524,17 @@ def run_workout_list(args: argparse.Namespace) -> None:
             w for w in sorted(workouts, key=lambda w: (w['date'], w['id']))
             if not (w['id'] in seen or seen.add(w['id']))
         ]
+
+    # Companion prose instead of the table: a single-day window reads as the day, any
+    # other window as the week ahead (DESIGN_bot_simple_frontend.md §6).
+    if is_simple_render():
+        if start_date and start_date == end_date:
+            lines = simple_day_lines(workouts, start_date)
+        else:
+            lines = simple_week_lines(workouts)
+        for line in lines:
+            print(line)
+        return
 
     print(bold(cyan("=== WORKOUT SCHEDULE ===")))
     if ids:

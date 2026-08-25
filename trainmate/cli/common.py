@@ -1,4 +1,5 @@
 """Shared helpers used across the CLI command modules."""
+import os
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
 from trainmate.config import config
@@ -206,3 +207,113 @@ def report_unhonored(constraints: List[Dict[str, Any]]) -> None:
         f"marked honored: {names}. Run " + cmd("workout generate") + " to build them "
         "back in."
     )))
+
+
+# --- Simple rendering (DESIGN_bot_simple_frontend.md §6) ---
+# Commands opt in one at a time; anything that hasn't opted in falls back to the
+# expert form. Tone rule: lead with what was done and what is next, state gaps as
+# neutral facts after the lead, never open with a miss.
+
+REST_DAY_LINE = "Rest day — enjoy it 🎉"
+
+# Emoji per canonical sport for the simple session lines; unknown sports get the
+# generic one rather than nothing, so a new sport never renders bare.
+SPORT_EMOJI = {
+    "running": "🏃",
+    "cycling": "🚴",
+    "swimming": "🏊",
+    "strength": "🏋️",
+    "hiking": "🥾",
+    "rowing": "🚣",
+    "yoga": "🧘",
+}
+DEFAULT_SPORT_EMOJI = "🎽"
+
+
+def is_simple_render() -> bool:
+    """The one place the TRAINMATE_RENDER env var is interpreted (mirrors
+    `is_json_frontend` for TRAINMATE_FRONTEND): 'simple' selects the companion
+    rendering for commands that opted in (DESIGN_bot_simple_frontend.md §6)."""
+    return os.environ.get("TRAINMATE_RENDER", "").strip().lower() == "simple"
+
+
+def sport_emoji(sport_type: Optional[str]) -> str:
+    """The emoji standing in for the sport column in simple session lines."""
+    return SPORT_EMOJI.get((sport_type or "").strip().lower(), DEFAULT_SPORT_EMOJI)
+
+
+def simple_session_line(w: Dict[str, Any], lead: Optional[str] = None) -> str:
+    """One simple-mode line for a session: '🏃 Today: Easy run — 40 min'.
+
+    `lead` is the day word ('Today', '2026-08-25 Tue'); omitted for a bare line."""
+    duration = w.get("duration_minutes")
+    duration_str = f" — {duration} min" if duration else ""
+    prefix = f"{sport_emoji(w.get('sport_type'))} "
+    if lead:
+        prefix += f"{lead}: "
+    return f"{prefix}{w.get('title') or w.get('sport_type', 'Session')}{duration_str}"
+
+
+def simple_day_lines(workouts: List[Dict[str, Any]], date_str: str) -> List[str]:
+    """Simple rendering of one day's schedule: session line(s) plus the wrapped
+    description (the coach's actual prescription), or the one-line rest message.
+    Any empty day gets the rest line, whatever the reason it is empty
+    (DESIGN_bot_simple_frontend.md §10)."""
+    if not workouts:
+        return [REST_DAY_LINE]
+    day_word = "Today" if date_str == _today_str() else fmt_date(date_str)
+    lines: List[str] = []
+    for w in workouts:
+        lines.append(simple_session_line(w, lead=day_word))
+        description = (w.get("description") or "").strip()
+        if description:
+            lines.append(wrap_text(description))
+    return lines
+
+
+def simple_week_lines(workouts: List[Dict[str, Any]]) -> List[str]:
+    """Simple rendering of a multi-day window: one dated line per session, no
+    descriptions, ending on an encouraging count. An empty window is a break, not
+    a gap (§6 tone rule)."""
+    if not workouts:
+        return ["Nothing on the schedule — enjoy the break 🎉"]
+    lines = ["🗓 Coming up:"]
+    for w in workouts:
+        day = datetime.strptime(w["date"], "%Y-%m-%d").strftime("%a %d")
+        lines.append(f"{day} · {simple_session_line(w)}")
+    count = len(workouts)
+    session_word = "session" if count == 1 else "sessions"
+    lines.append(f"\n{count} {session_word} planned — you've got this 💪")
+    return lines
+
+
+def simple_progress_lines(payload: Dict[str, Any], today: str) -> List[str]:
+    """The two-line simple `progress` summary: a fitness-trend sentence (from the
+    CTL series, ~28 days back) and a chart legend. Every branch keeps the §6 tone
+    rule — a falling CTL reads as freshening up, not as decay."""
+    days = payload.get("days") or []
+    dated = [(d["date"], d.get("ctl")) for d in days
+             if d.get("ctl") is not None and d["date"] <= today]
+    trend = "Your training story is just getting started 🌱"
+    if dated:
+        now_date, now_ctl = dated[-1]
+        base_cutoff = (
+            datetime.strptime(now_date, "%Y-%m-%d") - timedelta(days=28)
+        ).strftime("%Y-%m-%d")
+        # Baseline: the newest sample at or before the cutoff; a shorter history
+        # falls back to its earliest sample.
+        older = [ctl for date, ctl in dated if date <= base_cutoff]
+        base = older[-1] if older else dated[0][1]
+        if base and base > 0 and len(dated) > 1:
+            delta_pct = (now_ctl - base) / base * 100
+            if delta_pct > 3:
+                trend = f"Fitness is climbing — up {delta_pct:.0f}% this month 📈"
+            elif delta_pct < -3:
+                trend = "You're freshening up — recent rest is banking energy 🔋"
+            else:
+                trend = "Fitness is holding steady — consistency is doing its job 👍"
+    return [
+        trend,
+        "The chart shows your fitness building up top, and week-by-week training "
+        "below — keep stacking those weeks 💪",
+    ]

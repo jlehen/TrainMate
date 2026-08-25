@@ -93,6 +93,7 @@ from trainmate.cli.data import add_data_parser
 from trainmate.cli.models import (
     add_model_parser, run_model_list, run_model_reset, run_model_set,
 )
+from trainmate.cli.bot import add_bot_parser, run_bot_morning, run_bot_route
 
 
 def build_parser():
@@ -177,6 +178,7 @@ def build_parser():
     workout_parser = add_workout_parser(subparsers, pull_bypass_parser, llm_debug_parser)
     data_parser = add_data_parser(subparsers, pull_bypass_parser, llm_debug_parser)
     add_model_parser(subparsers)
+    add_bot_parser(subparsers)
 
     named_subparsers = {
         "goal": goal_parser,

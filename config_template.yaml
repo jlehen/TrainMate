@@ -9,6 +9,10 @@ llm:
   # Seconds an OpenRouter HTTP request may run before it's aborted. Generation is
   # slow (large plans), so keep this generous. Default 120.
   #request_timeout_seconds: 120
+  # Cheaper model the Telegram bot's free-text intent router uses (simple ui mode,
+  # DESIGN_bot_simple_frontend.md §5.4). A role, not a `model list` entry: `model set`
+  # keeps meaning the coaching model. Absent -> the active coaching model routes too.
+  #router_model: "google/gemini-3.5-flash"
 
 # The SQLite database this install operates on. A relative path resolves against this
 # config file's directory; default trainmate.db beside it.
@@ -74,7 +78,28 @@ llm:
 #  #prompt_timeout_seconds: 300
 #  # Column width replies wrap to. The CLI's terminal default (80) double-wraps on a
 #  # phone; ~48 fits portrait without the client re-wrapping. Raise on tablets.
+#  # Ignored in simple ui mode, where prose flows and the client wraps it.
 #  #wrap_width: 48
+#  # Which persona the bot presents (DESIGN_bot_simple_frontend.md). 'expert' (the
+#  # default) is the raw CLI-over-chat; 'simple' is the companion mode for a
+#  # non-technical athlete: reply keyboard, free-text intent routing, the morning
+#  # push below, and plain-prose rendering. Typed /commands still work in simple mode.
+#  #ui: expert
+#  # Morning push (simple ui mode only): the bot opens the day with today's session
+#  # and follow-up buttons. State lives in the instance's database, so restarts
+#  # never double-send.
+#  #push:
+#  #  # Off-switch for the push without leaving simple mode.
+#  #  #enabled: true
+#  #  # Local time the push fires.
+#  #  #morning_time: "08:00"
+#  #  # If the machine or bot was down at morning_time, catch up until this local
+#  #  # time; after it the day is skipped (a workout briefing at 9 PM is noise).
+#  #  #morning_deadline: "15:00"
+#  #  # Run the daily adaptation non-interactively (workout adapt -y) before
+#  #  # rendering the push, so it reflects overnight signals. Costs an LLM call
+#  #  # every morning.
+#  #  #adapt_first: false
 
 google:
   # Service-account JSON file used to authenticate to the Google APIs.

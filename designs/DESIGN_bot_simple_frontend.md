@@ -1,6 +1,6 @@
 # Design: Simple Bot Front-End ("companion mode")
 
-**Status:** Proposed (markup round 1 folded in — no code yet) · **Date:** 2026-08-25 ·
+**Status:** Implemented (all three rollout phases, 2026-08-25) · **Date:** 2026-08-25 ·
 **Branch:** worktree-config-env-and-frontend-design
 
 ## 1. Motivation
@@ -247,7 +247,15 @@ Each phase ships alone; her onboarding starts at phase 1.
 - `telegram.push.adapt_first` runs the daily adaptation (non-interactive, `-y`) before
   rendering the push; default off (2026-08-25, §4.2).
 - `📈 Progress` keeps its keyboard slot — to be judged in practice (2026-08-25).
+- The §4.1 recovery sentence ("Fresh legs…") is NOT synthesized by the renderer: a
+  heuristic recovery judgment would be coach logic living in a formatter. It appears
+  when `adapt_first` ran and changed something — as the applied change's reason line —
+  otherwise the push is the schedule alone (implementation, 2026-08-25).
+- In simple mode a leading `/` is the expert path; bare non-slash text is the companion
+  surface (labels → capture → router). Bare `help` gets the companion card; `/help
+  <cmd>` still reaches the CLI tree (implementation, 2026-08-25).
 
 **Open**
 1. Router echo: always show "→ …", or only when confidence is low? Draft: always;
-   applies unless objected to before phase 3 (rollout §9).
+   applies unless objected to before phase 3 (rollout §9). Implemented as: always
+   (`ROUTER_ECHO` in trainmate_bot.py); trivially revisitable.

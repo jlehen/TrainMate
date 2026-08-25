@@ -144,6 +144,22 @@ classes themselves.
     text, so a future sentinel degrades gracefully on a stale bot build. Currently used
     by `tm progress --chart` (DESIGN_progress_timeline.md §7.2); any future CLI command
     can reuse the same transport.
+  - **Simple ("companion") mode** — `telegram.ui: simple`, DESIGN_bot_simple_frontend.md.
+    The same pipeline gains a persona for a non-technical athlete; expert mode is
+    untouched. A persistent 2×2 reply keyboard maps labels onto fixed argv
+    (`SIMPLE_KEYBOARD`); "💬 Tell my coach" arms one free-text message for
+    `workout adapt -m`; other unarmed free text is classified by `tm bot route`
+    (a hidden CLI command calling `llm.router_model`) and mapped to argv from the bot's
+    own `ROUTER_INTENT_ARGV` table — the model picks an intent, never argv. Subprocesses
+    additionally get `TRAINMATE_RENDER=simple` (interpreted by
+    `cli/common.is_simple_render`) so opted-in commands render companion prose, sent
+    plain instead of `<pre>`. A third one-way sentinel, `BUTTONS_SENTINEL`/
+    `emit_buttons` (`\x1eTM-BUTTONS {json}`), attaches a *non-blocking* inline button
+    row (`ui:` callback namespace, token-invalidated) whose taps feed a canned
+    utterance back through the normal pipeline. An asyncio scheduler (`_push_loop`)
+    spawns `tm bot morning` inside the `telegram.push.morning_time`→`morning_deadline`
+    window; idempotency lives in the `settings` row `push_morning_last`, so the bot
+    process stays stateless. Slash-prefixed text is always the expert path.
   - **Output is quieter here than on a terminal.** Because `_drive` buffers the whole
     run and flushes it as one message, progress narration arrives *after* the work it
     describes, ahead of the answer. So `TRAINMATE_FRONTEND=json` also switches off
@@ -1484,7 +1500,9 @@ Invoked as `python trainmate_cli.py [--llm-model MODEL] <command> [subcommand] [
 patchable singletons; the handler functions, named
 `run_<command>_<subcommand>()`, live in the `trainmate/cli/` package
 (one module per command family: `status`, `progress`, `goals`, `constraints`,
-`benchmarks`, `signal`, `learnings`, `plans`, `data`, `models`, plus the
+`benchmarks`, `signal`, `learnings`, `plans`, `data`, `models`, `bot` (hidden:
+`bot morning`/`bot route`, spawned by the Telegram bot — DESIGN_bot_simple_frontend.md),
+plus the
 `workouts/` **package** — `parser`/`generate`/`edit`/`_helpers`; `selectors.py` holds the
 shared range grammar and `argparse_ext.py` the parser/help extensions). `help` is the one
 exception — it just introspects the parser tree (`_print_command_tree` in
@@ -1703,6 +1721,9 @@ Required fields:
 | `service_account_file` | str  | Path to service account JSON (default:                        |
 |                        |      | `service_account.json`)                                       |
 | `database`             | str  | SQLite file this instance operates on; a relative value resolves against the config file's directory (default: `trainmate.db`) |
+| `llm.router_model`     | str  | Cheaper model the bot's free-text router (`tm bot route`) uses; a role, not a `model list` entry. Absent → the active coaching model (DESIGN_bot_simple_frontend.md §5.4) |
+| `telegram.ui`          | str  | Bot persona: `expert` (default) or `simple` — the companion mode (DESIGN_bot_simple_frontend.md §3) |
+| `telegram.push.*`      | —    | Morning push (simple ui only): `enabled` (default true), `morning_time` (`08:00`), `morning_deadline` (`15:00`), `adapt_first` (default false → run `workout adapt -y` before rendering) |
 | `metrics_lookback_days`  | int  | Rolling window for adaptation (default: 15)                  |
 | `workout_generation_span_days` | int  | Default span length for `workout generate` (default: 28)     |
 | `minor_activity_load_threshold`    | float| Workload score below which an activity is "minor"            |

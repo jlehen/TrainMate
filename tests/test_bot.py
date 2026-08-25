@@ -273,6 +273,195 @@ class MenuCommandsTest(unittest.TestCase):
         self.assertIn("restart", names)
         self.assertIn("cancel", names)
 
+    def test_simple_menu_keeps_cancel_reachable(self):
+        names = [name for name, _ in bot.SIMPLE_MENU_COMMANDS]
+        self.assertIn("cancel", names)
+
+
+class SimpleKeyboardTest(unittest.TestCase):
+    """The §5.1 reply keyboard: labels map onto a fixed argv table, nothing else."""
+
+    def test_labels_map_to_fixed_argv(self):
+        self.assertEqual(
+            bot.keyboard_action("📅 Today"),
+            ("run", ["workout", "list", "-d", "today"]),
+        )
+        self.assertEqual(bot.keyboard_action("🗓 My week"), ("run", ["workout", "list"]))
+        self.assertEqual(
+            bot.keyboard_action("📈 Progress"), ("run", ["progress", "--chart"])
+        )
+
+    def test_capture_button_arms_instead_of_running(self):
+        self.assertEqual(bot.keyboard_action("💬 Tell my coach"), ("capture", None))
+
+    def test_non_label_text_is_not_a_button(self):
+        self.assertIsNone(bot.keyboard_action("show me my week"))
+        self.assertIsNone(bot.keyboard_action(""))
+
+    def test_surrounding_whitespace_is_tolerated(self):
+        self.assertEqual(
+            bot.keyboard_action("  📅 Today  "),
+            ("run", ["workout", "list", "-d", "today"]),
+        )
+
+    def test_returned_argv_is_a_copy(self):
+        kind, argv = bot.keyboard_action("📅 Today")
+        argv.append("--verbose")
+        self.assertEqual(
+            bot.keyboard_action("📅 Today"),
+            ("run", ["workout", "list", "-d", "today"]),
+        )
+
+
+class GuardrailTest(unittest.TestCase):
+    """§7: buttons and router intents only reach read-only views and `adapt -m` —
+    nothing destructive, plan-shaping or expensive is reachable without typing."""
+
+    ALLOWED_PREFIXES = {("workout", "list"), ("progress", "--chart")}
+
+    def test_keyboard_argv_stays_read_only(self):
+        for label, argv in bot.SIMPLE_KEYBOARD:
+            if argv is None:
+                continue
+            self.assertIn(tuple(argv[:2]), self.ALLOWED_PREFIXES, label)
+
+    def test_router_argv_stays_read_only(self):
+        for intent, argv in bot.ROUTER_INTENT_ARGV.items():
+            self.assertIn(tuple(argv[:2]), self.ALLOWED_PREFIXES, intent)
+
+    def test_morning_button_utterances_reach_only_adapt_m(self):
+        from trainmate.cli.bot import MORNING_BUTTONS
+
+        def leaves(buttons):
+            for b in buttons:
+                if b.get("menu"):
+                    yield from leaves(b["menu"])
+                else:
+                    yield b
+
+        sends = [b["send"] for b in leaves(MORNING_BUTTONS) if b.get("send")]
+        self.assertTrue(sends)
+        for utterance in sends:
+            argv = bot.parse_message_to_argv(utterance)
+            self.assertEqual(argv[:2], ["workout", "adapt"], utterance)
+            self.assertIn("-m", argv)
+            self.assertNotIn("-y", argv)
+
+
+class RouterTablesTest(unittest.TestCase):
+    """The intent names live in trainmate/cli/bot.py (what the model may pick) and the
+    argv in trainmate_bot.py (what each intent runs) — a rule that spans files, pinned
+    here so the two tables cannot drift (§5.3)."""
+
+    # Intents the bot answers itself rather than mapping to argv.
+    SPECIAL = {"coach_message", "help", "unclear"}
+
+    def test_every_cli_intent_lands_somewhere_in_the_bot(self):
+        from trainmate.cli.bot import ROUTER_INTENTS
+        for intent in ROUTER_INTENTS:
+            self.assertTrue(
+                intent in bot.ROUTER_INTENT_ARGV or intent in self.SPECIAL, intent
+            )
+
+    def test_bot_tables_name_no_unknown_intent(self):
+        from trainmate.cli.bot import ROUTER_INTENTS
+        for intent in list(bot.ROUTER_INTENT_ARGV) + list(bot.ROUTER_ECHO):
+            self.assertIn(intent, ROUTER_INTENTS)
+
+
+class ButtonsProtocolTest(unittest.TestCase):
+    def test_roundtrips_through_emit_buttons(self):
+        import io
+        from trainmate.prompt import emit_buttons
+        buf = io.StringIO()
+        emit_buttons([{"label": "A", "send": "status"}], out=buf)
+        # split("\n"), not splitlines(): \x1e is itself a str.splitlines boundary,
+        # while the bot reads byte lines split on \n alone.
+        line = buf.getvalue().split("\n")[0]
+        req = bot.parse_buttons_request(line)
+        self.assertEqual(req["buttons"], [{"label": "A", "send": "status"}])
+
+    def test_plain_output_is_not_a_buttons_request(self):
+        self.assertIsNone(bot.parse_buttons_request("workout listed"))
+
+    def test_prompt_line_is_not_a_buttons_request(self):
+        self.assertIsNone(bot.parse_buttons_request('\x1eTM-PROMPT {"id": "p1"}'))
+
+    def test_buttons_line_is_not_a_prompt_or_photo(self):
+        line = '\x1eTM-BUTTONS {"buttons": []}'
+        self.assertIsNone(bot.parse_prompt_request(line))
+        self.assertIsNone(bot.parse_photo_request(line))
+
+
+class UiCallbackTest(unittest.TestCase):
+    def test_roundtrips(self):
+        data = bot.ui_callback_data("abc123", "2.1")
+        self.assertEqual(bot.decode_ui_callback(data), ("abc123", "2.1"))
+
+    def test_rejects_malformed_and_foreign_namespaces(self):
+        self.assertIsNone(bot.decode_ui_callback("nonce:p1:y"))
+        self.assertIsNone(bot.decode_ui_callback("ui:onlytoken"))
+        self.assertIsNone(bot.decode_ui_callback(""))
+        self.assertIsNone(bot.decode_ui_callback("ui::2"))
+
+    def test_resolves_top_level_and_menu_paths(self):
+        buttons = [
+            {"label": "A", "ack": "ok"},
+            {"label": "B", "menu": [{"label": "B1", "send": "status"}]},
+        ]
+        self.assertEqual(bot.resolve_ui_action(buttons, "0")["label"], "A")
+        self.assertEqual(bot.resolve_ui_action(buttons, "1.0")["label"], "B1")
+
+    def test_unresolvable_paths_return_none(self):
+        buttons = [{"label": "A"}]
+        self.assertIsNone(bot.resolve_ui_action(buttons, "5"))
+        self.assertIsNone(bot.resolve_ui_action(buttons, "0.0"))
+        self.assertIsNone(bot.resolve_ui_action(buttons, "0.0.0"))
+        self.assertIsNone(bot.resolve_ui_action(buttons, "x"))
+
+    def test_morning_buttons_fit_telegrams_64_byte_callback_cap(self):
+        from trainmate.cli.bot import MORNING_BUTTONS
+        token = "aabbcc"  # secrets.token_hex(3) width
+        rows = bot.ui_button_rows(MORNING_BUTTONS, token)
+        for i, button in enumerate(MORNING_BUTTONS):
+            for menu_row in bot.ui_menu_rows(button.get("menu") or [], token, str(i)):
+                rows.append(menu_row)
+        for row in rows:
+            for _label, data in row:
+                self.assertLessEqual(len(data.encode()), 64, data)
+
+    def test_top_level_renders_one_row_menu_one_per_line(self):
+        buttons = [{"label": "A"}, {"label": "B"}, {"label": "C"}]
+        self.assertEqual(len(bot.ui_button_rows(buttons, "t")), 1)
+        self.assertEqual(len(bot.ui_menu_rows(buttons, "t", "2")), 3)
+
+
+class PushScheduleTest(unittest.TestCase):
+    """`next_push_delay` — the §4.3 send/catch-up window arithmetic."""
+
+    def _at(self, hour, minute=0):
+        import datetime as dt
+        return dt.datetime(2026, 8, 25, hour, minute)
+
+    def test_before_the_window_waits_for_morning(self):
+        self.assertEqual(bot.next_push_delay(self._at(6), "08:00", "15:00"), 7200.0)
+
+    def test_inside_the_window_fires_now(self):
+        self.assertEqual(bot.next_push_delay(self._at(8), "08:00", "15:00"), 0.0)
+        self.assertEqual(bot.next_push_delay(self._at(14, 59), "08:00", "15:00"), 0.0)
+
+    def test_past_the_deadline_skips_to_tomorrow(self):
+        delay = bot.next_push_delay(self._at(16), "08:00", "15:00")
+        self.assertEqual(delay, 16 * 3600.0)  # 16:00 → 08:00 next day
+
+    def test_unparseable_times_fall_back_to_defaults(self):
+        self.assertEqual(bot.next_push_delay(self._at(9), "morning!", "nope"), 0.0)
+        self.assertEqual(bot.next_push_delay(self._at(6), "25:99", ""), 7200.0)
+
+    def test_deadline_before_morning_means_no_catchup(self):
+        delay = bot.next_push_delay(self._at(9), "08:00", "07:00")
+        self.assertGreater(delay, 0)  # window already closed for the day
+
 
 if __name__ == "__main__":
     unittest.main()

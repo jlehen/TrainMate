@@ -58,6 +58,24 @@ def emit_photo(path: str, caption: Optional[str] = None, out=None) -> None:
     out.flush()
 
 
+# Third sentinel: a NON-blocking inline-button row attached to the output just
+# flushed. Prompts ask and block; buttons offer and exit — the CLI keeps deciding
+# WHAT to offer, the front-end only renders (DESIGN_bot_simple_frontend.md §4.4).
+BUTTONS_SENTINEL = "\x1eTM-BUTTONS "
+
+
+def emit_buttons(buttons: Sequence[dict], out=None) -> None:
+    """Writes one sentinel-framed button-row line: ``\\x1eTM-BUTTONS {json}``,
+    ``{"buttons": [...]}``. Each button is ``{"label": ...}`` plus exactly one of:
+    ``send`` (a canned utterance the front-end feeds back through its normal command
+    pipeline when tapped), ``ack`` (a short reply text; nothing runs), or ``menu`` (a
+    nested list of send/ack buttons) — DESIGN_bot_simple_frontend.md §4.4."""
+    if out is None:
+        out = sys.stdout
+    out.write(BUTTONS_SENTINEL + json.dumps({"buttons": list(buttons)}) + "\n")
+    out.flush()
+
+
 class PromptCancelled(Exception):
     """Raised when the front-end cancels an in-flight prompt (``/cancel`` or idle
     timeout), or when the answer channel closes.

@@ -26,7 +26,7 @@ from trainmate.util import (
     asides_enabled, bold, green, red, yellow, gray, dim, cmd, pad_visible, visible_len,
     wrap_text, color_tsb, today_str as _today_str, PMC_TSB_LAG_NOTE,
 )
-from trainmate.cli.common import ensure_recent_data
+from trainmate.cli.common import ensure_recent_data, is_simple_render, simple_progress_lines
 
 # `trainmate_cli` (the `db` facade) is imported lazily inside `run_progress`: it
 # imports this module, so a module-level import here is a cycle that breaks
@@ -905,6 +905,23 @@ def run_progress(args: argparse.Namespace) -> None:
     weeks_window = getattr(args, "weeks", None) or 8
 
     payload = timeline.build_timeline_payload(runtime.db)
+
+    # Companion summary instead of the tables; the chart (when asked for) captions
+    # itself with the trend line (DESIGN_bot_simple_frontend.md §6).
+    if is_simple_render():
+        simple_lines = simple_progress_lines(payload, today)
+        for line in simple_lines:
+            print(wrap_text(line))
+        chart_arg = getattr(args, "chart", False)
+        if chart_arg:
+            _emit_chart(
+                chart_arg,
+                progression.clip_payload_for_weeks(
+                    payload, weeks_window, today, cap_future=True
+                ),
+                simple_lines[0],
+            )
+        return
 
     sports = list(getattr(args, "sports", None) or [])
     blocks = getattr(args, "blocks", False)

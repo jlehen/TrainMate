@@ -2,6 +2,7 @@ import argparse
 import sys
 from datetime import datetime, timezone
 
+from trainmate.config import config
 from trainmate.llm_models import (
     active_source, clear_active_model, configured_models, list_models, set_active_model,
     stored_at,
@@ -45,6 +46,10 @@ def run_model_list(args: argparse.Namespace) -> None:
     override = getattr(args, "llm_model", None)
     if override:
         print(dim(f"\nOverridden for this run only by --llm-model: {override}"))
+    # The bot's free-text router role — a config key, not a menu entry, so it is
+    # annotated rather than listed (DESIGN_bot_simple_frontend.md §5.4).
+    if config.router_llm_model:
+        print(dim(f"\nRouter model (llm.router_model): {config.router_llm_model}"))
     aside("\nPick one with `model set <number>`; edit the list in config.yaml (llm.models).")
 
 
