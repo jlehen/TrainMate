@@ -1683,6 +1683,13 @@ Writes live in the CLI: `goal`/`constraint`/`signal`/`benchmark` authoring,
 
 ## 9. Configuration (`config.yaml`)
 
+The file is `config.yaml` at the repo root unless the `TRAINMATE_CONFIG` env var names
+another one — that is how a second athlete runs from the same checkout: own config, own
+`database:`, own Telegram token and Garmin account; shared code, `science/` and `logs/`.
+An explicitly named file must exist and parse (a typo aborts rather than silently running
+against the primary athlete's database). Relative `database:` and `service_account_file`
+values resolve against the config file's directory.
+
 Required fields:
 
 | Key                    | Type | Description                                                   |
@@ -1695,6 +1702,7 @@ Required fields:
 | `garmin_mutable_days` / `garmin_backfill_prompt_days` / `garmin_initial_backfill_days` / `garmin_throttle_seconds` | — | Auto-ensure tuning (see [§10 Data Pull](#data-pull-data-pull-and-auto-ensure)) |
 | `service_account_file` | str  | Path to service account JSON (default:                        |
 |                        |      | `service_account.json`)                                       |
+| `database`             | str  | SQLite file this instance operates on; a relative value resolves against the config file's directory (default: `trainmate.db`) |
 | `metrics_lookback_days`  | int  | Rolling window for adaptation (default: 15)                  |
 | `workout_generation_span_days` | int  | Default span length for `workout generate` (default: 28)     |
 | `minor_activity_load_threshold`    | float| Workload score below which an activity is "minor"            |

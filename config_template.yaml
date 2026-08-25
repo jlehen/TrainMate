@@ -10,6 +10,19 @@ llm:
   # slow (large plans), so keep this generous. Default 120.
   #request_timeout_seconds: 120
 
+# The SQLite database this install operates on. A relative path resolves against this
+# config file's directory; default trainmate.db beside it.
+#database: "trainmate.db"
+
+# Second athlete, same checkout: copy this file into a directory of its own (the
+# database and any relative paths in it will live there too), then point every command
+# at it:
+#   TRAINMATE_CONFIG=/path/to/other/config.yaml ./tm status     (and likewise ./tm-bot)
+# A file named via TRAINMATE_CONFIG must exist — a typo aborts instead of silently
+# falling back to the primary athlete's database. Each instance brings its own telegram
+# bot token, garmin credentials and token_dir, and google calendar_id; the science/
+# guidelines and logs/ directories stay shared.
+
 # Minimum minutes before an automatic refresh re-pulls — gates both Garmin hits and
 # Calendar-signal syncs; within this window reads reuse the local cache. Bypass a single
 # run with --force-pull.

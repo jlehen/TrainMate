@@ -2,7 +2,15 @@ import os
 import yaml
 from typing import Any, Dict, List, Optional
 
-CONFIG_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "config.yaml")
+# Which config file this process runs against. TRAINMATE_CONFIG selects one explicitly —
+# that is how a second athlete runs from the same checkout (ARCHITECTURE.md §9); the
+# default is config.yaml at the repo root. Relative paths written in the file
+# (`database:`, `service_account_file`) resolve against the config file's directory, so
+# an instance's state lives beside its config, never beside the code.
+_DEFAULT_CONFIG_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "config.yaml")
+CONFIG_PATH = os.path.abspath(
+    os.path.expanduser(os.environ.get("TRAINMATE_CONFIG") or _DEFAULT_CONFIG_PATH))
+CONFIG_DIR = os.path.dirname(CONFIG_PATH)
 
 # Fallback when `llm.models` is missing or empty.
 DEFAULT_LLM_MODEL = "google/gemini-3.5-flash"
@@ -11,14 +19,26 @@ class Config:
     """Manages application settings loaded from config.yaml and env variables."""
 
     def __init__(self) -> None:
-        """Initializes the configuration store from config.yaml if it exists."""
+        """Initializes the configuration store from the config file if it exists.
+
+        A file named via TRAINMATE_CONFIG must exist and parse: the env var picks which
+        athlete's data (database, Garmin account) this process touches, so a typo must
+        abort rather than fall back to defaults that point at the primary athlete's
+        database. The default path stays lenient — a bare checkout must still run.
+        """
         self.data: dict[str, Any] = {}
-        if os.path.exists(CONFIG_PATH):
-            try:
-                with open(CONFIG_PATH, "r") as f:
-                    self.data = yaml.safe_load(f) or {}
-            except Exception as e:
-                print(f"Warning: Failed to load config.yaml: {e}")
+        explicit = bool(os.environ.get("TRAINMATE_CONFIG"))
+        if not os.path.exists(CONFIG_PATH):
+            if explicit:
+                raise SystemExit(f"TRAINMATE_CONFIG names a missing file: {CONFIG_PATH}")
+            return
+        try:
+            with open(CONFIG_PATH, "r") as f:
+                self.data = yaml.safe_load(f) or {}
+        except Exception as e:
+            if explicit:
+                raise SystemExit(f"TRAINMATE_CONFIG file failed to load: {CONFIG_PATH} ({e})")
+            print(f"Warning: Failed to load config.yaml: {e}")
 
     def get(self, key: str, default: Any = None) -> Any:
         """Retrieves a configuration value by key with an optional default.
@@ -74,16 +94,23 @@ class Config:
 
     @property
     def service_account_file(self) -> str:
-        """Gets the service account file path. Resolves relative path to absolute."""
+        """Gets the service account file path. A relative path resolves against the
+        config file's directory (the CONFIG_PATH rule above)."""
         path = self.get("google", {}).get("service_account_file", "service_account.json")
+        path = os.path.expanduser(path)
         if not os.path.isabs(path):
-            path = os.path.join(os.path.dirname(os.path.dirname(__file__)), path)
+            path = os.path.join(CONFIG_DIR, path)
         return path
 
     @property
     def db_path(self) -> str:
-        """Gets the database absolute file path."""
-        return os.path.join(os.path.dirname(os.path.dirname(__file__)), "trainmate.db")
+        """The SQLite file this instance operates on: top-level `database:` key, default
+        trainmate.db. A relative value resolves against the config file's directory, so a
+        TRAINMATE_CONFIG instance cannot silently open another instance's database."""
+        path = os.path.expanduser(str(self.get("database") or "trainmate.db"))
+        if not os.path.isabs(path):
+            path = os.path.join(CONFIG_DIR, path)
+        return path
 
     @property
     def science_dir(self) -> str:
