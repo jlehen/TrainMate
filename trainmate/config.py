@@ -5,8 +5,8 @@ from typing import Any, Dict, List, Optional
 # Which config file this process runs against. TRAINMATE_CONFIG selects one explicitly —
 # that is how a second athlete runs from the same checkout (ARCHITECTURE.md §9); the
 # default is config.yaml at the repo root. Relative paths written in the file
-# (`database:`, `service_account_file`) resolve against the config file's directory, so
-# an instance's state lives beside its config, never beside the code.
+# (`database:`, `science_dir:`, `service_account_file`) resolve against the config file's
+# directory, so an instance's state lives beside its config, never beside the code.
 _DEFAULT_CONFIG_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "config.yaml")
 CONFIG_PATH = os.path.abspath(
     os.path.expanduser(os.environ.get("TRAINMATE_CONFIG") or _DEFAULT_CONFIG_PATH))
@@ -124,8 +124,14 @@ class Config:
 
     @property
     def science_dir(self) -> str:
-        """Gets the directory containing training guidelines/sports science texts."""
-        return os.path.join(os.path.dirname(os.path.dirname(__file__)), "science")
+        """The athlete's own sports-science guidelines: top-level `science_dir:` key,
+        default science/. A relative value resolves against the config file's directory,
+        so a TRAINMATE_CONFIG instance gets its own training philosophy rather than
+        inheriting the primary athlete's (ARCHITECTURE.md §9)."""
+        path = os.path.expanduser(str(self.get("science_dir") or "science"))
+        if not os.path.isabs(path):
+            path = os.path.join(CONFIG_DIR, path)
+        return path
 
     @property
     def llm_logs_dir(self) -> str:

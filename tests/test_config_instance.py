@@ -1,4 +1,4 @@
-"""TRAINMATE_CONFIG + `database:` resolution (ARCHITECTURE.md §9).
+"""TRAINMATE_CONFIG + `database:` / `science_dir:` resolution (ARCHITECTURE.md §9).
 
 The env var is read once, at import of trainmate.config, so every case here runs a fresh
 interpreter via subprocess instead of reaching into module state. That is the honest
@@ -17,10 +17,11 @@ import trainmate.config
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(trainmate.config.__file__)))
 
-# Prints the three resolved paths, one per line, from a fresh interpreter.
+# Prints the four resolved paths, one per line, from a fresh interpreter.
 _PRINT_PATHS = (
     "from trainmate.config import config, CONFIG_PATH; "
-    "print(CONFIG_PATH); print(config.db_path); print(config.service_account_file)"
+    "print(CONFIG_PATH); print(config.db_path); print(config.service_account_file); "
+    "print(config.science_dir)"
 )
 
 
@@ -47,17 +48,20 @@ class TestInstanceSelection(unittest.TestCase):
             cfg = os.path.join(d, "config.yaml")
             with open(cfg, "w") as f:
                 f.write("user_profile:\n  name: Other\n")
-            config_path, db_path, sa_path = self._paths(cfg)
+            config_path, db_path, sa_path, science_dir = self._paths(cfg)
             self.assertEqual(config_path, cfg)
             self.assertEqual(db_path, os.path.join(d, "trainmate.db"))
             self.assertEqual(sa_path, os.path.join(d, "service_account.json"))
+            # Guidelines follow the same rule as the database: a second athlete inherits
+            # the primary's training philosophy only by asking for it (§9).
+            self.assertEqual(science_dir, os.path.join(d, "science"))
 
     def test_relative_database_key_resolves_beside_config(self):
         with tempfile.TemporaryDirectory() as d:
             cfg = os.path.join(d, "config.yaml")
             with open(cfg, "w") as f:
                 f.write("database: other.db\n")
-            _, db_path, _ = self._paths(cfg)
+            _, db_path, _, _ = self._paths(cfg)
             self.assertEqual(db_path, os.path.join(d, "other.db"))
 
     def test_absolute_database_key_is_respected(self):
@@ -65,8 +69,25 @@ class TestInstanceSelection(unittest.TestCase):
             cfg = os.path.join(d, "config.yaml")
             with open(cfg, "w") as f:
                 f.write("database: /somewhere/else/other.db\n")
-            _, db_path, _ = self._paths(cfg)
+            _, db_path, _, _ = self._paths(cfg)
             self.assertEqual(db_path, "/somewhere/else/other.db")
+
+    def test_relative_science_dir_key_resolves_beside_config(self):
+        with tempfile.TemporaryDirectory() as d:
+            cfg = os.path.join(d, "config.yaml")
+            with open(cfg, "w") as f:
+                f.write("science_dir: guidelines\n")
+            _, _, _, science_dir = self._paths(cfg)
+            self.assertEqual(science_dir, os.path.join(d, "guidelines"))
+
+    def test_absolute_science_dir_key_is_respected(self):
+        # How two athletes deliberately share one philosophy — the only way they can.
+        with tempfile.TemporaryDirectory() as d:
+            cfg = os.path.join(d, "config.yaml")
+            with open(cfg, "w") as f:
+                f.write("science_dir: /shared/science\n")
+            _, _, _, science_dir = self._paths(cfg)
+            self.assertEqual(science_dir, "/shared/science")
 
     def test_missing_explicit_config_aborts(self):
         proc = _run("/nonexistent/nowhere/config.yaml")
@@ -87,8 +108,10 @@ class TestInstanceSelection(unittest.TestCase):
         # therefore its db_path) belongs to the user, not to this test.
         proc = _run(None)
         self.assertEqual(proc.returncode, 0, proc.stderr)
-        config_path = proc.stdout.strip().splitlines()[0]
+        config_path, _, _, science_dir = proc.stdout.strip().splitlines()
         self.assertEqual(config_path, os.path.join(REPO_ROOT, "config.yaml"))
+        # The primary install keeps the pre-`science_dir:` location, key or no key.
+        self.assertEqual(science_dir, os.path.join(REPO_ROOT, "science"))
 
 
 if __name__ == "__main__":

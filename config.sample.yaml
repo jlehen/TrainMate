@@ -25,6 +25,11 @@ llm:
 # A second athlete gets their own directory + config.yaml, selected by TRAINMATE_CONFIG.
 #database: "trainmate.db"
 
+# The athlete's own science/*.md guidelines, injected into every coaching prompt.
+# Relative to this file's directory, so each instance gets its own by default; give an
+# absolute path to share one between athletes.
+#science_dir: "science"
+
 # Minimum minutes before an automatic refresh re-pulls (Garmin and Calendar both).
 #refresh_minutes: 120
 

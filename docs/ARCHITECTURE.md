@@ -1709,10 +1709,12 @@ Writes live in the CLI: `goal`/`constraint`/`signal`/`benchmark` authoring,
 
 The file is `config.yaml` at the repo root unless the `TRAINMATE_CONFIG` env var names
 another one — that is how a second athlete runs from the same checkout: own config, own
-`database:`, own Telegram token and Garmin account; shared code, `science/` and `logs/`.
-An explicitly named file must exist and parse (a typo aborts rather than silently running
-against the primary athlete's database). Relative `database:` and `service_account_file`
-values resolve against the config file's directory.
+`database:`, own `science/` guidelines, own Telegram token and Garmin account; shared code
+and `logs/`. An explicitly named file must exist and parse (a typo aborts rather than
+silently running against the primary athlete's database). Relative `database:`,
+`science_dir:` and `service_account_file` values resolve against the config file's
+directory — two athletes share one set of guidelines only by pointing `science_dir:` at
+the same absolute path, never by default.
 
 Required fields:
 
@@ -1727,6 +1729,7 @@ Required fields:
 | `service_account_file` | str  | Path to service account JSON (default:                        |
 |                        |      | `service_account.json`)                                       |
 | `database`             | str  | SQLite file this instance operates on; a relative value resolves against the config file's directory (default: `trainmate.db`) |
+| `science_dir`          | str  | Directory whose `*.md` files become the ATHLETE-PROVIDED science block in every coaching prompt (`coach/formatting.py:_load_science_guidelines`); a relative value resolves against the config file's directory (default: `science`). The app's own `trainmate/science/` is not configurable |
 | `llm.router_model`     | str  | Cheaper model the bot's free-text router (`tm bot route`) uses; a role, not a `model list` entry. Absent → the active coaching model (DESIGN_bot_simple_frontend.md §5.4) |
 | `telegram.ui`          | str  | Bot persona: `expert` (default) or `simple` — the companion mode (DESIGN_bot_simple_frontend.md §3) |
 | `telegram.push.*`      | —    | Morning push (simple ui only): `enabled` (default true), `morning_time` (`08:00`), `morning_deadline` (`15:00`), `adapt_first` (default false → run `workout adapt -y` before rendering) |
