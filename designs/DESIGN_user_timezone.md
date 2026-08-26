@@ -24,7 +24,7 @@ Two clocks are the athlete's and now read `clock.now()`:
 - **The bot's morning push window** (`telegram.push.morning_time` / `morning_deadline`,
   DESIGN_bot_simple_frontend.md §4.3). Those are the hours the athlete wakes up in, not
   the hours the server is set to. The push loop drops the cached zone on every tick, since
-  `timezone set` runs in a CLI subprocess and the bot would otherwise hold its first
+  `settings set` runs in a CLI subprocess and the bot would otherwise hold its first
   answer until a restart.
 
 Two clocks are deliberately *not* the athlete's, because they are the machine's own
@@ -52,7 +52,7 @@ the machine does not reliably know its own name, only its offset.
 Two failure modes degrade instead of raising, because `today_date()` sits on every code
 path and must never be the thing that takes a command down:
 
-- A stored name this machine's tzdata does not carry (a hand-edited row — `timezone set`
+- A stored name this machine's tzdata does not carry (a hand-edited row — the command
   cannot write one) warns once and falls back to the machine.
 - A database that momentarily cannot be read (a lock) falls back for that one call and is
   **not** cached, so the next call tries again.
@@ -63,25 +63,30 @@ what makes the change land in the same process (the REPL, the bot, the tests).
 
 ## 4. The CLI surface
 
-`tm timezone` shows the active zone *with the local date and time it produces*, so the
-athlete checks it against their watch rather than trusting a name they half-remember.
-A bare `timezone` shows rather than printing help — the read-only-family exception
-(DESIGN_cli_noargs.md §a3), the same one `model` takes.
+The zone is one row of the `settings` command (DESIGN_settings.md §4) — it had a top-level
+`timezone` command of its own until the preference registry absorbed it.
 
-`tm timezone set <zone>` stores it. Matching ignores case, and a name that matches nothing
-lists the zones *containing* what was typed:
+`tm settings list timezone` shows the active zone *with the local date and time it
+produces*, so the athlete checks it against their watch rather than trusting a name they
+half-remember.
+
+`tm settings set timezone <zone>` stores it. Matching ignores case, and a name that matches
+nothing lists the zones *containing* what was typed:
 
 ```
-$ tm timezone set york
+$ tm settings set timezone york
 'york' is not a timezone name. Did you mean:
   America/New_York
 ```
 
-That search is the discovery mechanism. Nobody knows the IANA name for where they live,
-and a `timezone list` over 486 zones would be unreadable; typing the city is what an
-athlete can actually do.
+That search is the discovery mechanism, and it is why the zone is validated by
+`clock.resolve` rather than by anything generic in the registry. Nobody knows the IANA name
+for where they live, and a list of 486 zones would be unreadable; typing the city is what
+an athlete can actually do.
 
-`tm timezone reset` forgets the zone and follows the machine again.
+`tm settings reset timezone` forgets the zone and follows the machine again. Unlike every
+other setting, there is no `config.yaml` key behind it: a zone is the athlete's, not the
+install's, so "unset" means "follow this machine" (§3).
 
 ## 5. Stored instants are unchanged
 

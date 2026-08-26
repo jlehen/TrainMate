@@ -168,6 +168,21 @@ class RouteCommandTest(unittest.TestCase):
 
     def test_router_model_role_pins_the_client(self):
         from trainmate.openrouter import openrouter_client
+        # The router picks from the same menu the coach does — one allowlist
+        # (DESIGN_settings.md §4), so the cheap model is listed under `llm.models` too.
+        with patch.dict(
+            config.data,
+            {"llm": {"models": ["main/model", "cheap/model"],
+                     "router_model": "cheap/model"}},
+        ), patch(
+            "trainmate.openrouter.OpenRouterClient.complete",
+            return_value={"intent": "help"},
+        ):
+            run_cli(["bot", "route", "hello"])
+            self.assertEqual(openrouter_client.model, "cheap/model")
+
+    def test_an_off_menu_role_is_ignored_and_the_coach_model_routes(self):
+        from trainmate.openrouter import openrouter_client
         with patch.dict(
             config.data,
             {"llm": {"models": ["main/model"], "router_model": "cheap/model"}},
@@ -176,7 +191,7 @@ class RouteCommandTest(unittest.TestCase):
             return_value={"intent": "help"},
         ):
             run_cli(["bot", "route", "hello"])
-            self.assertEqual(openrouter_client.model, "cheap/model")
+            self.assertEqual(openrouter_client.model, "main/model")
 
     def test_absent_role_leaves_the_active_model(self):
         from trainmate.openrouter import openrouter_client

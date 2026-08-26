@@ -53,6 +53,20 @@ class Config:
         val = self.data.get(key)
         return val if val is not None else default
 
+    def raw(self, *path: str) -> Any:
+        """The literal value at a nested key path, or None when any level is absent.
+
+        `get` cannot tell "absent" from "set to the default"; a setting that reports where
+        its value came from has to (DESIGN_settings.md §3)."""
+        node: Any = self.data
+        for step in path:
+            if not isinstance(node, dict):
+                return None
+            node = node.get(step)
+            if node is None:
+                return None
+        return node
+
     @property
     def openrouter_api_key(self) -> Optional[str]:
         """Gets OpenRouter API Key. Prefers env variable over config.json."""
@@ -111,16 +125,6 @@ class Config:
         if not os.path.isabs(path):
             path = os.path.join(CONFIG_DIR, path)
         return path
-
-    @property
-    def router_llm_model(self) -> Optional[str]:
-        """The (cheaper) model the bot's free-text intent router uses — `llm.router_model`.
-
-        A config *role*, not a `model list` menu entry (DESIGN_bot_simple_frontend.md
-        §5.4): the stored choice and `model set` keep meaning the coaching model. None
-        when unconfigured, in which case the router falls back to the active model."""
-        model = self.get("llm", {}).get("router_model")
-        return str(model).strip() if model and str(model).strip() else None
 
     @property
     def science_dir(self) -> str:
@@ -474,35 +478,6 @@ class Config:
         'expert' (default) is the raw CLI-over-chat; 'simple' adds the reply keyboard,
         free-text router, morning push and simple rendering. Under `telegram:`."""
         return str(self.get("telegram", {}).get("ui", "expert")).strip().lower()
-
-    @property
-    def telegram_push_enabled(self) -> bool:
-        """Whether the bot sends the morning push at all (DESIGN_bot_simple_frontend.md
-        §4.3). The push only runs in simple ui mode; this is its off-switch. Under
-        `telegram.push:`. Default True."""
-        return bool((self.get("telegram", {}).get("push") or {}).get("enabled", True))
-
-    @property
-    def telegram_push_morning_time(self) -> str:
-        """Local HH:MM the morning push fires (DESIGN_bot_simple_frontend.md §4.3).
-        Under `telegram.push:`. Default 08:00."""
-        return str((self.get("telegram", {}).get("push") or {})
-                   .get("morning_time", "08:00")).strip()
-
-    @property
-    def telegram_push_morning_deadline(self) -> str:
-        """Local HH:MM after which a missed morning push is skipped for the day rather
-        than caught up (DESIGN_bot_simple_frontend.md §4.3). Under `telegram.push:`.
-        Default 15:00."""
-        return str((self.get("telegram", {}).get("push") or {})
-                   .get("morning_deadline", "15:00")).strip()
-
-    @property
-    def telegram_push_adapt_first(self) -> bool:
-        """Whether `tm bot morning` runs the daily adaptation non-interactively before
-        rendering the push (DESIGN_bot_simple_frontend.md §4.2). Under `telegram.push:`.
-        Default False."""
-        return bool((self.get("telegram", {}).get("push") or {}).get("adapt_first", False))
 
     # --- Web front-end (trainmate_web.py) ---
     @property

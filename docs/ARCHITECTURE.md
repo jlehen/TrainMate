@@ -208,9 +208,10 @@ classes themselves.
 |                      |                      | `json_object` response. `.model` resolves lazily |
 |                      |                      | on first use (see `llm_models.py`).              |
 | `llm_models.py`      | —                    | Which model to query: the `llm.models` config    |
-|                      |                      | menu, the stored choice, and how they combine    |
-|                      |                      | (`list_models`, `active_model`, `set_active_model`) |
-|                      |                      | — DESIGN_model_selection.md.                     |
+|                      |                      | menu and the stored choice read back through the |
+|                      |                      | registry (`list_models`, `active_model`,         |
+|                      |                      | `resolve_token` — the validator for both model   |
+|                      |                      | roles) — DESIGN_model_selection.md.              |
 | `garmin/`            | module functions     | A **package** (`client`/`load`/`pmc`/`sync`), all |
 |                      |                      | re-exported from `__init__.py` so `from trainmate |
 |                      |                      | import garmin` and `patch.object(garmin, …)` are  |
@@ -313,10 +314,16 @@ classes themselves.
 |                      |                      | `status` and `progress` share one implementation |
 |                      |                      | (DESIGN_intensity_distribution.md).              |
 | `clock.py`           | —                    | The athlete's timezone: `now()`, `to_local()` and  |
-|                      |                      | the `settings.timezone` row the `timezone` command|
-|                      |                      | writes. `util.today_date()` is its caller — no    |
-|                      |                      | other module calls `date.today()`                 |
+|                      |                      | the zone maths behind the `timezone` setting.      |
+|                      |                      | `util.today_date()` is its caller — no other       |
+|                      |                      | module calls `date.today()`                        |
 |                      |                      | (DESIGN_user_timezone.md).                        |
+| `settings.py`        | —                    | The preference registry: one `Setting` per knob    |
+|                      |                      | the athlete can change at runtime, its validator,  |
+|                      |                      | and the one resolver combining the stored row,     |
+|                      |                      | `config.yaml` and the built-in default. The single |
+|                      |                      | writer for every `settings` row                    |
+|                      |                      | (DESIGN_settings.md).                              |
 | `util.py`            | —                    | ANSI color helpers (`bold`, `green`, `red`, …),  |
 |                      |                      | `cmd` (every "run X" call to action), `wrap_text`,|
 |                      |                      | `format_labeled_text`, `strip_ansi`, `Progress`  |
@@ -354,7 +361,8 @@ flow for each lives in [§10](#10-key-data-flows).
 | Calendar push / daily-signal ingest | `trainmate/google_calendar.py`, see [§13](#13-daily-signal-calendar-ingest) |
 | Workout state (modified/calendar/removed) | `trainmate/calendar_state.py`, `db/workouts.py`, `cli/workouts/_helpers.py::modification_markers` ([§5](#workout-state--three-orthogonal-axes-not-one-enum)) |
 | What became of a planned session (the adherence verdict) | `adherence.py` (`classify_adherence` + `STATUS_LABELS`, the vocabulary), `cli/common.py` (`adherence_results` — the one DB-backed pairing — `adherence_verdicts` keyed by workout id, and `format_actual` for the effort it graded against), `cli/workouts/_helpers.py::adherence_marker` (the marker `workout list` prints), `cli/workouts/generate.py::_list_verdicts` (which span the listing grades, and the pull it needs), `google_calendar.py` (title tag), `/api/workouts` + `renderWorkoutCard` in `static/app.js` (the badge) ([§5](#workout-state--three-orthogonal-axes-not-one-enum)) |
-| Which timezone dates are read in | `trainmate/clock.py` (the zone, the cache, the fallback), `cli/timezone.py` (the command), `util.today_date`/`fmt_timestamp` (the only callers), the push loop in `trainmate_bot.py`, DESIGN_user_timezone.md |
+| Which timezone dates are read in | `trainmate/clock.py` (the zone, the cache, the fallback), `util.today_date`/`fmt_timestamp` (the only callers), the push loop in `trainmate_bot.py`, DESIGN_user_timezone.md. Changing it is one row of `settings` |
+| A preference the athlete can change at runtime | `trainmate/settings.py` (the registry: one `Setting`, its validator, its config key, its cache hook), `cli/settings.py` (the listing and the two rich detail views), and the reader that consumes it — `llm_models.active_model`, `clock.active_zone`, or a named reader in `settings.py` for the morning-push knobs. Adding one is a registry entry, not a command, DESIGN_settings.md |
 | A CLI command                    | `trainmate/cli/<family>.py` (`run_*`), dispatcher in `trainmate_cli.py` ([§7](#7-cli-commands-reference)) |
 | A message telling the athlete to run something | wrap the command in `util.cmd()`, nested *inside* the line's colour call, so it renders as the bright shade of that colour — and emit it with `util.aside`, not `print`: a "you could now run X" hint is side information |
 | Whether a line reaches the chat front-end | `util.aside` (side information, terminal only) vs `print` (the answer, warnings, errors). Building a list of lines rather than printing? gate on `util.asides_enabled()`. DESIGN_output_verbosity.md §3 |
@@ -1257,10 +1265,13 @@ only the columns it uses. See §10 (Data Pull), §13 (Daily Signals),
 ### settings
 App preferences that outlive one invocation but aren't training data — a generic
 key/value store, so the next single-value preference needs no schema change.
-Untouched by every `wipe` (a data wipe is about training history). Keys: `llm_model`,
-the chosen LLM identifier (`DESIGN_model_selection.md` §2); `timezone`, the IANA zone
-every date is computed in (`DESIGN_user_timezone.md` §3); `push_morning_last`, the
-morning-push idempotency marker (`DESIGN_bot_simple_frontend.md` §4.3).
+Untouched by every `wipe` (a data wipe is about training history). Every athlete-facing
+key is one entry in the `trainmate/settings.py` registry, written only by `settings set`
+(DESIGN_settings.md): `llm_model` and `router_llm_model`, the coaching and routing model
+identifiers; `timezone`, the IANA zone every date is computed in; `push_enabled`,
+`push_morning_time`, `push_morning_deadline` and `push_adapt_first`, the morning-push
+window and its switches. `push_morning_last` is the exception — an internal
+idempotency marker, not a preference (`DESIGN_bot_simple_frontend.md` §4.3).
 
 | Column       | Type    | Notes                                              |
 |--------------|---------|----------------------------------------------------|
@@ -1493,14 +1504,14 @@ self-alias no longer exists.
 `openrouter_client.model` is a lazily-resolved property, not a plain attribute: it reads
 the stored choice from the database on first use, so importing the module never opens the
 DB. Assigning to it pins a model for the invocation (how `--llm-model` overrides the stored
-choice); `reset_model()` drops the cache so the next call re-resolves — what `model set`
+choice); `reset_model()` drops the cache so the next call re-resolves — what `settings set coach-model`
 calls, since the REPL runs many commands in one process (DESIGN_model_selection.md §3.1).
 
 `clock.active_zone()` is the same shape for the athlete's timezone: the
 `settings.timezone` row is read on first use and cached for the process, since
-`util.today_date()` asks on every call. `clock.reset_cache()` drops it — what `timezone
-set`/`reset` call, and what the bot's push loop calls each tick because a `timezone set`
-runs in a CLI subprocess (DESIGN_user_timezone.md §2/§3).
+`util.today_date()` asks on every call. `clock.reset_cache()` drops it — the registry's
+`on_change` hook for the `timezone` setting, and what the bot's push loop calls each tick
+because `settings set` runs in a CLI subprocess (DESIGN_user_timezone.md §2/§3).
 
 `trainmate/garmin/` exposes module-level functions rather than a singleton, all
 re-exported from its `__init__.py`: `pull()`, `ensure_data()`, `reset_memo()` (tests),
@@ -1585,7 +1596,7 @@ resolved against one plan's blocks, which is what `plan feedback -m` files a not
 is *not* argparse's missing-argument path, so it gets neither the "the following
 arguments are required" line nor the chat short form — under `TRAINMATE_FRONTEND=json`
 the whole help block is sent to Telegram. The documented exception is a group with a
-single read-only view that is its whole state (`model`), which acts bare instead
+single read-only view that is its whole state (`settings`), which acts bare instead
 (DESIGN_cli_noargs.md §a3).
 
 | Command      | Subcommand   | Short form | Description                                                            |
@@ -1643,12 +1654,9 @@ single read-only view that is its whole state (`model`), which acts bare instead
 | `data`       | `show-analysis` | `d san` | Show the reconstruction stored by the last `bootstrap` — inferred macro focus, the mesocycle blocks `progress` draws as `~` bands, physiological insights. Strictly read-only (renders the slot; never calls the LLM, unlike `bootstrap --inspect-only`). `--short` reads `reflect`'s slot instead; flags when activities post-date the slot's window. |
 | `data`       | `backfill-tss` | —      | Recompute the measured `tss` for all stored activities under the current zone model (no Garmin calls), then refresh derived workload |
 | `data`       | `wipe`       | `--garmin`, `--calendar`, `-d RANGE`, `-y` | Delete cached data. No scope flag = everything (Garmin evidence + daily signals) and reset watermarks; `--garmin`/`--calendar` narrow the scope; date flags restrict to a window |
-| `model`      | `list`       | `model l` | List the models configured under `llm.models`, numbered, active one marked. A bare `model` does the same — the documented exception to the bare-group rule (DESIGN_cli_noargs.md §a3, applied by DESIGN_model_selection.md §4) |
-| `model`      | `set`        | `model s`, `model use` | Choose the model, by list number (`model set 3`) or full identifier. Stored in `settings.llm_model`; survives restarts |
-| `model`      | `reset`      | —        | Forget the stored choice and fall back to the first `llm.models` entry |
-| `timezone`   | `show`       | `timezone sh` | Show the timezone every date is computed in, with the local date and time it produces. A bare `timezone` does the same — the read-only-family exception (DESIGN_cli_noargs.md §a3, applied by DESIGN_user_timezone.md §4) |
-| `timezone`   | `set`        | `timezone s`, `timezone use` | Set the zone by IANA name (`timezone set Europe/Paris`), case-insensitive. A name that matches nothing lists the zones containing it, which is how the athlete finds theirs. Stored in `settings.timezone`; survives restarts |
-| `timezone`   | `reset`      | —        | Forget the stored zone and follow the machine TrainMate runs on again |
+| `settings`   | `list`       | `se l`   | Every preference with its value and where that value came from — the stored row, `config.yaml`, or the built-in default. With a NAME, that one setting in detail: the numbered model menu for `coach-model`, the local clock for `timezone`. A bare `settings` lists — the read-only-family exception (DESIGN_cli_noargs.md §a3, applied by DESIGN_settings.md §4) |
+| `settings`   | `set`        | `se s`, `se use` | Change one preference: `settings set coach-model 3`, `settings set timezone Europe/Paris`, `settings set morning-time 07:00`. The name takes any unambiguous prefix. Validated by the setting's own parser — a value it cannot read is refused and nothing is written. Stored in `settings`; survives restarts |
+| `settings`   | `reset`      | `se r`   | Forget one stored preference so `config.yaml`, or the built-in default, rules again |
 
 ---
 
@@ -1738,13 +1746,13 @@ exactly that reason.
 | GET    | `/api/daily-signals`            | Daily-signals (`signal list`; `?start_date=&end_date=&metric=`) |
 | GET    | `/api/daily-signals/metrics`    | Distinct signal metrics with counts + first/last date (`signal list-metrics`) |
 | GET    | `/api/metrics`                  | Cached metrics (range, else last 30 days)    |
-| GET    | `/api/models`                   | Configured LLM menu with the active entry marked (`model list`) → `{models, active, source, set_at}` |
+| GET    | `/api/models`                   | Configured LLM menu with the active entry marked (`settings list coach-model`) → `{models, active, source, set_at}` |
 
 Every other verb on every path returns **405** `{error, method, path}`.
 
 Writes live in the CLI: `goal`/`constraint`/`signal`/`benchmark` authoring,
 `plan generate`/`rollback`/`feedback`, `workout add`/`swap`/`rm`/`restore`/`adapt`/
-`generate`/`push`/`rollback`, `learnings edit`/`demote`/`keep`/`rm`, `model set`, and
+`generate`/`push`/`rollback`, `learnings edit`/`demote`/`keep`/`rm`, `settings set`, and
 `data pull`/`bootstrap`/`reflect`.
 
 ---
@@ -1765,7 +1773,7 @@ Required fields:
 | Key                    | Type | Description                                                   |
 |------------------------|------|---------------------------------------------------------------|
 | `openrouter_api_key`   | str  | Also readable from `OPENROUTER_API_KEY` env var               |
-| `llm.models`           | list | Models the `model` command lists and switches between, in display order; first entry is the default until `model set` picks another. Absent/empty → `google/gemini-3.5-flash` alone (DESIGN_model_selection.md §1) |
+| `llm.models`           | list | Models both model roles pick from, in display order; the first entry is the default until `settings set coach-model` picks another. Absent/empty → `google/gemini-3.5-flash` alone (DESIGN_model_selection.md §1) |
 | `google_calendar_id`   | str  | Target calendar ID                                            |
 | `garmin_email` / `garmin_password` | str | Garmin login; config.yaml only (kept out of the environment) |
 | `data_refresh_minutes` | int | Throttle window shared by Garmin pulls **and** Calendar-signal syncs; reads inside it reuse the cache. Top-level config key `refresh_minutes` (default 120) |
@@ -2391,7 +2399,7 @@ venv/bin/python -m unittest discover -s tests -p "test_*.py"
 |                                | matplotlib-absent 503, payload shape via the shared builder      |
 | `tests/test_utils.py`          | `util.py` helpers (text wrapping, ANSI width, `color_load_ratio`,|
 |                                | `default_wrap_width` and the TRAINMATE_WRAP_WIDTH override)      |
-| `tests/test_cli_models.py`     | the `model` command: config list vs stored choice vs             |
+| `tests/test_cli_settings.py`   | the `settings` command and its registry: config vs stored row vs |
 |                                | `--llm-model` override (DESIGN_model_selection.md §3)            |
 | `tests/test_clock.py`          | the athlete timezone: how a name resolves, that `today_date`     |
 |                                | reads the stored zone (two zones 26h apart never share a         |

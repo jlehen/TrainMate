@@ -686,7 +686,7 @@ def get_metrics() -> Any:
 @app.route("/api/models", methods=["GET"])
 def get_models() -> Any:
     """The configured LLM menu with the active entry marked (mirrors `model list`,
-    DESIGN_model_selection.md §3.3). Choosing one is `model set`, a CLI action."""
+    DESIGN_model_selection.md §3.3). Choosing one is `settings set coach-model`, a CLI action."""
     return jsonify({
         "models": llm_models.list_models(),
         "active": llm_models.active_model(),

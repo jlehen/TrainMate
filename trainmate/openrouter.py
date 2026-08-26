@@ -38,7 +38,7 @@ class OpenRouterClient:
 
     def reset_model(self) -> None:
         """Drops the cached model so the next call re-resolves it. The REPL runs many
-        commands in one process, so `model set` must not leave the old one pinned."""
+        commands in one process, so a model change must not leave the old one pinned."""
         self._model = None
 
     def _log_exchange(

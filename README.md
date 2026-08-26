@@ -196,8 +196,9 @@ actually looks like filled in — all values fictional — with the full knob
 documentation staying in the template.) The blocks you must fill:
 
 - **`llm:`** — `api_key` (an `OPENROUTER_API_KEY` env var overrides it) and
-  `models`, the list of OpenRouter models this install may use; `model set`
-  switches between them at runtime, and the first entry is the default.
+  `models`, the list of OpenRouter models this install may use;
+  `settings set coach-model` switches between them at runtime, and the first
+  entry is the default.
 - **`google:`** — `calendar_id` of the calendar your workouts are written to,
   and `service_account_file`, the service-account JSON used to authenticate
   (`service_account.json` in the repo root by default).
@@ -376,26 +377,28 @@ there's no separate sync step.
 (To force a manual re-push after a Calendar mishap, the maintenance command
 `workout push` is still there; see below.)
 
-Switch the LLM behind the coach without editing config by hand — `model` lists what
-`llm.models` in `config.yaml` offers, numbered, and `model set` picks one:
+Everything you might want to change without editing `config.yaml` by hand lives
+behind one command. `./tm settings` lists each preference, its value, and where
+that value came from — a row you set, the config file, or the built-in default:
 ```bash
-./tm model
-./tm model set 3
+./tm settings                             # the whole list
+./tm settings set coach-model 3           # switch the LLM behind the coach
+./tm settings set timezone Europe/Paris   # what "today" means
+./tm settings set morning-time 07:00      # when the bot opens your day
+./tm settings reset morning-time          # back to what config.yaml says
 ```
-The choice is stored and survives restarts; `--llm-model <id>` still overrides it for a
-single command without storing anything.
+Values are stored in the database and survive restarts, and everything works over
+Telegram too, which is the point: the phone has no editor.
 
-Tell TrainMate which timezone you live in, so "today" means your today and not the
-machine's — a home server left on UTC would otherwise roll the training day over at the
-wrong hour:
-```bash
-./tm timezone                     # what's active now, and the local time it gives
-./tm timezone set Europe/Paris
-```
-You don't have to know the exact name: `./tm timezone set paris` lists the zones
-containing "paris" and you pick yours. The zone is stored and survives restarts;
-with nothing set, dates follow whatever machine TrainMate runs on, and
-`./tm timezone reset` goes back to that.
+`./tm settings list coach-model` prints the numbered menu `llm.models` offers, marking
+which entry coaches and which one routes free-text chat messages; `--llm-model <id>`
+still overrides the choice for a single command without storing anything.
+
+Set the timezone so "today" means your today and not the machine's — a home server left
+on UTC would otherwise roll the training day over at the wrong hour. You don't have to
+know the exact name: `./tm settings set timezone paris` lists the zones containing
+"paris" and you pick yours. With nothing set, dates follow whatever machine TrainMate
+runs on, and `./tm settings reset timezone` goes back to that.
 
 Which model to pick is not a coin flip. On 2026-08-18 the author benchmarked
 fifteen OpenRouter models head-to-head — one isolated TrainMate install per
@@ -476,8 +479,7 @@ recovery metrics, and a daily-signal heat strip).
 
 Anything that changes something is a CLI command, and each panel names the one it
 wants — `tm goal add`, `tm plan generate`, `tm workout swap`, `tm learnings demote`,
-`tm benchmark record`, `tm signal add`, `tm model set`, `tm timezone set`,
-`tm data pull`.
+`tm benchmark record`, `tm signal add`, `tm settings set`, `tm data pull`.
 
 ## Running the Telegram bot
 

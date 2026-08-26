@@ -28,9 +28,9 @@ Three moving parts, each with one job:
 | --- | --- |
 | `config.yaml` → `llm.models` | The **menu**: models this install may use, in display order |
 | DB → `settings` table | The **choice**: which menu entry is currently active |
-| `model` command | Show the menu, change the choice |
+| `settings` command | Show the menu, change the choice (§4) |
 
-The numbers the athlete types (`model set 3`) are *display positions in the menu*, never
+The numbers the athlete types (`settings set coach-model 3`) are *display positions*, never
 stored. The database stores the model identifier string. Reorder the config list and an old
 stored choice still points at the same model.
 
@@ -45,7 +45,7 @@ shipped one — the list is meant to be edited freely, every install ends up wit
 llm:
   api_key: "sk-or-v1-…"
   # Models this install may use. `model list` numbers them in this order; the first entry is
-  # the default until `model set` picks another.
+  # the default until `settings set coach-model` picks another.
   models:
     - model: "moonshotai/kimi-k3"
     - model: "openai/gpt-5.5"
@@ -82,7 +82,7 @@ A new generic key/value table, so the next single-value preference doesn't need 
 CREATE TABLE IF NOT EXISTS settings (
     key        TEXT PRIMARY KEY,
     value      TEXT NOT NULL,
-    updated_at TEXT NOT NULL          -- UTC ISO, for "changed 3d ago" in `model` output
+    updated_at TEXT NOT NULL          -- UTC ISO, for "set 3d ago" in the listing
 )
 ```
 
@@ -110,7 +110,7 @@ Highest wins:
 
 `OpenRouterClient.__init__` currently does `self.model = config.openrouter_model` at *import*
 time. It can't read the DB there without dragging a database connection into every import of
-`trainmate.openrouter`. So `model` becomes a lazily-resolved property:
+`trainmate.openrouter`. So `.model` becomes a lazily-resolved property:
 
 ```python
 @property
@@ -129,11 +129,11 @@ verbatim, and keeps the existing test (`tests/test_cli_misc.py::test_llm_model_o
 meaningful. Resolution happens on first use — after the DB exists, and after any
 `--llm-model` override has been applied.
 
-Because the resolved value is cached, both `model set` and `model reset` call
-`openrouter_client.reset_model()` to drop it — either one changes what the next call should
-resolve to. One CLI invocation is one process, so this matters only in the REPL (`tm shell`),
-where many commands share a process and the athlete reasonably expects a `model set` to take
-effect on the very next line.
+Because the resolved value is cached, the registry's `on_change` hook for `coach-model`
+calls `openrouter_client.reset_model()` to drop it — a set and a reset both change what the
+next call should resolve to. One CLI invocation is one process, so this matters only in the
+REPL (`tm shell`), where many commands share a process and the athlete reasonably expects a
+model change to take effect on the very next line.
 
 ### §3.2 — The resolver module
 
@@ -144,7 +144,7 @@ New `trainmate/llm_models.py`, the single place that knows how config and DB com
 | `configured_models()` | The menu, in display order |
 | `list_models()` | Display rows `{number, model, active}`, 1-based, config order |
 | `active_model()` | The effective id per §3 (the `--llm-model` override is applied by the client) |
-| `active_source()` | `"db"` or `"config"` — what the `model` listing annotates |
+| `active_source()` | `"db"` or `"config"` — what the listing annotates |
 | `stored_model()` / `stored_at()` | The raw stored choice and when it was written |
 | `resolve_token(token)` | Number *or* id → id; raises `ValueError` with a printable message |
 | `set_active_model(token)` | `resolve_token` then write; nothing is written when it raises |
@@ -160,83 +160,34 @@ still a perfectly valid OpenRouter identifier, so TrainMate keeps using it rathe
 switching models behind the athlete's back. `model list` shows it as an extra, unnumbered line:
 
 ```
-  * moonshotai/kimi-k2   (active, not in config list — `model set N` to move off it)
+  * moonshotai/kimi-k2   (active, not in config list — `settings set coach-model N` to move off)
 ```
 
 Unnumbered because the numbers are config positions; there is no position to give it. This is a
 display state, not an error — nothing fails, nothing is auto-corrected.
 
-## §4 — The `model` command
+## §4 — Choosing the model
 
-A new top-level command, and the one command group that *acts* when run bare instead of printing
-its help: a bare `model` prints the list. DESIGN_cli_noargs.md §a3 is where that exception and
-the rule behind it live.
+The `model` command this section described is gone: choosing the model is now one row of
+the `settings` command, `settings set coach-model <n | id>`, and the numbered menu is
+`settings list coach-model`. See DESIGN_settings.md §4 — a top-level command per
+preference did not scale once the morning push and the router role wanted one too.
 
-```
-model                     # same as `model list`
-model list                # numbered menu, active marked
-model set <n | id>        # choose by number or by full identifier — persists
-model use <n | id>        # registered alias of `set`
-model reset               # forget the stored choice, fall back to the config default
-```
+What §1–§3 above define is unchanged: the menu is `llm.models`, the choice is the
+`settings.llm_model` row, the numbers are display positions and are never stored, and the
+resolution order is override → stored → config default. The registry entry for
+`coach-model` reuses `llm_models.resolve_token` as its validator, so an off-menu
+identifier is still refused and `--llm-model` is still the escape hatch.
 
-`model l` and `model s` also work, but they are prefixes, not aliases — every command level gets
-unambiguous prefixes for free and nothing registers them (DESIGN_cli_noargs.md §d, which is where
-that distinction is defined). `use` is the one alias registered here, precisely because it is
-*not* a prefix of `set`.
+Three display rules survived the move into the generic listing, because each answers a
+question the athlete would otherwise have to guess at:
 
-`model set` accepts either form because the number is only convenient when you have the list in
-front of you; from a script or from memory the identifier is what you have. An identifier that
-is *not* on the menu is refused: the menu is the allowlist, and `--llm-model` is already the
-escape hatch for a one-off model you don't want to keep.
-
-### §4.1 — Output
-
-Against §1's example menu, and abridged — the real listing carries the usual `=== LLM MODELS ===`
-header and a closing hint pointing at `model set`:
-
-```
-$ model
-  1  moonshotai/kimi-k3
-  2  openai/gpt-5.5
-* 3  deepseek/deepseek-v4-pro     active (set 3d ago)
-  4  z-ai/glm-5.2
-  5  anthropic/claude-opus-4.8
-  6  google/gemini-3.5-flash
-
-$ model set 5
-Model set to anthropic/claude-opus-4.8 (was deepseek/deepseek-v4-pro).
-
-$ model set 9
-No model numbered 9 — the list has 6 entries. Run `model` to see them.
-
-$ model reset
-Model reset to the config default: moonshotai/kimi-k3.
-```
-
-When no choice is stored, the active marker sits on entry 1 and the annotation reads
-`active (config default)` instead of `set 3d ago`, so "why this model?" is answerable from the
-listing alone.
-
-When `--llm-model` is in play for the invocation, the listing adds a line noting the override is
-active for this run only — otherwise `model` would report a model that isn't the one about to be
-used.
-
-The two no-op paths say so rather than reporting a change that did not happen: `model set` on the
-already-active model prints `Model is X (unchanged).`, and `model reset` with nothing stored
-prints `No stored choice — already on the config default: X.`
-
-### §4.2 — Wiring
-
-- `trainmate/cli/models.py`: `add_model_parser(subparsers)`, `run_model_list(args)`,
-  `run_model_set(args)`, `run_model_reset(args)`.
-- `trainmate_cli.py`: import the handlers, register the parser, add a `cmd == "model"` branch to
-  the dispatcher, and add `"model"` to `COMMAND_ORDER[""]` — placed after `data`, before
-  `shell`/`help` (it is configuration, not a daily-use command).
-- `trainmate_bot.py`: nothing. The bot proxies arbitrary CLI command lines, so `model` and
-  `model set 3` work over Telegram the moment the CLI has them. Optionally add `model` to
-  `MENU_COMMANDS` for the Telegram command menu — cosmetic only.
-- `trainmate_web.py`: out of scope.
+- Where the active value came from is always shown — `config.yaml` when nothing is stored,
+  `set 3d ago` when the athlete chose it. "Why this model?" is answerable from the listing.
+- A stored model that has since left `llm.models` is listed unnumbered and flagged
+  `not in config list` (§3.3). It is still what gets queried; nothing is auto-corrected.
+- The two no-op paths say so rather than reporting a change that did not happen:
+  `coach-model is X (unchanged).` and `Nothing stored for coach-model — already X.`
 
 ## §5 — Visibility elsewhere
 
@@ -246,19 +197,12 @@ is after the fact. One line in `status` answers it before the fact.
 
 ## §6 — Tests
 
-Extend `tests/test_cli_misc.py`:
-
-- `model` with nothing stored marks entry 1 and says `config default`.
-- `model set 3` writes the identifier (not the number) and the next `model` marks entry 3.
-- `model set <full-id>` resolves the same way.
-- `model set 0` / `model set 99` / `model set garbage` exit non-zero and change nothing.
-- `model reset` clears the row; the config default is active again.
-- Stored id absent from `llm.models` still resolves as active and is flagged in the listing.
-- `--llm-model` still wins over a stored choice and leaves the DB untouched (extends the
-  existing override test).
+`tests/test_cli_settings.py::TestCoachModel`: the identifier is stored rather than the
+number, off-menu tokens are refused, `reset` returns to the config default, a stored model
+dropped from `llm.models` stays active and is flagged, and `--llm-model` still wins over a
+stored choice while writing nothing.
 
 ## §7 — Documentation
 
-- `ARCHITECTURE.md`: §5 (new `settings` table), §7 (the `model` command), §9 (`llm.models`
-  replaces `llm.model`), §6 if the singleton list mentions `openrouter_client.model`.
+- `ARCHITECTURE.md`: the `settings` table, the `settings` command, `llm.models`.
 - `README.md`: one line in the command list.

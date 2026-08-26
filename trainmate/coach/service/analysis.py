@@ -786,7 +786,7 @@ class DataAnalysisMixin:
                 "content — no summary, no insights"
                 + (", no macrocycle or mesocycle blocks" if cycles else "")
                 + ". Nothing was saved. The raw response is in the LLM exchange log; re-run "
-                "to ask again, or switch models with " + cmd("model set") + "."
+                "to ask again, or switch models with " + cmd("settings set coach-model") + "."
             )
         unreadable = _unreadable_parts(decision, cycles)
         if unreadable:

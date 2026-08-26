@@ -36,8 +36,8 @@ read like a coach instead of a terminal.
 - Simple-mode replies are short prose with an encouraging frame, not `<pre>` dumps.
 - Expert mode is byte-for-byte unchanged, and the mode is chosen per instance
   (`telegram.ui:` in that instance's config).
-- The router runs on a configurable, cheaper model (`llm.router_model`), independent of
-  the coaching model the `model` command manages.
+- The router runs on a configurable, cheaper model (the `router-model` setting), independent of
+  the coaching model the `coach-model` setting manages.
 - Every simple-mode action still executes the real CLI as a subprocess. The simple
   layer maps chat onto argv; it never re-implements domain logic. That is the same
   parity principle the bot was built on, extended rather than abandoned.
@@ -94,7 +94,7 @@ A new hidden CLI family (`tm bot ...`, hidden like other maintenance commands):
   the instance's database; the bot process stays stateless across restarts, which is
   what lets `/restart` and crashes stay boring (DESIGN_bot_restart.md).
 
-When `telegram.push.adapt_first: true` (default **off**), `tm bot morning` first runs
+When `adapt-first` is on (default **off**), `tm bot morning` first runs
 the daily adaptation non-interactively (`workout adapt -y`, so no prompt can strand a
 scheduled run) and then renders the result — the push reflects overnight signals, and
 an applied change surfaces as its one reason line ("Eased today — rough night."). Off,
@@ -104,12 +104,16 @@ the schedule renders as-is and "Feeling tired" stays the trigger for adaptation.
 
 An asyncio task inside the bot (`python-telegram-bot` is installed without the
 job-queue extra, and a sleep-until-next-fire loop needs no dependency): compute the next
-`telegram.push.morning_time` (default `08:00`), sleep, spawn `tm bot morning` through
+`morning-time` (default `08:00`), sleep, spawn `tm bot morning` through
 the ordinary `_start_command` path, repeat. Missed fires (machine asleep, bot down) are
-caught up on startup/wake by the same rule: run it if the time is past but before
-`telegram.push.morning_deadline` (default `15:00`), otherwise skip the day — a workout
-briefing at 9 PM is noise. These knobs sit under `telegram.push:` beside `adapt_first`
-(§4.2); `enabled: false` turns the push off regardless of ui mode.
+caught up on startup/wake by the same rule: run it if the time is past but before the
+deadline (default `15:00`), otherwise skip the day — a workout briefing at 9 PM is noise.
+
+All four knobs — `push`, `morning-time`, `morning-deadline`, `adapt-first` (§4.2) — are
+settings (DESIGN_settings.md): `config.yaml` seeds them under `telegram.push:`, the athlete
+changes them with `settings set morning-time 07:00` from the CLI or from chat, and the loop
+re-reads all four every tick, so a change lands within five minutes without a restart.
+`push off` turns the push off regardless of ui mode.
 
 The push must not collide with an in-flight command's polling pause: it uses the same
 one-session-per-chat gate as typed commands (`sessions` dict) and simply retries a few
@@ -176,11 +180,14 @@ and keeps the bot importable without LLM plumbing.
 
 ### 5.4 The router model
 
-New config key `llm.router_model`, read by `tm bot route` only. Absent → the active
-coaching model (no surprise second model on an unconfigured install). This is a config
-*role*, not a menu entry: `model list` / `model set` and the stored DB choice keep
-meaning the coaching model (DESIGN_model_selection.md), and `model list` gains one
-annotation line naming the router model when configured.
+A *role*, read by `tm bot route` only: the `router-model` setting, seeded by
+`llm.router_model` in config.yaml (DESIGN_settings.md). Unset → the active coaching model,
+so an install that never configured one gets no surprise second model.
+
+It picks from `llm.models`, the same menu the coaching model picks from — one allowlist for
+both roles (DESIGN_settings.md §4.1). `coach-model` and `settings set coach-model` keep
+meaning the coaching model; `settings list coach-model` marks which menu entry currently
+holds which role.
 
 ### 5.5 Constraints in chat
 
@@ -265,7 +272,7 @@ earns it is expert detail, and the chat surface does not audit.
 | `trainmate_bot.py` | ui-mode switch (config at start, `/ui` flips it live, §5.6), reply keyboard + label→argv table, armed-capture chat state, `ui:` callback namespace, `TM-BUTTONS` parsing, push scheduler task |
 | `trainmate/prompt.py` | `BUTTONS_SENTINEL` + `emit_buttons()` (mirror of `emit_photo`) |
 | `trainmate/cli/bot.py` | new hidden family: `bot morning`, `bot route`, `bot constraints` |
-| `trainmate/config.py` | `telegram_ui`, `telegram.push.*` knobs, `router_llm_model` |
+| `trainmate/config.py` | `telegram_ui`; the push knobs and the router role resolve through `trainmate/settings.py` |
 | `trainmate/cli/common.py` | simple renderer helper + `TRAINMATE_RENDER` interpretation |
 | `docs/ARCHITECTURE.md` | §2 entry points, §9 config keys, bot section |
 | `tests/` | pure-helper tests (keyboard table, sentinel codec, router table→argv, tone renderer), `bot morning` idempotency against a temp DB, `bot route` with a mocked OpenRouter |
@@ -289,7 +296,7 @@ Each phase ships alone; her onboarding starts at phase 1.
   no session gets the one-line rest message whatever the reason it is empty — no
   `weekly_schedule` special-casing.
 - Strings are English; no locale table (2026-08-25).
-- `telegram.push.adapt_first` runs the daily adaptation (non-interactive, `-y`) before
+- `adapt-first` runs the daily adaptation (non-interactive, `-y`) before
   rendering the push; default off (2026-08-25, §4.2).
 - `📈 Progress` keeps its keyboard slot — to be judged in practice (2026-08-25).
 - The §4.1 recovery sentence ("Fresh legs…") is NOT synthesized by the renderer: a

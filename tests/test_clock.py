@@ -1,5 +1,5 @@
-"""The athlete timezone: how a name resolves, what "today" reads, and the `timezone`
-command (DESIGN_user_timezone.md)."""
+"""The athlete timezone: how a name resolves, what "today" reads, and the zone's row in
+the `settings` command (DESIGN_user_timezone.md)."""
 import os
 import unittest
 from datetime import date, datetime, timedelta, timezone
@@ -9,9 +9,18 @@ from tests.helpers import clear_all_tables, rebind_test_db, run_cli
 
 TEST_DB_PATH = os.path.join(os.path.dirname(__file__), "test_trainmate_clock.db")
 
-from trainmate import clock
+from trainmate import clock, settings
 from trainmate.db import Database
 from trainmate.util import fmt_timestamp, today_date, today_str
+
+
+def _set_zone(zone: str) -> str:
+    """The one writer for the stored zone (DESIGN_settings.md §3)."""
+    return settings.write(settings.TIMEZONE, zone)
+
+
+def _clear_zone() -> bool:
+    return settings.clear(settings.TIMEZONE)
 
 # 26 hours apart, so the calendar date in one is never the calendar date in the other —
 # whatever instant the test runs at.
@@ -37,7 +46,7 @@ class ClockTestCase(unittest.TestCase):
     def tearDownClass(cls):
         # Every other test module reads today_date(); leaving a zone stored here would
         # follow them into the same process.
-        clock.clear_timezone()
+        _clear_zone()
         if os.path.exists(TEST_DB_PATH):
             try:
                 os.remove(TEST_DB_PATH)
@@ -47,7 +56,7 @@ class ClockTestCase(unittest.TestCase):
     def setUp(self):
         clear_all_tables(test_db)
         clock.reset_cache()
-        self.addCleanup(clock.clear_timezone)
+        self.addCleanup(_clear_zone)
 
 
 class TestResolve(ClockTestCase):
@@ -85,41 +94,41 @@ class TestStoredZoneDrivesTheDate(ClockTestCase):
         self.assertEqual(today_date(), datetime.now().astimezone().date())
 
     def test_today_is_read_in_the_stored_zone(self):
-        clock.set_timezone(FAR_EAST)
+        _set_zone(FAR_EAST)
         self.assertEqual(today_date(), datetime.now(ZoneInfo(FAR_EAST)).date())
         self.assertEqual(today_str(), today_date().strftime("%Y-%m-%d"))
 
     def test_two_zones_a_day_apart_give_two_different_todays(self):
-        clock.set_timezone(FAR_EAST)
+        _set_zone(FAR_EAST)
         east = today_date()
-        clock.set_timezone(FAR_WEST)
+        _set_zone(FAR_WEST)
         west = today_date()
         self.assertNotEqual(east, west)
         self.assertIn(east - west, (timedelta(days=1), timedelta(days=2)))
 
     def test_setting_a_zone_drops_the_cached_one(self):
-        clock.set_timezone(FAR_EAST)
+        _set_zone(FAR_EAST)
         self.assertEqual(today_date(), datetime.now(ZoneInfo(FAR_EAST)).date())
-        clock.set_timezone("UTC")
+        _set_zone("UTC")
         self.assertEqual(today_date(), datetime.now(timezone.utc).date())
 
     def test_clearing_the_zone_returns_to_the_machine(self):
-        clock.set_timezone(FAR_EAST)
-        self.assertTrue(clock.clear_timezone())
+        _set_zone(FAR_EAST)
+        self.assertTrue(_clear_zone())
         self.assertIsNone(clock.active_zone())
-        self.assertFalse(clock.clear_timezone())
+        self.assertFalse(_clear_zone())
 
     def test_a_zone_this_machine_does_not_know_warns_and_falls_back(self):
-        # A hand-edited settings row — `timezone set` cannot write one (§3).
+        # A hand-edited settings row — `settings set timezone` cannot write one (§3).
         test_db.set_setting(clock.TIMEZONE_SETTING, "Mars/Olympus_Mons")
         clock.reset_cache()
         self.assertIsNone(clock.active_zone())
         self.assertEqual(today_date(), datetime.now().astimezone().date())
 
     def test_a_refused_name_writes_nothing(self):
-        clock.set_timezone("Europe/Paris")
+        _set_zone("Europe/Paris")
         with self.assertRaises(ValueError):
-            clock.set_timezone("Mars/Olympus_Mons")
+            _set_zone("Mars/Olympus_Mons")
         self.assertEqual(clock.stored_name(), "Europe/Paris")
 
 
@@ -130,19 +139,19 @@ class TestTimestampsAreShownLocal(ClockTestCase):
     STORED = "2026-01-15T23:30:00+00:00"
 
     def test_a_stored_utc_instant_renders_in_the_stored_zone(self):
-        clock.set_timezone("Europe/Paris")
+        _set_zone("Europe/Paris")
         self.assertEqual(fmt_timestamp(self.STORED), "2026-01-16 Fri 00:30")
 
     def test_the_same_instant_renders_differently_in_another_zone(self):
-        clock.set_timezone("America/New_York")
+        _set_zone("America/New_York")
         self.assertEqual(fmt_timestamp(self.STORED), "2026-01-15 Thu 18:30")
 
     def test_a_naive_stored_value_is_read_as_utc(self):
-        clock.set_timezone("Europe/Paris")
+        _set_zone("Europe/Paris")
         self.assertEqual(fmt_timestamp("2026-01-15T23:30:00"), "2026-01-16 Fri 00:30")
 
     def test_an_unparseable_value_is_passed_through(self):
-        clock.set_timezone("Europe/Paris")
+        _set_zone("Europe/Paris")
         self.assertEqual(fmt_timestamp("not a timestamp"), "not a timestamp")
         self.assertEqual(fmt_timestamp(None), "?")
 
@@ -151,7 +160,7 @@ class TestDescribe(ClockTestCase):
     """What the athlete is shown when they ask which zone is active (§4)."""
 
     def test_a_stored_zone_is_named(self):
-        clock.set_timezone("Europe/Paris")
+        _set_zone("Europe/Paris")
         self.assertEqual(clock.describe(), "Europe/Paris")
 
     def test_no_stored_zone_reports_the_machine_rather_than_inventing_a_name(self):
@@ -166,48 +175,48 @@ class TestDescribe(ClockTestCase):
                          "UTC+00:00")
 
 
-class TestTimezoneCommand(ClockTestCase):
-    """The `timezone` command surface (§4)."""
+class TestTimezoneThroughSettings(ClockTestCase):
+    """The zone as one row of the `settings` command (§4, DESIGN_settings.md §4)."""
 
-    def test_a_bare_timezone_shows_the_active_one(self):
-        clock.set_timezone("Europe/Paris")
-        exit_code, stdout, _ = run_cli(["timezone"])
+    def test_the_detail_view_shows_the_active_zone(self):
+        _set_zone("Europe/Paris")
+        exit_code, stdout, _ = run_cli(["settings", "list", "timezone"])
         self.assertEqual(exit_code, 0)
         self.assertIn("Europe/Paris", stdout)
 
     def test_set_stores_the_canonical_name(self):
-        exit_code, stdout, _ = run_cli(["timezone", "set", "europe/paris"])
+        exit_code, stdout, _ = run_cli(["settings", "set", "timezone", "europe/paris"])
         self.assertEqual(exit_code, 0)
         self.assertEqual(test_db.get_setting("timezone"), "Europe/Paris")
         self.assertIn("Europe/Paris", stdout)
 
     def test_set_reports_an_unchanged_zone_as_unchanged(self):
-        run_cli(["timezone", "set", "Europe/Paris"])
-        _, stdout, _ = run_cli(["timezone", "set", "Europe/Paris"])
+        run_cli(["settings", "set", "timezone", "Europe/Paris"])
+        _, stdout, _ = run_cli(["settings", "set", "timezone", "Europe/Paris"])
         self.assertIn("unchanged", stdout)
 
     def test_a_bad_name_fails_and_stores_nothing(self):
-        exit_code, stdout, _ = run_cli(["timezone", "set", "Mars/Olympus_Mons"])
+        exit_code, stdout, _ = run_cli(["settings", "set", "timezone", "Mars/Olympus_Mons"])
         self.assertEqual(exit_code, 1)
         self.assertIsNone(test_db.get_setting("timezone"))
 
     def test_reset_forgets_the_stored_zone(self):
-        run_cli(["timezone", "set", "Europe/Paris"])
-        exit_code, stdout, _ = run_cli(["timezone", "reset"])
+        run_cli(["settings", "set", "timezone", "Europe/Paris"])
+        exit_code, stdout, _ = run_cli(["settings", "reset", "timezone"])
         self.assertEqual(exit_code, 0)
         self.assertIsNone(test_db.get_setting("timezone"))
 
     def test_reset_with_nothing_stored_says_so_and_succeeds(self):
-        exit_code, stdout, _ = run_cli(["timezone", "reset"])
+        exit_code, stdout, _ = run_cli(["settings", "reset", "timezone"])
         self.assertEqual(exit_code, 0)
-        self.assertIn("No timezone stored", stdout)
+        self.assertIn("Nothing stored for timezone", stdout)
 
     def test_the_command_takes_effect_within_the_same_process(self):
-        """`timezone set` runs in the same process as the next command under the bot's
+        """`settings set timezone` runs in the same process as the next command under the bot's
         REPL and the test harness, so the resolved zone has to be dropped on write."""
-        run_cli(["timezone", "set", FAR_EAST])
+        run_cli(["settings", "set", "timezone", FAR_EAST])
         self.assertEqual(today_date(), datetime.now(ZoneInfo(FAR_EAST)).date())
-        run_cli(["timezone", "set", FAR_WEST])
+        run_cli(["settings", "set", "timezone", FAR_WEST])
         self.assertEqual(today_date(), datetime.now(ZoneInfo(FAR_WEST)).date())
 
 
@@ -217,7 +226,7 @@ class TestPushWindowFollowsTheAthlete(ClockTestCase):
 
     def test_the_scheduler_reads_the_stored_zone(self):
         import trainmate_bot
-        clock.set_timezone(FAR_EAST)
+        _set_zone(FAR_EAST)
         self.assertEqual(trainmate_bot.athlete_now().date(),
                          datetime.now(ZoneInfo(FAR_EAST)).date())
 

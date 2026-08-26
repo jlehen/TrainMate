@@ -21,7 +21,7 @@ fourth case with its own rule (§a3):
 | Read-only | Just act | `status`, `workout list`, `plan show` (defaults to the next active goal) |
 | Mutating, preview-then-confirm | Act on a sensible default, show the preview, gate the write behind a confirm | `workout adapt` (defaults to today), `plan generate` (defaults to the nearest goal) |
 | Mutating, immediate / no natural default | Print the command's help, then the line naming what's missing (in chat, that line plus a `-h` pointer instead of the help) | `workout swap`, `goal add`, `constraint add` |
-| Command group, no sub-command | Print the group's own help and exit 1 — the same output in chat, since no argument is missing (§a3) | `goal`, `workout`, `plan`; `model` is the one exception |
+| Command group, no sub-command | Print the group's own help and exit 1 — the same output in chat, since no argument is missing (§a3) | `goal`, `workout`, `plan`; `settings` is the one exception |
 
 Read-only is about the *bare* run, not the command name: `constraint show` and
 `learnings show` take a mandatory `id` and so land in the third bucket, while
@@ -112,11 +112,11 @@ reminder, and a pointer to `-h` is enough. A bare group carries no intent beyond
 one place where a screenful is the content rather than the packaging. Exit 1
 (not 2) says the same: nothing was malformed, the command was simply incomplete.
 
-**The exception is `model`.** A bare `model` runs `model list` instead of printing
-help (trainmate_cli.py, `args.subcommand or "list"`). The rule it follows is the
+**The exception is `settings`.** A bare `settings` runs `settings list` instead of
+printing help (the parser binds the handler at both levels). The rule it follows is the
 top-of-page one applied to the group: a group may act bare when it has a single
 read-only view that is its whole state, and the other sub-commands are addressed
-*through* that view — `model set` takes a number from `model list`, so printing
+*through* that view — `settings set` takes a name from `settings list`, so printing
 help instead would answer the question with a second command to run. No other
 group qualifies: `goal`, `workout` and the rest each hold several views, and
 picking one for them would be arbitrary.

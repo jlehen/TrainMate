@@ -1,7 +1,7 @@
 """Where "now" comes from: the athlete's timezone and the one clock every date reads.
 
 See DESIGN_user_timezone.md. The `settings.timezone` row holds an IANA zone name and is
-written by `tm timezone set`; with no row the machine's own zone rules (§3).
+written by `tm settings set timezone`; with no row the machine's own zone rules (§3).
 `util.today_date()` imports this module on every date call, so `trainmate.db` is imported
 lazily inside each function here — importing it must never open the database.
 """
@@ -14,7 +14,7 @@ from zoneinfo import ZoneInfo, available_timezones
 TIMEZONE_SETTING = "timezone"
 
 # The resolved zone, or None for "follow the machine". Resolved once per process because
-# today_date() asks on every call; `reset_cache` is what `timezone set` calls afterwards.
+# today_date() asks on every call; `reset_cache` is the registry's hook after a write.
 _UNRESOLVED = object()
 _zone: object = _UNRESOLVED
 
@@ -65,7 +65,8 @@ def _resolve_stored(name: Optional[str]) -> Optional[ZoneInfo]:
         from trainmate.util import cmd, yellow
         print(yellow(
             f"Warning: stored timezone '{name}' is unknown on this machine — using the "
-            f"machine's own timezone. Set a valid one with {cmd('timezone set <zone>')}."
+            f"machine's own timezone. Set a valid one with "
+            f"{cmd('settings set timezone <zone>')}."
         ))
         return None
 
@@ -104,7 +105,7 @@ def describe() -> str:
 
 
 def resolve(token: str) -> str:
-    """Maps a `timezone set` argument to a canonical IANA zone name.
+    """Maps a `settings set timezone` argument to a canonical IANA zone name.
 
     Matching is case-insensitive, so 'europe/paris' lands on 'Europe/Paris'. Raises
     ValueError with a ready-to-print message — naming a city or a region lists the zones
@@ -128,21 +129,3 @@ def resolve(token: str) -> str:
     listing = "\n".join(f"  {zone}" for zone in shown)
     more = f"\n  ... and {len(near) - len(shown)} more" if len(near) > len(shown) else ""
     raise ValueError(f"'{name}' is not a timezone name. Did you mean:\n{listing}{more}")
-
-
-def set_timezone(token: str) -> str:
-    """Stores the zone `token` names and returns its canonical name. Raises ValueError as
-    `resolve` does; nothing is written and no cache is dropped when it raises."""
-    from trainmate.db import db
-    name = resolve(token)
-    db.set_setting(TIMEZONE_SETTING, name)
-    reset_cache()
-    return name
-
-
-def clear_timezone() -> bool:
-    """Forgets the stored zone so the machine's own rules again. True if one was stored."""
-    from trainmate.db import db
-    cleared = db.clear_setting(TIMEZONE_SETTING)
-    reset_cache()
-    return cleared

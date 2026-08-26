@@ -18,7 +18,7 @@ llm:
   # Seconds an OpenRouter request may run before it's aborted. Generation is slow.
   #request_timeout_seconds: 120
   # Cheaper model the bot's free-text intent router uses (simple ui mode only).
-  # A role, not a `model list` entry — `model set` still means the coaching model.
+  # Seeds the `router-model` setting, and must be one of the `models:` above.
   #router_model: "google/gemini-3.5-flash"
 
 # The SQLite database this install operates on. Relative to this file's directory.
@@ -138,7 +138,8 @@ coach:
 #  # Persona: 'expert' is the raw CLI-over-chat; 'simple' is the companion mode
 #  # for a non-technical athlete (reply keyboard, free-text routing, morning push).
 #  #ui: expert
-#  # Morning push, simple ui mode only.
+#  # Morning push, simple ui mode only. Each key seeds a setting of the same name;
+#  # `settings set morning-time 07:00` changes one without editing this file.
 #  #push:
 #  #  #enabled: true
 #  #  #morning_time: "08:00"

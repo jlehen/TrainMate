@@ -56,6 +56,7 @@ import sys
 import time
 from typing import Any, Dict, List, Optional, Tuple
 
+from trainmate import settings
 from trainmate.clock import now as athlete_now, reset_cache as forget_timezone
 from trainmate.config import config
 from trainmate.prompt import (
@@ -107,7 +108,7 @@ MENU_COMMANDS = [
     ("signal", "Author daily signals"),
     ("learnings", "Inspect coach learnings"),
     ("constraint", "Manage directives the coach works around"),
-    ("model", "List/choose the LLM model"),
+    ("settings", "Show/change preferences (model, timezone, morning push)"),
     ("ui", "Switch simple/expert chat UI (until restart)"),
     ("cancel", "Abort the command awaiting your answer"),
     ("restart", "Restart the bot process (picks up new code)"),
@@ -229,13 +230,10 @@ def next_push_delay(
     defaults; a deadline before the send time means no catch-up window."""
     def _parse(raw: str, fallback: Tuple[int, int]) -> Tuple[int, int]:
         try:
-            hours, minutes = (raw or "").strip().split(":")
-            hours, minutes = int(hours), int(minutes)
-        except (ValueError, AttributeError):
+            hours, minutes = settings.parse_hhmm(raw).split(":")
+        except ValueError:
             return fallback
-        if 0 <= hours < 24 and 0 <= minutes < 60:
-            return hours, minutes
-        return fallback
+        return int(hours), int(minutes)
 
     send_h, send_m = _parse(morning, (8, 0))
     dead_h, dead_m = _parse(deadline, (15, 0))
@@ -1092,9 +1090,6 @@ def main() -> None:
     # The morning push goes to the first allowlisted chat — the single-athlete
     # instance model makes that the athlete (§4.3).
     push_chat_id = allowed_ids[0] if allowed_ids else None
-    # Gated on config and a target chat only; the persona is checked per tick
-    # inside the loop instead, so a /ui flip (§5.6) turns the push on and off live.
-    push_enabled = config.telegram_push_enabled and push_chat_id is not None
 
     async def _push_loop() -> None:
         """Fires `bot morning` inside the [morning_time, deadline] window, once per
@@ -1104,17 +1099,18 @@ def main() -> None:
         avoids re-spawning the subprocess every tick within one bot lifetime."""
         fired: Optional[str] = None
         while True:
-            # The athlete's wall clock, not the machine's: morning_time/morning_deadline
-            # are the hours they wake up in (DESIGN_user_timezone.md §2). Re-read each
-            # tick — `timezone set` runs in a CLI subprocess, so this long-lived process
-            # would otherwise hold its first answer until a restart.
+            # The athlete's wall clock, not the machine's: morning-time/morning-deadline
+            # are the hours they wake up in (DESIGN_user_timezone.md §2). Every knob here
+            # is re-read each tick — `settings set` runs in a CLI subprocess, so this
+            # long-lived process would otherwise hold its first answer until a restart
+            # (DESIGN_settings.md §5).
             forget_timezone()
             now = athlete_now()
             delay = next_push_delay(
-                now, config.telegram_push_morning_time,
-                config.telegram_push_morning_deadline,
+                now, settings.morning_time(), settings.morning_deadline(),
             )
-            if delay <= 0 and simple_ui and fired != now.date().isoformat():
+            if (delay <= 0 and simple_ui and settings.push_enabled()
+                    and fired != now.date().isoformat()):
                 if sessions.get(push_chat_id) is not None:
                     # §4.3: never collide with an in-flight command — retry shortly.
                     await asyncio.sleep(180)
@@ -1139,7 +1135,11 @@ def main() -> None:
         async with application:
             await application.start()
             await updater.start_polling(allowed_updates=Update.ALL_TYPES)
-            push_task = asyncio.create_task(_push_loop()) if push_enabled else None
+            # Started whenever there is a chat to push to: the persona and the `push`
+            # setting are checked per tick inside the loop, so a /ui flip (§5.6) or a
+            # `settings set push off` turns it on and off live (DESIGN_settings.md §5).
+            push_task = (asyncio.create_task(_push_loop())
+                         if push_chat_id is not None else None)
             await stop_event.wait()
             if push_task is not None:
                 push_task.cancel()

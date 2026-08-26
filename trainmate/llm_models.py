@@ -2,8 +2,10 @@
 
 See DESIGN_model_selection.md. `config.llm_models` is the menu, the `settings.llm_model` row
 is the choice, and the display numbers are positions in the menu — never stored, so reordering
-the config cannot repoint an existing choice. `trainmate.db` is imported lazily inside each
-function so importing this module (and `trainmate.openrouter` through it) never opens the DB.
+the config cannot repoint an existing choice. Writing the choice is `settings set coach-model`
+(DESIGN_settings.md); this module reads it. `trainmate.db` and `trainmate.settings` are
+imported lazily inside each function so importing this module (and `trainmate.openrouter`
+through it) never opens the DB.
 """
 
 from typing import Any, Dict, List, Optional
@@ -35,12 +37,16 @@ def stored_at() -> Optional[str]:
 def active_model() -> str:
     """The model to query: the stored choice if there is one, else the config default. The
     per-invocation `--llm-model` override sits above both and is applied by the client."""
-    return stored_model() or config.default_llm_model
+    # Imported here, not at module scope: trainmate.settings imports this module for the
+    # menu validator, and it owns the one stored-then-config resolution (DESIGN_settings.md §3).
+    from trainmate import settings
+    return settings.value(settings.COACH_MODEL)
 
 
 def active_source() -> str:
     """Where `active_model` came from — 'db' (stored choice) or 'config' (first menu entry)."""
-    return "db" if stored_model() else "config"
+    from trainmate import settings
+    return settings.resolve(settings.COACH_MODEL).source
 
 
 def list_models() -> List[Dict[str, Any]]:
@@ -59,40 +65,28 @@ def list_models() -> List[Dict[str, Any]]:
 
 
 def resolve_token(token: str) -> str:
-    """Maps a `model set` argument — a menu number or a full identifier — to a model id.
+    """Maps a model token — a menu number or a full identifier — to a model id.
 
-    Raises ValueError with a ready-to-print message if it names nothing on the menu. Off-menu
-    identifiers are refused on purpose: the menu is the allowlist, and `--llm-model` is the
-    escape hatch for a one-off model you don't want to keep.
+    The validator behind `settings set coach-model` and `settings set router-model`, and the
+    reader for `llm.router_model` in config.yaml, so it takes whatever YAML produced. Raises
+    ValueError with a ready-to-print message if the token names nothing on the menu. Off-menu
+    identifiers are refused on purpose: the menu is the one allowlist both model roles pick
+    from, and `--llm-model` is the escape hatch for a one-off model you don't want to keep.
     """
-    token = token.strip()
+    token = str(token).strip()
     models = configured_models()
     if token.isdigit():
         number = int(token)
         if not 1 <= number <= len(models):
             raise ValueError(
                 f"No model numbered {number} — the list has {len(models)} "
-                f"{'entry' if len(models) == 1 else 'entries'}. Run {cmd('model')} to see them."
+                f"{'entry' if len(models) == 1 else 'entries'}. Run "
+                f"{cmd('settings list coach-model')} to see them."
             )
         return models[number - 1]
     if token in models:
         return token
     raise ValueError(
-        f"'{token}' is not in the config list. Run {cmd('model')} to see the list, or "
-        "add it to `llm.models` in config.yaml."
+        f"'{token}' is not in the config list. Run {cmd('settings list coach-model')} to see "
+        "the list, or add it to `llm.models` in config.yaml."
     )
-
-
-def set_active_model(token: str) -> str:
-    """Stores the model `token` names and returns its identifier. Raises ValueError as
-    `resolve_token` does; nothing is written when it raises."""
-    from trainmate.db import db
-    model = resolve_token(token)
-    db.set_setting(LLM_MODEL_SETTING, model)
-    return model
-
-
-def clear_active_model() -> bool:
-    """Forgets the stored choice so the config default rules again. True if one was stored."""
-    from trainmate.db import db
-    return db.clear_setting(LLM_MODEL_SETTING)

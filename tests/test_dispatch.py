@@ -70,8 +70,8 @@ class TestEveryCommandHasAHandler(unittest.TestCase):
             bindings.setdefault(func, []).append(" ".join(path))
 
         # A read-only family answers bare by binding its own top-level parser to one of
-        # its sub-commands (`model` = `model list`, `timezone` = `timezone show`;
-        # DESIGN_cli_noargs.md §a3). Keyed on that shape — a parent and one child of it —
+        # its sub-commands (`settings` = `settings list`; DESIGN_cli_noargs.md §a3,
+        # applied by DESIGN_settings.md §4). Keyed on that shape — a parent and one child —
         # so a family added later is covered without editing this test.
         def is_bare_alias(cmds):
             if len(cmds) != 2:

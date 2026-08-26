@@ -10,8 +10,9 @@ llm:
   # slow (large plans), so keep this generous. Default 120.
   #request_timeout_seconds: 120
   # Cheaper model the Telegram bot's free-text intent router uses (simple ui mode,
-  # DESIGN_bot_simple_frontend.md §5.4). A role, not a `model list` entry: `model set`
-  # keeps meaning the coaching model. Absent -> the active coaching model routes too.
+  # DESIGN_bot_simple_frontend.md §5.4). Seeds the `router-model` setting; change it
+  # live with `settings set router-model`. It must be one of the `models:` entries
+  # above — one allowlist for both roles. Absent -> the coaching model routes too.
   #router_model: "google/gemini-3.5-flash"
 
 # The SQLite database this install operates on. A relative path resolves against this
@@ -98,6 +99,14 @@ llm:
 #  # Morning push (simple ui mode only): the bot opens the day with today's session
 #  # and follow-up buttons. State lives in the instance's database, so restarts
 #  # never double-send.
+#  # Each key below seeds a setting; change any of them live with `settings set`
+#  # (`push`, `morning-time`, `morning-deadline`, `adapt-first`) and the running bot
+#  # picks it up within five minutes. Quote the times: an unquoted 07:30 is not a
+#  # time to YAML.
+#  # Each key below seeds a setting; change any of them live with `settings set`
+#  # (`push`, `morning-time`, `morning-deadline`, `adapt-first`) and the running bot
+#  # picks it up within five minutes. Quote the times — an unquoted 07:30 is not a
+#  # time to YAML.
 #  #push:
 #  #  # Off-switch for the push without leaving simple mode.
 #  #  #enabled: true

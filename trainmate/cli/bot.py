@@ -9,7 +9,7 @@ import argparse
 import json
 from typing import Optional
 
-from trainmate.config import config
+from trainmate import settings
 from trainmate.cli.common import (
     ensure_recent_data, simple_constraint_lines, simple_day_lines,
 )
@@ -148,7 +148,7 @@ def run_bot_morning(args: argparse.Namespace) -> None:
     today = _today_str()
     if not args.force and runtime.db.get_setting(MORNING_MARKER) == today:
         return
-    adapt_note = _auto_adapt_note(today) if config.telegram_push_adapt_first else None
+    adapt_note = _auto_adapt_note(today) if settings.adapt_first() else None
     workouts = runtime.db.get_workouts(start_date=today, end_date=today)
     for line in simple_day_lines(workouts, today):
         print(line)
@@ -164,7 +164,7 @@ def run_bot_route(args: argparse.Namespace) -> None:
     JSON line: {"intent": ...}. Never fails: a routing error degrades to 'unclear',
     which the bot renders as a gentle fallback (§5.3)."""
     from trainmate.openrouter import openrouter_client
-    router_model = config.router_llm_model
+    router_model = settings.router_model()
     # The per-invocation --llm-model override (applied by the dispatcher before any
     # handler runs) outranks the router role (§5.4).
     if router_model and not getattr(args, "llm_model", None):

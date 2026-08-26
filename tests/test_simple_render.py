@@ -207,46 +207,29 @@ class ConstraintLinesTest(unittest.TestCase):
 
 
 class CompanionConfigKnobsTest(unittest.TestCase):
-    """`telegram.ui`, `telegram.push.*` and `llm.router_model` — defaults and set
-    values (§3, §4.3, §5.4)."""
+    """`telegram.ui` — the one companion knob config.yaml alone decides (§3). The push
+    window and the router model resolve through the registry, and are covered against it
+    in tests/test_cli_settings.py (DESIGN_settings.md §3)."""
 
     def _config(self, data):
         cfg = object.__new__(Config)
         cfg.data = data
         return cfg
 
-    def test_defaults(self):
-        cfg = self._config({})
-        self.assertEqual(cfg.telegram_ui, "expert")
-        self.assertTrue(cfg.telegram_push_enabled)
-        self.assertEqual(cfg.telegram_push_morning_time, "08:00")
-        self.assertEqual(cfg.telegram_push_morning_deadline, "15:00")
-        self.assertFalse(cfg.telegram_push_adapt_first)
-        self.assertIsNone(cfg.router_llm_model)
+    def test_ui_defaults_to_expert(self):
+        self.assertEqual(self._config({}).telegram_ui, "expert")
 
-    def test_set_values(self):
-        cfg = self._config({
-            "telegram": {
-                "ui": " Simple ",
-                "push": {
-                    "enabled": False,
-                    "morning_time": "07:30",
-                    "morning_deadline": "12:00",
-                    "adapt_first": True,
-                },
-            },
-            "llm": {"router_model": "cheap/model"},
-        })
+    def test_ui_is_read_case_and_space_insensitively(self):
+        cfg = self._config({"telegram": {"ui": " Simple "}})
         self.assertEqual(cfg.telegram_ui, "simple")
-        self.assertFalse(cfg.telegram_push_enabled)
-        self.assertEqual(cfg.telegram_push_morning_time, "07:30")
-        self.assertEqual(cfg.telegram_push_morning_deadline, "12:00")
-        self.assertTrue(cfg.telegram_push_adapt_first)
-        self.assertEqual(cfg.router_llm_model, "cheap/model")
 
-    def test_blank_router_model_reads_as_absent(self):
-        cfg = self._config({"llm": {"router_model": "   "}})
-        self.assertIsNone(cfg.router_llm_model)
+    def test_a_nested_key_path_reads_absent_levels_as_nothing(self):
+        """What every registry entry seeded from config.yaml is built on (§3)."""
+        cfg = self._config({"telegram": {"push": {"morning_time": "07:30"}}})
+        self.assertEqual(cfg.raw("telegram", "push", "morning_time"), "07:30")
+        self.assertIsNone(cfg.raw("telegram", "push", "enabled"))
+        self.assertIsNone(cfg.raw("telegram", "nothing", "here"))
+        self.assertIsNone(cfg.raw("absent"))
 
 
 if __name__ == "__main__":
