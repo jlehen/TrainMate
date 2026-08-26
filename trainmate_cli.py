@@ -33,8 +33,10 @@ PREFIX_HINT = "Any prefix that matches one command is that command: 'wo li' = 'w
 
 COMMAND_ORDER = {
     "": ["status", "workout", "progress", "plan", "goal",
-         "constraint", "benchmark", "signal", "learnings", "data", "model", "shell", "help"],
+         "constraint", "benchmark", "signal", "learnings", "data", "model", "timezone",
+         "shell", "help"],
     "model": ["list", "set", "reset"],
+    "timezone": ["show", "set", "reset"],
     "goal": ["list", "add", "edit", "rm"],
     "constraint": ["list", "show", "add", "edit", "rm"],
     "benchmark": ["list", "record", "rm"],
@@ -93,6 +95,7 @@ from trainmate.cli.data import add_data_parser
 from trainmate.cli.models import (
     add_model_parser, run_model_list, run_model_reset, run_model_set,
 )
+from trainmate.cli.timezone import add_timezone_parser
 from trainmate.cli.bot import (
     add_bot_parser, run_bot_constraints, run_bot_morning, run_bot_route,
 )
@@ -180,6 +183,7 @@ def build_parser():
     workout_parser = add_workout_parser(subparsers, pull_bypass_parser, llm_debug_parser)
     data_parser = add_data_parser(subparsers, pull_bypass_parser, llm_debug_parser)
     add_model_parser(subparsers)
+    add_timezone_parser(subparsers)
     add_bot_parser(subparsers)
 
     named_subparsers = {

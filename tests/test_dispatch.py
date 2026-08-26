@@ -69,11 +69,19 @@ class TestEveryCommandHasAHandler(unittest.TestCase):
             func = sub.get_default("func")
             bindings.setdefault(func, []).append(" ".join(path))
 
-        # `model` and `model list` share run_model_list deliberately (a bare `model`
-        # lists), so allow exactly that pair.
+        # A read-only family answers bare by binding its own top-level parser to one of
+        # its sub-commands (`model` = `model list`, `timezone` = `timezone show`;
+        # DESIGN_cli_noargs.md §a3). Keyed on that shape — a parent and one child of it —
+        # so a family added later is covered without editing this test.
+        def is_bare_alias(cmds):
+            if len(cmds) != 2:
+                return False
+            parent, child = sorted(cmds, key=len)
+            return child.startswith(parent + " ")
+
         duplicates = {
             f.__name__: cmds for f, cmds in bindings.items()
-            if len(cmds) > 1 and set(cmds) != {"model", "model list"}
+            if len(cmds) > 1 and not is_bare_alias(cmds)
         }
         self.assertEqual(duplicates, {}, f"one handler bound to several commands: {duplicates}")
 

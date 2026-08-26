@@ -26,14 +26,15 @@ def default_wrap_width() -> int:
 
 
 def today_date() -> date:
-    """Returns today's date in the machine's local timezone.
+    """Returns today's date in the athlete's timezone (DESIGN_user_timezone.md §1).
 
     Garmin keys daily metrics and activities on the athlete's local calendar
     date, so every "what day is it" computation must use local time rather than
     UTC (a UTC frontier drifts a day at the boundary hours). Instants stored for
     comparison (created_at, last-pull timestamps) stay in UTC elsewhere.
     """
-    return date.today()
+    from trainmate.clock import now
+    return now().date()
 
 
 def today_str() -> str:
@@ -70,13 +71,15 @@ def fmt_span(start: Optional[str], end: Optional[str], sep: str = " to ") -> str
 
 
 def fmt_timestamp(iso: Optional[str]) -> str:
-    """Renders a stored UTC ISO timestamp as 'YYYY-MM-DD Ddd HH:MM'.
+    """Renders a stored UTC ISO timestamp as 'YYYY-MM-DD Ddd HH:MM' in the athlete's
+    timezone — stored precise, converted only on display (DESIGN_user_timezone.md §5).
 
     Falls back to the raw string if it isn't parseable (e.g. a date-only legacy value)."""
     if not iso:
         return "?"
+    from trainmate.clock import to_local
     try:
-        return datetime.fromisoformat(iso).strftime("%Y-%m-%d %a %H:%M")
+        return to_local(datetime.fromisoformat(iso)).strftime("%Y-%m-%d %a %H:%M")
     except ValueError:
         return iso
 

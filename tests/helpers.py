@@ -119,6 +119,10 @@ def rebind_test_db(test_db) -> None:
     `trainmate.runtime.calendar_syncer` still owns the handle for its test.
     """
     from trainmate import runtime
+    from trainmate.clock import reset_cache as forget_timezone
+    # The athlete timezone is resolved once per process from the settings table, so a
+    # handle swap has to drop it or the new database's setting is never read.
+    forget_timezone()
     if "calendar_syncer" not in vars(runtime):
         runtime.calendar_syncer = MagicMock()
     from trainmate.calendar_reconcile import reconcile

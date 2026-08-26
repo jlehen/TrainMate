@@ -385,6 +385,18 @@ Switch the LLM behind the coach without editing config by hand — `model` lists
 The choice is stored and survives restarts; `--llm-model <id>` still overrides it for a
 single command without storing anything.
 
+Tell TrainMate which timezone you live in, so "today" means your today and not the
+machine's — a home server left on UTC would otherwise roll the training day over at the
+wrong hour:
+```bash
+./tm timezone                     # what's active now, and the local time it gives
+./tm timezone set Europe/Paris
+```
+You don't have to know the exact name: `./tm timezone set paris` lists the zones
+containing "paris" and you pick yours. The zone is stored and survives restarts;
+with nothing set, dates follow whatever machine TrainMate runs on, and
+`./tm timezone reset` goes back to that.
+
 Which model to pick is not a coin flip. On 2026-08-18 the author benchmarked
 fifteen OpenRouter models head-to-head — one isolated TrainMate install per
 model, same athlete, same two-goal season, same late-breaking constraints.
@@ -464,7 +476,8 @@ recovery metrics, and a daily-signal heat strip).
 
 Anything that changes something is a CLI command, and each panel names the one it
 wants — `tm goal add`, `tm plan generate`, `tm workout swap`, `tm learnings demote`,
-`tm benchmark record`, `tm signal add`, `tm model set`, `tm data pull`.
+`tm benchmark record`, `tm signal add`, `tm model set`, `tm timezone set`,
+`tm data pull`.
 
 ## Running the Telegram bot
 

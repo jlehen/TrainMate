@@ -56,6 +56,7 @@ import sys
 import time
 from typing import Any, Dict, List, Optional, Tuple
 
+from trainmate.clock import now as athlete_now, reset_cache as forget_timezone
 from trainmate.config import config
 from trainmate.prompt import (
     PROMPT_SENTINEL, PROMPT_PROTOCOL_VERSION, PHOTO_SENTINEL, BUTTONS_SENTINEL,
@@ -1103,7 +1104,12 @@ def main() -> None:
         avoids re-spawning the subprocess every tick within one bot lifetime."""
         fired: Optional[str] = None
         while True:
-            now = datetime.datetime.now()
+            # The athlete's wall clock, not the machine's: morning_time/morning_deadline
+            # are the hours they wake up in (DESIGN_user_timezone.md §2). Re-read each
+            # tick — `timezone set` runs in a CLI subprocess, so this long-lived process
+            # would otherwise hold its first answer until a restart.
+            forget_timezone()
+            now = athlete_now()
             delay = next_push_delay(
                 now, config.telegram_push_morning_time,
                 config.telegram_push_morning_deadline,

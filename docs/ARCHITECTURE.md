@@ -312,6 +312,11 @@ classes themselves.
 |                      |                      | callable, so `adapt`, the strategy prompt,       |
 |                      |                      | `status` and `progress` share one implementation |
 |                      |                      | (DESIGN_intensity_distribution.md).              |
+| `clock.py`           | —                    | The athlete's timezone: `now()`, `to_local()` and  |
+|                      |                      | the `settings.timezone` row the `timezone` command|
+|                      |                      | writes. `util.today_date()` is its caller — no    |
+|                      |                      | other module calls `date.today()`                 |
+|                      |                      | (DESIGN_user_timezone.md).                        |
 | `util.py`            | —                    | ANSI color helpers (`bold`, `green`, `red`, …),  |
 |                      |                      | `cmd` (every "run X" call to action), `wrap_text`,|
 |                      |                      | `format_labeled_text`, `strip_ansi`, `Progress`  |
@@ -349,6 +354,7 @@ flow for each lives in [§10](#10-key-data-flows).
 | Calendar push / daily-signal ingest | `trainmate/google_calendar.py`, see [§13](#13-daily-signal-calendar-ingest) |
 | Workout state (modified/calendar/removed) | `trainmate/calendar_state.py`, `db/workouts.py`, `cli/workouts/_helpers.py::modification_markers` ([§5](#workout-state--three-orthogonal-axes-not-one-enum)) |
 | What became of a planned session (the adherence verdict) | `adherence.py` (`classify_adherence` + `STATUS_LABELS`, the vocabulary), `cli/common.py` (`adherence_results` — the one DB-backed pairing — `adherence_verdicts` keyed by workout id, and `format_actual` for the effort it graded against), `cli/workouts/_helpers.py::adherence_marker` (the marker `workout list` prints), `cli/workouts/generate.py::_list_verdicts` (which span the listing grades, and the pull it needs), `google_calendar.py` (title tag), `/api/workouts` + `renderWorkoutCard` in `static/app.js` (the badge) ([§5](#workout-state--three-orthogonal-axes-not-one-enum)) |
+| Which timezone dates are read in | `trainmate/clock.py` (the zone, the cache, the fallback), `cli/timezone.py` (the command), `util.today_date`/`fmt_timestamp` (the only callers), the push loop in `trainmate_bot.py`, DESIGN_user_timezone.md |
 | A CLI command                    | `trainmate/cli/<family>.py` (`run_*`), dispatcher in `trainmate_cli.py` ([§7](#7-cli-commands-reference)) |
 | A message telling the athlete to run something | wrap the command in `util.cmd()`, nested *inside* the line's colour call, so it renders as the bright shade of that colour — and emit it with `util.aside`, not `print`: a "you could now run X" hint is side information |
 | Whether a line reaches the chat front-end | `util.aside` (side information, terminal only) vs `print` (the answer, warnings, errors). Building a list of lines rather than printing? gate on `util.asides_enabled()`. DESIGN_output_verbosity.md §3 |
@@ -1251,13 +1257,15 @@ only the columns it uses. See §10 (Data Pull), §13 (Daily Signals),
 ### settings
 App preferences that outlive one invocation but aren't training data — a generic
 key/value store, so the next single-value preference needs no schema change.
-Untouched by every `wipe` (a data wipe is about training history). Currently one
-key: `llm_model`, the chosen LLM identifier. See `DESIGN_model_selection.md` §2.
+Untouched by every `wipe` (a data wipe is about training history). Keys: `llm_model`,
+the chosen LLM identifier (`DESIGN_model_selection.md` §2); `timezone`, the IANA zone
+every date is computed in (`DESIGN_user_timezone.md` §3); `push_morning_last`, the
+morning-push idempotency marker (`DESIGN_bot_simple_frontend.md` §4.3).
 
 | Column       | Type    | Notes                                              |
 |--------------|---------|----------------------------------------------------|
-| `key`        | TEXT PK | Preference name (`llm_model`)                      |
-| `value`      | TEXT    | Stored value (an OpenRouter model identifier)      |
+| `key`        | TEXT PK | Preference name (`llm_model`, `timezone`, …)        |
+| `value`      | TEXT    | Stored value (a model identifier, a zone name, …) |
 | `updated_at` | TEXT    | UTC ISO instant of the last write                  |
 
 ### daily_signals
@@ -1488,6 +1496,12 @@ DB. Assigning to it pins a model for the invocation (how `--llm-model` overrides
 choice); `reset_model()` drops the cache so the next call re-resolves — what `model set`
 calls, since the REPL runs many commands in one process (DESIGN_model_selection.md §3.1).
 
+`clock.active_zone()` is the same shape for the athlete's timezone: the
+`settings.timezone` row is read on first use and cached for the process, since
+`util.today_date()` asks on every call. `clock.reset_cache()` drops it — what `timezone
+set`/`reset` call, and what the bot's push loop calls each tick because a `timezone set`
+runs in a CLI subprocess (DESIGN_user_timezone.md §2/§3).
+
 `trainmate/garmin/` exposes module-level functions rather than a singleton, all
 re-exported from its `__init__.py`: `pull()`, `ensure_data()`, `reset_memo()` (tests),
 `recompute_derived()`, `backfill_tss()`, `compute_pmc()`, `load_ratio()`,
@@ -1632,6 +1646,9 @@ single read-only view that is its whole state (`model`), which acts bare instead
 | `model`      | `list`       | `model l` | List the models configured under `llm.models`, numbered, active one marked. A bare `model` does the same — the documented exception to the bare-group rule (DESIGN_cli_noargs.md §a3, applied by DESIGN_model_selection.md §4) |
 | `model`      | `set`        | `model s`, `model use` | Choose the model, by list number (`model set 3`) or full identifier. Stored in `settings.llm_model`; survives restarts |
 | `model`      | `reset`      | —        | Forget the stored choice and fall back to the first `llm.models` entry |
+| `timezone`   | `show`       | `timezone sh` | Show the timezone every date is computed in, with the local date and time it produces. A bare `timezone` does the same — the read-only-family exception (DESIGN_cli_noargs.md §a3, applied by DESIGN_user_timezone.md §4) |
+| `timezone`   | `set`        | `timezone s`, `timezone use` | Set the zone by IANA name (`timezone set Europe/Paris`), case-insensitive. A name that matches nothing lists the zones containing it, which is how the athlete finds theirs. Stored in `settings.timezone`; survives restarts |
+| `timezone`   | `reset`      | —        | Forget the stored zone and follow the machine TrainMate runs on again |
 
 ---
 
@@ -1990,7 +2007,7 @@ gated by the same `data_refresh_minutes` throttle. When that throttle keeps a re
 cached data (Garmin or Calendar), a one-line note says so. These commands support
 `--no-pull` to bypass the sync entirely (cache-only) and `--force-pull` to refresh even
 within the throttle window (the two are mutually exclusive). Calendar dates use the
-machine-local timezone (`util.today_str`/`today_date`);
+athlete's timezone (`util.today_str`/`today_date`, DESIGN_user_timezone.md §1);
 stored instants stay UTC. The web app never calls this — it is a pure reader (see §1).
 
 ### Data Analysis (`data bootstrap` / `data reflect`)
@@ -2376,6 +2393,10 @@ venv/bin/python -m unittest discover -s tests -p "test_*.py"
 |                                | `default_wrap_width` and the TRAINMATE_WRAP_WIDTH override)      |
 | `tests/test_cli_models.py`     | the `model` command: config list vs stored choice vs             |
 |                                | `--llm-model` override (DESIGN_model_selection.md §3)            |
+| `tests/test_clock.py`          | the athlete timezone: how a name resolves, that `today_date`     |
+|                                | reads the stored zone (two zones 26h apart never share a         |
+|                                | calendar date), that stored UTC instants render local, and the   |
+|                                | `timezone` command (DESIGN_user_timezone.md)                     |
 
 Tests inject a fresh in-memory SQLite DB by assigning `test_db` to module-level
 `db` variables *before* importing the singletons. `openrouter_client` is mocked
