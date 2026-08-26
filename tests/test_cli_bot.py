@@ -14,7 +14,8 @@ import trainmate.db
 import trainmate_cli
 
 from trainmate import runtime
-from trainmate.cli.bot import MORNING_MARKER
+from trainmate.cli.bot import MORNING_MARKER, PUSH_ALL_DONE_LINE
+from trainmate.cli.common import SIMPLE_DONE_LINE
 from trainmate.config import config
 from trainmate.prompt import BUTTONS_SENTINEL
 from trainmate.util import today_str
@@ -40,6 +41,20 @@ class MorningPushTest(unittest.TestCase):
     def setUp(self):
         rebind_test_db(test_db)  # an earlier module may have rebound the handles
         clear_all_tables(test_db)
+        # The push grades today before it briefs it (§4.1), which freshens the cache
+        # first; the activities each test wants are written to the db directly.
+        garmin = patch.object(runtime, "garmin", MagicMock(), create=True)
+        garmin.start()
+        self.addCleanup(garmin.stop)
+
+    def _trained(self, sport="running", duration_min=40):
+        """One completed activity for today, the shape the Garmin pull would have left."""
+        test_db.save_completed_activity(
+            activity_id=f"a-{sport}", date=today_str(),
+            start_time=f"{today_str()} 07:00:00", activity_name=f"Morning {sport}",
+            activity_type=sport, duration_sec=duration_min * 60, distance_km=8.0,
+            elevation_gain_m=0.0, avg_hr=140, max_hr=160, rpe=None, tss=45.0,
+        )
 
     def test_rest_day_gets_one_line_and_no_buttons(self):
         code, out, _ = run_cli(["bot", "morning"])
@@ -57,6 +72,42 @@ class MorningPushTest(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertIn("🏃 Today: Easy run — 40 min", out)
         self.assertIn("Conversational pace", out)
+        self.assertIn(BUTTONS_SENTINEL, out)
+
+    def test_a_day_already_trained_is_congratulated_not_briefed(self):
+        save_workout(
+            test_db, today_str(), "running", "Easy run",
+            description="Conversational pace, HR under 145.", duration_minutes=40,
+        )
+        self._trained()
+        code, out, _ = run_cli(["bot", "morning"])
+        self.assertEqual(code, 0)
+        self.assertIn(PUSH_ALL_DONE_LINE, out)
+        self.assertNotIn("Easy run", out)
+        self.assertNotIn("Conversational pace", out)
+        self.assertNotIn(BUTTONS_SENTINEL, out)
+        self.assertEqual(test_db.get_setting(MORNING_MARKER), today_str())
+
+    def test_the_session_still_ahead_is_briefed_and_keeps_the_buttons(self):
+        save_workout(test_db, today_str(), "running", "Easy run", duration_minutes=40)
+        save_workout(test_db, today_str(), "strength", "Core work", duration_minutes=30)
+        self._trained()
+        code, out, _ = run_cli(["bot", "morning"])
+        self.assertEqual(code, 0)
+        self.assertNotIn(PUSH_ALL_DONE_LINE, out)
+        self.assertIn(SIMPLE_DONE_LINE, out)     # the run, acknowledged
+        self.assertIn("Core work", out)          # the session left, still briefed
+        self.assertIn(BUTTONS_SENTINEL, out)
+
+    def test_an_ungraded_day_falls_back_to_the_briefing(self):
+        save_workout(test_db, today_str(), "running", "Easy run", duration_minutes=40)
+        self._trained()
+        runtime.garmin.ensure_data.side_effect = RuntimeError("Garmin down")
+        with patch.dict(os.environ, {"TRAINMATE_FRONTEND": "json"}):
+            code, out, _ = run_cli(["bot", "morning"])
+        self.assertEqual(code, 0)
+        self.assertIn("Easy run", out)
+        self.assertNotIn("Garmin down", out)
         self.assertIn(BUTTONS_SENTINEL, out)
 
     def test_second_run_same_day_is_silent(self):

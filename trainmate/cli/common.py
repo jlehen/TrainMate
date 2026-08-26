@@ -259,8 +259,10 @@ REST_DAY_LINE = "Rest day — enjoy it 🎉"
 
 # A session the athlete has already trained, in companion voice. Only `done` and
 # `partial` earn a line — DESIGN_bot_simple_frontend.md §6 says why the other verdicts
-# say nothing at all.
+# say nothing at all. The statuses are a constant because the morning push reads them
+# too, and "already trained" has to mean the same thing on both surfaces (§4.1).
 SIMPLE_DONE_LINE = "✅ Already done — nice work 💪"
+SIMPLE_DONE_STATUSES = ("done", "partial")
 
 # Emoji per canonical sport for the simple session lines; unknown sports get the
 # generic one rather than nothing, so a new sport never renders bare.
@@ -318,7 +320,7 @@ def simple_day_lines(
     for w in workouts:
         lines.append(simple_session_line(w, lead=day_word))
         status = ((verdicts or {}).get(w.get("id")) or {}).get("status")
-        if status in ("done", "partial"):
+        if status in SIMPLE_DONE_STATUSES:
             lines.append(SIMPLE_DONE_LINE)
         description = (w.get("description") or "").strip()
         if description:

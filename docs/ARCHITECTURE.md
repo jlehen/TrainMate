@@ -162,7 +162,10 @@ classes themselves.
     utterance back through the normal pipeline. An asyncio scheduler (`_push_loop`)
     spawns `tm bot morning` inside the `telegram.push.morning_time`→`morning_deadline`
     window; idempotency lives in the `settings` row `push_morning_last`, so the bot
-    process stays stateless. Slash-prefixed text is always the expert path, and `/ui`
+    process stays stateless. That window runs into the afternoon, so the push grades
+    today's sessions (§5) before briefing them: a day already trained gets a
+    congratulation and no buttons, since the button row's only offers are ways to change
+    a session still ahead. Slash-prefixed text is always the expert path, and `/ui`
     flips the persona of a running bot in memory — `telegram.ui` decides again at the
     next restart (DESIGN_bot_simple_frontend.md §5.6).
   - **Output is quieter here than on a terminal.** Because `_drive` buffers the whole

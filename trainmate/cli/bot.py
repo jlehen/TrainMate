@@ -7,11 +7,12 @@ constraints` renders the companion constraints view with its remove picker (§5.
 """
 import argparse
 import json
-from typing import Optional
+from typing import Any, Dict, Optional
 
 from trainmate import settings
 from trainmate.cli.common import (
-    ensure_recent_data, simple_constraint_lines, simple_day_lines,
+    SIMPLE_DONE_STATUSES, adherence_verdicts, ensure_recent_data,
+    simple_constraint_lines, simple_day_lines,
 )
 from trainmate.prompt import emit_buttons
 from trainmate.util import aside, today_str as _today_str, wrap_text
@@ -41,6 +42,11 @@ MORNING_BUTTONS = [
                  'session"'},
     ]},
 ]
+
+# What the push says on a day already trained: the catch-up window runs to mid-afternoon
+# (§4.3), so it routinely fires on a session that is already in the bag, and reading its
+# prescription back with a "can't today" row attached is a ping about nothing (§4.1).
+PUSH_ALL_DONE_LINE = "✅ Already done for today — nice work 💪"
 
 # The router's fixed intent table (§5.3): the model picks an intent, never argv. The
 # bot maps each intent back onto argv from its own table (trainmate_bot.py); a test
@@ -138,23 +144,46 @@ def _auto_adapt_note(date_str: str) -> Optional[str]:
         return None
 
 
+def _trained_today(date_str: str) -> Dict[int, Dict[str, Any]]:
+    """Today's adherence verdicts over freshly pulled activity data — what the push needs
+    to tell a session still ahead from one already behind (§4.1). Like the adaptation, a
+    failure must not sink the push: an ungraded day renders as the schedule it was."""
+    from trainmate import runtime
+    try:
+        runtime.garmin.ensure_data(date_str, date_str)
+        return adherence_verdicts(date_str, date_str)
+    except Exception as e:
+        aside(f"Could not check what was trained today, briefing the schedule: {e}")
+        return {}
+
+
 def run_bot_morning(args: argparse.Namespace) -> None:
     """Renders the §4.1 morning message for today and emits its button row.
 
     Idempotent per day via the settings marker; the bot's scheduler may fire it
     repeatedly (catch-up after sleep, restarts) without double-sending. A day with no
-    session gets the one-line rest message, no buttons."""
+    session gets the one-line rest message and a day already trained the congratulation,
+    both without buttons — neither has anything left to offer."""
     from trainmate import runtime
     today = _today_str()
     if not args.force and runtime.db.get_setting(MORNING_MARKER) == today:
         return
     adapt_note = _auto_adapt_note(today) if settings.adapt_first() else None
+    # After the adaptation, so the verdicts grade the sessions this push is about to show.
     workouts = runtime.db.get_workouts(start_date=today, end_date=today)
-    for line in simple_day_lines(workouts, today):
-        print(line)
+    verdicts = _trained_today(today) if workouts else {}
+    ahead = [
+        w for w in workouts
+        if (verdicts.get(w.get("id")) or {}).get("status") not in SIMPLE_DONE_STATUSES
+    ]
+    if workouts and not ahead:
+        print(PUSH_ALL_DONE_LINE)
+    else:
+        for line in simple_day_lines(workouts, today, verdicts):
+            print(line)
     if adapt_note:
         print(wrap_text(adapt_note))
-    if workouts:
+    if ahead:
         emit_buttons(MORNING_BUTTONS)
     runtime.db.set_setting(MORNING_MARKER, today)
 

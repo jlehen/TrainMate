@@ -75,7 +75,15 @@ and how output is *shown* (rendering), never what runs.
 >
 > `[ 👍 Got it ]  [ 😴 Feeling tired ]  [ 🕐 Can't today ]`
 
-Rest days get one line ("Rest day — enjoy it 🎉", no buttons). Tapping:
+Rest days get one line ("Rest day — enjoy it 🎉", no buttons). So does a day whose
+sessions are all already trained — "✅ Already done for today — nice work 💪", the
+acknowledgement §6 gives the day view, promoted to the whole message. The catch-up
+window runs to mid-afternoon (§4.3), so the push routinely fires on a session that is
+already in the bag; briefing it back with a "can't today" row attached is a ping the
+athlete cannot act on, and the schedule is the one thing she has already seen. Every
+button below offers a way to change a session still ahead, so an all-done day earns
+none of them, and a day where one of two sessions is done briefs the one left and keeps
+them. Tapping:
 
 - **Got it** — acknowledges, nothing runs.
 - **Feeling tired** — runs `workout adapt -m "feeling tired this morning"`; the existing
@@ -93,6 +101,13 @@ A new hidden CLI family (`tm bot ...`, hidden like other maintenance commands):
   table and exits silently when already sent today. All push state therefore lives in
   the instance's database; the bot process stays stateless across restarts, which is
   what lets `/restart` and crashes stay boring (DESIGN_bot_restart.md).
+
+It takes the same `workout list` route to "what became of this session": freshen today's
+activity cache, then `adherence_verdicts` (ARCHITECTURE.md §5) — one grader, so "already
+trained" cannot mean one thing in the day view and another in the push. `done` and
+`partial` are the statuses that count, named once in `cli/common.py` because both
+surfaces read them. A grading failure degrades exactly like the adaptation below: an
+aside on the terminal, the schedule briefed as stored, never a sunk push.
 
 When `adapt-first` is on (default **off**), `tm bot morning` first runs
 the daily adaptation non-interactively (`workout adapt -y`, so no prompt can strand a
@@ -311,6 +326,10 @@ Each phase ships alone; her onboarding starts at phase 1.
   rm picker is the only destructive action buttons can reach — single-ID, tap-chosen.
 - `/ui` flips the persona at runtime, in-memory only (2026-08-25, §5.6): a test switch
   for the operator; config.yaml stays authoritative across restarts.
+- A day already trained is congratulated, not briefed, and loses the button row with it
+  (2026-08-26, §4.1). The adaptation still runs first when `adapt-first` is on: it
+  revises the whole forward range to the block's end, not just today, so a session
+  finished before breakfast is no reason to skip the day's pass.
 
 **Open**
 1. Router echo: always show "→ …", or only when confidence is low? Draft: always;
