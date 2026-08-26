@@ -231,6 +231,16 @@ with a miss. A skipped week reads "back on track Thursday — the coach adjusted
 days off", not "adherence 40%". The numbers stay available; expert mode and the
 dashboard are the audit surface, chat is the encouragement surface.
 
+**A day already trained is acknowledged, a day not yet trained is not remarked on.**
+The day view takes the adherence verdicts the expert listing carries
+(ARCHITECTURE.md §5) and adds one line — "already done, nice work" — for a session
+graded `done` or `partial`; every other verdict renders exactly as it did before.
+Asking what today holds after having trained it and being read the prescription back
+is the companion failing to notice, but `missed` and `pending` earn no line at all:
+the tone rule keeps a gap out of the lead, and "you have not done it yet" is not news
+to someone reading their own day. A `partial` counts as done here — the mismatch that
+earns it is expert detail, and the chat surface does not audit.
+
 ## 7. Guardrails
 
 - The router's intent table only reaches read-only views, `adapt -m`, and the §5.5

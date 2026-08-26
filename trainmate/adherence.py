@@ -165,6 +165,19 @@ def _discrepancy_reasons(
     return reasons
 
 
+# The athlete-facing name of each `classify_adherence` status: one vocabulary for the
+# Calendar title tag, the `workout list` marker and the web badge
+# (ARCHITECTURE.md §15 "A session already behind us carries its verdict").
+STATUS_LABELS = {
+    "done": "Done",
+    PARTIAL: "Partial",
+    MISSED: "Missed",
+    PENDING: "Not yet",
+    "rest_ok": "Rest OK",
+    "rest_violation": "Rest broken",
+}
+
+
 def classify_adherence(
     planned: Dict[str, Any],
     completed: Optional[Dict[str, Any]],

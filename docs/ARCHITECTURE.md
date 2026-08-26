@@ -245,6 +245,9 @@ classes themselves.
 |                      |                      | load valuation `progression.py` reuses. The      |
 |                      |                      | `pending_from` cutoff keeps an unfinished day's  |
 |                      |                      | untrained sessions out of the misses (below).    |
+|                      |                      | `STATUS_LABELS` is the one athlete-facing word   |
+|                      |                      | per verdict, shared by the `workout list`        |
+|                      |                      | marker, the web badge and the Calendar tag.      |
 | `plan_diff.py`       | —                    | Compares two periodization plan versions:        |
 |                      |                      | `resolve_versions` (which two, over a passed-in  |
 |                      |                      | db handle) + `diff_plans` → strategy prose, each  |
@@ -345,6 +348,7 @@ flow for each lives in [§10](#10-key-data-flows).
 | Planned time in zone (a session's intensity target) | `db/base.py` (`planned_zone_currency`, `planned_zone1..7_sec` on `workouts`), `db/workouts.py:WorkoutChange.append`, `intensity.parse_planned_zones` / `format_planned_zones`, `coach/engine/workouts.py` (`_planned_zone_task`, `_planned_zone_fields` — both prompts), `google_calendar.py` + `coach/formatting.py` (rendered from the columns, never stored), DESIGN_intensity_distribution.md §9.8 |
 | Calendar push / daily-signal ingest | `trainmate/google_calendar.py`, see [§13](#13-daily-signal-calendar-ingest) |
 | Workout state (modified/calendar/removed) | `trainmate/calendar_state.py`, `db/workouts.py`, `cli/workouts/_helpers.py::modification_markers` ([§5](#workout-state--three-orthogonal-axes-not-one-enum)) |
+| What became of a planned session (the adherence verdict) | `adherence.py` (`classify_adherence` + `STATUS_LABELS`, the vocabulary), `cli/common.py` (`adherence_results` — the one DB-backed pairing — `adherence_verdicts` keyed by workout id, and `format_actual` for the effort it graded against), `cli/workouts/_helpers.py::adherence_marker` (the marker `workout list` prints), `cli/workouts/generate.py::_list_verdicts` (which span the listing grades, and the pull it needs), `google_calendar.py` (title tag), `/api/workouts` + `renderWorkoutCard` in `static/app.js` (the badge) ([§5](#workout-state--three-orthogonal-axes-not-one-enum)) |
 | A CLI command                    | `trainmate/cli/<family>.py` (`run_*`), dispatcher in `trainmate_cli.py` ([§7](#7-cli-commands-reference)) |
 | A message telling the athlete to run something | wrap the command in `util.cmd()`, nested *inside* the line's colour call, so it renders as the bright shade of that colour — and emit it with `util.aside`, not `print`: a "you could now run X" hint is side information |
 | Whether a line reaches the chat front-end | `util.aside` (side information, terminal only) vs `print` (the answer, warnings, errors). Building a list of lines rather than printing? gate on `util.asides_enabled()`. DESIGN_output_verbosity.md §3 |
@@ -1145,6 +1149,20 @@ no precedence rule — the kind was recorded when the change ran:
     stamps `adherence_pushed_signature` (calendar fields **plus** verdict) so a later pass
     skips a no-op write; kept in its **own** column, and any edit to the session
     invalidates it so a re-mark follows.
+  - **The verdict is shown where the session is listed**, not only on the Calendar:
+    `workout list` marks every listed session dated today or earlier
+    `[DONE]`/`[PARTIAL]`/`[MISSED]`/`[REST OK]`/`[REST BROKEN]`, or `[NOT YET]` for one
+    still ahead of the athlete today, and `-v` names the activity it was graded against
+    plus what a `[PARTIAL]` differed by. `/api/workouts` hands the dashboard the same
+    verdict as each row's `adherence` (status, word, reasons, matched activity), rendered
+    as a badge. One pairing behind all three — `cli/common.py:adherence_verdicts` over
+    `adherence_results` — so a terminal line, a Calendar event and a web card cannot
+    disagree about whether a session happened. The listing grades **the whole window**,
+    never the rows it happens to be showing: matching is per-day and first-come, so a
+    narrowed listing that graded only its own rows would hand an activity to whichever
+    session survived the filter. Because the listing now reports on completed activities,
+    it freshens Garmin over that past span first (`--no-pull` skips it); a listing
+    entirely in the future costs neither a pull nor a query.
 
 **3. Removed?** = the live revision is a **void**. `workout rm` appends one carrying the
 athlete's reason; the session is not deleted, and everything before the void is still in
@@ -1591,7 +1609,7 @@ single read-only view that is its whole state (`model`), which acts bare instead
 | `plan`       | `feedback`   | `pl f`   | Append a note about the plan to its append-only log — bare text is plan-level, `-m [ATOM]` files it to one block by name-infix / date / mesocycle ID (bare `-m` = the current block). Bare run lists what is pending, `--rm ID [-y]` deletes one, `--replan` regenerates straight away, `-g/--goal ID` targets another goal's plan. No LLM at capture; the next `plan generate` reads the whole log and must address every note (DESIGN_plan_feedback.md) |
 | `plan`       | `wipe`       | —        | Delete all plans                                                         |
 | `progress`   | `[SPORT ...]` | `pr`    | Show the progress timeline: measured load to date, plan-projected forward (CTL/ATL/TSB), weekly planned-vs-actual bars (`-w/--weeks N`, `--chart [PATH]` for a PNG; DESIGN_progress_timeline.md). `-z`/`--zones` (implied by naming a sport) adds one weekly time-in-zone table per sport — measured behind today, prescribed ahead of it (`--blocks` for block grain, `--power`/`--hr` to force the currency; DESIGN_intensity_distribution.md §9.6/§9.8). The sport argument scopes the **zone tables only**: CTL/ATL/TSB, the projection and the load table stay whole-athlete |
-| `workout`    | `list`       | `w l`    | Show planned workouts. Defaults to a 7-day window from today. Positional `TARGET…` (workout IDs and/or date selectors, e.g. `wo li 12 15 -v`) plus the shared selectors `-d`/`-m`/`-M`/`-g` and `-t/--type TYPE`, `--removed` (DESIGN_cli_selectors.md). |
+| `workout`    | `list`       | `w l`    | Show planned workouts. Defaults to a 7-day window from today. Positional `TARGET…` (workout IDs and/or date selectors, e.g. `wo li 12 15 -v`) plus the shared selectors `-d`/`-m`/`-M`/`-g` and `-t/--type TYPE`, `--removed` (DESIGN_cli_selectors.md). Every listed session dated **today or earlier** also carries its adherence verdict — `[DONE]`/`[PARTIAL]`/`[MISSED]`/`[REST OK]`/`[REST BROKEN]`, or `[NOT YET]` for one still ahead today — and `-v` adds the matched activity and the mismatch behind a `[PARTIAL]`. Freshens Garmin over that past span unless `--no-pull` ([§5](#workout-state--three-orthogonal-axes-not-one-enum)). |
 | `workout`    | `compare`    | `w c`    | Compare planned vs completed (`analyze_adherence()`): prints PLANNED/ACTUAL per day, flags misses (red), rest violations (red), unplanned high-load (yellow), then a discrepancy summary. Today's untrained sessions read `(not yet — still ahead today)` and are not misses (`pending_from`, [§10](#10-key-data-flows)). Same selectors as `workout list`; default 14-day lookback; a bare span (`-d 7d`) looks *back*; end capped at today. |
 | `workout`    | `generate`   | `w g`    | Generate workouts from the plan blocks covering the days generated (the dates pick the plan, not a goal — DESIGN_cli_selectors.md §8). No selector → today for `config.workout_generation_span_days` (28 default). Span flags (mutually exclusive, **both** ends of the resolved window are used, and a span never opens before today): `-g/--goal [ID]` = the goal's whole plan span; `-d`; `-m` = that block's own days; `-M` (which also settles which plan to follow where two cover the same days). Lists the proposed sessions the way `workout list` renders them and asks before writing; on a `y` it archives the span's existing workouts, leaves the days outside it alone, and pushes the new ones to Calendar immediately. `-f/-y` skips both prompts. |
 | `workout`    | `rm`         | `w rm`   | Soft-remove by ID (`ID REASON`, both positional): marks `removed`, marks the Calendar event deleted; kept in DB, hidden from list/compare, shown to coach as a cancellation. |
@@ -1675,7 +1693,8 @@ actually present in the data rather than a hardcoded `<option>` list — the old
 itself fallen behind the canonical sports.
 
 Endpoints delegate rather than re-derive, so the two surfaces cannot disagree:
-`GET /api/workouts` annotates rows with `calendar_status` + `modification_status` (§5),
+`GET /api/workouts` annotates rows with `calendar_status` + `modification_status` and,
+for a row today or earlier, the `adherence` verdict `workout list` marks (§5),
 `/api/workouts/compare` reuses `analyze_adherence`, `/api/plan/diff` returns
 `plan_diff.diff_plans` verbatim, and `/api/zones` picks its sports and currencies with
 `intensity.window_sport_stats`/`select_zone_sports`/`zone_currency` — the same three
@@ -1687,7 +1706,7 @@ exactly that reason.
 | GET    | `/api/status`                   | Active goal, latest metrics, coach learnings (under `coach_learnings.learnings` + `.summary`), macrocycle+mesocycles, `config_mismatch`, `sync_state` (data freshness) |
 | GET    | `/api/objectives`               | All objectives (`goal list`)                 |
 | GET    | `/api/constraints`              | Active + upcoming directives — the read view of `constraint list`. Its window is a rolling `metrics_lookback_days` plus everything upcoming, **not** the CLI's active-mesocycle anchor |
-| GET    | `/api/workouts`                 | List workouts (`?start_date=&end_date=&sport_type=&include_removed=`). Rows carry derived `calendar_status` + `modification_status`. |
+| GET    | `/api/workouts`                 | List workouts (`?start_date=&end_date=&sport_type=&include_removed=`). Rows carry derived `calendar_status` + `modification_status`, plus `adherence` (`{status, label, reasons, completed}`, null for a row still ahead of us) from the CLI's own `adherence_verdicts`. No pull — §8. |
 | GET    | `/api/workouts/compare`         | Plan-vs-actual adherence (`workout compare`); no `ensure_data`. `?start_date=&end_date=&sport=` (default 14-day lookback, end capped at today) → `{filters, days[], discrepancies[], informational[]}` |
 | GET    | `/api/workouts/batches`         | Workout changes, newest first (`{batches:[{id, created_at, kind, summary, workouts, held, restorable, first_date, last_date, macrocycle_ids}]}`); undoing one is `workout rollback` |
 | GET    | `/api/plan`                     | Active plan for a goal (`plan show`): `?goal_id=` (default next active) → `{goal, macrocycle, mesocycles}` |
@@ -2579,3 +2598,29 @@ goal — every goal predating the field — hashes exactly as before, so shippin
 field did not flag existing plans stale, while flipping a goal either way adds or
 removes the key, changes `goals_hash`, and prompts the replan that change warrants.
 Current-state reference: [§5 objectives](#objectives).
+
+### A session already behind us carries its verdict
+`workout list` used to answer only "what was planned", so the athlete asking what they
+did last week got the plan read back at them and had to run `workout compare` to find out
+which of it actually happened — two commands for one question, and the listing quietly
+implying that a session it drew was a session that took place. The verdict now rides on
+the listing itself, today included: an untrained session on an unfinished day reads
+`[NOT YET]` rather than `[MISSED]`, which is the `pending_from` rule
+([§10](#10-key-data-flows)) surfacing where it is finally visible.
+
+Nothing new grades anything. `adherence_results` is the single DB-backed pairing —
+`analyze_adherence` over a window — and `adherence_verdicts` keys `classify_adherence`'s
+answer by workout id; the Calendar marker, the terminal marker and the web badge are three
+renderings of that one map. The wording is shared too (`adherence.STATUS_LABELS`): the
+Calendar tag map was the only place a verdict had ever been given a word, so a second
+surface would have invented a second wording, which is exactly how `[Partial]` on a
+calendar event and something else in a listing would have come to describe one session.
+
+Two things this forced. The listing grades its **whole** window rather than the rows it is
+showing, because matching is per-day and first-come — hand it only the rows that survived
+a `--type` filter and the day's activity goes to whoever is left, so a rest day beside a
+ride would read `[REST BROKEN]` the moment the ride was filtered out. And the listing
+became a command that reads completed activities, so it freshens Garmin like every other
+one that does; the cost is bounded by scoping the pull to the past part of the window,
+which leaves the ordinary forward-looking `workout list` entirely offline.
+

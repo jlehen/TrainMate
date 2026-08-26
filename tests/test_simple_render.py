@@ -74,6 +74,37 @@ class DayLinesTest(unittest.TestCase):
         self.assertIn("2026-08-27", lines[0])
 
 
+    def _today(self, verdicts=None):
+        with patch("trainmate.cli.common._today_str", return_value="2026-08-25"):
+            return common.simple_day_lines(
+                [{"id": 7, "sport_type": "running", "title": "Easy run",
+                  "duration_minutes": 40, "date": "2026-08-25",
+                  "description": "Conversational pace."}],
+                "2026-08-25", verdicts,
+            )
+
+    def test_a_session_already_trained_is_acknowledged(self):
+        """Asking for a day you have already trained should say so, not just re-read the
+        prescription back (DESIGN_bot_simple_frontend.md §6)."""
+        lines = self._today({7: {"status": "done", "label": "Done", "reasons": []}})
+        self.assertEqual(lines[1], common.SIMPLE_DONE_LINE)
+
+    def test_a_session_that_came_in_off_plan_still_counts_as_done(self):
+        lines = self._today({7: {"status": "partial", "label": "Partial",
+                                 "reasons": ["duration mismatch"]}})
+        self.assertEqual(lines[1], common.SIMPLE_DONE_LINE)
+        # The mismatch itself is expert detail — the companion never reads it out.
+        self.assertFalse(any("mismatch" in line for line in lines))
+
+    def test_a_session_still_ahead_or_missed_says_nothing(self):
+        """The §6 tone rule: a gap is never the lead, and 'you have not done it yet' is
+        not news to someone reading their own day."""
+        for status, label in (("pending", "Not yet"), ("missed", "Missed")):
+            lines = self._today({7: {"status": status, "label": label, "reasons": []}})
+            self.assertNotIn(common.SIMPLE_DONE_LINE, lines)
+            self.assertEqual(lines, self._today())
+
+
 class WeekLinesTest(unittest.TestCase):
     def test_empty_window_is_a_break(self):
         lines = common.simple_week_lines([])

@@ -8,6 +8,7 @@ from googleapiclient.errors import HttpError
 from trainmate import runtime
 from trainmate.config import config
 from trainmate.types import Workout
+from trainmate.adherence import STATUS_LABELS
 from trainmate.calendar_state import calendar_signature
 from trainmate import calendar_lineage
 from trainmate import intensity
@@ -60,14 +61,10 @@ class CalendarSyncer:
         self.service: Any = build('calendar', 'v3', credentials=self.creds)
         self.calendar_id: Optional[str] = config.google_calendar_id
 
-    # Past-event adherence verdict -> title tag (see adherence.classify_adherence).
-    _ADHERENCE_TAGS = {
-        "done": "Done",
-        "partial": "Partial",
-        "missed": "Missed",
-        "rest_ok": "Rest OK",
-        "rest_violation": "Rest broken",
-    }
+    # Past-event adherence verdict -> title tag, shared rather than copied
+    # (adherence.STATUS_LABELS). "Not yet" is in the map but unreachable here:
+    # `mark_adherence_from_results` skips pending rows before rendering a verdict.
+    _ADHERENCE_TAGS = STATUS_LABELS
 
     def sync_workout(
         self, workout: Workout, adherence: Optional[dict] = None

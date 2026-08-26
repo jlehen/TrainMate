@@ -3,9 +3,13 @@
 Each case here was written twice — once for the terminal and once for the dashboard —
 and the copies had already begun to disagree.
 """
+import ast
+import inspect
 import unittest
 
-from trainmate import intensity
+from trainmate import adherence, intensity
+from trainmate.adherence import STATUS_LABELS
+from trainmate.cli.workouts._helpers import adherence_marker
 from trainmate.baselines import (
     ELEVATED, NORMAL, SUPPRESSED, UNKNOWN, classify_metric, is_anomalous,
 )
@@ -143,3 +147,57 @@ class TestTheCliRendersTheSharedState(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def _status_expression_values(node):
+    """The string(s) one `"status": ...` expression can evaluate to."""
+    if isinstance(node, ast.Constant):
+        return {node.value}
+    if isinstance(node, ast.Name):
+        return {getattr(adherence, node.id)}
+    if isinstance(node, ast.IfExp):
+        return _status_expression_values(node.body) | _status_expression_values(node.orelse)
+    raise AssertionError(f"unreadable status expression: {ast.dump(node)}")
+
+
+def _statuses_the_classifier_can_return():
+    """Every verdict `classify_adherence` can hand back, read off its own source.
+
+    Keyed on the shape of its return dicts, never on a list kept by hand here, so a
+    status added tomorrow is covered tomorrow rather than whenever someone remembers."""
+    fn = ast.parse(inspect.getsource(adherence.classify_adherence)).body[0]
+    found = set()
+    for node in ast.walk(fn):
+        if not isinstance(node, ast.Dict):
+            continue
+        for key, value in zip(node.keys, node.values):
+            if isinstance(key, ast.Constant) and key.value == "status":
+                found |= _status_expression_values(value)
+    return found
+
+
+class TestAdherenceVocabulary(unittest.TestCase):
+    """One word per verdict for every surface that shows one: the `workout list` marker,
+    the web badge and the Calendar title tag.
+
+    Only the Calendar tag was ever written down, so the listing that came later had
+    nothing to read and would have invented its own wording."""
+
+    def test_every_verdict_the_classifier_can_return_has_a_word(self):
+        self.assertEqual(_statuses_the_classifier_can_return(), set(STATUS_LABELS))
+
+    def test_the_calendar_tag_map_is_the_shared_one_not_a_copy(self):
+        from trainmate.google_calendar import CalendarSyncer
+        self.assertIs(CalendarSyncer._ADHERENCE_TAGS, STATUS_LABELS)
+
+    def test_the_marker_prints_the_word_the_verdict_carries(self):
+        for status, label in STATUS_LABELS.items():
+            marker = adherence_marker({"status": status, "label": label})
+            self.assertIn(f"[{label.upper()}]", marker)
+
+    def test_no_verdict_means_no_marker(self):
+        """A session still ahead of us, a `workout generate` proposal and a cancelled
+        row all arrive without one, which is why the listing can render it blind."""
+        self.assertEqual(adherence_marker(None), "")
+        self.assertEqual(adherence_marker({}), "")
+

@@ -12,7 +12,8 @@ from trainmate.util import (
     days_between, fmt_date, fmt_span, fmt_timestamp,
 )
 from trainmate.cli.common import (
-    ensure_recent_data, mark_adherence_from_results, report_unhonored,
+    adherence_verdicts, ensure_recent_data, format_actual,
+    mark_adherence_from_results, report_unhonored,
     is_simple_render, simple_day_lines, simple_week_lines,
 )
 from trainmate.coach.proposals import GenerateProposal
@@ -500,6 +501,26 @@ def _workouts_by_id(ids: list, sport_type: Optional[str], include_removed: bool)
     return found
 
 
+def _list_verdicts(workouts: list, args: argparse.Namespace) -> dict:
+    """What became of each listed session that is today or earlier, keyed by workout ID.
+
+    Freshens the Garmin cache over that same span first (`--no-pull` skips it), since the
+    listing now reports on completed activities. A listing with nothing behind us costs
+    neither the pull nor the query (ARCHITECTURE.md §5)."""
+    today = _today_str()
+    past = sorted(w['date'] for w in workouts if w['date'] <= today)
+    if not past:
+        return {}
+    if not getattr(args, 'no_pull', False):
+        try:
+            runtime.garmin.ensure_data(
+                past[0], past[-1], force=getattr(args, 'force_pull', False)
+            )
+        except Exception as e:
+            print(yellow(f"Warning: Could not ensure recent data: {e}"))
+    return adherence_verdicts(past[0], past[-1])
+
+
 def run_workout_list(args: argparse.Namespace) -> None:
     """Lists stored workouts chronologically, by ID, date range, block, plan or sport."""
     ids, date_targets = split_targets(getattr(args, "targets", None))
@@ -528,11 +549,13 @@ def run_workout_list(args: argparse.Namespace) -> None:
             if not (w['id'] in seen or seen.add(w['id']))
         ]
 
+    verdicts = _list_verdicts(workouts, args)
+
     # Companion prose instead of the table: a single-day window reads as the day, any
     # other window as the week ahead (DESIGN_bot_simple_frontend.md §6).
     if is_simple_render():
         if start_date and start_date == end_date:
-            lines = simple_day_lines(workouts, start_date)
+            lines = simple_day_lines(workouts, start_date, verdicts)
         else:
             lines = simple_week_lines(workouts)
         for line in lines:
@@ -556,7 +579,8 @@ def run_workout_list(args: argparse.Namespace) -> None:
     # distinct summary only once across the listing so it doesn't dominate the output.
     seen_summaries: set = set()
     for w in workouts:
-        print(workout_line(w))
+        verdict = verdicts.get(w.get('id'))
+        print(workout_line(w, verdict))
         # -l surfaces the Calendar event link (rebuilt from the stored event id) so it can
         # be opened without the sync commands having to print the URL every push.
         if getattr(args, "link", False):
@@ -575,6 +599,13 @@ def run_workout_list(args: argparse.Namespace) -> None:
             lifecycle_parts.append(f"Last adapted: {fmt_timestamp(w['adapted_at'])}")
         if lifecycle_parts:
             print(gray("  " + "  ·  ".join(lifecycle_parts)))
+        # The effort the verdict graded against, and what a [PARTIAL] differed by — the
+        # marker alone only says that it did.
+        actual = (verdict or {}).get('completed')
+        if actual:
+            print(gray(f"  Actual: {format_actual(actual)}"))
+        for reason in (verdict or {}).get('reasons') or []:
+            print(yellow(f"  Discrepancy: {reason}"))
         print(format_labeled_block("  Description:", w['description']))
         summary = w.get('adaptation_summary')
         # Show the per-workout note inline, unless it's just the batch reason echoed
@@ -649,19 +680,6 @@ def run_workout_compare(args: argparse.Namespace) -> None:
     print(gray(f"Filters: {', '.join(filter_parts)}"))
     print()
 
-    def _fmt_act(act: dict) -> str:
-        dur = f"{act['duration_sec'] / 60:.0f}min"
-        parts: list[str] = [dur, f"load {runtime.garmin.activity_load(act):.0f}"]
-        if act.get('tss'):
-            parts.append(f"TSS {act['tss']:.0f}")
-        if act.get('rpe'):
-            parts.append(f"RPE {act['rpe']}")
-        s = f"[{act['activity_type']}] {act['activity_name']} ({', '.join(parts)})"
-        div = runtime.garmin.rpe_divergence(act)
-        if div is not None:
-            s += f" [load from RPE: HR under-counted {div:.1f}x]"
-        return s
-
     has_output = False
     for d in range(history_days):
         date_curr = (start_date_obj + timedelta(days=d)).strftime("%Y-%m-%d")
@@ -702,7 +720,7 @@ def run_workout_compare(args: argparse.Namespace) -> None:
                 print(f"  PLANNED:    [{magenta(w['sport_type'].upper())}] {bold(w['title'])}{info}")
 
             if act:
-                act_str = _fmt_act(act)
+                act_str = format_actual(act, divergence=True)
                 if is_rest:
                     print(f"  ACTUAL:     {red(act_str)} {bold(red('[REST VIOLATION]'))}")
                 else:
@@ -714,7 +732,7 @@ def run_workout_compare(args: argparse.Namespace) -> None:
 
         for act in unplanned:
             act_load = runtime.garmin.activity_load(act)
-            act_str = _fmt_act(act)
+            act_str = format_actual(act, divergence=True)
             if act_load < config.minor_activity_load_threshold:
                 print(gray(f"  (minor):    {act_str}"))
             elif date_covered(date_curr, covered_ranges):
@@ -743,7 +761,9 @@ def run_workout_compare(args: argparse.Namespace) -> None:
         print()
         print(bold(gray("=== OUTSIDE ANY PLAN (informational) ===")))
         for act in informational:
-            print(gray(f"- {fmt_date(act['date'])}: {_fmt_act(act)}"))
+            print(gray(
+                f"- {fmt_date(act['date'])}: {format_actual(act, divergence=True)}"
+            ))
 
     if not getattr(args, 'no_mark', False) and config.google_calendar_id:
         marked = mark_adherence_from_results(matching_results, today_str)

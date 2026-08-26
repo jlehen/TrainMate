@@ -30,12 +30,17 @@ def add_workout_parser(subparsers, pull_bypass_parser, llm_debug_parser):
     # workout list
     w_list = workout_subparsers.add_parser(
         "list",
+        parents=[pull_bypass_parser],
         help="Show all planned workouts",
         description=(
             "List planned workouts chronologically. With no filter at all, shows a 7-day "
             "window from today; with only --type, shows today onward. Name workout IDs or "
-            "dates as arguments to show just those (handy with -v). Reads the local "
-            "database only (no Garmin pull)."
+            "dates as arguments to show just those (handy with -v). Every listed session "
+            "dated today or earlier also carries what became of it — "
+            "[DONE]/[PARTIAL]/[MISSED]/[REST OK]/[REST BROKEN], or [NOT YET] for one still "
+            "ahead of you today — and -v names the effort it matched and what a [PARTIAL] "
+            "differed by. Garmin data is freshened over that past span first unless "
+            "--no-pull is given; a listing entirely in the future never pulls."
         )
     )
     w_list.set_defaults(func=run_workout_list)

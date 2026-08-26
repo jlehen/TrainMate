@@ -356,6 +356,20 @@ number. To see one session's recording rather than a
 week's, `data show-activities --zones` gives you per-activity zones and the
 coverage that tells you when the strap dropped out.
 
+Look at the sessions themselves, and every one already behind you says whether it
+happened:
+```bash
+./tm workout list              # the week ahead
+./tm workout list -d -7d..     # the week behind as well, each session graded
+./tm workout list -d -7d.. -v  # ...and what it was graded against
+```
+A finished session reads `[DONE]`, `[PARTIAL]`, `[MISSED]`, `[REST OK]` or
+`[REST BROKEN]`; one still ahead of you *today* reads `[NOT YET]`, because the day
+isn't over and a session you haven't got to yet is not a session you skipped. `-v`
+adds the activity it matched and, for a `[PARTIAL]`, by how much it differed. It is
+the same verdict `workout compare` reports and the same tag that lands on the
+Calendar event — graded once, shown wherever you happen to be looking.
+
 Your workouts sync to Google Calendar automatically as part of `plan generate`,
 `workout generate` (once you accept its proposal), and the daily `workout adapt` —
 there's no separate sync step.

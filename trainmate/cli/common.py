@@ -3,7 +3,7 @@ import os
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
 from trainmate.config import config
-from trainmate.adherence import analyze_adherence, classify_adherence
+from trainmate.adherence import STATUS_LABELS, analyze_adherence, classify_adherence
 from trainmate.util import cyan, yellow, cmd, fmt_date, wrap_text, today_str as _today_str
 
 # `trainmate_cli` (the `db`/`garmin`/`calendar_syncer` facade) is imported lazily
@@ -75,16 +75,75 @@ def ensure_recent_data(
             ))
 
 
-def _format_actual(act: Dict[str, Any]) -> str:
-    """Compact 'actual effort' line for a Calendar adherence header, e.g.
-    '[running] Morning Run (48min, load 62, TSS 58)'."""
+def format_actual(act: Dict[str, Any], divergence: bool = False) -> str:
+    """Compact 'actual effort' line for one completed activity, e.g.
+    '[running] Morning Run (48min, load 62, TSS 58)'.
+
+    One renderer for every surface that names the effort a planned session matched: the
+    Calendar adherence header, `workout compare`'s ACTUAL row and `workout list -v`.
+    `divergence` adds the "load from RPE" note — compare shows it, the Calendar header
+    does not, and that is the only difference the three ever had."""
     from trainmate import runtime
     parts = [f"{act['duration_sec'] / 60:.0f}min", f"load {runtime.garmin.activity_load(act):.0f}"]
     if act.get('tss'):
         parts.append(f"TSS {act['tss']:.0f}")
     if act.get('rpe'):
         parts.append(f"RPE {act['rpe']}")
-    return f"[{act['activity_type']}] {act['activity_name']} ({', '.join(parts)})"
+    line = f"[{act['activity_type']}] {act['activity_name']} ({', '.join(parts)})"
+    if not divergence:
+        return line
+    div = runtime.garmin.rpe_divergence(act)
+    if div is None:
+        return line
+    return f"{line} [load from RPE: HR under-counted {div:.1f}x]"
+
+
+def adherence_results(start_date: str, end_date: str) -> List[Dict[str, Any]]:
+    """`analyze_adherence`'s planned-vs-actual pairing over [start_date, end_date],
+    read from the cache (this never pulls — the caller owns that).
+
+    The one place a window becomes a pairing, and it is fed **every** planned workout in
+    that window rather than the ones a caller means to show (ARCHITECTURE.md §5)."""
+    from trainmate import runtime
+    workouts = runtime.db.get_workouts(start_date=start_date, end_date=end_date)
+    activities = runtime.db.get_completed_activities(start_date=start_date, end_date=end_date)
+    start_obj = datetime.strptime(start_date, "%Y-%m-%d").date()
+    end_obj = datetime.strptime(end_date, "%Y-%m-%d").date()
+    covered_ranges = runtime.db.get_mesocycle_ranges(start_date, end_date)
+    _, matching_results, _ = analyze_adherence(
+        planned_workouts=workouts,
+        completed_activities=activities,
+        start_date_obj=start_obj,
+        history_days=(end_obj - start_obj).days + 1,
+        minor_activity_load_threshold=config.minor_activity_load_threshold,
+        covered_ranges=covered_ranges,
+        pending_from=_today_str(),
+    )
+    return matching_results
+
+
+def adherence_verdicts(start_date: str, end_date: str) -> Dict[int, Dict[str, Any]]:
+    """Per-workout-id verdict over [start_date, end_date], for the listings that show
+    what became of a planned session (ARCHITECTURE.md §5, "Backward adherence marking").
+
+    Each value is `classify_adherence`'s ``{"status", "reasons"}`` plus the athlete-facing
+    `label` and the `completed` activity it graded against — so a caller can name the
+    verdict and the effort without re-looking-up either."""
+    threshold = config.minor_activity_load_threshold
+    verdicts: Dict[int, Dict[str, Any]] = {}
+    for r in adherence_results(start_date, end_date):
+        w = r['planned']
+        if w.get('id') is None:
+            continue
+        verdict = classify_adherence(
+            w, r['completed'], threshold, pending=r.get('pending', False)
+        )
+        verdicts[w['id']] = {
+            **verdict,
+            "label": STATUS_LABELS.get(verdict["status"], verdict["status"]),
+            "completed": r['completed'],
+        }
+    return verdicts
 
 
 def mark_adherence_from_results(
@@ -116,7 +175,7 @@ def mark_adherence_from_results(
         if r['date'] == today_str and not r['completed']:
             continue
         verdict = classify_adherence(w, r['completed'], threshold)
-        actual = _format_actual(r['completed']) if r['completed'] else None
+        actual = format_actual(r['completed']) if r['completed'] else None
         adherence = {
             "status": verdict["status"],
             "actual": actual,
@@ -142,28 +201,13 @@ def mark_adherence_from_results(
 def mark_adherence_range(start_date: str, end_date: str) -> int:
     """Computes adherence over [start_date, end_date] and marks strictly-past
     Calendar events with the verdict. No-op (returns 0) when no calendar is
-    configured. Reuses `analyze_adherence`'s pairing; the `data pull` ride-along
+    configured. Reads the shared `adherence_results` pairing; the `data pull` ride-along
     calls this once fresh activity data has landed."""
-    from trainmate import runtime
     if not config.google_calendar_id:
         return 0
-    workouts = runtime.db.get_workouts(start_date=start_date, end_date=end_date)
-    activities = runtime.db.get_completed_activities(start_date=start_date, end_date=end_date)
-    start_obj = datetime.strptime(start_date, "%Y-%m-%d").date()
-    end_obj = datetime.strptime(end_date, "%Y-%m-%d").date()
-    history_days = (end_obj - start_obj).days + 1
-    covered_ranges = runtime.db.get_mesocycle_ranges(start_date, end_date)
-    today = _today_str()
-    _, matching_results, _ = analyze_adherence(
-        planned_workouts=workouts,
-        completed_activities=activities,
-        start_date_obj=start_obj,
-        history_days=history_days,
-        minor_activity_load_threshold=config.minor_activity_load_threshold,
-        covered_ranges=covered_ranges,
-        pending_from=today,
+    return mark_adherence_from_results(
+        adherence_results(start_date, end_date), _today_str()
     )
-    return mark_adherence_from_results(matching_results, today)
 
 
 def constraint_line(c: Dict[str, Any], needs_a_pass: bool = False) -> str:
@@ -213,6 +257,11 @@ def report_unhonored(constraints: List[Dict[str, Any]]) -> None:
 
 REST_DAY_LINE = "Rest day — enjoy it 🎉"
 
+# A session the athlete has already trained, in companion voice. Only `done` and
+# `partial` earn a line — DESIGN_bot_simple_frontend.md §6 says why the other verdicts
+# say nothing at all.
+SIMPLE_DONE_LINE = "✅ Already done — nice work 💪"
+
 # Emoji per canonical sport for the simple session lines; unknown sports get the
 # generic one rather than nothing, so a new sport never renders bare.
 SPORT_EMOJI = {
@@ -251,17 +300,26 @@ def simple_session_line(w: Dict[str, Any], lead: Optional[str] = None) -> str:
     return f"{prefix}{w.get('title') or w.get('sport_type', 'Session')}{duration_str}"
 
 
-def simple_day_lines(workouts: List[Dict[str, Any]], date_str: str) -> List[str]:
+def simple_day_lines(
+    workouts: List[Dict[str, Any]], date_str: str,
+    verdicts: Optional[Dict[int, Dict[str, Any]]] = None,
+) -> List[str]:
     """Simple rendering of one day's schedule: session line(s) plus the wrapped
     description (the coach's actual prescription), or the one-line rest message.
     Any empty day gets the rest line, whatever the reason it is empty
-    (DESIGN_bot_simple_frontend.md §10)."""
+    (DESIGN_bot_simple_frontend.md §10).
+
+    `verdicts` is `adherence_verdicts`' map; a session already trained gets the done
+    line, and every other verdict renders as it did before (§6 tone rule)."""
     if not workouts:
         return [REST_DAY_LINE]
     day_word = "Today" if date_str == _today_str() else fmt_date(date_str)
     lines: List[str] = []
     for w in workouts:
         lines.append(simple_session_line(w, lead=day_word))
+        status = ((verdicts or {}).get(w.get("id")) or {}).get("status")
+        if status in ("done", "partial"):
+            lines.append(SIMPLE_DONE_LINE)
         description = (w.get("description") or "").strip()
         if description:
             lines.append(wrap_text(description))

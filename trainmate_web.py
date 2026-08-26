@@ -14,11 +14,12 @@ race the CLI or the bot over a workout row.
 """
 from datetime import datetime, timedelta
 from flask import Flask, jsonify, request, send_from_directory
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 from trainmate import runtime
 from trainmate import benchmarks, garmin, intensity, llm_models, plan_diff, progression
 from trainmate.adherence import analyze_adherence, classify_adherence, date_covered
 from trainmate.calendar_state import calendar_status
+from trainmate.cli.common import adherence_verdicts
 from trainmate.cli.workouts._helpers import modification_markers
 from trainmate.config import config, plan_config_hash
 from trainmate.sports import canonical_sport
@@ -54,11 +55,15 @@ def index() -> Any:
 
 # --- Helpers ---
 
-def _annotate_workout(workout: Dict[str, Any]) -> Dict[str, Any]:
-    """Adds the *derived* calendar fact the CLI shows as [SYNCED]/[STALE], and the
-    modification markers it shows as [ADAPTED ×2]/[SWAPPED]/… (ARCHITECTURE.md §5).
+def _annotate_workout(
+    workout: Dict[str, Any], adherence: Optional[Dict[str, Any]] = None
+) -> Dict[str, Any]:
+    """Adds the *derived* calendar fact the CLI shows as [SYNCED]/[STALE], the
+    modification markers it shows as [ADAPTED ×2]/[SWAPPED]/…, and — for a session
+    today or earlier — the adherence verdict it shows as [DONE]/[MISSED]/…
+    (ARCHITECTURE.md §5).
 
-    Both are computed here, never stored, so the frontend renders them without
+    All three are computed here, never stored, so the frontend renders them without
     re-deriving the rules (and risking drift from the writers). `modification_markers`
     is the CLI's own renderer, shared rather than copied
     (DESIGN_workout_revisions.md §7)."""
@@ -66,6 +71,7 @@ def _annotate_workout(workout: Dict[str, Any]) -> Dict[str, Any]:
         **workout,
         "calendar_status": calendar_status(workout),
         "modification_markers": modification_markers(workout),
+        "adherence": adherence,
     }
 
 
@@ -187,7 +193,8 @@ def list_constraints() -> Any:
 @app.route("/api/workouts", methods=["GET"])
 def list_workouts() -> Any:
     """Workouts in a date range (mirrors `workout list`). Rows carry the derived
-    `calendar_status` + `modification_markers` the CLI renders as markers."""
+    `calendar_status` + `modification_markers` the CLI renders as markers, plus the
+    `adherence` verdict for every row today or earlier."""
     start_date = request.args.get("start_date")
     end_date = request.args.get("end_date")
     include_removed = request.args.get("include_removed", "").lower() in ("1", "true", "yes")
@@ -196,7 +203,13 @@ def list_workouts() -> Any:
         start_date=start_date, end_date=end_date,
         sport_type=sport_type, include_removed=include_removed,
     )
-    return jsonify([_annotate_workout(w) for w in workouts])
+    # Graded over the listing's own past span rather than the requested window: the
+    # request may be open-ended on either side, and the verdicts are the CLI's
+    # (`adherence_verdicts`), never a second implementation. No pull — §8.
+    today = today_str()
+    past = sorted(w["date"] for w in workouts if w["date"] <= today)
+    verdicts = adherence_verdicts(past[0], past[-1]) if past else {}
+    return jsonify([_annotate_workout(w, verdicts.get(w["id"])) for w in workouts])
 
 
 @app.route("/api/workouts/compare", methods=["GET"])

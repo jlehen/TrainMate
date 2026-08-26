@@ -620,6 +620,16 @@ function renderWorkoutCard(w) {
     const iconClass = `workout-sport-icon ${w.sport_type || "rest"}`;
 
     const badges = [];
+    // What became of a session already behind us, first because it is the salient state
+    // for a finished day. The word comes from the API (`adherence.label`) rather than a
+    // copy of the vocabulary here (ARCHITECTURE.md §5).
+    const adherence = w.adherence;
+    if (adherence && adherence.label) {
+        const why = (adherence.reasons || []).join("; ");
+        const title = why ? ` title="${escapeHtml(why)}"` : "";
+        badges.push(`<span class="wbadge adh-${escapeHtml(adherence.status)}"${title}>`
+            + `${escapeHtml(adherence.label.toUpperCase())}</span>`);
+    }
     // One badge per marker: a session eased twice and then swapped shows both
     // (DESIGN_workout_revisions.md §12).
     for (const marker of modMarkers) {

@@ -1326,6 +1326,11 @@ header {
 .wbadge.synced { color: #6ee7b7; background: rgba(16,185,129,0.12); border: 1px solid rgba(16,185,129,0.3); }
 .wbadge.stale { color: #fcd34d; background: rgba(245,158,11,0.1); border: 1px solid rgba(245,158,11,0.25); }
 .wbadge.removed { color: #fca5a5; background: rgba(239,68,68,0.12); border: 1px solid rgba(239,68,68,0.3); }
+/* Adherence verdicts, for a day already behind us (ARCHITECTURE.md §5). */
+.wbadge.adh-done, .wbadge.adh-rest_ok { color: #6ee7b7; background: rgba(16,185,129,0.16); border: 1px solid rgba(16,185,129,0.4); }
+.wbadge.adh-partial { color: #fcd34d; background: rgba(245,158,11,0.16); border: 1px solid rgba(245,158,11,0.4); }
+.wbadge.adh-missed, .wbadge.adh-rest_violation { color: #fca5a5; background: rgba(239,68,68,0.16); border: 1px solid rgba(239,68,68,0.4); }
+.wbadge.adh-pending { color: var(--text-muted); background: rgba(148,163,184,0.12); border: 1px solid rgba(148,163,184,0.28); }
 
 /* --- DATA TABLES (History) --- */
 .data-table { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
