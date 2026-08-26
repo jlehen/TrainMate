@@ -29,6 +29,21 @@ function parseLocalDate(dateStr) {
     return new Date(parts[0], parts[1] - 1, parts[2]);
 }
 
+/** 'YYYY-MM-DD' -> 'YYYY-MM-DD Ddd', the same form `util.fmt_date` renders in the CLI.
+ *  Anything unparseable comes back untouched, so a row's missing date stays blank. */
+function fmtDate(dateStr) {
+    if (!dateStr) return "";
+    const d = parseLocalDate(dateStr);
+    if (isNaN(d)) return String(dateStr);
+    return `${dateStr} ${d.toLocaleDateString("en-US", { weekday: "short" })}`;
+}
+
+/** A date range with the weekday on both ends; one day long collapses to one date. */
+function fmtSpan(start, end, sep = " to ") {
+    if (start && start === end) return fmtDate(start);
+    return `${fmtDate(start)}${sep}${fmtDate(end)}`;
+}
+
 function todayStr() {
     const d = new Date();
     const pad = n => String(n).padStart(2, "0");
@@ -168,7 +183,7 @@ async function fetchStatus() {
             if (data.macrocycle.created_at) {
                 const created = new Date(data.macrocycle.created_at);
                 const formattedDate = created.toLocaleDateString("en-US", {
-                    month: "short", day: "numeric", year: "numeric"
+                    weekday: "short", month: "short", day: "numeric", year: "numeric"
                 });
                 const formattedTime = created.toLocaleTimeString("en-US", {
                     hour: "numeric", minute: "2-digit"
@@ -221,7 +236,7 @@ function renderSyncFreshness(syncState) {
         el.innerText = "Garmin data: never pulled — run 'tm data pull' (CLI).";
         return;
     }
-    const through = syncState.through_date || "?";
+    const through = syncState.through_date ? fmtDate(syncState.through_date) : "?";
     let ago = "";
     if (syncState.last_pull_utc) {
         const last = new Date(syncState.last_pull_utc);
@@ -235,7 +250,7 @@ function renderSyncFreshness(syncState) {
 
 /** One note of the plan's feedback log: date, what it was filed to, the text. */
 function feedbackNote(n) {
-    const date = n.created_at ? String(n.created_at).slice(0, 10) : "";
+    const date = n.created_at ? fmtDate(String(n.created_at).slice(0, 10)) : "";
     return `<div class="pf-note">`
         + `<span class="pf-meta">${escapeHtml(date)}`
         + ` · ${escapeHtml(n.mesocycle_name || "plan-level")}</span>`
@@ -288,7 +303,7 @@ function renderStrategyInputs(macrocycle) {
         ? goals.map(g => `<li>`
             + `<span class="si-title">${escapeHtml(g.title || "")}</span> `
             + `<span class="si-meta">(${escapeHtml((g.sport_type || "").toUpperCase())}) `
-            + `· ${escapeHtml(g.target_date || "")}</span>`
+            + `· ${escapeHtml(fmtDate(g.target_date))}</span>`
             + (g.description ? `<div class="si-desc">${escapeHtml(g.description)}</div>` : "")
             + `</li>`).join("")
         : `<li class="si-empty">None</li>`;
@@ -307,7 +322,7 @@ function renderStrategyInputs(macrocycle) {
             return `<li>`
                 + `<span class="si-title">${escapeHtml(e.title || "")}</span> `
                 + `<span class="si-meta">(${tags}) `
-                + `· ${escapeHtml(e.start_date || "")} → ${escapeHtml(e.end_date || "")}</span>`
+                + `· ${escapeHtml(fmtSpan(e.start_date, e.end_date, " → "))}</span>`
                 + (detail ? `<div class="si-desc">${escapeHtml(detail)}</div>` : "")
                 + `</li>`;
         }).join("")
@@ -369,7 +384,7 @@ function renderTimeline(mesocycles, planFeedback) {
         block.className = "cycle-block";
         block.style.width = `${widthPct}%`;
         block.innerText = m.name;
-        block.title = `${m.name} (${m.start_date} to ${m.end_date})`;
+        block.title = `${m.name} (${fmtSpan(m.start_date, m.end_date)})`;
 
         let status = "future";
         if (end < today) status = "done";
@@ -381,7 +396,8 @@ function renderTimeline(mesocycles, planFeedback) {
             block.classList.add("selected");
             detailsBox.style.display = "block";
             detailsName.innerText = m.name;
-            detailsDates.innerText = `${m.start_date} to ${m.end_date} (${duration} days)`;
+            detailsDates.innerText =
+                `${fmtSpan(m.start_date, m.end_date)} (${duration} days)`;
             detailsFocus.innerText = m.focus;
             const filed = (planFeedback || []).filter(n => n.mesocycle_id === m.id);
             detailsFeedback.innerHTML = filed.length
@@ -486,7 +502,7 @@ async function fetchObjectives() {
             item.innerHTML = `
                 <div class="item-info">
                     <span class="item-title">${escapeHtml(g.title)} (${escapeHtml(sportsList)})</span>
-                    <span class="item-meta">ID ${g.id} · Target: ${escapeHtml(g.target_date)} · ${escapeHtml(g.status)}</span>
+                    <span class="item-meta">ID ${g.id} · Target: ${escapeHtml(fmtDate(g.target_date))} · ${escapeHtml(g.status)}</span>
                     ${g.description ? `<span class="si-desc">${escapeHtml(g.description)}</span>` : ""}
                 </div>`;
             container.appendChild(item);
@@ -518,7 +534,7 @@ async function fetchEvents() {
             item.innerHTML = `
                 <div class="item-info">
                     <span class="item-title">${escapeHtml(ev.title)} ${badge}</span>
-                    <span class="item-meta">ID ${ev.id} · ${escapeHtml(ev.start_date)} → ${escapeHtml(ev.end_date)}`
+                    <span class="item-meta">ID ${ev.id} · ${escapeHtml(fmtSpan(ev.start_date, ev.end_date, " → "))}`
                     + (ev.replan ? " · replan" : "") + `</span>
                     ${ev.description ? `<span class="si-desc">${escapeHtml(ev.description)}</span>` : ""}
                 </div>`;
@@ -693,7 +709,8 @@ function renderCompare(data) {
 
     const head = document.createElement("div");
     head.className = "item-meta compare-filters";
-    head.innerText = `From ${data.filters.start_date} to ${data.filters.end_date}` +
+    head.innerText = `From ${fmtDate(data.filters.start_date)} `
+        + `to ${fmtDate(data.filters.end_date)}` +
         (data.filters.sport ? ` · ${data.filters.sport}` : "");
     target.appendChild(head);
 
@@ -705,7 +722,7 @@ function renderCompare(data) {
     data.days.forEach(day => {
         const block = document.createElement("div");
         block.className = "compare-day";
-        let html = `<div class="compare-date">${day.date}</div>`;
+        let html = `<div class="compare-date">${fmtDate(day.date)}</div>`;
         day.results.forEach(r => {
             const w = r.planned;
             const planned = r.is_rest ? `[REST]` :
@@ -747,7 +764,7 @@ function renderCompare(data) {
     }
     if (data.informational && data.informational.length) {
         summary.innerHTML += `<div class="compare-disc-head" style="margin-top:0.75rem;">Outside any plan (informational)</div>` +
-            data.informational.map(a => `<div class="actual-muted">${a.date}: [${a.activity_type}] ${escapeHtml(a.activity_name)}</div>`).join("");
+            data.informational.map(a => `<div class="actual-muted">${fmtDate(a.date)}: [${a.activity_type}] ${escapeHtml(a.activity_name)}</div>`).join("");
     }
     target.appendChild(summary);
 }
@@ -908,7 +925,7 @@ async function fetchBenchmarks() {
                 + `<span class="bm-kind">${escapeHtml(r.label)}</span> `
                 + `<span class="bm-value">${escapeHtml(r.formatted)}</span> ${delta}`
                 + `</div>`
-                + `<div class="item-meta">ID ${r.id} · ${escapeHtml(r.date)} · `
+                + `<div class="item-meta">ID ${r.id} · ${escapeHtml(fmtDate(r.date))} · `
                 + `${escapeHtml(sportTitle(r.sport_type))} · ${escapeHtml(r.source || "test")}</div>`
                 + (r.note ? `<div class="si-desc">${escapeHtml(r.note)}</div>` : "")
                 + `</div>`;
@@ -1024,7 +1041,7 @@ async function fetchHistory() {
         const res = await fetch(`${API_BASE}/api/activities?${range}`);
         const acts = await res.json();
         document.getElementById("activities-table").innerHTML = buildTable(acts, [
-            { label: "Date", key: "date" },
+            { label: "Date", get: a => fmtDate(a.date) },
             { label: "Type", key: "activity_type" },
             { label: "Name", key: "activity_name" },
             { label: "Duration", get: a => `${(a.duration_sec / 60).toFixed(0)}min` },
@@ -1040,7 +1057,7 @@ async function fetchHistory() {
         const res = await fetch(`${API_BASE}/api/metrics?${range}`);
         const metrics = await res.json();
         document.getElementById("metrics-table").innerHTML = buildTable(metrics, [
-            { label: "Date", key: "date" },
+            { label: "Date", get: m => fmtDate(m.date) },
             { label: "RHR", key: "rhr" },
             { label: "HRV", key: "hrv" },
             { label: "Sleep", key: "sleep_score" },
@@ -1060,7 +1077,7 @@ async function fetchHistory() {
         renderSignalVocab(vocab.metrics || []);
         renderSignalChart(sigs);
         document.getElementById("signal-table").innerHTML = buildTable(sigs, [
-            { label: "Date", key: "date" },
+            { label: "Date", get: r => fmtDate(r.date) },
             { label: "Metric", key: "metric" },
             { label: "Value", key: "value" },
             { label: "Note", key: "text" },
@@ -1079,7 +1096,7 @@ function renderSignalVocab(metrics) {
         return;
     }
     el.innerHTML = metrics.map(m =>
-        `<span class="sig-chip" title="${escapeHtml(m.first_date)} → ${escapeHtml(m.last_date)}">`
+        `<span class="sig-chip" title="${escapeHtml(fmtSpan(m.first_date, m.last_date, " → "))}">`
         + `${escapeHtml(m.metric)} <span class="sig-chip-count">${m.count}</span></span>`).join("");
 }
 
@@ -1104,7 +1121,10 @@ function renderSignalChart(rows) {
         const pad = n => String(n).padStart(2, "0");
         days.push(`${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`);
     }
-    if (badge) badge.innerText = `${dates[0]} → ${dates[dates.length - 1]} · ${rows.length} signals`;
+    if (badge) {
+        badge.innerText = `${fmtSpan(dates[0], dates[dates.length - 1], " → ")}`
+            + ` · ${rows.length} signals`;
+    }
 
     const byMetric = new Map();
     rows.forEach(r => {
@@ -1205,7 +1225,7 @@ async function loadPlanVersions() {
             const active = v.status !== "superseded";
             const created = v.created_at
                 ? new Date(v.created_at).toLocaleDateString("en-US",
-                    { month: "short", day: "numeric", year: "numeric" })
+                    { weekday: "short", month: "short", day: "numeric", year: "numeric" })
                 : "?";
             let excerpt = (v.strategy || "").replace(/\s+/g, " ").trim();
             if (excerpt.length > 90) excerpt = excerpt.slice(0, 89) + "…";
@@ -1272,7 +1292,7 @@ function renderFeedbackSides(entry) {
     return ["from", "to"].map((side, i) => {
         const notes = entry[side] || [];
         const body = notes.length
-            ? notes.map(n => `<div class="pd-detail">${escapeHtml(n.date)} · `
+            ? notes.map(n => `<div class="pd-detail">${escapeHtml(fmtDate(n.date))} · `
                 + `${escapeHtml(n.filing || "plan-level")} · ${escapeHtml(n.text)}</div>`).join("")
             : `<div class="pd-empty">none</div>`;
         return `<div class="pd-detail"><b>${i === 0 ? "A" : "B"}</b>:</div>${body}`;
@@ -1286,14 +1306,15 @@ function renderMesocycles(entries) {
         if (e.change === "added" || e.change === "removed") {
             const added = e.change === "added";
             return diffLine(added ? "+" : "−",
-                `${e.name} (${e.dates.start} → ${e.dates.end})`, added ? "added" : "removed");
+                `${e.name} (${fmtSpan(e.dates.start, e.dates.end, " → ")})`,
+                added ? "added" : "removed");
         }
         const header = e.renamed ? `${e.from_name}  →  ${e.name}` : e.name;
         let out = diffLine("~", header, "changed");
         if (e.dates) {
-            out += `<div class="pd-detail">dates ${escapeHtml(e.dates.from.start)} → `
-                + `${escapeHtml(e.dates.from.end)}  ⇒  ${escapeHtml(e.dates.to.start)} → `
-                + `${escapeHtml(e.dates.to.end)}</div>`;
+            out += `<div class="pd-detail">dates `
+                + `${escapeHtml(fmtSpan(e.dates.from.start, e.dates.from.end, " → "))}`
+                + `  ⇒  ${escapeHtml(fmtSpan(e.dates.to.start, e.dates.to.end, " → "))}</div>`;
         }
         for (const f of e.fields) {
             out += `<div class="pd-detail">${escapeHtml(f.field)}: `
@@ -1359,7 +1380,7 @@ async function loadPlanDiff(fromVersion) {
         const d = data.diff;
         const when = v => v.created_at
             ? new Date(v.created_at).toLocaleDateString("en-US",
-                { month: "short", day: "numeric", year: "numeric" })
+                { weekday: "short", month: "short", day: "numeric", year: "numeric" })
             : "?";
         panel.innerHTML = `<div class="pd-head">`
             + `<span class="pd-title">Plan ID ${d.from.id} <span class="pd-arrow">→</span> `
@@ -1402,7 +1423,7 @@ async function loadWorkoutBatches() {
         }
         listEl.innerHTML = batches.map(b => {
             const when = new Date(b.created_at).toLocaleString("en-US",
-                { month: "short", day: "numeric", year: "numeric",
+                { weekday: "short", month: "short", day: "numeric", year: "numeric",
                   hour: "2-digit", minute: "2-digit" });
             // A change that appended nothing — an adapt that held — is listed as itself.
             const state = b.held
@@ -1412,7 +1433,7 @@ async function loadWorkoutBatches() {
                     : `<span class="item-meta">all in the past</span>`;
             const plans = (b.macrocycle_ids || []).join(", ");
             const span = b.first_date
-                ? `${escapeHtml(b.first_date)} → ${escapeHtml(b.last_date)}`
+                ? `${escapeHtml(fmtSpan(b.first_date, b.last_date, " → "))}`
                 : "nothing changed";
             return `<div class="plan-version-row">`
                 + `<div class="plan-version-head">`

@@ -3,6 +3,7 @@ import unittest
 from unittest.mock import patch
 
 from tests.helpers import clear_all_tables, run_cli, rebind_test_db
+from trainmate.util import fmt_date
 
 TEST_DB_PATH = os.path.join(os.path.dirname(__file__), "test_trainmate_cli_signals.db")
 
@@ -52,7 +53,9 @@ class TestCliSignals(unittest.TestCase):
         self.assertIn("3 days", stdout)
         # Each authored day is echoed in the exact 'signal list' rendering.
         for day in ("2026-06-25", "2026-06-26", "2026-06-27"):
-            self.assertIn(f"| {day} | heat = 38.0 — severe heatwave (38.0)", stdout)
+            self.assertIn(
+                f"| {fmt_date(day)} | heat = 38.0 — severe heatwave (38.0)", stdout
+            )
         # One tagged event authored per day in the range.
         self.assertEqual(mock_calendar.add_signal_event.call_count, 3)
         rows = test_db.get_daily_signals("2026-06-25", "2026-06-27", metric="heat")

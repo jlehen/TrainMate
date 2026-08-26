@@ -4,7 +4,7 @@ import sys
 from trainmate import runtime
 from trainmate.util import (
     bold, green, red, yellow, cyan, magenta, gray, cmd,
-    format_labeled_block,
+    fmt_timestamp, format_labeled_block,
 )
 
 
@@ -52,9 +52,12 @@ def _echo_learning(learning_id: int) -> None:
 
 def _print_learning_dates(l: dict) -> None:
     """Prints the created/updated/reinforced timestamps shared by `list -v` and `show`."""
-    print(f"  created   : {l.get('created_at') or '-'}")
-    print(f"  updated   : {l.get('updated_at') or '-'}")
-    print(f"  reinforced: {l.get('last_reinforced_at') or '-'}")
+    for label, field in (
+        ("created   ", "created_at"), ("updated   ", "updated_at"),
+        ("reinforced", "last_reinforced_at"),
+    ):
+        value = l.get(field)
+        print(f"  {label}: {fmt_timestamp(value) if value else '-'}")
 
 
 def run_learning_list(args: argparse.Namespace) -> None:

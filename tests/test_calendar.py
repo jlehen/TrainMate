@@ -119,8 +119,8 @@ class TestCalendarSync(unittest.TestCase):
         self.assertIn("Duration: 20m | TSS: 15 | RPE: 4", desc)
         self.assertNotIn("Originally:", desc)
         # Lifecycle line: planned timestamp, last-adapted timestamp, ease count.
-        self.assertIn("Planned: 2026-06-01 14:30", desc)
-        self.assertIn("Last adapted: 2026-06-11 09:00", desc)
+        self.assertIn("Planned: 2026-06-01 Mon 14:30", desc)
+        self.assertIn("Last adapted: 2026-06-11 Thu 09:00", desc)
         self.assertIn("Adapted ×2", desc)
         # The lifecycle line sits above the technical ID footer.
         self.assertTrue(desc.index("Planned: 2026-06-01") < desc.index("Workout: 42"))
@@ -158,7 +158,7 @@ class TestCalendarSync(unittest.TestCase):
         ][0].kwargs["body"]
         desc = body.get("description", "")
 
-        self.assertIn("Planned: 2026-06-01 14:30", desc)
+        self.assertIn("Planned: 2026-06-01 Mon 14:30", desc)
         self.assertNotIn("Originally:", desc)
         self.assertNotIn("Last adapted:", desc)
         self.assertNotIn("Adapted ×", desc)

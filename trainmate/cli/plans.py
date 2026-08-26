@@ -9,9 +9,9 @@ from trainmate.adherence import planned_load
 from trainmate.util import (
     aside, bold, green, red, yellow, cyan, blue, magenta, gray, cmd, visible_len,
     pad_visible, wrap_text, format_labeled_block, default_wrap_width,
-    today_date as _today_date,
+    fmt_date, fmt_span, today_date as _today_date,
 )
-from trainmate.cli.common import fmt_date, ensure_recent_data, report_unhonored
+from trainmate.cli.common import ensure_recent_data, report_unhonored
 from trainmate.cli.selectors import (
     CURRENT, IdRange, SelectorError, parse_id_range, resolve_meso_atom,
 )
@@ -530,7 +530,7 @@ def _print_plan(next_goal: dict, macrocycle: dict, args: argparse.Namespace) -> 
         superseded_on = str(macrocycle.get('superseded_at', ''))[:10]
         header = (
             f"=== SUPERSEDED MACROCYCLE STRATEGY [Macrocycle ID: {macrocycle['id']}]"
-            + (f" superseded {superseded_on}" if superseded_on else "")
+            + (f" superseded {fmt_date(superseded_on)}" if superseded_on else "")
             + " ==="
         )
         print(bold(yellow("\n" + header)))
@@ -651,10 +651,10 @@ def run_plan_versions(args: argparse.Namespace) -> None:
             status = green("active")
         else:
             superseded = str(v.get('superseded_at', ''))[:10]
-            status = gray("superseded" + (f" {superseded}" if superseded else ""))
+            status = gray("superseded" + (f" {fmt_date(superseded)}" if superseded else ""))
         gen = f"generated {fmt_date(created)}" if created else ""
         print(
-            f"{marker} {pad_visible(id_str, 16)} {pad_visible(status, 24)} {gray(gen)}"
+            f"{marker} {pad_visible(id_str, 16)} {pad_visible(status, 28)} {gray(gen)}"
         )
         if excerpt:
             print(f"    {gray(excerpt)}")
@@ -703,15 +703,18 @@ def _print_mesocycles_diff(entries: list, width: int, full: bool) -> None:
     for e in changed:
         if e['change'] in ('added', 'removed'):
             added = e['change'] == 'added'
-            label = f"{e['name']} ({e['dates']['start']} -> {e['dates']['end']})"
+            label = (
+                f"{e['name']} "
+                f"({fmt_span(e['dates']['start'], e['dates']['end'], sep=' -> ')})"
+            )
             _print_change("+" if added else "-", label, width, green if added else red)
             continue
         header = f"{e['from_name']}  =>  {e['name']}" if e['renamed'] else e['name']
         _print_change("~", header, width, yellow)
         if e['dates']:
             frm, to = e['dates']['from'], e['dates']['to']
-            print(f"      dates {cyan(frm['start'])} -> {cyan(frm['end'])}  =>  "
-                  f"{cyan(to['start'])} -> {cyan(to['end'])}")
+            print(f"      dates {cyan(fmt_date(frm['start']))} -> {cyan(fmt_date(frm['end']))}"
+                  f"\n         =>  {cyan(fmt_date(to['start']))} -> {cyan(fmt_date(to['end']))}")
         for f in e['fields']:
             print(f"      {f['field']}: {f['from'] or '—'}  =>  {f['to'] or '—'}")
         if e['focus']:
@@ -787,11 +790,12 @@ def _print_thresholds_diff(diff: dict, width: int) -> None:
 
 
 def _version_line(tag: str, macro: dict) -> str:
-    """'A  Macrocycle 12  generated 2026-07-29  superseded 2026-07-31' for a diff header."""
+    """'A  Macrocycle 12  generated 2026-07-29 Wed  superseded 2026-07-31 Fri', for a
+    diff header."""
     created = str(macro.get('created_at', ''))[:10]
     if macro.get('status') == 'superseded':
         superseded = str(macro.get('superseded_at', ''))[:10]
-        state = gray("superseded" + (f" {superseded}" if superseded else ""))
+        state = gray("superseded" + (f" {fmt_date(superseded)}" if superseded else ""))
     else:
         state = green("active")
     gen = f"generated {fmt_date(created)}" if created else ""
@@ -892,7 +896,10 @@ def run_plan_rm(args: argparse.Namespace) -> None:
             "so their dates align correctly (e.g. running "
             + cmd("plan generate --goal <ID> --force") + "):"))
         for sg in subsequent_goals_with_plans:
-            print(yellow(f" - ID {sg['id']}: '{sg['title']}' (Target date: {sg['target_date']})"))
+            print(yellow(
+                f" - ID {sg['id']}: '{sg['title']}' "
+                f"(Target date: {fmt_date(sg['target_date'])})"
+            ))
 
 
 def run_plan_wipe(args: argparse.Namespace) -> None:

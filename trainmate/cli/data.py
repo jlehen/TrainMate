@@ -10,7 +10,7 @@ from trainmate.baselines import classify_metric, is_anomalous, UNKNOWN
 from trainmate.util import (
     aside, bold, green, red, yellow, cyan, magenta, gray, cmd, color_load_ratio, pmc_cells,
     visible_len, wrap_text, format_labeled_text, format_labeled_block, render_table,
-    is_narrow_client, default_wrap_width,
+    is_narrow_client, default_wrap_width, fmt_date, fmt_span,
 )
 from trainmate.cli.common import mark_adherence_range, pmc_warmup_cutoff
 from trainmate.cli.selectors import add_selector_args, resolve_window
@@ -86,11 +86,11 @@ def run_data_wipe(args: argparse.Namespace) -> None:
     scope = " and ".join(scope_parts)
 
     if start and end:
-        window = f" dated {start} to {end}"
+        window = f" dated {fmt_span(start, end)}"
     elif start:
-        window = f" dated {start} onward"
+        window = f" dated {fmt_date(start)} onward"
     elif end:
-        window = f" dated up to {end}"
+        window = f" dated up to {fmt_date(end)}"
     else:
         window = ""
 
@@ -128,7 +128,7 @@ def run_data_show_metrics(args: argparse.Namespace) -> None:
         _show_metrics_csv(metrics_history)
         return
 
-    range_str = f"{start_date} to {end_date}" if start_date and end_date else "All Time"
+    range_str = fmt_span(start_date, end_date) if start_date and end_date else "All Time"
     print(bold(cyan(f"\n=== ATHLETE METRICS ({range_str}) ===")))
     if not metrics_history:
         print("No metrics cached in this range.")
@@ -195,7 +195,7 @@ def run_data_show_metrics(args: argparse.Namespace) -> None:
                 sleep_base_str = f"{base['sleep_baseline_mean']:.1f}"
 
         rows.append([
-            m['date'], hrv_str, hrv_base_str, rhr_str, rhr_base_str,
+            fmt_date(m['date']), hrv_str, hrv_base_str, rhr_str, rhr_base_str,
             sleep_str, sleep_base_str, stress_str,
             ctl_str, atl_str, tsb_str, ratio_str,
         ])
@@ -293,7 +293,7 @@ def _show_activities_zones(activities: list) -> None:
             cells = [intensity.fmt_duration(s) if s else "—" for s in secs]
             cells += [""] * (7 - n)  # HR rows leave Z6/Z7 blank
             rows.append(
-                [act["date"], act["activity_type"].upper(),
+                [fmt_date(act["date"]), act["activity_type"].upper(),
                  intensity.fmt_duration(act.get("duration_sec") or 0.0), cur.tag]
                 + cells
                 + [f"{_zone_coverage(act, cur.prefix, n) * 100:.0f}%", _load_cell(act)]
@@ -335,7 +335,7 @@ def run_data_show_activities(args: argparse.Namespace) -> None:
         _show_activities_csv(activities)
         return
 
-    range_str = f"{start_date} to {end_date}" if start_date and end_date else "All Time"
+    range_str = fmt_span(start_date, end_date) if start_date and end_date else "All Time"
     print(bold(cyan(f"\n=== COMPLETED ACTIVITIES ({range_str}) ===")))
     if not activities:
         print("No completed activities found in this range.")
@@ -399,7 +399,7 @@ def run_data_show_activities(args: argparse.Namespace) -> None:
             time_str = time_str[:8]
 
         rows.append([
-            act['date'], time_str, act['activity_type'].upper(), name_str,
+            fmt_date(act['date']), time_str, act['activity_type'].upper(), name_str,
             dur_str, dist_str, elev_str, avg_hr_str, max_hr_str, watts_str,
             rpe_str, tss_str,
         ])
@@ -542,7 +542,9 @@ def _render_analysis_report(result: dict, inspect_only: bool) -> None:
     """Renders a bootstrap/reflect reconstruction + applied coach learning deltas."""
     print(bold(cyan("\n=== HISTORICAL WORKOUT ANALYSIS REPORT ===")))
     
-    # Macrocycle Overview
+    # Macrocycle Overview. The reconstruction windows keep bare dates: labelled with
+    # weekdays they outrun the bot's 48-column budget, and a window an analysis was run
+    # over is read as a span, not as days to train on.
     if "inferred_macrocycle" in result:
         im = result["inferred_macrocycle"]
         print("\n" + format_labeled_block(

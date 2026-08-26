@@ -577,8 +577,8 @@ class TestHonoredAt(unittest.TestCase):
                 redirect_stdout(buf):
             _maybe_point_at_honor(cid)
         out = " ".join(buf.getvalue().split())
-        self.assertIn("Lands in Build 1 (2026-07-01 — 2026-08-15)", out)
-        self.assertIn("adapt reaches it on 2026-07-01", out)
+        self.assertIn("Lands in Build 1 (2026-07-01 Wed — 2026-08-15 Sat)", out)
+        self.assertIn("adapt reaches it on 2026-07-01 Wed", out)
 
     def test_a_straddling_constraint_names_the_block_holding_its_UNREACHED_days(self):
         """The block is read off the constraint's END. Asked of its start, a straddling
@@ -595,7 +595,7 @@ class TestHonoredAt(unittest.TestCase):
                 redirect_stdout(buf):
             _maybe_point_at_honor(cid)
         out = " ".join(buf.getvalue().split())
-        self.assertIn("Straddles the end of Build 1 (2026-09-14)", out)
+        self.assertIn("Straddles the end of Build 1 (2026-09-14 Mon)", out)
         self.assertIn("Build 2 holds the rest", out)
         # One run covers both blocks, because generation starts today and runs through
         # the end of the block it is given — so it is Build 2 that must be named.

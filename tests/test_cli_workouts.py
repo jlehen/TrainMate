@@ -4,7 +4,7 @@ from datetime import datetime, timedelta, timezone
 from unittest.mock import patch
 
 from tests.helpers import clear_all_tables, run_cli, rebind_test_db, save_workout
-from trainmate.cli.common import fmt_date
+from trainmate.util import fmt_date
 from trainmate.coach.proposals import RevisionProposal, GenerateProposal
 from trainmate.coach.revisions import RevisionPair
 
@@ -790,7 +790,7 @@ class TestCliWorkouts(unittest.TestCase):
         exit_code, stdout, _ = self.run_cli(["workout", "compare", "-d", "2d"])
         self.assertEqual(exit_code, 0)
         self.assertIn("=== OUTSIDE ANY PLAN (informational) ===", stdout)
-        self.assertIn(f"- {yesterday_str}: [road_biking] Off-Season Ride", stdout)
+        self.assertIn(f"- {fmt_date(yesterday_str)}: [road_biking] Off-Season Ride", stdout)
         self.assertNotIn("'activity_id'", stdout)
 
     @patch("trainmate.runtime.coach_service")

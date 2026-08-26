@@ -4,16 +4,11 @@ from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
 from trainmate.config import config
 from trainmate.adherence import analyze_adherence, classify_adherence
-from trainmate.util import cyan, yellow, cmd, wrap_text, today_str as _today_str
+from trainmate.util import cyan, yellow, cmd, fmt_date, wrap_text, today_str as _today_str
 
 # `trainmate_cli` (the `db`/`garmin`/`calendar_syncer` facade) is imported lazily
 # inside the functions below: it imports this module, so a module-level import here
 # is a cycle that breaks whenever `common` is imported first (e.g. in isolation).
-
-
-def fmt_date(date_str: str) -> str:
-    """Return 'YYYY-MM-DD Ddd' (e.g. '2026-06-05 Fri')."""
-    return datetime.strptime(date_str, "%Y-%m-%d").strftime("%Y-%m-%d %a")
 
 
 def resolve_cleanup_range(args) -> tuple[Optional[str], Optional[str]]:
@@ -75,7 +70,9 @@ def ensure_recent_data(
             and rows[0].get('sleep_score') is None and rows[0].get('stress') is None
         )
         if not present:
-            print(yellow(f"Note: Garmin metrics for today ({today}) are not available yet."))
+            print(yellow(
+                f"Note: Garmin metrics for today ({fmt_date(today)}) are not available yet."
+            ))
 
 
 def _format_actual(act: Dict[str, Any]) -> str:
@@ -138,7 +135,7 @@ def mark_adherence_from_results(
                 runtime.db.mark_workout_adherence_pushed(w['id'], signature)
             marked += 1
         except Exception as e:
-            print(yellow(f"Warning: could not mark {w['date']} on Calendar: {e}"))
+            print(yellow(f"Warning: could not mark {fmt_date(w['date'])} on Calendar: {e}"))
     return marked
 
 
@@ -188,7 +185,7 @@ def constraint_line(c: Dict[str, Any], needs_a_pass: bool = False) -> str:
         tags += " · not yet in the plan"
     return (
         f"ID: {c['id']} | {yellow(c['title'])}: "
-        f"{cyan(c['start_date'])} to {cyan(c['end_date'])} | {tags}"
+        f"{cyan(fmt_date(c['start_date']))} to {cyan(fmt_date(c['end_date']))} | {tags}"
     )
 
 

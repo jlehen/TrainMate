@@ -46,7 +46,7 @@ COMMAND_ORDER = {
     "data": ["pull", "reflect", "show-metrics", "show-activities"],
 }
 
-from trainmate.cli.common import fmt_date, ensure_recent_data
+from trainmate.cli.common import ensure_recent_data
 from trainmate.cli.status import run_status
 from trainmate.cli.progress import run_progress
 from trainmate.cli.goals import (

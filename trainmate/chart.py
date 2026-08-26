@@ -16,6 +16,7 @@ from datetime import datetime
 from typing import Any, Dict, List
 
 from trainmate.progression import week_plan_denom
+from trainmate.util import fmt_date
 
 
 def _dt(date_str: str) -> datetime:
@@ -44,9 +45,9 @@ def render_timeline_png(payload: Dict[str, Any]) -> bytes:
     gap = payload.get("plan_gap")
     if gap:
         warnings.append({"code": "plan_gap", "text": (
-            f"plan generated through {gap['plan_end']} "
+            f"plan generated through {fmt_date(gap['plan_end'])} "
             f"({gap['weeks_before']} wks before objective "
-            f"{gap['objective']['target_date']})"
+            f"{fmt_date(gap['objective']['target_date'])})"
         )})
 
     fig, (ax_top, ax_bottom) = plt.subplots(

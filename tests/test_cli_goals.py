@@ -114,7 +114,9 @@ class TestCliGoals(unittest.TestCase):
             "--desc", "50% intensity",
         ])
         self.assertEqual(exit_code, 0)
-        self.assertIn("ID: 1 | Ibiza Vacation: 2026-07-01 to 2026-07-08 | advisory", stdout)
+        self.assertIn(
+            "ID: 1 | Ibiza Vacation: 2026-07-01 Wed to 2026-07-08 Wed | advisory", stdout
+        )
         self.assertIn("Constraint added successfully", stdout)
 
         exit_code, stdout, stderr = self.run_cli(["cons", "list", "--all"])
@@ -206,7 +208,8 @@ class TestCliGoals(unittest.TestCase):
         ])
         self.assertEqual(exit_code, 0)
         self.assertIn(
-            f"ID: {c_id} | Summer Vacation Adapted: 2026-08-02 to 2026-08-16 | no training",
+            f"ID: {c_id} | Summer Vacation Adapted: 2026-08-02 Sun to 2026-08-16 Sun "
+            f"| no training",
             stdout,
         )
         self.assertIn("Constraint updated successfully", stdout)

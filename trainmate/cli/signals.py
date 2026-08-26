@@ -12,7 +12,7 @@ from datetime import datetime, timedelta
 from typing import Iterator, Optional
 from trainmate import runtime
 from trainmate.config import config
-from trainmate.util import bold, dim, green, red, yellow, cyan, magenta
+from trainmate.util import bold, dim, green, red, yellow, cyan, magenta, fmt_date, fmt_span
 from trainmate.util import today_str as _today_str
 from trainmate.cli.selectors import add_selector_args, has_selector, resolve_window
 
@@ -41,7 +41,7 @@ def _signal_line(row: dict) -> str:
     val = f" = {row['value']}" if row.get("value") is not None else ""
     text = row.get("text") or ""
     return (
-        f"ID: {row['id']} | {cyan(row['date'])} | {magenta(row['metric'])}{val}"
+        f"ID: {row['id']} | {cyan(fmt_date(row['date']))} | {magenta(row['metric'])}{val}"
         + (f" — {text}" if text else "")
     )
 
@@ -94,7 +94,7 @@ def run_signal_list(args: argparse.Namespace) -> None:
     metric = args.metric or args.metric_target
 
     rows = runtime.db.get_daily_signals(start, end, metric=metric)
-    title = f"=== DAILY SIGNALS {start}..{end}"
+    title = f"=== DAILY SIGNALS {fmt_span(start, end, sep=' .. ')}"
     if metric:
         title += f" [{metric}]"
     print(bold(cyan(title + " ===")))
@@ -113,10 +113,7 @@ def run_signal_list_metrics(args: argparse.Namespace) -> None:
         print(dim("(none)"))
         return
     for m in metrics:
-        span = (
-            m["first_date"] if m["first_date"] == m["last_date"]
-            else f"{m['first_date']}..{m['last_date']}"
-        )
+        span = fmt_span(m["first_date"], m["last_date"], sep=" .. ")
         print(
             f"{magenta(m['metric'])}: {m['count']} "
             f"day{'s' if m['count'] != 1 else ''} ({cyan(span)})"

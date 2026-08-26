@@ -314,7 +314,15 @@ classes themselves.
 |                      |                      | `format_labeled_text`, `strip_ansi`, `Progress`  |
 |                      |                      | (self-erasing bar, silent off a terminal),       |
 |                      |                      | `aside`/`asides_enabled` (side information —     |
-|                      |                      | terminal only, DESIGN_output_verbosity.md).      |
+|                      |                      | terminal only, DESIGN_output_verbosity.md),      |
+|                      |                      | `fmt_date`/`fmt_span`/`fmt_timestamp` — the one  |
+|                      |                      | date renderer for every surface: a displayed day |
+|                      |                      | carries its abbreviated weekday                  |
+|                      |                      | (`2026-06-05 Fri`). Mirrored in the dashboard as |
+|                      |                      | `fmtDate`/`fmtSpan` in `static/app.js`. Two      |
+|                      |                      | places stay bare for want of room: `progress`'s  |
+|                      |                      | `MM-DD` week column (48-column budget) and the   |
+|                      |                      | `data bootstrap` reconstruction windows.         |
 
 ### Change recipes (where to edit for a given task)
 

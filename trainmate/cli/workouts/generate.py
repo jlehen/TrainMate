@@ -9,10 +9,10 @@ from trainmate.google_calendar import event_url
 from trainmate.util import (
     bold, green, red, yellow, cyan, magenta, gray, cmd, aside, pad_visible, wrap_text,
     format_labeled_block, today_str as _today_str, today_date as _today_date,
-    days_between, fmt_timestamp,
+    days_between, fmt_date, fmt_span, fmt_timestamp,
 )
 from trainmate.cli.common import (
-    fmt_date, ensure_recent_data, mark_adherence_from_results, report_unhonored,
+    ensure_recent_data, mark_adherence_from_results, report_unhonored,
     is_simple_render, simple_day_lines, simple_week_lines,
 )
 from trainmate.coach.proposals import GenerateProposal
@@ -39,7 +39,10 @@ def _print_block_boundary_hint(date_str: str) -> None:
     if not next_meso:
         return
 
-    when = "today" if days_left == 0 else f"in {days_left} day(s), on {meso['end_date']}"
+    when = (
+        "today" if days_left == 0
+        else f"in {days_left} day(s), on {fmt_date(meso['end_date'])}"
+    )
     # Actionable, so it reaches every front-end — but in two lines rather than the four
     # it used to take (DESIGN_output_verbosity.md §3.2).
     print(yellow(f"This block ({meso['name']}) ends {when}."))
@@ -55,7 +58,7 @@ def run_workout_adapt(args: argparse.Namespace) -> None:
     date_str = args.date or _today_str()
     if not args.date:
         # Name the defaulted target so a bare `adapt` isn't silent (DESIGN_cli_noargs.md §b).
-        aside(f"No date given — adapting today ({date_str}).")
+        aside(f"No date given — adapting today ({fmt_date(date_str)}).")
 
     ensure_recent_data(
         date_str, no_pull=args.no_pull, force_pull=getattr(args, 'force_pull', False)
@@ -75,7 +78,7 @@ def run_workout_adapt(args: argparse.Namespace) -> None:
 
     _print_block_boundary_hint(date_str)
 
-    aside(f"Evaluating daily Garmin metrics adaptation for {date_str}...")
+    aside(f"Evaluating daily Garmin metrics adaptation for {fmt_date(date_str)}...")
     try:
         proposal = runtime.coach_service.workout_adapt(
             date_str, message=getattr(args, 'message', None)
@@ -399,7 +402,7 @@ def _change_line(label: str, change: dict) -> str:
     macros = change.get('macrocycle_ids') or []
     plan = f"plan ID {', '.join(str(m) for m in macros)}" if macros else "unversioned"
     return (
-        f"{pad_visible(label, 5)} {pad_visible(when, 18)} "
+        f"{pad_visible(label, 5)} {pad_visible(when, 22)} "
         f"{pad_visible(change['kind'], 12)} {pad_visible(count, 32)} "
         f"{gray(span)}  {gray(plan)}"
     )
@@ -542,9 +545,9 @@ def run_workout_list(args: argparse.Namespace) -> None:
     if start_date or end_date or args.sport_type:
         filter_parts = []
         if start_date:
-            filter_parts.append(f"From: {start_date}")
+            filter_parts.append(f"From: {fmt_date(start_date)}")
         if end_date:
-            filter_parts.append(f"Until: {end_date}")
+            filter_parts.append(f"Until: {fmt_date(end_date)}")
         if args.sport_type:
             filter_parts.append(f"Type: {args.sport_type}")
         print(gray(f"Filters: {', '.join(filter_parts)}"))
@@ -640,7 +643,7 @@ def run_workout_compare(args: argparse.Namespace) -> None:
         results_by_date.setdefault(r['date'], []).append(r)
 
     print(bold(cyan("=== WORKOUT COMPARE ===")))
-    filter_parts = [f"From: {start_date}", f"Until: {end_date}"]
+    filter_parts = [f"From: {fmt_date(start_date)}", f"Until: {fmt_date(end_date)}"]
     if sport_filter:
         filter_parts.append(f"Type: {sport_filter}")
     print(gray(f"Filters: {', '.join(filter_parts)}"))
@@ -740,7 +743,7 @@ def run_workout_compare(args: argparse.Namespace) -> None:
         print()
         print(bold(gray("=== OUTSIDE ANY PLAN (informational) ===")))
         for act in informational:
-            print(gray(f"- {act['date']}: {_fmt_act(act)}"))
+            print(gray(f"- {fmt_date(act['date'])}: {_fmt_act(act)}"))
 
     if not getattr(args, 'no_mark', False) and config.google_calendar_id:
         marked = mark_adherence_from_results(matching_results, today_str)

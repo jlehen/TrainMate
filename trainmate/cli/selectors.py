@@ -12,7 +12,9 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Optional
 
-from trainmate.util import red, today_date as _today_date, today_str as _today_str
+from trainmate.util import (
+    fmt_span, red, today_date as _today_date, today_str as _today_str,
+)
 
 # `trainmate_cli` (the db facade) is imported lazily inside the resolvers: it imports the
 # CLI package, so a module-level import here is a cycle.
@@ -153,7 +155,7 @@ def _block_listing(mesocycles: list) -> str:
     """This plan's blocks, name and dates, to retry an unmatched atom against — an error
     listing rather than an interactive picker, so the bot behaves identically (§5)."""
     lines = "\n".join(
-        f"  [{m['id']}] {m['name']} ({m['start_date']} -> {m['end_date']})"
+        f"  [{m['id']}] {m['name']} ({fmt_span(m['start_date'], m['end_date'], sep=' -> ')})"
         for m in mesocycles
     )
     return f"This plan's blocks:\n{lines}"

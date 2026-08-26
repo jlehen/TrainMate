@@ -4,6 +4,7 @@ from datetime import datetime, timedelta, timezone
 from unittest.mock import patch
 
 from tests.helpers import clear_all_tables, run_cli, rebind_test_db
+from trainmate.util import fmt_date
 
 TEST_DB_PATH = os.path.join(os.path.dirname(__file__), "test_trainmate_cli_status.db")
 
@@ -105,7 +106,8 @@ class TestCliStatus(unittest.TestCase):
         )
         self.assertIn("Active Constraints:", stdout_v)
         self.assertIn(
-            f"- ID: {e_id} | Ibiza Trip: {trip_start} to {trip_end} | advisory",
+            f"- ID: {e_id} | Ibiza Trip: {fmt_date(trip_start)} to {fmt_date(trip_end)} "
+            f"| advisory",
             stdout_v,
         )
         self.assertIn("  Details:\n    Rest weeks", stdout_v)

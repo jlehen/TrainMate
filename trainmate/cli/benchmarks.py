@@ -5,9 +5,8 @@ from typing import Optional, Tuple
 from trainmate import runtime
 from trainmate.util import (
     aside, bold, dim, green, red, yellow, cyan, gray, cmd, format_labeled_block,
-    today_str as _today_str,
+    fmt_date, today_str as _today_str,
 )
-from trainmate.cli.common import fmt_date
 from trainmate.cli.selectors import add_single_date_arg
 from trainmate.sports import canonical_sport
 from trainmate import benchmarks

@@ -14,7 +14,7 @@ from typing import Optional
 from trainmate import runtime
 from trainmate.util import (
     aside, bold, dim, green, red, yellow, cyan, gray, cmd, format_labeled_block,
-    wrap_text, today_str as _today_str,
+    fmt_date, fmt_span, wrap_text, today_str as _today_str,
 )
 from trainmate.cli.selectors import add_selector_args, has_selector, resolve_window
 from trainmate.cli.common import constraint_line, is_simple_render
@@ -73,25 +73,27 @@ def _maybe_point_at_honor(constraint_id: int) -> None:
     # only once its window rolls on, so no single run ever sees the whole of it.
     if constraint['start_date'] <= active_meso['end_date']:
         print(yellow(wrap_text(
-            f"Straddles the end of {active_meso['name']} ({active_meso['end_date']}): "
-            f"daily adapt honors the days up to there, {landing['name']} holds the rest, "
+            f"Straddles the end of {active_meso['name']} "
+            f"({fmt_date(active_meso['end_date'])}): daily adapt honors the days up to "
+            f"there, {landing['name']} holds the rest, "
             "and no one run sees both."
         )))
         print(yellow(wrap_text(
             f"Build the whole of it in with {build} — that rebuilds the plan from today "
-            f"through {landing['end_date']}."
+            f"through {fmt_date(landing['end_date'])}."
         )))
         return
 
     print(yellow(wrap_text(
-        f"Lands in {landing['name']} ({landing['start_date']} — {landing['end_date']}), "
+        f"Lands in {landing['name']} "
+        f"({fmt_span(landing['start_date'], landing['end_date'], sep=' — ')}), "
         "outside daily adapt's reach."
     )))
     # Adapt at date D reaches from D to the end of D's block, so it sees this constraint
     # once its window rolls onto the landing block — i.e. on that block's first day.
     print(yellow(wrap_text(
-        f"Leave it — adapt reaches it on {landing['start_date']} — or build it in now "
-        f"with {build}, which rebuilds the plan from today through that block's end."
+        f"Leave it — adapt reaches it on {fmt_date(landing['start_date'])} — or build it "
+        f"in now with {build}, which rebuilds the plan from today through that block's end."
     )))
 
 
@@ -101,14 +103,14 @@ def _report_past_plan_end(constraint: dict) -> None:
     one covering none of it cannot."""
     if runtime.db.get_covering_mesocycle(constraint['start_date']):
         print(yellow(wrap_text(
-            f"Runs to {constraint['end_date']}, past the end of your plan. "
+            f"Runs to {fmt_date(constraint['end_date'])}, past the end of your plan. "
             + cmd("workout generate") + " builds the days your plan covers around it; "
             "run " + cmd("plan generate")
             + " to extend the periodization over the rest."
         )))
         return
     print(yellow(wrap_text(
-        f"Starts {constraint['start_date']}, past the end of the plan — no block "
+        f"Starts {fmt_date(constraint['start_date'])}, past the end of the plan — no block "
         "governs it yet, so nothing can schedule around it."
     )))
     print(yellow("Extend the periodization with " + cmd("plan generate") + " first."))
@@ -282,7 +284,7 @@ def run_constraint_show(args: argparse.Namespace) -> None:
     # scope, which is not the same as the plan having changed.
     if constraint.get('honored_at'):
         print(gray(f"  Coach pass: covered it on "
-                   f"{str(constraint['honored_at'])[:10]}."))
+                   f"{fmt_date(str(constraint['honored_at'])[:10])}."))
     elif needs_a_pass:
         print(yellow("  Coach pass: none yet — run "
                      + cmd("workout generate") + " to build it into the plan."))

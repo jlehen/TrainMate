@@ -7,10 +7,10 @@ from trainmate.util import (
     aside, asides_enabled, bold, dim, green, red, yellow, cyan, magenta, gray, cmd,
     color_load_ratio, color_ramp,
     pmc_cells, pmc_warming_note, format_labeled_block, default_wrap_width, PMC_TSB_LAG_NOTE,
-    today_str as _today_str, today_date as _today_date,
+    fmt_date, today_str as _today_str, today_date as _today_date,
 )
 from trainmate.cli.common import (
-    constraint_line, fmt_date, ensure_recent_data, pmc_warmup_cutoff,
+    constraint_line, ensure_recent_data, pmc_warmup_cutoff,
 )
 from trainmate.coach import honoring
 from trainmate.db.objectives import goal_state, GOAL_UPCOMING
@@ -76,7 +76,8 @@ def run_status(args) -> None:
             f"\n{bold('Next Goal')}: {cyan(next_goal['title'])} "
             f"({magenta(sport_str)})"
         )
-        print(f"{bold('Target Date')}: {cyan(next_goal['target_date'])}{gray(days_rem_str)}")
+        print(f"{bold('Target Date')}: {cyan(fmt_date(next_goal['target_date']))}"
+              f"{gray(days_rem_str)}")
         
         print(format_labeled_block(f"{bold('Description')}:", next_goal.get('description', '')))
         
@@ -124,7 +125,8 @@ def run_status(args) -> None:
             if active_meso:
                 print(
                     f"{bold('Active Mesocycle')}: {green(active_meso['name'])} "
-                    f"({cyan(active_meso['start_date'])} to {cyan(active_meso['end_date'])})"
+                    f"({cyan(fmt_date(active_meso['start_date']))} to "
+                    f"{cyan(fmt_date(active_meso['end_date']))})"
                 )
                 print(format_labeled_block(f"{bold('Cycle Focus')}:", active_meso['focus']))
                 # What the block ACTUALLY measured, beside what it was for
@@ -191,7 +193,7 @@ def run_status(args) -> None:
     metrics = runtime.db.get_metrics_cache()
     if metrics:
         last_metrics = metrics[-1]
-        print(f"\nRecent Garmin Metrics ({cyan(last_metrics['date'])}):")
+        print(f"\nRecent Garmin Metrics ({cyan(fmt_date(last_metrics['date']))}):")
         
         baseline = runtime.db.get_baseline(last_metrics['date'])
         rhr_val = last_metrics['rhr']
@@ -340,7 +342,7 @@ def run_status(args) -> None:
                 title_disp = gray(g['title'])
             print(
                 f"- {status_disp} ID: {g['id']} | {title_disp} "
-                f"({sport_str}) on {cyan(g['target_date'])}"
+                f"({sport_str}) on {cyan(fmt_date(g['target_date']))}"
             )
             if g.get('description'):
                 print(format_labeled_block("  Description:", g['description']))

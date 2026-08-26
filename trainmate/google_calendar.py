@@ -11,7 +11,7 @@ from trainmate.types import Workout
 from trainmate.calendar_state import calendar_signature
 from trainmate import calendar_lineage
 from trainmate import intensity
-from trainmate.util import fmt_timestamp, yellow, aside
+from trainmate.util import fmt_date, fmt_timestamp, yellow, aside
 
 # Events fetched per Calendar API page during a signal sync (the response is paged
 # through with pageToken regardless, so this only tunes round-trips vs payload size).
@@ -283,7 +283,7 @@ class CalendarSyncer:
             new_event_id = created_event.get('id')
             if _event_log:
                 print(
-                    f"Created new calendar event for {date_str} ({sport_type})."
+                    f"Created new calendar event for {fmt_date(date_str)} ({sport_type})."
                 )
             
             # Record the push: store the new event handle + the signature of what we

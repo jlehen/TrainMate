@@ -9,12 +9,11 @@ The renderer is pure text over raw revision dicts — what `db.get_lineage_revis
 returns, with the change's `kind`, `created_at` and `summary` joined on. `for_workout` is
 the one function that reaches for the database.
 """
-from datetime import datetime
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from trainmate import intensity
 from trainmate import runtime
-from trainmate.util import fmt_timestamp
+from trainmate.util import fmt_date, fmt_timestamp
 
 # Google's hard ceiling on an event description. The history is rendered last, into
 # whatever the rest of the event leaves, so a long prescription is never what gets cut.
@@ -60,16 +59,6 @@ def _label(revision: Dict[str, Any]) -> str:
     return table.get(kind, kind)
 
 
-def _day(date_str: Optional[str]) -> str:
-    """'2026-09-01 Tue' — the weekday is what makes a date move readable at a glance."""
-    if not date_str:
-        return "?"
-    try:
-        return datetime.strptime(date_str, "%Y-%m-%d").strftime("%Y-%m-%d %a")
-    except ValueError:
-        return date_str
-
-
 def _load(revision: Dict[str, Any]) -> Optional[str]:
     """The load line, in the same shape as the one at the top of the event, so the two
     compare by eye."""
@@ -93,7 +82,7 @@ def _entry(revision: Dict[str, Any], position: int, total: int) -> str:
         f"[{position}/{total}] {_label(revision)} · "
         f"{fmt_timestamp(revision.get('change_created_at'))}"
     )
-    lines: List[str] = [f"{_day(revision.get('date'))} · {revision.get('title') or ''}"]
+    lines: List[str] = [f"{fmt_date(revision.get('date'))} · {revision.get('title') or ''}"]
     if not void:
         for line in (_load(revision), intensity.format_planned_zones(revision)):
             if line:

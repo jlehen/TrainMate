@@ -24,7 +24,7 @@ from trainmate.intensity import (
 from trainmate.sports import SPORT_MAPPING, canonical_sport
 from trainmate.util import (
     asides_enabled, bold, green, red, yellow, gray, dim, cmd, pad_visible, visible_len,
-    wrap_text, color_tsb, today_str as _today_str, PMC_TSB_LAG_NOTE,
+    wrap_text, color_tsb, fmt_date, today_str as _today_str, PMC_TSB_LAG_NOTE,
 )
 from trainmate.cli.common import ensure_recent_data, is_simple_render, simple_progress_lines
 
@@ -73,7 +73,11 @@ def _to_date(date_str: str):
 
 
 def _short_date(date_str: str) -> str:
-    """'2026-07-31' -> '07-31'."""
+    """'2026-07-31' -> '07-31'.
+
+    The one place a displayed day carries no weekday: this table is laid out to the
+    bot's 48-column budget, and four more characters per label does not fit. The
+    footer notes spell the weekday out where a plan edge actually matters."""
     return date_str[5:]
 
 
@@ -193,7 +197,7 @@ def format_objective_projection_lines(
     """Per-objective projection, shown once the plan reaches that objective's target
     date (§7.1)."""
     return [
-        f"\U0001F3C1 {objective['target_date']} {objective['title']}",
+        f"\U0001F3C1 {fmt_date(objective['target_date'])} {objective['title']}",
         f"   projected CTL {ctl:.0f}, TSB {tsb:+.0f}",
     ]
 
@@ -210,7 +214,7 @@ def format_plan_gap_banner(
             f"⚠ plan generated through {_short_date(plan_end_date)} "
             f"— {weeks_before} wks before"
         ),
-        f"  \U0001F3C1 {next_objective['target_date']} {next_objective['title']}",
+        f"  \U0001F3C1 {fmt_date(next_objective['target_date'])} {next_objective['title']}",
         yellow(f"  ({cmd('workout generate -g', quote=False)})"),
     ]
 

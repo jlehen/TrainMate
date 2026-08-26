@@ -47,14 +47,36 @@ def days_between(start: str, end: str) -> int:
     return (datetime.strptime(end, fmt).date() - datetime.strptime(start, fmt).date()).days
 
 
+def fmt_date(date_str: Optional[str]) -> str:
+    """Renders a YYYY-MM-DD date as 'YYYY-MM-DD Ddd' (e.g. '2026-06-05 Fri').
+
+    The one date renderer for every surface with room for the weekday. Falls back to
+    the raw string when the value isn't a parseable date, so a caller can hand this
+    whatever a row happens to hold."""
+    if not date_str:
+        return "?"
+    try:
+        return datetime.strptime(str(date_str), "%Y-%m-%d").strftime("%Y-%m-%d %a")
+    except ValueError:
+        return str(date_str)
+
+
+def fmt_span(start: Optional[str], end: Optional[str], sep: str = " to ") -> str:
+    """Renders a date range with the weekday on both ends. A range that starts and
+    ends on the same day collapses to that one date."""
+    if start and end and start == end:
+        return fmt_date(start)
+    return f"{fmt_date(start)}{sep}{fmt_date(end)}"
+
+
 def fmt_timestamp(iso: Optional[str]) -> str:
-    """Renders a stored UTC ISO timestamp as 'YYYY-MM-DD HH:MM'.
+    """Renders a stored UTC ISO timestamp as 'YYYY-MM-DD Ddd HH:MM'.
 
     Falls back to the raw string if it isn't parseable (e.g. a date-only legacy value)."""
     if not iso:
         return "?"
     try:
-        return datetime.fromisoformat(iso).strftime("%Y-%m-%d %H:%M")
+        return datetime.fromisoformat(iso).strftime("%Y-%m-%d %a %H:%M")
     except ValueError:
         return iso
 

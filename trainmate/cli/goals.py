@@ -3,9 +3,9 @@ import sys
 from trainmate import runtime
 from trainmate.util import (
     bold, green, red, yellow, cyan, gray, cmd, format_labeled_block,
-    today_str as _today_str,
+    fmt_date, today_str as _today_str,
 )
-from trainmate.cli.common import fmt_date, report_unhonored
+from trainmate.cli.common import report_unhonored
 from trainmate.db.objectives import goal_state, GOAL_UPCOMING, ARCHIVED
 from trainmate.sports import CANONICAL_SPORTS
 
@@ -26,9 +26,9 @@ def _print_goal(g: dict) -> None:
         title_disp = gray(g['title'])
     # 'on' a date something happens on; 'by ~' a date that only bounds the plan.
     if g.get('date_type') == 'horizon':
-        date_disp = f"by ~{cyan(g['target_date'])} (horizon)"
+        date_disp = f"by ~{cyan(fmt_date(g['target_date']))} (horizon)"
     else:
-        date_disp = f"on {cyan(g['target_date'])}"
+        date_disp = f"on {cyan(fmt_date(g['target_date']))}"
     print(
         f"{status_disp} ID: {g['id']} | {title_disp} "
         f"({sport_str}) {date_disp}"

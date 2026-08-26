@@ -5,9 +5,9 @@ from datetime import datetime, timedelta
 from trainmate import runtime
 from trainmate.calendar_state import calendar_status
 from trainmate.util import (
-    bold, green, red, yellow, cyan, blue, magenta, cmd, today_str as _today_str,
+    bold, green, red, yellow, cyan, blue, magenta, cmd, fmt_date, fmt_span,
+    today_str as _today_str,
 )
-from trainmate.cli.common import fmt_date
 
 
 # The change kind of a session's live revision, as the athlete reads it
@@ -95,8 +95,8 @@ def warn_stale_before(start_date: str) -> None:
     label = "workout" if len(stale) == 1 else "workouts"
     earliest = min(w['date'] for w in stale)
     print(yellow(
-        f"Note: {len(stale)} {label} before {start_date} still read [STALE] — their "
-        f"calendar events are out of date and this push did not cover them. "
+        f"Note: {len(stale)} {label} before {fmt_date(start_date)} still read [STALE] "
+        f"— their calendar events are out of date and this push did not cover them. "
         f"Run {cmd(f'workout push -d {earliest}..')} to update them."
     ))
 
@@ -144,13 +144,13 @@ def _resolve_swap_ops(args: argparse.Namespace) -> list | None:
         for w in (w1, w2):
             if w['date'] < today:
                 print(red(
-                    f"Cannot swap [{w['id']}] {w['title']} ({w['date']}): "
+                    f"Cannot swap [{w['id']}] {w['title']} ({fmt_date(w['date'])}): "
                     "it is in the past."
                 ))
                 return None
         print(
-            f"Swapping [{w1['id']}] {w1['title']} ({w1['date']}) <-> "
-            f"[{w2['id']}] {w2['title']} ({w2['date']})"
+            f"Swapping [{w1['id']}] {w1['title']} ({fmt_date(w1['date'])}) <-> "
+            f"[{w2['id']}] {w2['title']} ({fmt_date(w2['date'])})"
         )
         return [
             {'id': w1['id'], 'new_date': w2['date']},
@@ -170,18 +170,19 @@ def _resolve_swap_ops(args: argparse.Namespace) -> list | None:
     today = _today_str()
     for d in (date1, date2):
         if d < today:
-            print(red(f"Cannot swap {d}: it is in the past."))
+            print(red(f"Cannot swap {fmt_date(d)}: it is in the past."))
             return None
     on_1 = runtime.db.get_workouts(start_date=date1, end_date=date1)
     on_2 = runtime.db.get_workouts(start_date=date2, end_date=date2)
     if not on_1 and not on_2:
         print(yellow(
-            f"No workouts on either {date1} or {date2}; nothing to swap."
+            f"No workouts on either {fmt_date(date1)} or {fmt_date(date2)}; "
+            f"nothing to swap."
         ))
         return None
     desc_1 = ", ".join(w['title'] for w in on_1) or "(rest)"
     desc_2 = ", ".join(w['title'] for w in on_2) or "(rest)"
-    print(f"Swapping {date1} [{desc_1}] <-> {date2} [{desc_2}]")
+    print(f"Swapping {fmt_date(date1)} [{desc_1}] <-> {fmt_date(date2)} [{desc_2}]")
     return (
         [{'id': w['id'], 'new_date': date2} for w in on_1]
         + [{'id': w['id'], 'new_date': date1} for w in on_2]

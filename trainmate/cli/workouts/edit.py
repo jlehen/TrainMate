@@ -7,7 +7,8 @@ from trainmate import runtime
 from trainmate.calendar_state import calendar_status
 from trainmate.sports import canonical_sport
 from trainmate.util import (
-    aside, bold, dim, green, red, yellow, cyan, gray, cmd, today_str as _today_str,
+    aside, bold, dim, green, red, yellow, cyan, gray, cmd, fmt_date, fmt_span,
+    today_str as _today_str,
 )
 from trainmate.cli.selectors import resolve_window
 
@@ -156,7 +157,7 @@ def run_workout_add(args: argparse.Namespace) -> None:
         to_replace = [same] if same else []
     for w in to_replace:
         print(yellow(
-            f"Replacing existing {w['sport_type']} workout on {args.date}: "
+            f"Replacing existing {w['sport_type']} workout on {fmt_date(args.date)}: "
             f"{w['title']}"
         ))
 
@@ -247,11 +248,11 @@ def run_workout_prune_calendar(args: argparse.Namespace) -> None:
     orphans.sort(key=lambda pair: pair[0])
 
     if start_date and end_date:
-        window = f" dated {start_date} to {end_date}"
+        window = f" dated {fmt_span(start_date, end_date)}"
     elif start_date:
-        window = f" dated {start_date} onward"
+        window = f" dated {fmt_date(start_date)} onward"
     elif end_date:
-        window = f" dated up to {end_date}"
+        window = f" dated up to {fmt_date(end_date)}"
     else:
         window = ""
 
@@ -263,7 +264,7 @@ def run_workout_prune_calendar(args: argparse.Namespace) -> None:
         return
 
     for day, event in orphans:
-        print(f"{cyan(day)}  {event.get('summary') or dim('(no title)')}")
+        print(f"{cyan(fmt_date(day))}  {event.get('summary') or dim('(no title)')}")
     print(dim(
         f"{len(orphans)} of {len(events)} workout event(s) on the calendar "
         f"match no local workout{window}."
