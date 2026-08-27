@@ -1,7 +1,7 @@
 from typing import Any, List, Optional, Dict
 from trainmate.config import config
 from trainmate.types import Objective, Constraint, Workout, CompletedActivity
-from trainmate.util import cyan, days_between, aside
+from trainmate.util import cyan, days_between, step
 from trainmate.coach.formatting import (
     EASED_DO_NOT_RESTORE, format_metrics_history, format_completed_activities,
     format_baseline, format_planned_workouts, format_planned_workouts_detailed,
@@ -509,7 +509,7 @@ class WorkoutLogicMixin:
         if history_text_parts:
             user_content += "\n\n" + "\n\n".join(history_text_parts)
 
-        aside("Querying OpenRouter to generate training workouts (microcycles)...", cyan)
+        step("Querying OpenRouter to generate training workouts (microcycles)...", cyan)
         plan_data = _eng.openrouter_client.complete(
             system_prompt, user_content, label="workout_generate"
         )
@@ -886,7 +886,7 @@ keeping isn't lost for lack of being restated:
 ## ADHERENCE DISCREPANCIES & VIOLATIONS
 {discrepancy_text}
 {informational_section}"""
-        aside(f"Querying OpenRouter to evaluate adaptation for the remainder of the mesocycle "
+        step(f"Querying OpenRouter to evaluate adaptation for the remainder of the mesocycle "
              f"({target_date_str} -> {meso_end_date_str})...", cyan)
         decision = _eng.openrouter_client.complete(
             system_prompt, user_content, label="workout_adapt"

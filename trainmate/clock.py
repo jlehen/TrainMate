@@ -62,12 +62,16 @@ def _resolve_stored(name: Optional[str]) -> Optional[ZoneInfo]:
     try:
         return ZoneInfo(name)
     except (KeyError, ValueError):
-        from trainmate.util import cmd, yellow
-        print(yellow(
-            f"Warning: stored timezone '{name}' is unknown on this machine — using the "
+        # Safe to journal from here even though `active_zone`'s cache is still unset:
+        # the journal takes its day and its timestamps from the system clock and imports
+        # nothing from this module, so nothing asks for the zone again
+        # (DESIGN_logging.md §5.3).
+        from trainmate.util import cmd, warn
+        warn(
+            f"stored timezone '{name}' is unknown on this machine — using the "
             f"machine's own timezone. Set a valid one with "
             f"{cmd('settings set timezone <zone>')}."
-        ))
+        )
         return None
 
 

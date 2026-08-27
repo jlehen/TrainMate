@@ -16,7 +16,7 @@ from typing import Any, Dict, Iterator, List, Optional, Sequence, Tuple
 from trainmate import runtime
 from trainmate.calendar_state import calendar_status
 from trainmate.db.workouts import ATHLETE_VOID_KINDS
-from trainmate.util import Progress, green, red
+from trainmate.util import Progress, fail, green
 
 # Whether a pass renders as one summary line and a bar, or as the per-event lines. The
 # commands that take `-v` flip this around their write.
@@ -137,7 +137,7 @@ def _push(syncer, workout) -> None:
     try:
         syncer.sync_workout(workout)
     except Exception as e:
-        print(red(f"Error syncing {workout['title']} to Google Calendar: {e}"))
+        fail(f"Google Calendar sync of {workout['title']} failed: {e}")
 
 
 def _tear_down(db, syncer, lineage_id: int, event_id: Optional[str]) -> None:
@@ -145,5 +145,5 @@ def _tear_down(db, syncer, lineage_id: int, event_id: Optional[str]) -> None:
         try:
             syncer.delete_workout_event(event_id)
         except Exception as e:
-            print(red(f"Error deleting Google Calendar event: {e}"))
+            fail(f"Google Calendar event delete failed: {e}")
     db.clear_calendar_state(lineage_id)

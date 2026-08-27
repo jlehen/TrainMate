@@ -30,6 +30,14 @@ llm:
 # absolute path to share one between athletes.
 #science_dir: "science"
 
+# The run journal (`tm journal`) and the LLM exchange files. Relative to this file's
+# directory, so each instance keeps its own. See DESIGN_logging.md §9.
+#logging:
+#  #dir: "logs"
+#  #level: "info"              # debug | info | warn | error
+#  #retain_days: 90
+#  #retain_exchange_days: 90
+
 # Minimum minutes before an automatic refresh re-pulls (Garmin and Calendar both).
 #refresh_minutes: 120
 

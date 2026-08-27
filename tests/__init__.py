@@ -7,8 +7,10 @@ guards are in place for every test.
 import atexit
 import glob
 import os
+import shutil
 import socket
 import sqlite3
+import tempfile
 from unittest import mock
 
 
@@ -57,6 +59,17 @@ def _remove_test_databases() -> None:
 # events and consumed the incremental sync token that `data pull` needs
 # (DESIGN_calendar_signal_ingest.md §6). Stub the bridge, not the callers.
 mock.patch("trainmate.garmin.sync._sync_calendar_signals", lambda *a, **k: None).start()
+
+# Third seam, same idea: every command a test runs opens a journal run
+# (DESIGN_logging.md §3), so a suite left pointing at the real logging.dir appends
+# several hundred KB of `test` runs to the operator's own journal. Redirect the whole
+# directory — the LLM exchange files hang off it too — and sweep it at exit.
+from trainmate.config import config as _config  # noqa: E402 -- after the db guard
+
+_TEST_LOG_DIR = tempfile.mkdtemp(prefix="trainmate-test-logs-")
+_config.data.setdefault("logging", {})["dir"] = _TEST_LOG_DIR
+os.environ.setdefault("TRAINMATE_SOURCE", "test")
+atexit.register(shutil.rmtree, _TEST_LOG_DIR, True)
 
 _LOOPBACK = {"127.0.0.1", "::1", "localhost", ""}
 _real_connect = socket.socket.connect

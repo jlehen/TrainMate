@@ -1,7 +1,7 @@
 import json
 from typing import Any, List, Optional, Dict
 from trainmate.types import Objective
-from trainmate.util import cyan, aside
+from trainmate.util import cyan, step
 import trainmate.coach.engine as _eng
 from trainmate.coach.engine import LEARNING_UPDATES_FIELD
 
@@ -163,7 +163,7 @@ class AnalysisLogicMixin:
         if context:
             user_content += f"\n\n## ATHLETE SUBJECTIVE CONTEXT FOR THIS PERIOD\n{context}\n"
 
-        aside("Querying OpenRouter to perform training history analysis...", cyan)
+        step("Querying OpenRouter to perform training history analysis...", cyan)
         result = _eng.openrouter_client.complete(
             system_prompt, user_content, label=label
         )

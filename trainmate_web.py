@@ -12,10 +12,11 @@ What that buys, concretely: no request can leave the database in a state the CLI
 put it in, so the web app is safe to leave running, safe to expose on the LAN, and cannot
 race the CLI or the bot over a workout row.
 """
+import traceback
 from datetime import datetime, timedelta
 from flask import Flask, jsonify, request, send_from_directory
 from typing import Any, Dict, List, Optional
-from trainmate import runtime
+from trainmate import journal, runtime
 from trainmate import benchmarks, garmin, intensity, llm_models, plan_diff, progression
 from trainmate.adherence import analyze_adherence, classify_adherence, date_covered
 from trainmate.calendar_state import calendar_status
@@ -44,6 +45,25 @@ def _reject_writes() -> Any:
             "path": request.path,
         }), 405
     return None
+
+
+@app.errorhandler(Exception)
+def _journal_failure(exc: Exception) -> Any:
+    """Records a failed request and re-raises it for Flask to render.
+
+    Only failures. A read-only GET neither changes anything nor costs anything, so it is
+    not a run, and these records carry no run id at all — which also keeps the journal's
+    module-level run stack away from Flask's threaded request handling
+    (DESIGN_logging.md §13). Flask handles an HTTPException itself (404, and the 405 the
+    guard above returns), so those are passed straight through."""
+    from werkzeug.exceptions import HTTPException
+    if isinstance(exc, HTTPException):
+        return exc
+    journal.record(
+        "internal", f"{request.method} {request.path} failed: {exc}", lvl="error",
+        path=request.path, traceback=traceback.format_exc(),
+    )
+    raise exc
 
 
 # --- Static Routes ---

@@ -15,7 +15,7 @@ from trainmate.cli.common import (
     simple_constraint_lines, simple_day_lines,
 )
 from trainmate.prompt import emit_buttons
-from trainmate.util import aside, today_str as _today_str, wrap_text
+from trainmate.util import step, today_str as _today_str, wrap_text
 
 # Settings-table marker that makes `bot morning` idempotent per day: all push state
 # lives in the instance's database so the bot process stays stateless across restarts
@@ -140,7 +140,7 @@ def _auto_adapt_note(date_str: str) -> Optional[str]:
         runtime.coach_service.workout_revision_apply(proposal)
         return proposal.reason
     except Exception as e:
-        aside(f"Morning adaptation failed, rendering the stored schedule: {e}")
+        step(f"Morning adaptation failed, rendering the stored schedule: {e}")
         return None
 
 
@@ -153,7 +153,7 @@ def _trained_today(date_str: str) -> Dict[int, Dict[str, Any]]:
         runtime.garmin.ensure_data(date_str, date_str)
         return adherence_verdicts(date_str, date_str)
     except Exception as e:
-        aside(f"Could not check what was trained today, briefing the schedule: {e}")
+        step(f"Could not check what was trained today, briefing the schedule: {e}")
         return {}
 
 
@@ -208,7 +208,7 @@ def run_bot_route(args: argparse.Namespace) -> None:
         if candidate in ROUTER_INTENTS:
             intent = candidate
     except Exception as e:
-        aside(f"Router failed: {e}")
+        step(f"Router failed: {e}")
     print(json.dumps({"intent": intent}))
 
 

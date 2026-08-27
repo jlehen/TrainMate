@@ -7,7 +7,7 @@ from trainmate import runtime
 from trainmate import plan_diff
 from trainmate.adherence import planned_load
 from trainmate.util import (
-    aside, bold, green, red, yellow, cyan, blue, magenta, gray, cmd, visible_len,
+    aside, step, bold, green, red, yellow, cyan, blue, magenta, gray, cmd, visible_len,
     pad_visible, wrap_text, format_labeled_block, default_wrap_width,
     fmt_date, fmt_span, today_date as _today_date,
 )
@@ -116,7 +116,7 @@ def _announce_targets(targets: list) -> None:
         goal = runtime.db.get_objective(goal_id) if goal_id is not None else None
         if goal:
             named.append(f"{goal['title']} ({fmt_date(goal['target_date'])})")
-    aside(wrap_text(
+    step(wrap_text(
         f"Planning {len(targets)} goals in date order, one strategy call each: "
         + "; ".join(named) + "."
     ))
@@ -188,7 +188,7 @@ def _generate_one_plan(
             next_goal = objectives[0]
             # Name the defaulted goal so a bare `plan generate` isn't silent
             # about which objective it planned for (DESIGN_cli_noargs.md §b).
-            aside(wrap_text(
+            step(wrap_text(
                 f"No goal given — planning for your next goal: "
                 f"{next_goal.get('title', '')} on {fmt_date(next_goal['target_date'])}."
             ))

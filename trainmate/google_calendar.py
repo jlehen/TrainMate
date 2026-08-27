@@ -12,7 +12,7 @@ from trainmate.adherence import STATUS_LABELS
 from trainmate.calendar_state import calendar_signature
 from trainmate import calendar_lineage
 from trainmate import intensity
-from trainmate.util import fmt_date, fmt_timestamp, yellow, aside
+from trainmate.util import fmt_date, fmt_timestamp, step, warn
 
 # Events fetched per Calendar API page during a signal sync (the response is paged
 # through with pageToken regardless, so this only tunes round-trips vs payload size).
@@ -547,7 +547,7 @@ def sync_calendar_signals(force: bool = False) -> None:
                     state["last_pull_utc"]
                 )
                 if age <= timedelta(minutes=config.data_refresh_minutes):
-                    aside(
+                    step(
                         f"Calendar signals is fresh (last sync "
                         f"{int(age.total_seconds() // 60)}m ago); using cache. "
                         "Pass --force-pull to refresh now."
@@ -560,4 +560,4 @@ def sync_calendar_signals(force: bool = False) -> None:
         calendar_syncer.sync_signals()
         _signals_synced = True
     except Exception as e:
-        print(yellow(f"Warning: calendar signal sync skipped: {e}"))
+        warn(f"calendar signal sync skipped: {e}")

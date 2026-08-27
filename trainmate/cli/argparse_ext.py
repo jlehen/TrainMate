@@ -446,6 +446,17 @@ def translate_dashless_argv(parser: argparse.ArgumentParser, tokens: list) -> li
             if canonical is not None:
                 out.extend(descend(canonical, tokens[i + 1:]))
                 return out
+            fallback = parser.get_default("_fallback_subcommand")
+            if fallback is not None and i == 0:
+                # A parser may name the sub-command an unrecognised word in the
+                # sub-command slot belongs to, so `tm journal 5a0e` reads as
+                # `tm journal show 5a0e` while `prune` stays a real sub-command a run id
+                # cannot collide with (DESIGN_logging.md §7). argparse cannot express
+                # both a positional and sub-commands at one level — the bare token
+                # always goes to the latter. Only the first token qualifies: later ones
+                # are the values of the dashed options passed through above.
+                out.extend(descend(fallback, tokens[i:]))
+                return out
         out.append(tok)
         i += 1
     return out

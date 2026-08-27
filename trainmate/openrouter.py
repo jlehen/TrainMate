@@ -2,10 +2,12 @@ import requests
 import json
 import os
 import re
+import time
 from datetime import datetime, timezone
 from typing import Any, Optional
+from trainmate import journal
 from trainmate.config import config
-from trainmate.util import aside
+from trainmate.util import aside, warn
 
 # A fenced reply may be one line (```{"a":1}```) or many, with or without a language
 # tag; the one-line form has no newline to split on.
@@ -48,16 +50,24 @@ class OpenRouterClient:
         user_content: str,
         response_data: Optional[dict[str, Any]] = None,
         error_msg: Optional[str] = None
-    ) -> None:
-        """Writes the LLM exchange to a markdown file in the logs directory."""
+    ) -> Optional[str]:
+        """Writes the LLM exchange to a markdown file, returning its path.
+
+        The name carries the run id, so `ls logs/llm_exchanges/*<run>*` is the whole of
+        "show me the prompts from that run" (DESIGN_logging.md §6). The id is the join
+        and not the timestamp on purpose: these names come from the machine's local
+        clock while the journal is UTC, so matching by time would mean reconciling two
+        zones on every lookup.
+        """
         try:
             logs_dir = config.llm_logs_dir
             os.makedirs(logs_dir, exist_ok=True)
-            
+
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
-            filename = f"{timestamp}_{label}.md"
-            filepath = os.path.join(logs_dir, filename)
-            
+            run_id = journal.current_id()
+            stamp = f"{timestamp}_{run_id}" if run_id else timestamp
+            filepath = os.path.join(logs_dir, f"{stamp}_{label}.md")
+
             usage_str = "N/A"
             if response_data:
                 usage = response_data.get("usage", {})
@@ -121,10 +131,34 @@ class OpenRouterClient:
                 
             with open(filepath, "w", encoding="utf-8") as f:
                 f.write("\n".join(lines))
-                
+
             aside(f"Logged LLM exchange to: {filepath}")
+            return filepath
         except Exception as e:
-            print(f"Warning: Failed to log LLM exchange: {e}")
+            # The log failing to log: the one place that belongs in the journal more
+            # than anywhere else (DESIGN_logging.md §5.3).
+            warn(f"Failed to log LLM exchange: {e}")
+            return None
+
+    def _record_call(
+        self, label: str, started: float, ok: bool,
+        response_data: Optional[dict[str, Any]] = None,
+        path: Optional[str] = None, error: Optional[str] = None,
+    ) -> None:
+        """The `llm.call` journal record for one completion (DESIGN_logging.md §6).
+
+        This is the join that did not exist: from a run you reach its prompts, and from
+        a prompt you reach the command that asked for it. The two asides in `complete`
+        keep their printed form on a terminal; their content lives here."""
+        usage = (response_data or {}).get("usage") or {}
+        journal.llm_call(
+            label=label, model=self.model,
+            ms=int((time.monotonic() - started) * 1000), ok=ok,
+            prompt_tokens=usage.get("prompt_tokens"),
+            completion_tokens=usage.get("completion_tokens"),
+            total_tokens=usage.get("total_tokens"),
+            path=path, error=error,
+        )
 
     @staticmethod
     def _parse_json_content(content: str) -> dict[str, Any]:
@@ -200,7 +234,11 @@ class OpenRouterClient:
 
         response = None
         resp_data = None
+        # One completion is one `llm.call` record, so `logged` now guards the journal
+        # record as well as the markdown file: a second one would double-count the
+        # call's tokens in `journal --cost`.
         logged = False
+        started = time.monotonic()
         try:
             aside(f"Querying OpenRouter with model: {self.model}")
             response = requests.post(
@@ -209,14 +247,17 @@ class OpenRouterClient:
             )
             response.raise_for_status()
             resp_data = response.json()
-            
+
             if "error" in resp_data:
                 err_obj = resp_data["error"]
                 err_msg = err_obj.get("message") if isinstance(err_obj, dict) else str(err_obj)
                 print(f"OpenRouter API error: {err_msg}")
-                self._log_exchange(
+                path = self._log_exchange(
                     label, system_content, user_content,
                     response_data=resp_data, error_msg=f"OpenRouter Error: {err_msg}"
+                )
+                self._record_call(
+                    label, started, False, resp_data, path, f"OpenRouter Error: {err_msg}"
                 )
                 logged = True
                 raise ValueError(f"OpenRouter API error: {err_msg}")
@@ -231,8 +272,12 @@ class OpenRouterClient:
             )
             
             # Log successful exchange
-            self._log_exchange(label, system_content, user_content, response_data=resp_data)
-            
+            path = self._log_exchange(
+                label, system_content, user_content, response_data=resp_data
+            )
+            self._record_call(label, started, True, resp_data, path)
+            logged = True
+
             choices = resp_data.get("choices", [])
             if not choices:
                 raise ValueError("Empty completion returned from OpenRouter.")
@@ -246,15 +291,19 @@ class OpenRouterClient:
             if resp_text:
                 print(f"Response Body: {resp_text}")
             err_msg = f"HTTP Error: {he}\nResponse: {resp_text}"
-            self._log_exchange(label, system_content, user_content, error_msg=err_msg)
+            path = self._log_exchange(
+                label, system_content, user_content, error_msg=err_msg
+            )
+            self._record_call(label, started, False, None, path, f"HTTP Error: {he}")
             raise he
         except Exception as e:
             print(f"Error calling OpenRouter completions: {e}")
             if not logged:
-                self._log_exchange(
+                path = self._log_exchange(
                     label, system_content, user_content,
                     response_data=resp_data, error_msg=str(e)
                 )
+                self._record_call(label, started, False, resp_data, path, str(e))
             raise e
 
 # Singleton instance

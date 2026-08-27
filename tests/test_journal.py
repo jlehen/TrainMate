@@ -1,0 +1,485 @@
+"""The run journal: the writer, the run bracket, retention, and `tm journal`.
+
+The three kinds DESIGN_logging.md §11 asks for — a unit test on the writer, a
+behavioural test on the bracket, and a structural test on the silent swallows — plus the
+reader and the command that renders it.
+"""
+import ast
+import io
+import json
+import os
+import shutil
+import sys
+import tempfile
+import unittest
+from datetime import date, datetime, timedelta, timezone
+from unittest.mock import patch
+
+from trainmate import journal
+from trainmate.config import config
+from trainmate.prompt import PromptCancelled
+from tests.helpers import bind_test_db, run_cli
+
+TEST_DB_PATH = os.path.join(os.path.dirname(__file__), "test_journal.db")
+
+
+def setUpModule():
+    """`tm journal` renders every stamp through the athlete's zone, which is a settings
+    row, so the reader needs a database even though the writer never opens one (§4)."""
+    bind_test_db(TEST_DB_PATH)
+
+
+class JournalTestCase(unittest.TestCase):
+    """Points `logging.dir` at a scratch directory for the life of one test."""
+
+    def setUp(self) -> None:
+        self.log_dir = tempfile.mkdtemp(prefix="tm-journal-test-")
+        self.addCleanup(shutil.rmtree, self.log_dir, True)
+        block = config.data.setdefault("logging", {})
+        previous = dict(block)
+        self.addCleanup(lambda: (block.clear(), block.update(previous)))
+        block["dir"] = self.log_dir
+        journal.reset()
+        self.addCleanup(journal.reset)
+
+    def lines(self):
+        """Every raw line written today, in order."""
+        path = journal.today_path()
+        if not os.path.exists(path):
+            return []
+        with open(path, encoding="utf-8") as handle:
+            return [line for line in handle.read().split("\n") if line]
+
+    def records(self):
+        return [json.loads(line) for line in self.lines()]
+
+
+class TestWriter(JournalTestCase):
+    """One record is one line, bounded, and never takes the command down (§4.3)."""
+
+    def test_a_record_round_trips(self):
+        journal.record("note", "Auto-syncing Garmin", lvl="warn", days=3)
+        (rec,) = self.records()
+        self.assertEqual(rec["ev"], "note")
+        self.assertEqual(rec["msg"], "Auto-syncing Garmin")
+        self.assertEqual(rec["lvl"], "warn")
+        self.assertEqual(rec["d"], {"days": 3})
+        self.assertEqual(rec["run"], journal.NO_RUN)
+        self.assertTrue(rec["ts"].endswith("Z"))
+
+    def test_a_none_valued_field_is_dropped_rather_than_written_as_null(self):
+        journal.record("note", "x", days=None)
+        self.assertNotIn("d", self.records()[0])
+
+    def test_the_day_file_is_named_for_the_utc_day_not_the_athletes(self):
+        # §4: naming the file from the athlete's zone would build and migrate the
+        # database, on `tm help` and in the path that must survive it being unreachable.
+        journal.record("note", "x")
+        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        self.assertEqual(
+            os.listdir(journal.runs_dir()), [f"{today}.jsonl"]
+        )
+
+    def test_a_multiline_message_is_still_one_line(self):
+        journal.record("note", "first\nsecond\nthird")
+        self.assertEqual(len(self.lines()), 1)
+        self.assertEqual(self.records()[0]["msg"], "first\nsecond\nthird")
+
+    def test_an_over_long_traceback_is_elided_in_the_middle(self):
+        head, tail = "HEAD" + "a" * 4000, "b" * 4000 + "TAIL"
+        journal.record("run.end", "failed", lvl="error", traceback=head + tail)
+        line = self.lines()[0]
+        self.assertLessEqual(len(line.encode("utf-8")), journal.MAX_RECORD_BYTES)
+        trace = self.records()[0]["d"]["traceback"]
+        self.assertTrue(trace.startswith("HEAD"))
+        self.assertTrue(trace.endswith("TAIL"))
+        self.assertIn("elided", trace)
+
+    def test_an_over_long_message_is_cut_and_the_record_stays_parseable(self):
+        journal.record("note", "x" * 40000)
+        line = self.lines()[0]
+        self.assertLessEqual(len(line.encode("utf-8")), journal.MAX_RECORD_BYTES)
+        self.assertTrue(self.records()[0]["msg"].endswith("…[cut]"))
+
+    def test_a_debug_record_is_dropped_at_the_default_level(self):
+        journal.debug("internal", "swallowed")
+        self.assertEqual(self.lines(), [])
+        config.data["logging"]["level"] = "debug"
+        journal.debug("internal", "swallowed")
+        self.assertEqual(self.records()[0]["lvl"], "debug")
+
+    def test_an_unwritable_directory_neither_raises_nor_repeats_itself(self):
+        blocker = os.path.join(self.log_dir, "blocker")
+        with open(blocker, "w") as handle:
+            handle.write("not a directory")
+        config.data["logging"]["dir"] = blocker
+        buffer = io.StringIO()
+        with patch.object(sys, "stderr", buffer):
+            journal.record("note", "one")
+            journal.record("note", "two")
+            journal.record("note", "three")
+        self.assertEqual(len(buffer.getvalue().strip().split("\n")), 1)
+
+    def test_seq_counts_within_the_run_not_the_file(self):
+        journal.start_run(["status"])
+        journal.record("note", "a")
+        journal.end_run("ok")
+        journal.start_run(["help"])
+        journal.end_run("ok")
+        seqs = [(rec["run"], rec["seq"]) for rec in self.records()]
+        first = seqs[0][0]
+        self.assertEqual([s for r, s in seqs if r == first], [0, 1, 2])
+        self.assertEqual([s for r, s in seqs if r != first], [0, 1])
+
+
+class TestReader(JournalTestCase):
+    """A line that is not valid JSON is skipped, not raised on (§4.3)."""
+
+    def test_a_torn_line_is_skipped_and_its_neighbours_survive(self):
+        journal.record("note", "before")
+        with open(journal.today_path(), "a", encoding="utf-8") as handle:
+            handle.write('{"ts":"2026-08-26T00:00:00.000Z","run":"aaaa\n')
+            handle.write("not json at all\n")
+            handle.write("[1, 2, 3]\n")
+        journal.record("note", "after")
+        msgs = [rec["msg"] for rec in journal.iter_records()]
+        self.assertEqual(msgs, ["before", "after"])
+
+    def test_the_window_opens_one_file_either_side_of_what_was_asked(self):
+        # A local day straddles two UTC files, so the reader widens by a day (§4).
+        for day in ("2026-08-01", "2026-08-02", "2026-08-03", "2026-08-04", "2026-08-05"):
+            path = os.path.join(journal.runs_dir(), f"{day}.jsonl")
+            os.makedirs(journal.runs_dir(), exist_ok=True)
+            with open(path, "w", encoding="utf-8") as handle:
+                handle.write(json.dumps({"ts": day, "ev": "note", "msg": day}) + "\n")
+        opened = journal.day_paths(date(2026, 8, 3), date(2026, 8, 3))
+        self.assertEqual(
+            [os.path.basename(p) for p in opened],
+            ["2026-08-02.jsonl", "2026-08-03.jsonl", "2026-08-04.jsonl"],
+        )
+
+    def test_a_file_that_is_not_a_day_is_never_opened(self):
+        os.makedirs(journal.runs_dir(), exist_ok=True)
+        with open(os.path.join(journal.runs_dir(), "notes.txt"), "w") as handle:
+            handle.write("hand-written\n")
+        self.assertEqual(journal.day_paths(), [])
+
+
+class TestRunBracket(JournalTestCase):
+    """Every command opens and closes a run, and says how it ended (§3, §5.4)."""
+
+    def _runs(self):
+        """(run id -> [record...]) for everything written."""
+        out = {}
+        for rec in journal.iter_records():
+            out.setdefault(rec["run"], []).append(rec)
+        return out
+
+    def _ends(self):
+        return [rec for rec in journal.iter_records() if rec["ev"] == "run.end"]
+
+    def test_every_start_has_an_end(self):
+        run_cli(["help"])
+        run_cli(["journal", "-n", "1"])
+        starts = [r for r in journal.iter_records() if r["ev"] == "run.start"]
+        ends = self._ends()
+        self.assertEqual(len(starts), 2)
+        self.assertEqual({r["run"] for r in starts}, {r["run"] for r in ends})
+
+    def test_run_start_names_the_command_without_touching_the_database(self):
+        run_cli(["help"])
+        (start,) = [r for r in journal.iter_records() if r["ev"] == "run.start"]
+        self.assertEqual(start["msg"], "help")
+        self.assertEqual(start["d"]["argv"], ["help"])
+        self.assertEqual(start["d"]["source"], "test")
+        self.assertIn("pid", start["d"])
+        # The model is deliberately absent: resolving it would build the database (§3).
+        self.assertNotIn("model", start["d"])
+
+    def test_a_command_that_raises_records_its_traceback_and_fails(self):
+        import trainmate_cli
+        with patch.object(trainmate_cli, "_dispatch", side_effect=KeyError("mesocycles")):
+            run_cli(["status"])
+        (end,) = self._ends()
+        self.assertEqual(end["d"]["outcome"], "failed")
+        self.assertEqual(end["lvl"], "error")
+        self.assertEqual(end["d"]["error"], "KeyError: 'mesocycles'")
+        self.assertIn("KeyError", end["d"]["traceback"])
+
+    def test_a_cancelled_command_is_cancelled_and_not_failed(self):
+        import trainmate_cli
+        with patch.object(trainmate_cli, "_dispatch", side_effect=PromptCancelled()):
+            run_cli(["status"])
+        (end,) = self._ends()
+        self.assertEqual(end["d"]["outcome"], "cancelled")
+        self.assertEqual(end["d"]["exit"], 130)
+
+    def test_a_domain_refusal_and_an_argparse_exit_both_read_as_ok(self):
+        run_cli(["goal"])          # a command group invoked bare: argparse exits 1
+        (end,) = self._ends()
+        self.assertEqual(end["d"]["outcome"], "ok")
+        self.assertEqual(end["d"]["exit"], 1)
+
+    def test_three_lines_in_a_shell_make_four_runs_with_one_parent(self):
+        import trainmate_cli
+        typed = iter(["help", "help", "help"])
+
+        def _input(_prompt=""):
+            try:
+                return next(typed)
+            except StopIteration:
+                raise EOFError
+
+        # main() directly rather than helpers.run_cli: that helper pins input() to one
+        # constant answer, which the REPL would read as the same line forever.
+        with patch("builtins.input", _input), patch.object(sys, "stdout", io.StringIO()):
+            trainmate_cli.main(["shell"])
+        starts = [r for r in journal.iter_records() if r["ev"] == "run.start"]
+        self.assertEqual(len(starts), 4)
+        (shell,) = [s for s in starts if s["msg"] == "shell"]
+        children = [s for s in starts if s["msg"] == "help"]
+        self.assertEqual(len(children), 3)
+        for child in children:
+            self.assertEqual(child["d"]["parent"], shell["run"])
+            self.assertEqual(child["d"]["source"], "repl")
+
+    def test_a_spawned_process_inherits_the_parent_run_and_its_own_source(self):
+        journal.start_run(["tm-bot"], source="bot")
+        env = journal.child_env({"TRAINMATE_PARENT_RUN": "stale"}, "push")
+        self.assertEqual(env["TRAINMATE_PARENT_RUN"], journal.current_id())
+        self.assertEqual(env["TRAINMATE_SOURCE"], "push")
+        journal.end_run("ok")
+        # With no run open, an inherited parent is dropped rather than passed on.
+        self.assertNotIn("TRAINMATE_PARENT_RUN", journal.child_env(dict(env), "cli"))
+
+    def test_the_rollup_counts_what_the_run_wrote(self):
+        journal.start_run(["plan", "generate"])
+        journal.note("careful", lvl="warn")
+        journal.llm_call(
+            label="plan_generate", model="m", ms=10, ok=True, total_tokens=1200
+        )
+        journal.end_run("ok")
+        (end,) = self._ends()
+        self.assertEqual(end["d"]["warns"], 1)
+        self.assertEqual(end["d"]["llm_calls"], 1)
+        self.assertEqual(end["d"]["tokens"], 1200)
+
+
+class TestRetention(JournalTestCase):
+    """The sweep deletes by name shape, and runs at most once a UTC day (§10)."""
+
+    def _seed(self, runs=(), exchanges=()):
+        os.makedirs(journal.runs_dir(), exist_ok=True)
+        os.makedirs(config.llm_logs_dir, exist_ok=True)
+        for name in runs:
+            open(os.path.join(journal.runs_dir(), name), "w").close()
+        for name in exchanges:
+            open(os.path.join(config.llm_logs_dir, name), "w").close()
+
+    def test_only_files_past_their_retention_and_of_the_right_shape_are_deleted(self):
+        config.data["logging"]["retain_days"] = 5
+        config.data["logging"]["retain_exchange_days"] = 5
+        old = (datetime.now(timezone.utc).date() - timedelta(days=30))
+        fresh = (datetime.now(timezone.utc).date() - timedelta(days=1))
+        self._seed(
+            runs=[f"{old}.jsonl", f"{fresh}.jsonl", "notes.txt"],
+            exchanges=[
+                f"{old:%Y%m%d}_120000_1_a1b2c3d4_plan.md",
+                f"{fresh:%Y%m%d}_120000_1_plan.md",
+                "hand-written.md",
+            ],
+        )
+        self.assertEqual(journal.prune(), (1, 1))
+        self.assertEqual(
+            sorted(os.listdir(journal.runs_dir())), sorted([f"{fresh}.jsonl", "notes.txt"])
+        )
+        self.assertEqual(
+            sorted(os.listdir(config.llm_logs_dir)),
+            sorted([f"{fresh:%Y%m%d}_120000_1_plan.md", "hand-written.md"]),
+        )
+
+    def test_the_stamp_file_gates_the_sweep_to_once_a_day(self):
+        config.data["logging"]["retain_days"] = 5
+        old = datetime.now(timezone.utc).date() - timedelta(days=30)
+        self._seed(runs=[f"{old}.jsonl"])
+        journal.start_run(["probe"])
+        journal.end_run("ok")                       # sweeps, and stamps the day
+        self.assertFalse(os.path.exists(os.path.join(journal.runs_dir(), f"{old}.jsonl")))
+        self._seed(runs=[f"{old}.jsonl"])
+        journal.start_run(["probe"])
+        journal.end_run("ok")                       # already stamped: no second sweep
+        self.assertTrue(os.path.exists(os.path.join(journal.runs_dir(), f"{old}.jsonl")))
+
+    def test_only_the_outermost_run_ending_considers_a_sweep(self):
+        journal.start_run(["shell"])
+        journal.start_run(["help"])
+        journal.end_run("ok")
+        stamp = os.path.join(journal.runs_dir(), journal.PRUNE_STAMP)
+        self.assertFalse(os.path.exists(stamp))
+        journal.end_run("ok")
+        self.assertTrue(os.path.exists(stamp))
+
+
+class TestJournalCommand(JournalTestCase):
+    """`tm journal` reads the files back in the athlete's terms (§7)."""
+
+    def _seed_runs(self):
+        journal.start_run(["plan", "generate", "-g", "2"], source="push")
+        journal.llm_call(
+            label="plan_generate", model="anthropic/claude-opus-5", ms=88400, ok=True,
+            total_tokens=210412, path="logs/llm_exchanges/x_plan_generate.md",
+        )
+        journal.end_run("failed", exit_code=1, error="KeyError: 'mesocycles'",
+                        traceback_text="Traceback (most recent call last):\n  boom")
+        journal.start_run(["workout", "adapt", "-m", "legs heavy"], source="bot")
+        journal.llm_call(
+            label="workout_adaptation", model="google/gemini-3.5-flash", ms=24118,
+            ok=True, total_tokens=38104,
+        )
+        journal.end_run("ok")
+        journal.reset()
+
+    def test_the_listing_shows_one_row_per_run_with_its_outcome(self):
+        self._seed_runs()
+        _code, out, _err = run_cli(["journal"])
+        self.assertIn("plan generate -g 2", out)
+        self.assertIn("FAILED", out)
+        self.assertIn("workout adapt", out)
+        self.assertIn("1 · 210k", out)
+
+    def test_a_run_with_no_end_reads_as_a_question_mark(self):
+        journal.start_run(["plan", "generate"], source="bot")
+        journal.reset()          # killed before it could write a run.end
+        _code, out, _err = run_cli(["journal"])
+        self.assertIn("?", out)
+
+    def test_an_id_prefix_opens_the_detail_view(self):
+        self._seed_runs()
+        run_id = [
+            rec["run"] for rec in journal.iter_records()
+            if rec["ev"] == "run.start" and rec["msg"].startswith("plan")
+        ][0]
+        _code, out, _err = run_cli(["journal", run_id[:4]])
+        self.assertIn(f"run {run_id}", out)
+        self.assertIn("llm.call", out)
+        self.assertIn("x_plan_generate.md", out)
+        self.assertIn("Traceback (most recent call last):", out)
+
+    def test_an_ambiguous_prefix_lists_what_it_matched_rather_than_guessing(self):
+        with patch("trainmate.journal.secrets.token_hex",
+                   side_effect=["ab121234", "ab125678"]):
+            for argv in (["status"], ["help"]):
+                journal.start_run(argv)
+                journal.end_run("ok")
+        journal.reset()
+        _code, out, _err = run_cli(["journal", "ab12"])
+        self.assertIn("matches 2 runs", out)
+        self.assertIn("ab121234", out)
+        self.assertIn("ab125678", out)
+
+    def test_prune_is_a_sub_command_and_not_read_as_a_run_id(self):
+        self._seed_runs()
+        _code, out, _err = run_cli(["journal", "prune"])
+        self.assertIn("Pruned", out)
+
+    def test_the_cost_rollup_groups_by_model_and_by_command(self):
+        self._seed_runs()
+        _code, out, _err = run_cli(["journal", "--cost"])
+        self.assertIn("anthropic/claude-opus-5", out)
+        self.assertIn("210,412", out)
+        self.assertIn("plan generate", out)
+        self.assertIn("248,516", out)          # the total row
+
+    def test_the_filters_narrow_to_one_source_and_to_trouble(self):
+        self._seed_runs()
+        _code, out, _err = run_cli(["journal", "--source", "bot"])
+        self.assertIn("workout adapt", out)
+        self.assertNotIn("plan generate", out)
+        _code, out, _err = run_cli(["journal", "--failed"])
+        self.assertIn("plan generate", out)
+        self.assertNotIn("workout adapt", out)
+
+
+class TestOutputVerbs(JournalTestCase):
+    """step/warn/fail print where they always did, and record what they printed (§5.1)."""
+
+    def test_step_prints_like_an_aside_and_journals_it(self):
+        from trainmate.util import step
+        buffer = io.StringIO()
+        with patch.object(sys, "stdout", buffer):
+            step("Auto-syncing Garmin 2026-08-22..2026-08-24...")
+        self.assertIn("Auto-syncing Garmin", buffer.getvalue())
+        (rec,) = self.records()
+        self.assertEqual(rec["ev"], "note")
+        self.assertEqual(rec["lvl"], "info")
+
+    def test_warn_and_fail_carry_their_prefix_and_level(self):
+        from trainmate.util import fail, warn
+        buffer = io.StringIO()
+        with patch.object(sys, "stdout", buffer):
+            warn("Garmin sync failed. Continuing with cached data.")
+            fail("Google Calendar event delete failed: boom")
+        printed = buffer.getvalue()
+        self.assertIn("Warning: Garmin sync failed.", printed)
+        self.assertIn("Error: Google Calendar event delete failed", printed)
+        self.assertEqual([rec["lvl"] for rec in self.records()], ["warn", "error"])
+
+    def test_a_journalled_message_carries_no_colour_codes(self):
+        from trainmate.util import cmd, warn
+        with patch("trainmate.util.is_color_enabled", return_value=True):
+            with patch.object(sys, "stdout", io.StringIO()):
+                warn("run " + cmd("data pull") + " in a terminal")
+        self.assertEqual(self.records()[0]["msg"], "run 'data pull' in a terminal")
+
+
+class TestNoSilentSwallows(unittest.TestCase):
+    """A broad handler whose body is exactly `pass` is an accident, not a decision.
+
+    Keyed on the shape rather than a list of names, so a file written tomorrow is covered
+    tomorrow (AGENTS.md, DESIGN_logging.md §11). A handler that means to stay quiet says
+    so with `journal.debug(...)`; a handler that names a narrow exception is exempt,
+    because the type is the documentation of what was expected, and one whose body is a
+    bare `return`/`continue` is exempt too, because the value it hands back is something
+    the caller sees. `pass` is the only shape with no effect outside itself.
+    """
+
+    ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    ENTRY_POINTS = ("trainmate_cli.py", "trainmate_bot.py", "trainmate_web.py")
+
+    def _sources(self):
+        for name in self.ENTRY_POINTS:
+            yield os.path.join(self.ROOT, name)
+        package = os.path.join(self.ROOT, "trainmate")
+        for dirpath, _dirs, files in os.walk(package):
+            if "__pycache__" in dirpath:
+                continue
+            for name in files:
+                if name.endswith(".py"):
+                    yield os.path.join(dirpath, name)
+
+    def test_no_broad_handler_swallows_an_exception_in_silence(self):
+        offenders = []
+        for path in self._sources():
+            with open(path, encoding="utf-8") as handle:
+                tree = ast.parse(handle.read())
+            for node in ast.walk(tree):
+                if not isinstance(node, ast.ExceptHandler):
+                    continue
+                caught = node.type
+                broad = caught is None or (
+                    isinstance(caught, ast.Name)
+                    and caught.id in ("Exception", "BaseException")
+                )
+                if not broad:
+                    continue
+                if len(node.body) == 1 and isinstance(node.body[0], ast.Pass):
+                    offenders.append(f"{os.path.relpath(path, self.ROOT)}:{node.lineno}")
+        self.assertFalse(
+            offenders,
+            "these handlers swallow an exception with no record of it; say so with "
+            "journal.debug(...) instead of `pass`: " + ", ".join(offenders),
+        )
+
+
+if __name__ == "__main__":
+    unittest.main()

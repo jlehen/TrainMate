@@ -28,15 +28,31 @@ llm:
 # (trainmate/science/) are unaffected either way.
 #science_dir: "science"
 
+# The operator-facing logs: the run journal (runs/YYYY-MM-DD.jsonl, one line per event,
+# read with `tm journal`) and the full LLM exchanges (llm_exchanges/*.md). Nothing the
+# app itself reads back lives here — see DESIGN_logging.md §2.1. Every key below has a
+# working default, so omitting the whole block behaves exactly as shown.
+#logging:
+#  # Where both directories go. A relative path resolves against this config file's
+#  # directory, like `database:` and `science_dir:`, so a second instance keeps its own
+#  # logs. Default logs/ beside the config.
+#  #dir: "logs"
+#  # Lowest level that reaches the journal file: debug | info | warn | error.
+#  # `debug` adds the records for exceptions the app deliberately swallows on screen.
+#  #level: "info"
+#  # Days each directory keeps. The sweep runs at most once a day, off the first
+#  # command that finishes after midnight UTC; `tm journal prune` forces one.
+#  #retain_days: 90
+#  #retain_exchange_days: 90
+
 # Second athlete, same checkout: copy this file into a directory of its own (the
 # database and any relative paths in it will live there too), then point every command
 # at it:
 #   TRAINMATE_CONFIG=/path/to/other/config.yaml ./tm status     (and likewise ./tm-bot)
 # A file named via TRAINMATE_CONFIG must exist — a typo aborts instead of silently
 # falling back to the primary athlete's database. Each instance brings its own telegram
-# bot token, garmin credentials and token_dir, google calendar_id, and — unless
-# `science_dir:` says otherwise — its own science/ guidelines beside it. The logs/
-# directory stays shared.
+# bot token, garmin credentials and token_dir, google calendar_id, its own logs/, and —
+# unless `science_dir:` says otherwise — its own science/ guidelines beside it.
 
 # Minimum minutes before an automatic refresh re-pulls — gates both Garmin hits and
 # Calendar-signal syncs; within this window reads reuse the local cache. Bypass a single

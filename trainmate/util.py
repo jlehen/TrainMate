@@ -5,6 +5,8 @@ import textwrap
 from datetime import date, datetime
 from typing import Optional, Tuple
 
+from trainmate import journal
+
 # ANSI escape codes for terminal coloring
 ANSI_ESCAPE = re.compile(r'(?:\033|\x1b)\[[0-9;]*m')
 RESET = "\033[0m"
@@ -154,6 +156,36 @@ def aside(text: str, color_fn=None) -> None:
     if not asides_enabled():
         return
     print((color_fn or dim)(text))
+
+
+def step(text: str, color_fn=None) -> None:
+    """Prints what the app is doing right now, and records it (DESIGN_logging.md §5.1).
+
+    The trace half of the old aside tier: a decision or an action a post-mortem wants —
+    "Auto-syncing Garmin...", "reusing the cached reconstruction", "no date given,
+    adapting today". Prints through the same gate and the same dim styling `aside` uses,
+    so nothing on screen moves; the difference is that it survives the screen."""
+    aside(text, color_fn)
+    journal.note(strip_ansi(text))
+
+
+def warn(text: str) -> None:
+    """An operational warning: something outside the app did not work, and it changes
+    what the answer means (DESIGN_logging.md §5.3).
+
+    Always prints, and folds in both the colour and the `Warning: ` prefix that used to
+    be twenty independent decisions. A domain refusal — "no active plan", "nothing
+    scheduled for Thursday" — is the app correctly reporting the athlete's own data, so
+    it is an answer and keeps its own `print`."""
+    print(yellow("Warning: " + text))
+    journal.note(strip_ansi(text), lvl="warn")
+
+
+def fail(text: str) -> None:
+    """The command could not do its job, for a reason outside the app (§5.3). Prints in
+    red with an `Error: ` prefix, and lands in the journal at `error`."""
+    print(red("Error: " + text))
+    journal.note(strip_ansi(text), lvl="error")
 
 
 def strip_ansi(text: str) -> str:

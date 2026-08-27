@@ -85,10 +85,13 @@ classes themselves.
 - **`trainmate_cli.py`** — thin entry point: argparse dispatcher (`main()`) and its
   helpers. No business logic. Singletons live in `trainmate/runtime.py`
   ([§6](#6-singletons)), which handlers read directly, so nothing under `trainmate/`
-  imports this module.
+  imports this module. `run_once` — the one function both `main` and the REPL call —
+  brackets each command with a journal run (`run.start`/`run.end`), just inside the two
+  existing error boundaries, so a failed command records its own traceback with no new
+  handler anywhere (DESIGN_logging.md §3/§5.4).
 - **`trainmate/cli/`** — per-command-family handler modules (`run_*()`): `status`,
   `progress`, `goals`, `constraints`, `benchmarks`, `signal`, `learnings`,
-  `plans`, `data`, `models`, the `workouts/` package, plus shared `common`.
+  `plans`, `data`, `models`, `journal`, the `workouts/` package, plus shared `common`.
 - **`trainmate_web.py`** — Flask REST API behind the dashboard. **Read-only**: GET
   handlers over `db` and the shared pure modules, no writes, no Garmin, no LLM, no
   Calendar ([§8](#8-web-api-endpoints)).
@@ -327,12 +330,37 @@ classes themselves.
 |                      |                      | `config.yaml` and the built-in default. The single |
 |                      |                      | writer for every `settings` row                    |
 |                      |                      | (DESIGN_settings.md).                              |
+| `journal.py`         | —                    | The run journal: `logs/runs/YYYY-MM-DD.jsonl`,   |
+|                      |                      | one JSON object per line, bracketed by a         |
+|                      |                      | `run.start`/`run.end` pair per command. The      |
+|                      |                      | operational record, as opposed to the domain     |
+|                      |                      | one the tables hold — nothing in the app ever    |
+|                      |                      | reads it back. Owns the writer (one `os.write`   |
+|                      |                      | on an O_APPEND fd, records bounded at 8 KB,      |
+|                      |                      | never raises), the module-level run stack, the   |
+|                      |                      | reader, and retention. Imports nothing but       |
+|                      |                      | `config`: the file name and every `ts` come from |
+|                      |                      | the system clock in **UTC**, because asking      |
+|                      |                      | `clock` for the athlete's day would open and     |
+|                      |                      | migrate the database — on `tm help`, and inside  |
+|                      |                      | the one path that must survive the database      |
+|                      |                      | being unreachable (DESIGN_logging.md §4).        |
 | `util.py`            | —                    | ANSI color helpers (`bold`, `green`, `red`, …),  |
 |                      |                      | `cmd` (every "run X" call to action), `wrap_text`,|
 |                      |                      | `format_labeled_text`, `strip_ansi`, `Progress`  |
-|                      |                      | (self-erasing bar, silent off a terminal),       |
-|                      |                      | `aside`/`asides_enabled` (side information —     |
-|                      |                      | terminal only, DESIGN_output_verbosity.md),      |
+|                      |                      | (self-erasing bar, silent off a terminal), and   |
+|                      |                      | the four output verbs: `print` (the answer),     |
+|                      |                      | `aside`/`asides_enabled` (a hint or standing     |
+|                      |                      | caveat, terminal only,                           |
+|                      |                      | DESIGN_output_verbosity.md), `step` (what the    |
+|                      |                      | app is doing right now — prints exactly where    |
+|                      |                      | `aside` prints, and journals it), `warn`/`fail`  |
+|                      |                      | (an operational warning or failure — always      |
+|                      |                      | prints, folds in the colour and the `Warning: `/ |
+|                      |                      | `Error: ` prefix, journals at `warn`/`error`).   |
+|                      |                      | A domain refusal ("no active plan") is an answer |
+|                      |                      | and keeps its own `print` (DESIGN_logging.md     |
+|                      |                      | §5.1/§5.3). Also                                 |
 |                      |                      | `fmt_date`/`fmt_span`/`fmt_timestamp` — the one  |
 |                      |                      | date renderer for every surface: a displayed day |
 |                      |                      | carries its abbreviated weekday                  |
@@ -369,6 +397,8 @@ flow for each lives in [§10](#10-key-data-flows).
 | A CLI command                    | `trainmate/cli/<family>.py` (`run_*`), dispatcher in `trainmate_cli.py` ([§7](#7-cli-commands-reference)) |
 | A message telling the athlete to run something | wrap the command in `util.cmd()`, nested *inside* the line's colour call, so it renders as the bright shade of that colour — and emit it with `util.aside`, not `print`: a "you could now run X" hint is side information |
 | Whether a line reaches the chat front-end | `util.aside` (side information, terminal only) vs `print` (the answer, warnings, errors). Building a list of lines rather than printing? gate on `util.asides_enabled()`. DESIGN_output_verbosity.md §3 |
+| Recording that something happened | Nothing new to call: `util.step` (what the app is doing), `util.warn`/`util.fail` (something outside the app did not work) print and journal in one go, and `run_once` already brackets the command. Reach for `trainmate/journal.py` directly only for a record with structured fields (`journal.record("garmin.pull", …)`) or for what must never reach the athlete (`journal.debug` — the tier that replaced `except Exception: pass`, pinned by `tests/test_journal.py`). The event name comes from the closed nine-word vocabulary in `journal.EVENTS`; severity is `lvl`, not a new name. Never copy something a table already holds — that is the domain record, and it outlives this one. DESIGN_logging.md §2/§4.2/§5 |
+| Reading back what a command did  | `tm journal` (`trainmate/cli/journal.py`), or `logs/runs/*.jsonl` with `jq`. A run's prompts are `logs/llm_exchanges/*<run id>*` — the id in the filename is the join, not the timestamp, because those names come from the machine's local clock while the journal is UTC. DESIGN_logging.md §6/§7 |
 | How long the coach's prose is    | `coach/engine/prompt.py` (`## WRITING FOR THE ATHLETE`, shared by every command built on `_build_system_prompt`) + the per-field caps in each `## RESPONSE FORMAT`. Check `coach/formatting.py` first: a field re-injected into later prompts must not be capped (DESIGN_output_verbosity.md §5.1) |
 | A web *view* of existing data    | a GET in `trainmate_web.py` + a panel in `static/app.js` ([§8](#8-web-api-endpoints)) |
 | A web endpoint that would *write* | it does not go in the web app — add the CLI command instead ([§8](#8-web-api-endpoints)) |
@@ -1559,7 +1589,7 @@ Invoked as `python trainmate_cli.py [--llm-model MODEL] <command> [subcommand] [
 patchable singletons; the handler functions, named
 `run_<command>_<subcommand>()`, live in the `trainmate/cli/` package
 (one module per command family: `status`, `progress`, `goals`, `constraints`,
-`benchmarks`, `signal`, `learnings`, `plans`, `data`, `models`, `bot` (hidden:
+`benchmarks`, `signal`, `learnings`, `plans`, `data`, `models`, `journal`, `bot` (hidden:
 `bot morning`/`bot route`/`bot constraints`, spawned by the Telegram bot —
 DESIGN_bot_simple_frontend.md),
 plus the
@@ -1660,6 +1690,9 @@ single read-only view that is its whole state (`settings`), which acts bare inst
 | `settings`   | `list`       | `se l`   | Every preference with its value and where that value came from — the stored row, `config.yaml`, or the built-in default. With a NAME, that one setting in detail: the numbered model menu for `coach-model`, the local clock for `timezone`. A bare `settings` lists — the read-only-family exception (DESIGN_cli_noargs.md §a3, applied by DESIGN_settings.md §4) |
 | `settings`   | `set`        | `se s`, `se use` | Change one preference: `settings set coach-model 3`, `settings set timezone Europe/Paris`, `settings set morning-time 07:00`. The name takes any unambiguous prefix. Validated by the setting's own parser — a value it cannot read is refused and nothing is written. Stored in `settings`; survives restarts |
 | `settings`   | `reset`      | `se r`   | Forget one stored preference so `config.yaml`, or the built-in default, rules again |
+| `journal`    | —            | `j`      | The operational record: one row per command run, newest first — id, when (athlete's zone), source, command, wall time, model calls · tokens, and how it ended (`ok`, `warn`, `cancelled`, `FAILED`, `?` for a run with no `run.end`). Filters: `-n N`, the shared `-d RANGE`, `--source`, `--command`, `--failed`, plus `--cost` for the by-model/by-command token rollup and `--follow` to tail the file live (DESIGN_logging.md §7) |
+| `journal`    | `show`       | `j 5a0e` | Everything one run wrote, by id prefix: where it ran, each event as an offset from its start, the LLM exchange files it produced, the traceback if it failed, and the runs it spawned. The bare `journal <id>` form is the same command; an ambiguous prefix lists what it matched |
+| `journal`    | `prune`      | `j p`    | Force the retention sweep now — journal days past `logging.retain_days`, exchange files past `logging.retain_exchange_days`. Otherwise it runs at most once a UTC day, off the first command to finish (DESIGN_logging.md §10) |
 
 ---
 
@@ -1673,6 +1706,12 @@ row, never calls Garmin, never calls the LLM, and never touches Google Calendar.
 one of those is a CLI (or bot) action. The rule is enforced, not merely documented — a
 `before_request` guard 405s every mutating verb, and `tests/test_web.py::TestReadOnly`
 fails if any route is registered with one.
+
+It is also the one surface that opens **no journal run**: a read-only GET neither changes
+anything nor costs anything, so there is nothing to bracket, and keeping the run stack out
+of Flask's threaded request handling is the second reason. Only failures are recorded — an
+`internal` record with no run id, written by an `errorhandler` that re-raises so Flask
+still renders the response it would have (DESIGN_logging.md §13).
 
 That is a deliberate demotion from the previous contract ("the API tracks the CLI feature
 set"), which decayed silently: parity was achieved once, in June 2026, and every feature
@@ -1764,12 +1803,12 @@ Writes live in the CLI: `goal`/`constraint`/`signal`/`benchmark` authoring,
 
 The file is `config.yaml` at the repo root unless the `TRAINMATE_CONFIG` env var names
 another one — that is how a second athlete runs from the same checkout: own config, own
-`database:`, own `science/` guidelines, own Telegram token and Garmin account; shared code
-and `logs/`. An explicitly named file must exist and parse (a typo aborts rather than
-silently running against the primary athlete's database). Relative `database:`,
-`science_dir:` and `service_account_file` values resolve against the config file's
-directory — two athletes share one set of guidelines only by pointing `science_dir:` at
-the same absolute path, never by default.
+`database:`, own `science/` guidelines, own `logs/`, own Telegram token and Garmin
+account; only the code is shared. An explicitly named file must exist and parse (a typo
+aborts rather than silently running against the primary athlete's database). Relative
+`database:`, `science_dir:`, `logging.dir` and `service_account_file` values resolve
+against the config file's directory — two athletes share one set of guidelines only by
+pointing `science_dir:` at the same absolute path, never by default.
 
 Required fields:
 
@@ -1785,6 +1824,9 @@ Required fields:
 |                        |      | `service_account.json`)                                       |
 | `database`             | str  | SQLite file this instance operates on; a relative value resolves against the config file's directory (default: `trainmate.db`) |
 | `science_dir`          | str  | Directory whose `*.md` files become the ATHLETE-PROVIDED science block in every coaching prompt (`coach/formatting.py:_load_science_guidelines`); a relative value resolves against the config file's directory (default: `science`). The app's own `trainmate/science/` is not configurable |
+| `logging.dir`          | str  | Root of the two operator log directories — `runs/` (the journal, read with `tm journal`) and `llm_exchanges/` (the full prompts). Relative to the config file's directory, like `database:` (default: `logs`). DESIGN_logging.md §6 |
+| `logging.level`        | str  | Lowest level that reaches the journal file: `debug`\|`info`\|`warn`\|`error` (default `info`). `debug` turns on the records for exceptions the app deliberately swallows on screen |
+| `logging.retain_days` / `logging.retain_exchange_days` | int | Days each directory keeps (default 90 each). The sweep runs at most once a UTC day, off the first command to finish; `tm journal prune` forces one |
 | `llm.router_model`     | str  | Cheaper model the bot's free-text router (`tm bot route`) uses; a role, not a `model list` entry. Absent → the active coaching model (DESIGN_bot_simple_frontend.md §5.4) |
 | `telegram.ui`          | str  | Bot persona: `expert` (default) or `simple` — the companion mode (DESIGN_bot_simple_frontend.md §3) |
 | `telegram.push.*`      | —    | Morning push (simple ui only): `enabled` (default true), `morning_time` (`08:00`), `morning_deadline` (`15:00`), `adapt_first` (default false → run `workout adapt -y` before rendering) |
@@ -2408,6 +2450,16 @@ venv/bin/python -m unittest discover -s tests -p "test_*.py"
 |                                | reads the stored zone (two zones 26h apart never share a         |
 |                                | calendar date), that stored UTC instants render local, and the   |
 |                                | `timezone` command (DESIGN_user_timezone.md)                     |
+| `tests/test_journal.py`        | the run journal (DESIGN_logging.md §11): the writer (one line    |
+|                                | per record, the 8 KB bound, a traceback elided in the middle, an |
+|                                | unwritable directory that neither raises nor repeats itself),    |
+|                                | the reader skipping a torn line, the run bracket (every start    |
+|                                | has an end; a raising command records its traceback and          |
+|                                | `failed`; a cancel is `cancelled`; three lines in `tm shell`     |
+|                                | make four runs with one parent), retention and its once-a-day    |
+|                                | stamp, `tm journal`'s three views, the `step`/`warn`/`fail`      |
+|                                | verbs — and the structural pass that fails on any broad          |
+|                                | `except` whose body is a bare `pass`                             |
 
 Tests inject a fresh in-memory SQLite DB by assigning `test_db` to module-level
 `db` variables *before* importing the singletons. `openrouter_client` is mocked
@@ -2419,6 +2471,11 @@ out, and any non-loopback socket connect raises. Without them the suite reached 
 real account — creating calendar events and consuming the incremental sync token
 that `data pull` depends on. A test needing network behaviour mocks its client. The
 same module sweeps the per-module `tests/*.db` files at exit.
+
+It installs a third seam for the same reason: every command a test runs opens a journal
+run, so `logging.dir` is redirected to a scratch directory (swept at exit) and
+`TRAINMATE_SOURCE=test` is set. Without it a suite run appends several hundred KB of
+`test` runs to the operator's own journal.
 
 Fixture dates ride on today (`_days_out(...)`/`GOAL_DATE`) rather than on fixed
 dates wherever the code compares them against the clock: a plan window needs its
@@ -2485,6 +2542,30 @@ eye to skip it"; this generalises it. The prompts got the matching half — a sh
 `## WRITING FOR THE ATHLETE` section plus per-field sentence caps on the rationale fields
 — with `plan generate`'s `strategy` deliberately exempt, because it is re-injected into
 every later prompt rather than read once. See DESIGN_output_verbosity.md.
+
+### The journal reuses the lines it already prints
+The app used to record one thing well — the full text of every LLM call — and that pile of
+documents could not answer "what happened at 6:15 this morning", "when did the Garmin sync
+start failing", or "what has this cost me". What was missing was not detail but a spine:
+nothing said *this run happened, this is what it did, this is how it ended*.
+
+The trap in fixing that is adding a logging call at every interesting place, so the calls
+drift out of step with the code. They are not added here. The verbs above already sit at
+the moments worth recording, already worded for a human, so they were given a second job:
+the trace half of the aside tier became `step`, which prints exactly where it printed and
+also journals; the operational warnings became `warn`/`fail`. One `try`/`except` in
+`run_once` then buys every failed command its own traceback — which used to be discarded
+unless the athlete passed `--debug`, which they never did, because the run that mattered
+had already finished.
+
+Two consequences are worth knowing before editing any of it. The journal's day file is the
+one date in this app that is **not** the athlete's, because resolving their zone reads a
+setting, which builds the database, which migrates it — on `tm help`, and inside the code
+path whose job is to survive the database being unreachable. Display converts back through
+their zone like every other stored instant. And the tier the output design had no name for
+is the one that matters most: things the app must not *say* but must not *forget* —
+`journal.debug`, which is what the ten `except Exception: pass` handlers became. See
+DESIGN_logging.md.
 
 ### The adapt TASK: standing rules, not restated ones
 The adapt prompt's TASK is one always-on body plus five conditional sections, each written

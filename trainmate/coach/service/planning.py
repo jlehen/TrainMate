@@ -8,7 +8,7 @@ from trainmate.adherence import planned_load
 from trainmate.sports import canonical_sport
 from trainmate.db.periodization import repair_block_contiguity
 from trainmate.util import (
-    aside, cyan, yellow, bold, cmd, wrap_text, format_labeled_block, default_wrap_width,
+    step, cyan, yellow, bold, cmd, wrap_text, format_labeled_block, default_wrap_width,
 )
 import trainmate.coach.service as _svc
 
@@ -378,7 +378,7 @@ class PlanningMixin:
                 reused = True
                 strategy = existing_macro['strategy']
                 mesocycles = self._db.get_mesocycles_for_macrocycle(existing_macro['id'])
-                aside(wrap_text(
+                step(wrap_text(
                     "Reusing existing periodization strategy (macrocycle and mesocycles) "
                     "from database."
                 ), cyan)
@@ -434,13 +434,13 @@ class PlanningMixin:
             # Generate new macrocycle strategy and mesocycles
             width = default_wrap_width()
             if fresh:
-                aside(wrap_text(
+                step(wrap_text(
                     "Clean slate: the plan in place is withheld from the prompt, so the "
                     "new strategy is not asked to continue it. Your training history, the "
                     "planned-vs-actual review and your plan feedback still feed in."
                 ), cyan)
             else:
-                aside(wrap_text(
+                step(wrap_text(
                     "Goals or plan-shaping constraints have changed, or force generation "
                     "requested. Determining new overall periodization strategy..."
                 ), cyan)

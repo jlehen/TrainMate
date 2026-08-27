@@ -7,7 +7,7 @@ from trainmate import runtime
 from trainmate.calendar_state import calendar_status
 from trainmate.sports import canonical_sport
 from trainmate.util import (
-    aside, bold, dim, green, red, yellow, cyan, gray, cmd, fmt_date, fmt_span,
+    step, bold, dim, green, red, yellow, cyan, gray, cmd, fmt_date, fmt_span,
     today_str as _today_str,
 )
 from trainmate.cli.selectors import resolve_window
@@ -53,7 +53,7 @@ def run_workout_push(args: argparse.Namespace) -> None:
         warn_stale_before(start_date)
         return
 
-    aside(f"Syncing {len(to_push)} workouts to Google Calendar...")
+    step(f"Syncing {len(to_push)} workouts to Google Calendar...")
     try:
         runtime.calendar_syncer.sync_multiple(to_push)
         print(green("Google Calendar synchronization completed."))
@@ -193,7 +193,7 @@ def run_workout_wipe(args: argparse.Namespace) -> None:
     workouts = runtime.db.get_workouts(include_removed=True)
     synced_workouts = [w for w in workouts if w.get('google_event_id')]
     if synced_workouts:
-        aside(f"Deleting {len(synced_workouts)} events from Google Calendar...")
+        step(f"Deleting {len(synced_workouts)} events from Google Calendar...")
         for w in synced_workouts:
             ge_id = w['google_event_id']
             if ge_id:

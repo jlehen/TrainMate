@@ -5,7 +5,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from trainmate import runtime
 from trainmate.config import config
-from trainmate.util import today_str, yellow
+from trainmate.util import today_str, warn
 import trainmate.garmin as _g
 from trainmate.garmin.client import _to_date
 from trainmate.garmin.load import _hr_zone_coverage, activity_load, compute_load, measured_tss
@@ -263,10 +263,10 @@ def backfill_tss(
     print(f"Recomputed measured TSS for {len(activities)} activities "
           f"({changed} changed).")
     if sparse:
-        print(yellow(
-            f"  {len(sparse)} activities have low HR-zone coverage and no RPE; "
+        warn(
+            f"{len(sparse)} activities have low HR-zone coverage and no RPE; "
             "their load is an underestimate. Enter an RPE in Garmin for accuracy."
-        ))
+        )
         if verbose:
             for act in sparse:
                 date = act.get("date", "?")

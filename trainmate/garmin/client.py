@@ -5,7 +5,8 @@ from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
 
 from trainmate.config import config
-from trainmate.util import aside
+from trainmate import journal
+from trainmate.util import step
 
 def _derivation_pad_days() -> int:
     """Raw history needed *before* a displayed window so the baselines and the CTL EWMA
@@ -88,7 +89,7 @@ class GarminClient:
                 metrics["rhr"] = stats.get("restingHeartRate")
                 metrics["stress"] = stats.get("averageStressLevel")
         except Exception as e:
-            aside(f"[{date_str}] daily stats unavailable: {e}")
+            step(f"[{date_str}] daily stats unavailable: {e}")
 
         try:
             sleep_data = self.api.get_sleep_data(date_str)
@@ -103,7 +104,7 @@ class GarminClient:
                         if isinstance(q, dict):
                             metrics["sleep_score"] = q.get("score")
         except Exception as e:
-            aside(f"[{date_str}] sleep data unavailable: {e}")
+            step(f"[{date_str}] sleep data unavailable: {e}")
 
         try:
             hrv_data = self.api.get_hrv_data(date_str)
@@ -113,8 +114,10 @@ class GarminClient:
                     metrics["hrv"] = summary.get("lastNightAvg")
                 else:
                     metrics["hrv"] = hrv_data.get("lastNightAvg")
-        except Exception:
-            pass  # older/non-HRV devices
+        except Exception as e:
+            # Older/non-HRV devices — silent on screen, not on disk
+            # (DESIGN_logging.md §5.5).
+            journal.debug("garmin.pull", f"[{date_str}] HRV unavailable: {e}")
 
         return metrics
 
@@ -166,8 +169,8 @@ class GarminClient:
             parsed = self._parse_zone_entries(data, 7, "power_zone")
             if any(v for v in parsed.values()):
                 return parsed  # type: ignore[return-value]
-        except Exception:
-            pass
+        except Exception as e:
+            journal.debug("garmin.pull", f"activity {activity_id} power zones: {e}")
         return {f"power_zone{i}_sec": None for i in range(1, 8)}
 
     def get_activity_rpe(self, activity_id: Any) -> Optional[float]:
@@ -178,6 +181,6 @@ class GarminClient:
                 rpe = act.get("summaryDTO", {}).get("directWorkoutRpe")
                 if rpe is not None:
                     return float(rpe) / 10.0
-        except Exception:
-            pass
+        except Exception as e:
+            journal.debug("garmin.pull", f"activity {activity_id} RPE: {e}")
         return None

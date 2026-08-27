@@ -7,7 +7,7 @@ from trainmate.config import config
 from trainmate.adherence import analyze_adherence, date_covered, format_discrepancies
 from trainmate.google_calendar import event_url
 from trainmate.util import (
-    bold, green, red, yellow, cyan, magenta, gray, cmd, aside, pad_visible, wrap_text,
+    bold, green, red, yellow, cyan, magenta, gray, cmd, aside, step, pad_visible, wrap_text,
     format_labeled_block, today_str as _today_str, today_date as _today_date,
     days_between, fmt_date, fmt_span, fmt_timestamp,
 )
@@ -59,7 +59,7 @@ def run_workout_adapt(args: argparse.Namespace) -> None:
     date_str = args.date or _today_str()
     if not args.date:
         # Name the defaulted target so a bare `adapt` isn't silent (DESIGN_cli_noargs.md §b).
-        aside(f"No date given — adapting today ({fmt_date(date_str)}).")
+        step(f"No date given — adapting today ({fmt_date(date_str)}).")
 
     ensure_recent_data(
         date_str, no_pull=args.no_pull, force_pull=getattr(args, 'force_pull', False)
@@ -72,14 +72,14 @@ def run_workout_adapt(args: argparse.Namespace) -> None:
         date_obj = datetime.strptime(date_str, "%Y-%m-%d").date()
         start_date = (date_obj - timedelta(days=history_days - 1)).strftime("%Y-%m-%d")
         metrics_history = runtime.db.get_metrics_cache(start_date=start_date, end_date=date_str)
-        aside(f"\nUsing {len(metrics_history)} days of recovery metrics "
+        step(f"\nUsing {len(metrics_history)} days of recovery metrics "
              f"(past {history_days}-day window).")
     except Exception as e:
         print(yellow(f"Warning: Could not load metrics trajectory: {e}"))
 
     _print_block_boundary_hint(date_str)
 
-    aside(f"Evaluating daily Garmin metrics adaptation for {fmt_date(date_str)}...")
+    step(f"Evaluating daily Garmin metrics adaptation for {fmt_date(date_str)}...")
     try:
         proposal = runtime.coach_service.workout_adapt(
             date_str, message=getattr(args, 'message', None)
@@ -135,7 +135,7 @@ def run_workout_adapt(args: argparse.Namespace) -> None:
             print("\nAdaptations discarded.")
             return
 
-        aside("\nApplying adaptations...")
+        step("\nApplying adaptations...")
         runtime.coach_service.workout_revision_apply(proposal)
         print(green("Adaptations applied and synced to calendar successfully."))
 

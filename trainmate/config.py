@@ -138,9 +138,40 @@ class Config:
         return path
 
     @property
+    def logging_dir(self) -> str:
+        """Root of the operator-facing logs — the run journal and the LLM exchanges
+        (DESIGN_logging.md §6). Top-level `logging.dir` key, default logs/.
+
+        A relative value resolves against the config file's directory, like `database:`
+        and `science_dir:`, so a TRAINMATE_CONFIG instance keeps its logs beside its own
+        config instead of interleaving them with the primary athlete's."""
+        path = os.path.expanduser(str(self.get("logging", {}).get("dir") or "logs"))
+        if not os.path.isabs(path):
+            path = os.path.join(CONFIG_DIR, path)
+        return path
+
+    @property
     def llm_logs_dir(self) -> str:
         """Gets the directory where LLM interaction logs are stored."""
-        return os.path.join(os.path.dirname(os.path.dirname(__file__)), "logs", "llm_exchanges")
+        return os.path.join(self.logging_dir, "llm_exchanges")
+
+    @property
+    def logging_level(self) -> str:
+        """Lowest level that reaches the journal file: debug|info|warn|error, default
+        info. `debug` turns on the swallowed-exception tier (DESIGN_logging.md §9)."""
+        return str(self.get("logging", {}).get("level", "info")).strip().lower()
+
+    @property
+    def logging_retain_days(self) -> int:
+        """Days of `logs/runs/*.jsonl` kept by the daily sweep. Default 90."""
+        return int(self.get("logging", {}).get("retain_days", 90))
+
+    @property
+    def logging_retain_exchange_days(self) -> int:
+        """Days of `logs/llm_exchanges/*.md` kept by the daily sweep. Default 90 —
+        the model-comparison work reads old exchanges, and a benchmark you cannot
+        re-read is one you have to re-run (DESIGN_logging.md §10)."""
+        return int(self.get("logging", {}).get("retain_exchange_days", 90))
 
     @property
     def app_science_dir(self) -> str:

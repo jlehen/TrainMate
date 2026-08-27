@@ -56,7 +56,7 @@ import sys
 import time
 from typing import Any, Dict, List, Optional, Tuple
 
-from trainmate import settings
+from trainmate import journal, settings
 from trainmate.clock import now as athlete_now, reset_cache as forget_timezone
 from trainmate.config import config
 from trainmate.prompt import (
@@ -439,12 +439,21 @@ def format_reply(text: str, simple: bool = False) -> List[str]:
     return [f"<pre>{html.escape(chunk)}</pre>" for chunk in chunk_text(text)]
 
 
-def _cli_env(wrap_width: Optional[int], simple: bool = False) -> Dict[str, str]:
+def _cli_env(
+    wrap_width: Optional[int], simple: bool = False, source: str = "bot"
+) -> Dict[str, str]:
     """Environment for a bot-driven CLI subprocess: structured prompts, no colour,
     unbuffered I/O (so prompt requests arrive before the child blocks on stdin), and
     the narrow wrap width phones want. `simple` opts commands into the companion
-    rendering (DESIGN_bot_simple_frontend.md §6)."""
+    rendering (DESIGN_bot_simple_frontend.md §6).
+
+    `source` is a parameter rather than a constant beside TRAINMATE_FRONTEND because
+    this one function serves three callers with three different answers: a chat message
+    is `bot`, the same call firing the morning push is `push`, and the intent router is
+    `route` (DESIGN_logging.md §3). The child also gets this process's run id as its
+    parent, so the push and the subprocess it launched read as one story."""
     env = dict(os.environ)
+    journal.child_env(env, source)
     env["TRAINMATE_FRONTEND"] = "json"
     env["NO_COLOR"] = "1"
     env["PYTHONUNBUFFERED"] = "1"
@@ -565,8 +574,14 @@ def main() -> None:
         return reply_keyboard if simple_ui else None
 
     def _log(chat_id: int, direction: str, msg: str) -> None:
+        """The bot's own timeline: printed live, and journalled (DESIGN_logging.md §8).
+
+        Also journalled, not instead: an operator watching ./tm-bot in a terminal keeps
+        the view they have today. Where that stdout goes depends entirely on how the
+        supervisor was launched, which in practice means nowhere."""
         ts = datetime.datetime.now().strftime("%H:%M:%S")
         print(f"{ts} [{chat_id}] {direction} {msg}", flush=True)
+        journal.record("bot.event", f"{direction} {msg}", chat=chat_id)
 
     application = Application.builder().token(token).post_init(_post_init).build()
     bot = application.bot
@@ -627,8 +642,10 @@ def main() -> None:
                 )
                 _log(session.chat_id, "<<", f"{len(buttons)} ui button(s)")
                 return
-            except Exception:
-                pass  # older client / edited race — degrade to a fresh message
+            except Exception as exc:
+                # Older client / edited race — degrade to a fresh message
+                # (DESIGN_logging.md §5.5).
+                journal.debug("bot.event", f"button attach failed: {exc}")
         await bot.send_message(
             chat_id=session.chat_id, text="👇", reply_markup=keyboard,
         )
@@ -764,13 +781,15 @@ def main() -> None:
                     pass
             await _resume_polling()  # back to idle: always end this session live
 
-    async def _start_command(chat_id: int, argv: List[str], quiet: bool = False) -> None:
+    async def _start_command(
+        chat_id: int, argv: List[str], quiet: bool = False, source: str = "bot"
+    ) -> None:
         proc = await asyncio.create_subprocess_exec(
             sys.executable, "-u", CLI_PATH, *argv,
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.STDOUT,
-            env=_cli_env(_wrap_width(), simple=simple_ui),
+            env=_cli_env(_wrap_width(), simple=simple_ui, source=source),
             cwd=os.path.dirname(CLI_PATH),
         )
         session = _Session(chat_id, proc, secrets.token_hex(4), quiet=quiet)
@@ -787,7 +806,9 @@ def main() -> None:
                 stdin=asyncio.subprocess.DEVNULL,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.DEVNULL,
-                env=_cli_env(None),
+                # `route` keeps its own source: it runs once per free-text message and
+                # is pure noise in every other view (DESIGN_logging.md §3).
+                env=_cli_env(None, source="route"),
                 cwd=os.path.dirname(CLI_PATH),
             )
             out, _ = await asyncio.wait_for(
@@ -874,8 +895,8 @@ def main() -> None:
         commands = SIMPLE_MENU_COMMANDS if target else MENU_COMMANDS
         try:
             await bot.set_my_commands([BotCommand(n, d) for n, d in commands])
-        except Exception:
-            pass  # the menu is cosmetic — never let it block the switch
+        except Exception as exc:  # the menu is cosmetic — never let it block the switch
+            journal.debug("bot.event", f"command menu not updated: {exc}")
         if target:
             await bot.send_message(
                 chat_id=chat_id, text=UI_SIMPLE_ON, reply_markup=reply_keyboard
@@ -998,8 +1019,8 @@ def main() -> None:
         if decoded is None or current is None or decoded[0] != current[0]:
             try:  # replaced by a newer push: drop the dead buttons
                 await query.edit_message_reply_markup(reply_markup=None)
-            except Exception:
-                pass
+            except Exception as exc:
+                journal.debug("bot.event", f"stale buttons not dropped: {exc}")
             return
         token, path = decoded
         action = resolve_ui_action(current[1], path)
@@ -1014,8 +1035,8 @@ def main() -> None:
             )
             try:
                 await query.edit_message_reply_markup(reply_markup=keyboard)
-            except Exception:
-                pass
+            except Exception as exc:
+                journal.debug("bot.event", f"sub-menu not swapped in: {exc}")
             return
         utterance = action.get("send")
         if utterance and sessions.get(chat_id) is not None:
@@ -1028,8 +1049,8 @@ def main() -> None:
         _log(chat_id, "  ", f"ui tap: {action.get('label')}")
         try:  # a decided row is spent: drop the buttons
             await query.edit_message_reply_markup(reply_markup=None)
-        except Exception:
-            pass
+        except Exception as exc:
+            journal.debug("bot.event", f"spent buttons not dropped: {exc}")
         ui_actions.pop(chat_id, None)
         if not utterance:
             ack = action.get("ack")
@@ -1069,8 +1090,8 @@ def main() -> None:
                 or awaiting.get("id") != pid or fut is None or fut.done()):
             try:  # stale tap (session replaced/expired): drop the dead buttons
                 await query.edit_message_reply_markup(reply_markup=None)
-            except Exception:
-                pass
+            except Exception as exc:
+                journal.debug("bot.event", f"expired prompt buttons not dropped: {exc}")
             return
 
         if awaiting.get("type") == "confirm":
@@ -1084,8 +1105,8 @@ def main() -> None:
         _log(chat.id, "  ", f"answer: {chosen}")
         try:  # echo the choice in place of the buttons
             await query.edit_message_text(text=f"{format_prompt_message(awaiting)}\n\n→ {chosen}")
-        except Exception:
-            pass
+        except Exception as exc:
+            journal.debug("bot.event", f"answer not echoed into the prompt: {exc}")
 
     # The morning push goes to the first allowlisted chat — the single-athlete
     # instance model makes that the athlete (§4.3).
@@ -1117,7 +1138,9 @@ def main() -> None:
                     continue
                 fired = now.date().isoformat()
                 _log(push_chat_id, "**", "morning push")
-                await _start_command(push_chat_id, ["bot", "morning"], quiet=True)
+                await _start_command(
+                    push_chat_id, ["bot", "morning"], quiet=True, source="push"
+                )
                 continue
             await asyncio.sleep(min(max(delay, 60), 300))
 
@@ -1151,7 +1174,14 @@ def main() -> None:
     application.add_handler(MessageHandler(filters.TEXT, on_message))
     application.add_handler(CallbackQueryHandler(on_callback))
     print("TrainMate Telegram bot started. Press Ctrl-C to stop.")
+    # One long-lived run for the whole process, so the bot's own lifetime is a readable
+    # timeline and every subprocess it spawns names it as their parent
+    # (DESIGN_logging.md §8). It gets a `run.end` only on a clean shutdown: a /restart
+    # hard-exits and a supervisor kill takes it with no warning, which is the normal way
+    # it ends and the reason the `?` outcome exists (§3).
+    journal.start_run(["tm-bot"], source="bot")
     asyncio.run(_serve())
+    journal.end_run("ok")
 
 
 async def _post_init(app) -> None:

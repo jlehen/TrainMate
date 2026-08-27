@@ -598,6 +598,34 @@ class TestReadOnly(unittest.TestCase):
             self.assertEqual(res.status_code, 405, f"{verb.upper()} {path}")
             self.assertIn("read-only", res.get_json()["error"])
 
+    def test_only_a_failed_request_is_journalled_and_it_carries_no_run(self):
+        """A read-only GET neither changes anything nor costs anything, so it is not a
+        run — the web app opens none, which is also what keeps the journal's
+        module-level run stack away from Flask's threading. Only failures are recorded,
+        and with no run id at all (DESIGN_logging.md §13)."""
+        from werkzeug.exceptions import NotFound
+        from trainmate import journal
+
+        with open(trainmate_web.__file__) as handle:
+            self.assertNotIn("start_run", handle.read())
+
+        recorded = []
+        with unittest.mock.patch.object(
+            journal, "record", side_effect=lambda *a, **k: recorded.append((a, k))
+        ):
+            with trainmate_web.app.test_request_context("/api/workouts"):
+                # An HTTPException is Flask's own to render, and not an event.
+                not_found = NotFound()
+                self.assertIs(trainmate_web._journal_failure(not_found), not_found)
+                self.assertEqual(recorded, [])
+                with self.assertRaises(RuntimeError):        # re-raised, not swallowed
+                    trainmate_web._journal_failure(RuntimeError("boom"))
+        (args, kwargs), = recorded
+        self.assertEqual(args[0], "internal")
+        self.assertEqual(kwargs["lvl"], "error")
+        self.assertIn("boom", args[1])
+        self.assertEqual(kwargs["path"], "/api/workouts")
+
     def test_no_google_or_llm_import_at_module_scope(self):
         # A reader needs no Calendar service-account credentials and no LLM client;
         # importing either would put write capability one call away.

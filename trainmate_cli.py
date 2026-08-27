@@ -7,9 +7,10 @@ cycle is gone with it.
 """
 import argparse
 import sys
+import traceback
 from typing import Optional
 
-from trainmate import runtime
+from trainmate import journal, runtime
 from trainmate.prompt import PromptCancelled
 from trainmate.util import (
     bold, dim, green, red, yellow, cyan, blue, magenta, gray, aside,
@@ -34,8 +35,9 @@ PREFIX_HINT = "Any prefix that matches one command is that command: 'wo li' = 'w
 COMMAND_ORDER = {
     "": ["status", "workout", "progress", "plan", "goal",
          "constraint", "benchmark", "signal", "learnings", "data", "settings",
-         "shell", "help"],
+         "journal", "shell", "help"],
     "settings": ["list", "set", "reset"],
+    "journal": ["show", "prune"],
     "goal": ["list", "add", "edit", "rm"],
     "constraint": ["list", "show", "add", "edit", "rm"],
     "benchmark": ["list", "record", "rm"],
@@ -92,6 +94,7 @@ from trainmate.cli.plans import add_plan_parser
 from trainmate.cli.workouts import add_workout_parser
 from trainmate.cli.data import add_data_parser
 from trainmate.cli.settings import add_settings_parser
+from trainmate.cli.journal import add_journal_parser
 from trainmate.cli.bot import (
     add_bot_parser, run_bot_constraints, run_bot_morning, run_bot_route,
 )
@@ -179,6 +182,7 @@ def build_parser():
     workout_parser = add_workout_parser(subparsers, pull_bypass_parser, llm_debug_parser)
     data_parser = add_data_parser(subparsers, pull_bypass_parser, llm_debug_parser)
     add_settings_parser(subparsers)
+    add_journal_parser(subparsers)
     add_bot_parser(subparsers)
 
     named_subparsers = {
@@ -195,8 +199,39 @@ def build_parser():
     return parser, named_subparsers
 
 
-def run_once(argv, parser, named_subparsers) -> None:
-    """Parse one command line and dispatch it. Shared by ``main`` and the REPL."""
+def run_once(argv, parser, named_subparsers, source=None) -> None:
+    """Parse one command line and dispatch it, bracketed by a journal run.
+
+    Shared by ``main`` and the REPL, which is why the bracket lives here rather than in
+    ``main``: ``tm shell`` runs many commands in one process, so a run is a command, not
+    a process (DESIGN_logging.md §3). It sits just inside the two existing error
+    boundaries, so every failed command records its own traceback with no new handler
+    anywhere — the bracket notes the exception and re-raises it unchanged (§5.4).
+
+    Three outcomes, because an exit code conflates three things: ``ok`` for a command
+    that finished — a domain refusal and argparse's exit-1 help paths included —
+    ``cancelled`` for a deliberate abort, ``failed`` for an unhandled exception.
+    """
+    journal.start_run(argv, source=source)
+    try:
+        _dispatch(argv, parser, named_subparsers)
+    except SystemExit as exc:
+        journal.end_run("ok", exit_code=exc.code if isinstance(exc.code, int) else 0)
+        raise
+    except (PromptCancelled, KeyboardInterrupt):
+        journal.end_run("cancelled", exit_code=130)
+        raise
+    except BaseException as exc:
+        journal.end_run(
+            "failed", exit_code=1, error=f"{type(exc).__name__}: {exc}",
+            traceback_text=traceback.format_exc(),
+        )
+        raise
+    journal.end_run("ok")
+
+
+def _dispatch(argv, parser, named_subparsers) -> None:
+    """Parse one command line and run its handler."""
     # Parse the arguments. Network-appliance-style dashless options
     # (e.g. `workout adapt message "..." no-pull`) are first rewritten back into
     # `--flag` form against the parser tree, so both syntaxes share one definition.
@@ -281,7 +316,9 @@ def _repl(parser, named_subparsers) -> None:
             continue
 
         try:
-            run_once(argv, parser, named_subparsers)
+            # A typed line is a run of its own, naming the shell run as its parent
+            # (DESIGN_logging.md §3).
+            run_once(argv, parser, named_subparsers, source="repl")
         except SystemExit:
             # argparse errors, `-h`, and missing-subcommand paths call sys.exit;
             # swallow it so a bad line doesn't tear down the whole shell.

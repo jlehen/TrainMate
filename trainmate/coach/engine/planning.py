@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Any, List, Optional, Dict
 from trainmate.types import Objective, Constraint
-from trainmate.util import cyan, aside, wrap_text
+from trainmate.util import cyan, step, wrap_text
 import trainmate.coach.engine as _eng
 
 
@@ -192,7 +192,7 @@ You MUST respond with a JSON object containing:
             f"Please determine the macrocycle and mesocycle blocks {start_phrase}."
         )
 
-        aside(wrap_text(
+        step(wrap_text(
             "Querying OpenRouter to generate macrocycle and mesocycles "
             "periodization strategy..."
         ), cyan)

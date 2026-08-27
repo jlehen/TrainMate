@@ -5,7 +5,7 @@ from typing import Any, List, Optional, Tuple
 
 from trainmate import runtime
 from trainmate.config import config
-from trainmate.util import today_str, yellow, red, cmd, aside
+from trainmate.util import today_str, cmd, fail, step, warn
 import trainmate.garmin as _g
 from trainmate.garmin.client import (GarminAuthRequired, GarminClient, _date_range,
     _derivation_pad_days, _shift, _to_date)
@@ -22,9 +22,9 @@ def _ingest_activities(client: GarminClient, start: str, end: str, throttle: flo
         # Skip ingest AND deletion-reconcile on a failed fetch: an empty result
         # here would otherwise be read as "Garmin has no activities" and prune
         # the whole local range.
-        print(red(f"Error fetching activities {start}..{end}: {e}"))
+        fail(f"Garmin activity fetch {start}..{end} failed: {e}")
         return -1
-    aside(f"Found {len(activities)} activities in {start}..{end}.")
+    step(f"Found {len(activities)} activities in {start}..{end}.")
     underestimated_activities = []  # activities whose load is a weak estimate for lack of RPE
     fetched_ids = []  # everything Garmin still has in this range, for deletion reconcile
     for idx, act in enumerate(activities):
@@ -85,13 +85,12 @@ def _ingest_activities(client: GarminClient, start: str, end: str, throttle: flo
 
     if underestimated_activities:
         count = len(underestimated_activities)
-        print(yellow(
-            f"  {count} activit{'y' if count == 1 else 'ies'} "
+        listing = "".join(f"\n    - {act}" for act in underestimated_activities)
+        warn(
+            f"{count} activit{'y' if count == 1 else 'ies'} "
             "had low HR-zone coverage and no RPE; their load is an underestimate. "
-            "Enter an RPE in Garmin for a better load value:"
-        ))
-        for act_str in underestimated_activities:
-            print(yellow(f"    - {act_str}"))
+            f"Enter an RPE in Garmin for a better load value:{listing}"
+        )
 
     # Reconcile deletions: drop local rows in this range that Garmin no longer
     # returns (e.g. a duplicate Zwift auto-upload the user deleted in Garmin
@@ -104,7 +103,7 @@ def _ingest_activities(client: GarminClient, start: str, end: str, throttle: flo
 def _ingest_metrics(client: GarminClient, start: str, end: str, throttle: float) -> int:
     """Ingests one row per day in the range, returning how many days that was."""
     dates = _date_range(start, end)
-    aside(f"Fetching daily metrics for {len(dates)} day(s) {start}..{end}...")
+    step(f"Fetching daily metrics for {len(dates)} day(s) {start}..{end}...")
     for date_str in dates:
         m = client.get_daily_metrics(date_str)
         # Write a row for EVERY day in range, even all-null, so the metrics-cache
@@ -140,7 +139,7 @@ def pull(
         throttle = config.garmin_throttle_seconds
 
     client = GarminClient(config.garmin_email, config.garmin_password, config.garmin_token_dir)
-    aside(f"Logging into Garmin Connect (tokens: {config.garmin_token_dir})...")
+    step(f"Logging into Garmin Connect (tokens: {config.garmin_token_dir})...")
     client.login()
 
     landed = []
@@ -266,7 +265,7 @@ def ensure_data(start_date: str, end_date: str, force: bool = False) -> None:
                 f"last pull {last_pull_age_min}m ago, < {refresh_minutes}m"
                 if last_pull_age_min is not None else "recently pulled"
             )
-            aside(
+            step(
                 f"Garmin data is fresh ({age_note}); using cache. "
                 "Pass --force-pull to refresh now."
             )
@@ -293,17 +292,17 @@ def ensure_data(start_date: str, end_date: str, force: bool = False) -> None:
 
     for region in auto_regions:
         try:
-            aside(f"Auto-syncing Garmin {region[0]}..{region[1]}...")
+            step(f"Auto-syncing Garmin {region[0]}..{region[1]}...")
             _g.pull(region[0], region[1], throttle=config.garmin_throttle_seconds)
         except GarminAuthRequired:
-            print(yellow(
+            warn(
                 "Garmin re-auth required — run "
                 + cmd("python trainmate_cli.py data pull")
                 + " in a terminal. Continuing with cached data."
-            ))
+            )
             break
         except Exception as e:
-            print(yellow(f"Garmin sync failed ({e}). Continuing with cached data."))
+            warn(f"Garmin sync failed ({e}). Continuing with cached data.")
             break
 
     if surfaced_regions:
@@ -313,18 +312,15 @@ def ensure_data(start_date: str, end_date: str, force: bool = False) -> None:
 
     _remember(pad_start, req_end)
 def _warn_manual(start: str, end: str, *, cold: bool) -> None:
-    if cold:
-        print(yellow(
-            "No Garmin data has been pulled yet. To get started, run:"
-        ))
-    else:
-        print(yellow(
+    headline = "No Garmin data has been pulled yet. To get started, run:"
+    if not cold:
+        headline = (
             f"This view needs Garmin data back to {start}, which hasn't been pulled. "
             "Baselines may be incomplete. Fitness/fatigue (CTL/ATL/TSB) also "
             f"warm up over the first ~{config.pmc_ctl_days} days of history, so on a "
             "shallow backfill freshness can read artificially low. To backfill, run:"
-        ))
-    print(yellow("  " + cmd(_pull_command(start, end), quote=False)))
+        )
+    warn(headline + "\n  " + cmd(_pull_command(start, end), quote=False))
 def _remember(start: str, end: str) -> None:
     global _ensured
     if _ensured is None:
