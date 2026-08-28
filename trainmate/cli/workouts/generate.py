@@ -45,21 +45,22 @@ def _resolve_ambiguous_matches(date_str: str, auto: bool) -> None:
         planned_min = planned.get("duration_minutes") or 0
         actual_min = round((act.get("duration_sec") or 0) / 60.0)
         step(
-            f"\nOn {fmt_date(q['date'])} the only {planned['sport_type'].lower()} "
-            f"activity recorded was {act.get('activity_name')!r} "
-            f"({act.get('activity_type')}, {actual_min}m), against a planned "
-            f"{planned_min}m {planned['title']!r}."
+            f"\nOn {fmt_date(q['date'])} you planned {planned_min}m of "
+            f"{planned['title']!r}, but the only matching activity is "
+            f"{act.get('activity_name')!r} ({act.get('activity_type')}) at "
+            f"{actual_min}m — far short of it."
         )
         accepted = runtime.prompt.confirm(
-            f"Count it as your {planned['title']!r} session?", default=False
+            "Was that the session, cut short? (No = it was something else, "
+            "e.g. a warm-up to discard)", default=False
         )
         runtime.coach_service.record_match_decision(
             q["activity_id"], q["sport"], accepted
         )
         if accepted:
-            print(gray("  Recorded as that session (partially performed)."))
+            print(gray("  Counted as that session, partially performed."))
         else:
-            print(gray("  Kept separate — the session reads as not done."))
+            print(gray("  Discarded — the session reads as not done."))
 
 
 def _print_block_boundary_hint(date_str: str) -> None:

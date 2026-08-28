@@ -599,11 +599,12 @@ class TestAdaptationAdapt(unittest.TestCase):
             self.assertNotIn("[COMPLETED", prompt_user_content)
 
     @patch("trainmate.coach.engine.openrouter_client")
-    def test_unambiguous_match_is_never_questioned(self, mock_client):
-        """The question stays quiet when the pairing is obvious, so it costs nothing on an
-        ordinary day: a strength activity against a strength session is the session
-        however short it ran, and an aliased activity that ran the planned length is
-        plainly the session too."""
+    def test_same_sport_but_far_too_short_is_also_asked_about(self, mock_client):
+        """The sport check has already done its work by the time a pairing exists, so the
+        question turns on DURATION alone — an exact sport match that ran far short is as
+        unclear as an aliased one. A 10-minute strength activity against a 65-minute lift
+        is either the session cut short or a warm-up to discard, and only the athlete
+        knows which (ARCHITECTURE.md §15)."""
         test_profile = {"lthr": 165, "max_hr": 185}
         with patch.dict(trainmate.coach.config.data, {
             "user_profile": test_profile,
@@ -614,16 +615,35 @@ class TestAdaptationAdapt(unittest.TestCase):
         }):
             test_db.save_metric_cache("2026-06-03", 56, 42, 60, 35, 14.0, 8.0, 1.75)
             test_db.save_baseline("2026-06-03", 50.0, 2.0, 60.0, 5.0, 80.0, 5.0)
-            # Exact sport, badly short — a session cut, not a mis-pairing.
             save_workout(test_db,
-                "2026-06-02", "strength_training", "Full-Body Strength", "65 mins",
+                "2026-06-03", "strength_training", "Full-Body Strength", "65 mins",
                 duration_minutes=65, rpe=6, tss=30,
             )
             test_db.save_completed_activity(
-                "act_short_lift", "2026-06-02", "2026-06-02 12:00:00", "Strength",
+                "act_short_lift", "2026-06-03", "2026-06-03 12:00:00", "Strength",
                 "strength_training", 600.0, 5.0, None, 120, 140, 3, 5.0,
             )
-            # Aliased sport, right length — plainly the session.
+
+            questions = coach_service.pending_match_questions("2026-06-03")
+            self.assertEqual(len(questions), 1)
+            self.assertEqual(questions[0]["activity_id"], "act_short_lift")
+
+    @patch("trainmate.coach.engine.openrouter_client")
+    def test_a_session_that_ran_its_length_is_never_questioned(self, mock_client):
+        """The question costs nothing on an ordinary day. An activity that ran roughly the
+        planned length is the session, whether its type is the planned sport's own name or
+        one of its aliases — a 62-minute virtual_ride IS the 60-minute cycling session."""
+        test_profile = {"lthr": 165, "max_hr": 185}
+        with patch.dict(trainmate.coach.config.data, {
+            "user_profile": test_profile,
+            "coach": {
+                "metrics_lookback_days": 3,
+                "minor_activity_load_threshold": 10.0,
+            }
+        }):
+            test_db.save_metric_cache("2026-06-03", 56, 42, 60, 35, 14.0, 8.0, 1.75)
+            test_db.save_baseline("2026-06-03", 50.0, 2.0, 60.0, 5.0, 80.0, 5.0)
+            # Aliased sport, right length.
             save_workout(test_db,
                 "2026-06-03", "cycling", "Endurance Ride", "60 mins",
                 duration_minutes=60, rpe=4, tss=40,
@@ -631,6 +651,15 @@ class TestAdaptationAdapt(unittest.TestCase):
             test_db.save_completed_activity(
                 "act_ride", "2026-06-03", "2026-06-03 08:00:00", "Zwift",
                 "virtual_ride", 3720.0, 42.0, 250.0, 132, 150, 4, 42.0,
+            )
+            # Exact sport, right length.
+            save_workout(test_db,
+                "2026-06-02", "strength_training", "Full-Body Strength", "65 mins",
+                duration_minutes=65, rpe=6, tss=30,
+            )
+            test_db.save_completed_activity(
+                "act_lift", "2026-06-02", "2026-06-02 12:00:00", "Strength",
+                "strength_training", 3840.0, 31.0, None, 120, 140, 6, 31.0,
             )
 
             self.assertEqual(coach_service.pending_match_questions("2026-06-03"), [])

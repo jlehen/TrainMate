@@ -2789,13 +2789,21 @@ asking about and `pending_match_questions` raises them **before** the LLM call, 
 a wrong pairing does not merely mislabel a row in a listing, it tells the coach a session
 was performed, and by the time a proposal comes back that premise is already baked into it.
 
-Two conditions must both hold, which is what keeps the question rare. The activity must
-have matched only through an *alias* — its own recorded type is not the planned sport's
-name — and its duration must fall materially short of the plan. A `strength_training`
-activity against a strength session is that session however short it ran, and `partial`
-already describes it correctly; a 62-minute `virtual_ride` against a 60-minute `cycling`
-session is plainly the session too. Measured over three months of real data: 18 pairings
-made, one question raised, on the day that prompted this.
+The test is duration alone. By the time a pairing exists the sport check has already done
+its work — a ride never reaches a strength session, whatever its length — so the type is
+not what is in doubt. What is left undecided is that an activity of the right sport ran far
+shorter than planned, which is either the session cut short or something else entirely (a
+warm-up, a fragment). Nothing in the data separates those two readings, and the athlete's
+answer is different in each case: count it as partially performed, or discard it and let
+the session read as not done.
+
+That applies to an exact sport match as readily as an aliased one. A 10-minute
+`strength_training` activity against a 65-minute lift is exactly as unclear as a 10-minute
+`indoor_cardio` one; an earlier version of this excluded exact matches on the theory that
+they must be a cut session, which is only one of the two things it can be. An activity that
+ran roughly its planned length is never questioned, so an ordinary day costs nothing.
+Measured over the athlete's full history: 19 pairings made, one question raised, on the day
+that prompted this.
 
 The answer persists in `activity_match_decisions`, keyed by `(activity_id, sport)` rather
 than by workout id — workout rows are replaced on every revision, so a workout id would go

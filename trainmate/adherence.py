@@ -268,22 +268,19 @@ def _duration_shortfall(w: Dict[str, Any], matched_act: Dict[str, Any]) -> bool:
 
 
 def is_ambiguous_match(w: Dict[str, Any], matched_act: Dict[str, Any]) -> bool:
-    """Whether pairing `matched_act` with planned session `w` is a guess worth checking
-    with the athlete rather than a fact (ARCHITECTURE.md §15).
+    """Whether pairing `matched_act` with planned session `w` is worth putting to the
+    athlete rather than assuming (ARCHITECTURE.md §15).
 
-    Both conditions must hold, which keeps this quiet:
+    The sport check has already done its work by the time a pairing exists — a ride never
+    reaches a strength session, whatever its length. What is left undecided is DURATION:
+    an activity of the right sport that ran far shorter than planned is either the session
+    cut short or something else entirely (a warm-up, a fragment), and nothing in the data
+    separates those two. Only the athlete can.
 
-    * the activity matched only through a sport ALIAS — its own recorded type is not the
-      planned sport's name. `indoor_cardio` counting as `strength_training` is a guess;
-      a `strength_training` activity against a strength session is not, however short it
-      ran (that is a session the athlete cut, and `partial` says so correctly).
-    * its duration falls materially short of the plan. An aliased activity that ran the
-      planned length is plainly the session — a 62-minute `virtual_ride` against a
-      60-minute `cycling` session needs no confirmation.
+    So the test is the shortfall alone, and it applies to an exact sport match as readily
+    as an aliased one — a 10-minute `strength_training` activity against a 65-minute lift
+    is exactly as unclear as a 10-minute `indoor_cardio` one.
     """
-    act_type = (matched_act.get("activity_type") or "").lower()
-    if act_type == canonical_sport(w["sport_type"]):
-        return False
     return _duration_shortfall(w, matched_act)
 
 
