@@ -151,6 +151,46 @@ class ActivitiesMixin:
             row = cursor.fetchone()
             return row["d"] if row else None
 
+    # --- Ambiguous-match decisions ---
+    def save_match_decision(
+        self, activity_id: str, sport_canonical: str, accepted: bool
+    ) -> None:
+        """Records the athlete's answer to "is this activity that session?".
+
+        Keyed by (activity, sport) rather than by workout id because the pairing itself
+        is per (date, sport) — and because a workout row is replaced on every revision,
+        so a workout id would go stale the next time the day is adapted
+        (ARCHITECTURE.md §15)."""
+        with self._get_connection() as conn:
+            conn.execute("""
+                INSERT INTO activity_match_decisions
+                    (activity_id, sport_canonical, accepted, decided_at)
+                VALUES (?, ?, ?, datetime('now'))
+                ON CONFLICT(activity_id, sport_canonical) DO UPDATE SET
+                    accepted=excluded.accepted,
+                    decided_at=excluded.decided_at
+            """, (activity_id, sport_canonical, 1 if accepted else 0))
+
+    def get_match_decisions(self) -> Dict[tuple, bool]:
+        """Every answered ambiguous pairing, as `(activity_id, sport) -> accepted`."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT activity_id, sport_canonical, accepted "
+                "FROM activity_match_decisions"
+            )
+            return {
+                (r["activity_id"], r["sport_canonical"]): bool(r["accepted"])
+                for r in cursor.fetchall()
+            }
+
+    def get_rejected_matches(self) -> set:
+        """The `(activity_id, sport)` pairings the athlete ruled out — what every
+        adherence surface passes to `analyze_adherence` so they all pair alike."""
+        return {
+            key for key, accepted in self.get_match_decisions().items() if not accepted
+        }
+
     # --- Athlete Metrics Cache ---
     def save_metric_cache(
         self, date: str, rhr: Optional[int], hrv: Optional[int],

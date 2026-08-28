@@ -23,6 +23,45 @@ from trainmate.cli.selectors import has_selector as _has_selector, resolve_windo
 from trainmate.cli.workouts._helpers import workout_line
 
 
+def _resolve_ambiguous_matches(date_str: str, auto: bool) -> None:
+    """Asks the athlete about any pairing the matcher had to guess at, before the coach
+    is told a session was performed (ARCHITECTURE.md §15).
+
+    Skipped under `--auto` and on any non-interactive run, which then falls back to the
+    matcher's own answer — the question is a refinement, never a gate.
+    """
+    if auto:
+        return
+    try:
+        questions = runtime.coach_service.pending_match_questions(date_str)
+    except Exception as e:
+        print(yellow(f"Warning: could not check activity matching: {e}"))
+        return
+    if not questions:
+        return
+
+    for q in questions:
+        planned, act = q["planned"], q["completed"]
+        planned_min = planned.get("duration_minutes") or 0
+        actual_min = round((act.get("duration_sec") or 0) / 60.0)
+        step(
+            f"\nOn {fmt_date(q['date'])} the only {planned['sport_type'].lower()} "
+            f"activity recorded was {act.get('activity_name')!r} "
+            f"({act.get('activity_type')}, {actual_min}m), against a planned "
+            f"{planned_min}m {planned['title']!r}."
+        )
+        accepted = runtime.prompt.confirm(
+            f"Count it as your {planned['title']!r} session?", default=False
+        )
+        runtime.coach_service.record_match_decision(
+            q["activity_id"], q["sport"], accepted
+        )
+        if accepted:
+            print(gray("  Recorded as that session (partially performed)."))
+        else:
+            print(gray("  Kept separate — the session reads as not done."))
+
+
 def _print_block_boundary_hint(date_str: str) -> None:
     """Points at `workout generate` when the current block is about to end.
 
@@ -78,6 +117,9 @@ def run_workout_adapt(args: argparse.Namespace) -> None:
         print(yellow(f"Warning: Could not load metrics trajectory: {e}"))
 
     _print_block_boundary_hint(date_str)
+
+    # Before the coach is told anything: settle any pairing the matcher had to guess at.
+    _resolve_ambiguous_matches(date_str, auto=args.auto)
 
     step(f"Evaluating daily Garmin metrics adaptation for {fmt_date(date_str)}...")
     try:
@@ -657,6 +699,7 @@ def run_workout_compare(args: argparse.Namespace) -> None:
         minor_activity_load_threshold=config.minor_activity_load_threshold,
         covered_ranges=covered_ranges,
         pending_from=today_str,
+        rejected_matches=runtime.db.get_rejected_matches(),
     )
 
     sport_filter = (getattr(args, 'sport_type', None) or "").lower() or None

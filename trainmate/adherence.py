@@ -1,6 +1,6 @@
 from dataclasses import dataclass, field
 from datetime import timedelta
-from typing import List, Dict, Any, Tuple, Optional
+from typing import List, Dict, Any, Set, Tuple, Optional
 
 from trainmate.config import config
 from trainmate.garmin import activity_load, _rpe_tss
@@ -267,6 +267,26 @@ def _duration_shortfall(w: Dict[str, Any], matched_act: Dict[str, Any]) -> bool:
     )
 
 
+def is_ambiguous_match(w: Dict[str, Any], matched_act: Dict[str, Any]) -> bool:
+    """Whether pairing `matched_act` with planned session `w` is a guess worth checking
+    with the athlete rather than a fact (ARCHITECTURE.md §15).
+
+    Both conditions must hold, which keeps this quiet:
+
+    * the activity matched only through a sport ALIAS — its own recorded type is not the
+      planned sport's name. `indoor_cardio` counting as `strength_training` is a guess;
+      a `strength_training` activity against a strength session is not, however short it
+      ran (that is a session the athlete cut, and `partial` says so correctly).
+    * its duration falls materially short of the plan. An aliased activity that ran the
+      planned length is plainly the session — a 62-minute `virtual_ride` against a
+      60-minute `cycling` session needs no confirmation.
+    """
+    act_type = (matched_act.get("activity_type") or "").lower()
+    if act_type == canonical_sport(w["sport_type"]):
+        return False
+    return _duration_shortfall(w, matched_act)
+
+
 def analyze_adherence(
     planned_workouts: List[Dict[str, Any]],
     completed_activities: List[Dict[str, Any]],
@@ -275,6 +295,7 @@ def analyze_adherence(
     minor_activity_load_threshold: float = 25.0,
     covered_ranges: Optional[List[Tuple[str, str]]] = None,
     pending_from: Optional[str] = None,
+    rejected_matches: Optional[Set[Tuple[str, str]]] = None,
 ) -> Tuple[List[str], List[Dict[str, Any]], List[Dict[str, Any]]]:
     """Evaluates planned workouts vs completed Garmin activities over a rolling window.
 
@@ -293,6 +314,10 @@ def analyze_adherence(
         pending_from: first date whose day is not over yet (normally today). An unmatched
             non-rest session on or after it is PENDING, not missed — the athlete is
             assumed to still be doing it. None means every date is final.
+        rejected_matches: `(activity_id, canonical_sport)` pairs the athlete has told us
+            are NOT that sport's session — the answers to `is_ambiguous_match` questions
+            (ARCHITECTURE.md §15). The activity is passed over for that session and stays
+            available to the rest of the day's pairing.
 
     Returns:
         A tuple containing:
@@ -304,6 +329,7 @@ def analyze_adherence(
     matching_results = []
     discrepancies = []
     informational = []
+    rejected = rejected_matches or set()
 
     # Group completed activities by date
     activities_by_date: Dict[str, List[Dict[str, Any]]] = {}
@@ -357,6 +383,9 @@ def analyze_adherence(
                 for act in day_acts:
                     if act["activity_id"] in used_act_ids:
                         continue
+                    # The athlete has already told us this one is not that session.
+                    if (act["activity_id"], w_sport) in rejected:
+                        continue
                     act_type = act["activity_type"].lower()
                     if act_type in allowed_types or any(t in act_type for t in allowed_types):
                         matched_act = act
@@ -386,6 +415,14 @@ def analyze_adherence(
                 "planned": w,
                 "completed": matched_act,
                 "pending": pending,
+                # A pairing the athlete should get the chance to reject before it reaches
+                # the coach as fact. Rest days are excluded: a rest "match" is a violation,
+                # not a claim that the athlete performed the session.
+                "ambiguous": bool(
+                    matched_act is not None
+                    and w_sport != "rest"
+                    and is_ambiguous_match(w, matched_act)
+                ),
             })
 
         # Check for completed activities when nothing was planned

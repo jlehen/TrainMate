@@ -8,7 +8,7 @@ from trainmate.config import config
 # migrations are idempotent, so this is a "skip the work" marker rather than a ledger of
 # steps to replay — TrainMate has one user and one database, and the alternative (a
 # numbered migration framework) would be more machinery than that warrants.
-SCHEMA_VERSION = 9
+SCHEMA_VERSION = 10
 
 
 # How long a connection waits for a writer to finish before raising "database is
@@ -440,6 +440,21 @@ class BaseDB:
                     cursor, "completed_activities", col.split()[0],
                     f"ALTER TABLE completed_activities ADD COLUMN {col}"
                 )
+
+            # The athlete's answers to "is this activity that session?" — the pairing
+            # questions `adherence.is_ambiguous_match` raises (ARCHITECTURE.md §15).
+            # Keyed by (activity, sport), not by workout id: workout rows are replaced on
+            # every revision, so a workout id would go stale the next time the day is
+            # adapted, and the athlete would be asked the same question again.
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS activity_match_decisions (
+                    activity_id TEXT NOT NULL,
+                    sport_canonical TEXT NOT NULL,
+                    accepted INTEGER NOT NULL,
+                    decided_at TEXT NOT NULL,
+                    PRIMARY KEY (activity_id, sport_canonical)
+                )
+            """)
 
             # Athlete metrics cache table
             cursor.execute("""

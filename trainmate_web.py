@@ -273,6 +273,7 @@ def compare_workouts() -> Any:
         minor_activity_load_threshold=threshold,
         covered_ranges=covered_ranges,
         pending_from=today,
+        rejected_matches=runtime.db.get_rejected_matches(),
     )
 
     matched_act_ids = {

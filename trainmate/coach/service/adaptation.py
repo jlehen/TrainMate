@@ -59,6 +59,78 @@ class AdaptationMixin:
                 return True
         return False
 
+    def _rejected_matches(self) -> set:
+        """The `(activity_id, sport)` pairings the athlete has said are NOT that session."""
+        return {
+            key for key, accepted in self._db.get_match_decisions().items()
+            if not accepted
+        }
+
+    def pending_match_questions(
+        self, target_date_str: Optional[str] = None
+    ) -> List[Dict[str, Any]]:
+        """Pairings in the adapt window that are a guess and that the athlete has not yet
+        ruled on — `adherence.is_ambiguous_match` (ARCHITECTURE.md §15).
+
+        Asked BEFORE the LLM call, because a wrong pairing does not merely mislabel a row:
+        it tells the coach a session was performed. Each entry carries the planned session
+        and the activity so the caller can render the question without re-deriving it.
+        """
+        if not target_date_str:
+            target_date_str = _svc._today_str()
+        target_date_obj = datetime.strptime(target_date_str, "%Y-%m-%d").date()
+        history_days = config.metrics_lookback_days
+        start_date_obj = target_date_obj - timedelta(days=history_days - 1)
+        start_date_str = start_date_obj.strftime("%Y-%m-%d")
+
+        active_meso = self._db.get_active_mesocycle(target_date_str)
+        end_date_str = active_meso['end_date'] if active_meso else target_date_str
+        planned = [
+            w for w in self._db.get_workouts(
+                start_date=start_date_str, end_date=end_date_str, include_removed=True
+            ) if not w.get('removed')
+        ]
+        activities = self._db.get_completed_activities(
+            start_date=start_date_str, end_date=target_date_str
+        )
+
+        # Pair with NO rejections applied: a pairing already answered "no" would other-
+        # wise vanish before we could tell it apart from one never asked about.
+        _d, matching_results, _i = analyze_adherence(
+            planned_workouts=planned,
+            completed_activities=activities,
+            start_date_obj=start_date_obj,
+            history_days=history_days,
+            minor_activity_load_threshold=config.minor_activity_load_threshold,
+            covered_ranges=self._db.get_mesocycle_ranges(start_date_str, target_date_str),
+            pending_from=target_date_str,
+        )
+
+        decided = self._db.get_match_decisions()
+        questions = []
+        for m in matching_results:
+            if not m.get("ambiguous"):
+                continue
+            act = m["completed"]
+            sport = canonical_sport(m["planned"]["sport_type"])
+            if (act["activity_id"], sport) in decided:
+                continue
+            questions.append({
+                "activity_id": act["activity_id"],
+                "sport": sport,
+                "date": m["date"],
+                "planned": m["planned"],
+                "completed": act,
+            })
+        return questions
+
+    def record_match_decision(
+        self, activity_id: str, sport: str, accepted: bool
+    ) -> None:
+        """Persists one answer, so the question is asked once rather than every run and
+        every adherence surface reads the same pairing."""
+        self._db.save_match_decision(activity_id, canonical_sport(sport), accepted)
+
     def workout_adapt(
         self, target_date_str: Optional[str] = None, message: Optional[str] = None
     ) -> RevisionProposal:
@@ -150,6 +222,7 @@ class AdaptationMixin:
             minor_activity_load_threshold=config.minor_activity_load_threshold,
             covered_ranges=covered_ranges,
             pending_from=target_date_str,
+            rejected_matches=self._rejected_matches(),
         )
 
         # What each planned session actually got, and which of them are history the LLM

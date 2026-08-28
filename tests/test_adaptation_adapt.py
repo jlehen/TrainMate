@@ -550,6 +550,92 @@ class TestAdaptationAdapt(unittest.TestCase):
             )
 
     @patch("trainmate.coach.engine.openrouter_client")
+    def test_ambiguous_match_is_asked_about_and_the_answer_sticks(self, mock_client):
+        """A pairing the matcher had to GUESS at is raised as a question before the LLM
+        call, and answering "no" keeps the activity out of the session.
+
+        `indoor_cardio` is an alias of `strength_training`, so a 10-minute warm-up pairs
+        with a 65-minute lift on load-sorted first-come matching. That is a guess, not a
+        fact, and it used to reach the coach as "this session was performed"
+        (ARCHITECTURE.md §15)."""
+        test_profile = {"lthr": 165, "max_hr": 185}
+        with patch.dict(trainmate.coach.config.data, {
+            "user_profile": test_profile,
+            "coach": {
+                "metrics_lookback_days": 3,
+                "minor_activity_load_threshold": 10.0,
+            }
+        }):
+            mock_client.complete.return_value = {
+                "change_needed": False, "reason": "Holding.", "adapted_workouts": [],
+            }
+            test_db.save_metric_cache("2026-06-03", 56, 42, 60, 35, 14.0, 8.0, 1.75)
+            test_db.save_baseline("2026-06-03", 50.0, 2.0, 60.0, 5.0, 80.0, 5.0)
+            save_workout(test_db,
+                "2026-06-03", "strength_training", "Full-Body Strength", "65 mins",
+                duration_minutes=65, rpe=6, tss=30,
+            )
+            test_db.save_completed_activity(
+                "act_warmup", "2026-06-03", "2026-06-03 12:00:00", "Warm-up",
+                "indoor_cardio", 600.0, 1.6, None, 107, 120, 1, 1.6,
+            )
+
+            # The guess is surfaced rather than silently believed.
+            questions = coach_service.pending_match_questions("2026-06-03")
+            self.assertEqual(len(questions), 1)
+            self.assertEqual(questions[0]["activity_id"], "act_warmup")
+            self.assertEqual(questions[0]["sport"], "strength_training")
+
+            # Say no: that warm-up was not the lift.
+            coach_service.record_match_decision("act_warmup", "strength_training", False)
+
+            # Asked once, not every run.
+            self.assertEqual(coach_service.pending_match_questions("2026-06-03"), [])
+
+            coach_service.workout_adapt("2026-06-03")
+            prompt_user_content = mock_client.complete.call_args[0][1]
+            # The session now carries no performed-tag at all: nothing was done.
+            self.assertNotIn("[PARTIAL", prompt_user_content)
+            self.assertNotIn("[COMPLETED", prompt_user_content)
+
+    @patch("trainmate.coach.engine.openrouter_client")
+    def test_unambiguous_match_is_never_questioned(self, mock_client):
+        """The question stays quiet when the pairing is obvious, so it costs nothing on an
+        ordinary day: a strength activity against a strength session is the session
+        however short it ran, and an aliased activity that ran the planned length is
+        plainly the session too."""
+        test_profile = {"lthr": 165, "max_hr": 185}
+        with patch.dict(trainmate.coach.config.data, {
+            "user_profile": test_profile,
+            "coach": {
+                "metrics_lookback_days": 3,
+                "minor_activity_load_threshold": 10.0,
+            }
+        }):
+            test_db.save_metric_cache("2026-06-03", 56, 42, 60, 35, 14.0, 8.0, 1.75)
+            test_db.save_baseline("2026-06-03", 50.0, 2.0, 60.0, 5.0, 80.0, 5.0)
+            # Exact sport, badly short — a session cut, not a mis-pairing.
+            save_workout(test_db,
+                "2026-06-02", "strength_training", "Full-Body Strength", "65 mins",
+                duration_minutes=65, rpe=6, tss=30,
+            )
+            test_db.save_completed_activity(
+                "act_short_lift", "2026-06-02", "2026-06-02 12:00:00", "Strength",
+                "strength_training", 600.0, 5.0, None, 120, 140, 3, 5.0,
+            )
+            # Aliased sport, right length — plainly the session.
+            save_workout(test_db,
+                "2026-06-03", "cycling", "Endurance Ride", "60 mins",
+                duration_minutes=60, rpe=4, tss=40,
+            )
+            test_db.save_completed_activity(
+                "act_ride", "2026-06-03", "2026-06-03 08:00:00", "Zwift",
+                "virtual_ride", 3720.0, 42.0, 250.0, 132, 150, 4, 42.0,
+            )
+
+            self.assertEqual(coach_service.pending_match_questions("2026-06-03"), [])
+
+    @patch("trainmate.coach.engine.openrouter_client")
     def test_adapt_drops_noop_relisted_session(self, mock_client):
         """No-op backstop: if the model re-lists a session unchanged (here verbatim, plus a
         cosmetic whitespace-only variant), it is dropped so an untouched session is never

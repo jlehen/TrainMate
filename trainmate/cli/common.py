@@ -118,6 +118,7 @@ def adherence_results(start_date: str, end_date: str) -> List[Dict[str, Any]]:
         minor_activity_load_threshold=config.minor_activity_load_threshold,
         covered_ranges=covered_ranges,
         pending_from=_today_str(),
+        rejected_matches=runtime.db.get_rejected_matches(),
     )
     return matching_results
 

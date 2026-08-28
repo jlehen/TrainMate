@@ -2775,3 +2775,37 @@ on an unfinished day was already in (`pending`, above): on the evaluation date, 
 locked only once the planned time has been spent. What the athlete already did travels with
 it, so the coach salvages the remainder rather than re-prescribing the whole session.
 
+### A pairing the matcher had to guess at is a question, not a fact
+Everything above assumes the pairing is right. Sometimes it is a guess, and the 27th was
+one: `SPORT_MAPPING` lists `indoor_cardio` among `strength_training`'s aliases, so a
+ten-minute warm-up logged before an abandoned lift was the only candidate on the day and
+first-come load-sorted matching handed it the 65-minute session. Grading that pairing more
+honestly does not help, because the pairing itself is what is wrong — the athlete did none
+of the session, and calling it "partial, 10m performed" is a better-worded version of the
+same false claim.
+
+Only the athlete can settle it, so `adherence.is_ambiguous_match` marks the pairings worth
+asking about and `pending_match_questions` raises them **before** the LLM call, not after:
+a wrong pairing does not merely mislabel a row in a listing, it tells the coach a session
+was performed, and by the time a proposal comes back that premise is already baked into it.
+
+Two conditions must both hold, which is what keeps the question rare. The activity must
+have matched only through an *alias* — its own recorded type is not the planned sport's
+name — and its duration must fall materially short of the plan. A `strength_training`
+activity against a strength session is that session however short it ran, and `partial`
+already describes it correctly; a 62-minute `virtual_ride` against a 60-minute `cycling`
+session is plainly the session too. Measured over three months of real data: 18 pairings
+made, one question raised, on the day that prompted this.
+
+The answer persists in `activity_match_decisions`, keyed by `(activity_id, sport)` rather
+than by workout id — workout rows are replaced on every revision, so a workout id would go
+stale the next time the day is adapted and the athlete would be asked again. Every
+adherence surface passes `db.get_rejected_matches()` into `analyze_adherence`, so the
+terminal listing, the web badge and the coach cannot disagree about what counts as done. A
+rejected activity is passed over for that session and stays available to the rest of the
+day's pairing, which is what makes it fall through to the unplanned/informational path
+rather than vanishing.
+
+The question is a refinement, never a gate: `--auto` and the unattended runs skip it and
+fall back to the matcher's own answer, which the duration rule above already makes sane.
+
