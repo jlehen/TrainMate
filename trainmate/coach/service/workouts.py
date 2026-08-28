@@ -118,20 +118,21 @@ class WorkoutGenMixin:
         return out
 
     @classmethod
-    def _enforce_rest_windows_revision(
-        cls, adapted: List[Dict[str, Any]], planned_workouts: List[Workout],
-        constraints: List[Constraint], completed_keys: Optional[set], from_date: str
-    ) -> List[Dict[str, Any]]:
-        """Eases planned sessions to rest on `rest` constraint dates (§6). Every other
-        constraint is advisory only (§5) — left to the model, not enforced here. Only
-        touches sessions on or after `from_date` that aren't already rest or completed."""
+    def _forced_rest_days(
+        cls, planned_workouts: List[Workout], constraints: List[Constraint],
+        completed_keys: Optional[set], from_date: str
+    ) -> Dict[str, str]:
+        """`date -> constraint title` for the days a `rest` constraint clears outright.
+
+        One reading of the rule, because two callers act on it: the pass below replaces
+        those days with rest, and the adaptation drops anything it was holding there."""
         full_rest = cls._hard_rest_windows(constraints)
         if not full_rest:
-            return adapted
+            return {}
         completed = completed_keys or set()
         rest_sport = canonical_sport('rest')
 
-        forced_rest: Dict[str, str] = {}          # date -> constraint title
+        forced_rest: Dict[str, str] = {}
         for w in planned_workouts:
             day = w.get('date', '')
             if day < from_date:
@@ -142,7 +143,19 @@ class WorkoutGenMixin:
             fr = next((t for (s, e, t) in full_rest if s <= day <= e), None)
             if fr is not None:
                 forced_rest[day] = fr
+        return forced_rest
 
+    @classmethod
+    def _enforce_rest_windows_revision(
+        cls, adapted: List[Dict[str, Any]], planned_workouts: List[Workout],
+        constraints: List[Constraint], completed_keys: Optional[set], from_date: str
+    ) -> List[Dict[str, Any]]:
+        """Eases planned sessions to rest on `rest` constraint dates (§6). Every other
+        constraint is advisory only (§5) — left to the model, not enforced here. Only
+        touches sessions on or after `from_date` that aren't already rest or completed."""
+        forced_rest = cls._forced_rest_days(
+            planned_workouts, constraints, completed_keys, from_date
+        )
         if not forced_rest:
             return adapted
 

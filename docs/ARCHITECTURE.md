@@ -710,14 +710,19 @@ called by the UIs.
     no priority field at all. Human-confirmed, never auto-regen.
   - **Only-changes contract:** the prompt shows the whole forward plan through the
     mesocycle end but instructs the model to return **only sessions it is changing** —
-    omitted sessions are preserved (apply never drops a date with no proposal).
+    omitted sessions are preserved (apply never drops a date with no proposal). A date the
+    model *does* touch is the exception: it keeps only the sports named on it, so a
+    same-day session of another sport is named with a **keep marker** —
+    `{date, sport_type, keep: true}` and nothing else (DESIGN_workout_revisions.md §9.1).
   - **Locked history:** any proposal targeting a `(date, sport)` that already has a
     matching completed activity (incl. one done earlier today) is dropped — a finished
     workout is never "adapted".
-  - **No-op backstop** (`_revision_is_change`): drops any proposal that reproduces an
-    existing same-sport session on every meaningful field (title, description,
-    duration/RPE/TSS — whitespace- and int/float-insensitive), so an unchanged re-list
-    is never re-stamped or needlessly re-synced.
+  - **No-op backstop** (`_revision_is_change`): a proposal reproducing an existing
+    same-sport session on every meaningful field (title, description, duration/RPE/TSS —
+    whitespace- and int/float-insensitive) is **held, not dropped**: no revision row, but
+    it still counts as proposed on its date, so the displacement rule cannot void the
+    session the re-list was protecting. Held slots travel on `RevisionProposal.held`, which
+    both the preview and apply union into the date's proposed sports (§9.1).
 - **`workout_adapt_apply(proposed, reason, start, end)`** — deletes overridden
   workouts (+ calendar events), saves adapted workouts, syncs to Calendar. Each
   session keeps its short per-workout `change_reason` in `modification_reason`; the

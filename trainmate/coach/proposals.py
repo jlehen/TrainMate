@@ -48,6 +48,10 @@ class RevisionProposal:
     # exactly the set decided at proposal time (DESIGN_constraint_honoring.md §3). See
     # `coach/honoring.py`.
     covered_constraint_ids: Tuple[int, ...] = ()
+    # `(date, canonical sport)` the coach named only to hold — no revision, but the
+    # displacement rule must still count them as spoken for
+    # (DESIGN_workout_revisions.md §9.1).
+    held: Tuple[Tuple[str, str], ...] = ()
 
 
 @dataclass(frozen=True)

@@ -1,5 +1,5 @@
 from datetime import datetime, timedelta
-from typing import Any, List, Optional, Dict
+from typing import Any, List, Optional, Dict, Tuple
 from trainmate.config import config
 from trainmate.adherence import analyze_adherence, format_discrepancies
 from trainmate.sports import canonical_sport
@@ -9,7 +9,7 @@ from trainmate.coach.formatting import format_baseline
 from trainmate.coach import honoring
 from trainmate.coach.proposals import RevisionProposal
 from trainmate.coach.revisions import (
-    normalize_load_fields, pair_revisions, structure_revision,
+    held_slots, normalize_load_fields, pair_revisions, structure_revision,
 )
 from trainmate.db.workouts import ATHLETE_VOID_KINDS
 import trainmate.coach.service as _svc
@@ -17,6 +17,13 @@ import trainmate.coach.service as _svc
 
 class AdaptationMixin:
     """Part of :class:`CoachService` — see coach/service/__init__.py."""
+
+    @staticmethod
+    def _is_keep_marker(proposal: Dict[str, Any]) -> bool:
+        """True for `{"date", "sport_type", "keep": true}` — hold this session, don't
+        rewrite it. Carries no prescription, so it cannot drift into a spurious
+        adaptation the way a verbatim re-list does (DESIGN_workout_revisions.md §9.1)."""
+        return bool(proposal.get('keep'))
 
     def _revision_is_change(self, proposal: Dict[str, Any]) -> bool:
         """True unless `proposal` exactly reproduces an existing same-sport session.
@@ -244,13 +251,18 @@ class AdaptationMixin:
                 not in completed_keys
             ]
 
-        # No-op backstop: the prompt tells the model to return ONLY changed sessions, but
-        # if it re-lists one verbatim (or with cosmetic-only churn) anyway, drop it here so
-        # an unchanged session is never re-stamped as adapted or needlessly re-synced. A
-        # proposal is a real change unless it matches an EXISTING same-sport session on every
-        # meaningful field; a sport swap (no same-sport original) or a brand-new date always
-        # counts as a change and is kept.
-        adapted = [w for w in adapted if self._revision_is_change(w)]
+        # Held, not dropped (DESIGN_workout_revisions.md §9.1). A session named only to keep
+        # it — a keep marker, or the verbatim re-list the no-op backstop catches — appends
+        # no revision but stays SPOKEN FOR, because the same list decides what its date
+        # keeps. Filtered out instead, it was deleted by the change it was protecting.
+        held: List[Tuple[str, str]] = []
+        changed: List[Dict[str, Any]] = []
+        for w in adapted:
+            if self._is_keep_marker(w) or not self._revision_is_change(w):
+                held.append((w.get("date", ""), canonical_sport(w.get("sport_type", ""))))
+            else:
+                changed.append(w)
+        adapted = changed
 
         # Deterministic rest-window pre-pass (§6): force rest onto any future,
         # not-yet-completed planned session that falls under a `rest` constraint, so the
@@ -258,6 +270,12 @@ class AdaptationMixin:
         adapted = self._enforce_rest_windows_revision(
             adapted, planned_workouts, constraints, completed_keys, target_date_str
         )
+        # A forced-rest day is cleared outright, so nothing on it is held: the constraint
+        # outranks the coach's wish to keep the session (§6 over §9.1).
+        forced_rest = self._forced_rest_days(
+            planned_workouts, constraints, completed_keys, target_date_str
+        )
+        held = [(date, sport) for date, sport in held if date not in forced_rest]
 
         # §8: constraint-shaped directives the same LLM call extracted from the athlete's
         # note, if any — raw and UNCONFIRMED. The caller must confirm each with the
@@ -274,7 +292,7 @@ class AdaptationMixin:
         window_workouts = self._db.get_workouts(
             start_date=target_date_str, end_date=meso_end_date_str
         )
-        pairs, removals = pair_revisions(structured, window_workouts)
+        pairs, removals = pair_revisions(structured, window_workouts, held)
         return RevisionProposal(
             reason=reason,
             workouts=structured,
@@ -283,6 +301,7 @@ class AdaptationMixin:
             range_end=meso_end_date_str,
             pairs=pairs,
             removals=removals,
+            held=tuple(held),
             # Decided at proposal time so apply stamps this list rather than re-deriving
             # it from a set that may have been edited since (§8).
             covered_constraint_ids=honoring.covered_ids(
@@ -318,6 +337,10 @@ class AdaptationMixin:
         proposed_by_date: Dict[str, List[Dict[str, Any]]] = {}
         for pw in proposed_workouts:
             proposed_by_date.setdefault(pw['date'], []).append(pw)
+        # Sessions the coach kept as planned. They append nothing, but they are spoken for,
+        # so the displacement rule below must not read them as sessions it wants gone
+        # (§9.1) — the same union the preview made in `pair_revisions`.
+        held_by_date = held_slots(proposal.held)
 
         # The session displaced on each date, so a cross-sport substitution can carry its
         # lineage to the sport it becomes.
@@ -330,6 +353,7 @@ class AdaptationMixin:
             proposed_sports = {
                 canonical_sport(p['sport_type']) for p in proposed_by_date[ew['date']]
             }
+            proposed_sports |= held_by_date.get(ew['date'], set())
             if canonical_sport(ew['sport_type']) not in proposed_sports:
                 displaced_by_date.setdefault(ew['date'], ew)
 

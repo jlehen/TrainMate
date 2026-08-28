@@ -4,7 +4,7 @@ Kept apart from `proposals.py`, which holds only the frozen records the coach ha
 CLI: this is the logic that fills them in.
 """
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from trainmate.sports import canonical_sport
 
@@ -66,8 +66,22 @@ def normalize_load_fields(workouts: List[Dict[str, Any]]) -> None:
                 w[field] = round(value)
 
 
+def held_slots(held: Sequence[Tuple[str, str]]) -> Dict[str, set]:
+    """`date -> {canonical sport}` for the sessions a revision holds rather than rewrites.
+
+    A held session appends nothing, but it is still spoken for: the displacement rule
+    below and in `workout_revision_apply` reads an unmentioned sport as one the coach
+    wants gone, so omitting it here deletes it (§9.1).
+    """
+    by_date: Dict[str, set] = {}
+    for date, sport in held:
+        by_date.setdefault(date, set()).add(canonical_sport(sport))
+    return by_date
+
+
 def pair_revisions(
-    proposals: List[Dict[str, Any]], existing: List[Dict[str, Any]]
+    proposals: List[Dict[str, Any]], existing: List[Dict[str, Any]],
+    held: Sequence[Tuple[str, str]] = (),
 ) -> Tuple[Tuple[RevisionPair, ...], Tuple[Dict[str, Any], ...]]:
     """Decides, per date, which planned session each proposal replaces.
 
@@ -75,6 +89,10 @@ def pair_revisions(
     carries a new sport_type and so has no same-sport original: on a proposed date, an
     existing session whose canonical sport is not among that date's proposals is the one
     being overridden, and is paired with that date's new-sport proposal.
+
+    `held` names sessions the coach kept as planned. They produce no pair — there is
+    nothing to show — but they count as proposed, so a date's other change cannot
+    displace them (§9.1).
 
     Returns `(pairs, removals)`, where removals are overridden sessions left without a
     replacement — plain deletions, which the preview must show so apply never drops a
@@ -88,12 +106,14 @@ def pair_revisions(
     for session in existing:
         existing_by_date.setdefault(session["date"], []).append(session)
 
+    held_by_date = held_slots(held)
     swap_original: Dict[int, Dict[str, Any]] = {}
     removals: List[Dict[str, Any]] = []
 
     for date, date_proposals in proposed_by_date.items():
         on_date = existing_by_date.get(date, [])
         proposed_sports = {canonical_sport(p["sport_type"]) for p in date_proposals}
+        proposed_sports |= held_by_date.get(date, set())
         existing_sports = {canonical_sport(e["sport_type"]) for e in on_date}
 
         overridden = [

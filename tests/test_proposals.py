@@ -77,6 +77,38 @@ class TestPairAdaptations(unittest.TestCase):
         self.assertIn(removals[0]["title"], {"Heavy Lower", "Long Ride"})
         self.assertNotEqual(removals[0]["title"], pairs[0].original["title"])
 
+
+    def test_a_held_session_is_neither_paired_nor_removed(self):
+        """A session the coach kept is spoken for. Left out of the list, the swap rule
+        below reads it as overridden and apply voids it — the bug that deleted a lift
+        the model had explicitly asked to keep (DESIGN_workout_revisions.md §9.1)."""
+        proposal = self._planned("2026-06-10", "cycling", "Climb Threshold — Indoors")
+        existing = [
+            self._planned("2026-06-10", "cycling", "Climb Threshold — Outdoors"),
+            self._planned("2026-06-10", "strength", "Kettlebell Full-Body"),
+        ]
+
+        pairs, removals = pair_revisions(
+            [proposal], existing, held=[("2026-06-10", "strength_training")]
+        )
+
+        self.assertEqual(len(pairs), 1)
+        self.assertEqual(pairs[0].original["title"], "Climb Threshold — Outdoors")
+        self.assertFalse(pairs[0].is_swap)
+        self.assertEqual(removals, (), "the held lift was offered up for deletion")
+
+    def test_without_the_hold_the_same_day_session_is_a_removal(self):
+        """The other half of the case above: nothing named means nothing kept."""
+        proposal = self._planned("2026-06-10", "cycling", "Climb Threshold — Indoors")
+        existing = [
+            self._planned("2026-06-10", "cycling", "Climb Threshold — Outdoors"),
+            self._planned("2026-06-10", "strength", "Kettlebell Full-Body"),
+        ]
+
+        _pairs, removals = pair_revisions([proposal], existing)
+
+        self.assertEqual([r["title"] for r in removals], ["Kettlebell Full-Body"])
+
     def test_a_proposal_on_an_empty_date_has_no_original(self):
         pairs, removals = pair_revisions(
             [self._planned("2026-06-11", "running", "Extra Run")], []

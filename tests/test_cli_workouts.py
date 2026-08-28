@@ -128,6 +128,55 @@ class TestCliWorkouts(unittest.TestCase):
             f"Workout with ID {w_id} ('Interval Session') removed successfully", stdout
         )
 
+
+    @patch("trainmate.cli.workouts.generate.ensure_recent_data")
+    @patch("trainmate.runtime.coach_service")
+    def test_a_wording_only_rewrite_is_labelled_in_the_preview(
+        self, mock_coach, _mock_ensure
+    ):
+        """Title and load are the only columns the table can show, so a session rewritten
+        in words alone rendered as `X | X | 85m/RPE7/TSS84 -> 85m/RPE7/TSS84` and read as
+        a no-op the coach had proposed for no reason (DESIGN_workout_revisions.md §9.1)."""
+        original = {
+            "date": "2026-06-05", "sport_type": "cycling", "title": "Climb Threshold",
+            "description": "2x20 at threshold. Ride it evenly.",
+            "duration_minutes": 85, "rpe": 7, "tss": 84,
+        }
+        adapted = dict(original, description="2x20 at threshold. Ride it in the morning.")
+        mock_coach.workout_adapt.return_value = RevisionProposal(
+            reason="Holding the block; the ride moves to the morning.",
+            workouts=[adapted], new_constraints=[],
+            range_start="2026-06-05", range_end="2026-06-30",
+            pairs=(RevisionPair(proposal=adapted, original=original, is_swap=False),),
+        )
+
+        exit_code, stdout, _stderr = self.run_cli(["workout", "adapt"])
+
+        self.assertEqual(exit_code, 0)
+        self.assertIn("85m/RPE7/TSS84 -> 85m/RPE7/TSS84", stdout)
+        self.assertIn("[wording only]", stdout)
+
+    @patch("trainmate.cli.workouts.generate.ensure_recent_data")
+    @patch("trainmate.runtime.coach_service")
+    def test_a_real_load_change_carries_no_wording_label(self, mock_coach, _mock_ensure):
+        original = {
+            "date": "2026-06-05", "sport_type": "cycling", "title": "Climb Threshold",
+            "description": "2x20 at threshold.",
+            "duration_minutes": 85, "rpe": 7, "tss": 84,
+        }
+        adapted = dict(original, title="Easy Spin", description="Z2 only.",
+                       duration_minutes=45, rpe=3, tss=30)
+        mock_coach.workout_adapt.return_value = RevisionProposal(
+            reason="Easing for fatigue.", workouts=[adapted], new_constraints=[],
+            range_start="2026-06-05", range_end="2026-06-30",
+            pairs=(RevisionPair(proposal=adapted, original=original, is_swap=False),),
+        )
+
+        exit_code, stdout, _stderr = self.run_cli(["workout", "adapt"])
+
+        self.assertEqual(exit_code, 0)
+        self.assertNotIn("[wording only]", stdout)
+
     def _seed_pmc_metrics(self, n_days: int) -> None:
         """n_days of metrics ending today, each carrying the PMC triple."""
         today = datetime.now().date()

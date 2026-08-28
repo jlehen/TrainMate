@@ -740,9 +740,15 @@ evidence-backed observations are authored only by the weekly history analysis
                 "    // Include ONLY sessions you are actually changing. Omit any session that\n"
                 "    // stays exactly as planned — it is preserved automatically, so re-listing\n"
                 "    // an unchanged session (even verbatim) is wrong and counts as a spurious\n"
-                "    // adaptation. EXCEPTION: if you change one session on a date that holds\n"
-                "    // ANOTHER session of a different sport you are keeping, include BOTH that\n"
-                "    // day so the kept one is not dropped.\n"
+                "    // adaptation.\n"
+                "    // ONE EXCEPTION, and it does NOT need a full entry: a date you are\n"
+                "    // changing keeps only the sports you name, so a session of ANOTHER sport\n"
+                "    // that day is dropped unless you name it. Name it with a KEEP MARKER —\n"
+                "    // three fields, nothing else:\n"
+                '    //     { "date": "YYYY-MM-DD", "sport_type": "...", "keep": true }\n'
+                "    // That holds it exactly as planned. Do NOT restate its title, description\n"
+                "    // or numbers to keep it: retyping them is how an unchanged session gets\n"
+                "    // recorded as adapted.\n"
                 "    {\n"
                 '      "date": "YYYY-MM-DD",\n'
                 + _SPORT_TYPE_ENUM +

@@ -682,6 +682,47 @@ and a rationale for holding is not worth a revision. The pass is still recorded 
 `workout_changes` row is written regardless, so a change that appended nothing is visible in
 the history as exactly that.
 
+### 9.1 Held is not the same as dropped
+
+Adapt's proposal list answers two different questions at once, and conflating them cost a
+session.
+
+1. *What am I rewriting?* — every entry becomes a revision.
+2. *What does this date keep?* — a date the coach touches keeps only the sports it names.
+   Anything else on that date is read as displaced and voided (§4, "Swap, in full").
+
+The adaptation prompt asks for changed sessions only, so a date carrying a ride and a lift
+where only the ride changes would silently lose the lift. The prompt's answer was to have
+the model re-list the lift verbatim. Both halves of that then failed:
+
+* **The re-list was stripped, and the lift deleted.** The service dropped no-op proposals
+  from the list *before* the displacement rule read it, so a perfectly obedient verbatim
+  re-list removed the session it existed to protect. Observed 2026-08-26: a kettlebell
+  session re-listed with the note *"Unchanged; listed only so the indoor climb session does
+  not displace it"* was voided by that same pass.
+* **The re-list drifted, and became a spurious adaptation.** Reproducing 300 words verbatim
+  is not something a model does reliably. Observed 2026-08-27: a climb session came back
+  identical in title, duration, RPE, TSS and zones, with one sentence of coaching prose
+  swapped — enough to clear the no-op check, so an untouched session was re-stamped as
+  adapted, bumping the tally that §7.1 feeds back into the next prompt as *"ALREADY EASED"*.
+
+**A held session is therefore a first-class thing, not an absent one.** The coach names it
+with a keep marker — `{"date", "sport_type", "keep": true}`, and nothing else. It carries no
+prescription, so there is no prose to drift; it appends no revision, so no adaptation is
+recorded against it; and it counts as *proposed* for the displacement rule, so the date
+keeps it. `RevisionProposal.held` carries these slots, and `pair_revisions` (preview) and
+`workout_revision_apply` (write) both union them into the date's proposed sports — one rule,
+read in the two places that must agree about what disappears.
+
+The no-op backstop stays, and now *holds* rather than drops: a model that re-lists verbatim
+anyway gets the same protection. A `rest` constraint still outranks a hold — §6 clears the
+whole day, so anything held there is released.
+
+**The preview labels a wording-only rewrite.** Its three columns are title and load, so a
+session rewritten in words alone renders as `X | X | 85m/RPE7/TSS84 -> 85m/RPE7/TSS84` and
+reads as a change the coach proposed for no reason. Such a rewrite is real — the athlete
+reads the description — so it is marked `[wording only]` rather than hidden.
+
 ## 10. Undo — the batch key moves from death to birth
 
 Today a batch is `archived_at`: a timestamp stamped on the rows a command *displaced*. That
@@ -919,6 +960,12 @@ migration function.
 - A generate landing on a manual session replaces it under a new lineage, prints the
   notice, and rolling the change back brings the manual session back (§4, §12).
 - Regenerating an unchanged horizon appends no revisions (§9).
+- A session named only to keep it survives the pass (§9.1) — both as a verbatim re-list and
+  as a keep marker: no revision row, no bumped tally, and above all not a removal. Its
+  mirror image is pinned too: with nothing named, the same-day session IS a removal, so the
+  test says the hold is what saves it rather than passing for an unrelated reason.
+- A wording-only rewrite is a real change, and the preview says so (§9.1). The backstop is
+  exact, not fuzzy — the keep marker is what removes the churn, not a similarity threshold.
 - Restoring an archived revision appends a copy and makes it live, and the previously live
   revision stays in the chain.
 - An adapt that drops a session leaves a void, and `workout rollback` on that change brings
