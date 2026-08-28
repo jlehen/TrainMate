@@ -614,8 +614,11 @@ A session tagged "[PARTIAL — ...]" did NOT go as planned: the tag reports the 
 load actually performed, and those are the truth — do not read the planned numbers beside
 it as work the athlete banked. Where the tag also says "locked history", the day is behind
 us, so the difference is a fact to plan AROUND, not a session to rewrite. Where it says the
-day is not over, the athlete started and stopped and the rest of the session is still
-available today: salvage what remains on that day, or move the exposure to another one.
+session is not yet history, the athlete started it and stopped, and today is still yours to
+shape: salvage what remains of it, move the exposure to another day, or — if the athlete
+tells you the day is gone — write that day off to rest so the calendar records what
+actually happened. Do not leave a session standing that the athlete has told you they
+abandoned.
 Sessions tagged "[athlete-added]" are the athlete's own deliberate intent:
 preserve them as planned unless fatigue or injury risk clearly warrants easing.
 

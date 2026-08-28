@@ -18,6 +18,7 @@ rebind_test_db(test_db)
 
 from trainmate.coach import coach_service
 from trainmate.coach.proposals import RevisionProposal
+from trainmate.sports import canonical_sport
 
 # trainmate_cli re-exports names from trainmate.cli.workouts, so it must be imported first.
 import trainmate_cli  # noqa: F401
@@ -504,12 +505,12 @@ class TestAdaptationAdapt(unittest.TestCase):
                 "adapted_workouts": [
                     {
                         "date": "2026-06-03",
-                        "sport_type": "strength_training",
-                        "title": "Abbreviated Squat/Hinge",
-                        "description": "3x3 at 8RM, nothing more.",
-                        "duration_minutes": 30,
-                        "rpe": 5,
-                        "tss": 15.0,
+                        "sport_type": "rest",
+                        "title": "Rest Day (Lift Abandoned)",
+                        "description": "Paged after the warm-up; the day is a wash.",
+                        "duration_minutes": 0,
+                        "rpe": 0,
+                        "tss": 0,
                     },
                 ],
             }
@@ -537,9 +538,16 @@ class TestAdaptationAdapt(unittest.TestCase):
                           prompt_user_content)
             self.assertNotIn("Full-Body Strength | Expected duration: 65m, RPE: 6, TSS: 30 "
                              "[COMPLETED", prompt_user_content)
-            # ...and the guard no longer drops the salvage the model proposed for today.
+            # ...and the guard no longer drops the write-off the model proposed for today,
+            # which swaps the abandoned lift out for rest so the calendar records the day
+            # that actually happened.
             self.assertEqual([p["date"] for p in proposed], ["2026-06-03"])
-            self.assertEqual(proposed[0]["title"], "Abbreviated Squat/Hinge")
+            self.assertEqual(proposed[0]["sport_type"], "rest")
+            swaps = [p for p in _p.pairs if p.is_swap]
+            self.assertEqual(len(swaps), 1)
+            self.assertEqual(
+                canonical_sport(swaps[0].original["sport_type"]), "strength_training"
+            )
 
     @patch("trainmate.coach.engine.openrouter_client")
     def test_adapt_drops_noop_relisted_session(self, mock_client):

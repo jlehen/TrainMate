@@ -220,8 +220,8 @@ def _performed_marker(p: Performed) -> str:
         )
     return (
         f" [PARTIAL — performed so far today: {p.duration_min:.0f}m, load {p.load:.1f};"
-        " the day is not over, so adapt what REMAINS of it or move it"
-        " — never restate it as done]"
+        " this is TODAY, so it is not yet history — salvage what remains of it, move the"
+        " exposure, or write the day off — never restate it as done]"
     )
 
 
