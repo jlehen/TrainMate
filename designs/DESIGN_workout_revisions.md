@@ -693,24 +693,30 @@ session.
 
 The adaptation prompt asks for changed sessions only, so a date carrying a ride and a lift
 where only the ride changes would silently lose the lift. The prompt's answer was to have
-the model re-list the lift verbatim. Both halves of that then failed:
+the model re-list the lift verbatim. That answer failed at both ends.
 
-* **The re-list was stripped, and the lift deleted.** The service dropped no-op proposals
-  from the list *before* the displacement rule read it, so a perfectly obedient verbatim
-  re-list removed the session it existed to protect. Observed 2026-08-26: a kettlebell
-  session re-listed with the note *"Unchanged; listed only so the indoor climb session does
-  not displace it"* was voided by that same pass.
-* **The re-list drifted, and became a spurious adaptation.** Reproducing 300 words verbatim
-  is not something a model does reliably. Observed 2026-08-27: a climb session came back
-  identical in title, duration, RPE, TSS and zones, with one sentence of coaching prose
-  swapped — enough to clear the no-op check, so an untouched session was re-stamped as
-  adapted, bumping the tally that §7.1 feeds back into the next prompt as *"ALREADY EASED"*.
+**The re-list was stripped, and the lift deleted.** The service dropped no-op proposals from
+the list *before* the displacement rule read it, so a perfectly obedient verbatim re-list
+removed the session it existed to protect. Observed 2026-08-26: a kettlebell session
+re-listed with the note *"Unchanged; listed only so the indoor climb session does not
+displace it"* was voided by that same pass.
+
+**And asking for 300 words verbatim invites an edit.** Observed 2026-08-27: a climb session
+came back identical in title, duration, RPE, TSS and zones, with one coaching cue rewritten
+from a forward-looking note about the goal climb to a backward-looking one about the session
+just executed — while its `change_reason` said *"Unchanged and held as planned"*. Do not
+read that as the model failing to copy. **The coach revises descriptions deliberately and
+often, and should**: the athlete reads the description, so a better cue or an updated
+reference is worth making, and §9 applies such a revision like any other. The defect was
+that the intent could not be *said* — "hold this" and "keep this but reword it" had the same
+encoding — and that the preview could not show the difference.
 
 **A held session is therefore a first-class thing, not an absent one.** The coach names it
 with a keep marker — `{"date", "sport_type", "keep": true}`, and nothing else. It carries no
-prescription, so there is no prose to drift; it appends no revision, so no adaptation is
-recorded against it; and it counts as *proposed* for the displacement rule, so the date
-keeps it. `RevisionProposal.held` carries these slots, and `pair_revisions` (preview) and
+prescription, so a hold cannot be mistaken for a rewrite; it appends no revision; and it
+counts as *proposed* for the displacement rule, so the date keeps it. A session the coach
+wants reworded takes a full entry instead, and is applied as the change it is.
+`RevisionProposal.held` carries the held slots, and `pair_revisions` (preview) and
 `workout_revision_apply` (write) both union them into the date's proposed sports — one rule,
 read in the two places that must agree about what disappears.
 
@@ -718,10 +724,18 @@ The no-op backstop stays, and now *holds* rather than drops: a model that re-lis
 anyway gets the same protection. A `rest` constraint still outranks a hold — §6 clears the
 whole day, so anything held there is released.
 
-**The preview labels a wording-only rewrite.** Its three columns are title and load, so a
-session rewritten in words alone renders as `X | X | 85m/RPE7/TSS84 -> 85m/RPE7/TSS84` and
-reads as a change the coach proposed for no reason. Such a rewrite is real — the athlete
-reads the description — so it is marked `[wording only]` rather than hidden.
+**The preview shows a text revision rather than merely marking it.** Its columns are title
+and load, so a session revised in words alone renders as
+`X | X | 85m/RPE7/TSS84 -> 85m/RPE7/TSS84` and reads as a change made for no reason. The row
+is tagged `[text revised]` and the changed sentences are printed under the table as a
+`-`/`+` diff. A preview that says a session changed but not how is what makes an honest
+revision look like a bug.
+
+**What a text revision costs, precisely.** Nothing that matters. It appends a revision row
+and re-pushes the Calendar event, and that is all: `_eased` (§7) counts a revision only when
+`duration_minutes` or `tss` actually *fell*, so a reworded session does not bump
+`adaptation_count` and never renders the `ALREADY EASED` tag. The keep marker exists to make
+intent expressible, not to suppress rewording.
 
 ## 10. Undo — the batch key moves from death to birth
 
@@ -964,8 +978,9 @@ migration function.
   as a keep marker: no revision row, no bumped tally, and above all not a removal. Its
   mirror image is pinned too: with nothing named, the same-day session IS a removal, so the
   test says the hold is what saves it rather than passing for an unrelated reason.
-- A wording-only rewrite is a real change, and the preview says so (§9.1). The backstop is
-  exact, not fuzzy — the keep marker is what removes the churn, not a similarity threshold.
+- A text-only revision is applied like any other change, does not bump `adaptation_count`,
+  and the preview prints the sentences that moved (§9.1). The backstop is exact, not fuzzy:
+  the keep marker is what separates a hold from a rewrite, not a similarity threshold.
 - Restoring an archived revision appends a copy and makes it live, and the previously live
   revision stays in the chain.
 - An adapt that drops a session leaves a void, and `workout rollback` on that change brings

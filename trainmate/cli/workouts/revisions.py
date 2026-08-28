@@ -1,9 +1,15 @@
 """Previewing an in-place revision before it is applied."""
+import difflib
+import re
+from typing import List
+
 from trainmate import runtime
 from trainmate.util import (
-    bold, green, red, yellow, cyan, magenta, gray, render_table,
+    bold, green, red, yellow, cyan, magenta, gray, render_table, wrap_text,
 )
 from trainmate.coach.proposals import RevisionProposal
+
+_SENTENCE_END = re.compile(r"(?<=[.!?])\s+")
 
 
 def _stats(w: dict) -> str:
@@ -18,16 +24,61 @@ def _stats(w: dict) -> str:
 def _rewritten_text_only(proposal: dict, original: dict) -> bool:
     """True when the prescription the table can SHOW is identical and only the text moved.
 
-    The three visible columns are title and load, so a session rewritten in words alone
-    renders as `X | X | 85m/RPE7/TSS84 -> 85m/RPE7/TSS84` — a real change that reads as a
-    bug. Flagged rather than hidden: the athlete reads the description, so a rewrite of it
-    is worth seeing (DESIGN_workout_revisions.md §9.1)."""
+    Its columns are title and load, so a session the coach revised in words alone renders
+    as `X | X | 85m/RPE7/TSS84 -> 85m/RPE7/TSS84` and reads as a change made for no
+    reason. Those are the rows the diff below exists for
+    (DESIGN_workout_revisions.md §9.1)."""
     if not original:
         return False
     if proposal.get('title') != original.get('title') or _stats(proposal) != _stats(original):
         return False
     norm = lambda v: " ".join(str(v or "").split())  # noqa: E731
     return norm(proposal.get('description')) != norm(original.get('description'))
+
+
+def _sentences(text) -> List[str]:
+    """A description as sentences. Blank lines are layout, so the diff ignores them."""
+    out: List[str] = []
+    for line in str(text or "").splitlines():
+        for sentence in _SENTENCE_END.split(line.strip()):
+            if sentence.strip():
+                out.append(sentence.strip())
+    return out
+
+
+def _wording_diff(proposal: dict, original: dict) -> List[str]:
+    """The sentences that moved between two descriptions, as `-`/`+` lines."""
+    return [
+        line for line in difflib.unified_diff(
+            _sentences(original.get('description')),
+            _sentences(proposal.get('description')),
+            lineterm="", n=0,
+        )
+        if not line.startswith(("---", "+++", "@@"))
+    ]
+
+
+def _print_wording_changes(proposal: RevisionProposal) -> None:
+    """Shows what a revision changed when the table's columns cannot.
+
+    The athlete reads the description, so revising it is a real adaptation — the coach
+    makes them deliberately, e.g. rewriting a pacing cue to reference the session just
+    executed. Printed rather than merely flagged: a preview that says a session changed
+    but not how is what makes an honest text revision look like a bug (§9.1)."""
+    reworded = [
+        (pair.proposal, pair.original) for pair in proposal.pairs
+        if _rewritten_text_only(pair.proposal, pair.original)
+    ]
+    if not reworded:
+        return
+    print(bold(yellow("\nTEXT REVISED (same load, so the columns above cannot show it):")))
+    for pw, existing in reworded:
+        print(f"\n  {cyan(pw['date'])} {magenta(pw['sport_type'].upper())} — {pw['title']}")
+        for line in _wording_diff(pw, existing):
+            paint = red if line.startswith("-") else green
+            # "    - text": the space is what lets wrap_text see a list prefix and hang
+            # continuation lines under it.
+            print(paint(wrap_text(f"    {line[0]} {line[1:].strip()}", width=88)))
 
 
 def preview_and_confirm_revision(
@@ -54,7 +105,7 @@ def preview_and_confirm_revision(
         )
         proposed_label = green(pw['title'])
         if _rewritten_text_only(pw, existing):
-            proposed_label += gray(" [wording only]")
+            proposed_label += gray(" [text revised]")
         rows.append([
             cyan(pw['date']), magenta(sport_label), gray(orig_title),
             proposed_label, yellow(stats_diff),
@@ -70,4 +121,5 @@ def preview_and_confirm_revision(
 
     rows.sort(key=lambda r: r[0])
     print(render_table(headers, rows))
+    _print_wording_changes(proposal)
     return auto or runtime.prompt.confirm(question)

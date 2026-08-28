@@ -688,10 +688,11 @@ class TestAdaptationAdapt(unittest.TestCase):
             self.assertEqual(lift["adaptation_count"], 0)
 
     @patch("trainmate.coach.engine.openrouter_client")
-    def test_adapt_near_verbatim_relist_is_still_a_change(self, mock_client):
-        """The backstop is exact, not fuzzy: a re-list whose description drifted by a
-        sentence really did change the prescription, so it is applied. What stops that
-        churn is the keep marker above, not a similarity threshold here."""
+    def test_adapt_applies_a_text_only_revision_and_it_costs_no_easing(self, mock_client):
+        """Rewriting only the description is a real change the coach makes deliberately —
+        the athlete reads it — so it is applied, not suppressed. And it is cheap: `_eased`
+        counts a revision only when duration or TSS FELL, so a reworded session never
+        renders the `ALREADY EASED` tag that raises the bar for the next adapt (§9.1)."""
         with patch.dict(trainmate.coach.config.data, {
             "user_profile": {"lthr": 165, "max_hr": 185},
             "coach": {
@@ -701,12 +702,15 @@ class TestAdaptationAdapt(unittest.TestCase):
         }):
             mock_client.complete.return_value = {
                 "change_needed": True,
-                "reason": "Holding the block.",
+                "reason": "Holding the block; the pacing cue now references Wednesday.",
                 "adapted_workouts": [
                     {
                         "date": "2026-06-05", "sport_type": "cycling",
                         "title": "Climb Threshold",
-                        "description": "85 mins, 2x20. Ride it evenly.",
+                        "change_reason": "Cue now references Wednesday's execution.",
+                        "description": (
+                            "85 mins, 2x20. Wednesday's execution was exactly right."
+                        ),
                         "duration_minutes": 85, "rpe": 7, "tss": 84,
                     },
                 ],
@@ -715,14 +719,25 @@ class TestAdaptationAdapt(unittest.TestCase):
             test_db.save_baseline("2026-06-03", 50.0, 2.0, 60.0, 5.0, 80.0, 5.0)
             save_workout(test_db,
                 "2026-06-05", "cycling", "Climb Threshold",
-                "85 mins, 2x20. Wednesday's execution was exactly right.",
+                "85 mins, 2x20. Even power beats a good average.",
                 duration_minutes=85, rpe=7, tss=84,
             )
 
             proposal = coach_service.workout_adapt("2026-06-03")
 
+            # The backstop is exact, not fuzzy: the text moved, so this is a change.
             self.assertEqual(len(proposal.workouts), 1)
             self.assertEqual(proposal.held, ())
+
+            service = trainmate.coach.CoachService(db_instance=test_db)
+            with redirect_stdout(io.StringIO()):
+                service.workout_revision_apply(proposal)
+
+            ride = test_db.get_workout("2026-06-05", "cycling")
+            self.assertIn("Wednesday's execution", ride["description"])
+            self.assertEqual(ride["duration_minutes"], 85)
+            self.assertEqual(ride["adaptation_count"], 0)
+            self.assertIsNone(ride["adapted_at"])
 
     def test_adapt_apply_stamps_recency_and_bumps_count(self):
         """Applying an adaptation that MOVES THE LOAD stamps `adapted_at` and bumps

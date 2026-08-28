@@ -746,9 +746,13 @@ evidence-backed observations are authored only by the weekly history analysis
                 "    // that day is dropped unless you name it. Name it with a KEEP MARKER —\n"
                 "    // three fields, nothing else:\n"
                 '    //     { "date": "YYYY-MM-DD", "sport_type": "...", "keep": true }\n'
-                "    // That holds it exactly as planned. Do NOT restate its title, description\n"
-                "    // or numbers to keep it: retyping them is how an unchanged session gets\n"
-                "    // recorded as adapted.\n"
+                "    // That holds it exactly as planned. Use it ONLY for a session you are\n"
+                "    // leaving alone; do not restate its title, description or numbers to\n"
+                "    // keep it.\n"
+                "    // Rewriting only a session's DESCRIPTION is a real change, not churn —\n"
+                "    // the athlete reads it, so a better cue, an updated reference to a\n"
+                "    // session just executed, or a clearer instruction is worth making. Give\n"
+                "    // it a full entry and say why in \"change_reason\".\n"
                 "    {\n"
                 '      "date": "YYYY-MM-DD",\n'
                 + _SPORT_TYPE_ENUM +
