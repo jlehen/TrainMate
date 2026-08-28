@@ -213,6 +213,8 @@ classes themselves.
 | `openrouter.py`      | `openrouter_client`  | HTTP client for OpenRouter; always expects       |
 |                      |                      | `json_object` response. `.model` resolves lazily |
 |                      |                      | on first use (see `llm_models.py`).              |
+|                      |                      | Two objects in one reply (a model                |
+|                      |                      | correcting itself): the last wins.               |
 | `llm_models.py`      | —                    | Which model to query: the `llm.models` config    |
 |                      |                      | menu and the stored choice read back through the |
 |                      |                      | registry (`list_models`, `active_model`,         |

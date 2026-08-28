@@ -10,7 +10,9 @@ from trainmate.config import config
 from trainmate.util import aside, warn
 
 # A fenced reply may be one line (```{"a":1}```) or many, with or without a language
-# tag; the one-line form has no newline to split on.
+# tag; the one-line form has no newline to split on. The `$` anchor deliberately
+# captures through to the *last* closing fence, so a reply that fences two attempts
+# hands both to the decoder — see `_parse_json_content`.
 _FENCED_JSON = re.compile(r"^```[A-Za-z0-9_+-]*\s*(.*?)\s*```\s*$", re.DOTALL)
 _OPEN_FENCE = re.compile(r"^```[A-Za-z0-9_+-]*[ \t]*\n?")
 
@@ -164,9 +166,10 @@ class OpenRouterClient:
     def _parse_json_content(content: str) -> dict[str, Any]:
         """Parses the model's JSON response, tolerating common chatty output.
 
-        Strips an optional ```json ... ``` markdown fence and ignores any
-        trailing data after the first complete JSON value, so responses that
-        append prose or a stray fence don't abort the whole exchange.
+        Strips an optional ```json ... ``` markdown fence and ignores trailing prose, so a
+        reply that appends a comment or a stray fence doesn't abort the exchange. Of two
+        or more objects the last wins: a model that answers, sees its answer was partial
+        and answers again means the second one.
         """
         text = content.strip()
         fenced = _FENCED_JSON.match(text)
@@ -176,9 +179,41 @@ class OpenRouterClient:
             # Opening fence with no closing one: drop the fence and any language tag.
             text = _OPEN_FENCE.sub("", text)
         text = text.strip()
-        # raw_decode parses the first JSON value and ignores trailing data.
-        obj, _ = json.JSONDecoder().raw_decode(text)
+        # raw_decode parses one JSON value and reports where it stopped; an unparseable
+        # first value is a failed exchange and raises out of here as it always did.
+        decoder = json.JSONDecoder()
+        obj, end = decoder.raw_decode(text)
+        obj, extra = OpenRouterClient._later_objects(decoder, text, end, obj)
+        if extra:
+            journal.note(
+                f"model returned {extra + 1} JSON objects, kept the last",
+                lvl="warn", dropped=extra,
+            )
         return obj
+
+    @staticmethod
+    def _later_objects(
+        decoder: json.JSONDecoder, text: str, end: int, obj: dict[str, Any]
+    ) -> tuple[dict[str, Any], int]:
+        """Scans the text after the first value for further JSON objects, returning the
+        last one that parses and how many were found past the first.
+
+        Every `{` from `end` on is a candidate, because the abandoned attempt and the
+        real one are separated by prose and fences that decode nowhere."""
+        found = 0
+        while True:
+            start = text.find("{", end)
+            if start < 0:
+                return obj, found
+            try:
+                candidate, end = decoder.raw_decode(text, start)
+            except ValueError:
+                # Not the start of a value — a brace in prose. Keep looking past it.
+                end = start + 1
+                continue
+            # A value starting at `{` decodes to a dict or not at all.
+            obj = candidate
+            found += 1
 
     def complete(
         self, system_content: str, user_content: str, label: str = "exchange"

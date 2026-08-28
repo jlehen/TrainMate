@@ -49,6 +49,50 @@ class TestParseJsonContent(unittest.TestCase):
             {"workouts": [{"date": "2026-06-01"}]},
         )
 
+    def test_self_correction_keeps_the_last_object(self):
+        # A model that answers, notices the answer was partial and answers again: the
+        # second block is the answer, the first is the one it abandoned.
+        text = (
+            '```json\n'
+            '{"change_needed": true, "reason": "nothing needs easing"}\n'
+            '```\n'
+            'Wait — I must return the full object.\n\n'
+            '```json\n'
+            '{"change_needed": true, "reason": "nothing gets eased", '
+            '"adapted_workouts": [{"date": "2026-09-02"}]}\n'
+            '```'
+        )
+        self.assertEqual(
+            OpenRouterClient._parse_json_content(text),
+            {
+                "change_needed": True,
+                "reason": "nothing gets eased",
+                "adapted_workouts": [{"date": "2026-09-02"}],
+            },
+        )
+
+    def test_a_brace_in_the_prose_between_blocks_is_skipped(self):
+        # The scan must step over a brace that starts no value, or it stops before the
+        # correction and keeps the abandoned block after all.
+        text = (
+            '{"a": 1}\n'
+            'Hold on, that is wrong {not json here}. Again:\n'
+            '{"a": 2}'
+        )
+        self.assertEqual(OpenRouterClient._parse_json_content(text), {"a": 2})
+
+    def test_dropping_a_block_is_recorded(self):
+        # Silence was half the bug: nothing said the discarded characters existed.
+        with patch("trainmate.openrouter.journal.note") as note:
+            OpenRouterClient._parse_json_content('{"a": 1}\n{"a": 2}')
+        note.assert_called_once()
+        self.assertEqual(note.call_args.kwargs["lvl"], "warn")
+
+    def test_a_single_object_is_not_reported(self):
+        with patch("trainmate.openrouter.journal.note") as note:
+            OpenRouterClient._parse_json_content('{"a": 1}\n\nAnything else?')
+        note.assert_not_called()
+
     def test_unparseable_content_raises(self):
         with self.assertRaises(ValueError):
             OpenRouterClient._parse_json_content("I'm afraid I can't do that.")
