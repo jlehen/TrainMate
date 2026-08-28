@@ -525,7 +525,7 @@ class WorkoutLogicMixin:
         informational: Optional[List[CompletedActivity]] = None,
         removed_workouts: Optional[List[Workout]] = None,
         daily_signals: Optional[List[Dict[str, Any]]] = None,
-        completed_keys: Optional[set] = None,
+        performed: Optional[dict] = None,
         athlete_message: Optional[str] = None,
         pmc_warmup_cutoff: Optional[str] = None,
         pmc_context: Optional[str] = None,
@@ -609,7 +609,14 @@ the active mesocycle block (from {target_date_str} to {meso_end_date_str}).
 Sessions tagged "[COMPLETED — locked history, not adaptable]" have already been performed,
 including any the athlete trained earlier on the evaluation date. Do NOT adapt them, and
 never restate a finished session to match what was actually done — adapt only sessions
-still ahead. Sessions tagged "[athlete-added]" are the athlete's own deliberate intent:
+still ahead.
+A session tagged "[PARTIAL — ...]" did NOT go as planned: the tag reports the duration and
+load actually performed, and those are the truth — do not read the planned numbers beside
+it as work the athlete banked. Where the tag also says "locked history", the day is behind
+us, so the difference is a fact to plan AROUND, not a session to rewrite. Where it says the
+day is not over, the athlete started and stopped and the rest of the session is still
+available today: salvage what remains on that day, or move the exposure to another one.
+Sessions tagged "[athlete-added]" are the athlete's own deliberate intent:
 preserve them as planned unless fatigue or injury risk clearly warrants easing.
 
 ### ATTRIBUTING A DEPRESSED MORNING — TRAINING FATIGUE vs LIFESTYLE NOISE
@@ -819,7 +826,7 @@ evidence-backed observations are authored only by the weekly history analysis
             else "No discrepancies detected (athlete fully on track)."
         )
         planned_text = format_planned_workouts_detailed(
-            planned_workouts, completed_keys, eval_date=target_date_str
+            planned_workouts, performed, eval_date=target_date_str
         )
         completed_text = format_completed_activities(completed_activities)
 

@@ -5,6 +5,7 @@ from trainmate.types import Workout, CompletedActivity
 from trainmate.garmin import activity_load, load_ratio, rpe_divergence
 from trainmate.util import PMC_TSB_LAG_NOTE
 from trainmate.sports import canonical_sport
+from trainmate.adherence import Performed
 from trainmate import intensity
 
 
@@ -204,9 +205,29 @@ def format_planned_workouts(
     )
 
 
+def _performed_marker(p: Performed) -> str:
+    """The done/partial tag for a session that matched an activity. A partial says what
+    was actually performed rather than claiming the session happened — a 10-minute
+    warm-up against a 65-minute lift is not a completed session (ARCHITECTURE.md §15)."""
+    if p.status == "done":
+        return " [COMPLETED — locked history, not adaptable]"
+    # Neutral wording: a partial is as often an overshoot as a shortfall, and the planned
+    # numbers already sit on the line above, so the tag states only what was performed.
+    if p.locked:
+        return (
+            f" [PARTIAL — actually performed: {p.duration_min:.0f}m, load {p.load:.1f}"
+            " — locked history, not adaptable]"
+        )
+    return (
+        f" [PARTIAL — performed so far today: {p.duration_min:.0f}m, load {p.load:.1f};"
+        " the day is not over, so adapt what REMAINS of it or move it"
+        " — never restate it as done]"
+    )
+
+
 def format_planned_workouts_detailed(
     planned_workouts: List[Workout],
-    completed_keys: Optional[Set[Tuple[str, str]]] = None,
+    performed: Optional[Dict[Tuple[str, str], Performed]] = None,
     eval_date: Optional[str] = None,
     easing_closer: str = EASED_DO_NOT_COMPOUND,
 ) -> str:
@@ -220,22 +241,23 @@ def format_planned_workouts_detailed(
     Sessions the athlete scheduled themselves (source == 'manual') are tagged
     "[athlete-added]" so the adaptation can treat them as deliberate intent.
 
-    `completed_keys` is the set of `(date, canonical_sport)` pairs that already have a
-    matching completed activity (computed by adherence analysis). Those sessions are
-    tagged "[COMPLETED — locked history, not adaptable]" so the model has the
-    authoritative done/locked signal instead of re-pairing the plan against the
-    completed-activity list itself.
+    `performed` maps `(date, canonical_sport)` to what the session actually got
+    (`adherence.performed_sessions`), so the model has the authoritative verdict instead
+    of re-pairing the plan against the completed-activity list itself. A full session is
+    tagged "[COMPLETED — locked history, not adaptable]"; one only partly performed says
+    so and reports what was actually done, and on the evaluation date stays adaptable.
 
     Sessions a prior `workout adapt` already eased are tagged "[ALREADY EASED …]" with
     how recently and how many times (relative to `eval_date`), so a re-run does not stack
     a second reduction on a session whose current form is already the reduced plan.
     """
-    completed_keys = completed_keys or set()
+    performed = performed or {}
     blocks = []
     for w in planned_workouts:
         markers = ""
-        if (w['date'], canonical_sport(w['sport_type'])) in completed_keys:
-            markers += " [COMPLETED — locked history, not adaptable]"
+        p = performed.get((w['date'], canonical_sport(w['sport_type'])))
+        if p is not None:
+            markers += _performed_marker(p)
         if w.get('source') == 'manual':
             markers += " [athlete-added]"
         # A benchmark (fitness test) must be rescheduled intact, never softened — see the

@@ -208,7 +208,63 @@ def classify_adherence(
         return {"status": PENDING if pending else "missed", "reasons": []}
 
     reasons = _discrepancy_reasons(planned, completed)
-    return {"status": "partial" if reasons else "done", "reasons": reasons}
+    return {"status": PARTIAL if reasons else "done", "reasons": reasons}
+
+
+@dataclass(frozen=True)
+class Performed:
+    """What a planned session actually got, for the surfaces that must not call a
+    fragment of a session "done" (ARCHITECTURE.md §15 "A session already behind us
+    carries its verdict")."""
+    status: str          # `classify_adherence` verdict: "done" or "partial"
+    duration_min: float  # what the matched activity actually ran
+    load: float          # ...and what it actually cost
+    locked: bool         # history now: adapt may not rewrite it
+
+
+def performed_sessions(
+    matching_results: List[Dict[str, Any]],
+    eval_date: str,
+    minor_activity_load_threshold: float = 25.0,
+) -> Dict[Tuple[str, str], Performed]:
+    """`(date, canonical_sport) -> Performed` for every planned session that matched a
+    completed activity. Unmatched sessions are absent (missed or pending — adapt's to
+    shape), and so are rest days, whose verdict is about a violation, not a performance.
+
+    `locked` is adapt's history lock: on the evaluation date a session becomes history
+    only once its planned TIME was actually spent, so one abandoned after the warm-up
+    stays adaptable for the rest of the day (ARCHITECTURE.md §15).
+    """
+    performed: Dict[Tuple[str, str], Performed] = {}
+    for m in matching_results:
+        act = m["completed"]
+        if act is None:
+            continue
+        w = m["planned"]
+        status = classify_adherence(
+            w, act, minor_activity_load_threshold, pending=m.get("pending", False)
+        )["status"]
+        if status not in ("done", PARTIAL):
+            continue
+        performed[(m["date"], canonical_sport(w["sport_type"]))] = Performed(
+            status=status,
+            duration_min=act["duration_sec"] / 60.0,
+            load=activity_load(act),
+            locked=m["date"] < eval_date or not _duration_shortfall(w, act),
+        )
+    return performed
+
+
+def _duration_shortfall(w: Dict[str, Any], matched_act: Dict[str, Any]) -> bool:
+    """Whether the matched activity ran materially SHORTER than planned. Duration, not
+    load: strength load read off HR is unreliable, but time in the gym is not."""
+    p_duration = w.get("duration_minutes") or 0
+    if p_duration <= 0:
+        return False
+    act_duration_min = matched_act["duration_sec"] / 60.0
+    return (p_duration - act_duration_min) / p_duration > _adherence_tolerance(
+        planned_load(w)
+    )
 
 
 def analyze_adherence(

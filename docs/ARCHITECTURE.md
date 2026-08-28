@@ -419,9 +419,11 @@ three submodules:
   `format_metrics_history`, `format_completed_activities`,
   `format_planned_workouts`, `format_planned_workouts_detailed` (adapt-only
   variant that includes each session's full description so the model preserves
-  interval/rest detail it isn't deliberately changing, tags already-completed
-  sessions `[COMPLETED — locked history, not adaptable]` from the adherence
-  `completed_keys`, and tags already-eased sessions `[ALREADY EASED …]` with
+  interval/rest detail it isn't deliberately changing, tags a session already
+  trained `[COMPLETED — locked history, not adaptable]` or `[PARTIAL — …]` with
+  what was actually performed, from `adherence.performed_sessions`
+  ([§15](#a-session-already-behind-us-carries-its-verdict)), and tags
+  already-eased sessions `[ALREADY EASED …]` with
   recency/count from `adapted_at`/`adaptation_count` so a re-run doesn't compound
   the cut), `format_removed_workouts`, `format_daily_signals`
   (renders the window's `daily_signals` rows into the adapt prompt),
@@ -2743,4 +2745,33 @@ ride would read `[REST BROKEN]` the moment the ride was filtered out. And the li
 became a command that reads completed activities, so it freshens Garmin like every other
 one that does; the cost is bounded by scoping the pull to the past part of the window,
 which leaves the ordinary forward-looking `workout list` entirely offline.
+
+### The adapt prompt reads the verdict, not just the pairing
+`workout adapt` is the fourth reader of that map, and for a while it was the one that
+ignored it. It asked only whether a planned session had matched *anything*, and tagged
+every match `[COMPLETED — locked history, not adaptable]` — collapsing `done` and
+`partial` into one word. That is wrong in a specific and costly way, because
+`indoor_cardio` is an alias of `strength_training`: a ten-minute warm-up logged before a
+lift the athlete then abandoned pairs with the 65-minute session it was supposed to open.
+The prompt told the coach a session that never happened was in the bank, and the guard
+that backs the tag dropped any proposal touching it — so the coach could not salvage the
+rest of the day even after reading, three sections lower, its own discrepancy line saying
+10 minutes were performed against 65 planned.
+
+`adherence.performed_sessions` now hands the prompt `classify_adherence`'s verdict plus the
+duration and load actually recorded, and the tag states them: a partial says it is partial
+and reports what was performed. The numbers, not an adjective, carry the meaning — a
+partial is as often an overshoot as a shortfall, so the tag stays neutral and lets the
+planned figures already on the line above do the comparing.
+
+The lock narrows with it. History is still history: any match on a day already behind the
+evaluation date stays locked, partial included, because rewriting a past calendar event is
+meaningless whatever the verdict. On the **evaluation date** a session becomes history only
+once its planned *time* was actually spent. Duration is the test, not load — strength load
+read off heart rate is unreliable enough that this codebase already falls back to sRPE for
+it, but minutes in the gym are not in doubt. So a session abandoned after its warm-up stays
+adaptable for the rest of the day, which lands it in exactly the state an untrained session
+on an unfinished day was already in (`pending`, above): on the evaluation date, a session is
+locked only once the planned time has been spent. What the athlete already did travels with
+it, so the coach salvages the remainder rather than re-prescribing the whole session.
 

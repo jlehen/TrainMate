@@ -1,7 +1,9 @@
 from datetime import datetime, timedelta
 from typing import Any, List, Optional, Dict, Tuple
 from trainmate.config import config
-from trainmate.adherence import analyze_adherence, format_discrepancies
+from trainmate.adherence import (
+    analyze_adherence, format_discrepancies, performed_sessions,
+)
 from trainmate.sports import canonical_sport
 from trainmate import intensity
 from trainmate.util import yellow, cmd
@@ -150,15 +152,16 @@ class AdaptationMixin:
             pending_from=target_date_str,
         )
 
-        # Sessions that already have a matching completed Garmin activity are history and
-        # cannot be adapted: the evaluation date is the first day of the adaptation range,
-        # but the athlete may have already trained today. Without this lock the LLM
+        # What each planned session actually got, and which of them are history the LLM
+        # may not rewrite: the evaluation date is the first day of the adaptation range,
+        # but the athlete may have already trained today. Without the lock the LLM
         # "adapts" a finished session (typically restating it to match the actual ride),
-        # which is meaningless and, on apply, rewrites a past calendar event.
-        completed_keys = {
-            (m["date"], canonical_sport(m["planned"]["sport_type"]))
-            for m in matching_results if m["completed"] is not None
-        }
+        # which is meaningless and, on apply, rewrites a past calendar event — and a
+        # session abandoned after its warm-up is not finished (ARCHITECTURE.md §15).
+        performed = performed_sessions(
+            matching_results, target_date_str, config.minor_activity_load_threshold
+        )
+        completed_keys = {key for key, p in performed.items() if p.locked}
 
         objectives = self._db.upcoming_objectives()
 
@@ -213,7 +216,7 @@ class AdaptationMixin:
             informational=informational,
             removed_workouts=removed_workouts,
             daily_signals=daily_signals,
-            completed_keys=completed_keys,
+            performed=performed,
             athlete_message=message,
             constraints=constraints,
             pmc_warmup_cutoff=pmc_cutoff,

@@ -482,6 +482,66 @@ class TestAdaptationAdapt(unittest.TestCase):
             )
 
     @patch("trainmate.coach.engine.openrouter_client")
+    def test_adapt_abandoned_session_is_partial_not_completed(self, mock_client):
+        """A session the athlete abandoned after the warm-up is NOT completed history.
+
+        `indoor_cardio` is an alias of `strength_training`, so a 10-minute warm-up pairs
+        with the 65-minute lift it preceded. The prompt used to call that pairing
+        "[COMPLETED — locked history, not adaptable]" and the guard dropped any proposal
+        touching it, so the coach was told a session the athlete never did was in the bank
+        and forbidden from salvaging the rest of the day (ARCHITECTURE.md §15)."""
+        test_profile = {"lthr": 165, "max_hr": 185}
+        with patch.dict(trainmate.coach.config.data, {
+            "user_profile": test_profile,
+            "coach": {
+                "metrics_lookback_days": 3,
+                "minor_activity_load_threshold": 10.0,
+            }
+        }):
+            mock_client.complete.return_value = {
+                "change_needed": True,
+                "reason": "Only the warm-up happened; salvage a short lift tonight.",
+                "adapted_workouts": [
+                    {
+                        "date": "2026-06-03",
+                        "sport_type": "strength_training",
+                        "title": "Abbreviated Squat/Hinge",
+                        "description": "3x3 at 8RM, nothing more.",
+                        "duration_minutes": 30,
+                        "rpe": 5,
+                        "tss": 15.0,
+                    },
+                ],
+            }
+
+            test_db.save_metric_cache("2026-06-03", 56, 42, 60, 35, 14.0, 8.0, 1.75)
+            test_db.save_baseline("2026-06-03", 50.0, 2.0, 60.0, 5.0, 80.0, 5.0)
+
+            save_workout(test_db,
+                "2026-06-03", "strength_training", "Full-Body Strength", "65 mins",
+                duration_minutes=65, rpe=6, tss=30,
+            )
+            # Ten minutes of warm-up and nothing else — the athlete stopped there.
+            test_db.save_completed_activity(
+                "act_warmup", "2026-06-03", "2026-06-03 12:00:00", "Warm-up",
+                "indoor_cardio", 600.0, 1.6, None, 107, 120, 1, 1.6,
+            )
+
+            _p = coach_service.workout_adapt("2026-06-03")
+            proposed = _p.workouts
+
+            prompt_user_content = mock_client.complete.call_args[0][1]
+            # The tag tells the truth: partial, with what was actually performed, and the
+            # day is not over so the rest of the session is still on the table.
+            self.assertIn("[PARTIAL — performed so far today: 10m, load 1.6;",
+                          prompt_user_content)
+            self.assertNotIn("Full-Body Strength | Expected duration: 65m, RPE: 6, TSS: 30 "
+                             "[COMPLETED", prompt_user_content)
+            # ...and the guard no longer drops the salvage the model proposed for today.
+            self.assertEqual([p["date"] for p in proposed], ["2026-06-03"])
+            self.assertEqual(proposed[0]["title"], "Abbreviated Squat/Hinge")
+
+    @patch("trainmate.coach.engine.openrouter_client")
     def test_adapt_drops_noop_relisted_session(self, mock_client):
         """No-op backstop: if the model re-lists a session unchanged (here verbatim, plus a
         cosmetic whitespace-only variant), it is dropped so an untouched session is never
