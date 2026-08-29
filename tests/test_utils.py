@@ -3,8 +3,8 @@ import os
 import unittest
 from unittest.mock import patch
 from trainmate.util import (
-    wrap_text, visible_len, pad_visible, color_load_ratio, format_labeled_text,
-    yellow, Progress,
+    RESET, wrap_text, visible_len, pad_visible, color_load_ratio, format_labeled_text,
+    render_table, truncate_visible, yellow, Progress,
 )
 
 
@@ -158,6 +158,54 @@ class TestWrapWidth(unittest.TestCase):
         # an unwrapped single line would satisfy the first check alone.
         self.assertTrue(any(len(line) > 30 for line in lines))
         self.assertTrue(all(len(line) <= 60 for line in lines))
+
+
+class TestFlexColumn(unittest.TestCase):
+    """A table with one unbounded cell fits the screen instead of wrapping it
+    (DESIGN_logging.md §7.2)."""
+
+    HEADERS = ["RUN", "COMMAND", "END"]
+
+    def setUp(self):
+        self._saved = os.environ.get("TRAINMATE_WRAP_WIDTH")
+        # Not a terminal under test, so `display_width` is the wrap width: pin it.
+        os.environ["TRAINMATE_WRAP_WIDTH"] = "80"
+
+    def tearDown(self):
+        if self._saved is None:
+            os.environ.pop("TRAINMATE_WRAP_WIDTH", None)
+        else:
+            os.environ["TRAINMATE_WRAP_WIDTH"] = self._saved
+
+    def test_a_short_cell_is_left_alone(self):
+        rows = [["5a0e", "plan generate", "ok"]]
+        table = render_table(self.HEADERS, rows, narrow=False, flex=1)
+        self.assertIn("plan generate", table)
+        self.assertNotIn("…", table)
+
+    def test_a_long_cell_is_clipped_so_every_line_fits(self):
+        rows = [["5a0e", "workout adapt -m '" + "long note " * 30 + "'", "ok"]]
+        table = render_table(self.HEADERS, rows, narrow=False, flex=1)
+        for line in table.split("\n"):
+            self.assertLessEqual(visible_len(line), 80)
+        self.assertIn("workout adapt -m 'long", table)
+        self.assertIn("…", table)
+
+    def test_the_other_columns_keep_their_own_width(self):
+        rows = [["5a0e", "x" * 200, "FAILED"]]
+        table = render_table(self.HEADERS, rows, narrow=False, flex=1)
+        self.assertIn("FAILED", table)
+        self.assertIn("5a0e", table)
+
+    def test_truncate_visible_counts_colour_as_no_width(self):
+        self.assertEqual(truncate_visible("abcdef", 6), "abcdef")
+        self.assertEqual(truncate_visible("abcdef", 4), "abc…")
+        # Forced on: off a TTY colorize() is a no-op and there would be no escapes left
+        # to measure — which is the whole point of the assertion.
+        with patch("trainmate.util.is_color_enabled", return_value=True):
+            clipped = truncate_visible(yellow("abcdef"), 4)
+        self.assertEqual(visible_len(clipped), 4)
+        self.assertTrue(clipped.endswith(RESET))
 
 
 class TestAsides(unittest.TestCase):

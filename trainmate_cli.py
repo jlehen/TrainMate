@@ -253,6 +253,10 @@ def _dispatch(argv, parser, named_subparsers) -> None:
     # (DESIGN_cli_noargs.md §d), so `cmd` is always canonical.
     cmd = args.command.lower()
 
+    # On the record too, so `journal` can tell a read-only view from a command that
+    # changed something whatever prefix was typed (DESIGN_logging.md §7.1).
+    journal.name_run(cmd, getattr(args, "subcommand", None))
+
     # Two commands need the parser tree itself rather than the database, so they are
     # answered here instead of through a handler.
     if cmd == "help":

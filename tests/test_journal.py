@@ -18,6 +18,7 @@ from unittest.mock import patch
 from trainmate import journal
 from trainmate.config import config
 from trainmate.prompt import PromptCancelled
+from trainmate.util import default_wrap_width, visible_len
 from tests.helpers import bind_test_db, run_cli
 
 TEST_DB_PATH = os.path.join(os.path.dirname(__file__), "test_journal.db")
@@ -52,6 +53,35 @@ class JournalTestCase(unittest.TestCase):
 
     def records(self):
         return [json.loads(line) for line in self.lines()]
+
+    def _seed_runs(self):
+        """The two runs most of the listing tests read: one failed, one that called out."""
+        journal.start_run(["plan", "generate", "-g", "2"], source="push")
+        journal.name_run("plan", "generate")
+        journal.llm_call(
+            label="plan_generate", model="anthropic/claude-opus-5", ms=88400, ok=True,
+            total_tokens=210412, path="logs/llm_exchanges/x_plan_generate.md",
+        )
+        journal.end_run("failed", exit_code=1, error="KeyError: 'mesocycles'",
+                        traceback_text="Traceback (most recent call last):\n  boom")
+        journal.start_run(["workout", "adapt", "-m", "legs heavy"], source="bot")
+        journal.name_run("workout", "adapt")
+        journal.llm_call(
+            label="workout_adaptation", model="google/gemini-3.5-flash", ms=24118,
+            ok=True, total_tokens=38104,
+        )
+        journal.end_run("ok")
+        journal.reset()
+
+    def _seed(self, argv, path=None, outcome="ok", lvl=None, source="cli"):
+        """One finished run of `argv`, named as the dispatcher would name it."""
+        journal.start_run(argv, source=source)
+        if path:
+            journal.name_run(*path.split(" "))
+        if lvl:
+            journal.note("the calendar did not answer", lvl=lvl)
+        journal.end_run(outcome)
+        journal.reset()
 
 
 class TestWriter(JournalTestCase):
@@ -196,6 +226,11 @@ class TestRunBracket(JournalTestCase):
         # The model is deliberately absent: resolving it would build the database (§3).
         self.assertNotIn("model", start["d"])
 
+    def test_run_end_names_the_canonical_command_whatever_prefix_was_typed(self):
+        run_cli(["j", "-n", "1"])          # `j` is an unambiguous prefix of `journal`
+        (end,) = self._ends()
+        self.assertEqual(end["d"]["cmd"], "journal")
+
     def test_a_command_that_raises_records_its_traceback_and_fails(self):
         import trainmate_cli
         with patch.object(trainmate_cli, "_dispatch", side_effect=KeyError("mesocycles")):
@@ -323,25 +358,9 @@ class TestRetention(JournalTestCase):
 class TestJournalCommand(JournalTestCase):
     """`tm journal` reads the files back in the athlete's terms (§7)."""
 
-    def _seed_runs(self):
-        journal.start_run(["plan", "generate", "-g", "2"], source="push")
-        journal.llm_call(
-            label="plan_generate", model="anthropic/claude-opus-5", ms=88400, ok=True,
-            total_tokens=210412, path="logs/llm_exchanges/x_plan_generate.md",
-        )
-        journal.end_run("failed", exit_code=1, error="KeyError: 'mesocycles'",
-                        traceback_text="Traceback (most recent call last):\n  boom")
-        journal.start_run(["workout", "adapt", "-m", "legs heavy"], source="bot")
-        journal.llm_call(
-            label="workout_adaptation", model="google/gemini-3.5-flash", ms=24118,
-            ok=True, total_tokens=38104,
-        )
-        journal.end_run("ok")
-        journal.reset()
-
     def test_the_listing_shows_one_row_per_run_with_its_outcome(self):
         self._seed_runs()
-        _code, out, _err = run_cli(["journal"])
+        _code, out, _err = run_cli(["journal", "-v"])
         self.assertIn("plan generate -g 2", out)
         self.assertIn("FAILED", out)
         self.assertIn("workout adapt", out)
@@ -392,12 +411,66 @@ class TestJournalCommand(JournalTestCase):
 
     def test_the_filters_narrow_to_one_source_and_to_trouble(self):
         self._seed_runs()
-        _code, out, _err = run_cli(["journal", "--source", "bot"])
+        _code, out, _err = run_cli(["journal", "-v", "--source", "bot"])
         self.assertIn("workout adapt", out)
         self.assertNotIn("plan generate", out)
-        _code, out, _err = run_cli(["journal", "--failed"])
+        _code, out, _err = run_cli(["journal", "-v", "--failed"])
         self.assertIn("plan generate", out)
         self.assertNotIn("workout adapt", out)
+
+
+class TestJournalListing(JournalTestCase):
+    """What the default listing leaves out, and what the footer says about it (§7.1)."""
+
+    def test_a_run_that_only_looked_is_left_out_until_a_asks_for_it(self):
+        self._seed(["workout", "list"], "workout list")
+        self._seed(["wo", "a"], "workout adapt")
+        _code, out, _err = run_cli(["journal"])
+        self.assertIn("wo a", out)                       # the line as it was typed
+        self.assertNotIn("workout list", out)
+        self.assertIn("1 read-only run(s) hidden", out)
+        _code, out, _err = run_cli(["journal", "-a"])
+        self.assertIn("workout list", out)
+
+    def test_a_view_that_went_wrong_is_never_hidden(self):
+        self._seed(["workout", "list"], "workout list", lvl="warn")
+        _code, out, _err = run_cli(["journal"])
+        self.assertIn("workout list", out)
+        self.assertIn("warn", out)
+
+    def test_a_help_run_is_left_out_whatever_it_asked_about(self):
+        # `-h` exits inside argparse, so the run is never named: the argv is the tell.
+        self._seed(["workout", "adapt", "-h"])
+        _code, out, _err = run_cli(["journal"])
+        self.assertNotIn("workout adapt", out)
+        self.assertIn("1 read-only run(s) hidden", out)
+
+    def test_naming_a_command_lists_it_views_included(self):
+        self._seed(["wo", "li"], "workout list")
+        _code, out, _err = run_cli(["journal", "--command", "workout list"])
+        self.assertIn("wo li", out)
+        self.assertNotIn("hidden", out)
+
+    def test_the_command_column_is_clipped_to_the_screen_unless_v_asks(self):
+        note = "the intervals ran long and the second round was short, " * 4
+        self._seed(["workout", "adapt", "-m", note], "workout adapt")
+        _code, out, _err = run_cli(["journal"])
+        self.assertNotIn(note, out)
+        self.assertIn("…", out)
+        self.assertIn("command lines clipped", out)
+        for line in out.split("\n"):
+            self.assertLessEqual(visible_len(line), default_wrap_width())
+        _code, out, _err = run_cli(["journal", "-v"])
+        self.assertIn(note, out)
+        self.assertNotIn("command lines clipped", out)
+
+    def test_the_legend_glosses_the_outcomes_on_screen_and_no_others(self):
+        self._seed_runs()
+        _code, out, _err = run_cli(["journal"])
+        self.assertIn("END  ok = finished", out)
+        self.assertIn("FAILED = raised", out)
+        self.assertNotIn("stopped with Ctrl-C", out)     # nothing was cancelled
+        self.assertIn("LLM  model calls · tokens", out)
 
 
 class TestOutputVerbs(JournalTestCase):
@@ -430,6 +503,38 @@ class TestOutputVerbs(JournalTestCase):
             with patch.object(sys, "stdout", io.StringIO()):
                 warn("run " + cmd("data pull") + " in a terminal")
         self.assertEqual(self.records()[0]["msg"], "run 'data pull' in a terminal")
+
+
+class TestReadOnlyVerbs(unittest.TestCase):
+    """Every verb the listing hides has to still name a command (DESIGN_logging.md §7.1).
+
+    The set is what `journal` filters on, and it is read at display time against a name
+    the parser produced — so a command renamed or retired here leaves an entry that
+    silently matches nothing, and its runs quietly come back. Keyed on the real tree, so
+    a `show` added under a new group tomorrow needs no edit here."""
+
+    def test_every_read_only_verb_names_a_command_in_the_tree(self):
+        import trainmate_cli
+        from trainmate.cli.argparse_ext import _subparsers_action
+        from trainmate.cli.journal import READ_ONLY_VERBS
+
+        parser, _named = trainmate_cli.build_parser()
+
+        def names(level):
+            action = _subparsers_action(level)
+            if action is None:
+                return set()
+            found = set(action.canonical_names)
+            for name in action.canonical_names:
+                found |= names(action.choices[name])
+            return found
+
+        unknown = sorted(READ_ONLY_VERBS - names(parser))
+        self.assertFalse(
+            unknown,
+            "these verbs no longer name a command, so the runs they used to hide are "
+            "back in the listing: " + ", ".join(unknown),
+        )
 
 
 class TestNoSilentSwallows(unittest.TestCase):

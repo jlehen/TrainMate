@@ -440,11 +440,15 @@ training log", which is what the workouts already are. It needs an entry in
 $ tm journal
 RUN       WHEN                  SRC   COMMAND                          TIME   LLM       END
 a3f91c2e  2026-08-26 Wed 06:15  push  bot morning                     24.1s   1 · 41k   ok
-7d20b8a4  2026-08-25 Tue 21:03  bot   workout adapt -m "legs heavy"   31.7s   1 · 38k   ok
-19ce4402  2026-08-25 Tue 21:01  bot   status                           0.6s   —         ok
+7d20b8a4  2026-08-25 Tue 21:03  bot   workout adapt -m "legs heavy…   31.7s   1 · 38k   ok
 c8b17f30  2026-08-25 Tue 08:40  cli   data pull -d 7                   8.2s   —         warn
 0b4a7712  2026-08-24 Mon 22:10  bot   plan generate                       —   1 · 96k   ?
 5a0e1d99  2026-08-24 Mon 19:22  cli   plan generate -g 2              96.4s   2 · 210k  FAILED
+
+END  ok = finished · warn = finished, but logged a warning or an error · FAILED = raised —
+     'journal <id>' has the traceback · ? = no end recorded: still running, or killed
+LLM  model calls · tokens
+9 read-only run(s) hidden (-a for all) · command lines clipped (-v for the full one)
 ```
 
 `END` is the outcome plus what the run wrote: `ok`, `warn` (finished, but logged a warning
@@ -484,17 +488,86 @@ workout generate               9     11     720,300
 workout adapt                 31     31     490,100
 ```
 
-The flags: `-n` for how many, `--since`/`--until` for a window, `--source push` for the
-unattended runs, `--failed` for runs that failed, were killed, or logged an error,
-`--command "workout adapt"` for one command's history, `--cost` for the rollup above, and
-`--follow` to tail the file while the bot runs. `tm journal prune` is a real sub-command,
-not a positional, so it cannot be confused with a run id.
+The flags: `-n` for how many, `-d` for a window (the shared range grammar,
+`DESIGN_cli_selectors.md` §3), `--source push` for the unattended runs, `--failed` for runs
+that failed, were killed, or logged an error, `--command "workout adapt"` for one command's
+history, `-a` for the read-only views the listing leaves out (§7.1), `-v` for command lines
+in full rather than clipped (§7.2), `--cost` for the rollup above, and `--follow` to tail
+the file while the bot runs. `tm journal prune` is a real sub-command, not a positional, so
+it cannot be confused with a run id.
 
 Timestamps display in the athlete's timezone through the existing `fmt_timestamp`, which
 renders `YYYY-MM-DD Ddd HH:MM` — no seconds anywhere, on purpose. Sub-minute resolution is
 what the `+96.3s` offsets in the detail view are for, and it is relative time you want
 there anyway. The listing goes through `render_table`, so it collapses to the vertical
 record layout on a phone like every other table.
+
+### 7.1 The listing is what the app *did*
+
+`tm workout list` changes nothing. Neither does `plan show`, `status`, `journal` itself, or
+any `-h`. Left in, they **are** the listing: on an ordinary day the athlete looks at things
+far more often than the app writes anything, and the two runs worth reading — the adapt that
+reshaped the week, the morning push that warned — sit under a screenful of views. The
+`19ce4402  bot  status  0.6s` row this table used to carry is the shape of the problem: it
+costs a line and answers no question anyone asks of a log.
+
+So the default listing leaves the views out and `-a` brings them back. What counts as a view
+is the **verb** — the last word of the command: `list`, `show` and every `show-*`, `status`,
+`progress`, `compare`, `batches`, `versions`, `diff`, `journal`, `help`, `shell`, and a bare
+`settings`, which is `settings list` (`DESIGN_cli_noargs.md` §a3). Keying on the verb means
+one entry covers every group's `list`, and a `show` added under a new group tomorrow is
+covered the day it lands. `TestReadOnlyVerbs` walks the real parser tree and fails the day
+one of those names stops existing, because a stale entry hides nothing and says nothing.
+
+Three things override it, because "it only looked" is a claim about a *quiet* run:
+
+* **trouble** — failed, killed, or having logged a warning or an error. An exception raised
+  inside `workout list` is exactly what this listing exists to put in front of you;
+* **a model call.** The tokens were spent whoever asked;
+* **`--command`.** Naming a command is asking for it, views included.
+
+**Why not "did it write anything?"** That is the better rule and it is not available:
+nothing emits `db.write` or `calendar.write` today — §4.2 reserves the events, no caller
+uses them. The verb is the honest approximation until they exist; the day they do, this
+becomes a filter on the record rather than on the name.
+
+**What the record has to carry for this to work.** The athlete types prefixes — `wo li`,
+`j` (§d of `DESIGN_cli_noargs.md`) — and `run.start` stores the argv verbatim, which is
+right for a record and useless for a filter. So the parse now names the run:
+`journal.name_run` puts the canonical `workout list` on `run.end`, and the listing filters,
+groups (`--cost`) and matches (`--command "workout adapt"`) on that instead of on the typed
+line. The screen still shows what was typed — that is what the athlete recognises.
+
+A run killed before its parse never got a name, and a run recorded before this existed has
+none either. Both fall back to the words they were typed as, and a word that matches nothing
+is **listed** rather than hidden: never hide what you cannot classify. A bare command group
+(`tm plan`) prints help and is listed for the same reason — the record cannot tell it apart
+from the group acting on its own, and it is too rare to be worth a second mechanism.
+
+### 7.2 Nothing wraps, and the columns say what they mean
+
+`workout adapt -m '<the athlete's whole note about the session>'` is a 380-character command
+line. Printed in full it wrapped four times, and a table that wraps is no longer a table:
+every column after it lands in a different place on every row.
+
+COMMAND is the only cell with no upper bound, so it is the one that gives way. `render_table`
+takes a `flex` column: it measures every other column, gives that one what is left of the
+screen, and clips its cells with `truncate_visible`, which counts colour as no width and
+ends the cell in `…`. `-v` prints the line in full instead and lets the terminal do what it
+likes with it — the run id and `journal <id>` are the better way to read a long one anyway.
+
+"The screen" is `util.display_width`: the real terminal's width when there is one, and
+`default_wrap_width` (80, or whatever TRAINMATE_WRAP_WIDTH says) when there is not. Piped
+output, the tests and the bot therefore stay deterministic, and a wide terminal is used
+rather than wasted. This is the one table that asks for the window, because it is the one
+whose content has no natural width — everywhere else 80 columns is a deliberate budget.
+
+Under the table, in gray: what `END` says, glossed for the outcomes **actually on screen**
+(a legend explaining `cancelled` when nothing was cancelled is a paragraph the eye learns to
+skip), `LLM  model calls · tokens` when that column has anything in it, and then a dim line
+naming what was left out — how many views, whether command lines were clipped, how many
+older runs — each with the flag that brings it back. A legend is one of the lines §3 of
+`DESIGN_output_verbosity.md` keeps at answer level: you cannot read the column without it.
 
 **Tokens, not money.** The rollup counts tokens because tokens are what the response
 carries today. Read it as a volume, not a bill: prompt caching means the two are not
@@ -573,7 +646,7 @@ re-read is a benchmark you have to re-run.
 
 ## 11. Testing
 
-Three tests, matching the kinds `AGENTS.md` asks for.
+Four tests, matching the kinds `AGENTS.md` asks for.
 
 **A unit test on the writer.** A record round-trips; a record never contains a newline; an
 over-long traceback is elided in the middle and the whole record stays under 8 KB; a line
@@ -585,6 +658,13 @@ temporary journal directory: every `run.start` has a matching `run.end`; a comma
 raises records the traceback and `outcome: failed`; a cancelled command records
 `outcome: cancelled` and not `failed`; and three lines typed into `tm shell` produce four
 runs — one for the shell and one per line, each naming the shell as its parent (§3).
+
+**A structural test on the read-only verbs.** §7.1 hides a run by matching the last word of
+its command against a set of names, and that set lives in `cli/journal.py` while the names
+live in the parser tree — two files, so the invariant needs a test that spans them.
+`TestReadOnlyVerbs` walks the real tree and fails on any verb that no longer names a
+command: a renamed or retired one would otherwise match nothing, silently, and its runs
+would drift back into the listing with no symptom to notice.
 
 **A structural test on the swallows.** `AGENTS.md` asks for a test that spans files when
 the rule does, keyed on a shape rather than a list of names. The shape here is

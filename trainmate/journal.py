@@ -70,6 +70,7 @@ class Run:
     source: str
     parent: Optional[str]
     started: float                  # time.monotonic(), for the wall-clock duration
+    command: Optional[str] = None   # canonical name, once the argv has been parsed
     seq: int = 0
     llm_calls: int = 0
     llm_tokens: int = 0
@@ -333,6 +334,18 @@ def start_run(argv, source: Optional[str] = None, parent: Optional[str] = None) 
     return run.id
 
 
+def name_run(command: str, subcommand: Optional[str] = None) -> None:
+    """Records which command the parsed argv turned out to be (§7.1).
+
+    ``run.start`` keeps what the athlete typed, which may be any unambiguous prefix
+    (DESIGN_cli_noargs.md §d); this is the canonical name `journal` filters and groups on.
+    It lands on ``run.end`` because that is the first record written after the parse."""
+    run = current()
+    if run is None:
+        return
+    run.command = " ".join(word for word in (command, subcommand) if word)
+
+
 def end_run(
     outcome: str, exit_code: int = 0, error: Optional[str] = None,
     traceback_text: Optional[str] = None,
@@ -345,7 +358,7 @@ def end_run(
     record(
         "run.end", f"{outcome} · {error}" if error else outcome,
         lvl="error" if outcome == "failed" else "info",
-        outcome=outcome, exit=exit_code,
+        outcome=outcome, exit=exit_code, cmd=run.command,
         ms=int((time.monotonic() - run.started) * 1000),
         llm_calls=run.llm_calls, tokens=run.llm_tokens,
         warns=run.warns, errors=run.errors,

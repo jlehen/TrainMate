@@ -9,18 +9,19 @@ zone first, so "what happened on Tuesday" is still answered in local terms.
 """
 import argparse
 import os
+import textwrap
 import time
 from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import date, datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from trainmate import journal
 from trainmate.cli.selectors import add_selector_args, resolve_window
 from trainmate.clock import to_local
 from trainmate.util import (
-    bold, cyan, dim, fmt_timestamp, gray, green, pad_visible, red, render_table,
-    visible_len, yellow,
+    bold, cyan, dim, display_width, flex_width, fmt_timestamp, gray, green, pad_visible,
+    red, render_table, visible_len, yellow,
 )
 
 # How many runs the listing shows when nothing else is asked for.
@@ -31,6 +32,32 @@ FOLLOW_POLL_SECONDS = 0.5
 
 _LEVEL_COLOR = {"warn": yellow, "error": red, "debug": gray}
 
+# The read-only views the listing leaves out until `-a` asks for them (§7.1). Keyed on the
+# verb — the last word of the canonical command path — so one entry covers every group's
+# `list`, and a `show` added under a new group tomorrow is covered the day it lands.
+READ_ONLY_VERBS = frozenset({
+    "list", "list-metrics", "show", "show-metrics", "show-activities", "show-analysis",
+    "status", "progress", "compare", "batches", "versions", "diff", "journal", "help",
+    "shell",
+    # A bare `settings` is `settings list`: the one group that acts, read-only, when it is
+    # given no sub-command (DESIGN_cli_noargs.md §a3).
+    "settings",
+})
+
+# An argv carrying one of these printed help and did nothing else.
+HELP_FLAGS = ("-h", "--help", "--helpall")
+
+# What the END column says, the colour it says it in, and what it means. The legend
+# glosses the words that are actually on screen, in this order (§7.2).
+_END_GLOSS = (
+    ("ok", green, "finished"),
+    ("warn", yellow, "finished, but logged a warning or an error"),
+    ("cancelled", dim, "stopped with Ctrl-C"),
+    ("FAILED", red, "raised — 'journal <id>' has the traceback"),
+    ("?", yellow, "no end recorded: still running, or killed"),
+)
+_END_COLOR = {word: color for word, color, _gloss in _END_GLOSS}
+
 
 @dataclass
 class RunSummary:
@@ -38,7 +65,8 @@ class RunSummary:
     id: str
     started: str = ""
     source: str = "?"
-    command: str = ""
+    command: str = ""                   # the line as it was typed, prefixes and all
+    path: str = ""                      # the canonical command that line resolved to
     argv: List[str] = field(default_factory=list)
     parent: Optional[str] = None
     pid: Optional[int] = None
@@ -68,14 +96,21 @@ def _local(ts: Any) -> Optional[datetime]:
 def _command_of(argv: List[str]) -> str:
     """The command a run is, without its arguments: the leading two bare words.
 
-    `plan generate -g 2` is `plan generate`; `status` is `status`. This is what the
-    `--cost` rollup groups on and what `--command` matches against."""
+    `plan generate -g 2` is `plan generate`; `status` is `status`. Only a fallback now:
+    what was typed may be any unambiguous prefix, so `wo a` reads as `wo a` here and not
+    as `workout adapt` — `_path` prefers the canonical name the record carries (§7.1)."""
     words = []
     for token in argv:
         if token.startswith("-") or len(words) == 2:
             break
         words.append(token)
     return " ".join(words)
+
+
+def _path(run: "RunSummary") -> str:
+    """The canonical command the run turned out to be, falling back to the words it was
+    typed as for a run that was killed before its parse — or that predates `cmd` (§7.1)."""
+    return run.path or _command_of(run.argv)
 
 
 def _collect(start_day: Optional[date], end_day: Optional[date]) -> Dict[str, RunSummary]:
@@ -99,6 +134,7 @@ def _collect(start_day: Optional[date], end_day: Optional[date]) -> Dict[str, Ru
             summary.db = d.get("db")
             continue
         summary.outcome = str(d.get("outcome") or "ok")
+        summary.path = str(d.get("cmd") or "")
         summary.exit_code = d.get("exit")
         summary.ms = d.get("ms")
         summary.llm_calls = int(d.get("llm_calls") or 0)
@@ -126,8 +162,8 @@ def _as_date(value: Optional[str]) -> Optional[date]:
     return date.fromisoformat(str(value).strip())
 
 
-def _select(args: argparse.Namespace) -> List[RunSummary]:
-    """The runs the flags ask for, newest first."""
+def _select(args: argparse.Namespace) -> Tuple[List[RunSummary], int]:
+    """The runs the flags ask for, newest first, and how many views were left out."""
     since, until = _window(args)
     # This very run is excluded: it has no `run.end` yet, so it would head every
     # listing as a `?` and turn up under --failed as the command you just typed.
@@ -140,11 +176,37 @@ def _select(args: argparse.Namespace) -> List[RunSummary]:
         runs = [r for r in runs if r.source == source]
     wanted = getattr(args, "command_filter", None)
     if wanted:
-        runs = [r for r in runs if r.command.startswith(wanted)]
+        runs = [r for r in runs if _matches_command(r, wanted)]
     if getattr(args, "failed", False):
         runs = [r for r in runs if _is_trouble(r)]
+    hidden = 0
+    # Naming a command is asking for it, views included; otherwise this listing is about
+    # what the app did, and a run that only printed did nothing (§7.1).
+    if not getattr(args, "show_all", False) and not wanted:
+        kept = [r for r in runs if not _is_view(r)]
+        hidden = len(runs) - len(kept)
+        runs = kept
     runs.sort(key=lambda r: r.started, reverse=True)
-    return runs
+    return runs, hidden
+
+
+def _matches_command(run: RunSummary, wanted: str) -> bool:
+    """What `--command "workout adapt"` matches: the canonical name first, so a run typed
+    `wo a` answers to it too, and the typed line for records that predate `cmd` (§7.1)."""
+    wanted = wanted.strip().lower()
+    return _path(run).startswith(wanted) or run.command.startswith(wanted)
+
+
+def _is_view(run: RunSummary) -> bool:
+    """Whether the run only looked at things: a read-only view, or a help print (§7.1).
+
+    Trouble and model calls are never a view, whatever the command was: an error raised
+    inside `workout list` is exactly what this listing exists to put in front of you."""
+    if _is_trouble(run) or run.llm_calls:
+        return False
+    if not run.argv or any(flag in run.argv for flag in HELP_FLAGS):
+        return True
+    return _path(run).split(" ")[-1] in READ_ONLY_VERBS
 
 
 def _in_window(run: RunSummary, since: Optional[date], until: Optional[date]) -> bool:
@@ -167,17 +229,22 @@ def _is_trouble(run: RunSummary) -> bool:
 
 # --- rendering -------------------------------------------------------------------
 
-def _end_cell(run: RunSummary) -> str:
+def _end_word(run: RunSummary) -> str:
     """The END column: the outcome, plus what the run wrote (§7)."""
     if run.outcome is None:
-        return yellow("?")
+        return "?"
     if run.outcome == "failed":
-        return red("FAILED")
+        return "FAILED"
     if run.outcome == "cancelled":
-        return dim("cancelled")
+        return "cancelled"
     if run.warns or run.errors:
-        return yellow("warn")
-    return green("ok")
+        return "warn"
+    return "ok"
+
+
+def _end_cell(run: RunSummary) -> str:
+    word = _end_word(run)
+    return _END_COLOR[word](word)
 
 
 def _time_cell(run: RunSummary) -> str:
@@ -196,21 +263,71 @@ def _when_cell(run: RunSummary) -> str:
     return fmt_timestamp(run.started)
 
 
-def _print_listing(runs: List[RunSummary], limit: int) -> None:
+_HEADERS = ["RUN", "WHEN", "SRC", "COMMAND", "TIME", "LLM", "END"]
+
+# The command line is the one cell with no upper bound, so it is the one that gives way
+# when the table would otherwise run past the screen (§7.2).
+_COMMAND_COLUMN = _HEADERS.index("COMMAND")
+
+
+def _print_listing(
+    runs: List[RunSummary], limit: int, hidden: int = 0, verbose: bool = False
+) -> None:
     shown = runs[:limit] if limit else runs
     if not shown:
         print("No runs match." if journal.day_paths() else "No runs recorded yet.")
+        if hidden:
+            print(dim(_omissions(hidden, 0, False)))
         return
     rows = [
         [run.id, _when_cell(run), run.source, run.command,
          _time_cell(run), _llm_cell(run), _end_cell(run)]
         for run in shown
     ]
-    print(render_table(
-        ["RUN", "WHEN", "SRC", "COMMAND", "TIME", "LLM", "END"], rows
-    ))
-    if len(runs) > len(shown):
-        print(dim(f"\n{len(runs) - len(shown)} older run(s) not shown; raise -n to see more."))
+    room = flex_width(_HEADERS, rows, _COMMAND_COLUMN)
+    clipped = not verbose and any(
+        visible_len(row[_COMMAND_COLUMN]) > room for row in rows
+    )
+    print(render_table(_HEADERS, rows, flex=None if verbose else _COMMAND_COLUMN))
+    print()
+    for line in _legend(shown):
+        print(gray(line))
+    for line in _wrap(_omissions(hidden, len(runs) - len(shown), clipped)):
+        print(dim(line))
+
+
+def _legend(shown: List[RunSummary]) -> List[str]:
+    """The gray footer that says what the two coded columns mean (§7.2).
+
+    Only the outcomes actually on screen are glossed: a legend that explains what is not
+    there is a paragraph the eye learns to skip."""
+    words = {_end_word(run) for run in shown}
+    lines = ["END  " + " · ".join(
+        f"{word} = {gloss}" for word, _color, gloss in _END_GLOSS if word in words
+    )]
+    if any(run.llm_calls for run in shown):
+        lines.append("LLM  model calls · tokens")
+    return [line for text in lines for line in _wrap(text, indent="     ")]
+
+
+def _wrap(text: str, indent: str = "") -> List[str]:
+    """One footer line inside the client's width, continuations indented so they read as
+    the same line rather than as a new one."""
+    return textwrap.wrap(
+        text, width=display_width(), subsequent_indent=indent, break_on_hyphens=False
+    )
+
+
+def _omissions(hidden: int, older: int, clipped: bool) -> str:
+    """The dim line naming what the listing left out, and the flag that brings it back."""
+    parts = []
+    if hidden:
+        parts.append(f"{hidden} read-only run(s) hidden (-a for all)")
+    if clipped:
+        parts.append("command lines clipped (-v for the full one)")
+    if older:
+        parts.append(f"{older} older run(s) not shown (raise -n)")
+    return " · ".join(parts)
 
 
 def _print_detail(run: RunSummary, runs: Dict[str, RunSummary]) -> None:
@@ -358,7 +475,7 @@ def _print_cost(args: argparse.Namespace) -> None:
         run = runs[run_id]
         if not run.llm_calls:
             continue
-        entry = by_command[_command_of(run.argv) or run.command]
+        entry = by_command[_path(run) or run.command]
         entry[0] += 1
         entry[1] += run.llm_calls
         entry[2] += run.tokens
@@ -428,7 +545,11 @@ def run_journal(args: argparse.Namespace) -> None:
     if getattr(args, "cost", False):
         _print_cost(args)
         return
-    _print_listing(_select(args), getattr(args, "limit", DEFAULT_LIMIT))
+    runs, hidden = _select(args)
+    _print_listing(
+        runs, getattr(args, "limit", DEFAULT_LIMIT), hidden,
+        verbose=getattr(args, "verbose", False),
+    )
 
 
 def run_journal_show(args: argparse.Namespace) -> None:
@@ -467,8 +588,11 @@ def add_journal_parser(subparsers):
             "The operational record beside the training one: which command ran, from "
             "where, how long it took, what it called out to and how it ended. Runs are "
             "listed newest first; name a run's id (a unique prefix is enough) to read "
-            "everything it wrote, including the traceback if it failed. Kept for "
-            "logging.retain_days and never read by the app itself."
+            "everything it wrote, including the traceback if it failed. The read-only "
+            "views — 'list', 'show', 'status', 'journal', help — are left out unless -a "
+            "asks for them, and each command line is clipped to the width of the screen "
+            "unless -v asks for it. Kept for logging.retain_days and never read by the "
+            "app itself."
         )
     )
     # Read-only at the top level, so a bare `journal` lists rather than printing help
@@ -498,6 +622,14 @@ def add_journal_parser(subparsers):
     journal_parser.add_argument(
         "--failed", action="store_true",
         help="Only runs that failed, were killed, or logged a warning or an error"
+    )
+    journal_parser.add_argument(
+        "-a", "--all", action="store_true", dest="show_all",
+        help="Also list the read-only views: 'list', 'show', 'status', 'journal', help"
+    )
+    journal_parser.add_argument(
+        "-v", "--verbose", action="store_true",
+        help="Print each command line in full rather than clipping it to the screen"
     )
     journal_parser.add_argument(
         "--cost", action="store_true",

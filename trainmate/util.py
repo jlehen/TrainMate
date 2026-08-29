@@ -1,5 +1,6 @@
 import os
 import re
+import shutil
 import sys
 import textwrap
 from datetime import date, datetime
@@ -25,6 +26,19 @@ def default_wrap_width() -> int:
         return max(20, int(raw))
     except ValueError:
         return 80
+
+
+def display_width() -> int:
+    """How many columns a table may spread over: the real terminal's, else the wrap width.
+
+    `default_wrap_width` is a budget for *prose* — 80 unless a client asked for less — and
+    a table that has to fit the screen wants the screen (DESIGN_logging.md §7.2). An
+    explicit TRAINMATE_WRAP_WIDTH still wins, because that is a narrow client stating its
+    own width. Off a terminal — piped, tested, the bot — it stays the wrap width, so the
+    output does not change with whichever window happened to run the command."""
+    if os.environ.get("TRAINMATE_WRAP_WIDTH") or not sys.stdout.isatty():
+        return default_wrap_width()
+    return max(40, shutil.get_terminal_size((80, 24)).columns)
 
 
 def today_date() -> date:
@@ -303,6 +317,33 @@ def pad_visible(s: str, width: int, align_left: bool = True) -> str:
         return padding + s
 
 
+def truncate_visible(s: str, width: int) -> str:
+    """`s` clipped to `width` visible columns, ending in an ellipsis when it lost anything.
+
+    ANSI-aware like `pad_visible`: colour codes cost no columns, and a clipped coloured
+    string still gets its reset."""
+    if visible_len(s) <= width:
+        return s
+    if width <= 0:
+        return ""
+    out, used, coloured = [], 0, False
+    for piece in re.split(f"({ANSI_ESCAPE.pattern})", s):
+        if not piece:
+            continue
+        if ANSI_ESCAPE.fullmatch(piece):
+            out.append(piece)
+            coloured = True
+            continue
+        room = width - 1 - used
+        out.append(piece[:room])
+        used += min(room, len(piece))
+        # Stop at the budget rather than carrying on through the escapes that follow:
+        # a reset appended here would leave the ellipsis outside the colour it ends.
+        if used >= width - 1:
+            break
+    return "".join(out) + "…" + (RESET if coloured else "")
+
+
 class Progress:
     """A single self-erasing '[####....] 7/28' line for a loop whose only other option is
     one printed line per item (the Calendar round-trips of generate/rollback).
@@ -356,8 +397,40 @@ def is_narrow_client() -> bool:
     return default_wrap_width() < 70
 
 
+def _column_width(headers: list, rows: list, i: int) -> int:
+    """The natural width of one column: its widest cell, or its header."""
+    return max(
+        [visible_len(str(row[i])) for row in rows] + [visible_len(str(headers[i]))]
+    )
+
+
+def flex_width(
+    headers: list, rows: list, flex: int, narrow: Optional[bool] = None
+) -> int:
+    """How wide `render_table` will let its flexible column be: its natural width, or
+    whatever `display_width` has left once every other column has taken its own.
+
+    Public because a caller that clips should be able to say so — the journal's footer
+    names `-v` only when the command column actually lost something (DESIGN_logging.md
+    §7.2). Never narrower than the column's own header, which still has to fit."""
+    if narrow is None:
+        narrow = is_narrow_client()
+    if narrow:
+        # One "  LABEL  value" line per column, so only the label column is spent.
+        label_w = max((visible_len(h) for h in headers[1:]), default=0)
+        spent = 0 if flex == 0 else 4 + label_w
+    else:
+        spent = sum(
+            _column_width(headers, rows, i) for i in range(len(headers)) if i != flex
+        ) + 3 * (len(headers) - 1)
+    natural = _column_width(headers, rows, flex)
+    return max(
+        visible_len(str(headers[flex])), min(natural, display_width() - spent)
+    )
+
+
 def render_table(
-    headers: list, rows: list, narrow: Optional[bool] = None
+    headers: list, rows: list, narrow: Optional[bool] = None, flex: Optional[int] = None
 ) -> str:
     """Renders a table for the active client and returns it as text.
 
@@ -371,9 +444,21 @@ def render_table(
     aligned ``label  value`` lines — so figures stay readable without the wide
     line being re-wrapped by the client. Records are blank-line separated.
 
+    ``flex`` names the one column that may be clipped rather than letting the table run
+    past the client's width: its cells are cut to `flex_width` and end in an ellipsis.
+    Without it a single long cell wraps the whole table (DESIGN_logging.md §7.2).
+
     Returns the rendered text with no trailing newline."""
     if narrow is None:
         narrow = is_narrow_client()
+
+    if flex is not None:
+        room = flex_width(headers, rows, flex, narrow)
+        rows = [
+            [truncate_visible(str(cell), room) if i == flex else cell
+             for i, cell in enumerate(row)]
+            for row in rows
+        ]
 
     if narrow:
         label_w = max((visible_len(h) for h in headers[1:]), default=0)
@@ -385,10 +470,7 @@ def render_table(
             blocks.append("\n".join(lines))
         return "\n\n".join(blocks)
 
-    widths = []
-    for i, header in enumerate(headers):
-        cell_w = max((visible_len(str(row[i])) for row in rows), default=0)
-        widths.append(max(visible_len(header), cell_w))
+    widths = [_column_width(headers, rows, i) for i in range(len(headers))]
 
     out = [bold(" | ".join(pad_visible(h, widths[i]) for i, h in enumerate(headers)))]
     total = sum(widths) + 3 * (len(widths) - 1)
