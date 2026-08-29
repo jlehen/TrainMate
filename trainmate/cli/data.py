@@ -523,19 +523,29 @@ def run_data_show_analysis(args: argparse.Namespace) -> None:
     print(gray(wrap_text(f"From {cmd(source)} · window {window} · computed {computed}")))
     _render_analysis_report(cached["reconstruction"], inspect_only=False)
 
-    # The slot is only refreshed by a re-run, so training since its window closed is
-    # simply absent from the picture above — say so rather than let it read as current.
+    # Training since the window closed is absent from the picture above, so say so rather
+    # than let it read as current. Both slots point at reflect: bootstrap reads the backlog
+    # once, so its slot falling behind is by design (DESIGN_backward_evaluation.md §5).
     window_end = cached.get("window_end")
     newer = [
         a for a in runtime.db.get_completed_activities(start_date=window_end)
         if a["date"] > window_end
     ] if window_end else []
-    if newer:
-        noun = "activity" if len(newer) == 1 else "activities"
-        print(yellow(wrap_text(
-            f"{len(newer)} {noun} since {window_end} {'is' if len(newer) == 1 else 'are'} "
-            f"not reflected here; re-run {cmd(f'{source} --force')} to rebuild."
-        )))
+    if not newer:
+        return
+
+    one = len(newer) == 1
+    if horizon == "short":
+        remedy = f"{cmd('data reflect')} folds {'it' if one else 'them'} in."
+    else:
+        remedy = (
+            f"Bootstrap builds it once, so it will not catch up. {cmd('data reflect')} "
+            f"follows the training since. Read it with {cmd('data show-analysis --short')}."
+        )
+    print(yellow(wrap_text(
+        f"{len(newer)} {'activity' if one else 'activities'} since {window_end} "
+        f"{'post-dates' if one else 'post-date'} this analysis. {remedy}"
+    )))
 
 
 def _render_analysis_report(result: dict, inspect_only: bool) -> None:

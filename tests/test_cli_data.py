@@ -345,7 +345,13 @@ class TestCliData(unittest.TestCase):
         )
         exit_code, stdout, stderr = self.run_cli(["data", "show-analysis"])
         self.assertEqual(exit_code, 0)
-        self.assertIn("1 activity since 2026-03-31 is not reflected here", stdout)
+        flat = " ".join(stdout.split())
+        self.assertIn("1 activity since 2026-03-31 post-dates this analysis", flat)
+        # Bootstrap reads the backlog once, so this slot falling behind is by design, not a
+        # defect to repair: the nudge names the command that does follow training since.
+        self.assertIn("data reflect", flat)
+        self.assertIn("data show-analysis --short", flat)
+        self.assertNotIn("data bootstrap --force", flat)
 
         # The provenance and staleness lines are this command's own, outside the shared
         # renderer the wrap test covers, and must hold the client width too (AGENTS.md).
@@ -357,6 +363,23 @@ class TestCliData(unittest.TestCase):
             del os.environ["TRAINMATE_WRAP_WIDTH"]
         for line in stdout.split("\n"):
             self.assertLessEqual(visible_len(line), 48, msg=repr(line))
+
+    def test_data_show_analysis_short_slot_points_at_a_plain_reflect(self):
+        # Reflect's window starts at its watermark, so a plain re-run picks the newer
+        # activities up; --force only re-pays for evidence the slot already covers.
+        self._seed_reconstruction("short", "Recent Week", "2026-04-01", "2026-04-07")
+        test_db.save_completed_activity(
+            activity_id="act_after_reflect", date="2026-04-09", start_time="10:00",
+            activity_name="Ride", activity_type="cycling", duration_sec=3600,
+            distance_km=30.0, elevation_gain_m=200, avg_hr=140, max_hr=165,
+            rpe=5, tss=60.0,
+        )
+        exit_code, stdout, stderr = self.run_cli(["data", "show-analysis", "--short"])
+        self.assertEqual(exit_code, 0)
+        flat = " ".join(stdout.split())
+        self.assertIn("1 activity since 2026-04-07 post-dates this analysis", flat)
+        self.assertIn("data reflect", flat)
+        self.assertNotIn("--force", flat)
 
     def test_data_show_analysis_without_a_stored_reconstruction(self):
         exit_code, stdout, stderr = self.run_cli(["data", "show-analysis"])

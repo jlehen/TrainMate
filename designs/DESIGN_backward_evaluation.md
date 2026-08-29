@@ -285,6 +285,14 @@ absent, else recompute and `save_analysis_cache(...)`.
    slot. Retention being one-row-per-horizon, it reports the current picture and
    flags activities that post-date the slot's window rather than implying currency.
 
+   That flag names `data reflect` in both slots, never a `--force` rebuild.
+   Bootstrap reads the backlog once per onboarding — its own repeat-run guard says
+   so — which makes the `long` slot ending months back the design working (§5), not
+   a chore waiting to be done: reflect is what follows the training since, and
+   `--short` is where that read is printed. On the `short` slot a plain reflect
+   already covers the newer days, because its window starts at the watermark;
+   `--force` would only re-pay for evidence the slot already holds.
+
 ---
 
 ## 6. Planned-vs-Inferred Diff
