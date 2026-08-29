@@ -21,7 +21,7 @@ from trainmate.cli.selectors import add_selector_args, resolve_window
 from trainmate.clock import to_local
 from trainmate.util import (
     bold, cyan, dim, display_width, flex_width, fmt_timestamp, gray, green, pad_visible,
-    red, render_table, visible_len, yellow,
+    red, render_table, truncate_visible, visible_len, yellow,
 )
 
 # How many runs the listing shows when nothing else is asked for.
@@ -79,6 +79,7 @@ class RunSummary:
     tokens: int = 0
     warns: int = 0
     errors: int = 0
+    warning: str = ""                   # the first one it logged, verbatim (§7.3)
     error: Optional[str] = None
     traceback: Optional[str] = None
 
@@ -114,13 +115,17 @@ def _path(run: "RunSummary") -> str:
 
 
 def _collect(start_day: Optional[date], end_day: Optional[date]) -> Dict[str, RunSummary]:
-    """Every run in the window, keyed by id, from its two bracket records."""
+    """Every run in the window, keyed by id, from its two bracket records — plus the
+    first warning each one logged, which is what its END column is reporting (§7.3)."""
     runs: Dict[str, RunSummary] = {}
+    first_warning: Dict[str, str] = {}
     for rec in journal.iter_records(start_day, end_day):
         ev = rec.get("ev")
-        if ev not in ("run.start", "run.end"):
-            continue
         run_id = str(rec.get("run") or journal.NO_RUN)
+        if ev not in ("run.start", "run.end"):
+            if rec.get("lvl") in ("warn", "error"):
+                first_warning.setdefault(run_id, str(rec.get("msg") or ""))
+            continue
         summary = runs.setdefault(run_id, RunSummary(id=run_id))
         d = rec.get("d") or {}
         if ev == "run.start":
@@ -143,6 +148,9 @@ def _collect(start_day: Optional[date], end_day: Optional[date]) -> Dict[str, Ru
         summary.errors = int(d.get("errors") or 0)
         summary.error = d.get("error")
         summary.traceback = d.get("traceback")
+    # After the pass: a run split across two day files can log a warning before its bracket.
+    for run_id, summary in runs.items():
+        summary.warning = first_warning.get(run_id, "")
     return runs
 
 
@@ -277,7 +285,7 @@ def _print_listing(
     if not shown:
         print("No runs match." if journal.day_paths() else "No runs recorded yet.")
         if hidden:
-            print(dim(_omissions(hidden, 0, False)))
+            print(dim(_omissions(hidden, 0, [])))
         return
     rows = [
         [run.id, _when_cell(run), run.source, run.command,
@@ -290,9 +298,15 @@ def _print_listing(
     )
     print(render_table(_HEADERS, rows, flex=None if verbose else _COMMAND_COLUMN))
     print()
+    reasons, reasons_cut = _reasons(shown, verbose)
+    for line in reasons:
+        print(line)
+    if reasons:
+        print()
     for line in _legend(shown):
         print(gray(line))
-    for line in _wrap(_omissions(hidden, len(runs) - len(shown), clipped)):
+    cut = (["command lines"] if clipped else []) + (["warnings"] if reasons_cut else [])
+    for line in _wrap(_omissions(hidden, len(runs) - len(shown), cut)):
         print(dim(line))
 
 
@@ -310,6 +324,60 @@ def _legend(shown: List[RunSummary]) -> List[str]:
     return [line for text in lines for line in _wrap(text, indent="     ")]
 
 
+def _reason(run: RunSummary) -> str:
+    """Why a run did not simply finish: the exception that ended it, else the first
+    warning it logged (§7.3)."""
+    if run.outcome == "failed" and run.error:
+        return str(run.error)
+    return run.warning
+
+
+def _reasons(shown: List[RunSummary], verbose: bool) -> Tuple[List[str], bool]:
+    """One line per unhappy run, under the table, and whether any was cut to fit (§7.3).
+
+    Clipped with its own newlines collapsed, so that one run is one line; `-v` gives the
+    message its shape back, because the multi-line ones are lists."""
+    rows = [(run, _reason(run).strip()) for run in shown]
+    rows = [(run, why) for run, why in rows if why]
+    if not rows:
+        return [], False
+    word_width = max(len(_end_word(run)) for run, _why in rows)
+    id_width = max(len(run.id) for run, _why in rows)
+    indent = word_width + id_width + 4
+    lines, cut = [], False
+    for run, why in rows:
+        word = _end_word(run)
+        head = (_END_COLOR[word](word) + " " * (word_width - len(word))
+                + "  " + run.id.ljust(id_width) + "  ")
+        if not verbose:
+            flat = " ".join(why.split())
+            cut = cut or visible_len(head + flat) > display_width()
+            lines.append(truncate_visible(head + flat, display_width()))
+            continue
+        # Laid out by hand rather than through `_wrap`: the hanging indent has to line up
+        # under text that starts after a coloured head, whose escapes textwrap would count.
+        body = _reflow(why, display_width() - indent)
+        lines.append(head + body[0])
+        lines.extend(" " * indent + more for more in body[1:])
+    return lines, cut
+
+
+def _reflow(text: str, width: int) -> List[str]:
+    """A logged message wrapped to `width`, each of its own lines kept and its own indent
+    with it: these are written to be read, and the indented ones are lists (§7.3)."""
+    out = []
+    for line in text.split("\n"):
+        stripped = line.strip()
+        if not stripped:
+            continue
+        margin = " " * (len(line) - len(line.lstrip()))
+        out.extend(textwrap.wrap(
+            stripped, width=max(20, width), initial_indent=margin,
+            subsequent_indent=margin + "  ", break_on_hyphens=False,
+        ))
+    return out or [""]
+
+
 def _wrap(text: str, indent: str = "") -> List[str]:
     """One footer line inside the client's width, continuations indented so they read as
     the same line rather than as a new one."""
@@ -318,13 +386,13 @@ def _wrap(text: str, indent: str = "") -> List[str]:
     )
 
 
-def _omissions(hidden: int, older: int, clipped: bool) -> str:
+def _omissions(hidden: int, older: int, clipped: List[str]) -> str:
     """The dim line naming what the listing left out, and the flag that brings it back."""
     parts = []
     if hidden:
         parts.append(f"{hidden} read-only run(s) hidden (-a for all)")
     if clipped:
-        parts.append("command lines clipped (-v for the full one)")
+        parts.append(f"{' and '.join(clipped)} clipped (-v for the full text)")
     if older:
         parts.append(f"{older} older run(s) not shown (raise -n)")
     return " · ".join(parts)
@@ -629,7 +697,7 @@ def add_journal_parser(subparsers):
     )
     journal_parser.add_argument(
         "-v", "--verbose", action="store_true",
-        help="Print each command line in full rather than clipping it to the screen"
+        help="Print command lines and warnings in full rather than clipped to the screen"
     )
     journal_parser.add_argument(
         "--cost", action="store_true",

@@ -73,13 +73,14 @@ class JournalTestCase(unittest.TestCase):
         journal.end_run("ok")
         journal.reset()
 
-    def _seed(self, argv, path=None, outcome="ok", lvl=None, source="cli"):
+    def _seed(self, argv, path=None, outcome="ok", lvl=None, source="cli",
+              msg="the calendar did not answer"):
         """One finished run of `argv`, named as the dispatcher would name it."""
         journal.start_run(argv, source=source)
         if path:
             journal.name_run(*path.split(" "))
         if lvl:
-            journal.note("the calendar did not answer", lvl=lvl)
+            journal.note(msg, lvl=lvl)
         journal.end_run(outcome)
         journal.reset()
 
@@ -437,6 +438,7 @@ class TestJournalListing(JournalTestCase):
         _code, out, _err = run_cli(["journal"])
         self.assertIn("workout list", out)
         self.assertIn("warn", out)
+        self.assertIn("the calendar did not answer", out)
 
     def test_a_help_run_is_left_out_whatever_it_asked_about(self):
         # `-h` exits inside argparse, so the run is never named: the argv is the tell.
@@ -471,6 +473,59 @@ class TestJournalListing(JournalTestCase):
         self.assertIn("FAILED = raised", out)
         self.assertNotIn("stopped with Ctrl-C", out)     # nothing was cancelled
         self.assertIn("LLM  model calls · tokens", out)
+
+
+class TestJournalReasons(JournalTestCase):
+    """A row that is not `ok` says why, on the same screen (§7.3)."""
+
+    def test_a_run_that_warned_says_what_it_warned_about(self):
+        self._seed(["data", "pull"], "data pull", lvl="warn",
+                   msg="Garmin sync failed, continuing with cached data")
+        _code, out, _err = run_cli(["journal"])
+        self.assertIn("Garmin sync failed, continuing with cached data", out)
+
+    def test_the_first_warning_is_the_one_shown(self):
+        journal.start_run(["data", "pull"])
+        journal.name_run("data", "pull")
+        journal.note("the calendar did not answer", lvl="warn")
+        journal.note("and neither did Garmin", lvl="warn")
+        journal.end_run("ok")
+        journal.reset()
+        _code, out, _err = run_cli(["journal"])
+        self.assertIn("the calendar did not answer", out)
+        self.assertNotIn("and neither did Garmin", out)
+
+    def test_a_failed_run_names_the_exception_and_not_a_warning_on_the_way(self):
+        journal.start_run(["plan", "generate"])
+        journal.name_run("plan", "generate")
+        journal.note("the calendar did not answer", lvl="warn")
+        journal.end_run("failed", exit_code=1, error="KeyError: 'mesocycles'")
+        journal.reset()
+        _code, out, _err = run_cli(["journal"])
+        self.assertIn("KeyError: 'mesocycles'", out)
+        self.assertNotIn("the calendar did not answer", out)
+
+    def test_a_quiet_listing_prints_no_reasons_at_all(self):
+        self._seed(["data", "pull"], "data pull")
+        _code, out, _err = run_cli(["journal"])
+        self.assertNotIn("warnings clipped", out)
+        self.assertEqual(out.count("data pull"), 1)     # the row, and no line under it
+
+    def test_a_long_warning_is_clipped_to_the_screen_until_v_asks(self):
+        self._seed(["data", "pull"], "data pull", lvl="warn", msg=(
+            "2 activities had low HR-zone coverage and no RPE; their load is an "
+            "underestimate:\n    - 2026-08-27 Warm-up\n    - 2026-08-26 Evening Ride"
+        ))
+        _code, out, _err = run_cli(["journal"])
+        self.assertIn("warnings clipped (-v for the full text)", out)
+        self.assertNotIn("Evening Ride", out)
+        for line in out.split("\n"):
+            self.assertLessEqual(visible_len(line), default_wrap_width())
+        _code, out, _err = run_cli(["journal", "-v"])
+        self.assertIn("- 2026-08-26 Evening Ride", out)  # the list keeps its own shape
+        self.assertNotIn("warnings clipped", out)
+        for line in out.split("\n"):
+            self.assertLessEqual(visible_len(line), default_wrap_width())
 
 
 class TestOutputVerbs(JournalTestCase):

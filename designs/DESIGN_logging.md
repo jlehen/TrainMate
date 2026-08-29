@@ -445,10 +445,13 @@ c8b17f30  2026-08-25 Tue 08:40  cli   data pull -d 7                   8.2s   �
 0b4a7712  2026-08-24 Mon 22:10  bot   plan generate                       —   1 · 96k   ?
 5a0e1d99  2026-08-24 Mon 19:22  cli   plan generate -g 2              96.4s   2 · 210k  FAILED
 
+warn    c8b17f30  Garmin sync failed, continuing with cached data
+FAILED  5a0e1d99  KeyError: 'mesocycles'
+
 END  ok = finished · warn = finished, but logged a warning or an error · FAILED = raised —
      'journal <id>' has the traceback · ? = no end recorded: still running, or killed
 LLM  model calls · tokens
-9 read-only run(s) hidden (-a for all) · command lines clipped (-v for the full one)
+9 read-only run(s) hidden (-a for all) · command lines clipped (-v for the full text)
 ```
 
 `END` is the outcome plus what the run wrote: `ok`, `warn` (finished, but logged a warning
@@ -492,8 +495,8 @@ The flags: `-n` for how many, `-d` for a window (the shared range grammar,
 `DESIGN_cli_selectors.md` §3), `--source push` for the unattended runs, `--failed` for runs
 that failed, were killed, or logged an error, `--command "workout adapt"` for one command's
 history, `-a` for the read-only views the listing leaves out (§7.1), `-v` for command lines
-in full rather than clipped (§7.2), `--cost` for the rollup above, and `--follow` to tail
-the file while the bot runs. `tm journal prune` is a real sub-command, not a positional, so
+and warnings in full rather than clipped (§7.2, §7.3), `--cost` for the rollup above, and
+`--follow` to tail the file while the bot runs. `tm journal prune` is a real sub-command, not a positional, so
 it cannot be confused with a run id.
 
 Timestamps display in the athlete's timezone through the existing `fmt_timestamp`, which
@@ -565,8 +568,8 @@ whose content has no natural width — everywhere else 80 columns is a deliberat
 Under the table, in gray: what `END` says, glossed for the outcomes **actually on screen**
 (a legend explaining `cancelled` when nothing was cancelled is a paragraph the eye learns to
 skip), `LLM  model calls · tokens` when that column has anything in it, and then a dim line
-naming what was left out — how many views, whether command lines were clipped, how many
-older runs — each with the flag that brings it back. A legend is one of the lines §3 of
+naming what was left out — how many views, what was clipped to fit, how many older runs —
+each with the flag that brings it back. A legend is one of the lines §3 of
 `DESIGN_output_verbosity.md` keeps at answer level: you cannot read the column without it.
 
 **Tokens, not money.** The rollup counts tokens because tokens are what the response
@@ -576,6 +579,42 @@ added for in the first place. OpenRouter can also return the charged cost of a c
 the request asks for it; if that turns out to work as documented, `--cost` gains a currency
 column and the record gains one field. It is a small follow-up, not a reason to hold the
 design.
+
+### 7.3 A row that is not `ok` says why
+
+`warn` in the END column is a true statement and an unhelpful one. Three runs in a row
+ended `warn` for the same reason — Garmin returned one activity with sparse HR zones and no
+RPE, so its load is an underestimate — and nothing on screen said so. `util.warn` had
+printed it at the time, hours earlier, inside a `bot morning` that scrolled past. Reading a
+coded column and then running a second command to learn what it was coding is the failure
+§7.2 fixed for the columns, in a different place: the listing knew and did not say.
+
+So under the table, above the legend, one line per run that did not simply finish:
+
+```
+warn    5f922aa5  1 activity had low HR-zone coverage and no RPE; their load is an underes…
+warn    1da7ed67  Garmin sync failed, continuing with cached data
+FAILED  5a0e1d99  KeyError: 'mesocycles'
+```
+
+For a failed run that is the exception `run.end` already carries; for any other, the
+**first** warning or error the run logged. First rather than last, and one rather than all:
+the first thing to go wrong is usually why the rest did, and a listing that grows a
+paragraph per row is a listing nobody reads again. The rest is one `journal <id>` away,
+which is what the id on the line is for.
+
+**Nothing new is written for this.** `_collect` already walks every record in the window to
+find the two bracket records; it now also keeps the first `warn`/`error` message it passes,
+attached after the pass rather than during it, because a run that spans midnight can log its
+warning into a day file the bracket that owns it is not in. That costs no I/O, adds no field
+to `run.end`, and — the reason to prefer it — works on every record already on disk,
+including every one written before this existed.
+
+The line is clipped to the screen like the command column, the message's own newlines
+collapsed so that one warning is one row. `-v` prints it in full and there keeps the
+newlines, because the multi-line warnings in `garmin/` are lists of activities and a list
+flattened into a sentence is worse than no list. The dim footer names whichever of the two
+was clipped, so `-v` is never something to guess at.
 
 ## 8. The bot
 
