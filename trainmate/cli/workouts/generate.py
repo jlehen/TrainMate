@@ -42,13 +42,11 @@ def _resolve_ambiguous_matches(date_str: str, auto: bool) -> None:
 
     for q in questions:
         planned, act = q["planned"], q["completed"]
-        planned_min = planned.get("duration_minutes") or 0
         actual_min = round((act.get("duration_sec") or 0) / 60.0)
         step(
-            f"\nOn {fmt_date(q['date'])} you planned {planned_min}m of "
-            f"{planned['title']!r}, but the only matching activity is "
-            f"{act.get('activity_name')!r} ({act.get('activity_type')}) at "
-            f"{actual_min}m — far short of it."
+            f"\nPlanned: {workout_line(planned)}\n"
+            f"Only matching activity is {act.get('activity_name')!r} "
+            f"({act.get('activity_type')}) at {actual_min}m — far short of it."
         )
         accepted = runtime.prompt.confirm(
             "Was that the session, cut short? (No = it was something else, "
