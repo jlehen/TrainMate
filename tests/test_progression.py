@@ -32,13 +32,15 @@ TODAY = _d(0)  # 2026-07-03, Friday; its week commences 2026-06-29 (Monday)
 CTL_DAYS, ATL_DAYS = 42, 7
 
 
-def _act(offset, tss=None, rpe=None, duration_sec=3600.0, activity_id=None):
+def _act(offset, tss=None, rpe=None, duration_sec=3600.0, activity_id=None,
+         activity_type="cycling"):
     return {
         "activity_id": activity_id or f"act-{offset}-{tss}-{rpe}",
         "date": _d(offset),
         "tss": tss,
         "rpe": rpe,
         "duration_sec": duration_sec,
+        "activity_type": activity_type,
     }
 
 
@@ -213,6 +215,31 @@ class TestWeeklyAggregates(unittest.TestCase):
         self.assertEqual(weeks[0]["week_commencing"], "2026-06-29")
         self.assertEqual(weeks[0]["actual_load"], 50.0)
 
+    def test_actual_and_planned_load_split_by_canonical_sport(self):
+        # A missed-strength week: cycling on plan, strength entirely skipped —
+        # the blended total (105/140, 75%) should not hide that the shortfall is
+        # ALL strength, not any cycling shortfall.
+        activities = [_act(-4, tss=105.0, activity_type="indoor_cycling")]  # Mon
+        workouts = [
+            _w(-4, sport_type="cycling", tss=105),
+            _w(-3, sport_type="strength", tss=35),  # alias for strength_training
+        ]
+        weeks = progression.weekly_aggregates(activities, workouts, TODAY, [])
+        week = next(w for w in weeks if w["week_commencing"] == "2026-06-29")
+        self.assertEqual(week["actual_load_by_sport"], {"cycling": 105.0})
+        self.assertEqual(
+            week["planned_load_by_sport"], {"cycling": 105.0, "strength_training": 35.0}
+        )
+
+    def test_in_progress_elapsed_by_sport_matches_scalar_cutoff(self):
+        workouts = [
+            _w(o, sport_type="cycling", tss=40) for o in (-4, -3, -2, -1, 0, 1, 2)
+        ]
+        weeks = progression.weekly_aggregates([], workouts, TODAY, [])
+        week = next(w for w in weeks if w["week_commencing"] == "2026-06-29")
+        # No activity today -> today not synced -> elapsed is Mon..Thu (yesterday).
+        self.assertEqual(week["planned_load_elapsed_by_sport"], {"cycling": 40 * 4})
+
     def test_judged_sport_seconds_drops_the_sessions_under_the_floor(self):
         # The `!` marker's denominator: a 5-minute session keeps its duration in
         # `sport_seconds` and loses only its vote on the markers (§11).
@@ -299,6 +326,34 @@ class TestWeeklyAggregates(unittest.TestCase):
     def test_no_matching_span_leaves_week_unlabeled(self):
         weeks = progression.weekly_aggregates([_act(-4, tss=10.0)], [], TODAY, [])
         self.assertIsNone(weeks[0]["meso_label"])
+
+
+class TestWeekPlanDenomBySport(unittest.TestCase):
+    def test_none_for_uncovered_week(self):
+        self.assertIsNone(progression.week_plan_denom_by_sport({"planned_load": None}))
+
+    def test_full_total_for_completed_week(self):
+        week = {
+            "planned_load": 140.0,
+            "planned_load_by_sport": {"cycling": 105.0, "strength_training": 35.0},
+            "in_progress": False,
+        }
+        self.assertEqual(
+            progression.week_plan_denom_by_sport(week),
+            {"cycling": 105.0, "strength_training": 35.0},
+        )
+
+    def test_elapsed_slice_for_in_progress_week(self):
+        week = {
+            "planned_load": 280.0,
+            "planned_load_by_sport": {"cycling": 210.0, "strength_training": 70.0},
+            "in_progress": True,
+            "planned_load_elapsed_by_sport": {"cycling": 105.0, "strength_training": 35.0},
+        }
+        self.assertEqual(
+            progression.week_plan_denom_by_sport(week),
+            {"cycling": 105.0, "strength_training": 35.0},
+        )
 
 
 class TestMesoBands(unittest.TestCase):

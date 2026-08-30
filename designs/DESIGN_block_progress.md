@@ -126,6 +126,30 @@ knob) to decide how far below its neighbours a week must dip. The precedent is �
 the figures and what divided them, and let the model read the dip. The TASK below says
 explicitly that a clear dip in an elapsed week *was* the deload.
 
+### 3.3 Per-sport gap annotation
+
+The week line's total is one blended figure across every sport (training_load.md's CTL/ATL/TSB
+model is deliberately one systemic load stream, `DESIGN_pmc_fitness_fatigue.md`'s "out of
+scope" list). That blending can hide *which* sport produced a gap: a week where cycling landed
+exactly on plan and strength was skipped entirely blends to an unremarkable-looking ~90%, not
+the 0%/100% split that actually happened — and a planning model reading only the blended
+number has no way to tell a missed-strength week from a genuinely soft week for the goal the
+plan is actually building toward. An incident on 2026-08-30 (Klausenpass taper collapse) turned
+on exactly this: the model cited "212 actual vs 237 planned (90%)" as evidence of an already-
+soft week and shortened the pre-race taper, when the shortfall was almost entirely the missed
+strength sessions and the cycling the goal depended on was on plan.
+
+`progression.weekly_aggregates` therefore also buckets each week's load by
+`sports.canonical_sport` (`actual_load_by_sport`, `planned_load_by_sport`,
+`planned_load_elapsed_by_sport?`; `week_plan_denom_by_sport` is the per-sport counterpart of
+`week_plan_denom`, same elapsed-vs-full rule). `_block_week_lines` appends a second, indented
+line — `of which cycling: 212/205 (103%), strength_training: 0/32 (0%)` — under any week where
+some sport's own adherence rate sits >=20 points off the week's blended rate, i.e. that sport
+is not telling the same story as the total. The trigger is deliberately NOT "the blended total
+is far from 100%": that is exactly the number this note exists to second-guess. A week where
+every sport tracks the blended rate together, or where only one sport had a plan that week,
+gets no second line — there is nothing the split would add.
+
 ## 4. The prompt
 
 `coach/engine/workouts.py::_block_progress_task` appends a `CONTINUING A BLOCK ALREADY UNDER

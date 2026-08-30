@@ -565,8 +565,9 @@ def fitness_series(day_points, metrics_rows, today, ctl_days, atl_days,
 def weekly_aggregates(activities, workouts, today, meso_spans, *,
                       window_end=None) -> list[dict]
     # {week_commencing (Monday, per learning_evidence precedent),
-    #  planned_load, planned_load_elapsed?, in_progress?, partial_plan?,
-    #  actual_load, meso_label?, meso_source?,
+    #  planned_load, planned_load_by_sport, planned_load_elapsed?,
+    #  planned_load_elapsed_by_sport?, in_progress?, partial_plan?,
+    #  actual_load, actual_load_by_sport, meso_label?, meso_source?,
     #  zone_rows, sport_seconds, judged_sport_seconds, load_sparse,
     #  planned_zone_rows}
     # planned = Σ adherence.planned_load over non-removed workouts (the
@@ -576,6 +577,11 @@ def weekly_aggregates(activities, workouts, today, meso_spans, *,
     # the intensity half of the same rows, joined here because this function
     # already holds every activity bucketed by week and no renderer may read
     # the db (DESIGN_intensity_distribution.md §9.6/§9.8/§11).
+    # The `_by_sport` dicts are the same totals bucketed by sports.canonical_sport
+    # (activity_type for actual, sport_type for planned) — the per-sport gap
+    # annotation `_block_week_lines` derives from them lives in
+    # DESIGN_block_progress.md §3.3, not here: this module stays pure maths, the
+    # rendering decision belongs to the prompt-facing caller.
 
 def week_plan_denom(week) -> float | None
     # The planned figure a week's bar and percentage compare against (§3
@@ -583,6 +589,11 @@ def week_plan_denom(week) -> float | None
     # full planned_load otherwise, None for a week no plan covered. A payload
     # rule, not a layout one — the CLI table and the PNG both call it, and the
     # PNG reading planned_load directly is exactly how they disagreed.
+
+def week_plan_denom_by_sport(week) -> dict[str, float] | None
+    # week_plan_denom's per-sport counterpart, same elapsed-vs-full rule, keyed
+    # by canonical sport. Sole consumer today is the §3.3 gap annotation
+    # (DESIGN_block_progress.md), not a rendered bar/percentage of its own.
 
 def assemble_timeline(activities, workouts, metrics_rows, mesocycles,
                       inferred_mesocycles, objectives, today,

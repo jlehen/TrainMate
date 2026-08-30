@@ -370,7 +370,54 @@ class PmcContextMixin:
                 if when < meso['start_date'] and not w['in_progress'] else ""
             )
             out.append(f"{head}: {asked}, actual {actual:.0f}{pct}{note}")
+            sport_note = self._week_sport_gap_note(w, denom, actual)
+            if sport_note:
+                # A week with several sports can run past the 100-char prompt-wide wrap
+                # convention (AGENTS.md) that the single blended line above never risks.
+                out.append(wrap_text(f"{indent}    {sport_note}"))
         return out
+
+    def _week_sport_gap_note(
+        self, week: Dict[str, Any], denom: Optional[float], actual: float,
+    ) -> Optional[str]:
+        """Per-sport breakdown for a week whose planned-vs-actual TOTAL hides which
+        sport actually drove it — a shortfall concentrated in one sport (e.g. missed
+        strength) reads as generalized under-training when only the blended total is
+        shown, even though the sport the athlete's goal depends on may be fully on
+        plan (DESIGN_block_progress.md §3.3: CTL/ATL/TSB is one blended stream across
+        all sports by design, DESIGN_pmc_fitness_fatigue.md's out-of-scope list; this
+        note is the cheap per-sport cross-check the blended total can't give alone).
+
+        The trigger is deliberately NOT "the blended total is far from 100%": a week
+        can blend a fully-on-plan sport with a fully-missed one and still land near
+        90% overall (100/205 cycling offsetting 0/32 strength) — exactly the case
+        this note exists for. Instead it fires when some sport's OWN adherence rate
+        is >=20 points off the blended rate, i.e. that sport is not telling the same
+        story as the total. 20 points matches no other threshold in this file —
+        chosen as clearly outside normal week-to-week noise between sports."""
+        if not denom or actual <= 0:
+            return None
+        planned_by_sport = progression.week_plan_denom_by_sport(week) or {}
+        actual_by_sport = week.get("actual_load_by_sport", {})
+        sports = sorted(set(planned_by_sport) | set(actual_by_sport))
+        if len(sports) < 2:
+            return None
+        overall_pct = actual / denom * 100
+        sport_pcts = [
+            actual_by_sport.get(sport, 0.0) / planned_by_sport[sport] * 100
+            for sport in sports if planned_by_sport.get(sport)
+        ]
+        if not sport_pcts or max(abs(p - overall_pct) for p in sport_pcts) < 20:
+            return None
+        parts = []
+        for sport in sports:
+            sport_planned = planned_by_sport.get(sport, 0.0)
+            sport_actual = actual_by_sport.get(sport, 0.0)
+            if not sport_planned and not sport_actual:
+                continue
+            sport_pct = f" ({sport_actual / sport_planned * 100:.0f}%)" if sport_planned else ""
+            parts.append(f"{sport}: {sport_actual:.0f}/{sport_planned:.0f}{sport_pct}")
+        return "of which " + ", ".join(parts) if parts else None
 
     def _block_benchmark_lines(
         self, meso: Dict[str, Any], elapsed_end: str, workouts: List[Workout],

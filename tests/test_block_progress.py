@@ -138,6 +138,24 @@ class TestBlockProgressContext(unittest.TestCase):
             max(text.splitlines(), key=len),
         )
 
+    def test_missed_strength_week_gets_a_per_sport_split(self):
+        """A week where cycling was fully executed but strength was entirely skipped
+        reads as an unremarkable ~80% week blended, hiding that cycling itself was on
+        plan. The per-sport annotation is what makes that visible to the prompt."""
+        self._planned("2026-07-06", 200.0, sport_type="cycling")
+        self._done("2026-07-06", 200.0, "cyc-1")
+        self._planned("2026-07-08", 50.0, sport_type="strength_training", title="Full body")
+        # No completed activity for the strength session: it was skipped.
+        text = self._context("2026-07-22", "2026-07-22")
+        self.assertIn("week of 2026-07-06: planned 250, actual 200 (80%)", text)
+        self.assertIn(
+            "of which cycling: 200/200 (100%), strength_training: 0/50 (0%)", text
+        )
+        self.assertTrue(
+            all(len(line) <= 100 for line in text.splitlines()),
+            max(text.splitlines(), key=len),
+        )
+
     def test_a_week_the_block_straddles_is_flagged_incomparable(self):
         """A block starting mid-week compares a part-week of plan against a whole week of
         training, and no honest percentage comes from that pair."""
