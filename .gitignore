@@ -10,6 +10,8 @@ venv/
 # Credentials & configs
 config.yaml
 service_account.json
+# Garmin OAuth token stores — default .garminconnect beside each config, any depth
+.garminconnect/
 
 # Local database, and the hand-made snapshots taken before risky migrations
 trainmate.db

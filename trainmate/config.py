@@ -321,14 +321,12 @@ class Config:
 
     @property
     def garmin_token_dir(self) -> str:
-        """Directory where garminconnect persists OAuth tokens (default ~/.garminconnect).
-        A relative value resolves against the config file's directory (the CONFIG_PATH
-        rule above) — a second athlete must set this, or their instance silently resumes
-        the primary account's session (DESIGN_garmin_direct_pull.md §11)."""
-        path = self.get("garmin", {}).get("token_dir")
-        if not path:
-            return os.path.join(os.path.expanduser("~"), ".garminconnect")
-        path = os.path.expanduser(path)
+        """Directory where garminconnect persists OAuth tokens: `garmin.token_dir`,
+        default .garminconnect beside the config file. A relative value resolves against
+        the config file's directory (the CONFIG_PATH rule above) — configs sharing a
+        directory must set it apart, or the second silently resumes the first account's
+        session (DESIGN_garmin_direct_pull.md §11)."""
+        path = os.path.expanduser(str(self.get("garmin", {}).get("token_dir") or ".garminconnect"))
         if not os.path.isabs(path):
             path = os.path.join(CONFIG_DIR, path)
         return path

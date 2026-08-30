@@ -443,15 +443,19 @@ the GarminScraper `.env` duplication disappears. FTP/LTHR remain in
 `config.yaml` `user_profile` for coaching context. Token store defaults to
 `~/.garminconnect`.
 
-> **Rev. 3 — the token store is per-instance state, and the default hides that.** The
-> default `~/.garminconnect` is shared machine-wide, and `login(tokenstore=…)` resumes
-> any valid tokens found there *without ever touching* `garmin.email`/`garmin.password`
-> — so a second athlete's TRAINMATE_CONFIG instance that leaves `token_dir` unset
-> silently pulls the **primary** athlete's Garmin data into its own database. Two
-> consequences: `token_dir` now resolves relative values against the config file's
-> directory (the same CONFIG_PATH rule as `database:`/`science_dir:`), and every
-> secondary instance must set it — the templates say so at the key. The primary keeps
-> the `~/.garminconnect` default; migrating it would force a pointless re-login/MFA.
+> **Rev. 3 — the token store is per-instance state, and the old default hid that.** The
+> original default `~/.garminconnect` was shared machine-wide, and `login(tokenstore=…)`
+> resumes any valid tokens found there *without ever touching*
+> `garmin.email`/`garmin.password` — so a second athlete's TRAINMATE_CONFIG instance
+> that left `token_dir` unset silently pulled the **primary** athlete's Garmin data
+> into its own database. `token_dir` now follows the same CONFIG_PATH rule as
+> `database:`/`science_dir:`: relative values resolve against the config file's
+> directory, and the default is `.garminconnect` **beside the config**, so an instance
+> whose config lives in its own directory gets its own store for free. The residual
+> sharp edge is two configs in one directory sharing the default — those must set
+> `token_dir` apart, as the templates say at the key. Migrating an existing primary
+> install means moving `~/.garminconnect` beside its config (or setting `token_dir` to
+> the old path); otherwise the next pull asks for a fresh login/MFA.
 
 ---
 

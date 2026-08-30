@@ -105,17 +105,18 @@ class TestInstanceSelection(unittest.TestCase):
             _, _, _, _, token_dir = self._paths(cfg)
             self.assertEqual(token_dir, "/somewhere/tokens")
 
-    def test_default_garmin_token_dir_is_the_shared_home_store(self):
-        # The one per-instance path whose default does NOT land beside the config: it
-        # stays ~/.garminconnect so the primary install keeps its tokens. A second
-        # instance must therefore set token_dir explicitly, or it resumes the primary
-        # account's session (DESIGN_garmin_direct_pull.md §11 rev. 3).
+    def test_default_garmin_token_dir_resolves_beside_config(self):
+        # Tokens beat credentials in garminconnect, so a shared default store would let
+        # a second instance resume the first account's session — the default lands
+        # beside the config like every other instance path; only configs sharing one
+        # directory still need an explicit token_dir (DESIGN_garmin_direct_pull.md §11
+        # rev. 3).
         with tempfile.TemporaryDirectory() as d:
             cfg = os.path.join(d, "config.yaml")
             with open(cfg, "w") as f:
                 f.write("user_profile:\n  name: Other\n")
             _, _, _, _, token_dir = self._paths(cfg)
-            self.assertEqual(token_dir, os.path.join(os.path.expanduser("~"), ".garminconnect"))
+            self.assertEqual(token_dir, os.path.join(d, ".garminconnect"))
 
     def test_missing_explicit_config_aborts(self):
         proc = _run("/nonexistent/nowhere/config.yaml")
