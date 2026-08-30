@@ -45,6 +45,11 @@ class SessionLineTest(unittest.TestCase):
             common.simple_session_line(w).startswith(common.DEFAULT_SPORT_EMOJI)
         )
 
+    def test_every_canonical_sport_has_its_own_emoji(self):
+        from trainmate.sports import CANONICAL_SPORTS
+        for sport in CANONICAL_SPORTS:
+            self.assertIn(sport, common.SPORT_EMOJI)
+
 
 class DayLinesTest(unittest.TestCase):
     def test_empty_day_is_a_rest_day(self):
@@ -127,6 +132,176 @@ class WeekLinesTest(unittest.TestCase):
             [{"sport_type": "running", "title": "Easy run", "date": "2026-08-25"}]
         )
         self.assertIn("1 session planned", lines[-1])
+
+    def test_a_trained_session_gets_the_check_and_the_count(self):
+        lines = common.simple_week_lines(
+            [{"id": 1, "sport_type": "running", "title": "Easy run",
+              "date": "2026-08-25"},
+             {"id": 2, "sport_type": "cycling", "title": "Endurance ride",
+              "date": "2026-08-27"}],
+            verdicts={1: {"status": "done"}},
+        )
+        self.assertIn("✅", lines[1])
+        self.assertNotIn("✅", lines[2])
+        self.assertIn("1 of 2 sessions already done", lines[-1])
+
+    def test_missed_and_pending_sessions_say_nothing(self):
+        # §6 tone rule: a gap is never remarked on in the listing.
+        lines = common.simple_week_lines(
+            [{"id": 1, "sport_type": "running", "title": "Easy run",
+              "date": "2026-08-25"}],
+            verdicts={1: {"status": "missed"}},
+        )
+        self.assertNotIn("✅", lines[1])
+        self.assertIn("1 session planned", lines[-1])
+
+
+class WhenWordsTest(unittest.TestCase):
+    """`simple_when` — the countdown vocabulary of the goal and plan views (§11)."""
+
+    def test_the_near_words(self):
+        self.assertEqual(common.simple_when("2026-08-25", "2026-08-25"), "today")
+        self.assertEqual(common.simple_when("2026-08-26", "2026-08-25"), "tomorrow")
+        self.assertEqual(common.simple_when("2026-08-30", "2026-08-25"), "in 5 days")
+
+    def test_weeks_then_months(self):
+        self.assertEqual(common.simple_when("2026-09-26", "2026-08-25"), "in 5 weeks")
+        self.assertEqual(common.simple_when("2027-04-30", "2026-08-30"), "in 8 months")
+
+    def test_a_past_date_reads_as_passed(self):
+        self.assertEqual(common.simple_when("2026-08-20", "2026-08-25"), "passed")
+
+
+class GoalLinesTest(unittest.TestCase):
+    """`simple_goal_lines` — the companion goals view (§11): countdown words, no IDs
+    or state tags, archived goals silent, completed ones one celebration line."""
+
+    EVENT = {"id": 1, "title": "Marathon", "target_date": "2026-09-26",
+             "sport_type": "running", "date_type": "event", "status": "active",
+             "description": "Sub 4 hours."}
+    HORIZON = {"id": 2, "title": "Climb faster", "target_date": "2026-09-30",
+               "sport_type": "cycling", "date_type": "horizon", "status": "active",
+               "description": ""}
+
+    def test_event_goal_names_the_day_and_the_countdown(self):
+        lines = common.simple_goal_lines([self.EVENT], "2026-08-25")
+        self.assertIn("🎯 What you're training for:", lines[0])
+        self.assertIn("🏃 Marathon — on Sat Sep 26 (in 5 weeks)", lines[1])
+        self.assertIn("Sub 4 hours.", lines[2])
+
+    def test_horizon_goal_reads_as_by_approximately(self):
+        lines = common.simple_goal_lines([self.HORIZON], "2026-08-25")
+        self.assertIn("🚴 Climb faster — by ~Wed Sep 30 (in 5 weeks)", lines[1])
+
+    def test_no_expert_ids_or_tags_leak(self):
+        for line in common.simple_goal_lines([self.EVENT], "2026-08-25"):
+            self.assertNotIn("ID", line)
+            self.assertNotIn("[UPCOMING]", line)
+
+    def test_completed_goals_become_one_celebration_line(self):
+        past = dict(self.EVENT, target_date="2026-05-01")
+        lines = common.simple_goal_lines([past, self.EVENT], "2026-08-25")
+        self.assertIn("Marathon — on Sat Sep 26", "\n".join(lines))
+        self.assertIn("1 goal already behind you", lines[-1])
+
+    def test_archived_goals_say_nothing(self):
+        archived = dict(self.HORIZON, status="archived")
+        lines = common.simple_goal_lines([self.EVENT, archived], "2026-08-25")
+        self.assertNotIn("Climb faster", "\n".join(lines))
+
+    def test_empty_is_an_invitation(self):
+        lines = common.simple_goal_lines([], "2026-08-25")
+        self.assertEqual(len(lines), 1)
+        self.assertIn("No goal on the horizon", lines[0])
+
+
+class PlanLinesTest(unittest.TestCase):
+    """`simple_plan_lines` — the companion plan view (§11): done blocks checked, the
+    active block located by week with its focus, future blocks dated, the goal day
+    closing the road."""
+
+    GOAL = {"id": 1, "title": "Marathon", "target_date": "2026-09-26",
+            "sport_type": "running", "date_type": "event", "status": "active"}
+    ACTIVE_MACRO = {"id": 6, "status": "active"}
+    MESOCYCLES = [
+        {"id": 1, "name": "Base", "start_date": "2026-07-27",
+         "end_date": "2026-08-16", "focus": "Aerobic volume."},
+        {"id": 2, "name": "Build", "start_date": "2026-08-17",
+         "end_date": "2026-09-06", "focus": "Threshold work."},
+        {"id": 3, "name": "Peak", "start_date": "2026-09-07",
+         "end_date": "2026-09-16", "focus": "Race sharpening."},
+    ]
+
+    def _lines(self, today="2026-08-30"):
+        return common.simple_plan_lines(
+            self.GOAL, self.ACTIVE_MACRO, self.MESOCYCLES, today
+        )
+
+    def test_the_road_by_block(self):
+        lines = self._lines()
+        self.assertEqual(lines[0], "🧭 The road to Marathon:")
+        self.assertIn("✅ Base — done", lines[1])
+        self.assertIn("👉 Build — you're here, week 2 of 3", lines[2])
+        self.assertIn("Threshold work.", lines[3])
+        self.assertIn("🔜 Peak — starts Mon Sep 07, 10 days", lines[4])
+        self.assertIn("🏁 The big day: Sat Sep 26 (in 4 weeks)", lines[-1])
+
+    def test_exact_week_blocks_read_in_weeks(self):
+        lines = common.simple_plan_lines(
+            self.GOAL, self.ACTIVE_MACRO,
+            [{"id": 3, "name": "Peak", "start_date": "2026-09-07",
+              "end_date": "2026-09-20", "focus": "Race sharpening."}],
+            "2026-08-30",
+        )
+        self.assertIn("🔜 Peak — starts Mon Sep 07, 2 weeks", lines[1])
+
+    def test_a_long_focus_shrinks_to_its_first_sentence(self):
+        wall = ("Three weeks: two loading microcycles plus a deload. LOADING WEEKS: "
+                "1-2 threshold sessions accumulating 40+ min in zone, " + "x" * 300)
+        mesocycles = [dict(self.MESOCYCLES[1], focus=wall)]
+        lines = common.simple_plan_lines(
+            self.GOAL, self.ACTIVE_MACRO, mesocycles, "2026-08-30"
+        )
+        self.assertEqual(
+            lines[2], "Three weeks: two loading microcycles plus a deload."
+        )
+
+    def test_a_long_single_sentence_focus_is_cut_at_a_word(self):
+        wall = "word " * 100
+        mesocycles = [dict(self.MESOCYCLES[1], focus=wall)]
+        lines = common.simple_plan_lines(
+            self.GOAL, self.ACTIVE_MACRO, mesocycles, "2026-08-30"
+        )
+        self.assertTrue(lines[2].endswith("…"))
+        self.assertLessEqual(len(lines[2]), 221)
+
+    def test_only_the_active_block_carries_its_focus(self):
+        joined = "\n".join(self._lines())
+        self.assertNotIn("Aerobic volume.", joined)
+        self.assertNotIn("Race sharpening.", joined)
+
+    def test_a_horizon_goal_closes_without_a_big_day(self):
+        goal = dict(self.GOAL, date_type="horizon")
+        lines = common.simple_plan_lines(
+            goal, self.ACTIVE_MACRO, self.MESOCYCLES, "2026-08-30"
+        )
+        self.assertIn("🏁 Building toward ~Sat Sep 26", lines[-1])
+
+    def test_a_superseded_version_says_so(self):
+        macro = dict(self.ACTIVE_MACRO, status="superseded")
+        lines = common.simple_plan_lines(
+            self.GOAL, macro, self.MESOCYCLES, "2026-08-30"
+        )
+        self.assertIn("older version", lines[1])
+
+    def test_no_expert_ids_leak(self):
+        for line in self._lines():
+            self.assertNotIn("ID", line)
+            self.assertNotIn("Macrocycle", line)
+
+    def test_no_blocks_is_a_gentle_note(self):
+        lines = common.simple_plan_lines(self.GOAL, self.ACTIVE_MACRO, [], "2026-08-30")
+        self.assertIn("No training blocks drawn up yet", lines[-1])
 
 
 class ProgressLinesTest(unittest.TestCase):

@@ -152,12 +152,14 @@ the parity principle: the bot renders, it does not decide.
 ### 5.1 Persistent reply keyboard
 
 Simple mode replaces the command menu with a `ReplyKeyboardMarkup` (persistent, resized)
-of four buttons, each mapping to fixed argv:
+of six buttons (two per row, in table order), each mapping to fixed argv:
 
 | Button           | Runs                          |
 |------------------|-------------------------------|
 | 📅 Today         | `workout list -d today`       |
 | 🗓 My week       | `workout list`                |
+| 🎯 Goals         | `goal list` (§11)             |
+| 🧭 My plan       | `plan show` (§11)             |
 | 📈 Progress      | `progress --chart`            |
 | 💬 Tell my coach | arms free-text capture (§5.2) |
 
@@ -182,10 +184,10 @@ maps the intent back to argv **from its own table** and runs it. The model picks
 intent and slots; it never authors argv, so a hostile or confused message cannot reach
 flags the table doesn't expose.
 
-Intent table: `show_today`, `show_week`, `show_progress`, `coach_message` (→ `adapt
--m`, carrying the original text), `add_constraint` (→ the same `adapt -m` inbox, §5.5),
-`show_constraints` / `remove_constraint` (→ `bot constraints`, §5.5), `help`,
-`unclear`. `unclear` renders a gentle fallback with the keyboard as the suggestion. The
+Intent table: `show_today`, `show_week`, `show_goals` / `show_plan` (§11),
+`show_progress`, `coach_message` (→ `adapt -m`, carrying the original text),
+`add_constraint` (→ the same `adapt -m` inbox, §5.5), `show_constraints` /
+`remove_constraint` (→ `bot constraints`, §5.5), `help`, `unclear`. `unclear` renders a gentle fallback with the keyboard as the suggestion. The
 routed command is echoed in one short italic line ("→ showing your week") so she learns
 the vocabulary and misroutes are visible immediately.
 
@@ -245,7 +247,8 @@ that hasn't opted in falls back to the expert `<pre>` form — the web dashboard
 applied: a fallback that cannot decay beats a parity promise nobody re-checks.
 
 Initial opt-in set: `workout list` (today/week), `progress` (chart caption + two-line
-summary), the adapt result, and `bot morning`.
+summary), the adapt result, and `bot morning`. The §11 breadth pass added `goal list`
+and `plan show`.
 
 **Tone rule** (the "not depressing" requirement): simple rendering leads with what was
 done and what is next, states gaps as neutral facts after the lead, and never opens
@@ -330,8 +333,53 @@ Each phase ships alone; her onboarding starts at phase 1.
   (2026-08-26, §4.1). The adaptation still runs first when `adapt-first` is on: it
   revises the whole forward range to the block's end, not just today, so a session
   finished before breakfast is no reason to skip the day's pass.
+- Goals and the plan join the companion surface (2026-08-30, §11): two new keyboard
+  buttons and router intents, `goal list` / `plan show` opted into simple rendering,
+  and ✅ verdicts folded into the week view. Both new targets are read-only, so the §7
+  guardrail posture is unchanged.
 
 **Open**
 1. Router echo: always show "→ …", or only when confidence is low? Draft: always;
    applies unless objected to before phase 3 (rollout §9). Implemented as: always
    (`ROUTER_ECHO` in trainmate_bot.py); trivially revisitable.
+
+## 11. Breadth: goals, the plan, and a calendar-shaped week (2026-08-30)
+
+The first weeks of companion mode covered the daily loop — today, the week, progress,
+telling the coach. What it lacked was the *why*: an athlete without the Google Calendar
+integration had no way to see what she is training toward or how the months ahead are
+laid out. This pass widens the same surface without touching its rules: two more
+keyboard buttons (§5.1), two more router intents (§5.3), two more commands opted into
+simple rendering (§6), and no new machinery.
+
+**Goals — `show_goals` → `goal list`.** Each goal still ahead renders as one line —
+sport emoji(s), title, day word, and a countdown — followed by its description. The
+countdown vocabulary (`simple_when`) is deliberately rough: days inside two weeks, then
+weeks, then months — a feeling, not a schedule; it also carries the year information the
+year-less day words (`simple_date_word`, 'Sat Sep 26') omit. An event goal reads "on
+Sat Sep 26"; a horizon goal "by ~Wed Sep 30", the same on/by-~ wording rule as the
+expert view. Completed goals compress into one celebration line; archived goals were
+called off and say nothing (§6 tone rule); IDs and state tags stay expert detail. An
+empty list is an invitation, not a gap.
+
+**The plan — `show_plan` → `plan show`.** "Plan" here is the periodization —
+macrocycle + mesocycles, never the scheduled sessions (those are 🗓 My week). The
+companion form is the road to the goal, one line per block: done blocks get a ✅ and
+nothing more, the block she is in is located by week ("you're here, week 2 of 3") and
+carries the first sentence of its focus (`simple_focus_snippet` — the full prescription
+is dense coach prose and stays expert detail), and future blocks get their start day and
+length. The goal day closes the road, reusing the goal view's wording rule. Strategy
+prose, feedback, snapshotted inputs, IDs and the progress bars all stay in the expert
+view; wherever that view would suggest `plan generate`, simple mode says the plan "will
+appear once your goal is set up" — the athlete in companion mode cannot run it, the
+operator can.
+
+**The week doubles as her calendar.** `workout list` already computed adherence
+verdicts for the listed span; the simple week view now folds them in — a trained
+session's line gets a ✅, and the closing count becomes "1 of 8 sessions already done"
+once anything is. `missed`/`pending` still say nothing at all, the same §6 rule the day
+view follows.
+
+Both new argv targets are read-only, so the §7 guardrail table gains two entries and
+nothing else changes: plan-shaping and destructive commands still require the typed
+expert vocabulary.

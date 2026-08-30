@@ -5,7 +5,7 @@ from trainmate.util import (
     bold, green, red, yellow, cyan, gray, cmd, format_labeled_block,
     fmt_date, today_str as _today_str,
 )
-from trainmate.cli.common import report_unhonored
+from trainmate.cli.common import is_simple_render, report_unhonored, simple_goal_lines
 from trainmate.db.objectives import goal_state, GOAL_UPCOMING, ARCHIVED
 from trainmate.sports import CANONICAL_SPORTS
 
@@ -146,6 +146,11 @@ def _offer_reinstated_sessions(objective_id: int) -> None:
 def run_goal_list(args=None) -> None:
     """Lists all active and past training objective goals."""
     goals = runtime.db.get_objectives()
+    # Companion prose instead of the tagged list (DESIGN_bot_simple_frontend.md §11).
+    if is_simple_render():
+        for line in simple_goal_lines(goals, _today_str()):
+            print(line)
+        return
     print(bold(cyan("=== GOALS ===")))
     for g in goals:
         _print_goal(g)

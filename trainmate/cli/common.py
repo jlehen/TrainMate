@@ -4,7 +4,9 @@ from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
 from trainmate.config import config
 from trainmate.adherence import STATUS_LABELS, analyze_adherence, classify_adherence
-from trainmate.util import cyan, yellow, cmd, fmt_date, wrap_text, today_str as _today_str
+from trainmate.util import (
+    cyan, yellow, cmd, days_between, fmt_date, wrap_text, today_str as _today_str,
+)
 
 # `trainmate_cli` (the `db`/`garmin`/`calendar_syncer` facade) is imported lazily
 # inside the functions below: it imports this module, so a module-level import here
@@ -265,16 +267,18 @@ REST_DAY_LINE = "Rest day — enjoy it 🎉"
 SIMPLE_DONE_LINE = "✅ Already done — nice work 💪"
 SIMPLE_DONE_STATUSES = ("done", "partial")
 
-# Emoji per canonical sport for the simple session lines; unknown sports get the
-# generic one rather than nothing, so a new sport never renders bare.
+# Emoji per canonical sport for the simple session lines, keyed by the names in
+# `sports.CANONICAL_SPORTS`; unknown sports get the generic one rather than nothing,
+# so a new sport never renders bare.
 SPORT_EMOJI = {
     "running": "🏃",
     "cycling": "🚴",
-    "swimming": "🏊",
-    "strength": "🏋️",
     "hiking": "🥾",
-    "rowing": "🚣",
+    "strength_training": "🏋️",
     "yoga": "🧘",
+    "ski_touring": "🎿",
+    "rowing": "🚣",
+    "downhill_skiing": "⛷️",
 }
 DEFAULT_SPORT_EMOJI = "🎽"
 
@@ -329,20 +333,60 @@ def simple_day_lines(
     return lines
 
 
-def simple_week_lines(workouts: List[Dict[str, Any]]) -> List[str]:
+def simple_week_lines(
+    workouts: List[Dict[str, Any]],
+    verdicts: Optional[Dict[int, Dict[str, Any]]] = None,
+) -> List[str]:
     """Simple rendering of a multi-day window: one dated line per session, no
     descriptions, ending on an encouraging count. An empty window is a break, not
-    a gap (§6 tone rule)."""
+    a gap (§6 tone rule).
+
+    `verdicts` is `adherence_verdicts`' map; a session already trained gets a ✅
+    instead of its sport emoji, so the listing doubles as her calendar — done behind,
+    plan ahead (DESIGN_bot_simple_frontend.md §11)."""
     if not workouts:
         return ["Nothing on the schedule — enjoy the break 🎉"]
     lines = ["🗓 Coming up:"]
+    done = 0
     for w in workouts:
         day = datetime.strptime(w["date"], "%Y-%m-%d").strftime("%a %d")
-        lines.append(f"{day} · {simple_session_line(w)}")
+        status = ((verdicts or {}).get(w.get("id")) or {}).get("status")
+        if status in SIMPLE_DONE_STATUSES:
+            done += 1
+            lines.append(f"{day} · ✅ {simple_session_line(w)}")
+        else:
+            lines.append(f"{day} · {simple_session_line(w)}")
     count = len(workouts)
     session_word = "session" if count == 1 else "sessions"
-    lines.append(f"\n{count} {session_word} planned — you've got this 💪")
+    if done:
+        lines.append(f"\n{done} of {count} {session_word} already done — keep it rolling 💪")
+    else:
+        lines.append(f"\n{count} {session_word} planned — you've got this 💪")
     return lines
+
+
+def simple_date_word(date_str: str) -> str:
+    """A date in companion words — 'Sat Sep 26' — no ISO form, no year (§6). The
+    countdown beside it (`simple_when`) carries the year information a reader needs."""
+    return datetime.strptime(date_str, "%Y-%m-%d").strftime("%a %b %d")
+
+
+def simple_when(date_str: str, today: str) -> str:
+    """How far away a date is, in companion words: 'today', 'tomorrow', days inside two
+    weeks, then weeks, then months. Rough on purpose — a countdown is a feeling here,
+    not a schedule (DESIGN_bot_simple_frontend.md §11)."""
+    days = days_between(today, date_str)
+    if days < 0:
+        return "passed"
+    if days == 0:
+        return "today"
+    if days == 1:
+        return "tomorrow"
+    if days < 14:
+        return f"in {days} days"
+    if days < 112:
+        return f"in {round(days / 7)} weeks"
+    return f"in {round(days / 30.4)} months"
 
 
 def simple_constraint_lines(constraints: List[Dict[str, Any]], today: str) -> List[str]:
@@ -356,7 +400,7 @@ def simple_constraint_lines(constraints: List[Dict[str, Any]], today: str) -> Li
     def day_word(date_str: str) -> str:
         if date_str == today:
             return "today"
-        return datetime.strptime(date_str, "%Y-%m-%d").strftime("%a %b %d")
+        return simple_date_word(date_str)
 
     lines = ["📌 I'm working around:"]
     for c in constraints:
@@ -398,3 +442,99 @@ def simple_progress_lines(payload: Dict[str, Any], today: str) -> List[str]:
         "The chart shows your fitness building up top, and week-by-week training "
         "below — keep stacking those weeks 💪",
     ]
+
+
+def simple_goal_lines(goals: List[Dict[str, Any]], today: str) -> List[str]:
+    """Simple rendering of the goals view: each goal still ahead with a day word and a
+    countdown, then the completed ones as one celebration line. No IDs or state tags
+    (the expert `goal list` keeps those); an archived goal was called off and says
+    nothing at all (§6 tone rule). Empty reads as an invitation, not a gap."""
+    from trainmate.db.objectives import GOAL_COMPLETED, GOAL_UPCOMING, goal_state
+    upcoming = [g for g in goals if goal_state(g, today) == GOAL_UPCOMING]
+    completed = [g for g in goals if goal_state(g, today) == GOAL_COMPLETED]
+    lines: List[str] = []
+    if upcoming:
+        lines.append("🎯 What you're training for:")
+        for g in upcoming:
+            date_word = simple_date_word(str(g["target_date"]))
+            when = simple_when(str(g["target_date"]), today)
+            # 'on' a date something happens on; 'by ~' a horizon that only bounds the
+            # plan — the same wording rule as the expert view.
+            if g.get("date_type") == "horizon":
+                date_part = f"by ~{date_word} ({when})"
+            else:
+                date_part = f"on {date_word} ({when})"
+            emoji = " ".join(sport_emoji(s) for s in str(g["sport_type"]).split(","))
+            lines.append(f"{emoji} {g['title']} — {date_part}")
+            description = (g.get("description") or "").strip()
+            if description:
+                lines.append(wrap_text(description))
+    else:
+        lines.append(
+            "No goal on the horizon right now — once one is set, your training "
+            "will build toward it 🎯"
+        )
+    if completed:
+        count = len(completed)
+        goal_word = "goal" if count == 1 else "goals"
+        lines.append(f"\n🏁 {count} {goal_word} already behind you — nice collection 🏆")
+    return lines
+
+
+def simple_focus_snippet(text: str, limit: int = 220) -> str:
+    """The opening of a mesocycle's focus, for the plan view: the first sentence when
+    one ends within `limit` chars, else a word-boundary cut with an ellipsis. The full
+    prescription is expert detail (§11); the companion gets the headline."""
+    text = " ".join(text.split())
+    cut = text.find(". ")
+    if 0 <= cut < limit:
+        return text[:cut + 1]
+    if len(text) <= limit:
+        return text
+    return text[:text.rfind(" ", 0, limit)] + "…"
+
+
+def simple_plan_lines(
+    goal: Dict[str, Any], macrocycle: Dict[str, Any],
+    mesocycles: List[Dict[str, Any]], today: str,
+) -> List[str]:
+    """Simple rendering of one periodization plan: the road to the goal — blocks done,
+    the block the athlete is in (with its focus), blocks ahead — closed by the goal day.
+    Strategy prose, IDs, feedback and snapshotted inputs stay expert detail (§11)."""
+    lines = [f"🧭 The road to {goal['title']}:"]
+    if macrocycle.get("status") == "superseded":
+        lines.append("(an older version of the plan — a newer one has replaced it)")
+    if not mesocycles:
+        lines.append("No training blocks drawn up yet — check back soon 🌱")
+        return lines
+    for m in mesocycles:
+        start, end = str(m["start_date"]), str(m["end_date"])
+        total_days = max(1, days_between(start, end) + 1)
+        if end < today:
+            lines.append(f"✅ {m['name']} — done")
+            continue
+        if start <= today:
+            total_weeks = max(1, -(-total_days // 7))  # ceiling
+            week_now = min(total_weeks, days_between(start, today) // 7 + 1)
+            lines.append(
+                f"👉 {m['name']} — you're here, week {week_now} of {total_weeks}"
+            )
+            focus = (m.get("focus") or "").strip()
+            if focus:
+                lines.append(wrap_text(simple_focus_snippet(focus)))
+            continue
+        # A future block: when it starts and how long it runs. Exact-week blocks read
+        # in weeks; anything ragged reads in days rather than as a rounded lie.
+        if total_days % 7 == 0:
+            weeks = total_days // 7
+            length = "1 week" if weeks == 1 else f"{weeks} weeks"
+        else:
+            length = f"{total_days} days"
+        lines.append(f"🔜 {m['name']} — starts {simple_date_word(start)}, {length}")
+    date_word = simple_date_word(str(goal["target_date"]))
+    when = simple_when(str(goal["target_date"]), today)
+    if goal.get("date_type") == "horizon":
+        lines.append(f"\n🏁 Building toward ~{date_word} ({when}) — keep stacking 💪")
+    else:
+        lines.append(f"\n🏁 The big day: {date_word} ({when}) — you've got this 💪")
+    return lines

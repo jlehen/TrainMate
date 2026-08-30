@@ -149,17 +149,19 @@ classes themselves.
     can reuse the same transport.
   - **Simple ("companion") mode** — `telegram.ui: simple`, DESIGN_bot_simple_frontend.md.
     The same pipeline gains a persona for a non-technical athlete; expert mode is
-    untouched. A persistent 2×2 reply keyboard maps labels onto fixed argv
-    (`SIMPLE_KEYBOARD`); "💬 Tell my coach" arms one free-text message for
-    `workout adapt -m`; other unarmed free text is classified by `tm bot route`
+    untouched. A persistent reply keyboard (two labels per row) maps labels onto fixed
+    argv (`SIMPLE_KEYBOARD`): today, the week, goals, the periodization plan, progress
+    (DESIGN_bot_simple_frontend.md §5.1, §11); "💬 Tell my coach" arms one free-text
+    message for `workout adapt -m`; other unarmed free text is classified by `tm bot route`
     (a hidden CLI command calling `llm.router_model`) and mapped to argv from the bot's
     own `ROUTER_INTENT_ARGV` table — the model picks an intent, never argv. Constraints
     are part of that surface: adding rides the `adapt -m` capture flow, and
     showing/removing map to `tm bot constraints`, whose button picker offers single-ID
     `constraint rm` taps (DESIGN_bot_simple_frontend.md §5.5). Subprocesses
     additionally get `TRAINMATE_RENDER=simple` (interpreted by
-    `cli/common.is_simple_render`) so opted-in commands render companion prose, sent
-    plain instead of `<pre>`. A third one-way sentinel, `BUTTONS_SENTINEL`/
+    `cli/common.is_simple_render`) so opted-in commands (`workout list`, `progress`,
+    the adapt result, `bot morning`, `goal list`, `plan show`) render companion prose,
+    sent plain instead of `<pre>`. A third one-way sentinel, `BUTTONS_SENTINEL`/
     `emit_buttons` (`\x1eTM-BUTTONS {json}`), attaches a *non-blocking* inline button
     row (`ui:` callback namespace, token-invalidated) whose taps feed a canned
     utterance back through the normal pipeline. An asyncio scheduler (`_push_loop`)

@@ -124,6 +124,8 @@ SIMPLE_WELCOME = (
     "Use the buttons below:\n"
     "📅 Today — today's session\n"
     "🗓 My week — the days ahead\n"
+    "🎯 Goals — what you're training for\n"
+    "🧭 My plan — the road to your goal\n"
     "📈 Progress — how your fitness is building\n"
     "💬 Tell my coach — pass something on (tired, busy, sore…)\n\n"
     "Or just type what you want, in your own words."
@@ -138,10 +140,12 @@ ROUTER_FALLBACK = (
 )
 
 # Reply-keyboard label → fixed argv; None arms free-text capture (§5.1/§5.2).
-# Buttons never reach beyond this table.
+# Buttons never reach beyond this table; the keyboard renders it two per row, in order.
 SIMPLE_KEYBOARD = [
     ("📅 Today", ["workout", "list", "-d", "today"]),
     ("🗓 My week", ["workout", "list"]),
+    ("🎯 Goals", ["goal", "list"]),
+    ("🧭 My plan", ["plan", "show"]),
     ("📈 Progress", ["progress", "--chart"]),
     ("💬 Tell my coach", None),
 ]
@@ -154,6 +158,8 @@ SIMPLE_KEYBOARD = [
 ROUTER_INTENT_ARGV = {
     "show_today": ["workout", "list", "-d", "today"],
     "show_week": ["workout", "list"],
+    "show_goals": ["goal", "list"],
+    "show_plan": ["plan", "show"],
     "show_progress": ["progress", "--chart"],
     "show_constraints": ["bot", "constraints"],
     "remove_constraint": ["bot", "constraints"],
@@ -164,6 +170,8 @@ ROUTER_INTENT_ARGV = {
 ROUTER_ECHO = {
     "show_today": "showing today",
     "show_week": "showing your week",
+    "show_goals": "showing your goals",
+    "show_plan": "showing your plan",
     "show_progress": "showing your progress",
     "coach_message": "passing that on to your coach",
     "add_constraint": "noting that rule for your coach",
@@ -562,11 +570,12 @@ def main() -> None:
     armed: Dict[int, float] = {}
     ui_actions: Dict[int, Tuple[str, List[dict]]] = {}
 
-    # The persistent §5.1 reply keyboard, 2×2 — built unconditionally, attached (and
-    # re-asserted on every message) only while the persona is simple.
+    # The persistent §5.1 reply keyboard, two labels per row in table order — built
+    # unconditionally, attached (and re-asserted on every message) only while the
+    # persona is simple.
     reply_keyboard = ReplyKeyboardMarkup(
-        [[KeyboardButton(SIMPLE_KEYBOARD[0][0]), KeyboardButton(SIMPLE_KEYBOARD[1][0])],
-         [KeyboardButton(SIMPLE_KEYBOARD[2][0]), KeyboardButton(SIMPLE_KEYBOARD[3][0])]],
+        [[KeyboardButton(label) for label, _ in SIMPLE_KEYBOARD[i:i + 2]]
+         for i in range(0, len(SIMPLE_KEYBOARD), 2)],
         resize_keyboard=True, is_persistent=True,
     )
 

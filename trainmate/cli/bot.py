@@ -54,6 +54,14 @@ PUSH_ALL_DONE_LINE = "✅ Already done for today — nice work 💪"
 ROUTER_INTENTS = {
     "show_today": "the athlete wants to see today's session or what to do today",
     "show_week": "the athlete wants to see the upcoming schedule / their week",
+    "show_goals": (
+        "the athlete wants to see their goals — what they are training for, or when "
+        "the event is"
+    ),
+    "show_plan": (
+        "the athlete wants the big picture of their training plan — the phases or "
+        "blocks on the way to the goal, what comes after this week"
+    ),
     "show_progress": "the athlete wants to see progress, fitness, stats or a chart",
     "coach_message": (
         "the athlete is telling the coach something about their state or availability "

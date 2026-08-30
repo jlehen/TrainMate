@@ -598,7 +598,7 @@ def run_workout_list(args: argparse.Namespace) -> None:
         if start_date and start_date == end_date:
             lines = simple_day_lines(workouts, start_date, verdicts)
         else:
-            lines = simple_week_lines(workouts)
+            lines = simple_week_lines(workouts, verdicts)
         for line in lines:
             print(line)
         return

@@ -312,6 +312,8 @@ class SimpleKeyboardTest(unittest.TestCase):
             ("run", ["workout", "list", "-d", "today"]),
         )
         self.assertEqual(bot.keyboard_action("🗓 My week"), ("run", ["workout", "list"]))
+        self.assertEqual(bot.keyboard_action("🎯 Goals"), ("run", ["goal", "list"]))
+        self.assertEqual(bot.keyboard_action("🧭 My plan"), ("run", ["plan", "show"]))
         self.assertEqual(
             bot.keyboard_action("📈 Progress"), ("run", ["progress", "--chart"])
         )
@@ -345,7 +347,8 @@ class GuardrailTest(unittest.TestCase):
     typing."""
 
     ALLOWED_PREFIXES = {
-        ("workout", "list"), ("progress", "--chart"), ("bot", "constraints"),
+        ("workout", "list"), ("goal", "list"), ("plan", "show"),
+        ("progress", "--chart"), ("bot", "constraints"),
     }
 
     def test_keyboard_argv_stays_read_only(self):
