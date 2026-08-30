@@ -188,7 +188,7 @@ classes themselves.
 |----------------------|----------------------|--------------------------------------------------|
 | `types.py`           | —                    | TypedDicts: `Objective`, `Constraint`, `LifeEvent` (legacy), `Workout` (the hydrated session, not a table row — §5), `CompletedActivity` (incl. `bike_avg_watts`, `zone1_sec`–`zone5_sec`), `AthleteMetric`, `AthleteBaseline`, `Macrocycle`, `Mesocycle` |
 | `config.py`          | `config`             | Reads `config.yaml`; exposes typed properties.   |
-| `prompt.py`          | (`cli.prompt`)       | Front-end-agnostic prompt broker: `confirm`/`choose`/`ask_text` over `TtyPrompt` (`input()`) or `JsonPrompt` (chat/web). See [§6](#6-singletons). |
+| `prompt.py`          | (`cli.prompt`)       | Front-end-agnostic prompt broker: `confirm`/`choose`/`ask_text` over `TtyPrompt` (`input()`) or `JsonPrompt` (chat/web). Journals every answer on the asking run (DESIGN_logging.md §5.6). See [§6](#6-singletons). |
 | `db/`                | `db`                 | SQLite wrapper; `Database` composed from         |
 |                      |                      | per-domain mixins. Full CRUD for all tables.     |
 | `coach/honoring.py`  | —                    | Which coach pass owns a constraint, and whether  |
@@ -401,7 +401,7 @@ flow for each lives in [§10](#10-key-data-flows).
 | A CLI command                    | `trainmate/cli/<family>.py` (`run_*`), dispatcher in `trainmate_cli.py` ([§7](#7-cli-commands-reference)) |
 | A message telling the athlete to run something | wrap the command in `util.cmd()`, nested *inside* the line's colour call, so it renders as the bright shade of that colour — and emit it with `util.aside`, not `print`: a "you could now run X" hint is side information |
 | Whether a line reaches the chat front-end | `util.aside` (side information, terminal only) vs `print` (the answer, warnings, errors). Building a list of lines rather than printing? gate on `util.asides_enabled()`. DESIGN_output_verbosity.md §3 |
-| Recording that something happened | Nothing new to call: `util.step` (what the app is doing), `util.warn`/`util.fail` (something outside the app did not work) print and journal in one go, and `run_once` already brackets the command. Reach for `trainmate/journal.py` directly only for a record with structured fields (`journal.record("garmin.pull", …)`) or for what must never reach the athlete (`journal.debug` — the tier that replaced `except Exception: pass`, pinned by `tests/test_journal.py`). The event name comes from the closed nine-word vocabulary in `journal.EVENTS`; severity is `lvl`, not a new name. Never copy something a table already holds — that is the domain record, and it outlives this one. DESIGN_logging.md §2/§4.2/§5 |
+| Recording that something happened | Nothing new to call: `util.step` (what the app is doing), `util.warn`/`util.fail` (something outside the app did not work) print and journal in one go, and `run_once` already brackets the command. Reach for `trainmate/journal.py` directly only for a record with structured fields (`journal.record("garmin.pull", …)`) or for what must never reach the athlete (`journal.debug` — the tier that replaced `except Exception: pass`, pinned by `tests/test_journal.py`). The event name comes from the closed nine-word vocabulary in `journal.EVENTS`; severity is `lvl`, not a new name. Never copy something a table already holds — that is the domain record, and it outlives this one. What the athlete *answered* needs nothing at all: `runtime.prompt` journals every `confirm`/`choose` itself (§5.6). DESIGN_logging.md §2/§4.2/§5 |
 | Reading back what a command did  | `tm journal` (`trainmate/cli/journal.py`), or `logs/runs/*.jsonl` with `jq`. A run's prompts are `logs/llm_exchanges/*<run id>*` — the id in the filename is the join, not the timestamp, because those names come from the machine's local clock while the journal is UTC. DESIGN_logging.md §6/§7 |
 | How long the coach's prose is    | `coach/engine/prompt.py` (`## WRITING FOR THE ATHLETE`, shared by every command built on `_build_system_prompt`) + the per-field caps in each `## RESPONSE FORMAT`. Check `coach/formatting.py` first: a field re-injected into later prompts must not be capped (DESIGN_output_verbosity.md §5.1) |
 | A web *view* of existing data    | a GET in `trainmate_web.py` + a panel in `static/app.js` ([§8](#8-web-api-endpoints)) |
@@ -1580,6 +1580,18 @@ abort for a command error; `trainmate_cli.main`'s `__main__` guard catches it an
 `Cancelled.`. Garmin MFA (`garmin/client.py`) stays outside the broker: it's gated by
 `sys.stdin.isatty()` and raises `GarminAuthRequired` off a TTY, so it never hangs the bot.
 
+The broker is also where an answer is **journalled**, in `_record_answer` — one `info`
+`note` reading `<question> → yes|no`, with `d.answer` for querying. It goes here and not
+at the ~29 call sites because this is the only thing that asks, so a question added later
+is covered the day it lands; `tests/test_journal.py` fails on any bare `input()` under
+`trainmate/cli/` or `trainmate/coach/` to keep that true. Three cases stay apart: EOF (cron,
+a pipe) records `defaulted` rather than a decision nobody made, a cancel records the
+question that was open, and `ask_text` is not journalled at all because its answer is the
+athlete's free text (DESIGN_logging.md §4.4). The record lands on the innermost open run of
+the process that writes — under the bot that is the CLI subprocess, so it carries the
+command's run id and not the bot's. The two imports it needs are deferred so this module
+still imports nothing beyond the stdlib. DESIGN_logging.md §5.6
+
 For tests, call `tests.helpers.rebind_test_db(test_db)`: it sets `runtime.db` plus the
 remaining by-value sites in one call, so a module cannot be left reading a different
 handle than its neighbours. `tests/__init__.py` installs two backstops before anything
@@ -2479,8 +2491,11 @@ venv/bin/python -m unittest discover -s tests -p "test_*.py"
 |                                | `failed`; a cancel is `cancelled`; three lines in `tm shell`     |
 |                                | make four runs with one parent), retention and its once-a-day    |
 |                                | stamp, `tm journal`'s three views, the `step`/`warn`/`fail`      |
-|                                | verbs — and the structural pass that fails on any broad          |
-|                                | `except` whose body is a bare `pass`                             |
+|                                | verbs, the prompt answers (a declined confirm on the asking      |
+|                                | run, EOF marked `defaulted`, a cancel naming the open question,  |
+|                                | `ask_text` never journalled) — and two structural passes, one    |
+|                                | failing on any broad `except` whose body is a bare `pass`, one   |
+|                                | on any bare `input()` under `cli/` or `coach/`                   |
 
 Tests inject a fresh in-memory SQLite DB by assigning `test_db` to module-level
 `db` variables *before* importing the singletons. `openrouter_client` is mocked
@@ -2578,6 +2593,13 @@ also journals; the operational warnings became `warn`/`fail`. One `try`/`except`
 `run_once` then buys every failed command its own traceback — which used to be discarded
 unless the athlete passed `--debug`, which they never did, because the run that mattered
 had already finished.
+
+The same reasoning put one more record in one more place. The verbs cover what the app
+says; they do not cover what it hears. A declined `workout generate` returns from its
+handler normally, so its run ends `ok` — indistinguishable in the listing from the run that
+applied, same duration, same tokens, and two of those answers quietly re-stamp a config
+hash on the way past. The answer is therefore recorded in the prompt broker, which is the
+one place all 29 questions pass through, rather than beside each of them.
 
 Two consequences are worth knowing before editing any of it. The journal's day file is the
 one date in this app that is **not** the athlete's, because resolving their zone reads a

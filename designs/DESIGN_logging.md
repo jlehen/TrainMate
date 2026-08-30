@@ -292,6 +292,9 @@ ones that already exist a second job.
 Read down the "journals" column and the log's shape is just the output design plus the one
 tier the athlete never sees.
 
+These are all things the app says. The one thing it hears — the answer to a yes/no
+question — is recorded in the prompt broker rather than by a verb, and §5.6 says why.
+
 ### 5.2 Splitting `aside`
 
 `DESIGN_output_verbosity.md` put two different things in the aside tier, because for the
@@ -380,6 +383,92 @@ That single hook is the largest thing this design buys and it costs one `try`/`e
 The ten `except Exception: pass` sites become `except Exception: journal.debug(...)`.
 They stay silent on screen. They stop being silent on disk. A structural test pins this
 (§11).
+
+### 5.6 What the athlete answered
+
+The verbs above record what the app did on its own. They do not record the one thing the
+athlete contributes to a run: the answer to a yes/no question.
+
+That gap is not cosmetic. A declined `workout generate` returns from its handler
+normally — `confirm()` returns `False`, the handler prints "Workouts discarded" and
+returns — so the run ends `ok`, with the same duration and the same token count as a run
+that applied. Two rows in the listing, identical, one of which changed the plan and one of
+which changed nothing:
+
+```
+81c0901f  W g -m 19   52,270 tok · 187.3s  ok
+ba59ada8  W g -m 19   54,621 tok · 217.7s  ok
+```
+
+`cancelled` does not close this. It is `PromptCancelled`, which only the structured
+front-end raises — a `/cancel`, an idle timeout, a dead answer channel. So the journal
+already records *the athlete never answered* and has no way to record *the athlete said
+no*, which is the far more common of the two.
+
+Two of these answers also write to the database. Declining "a plan-shaping input has
+changed, regenerate?" re-stamps the macrocycle's config hash, so the warning never fires
+again; `workout generate` does the same when the athlete accepts the out-of-date plan.
+A single keystroke permanently silences a future warning and leaves no trace anywhere.
+That is exactly the "what it decided to skip" of §2.1.
+
+**The record goes in the broker, not at the call sites.** All 29 questions in the tree —
+28 `confirm`, one `choose` — go through `trainmate/prompt.py`, and nothing else asks. One
+edit there covers every command on both transports, and a question added next year is
+covered the day it lands. Twenty-nine `journal.note(...)` calls beside twenty-nine
+prompts is the drift §5 opens by warning about.
+
+It costs `prompt.py` its stdlib-only import, which is what kept it unit-testable with a
+pair of `StringIO` streams. The import is deferred into `_record_answer` instead, so the
+module still imports nothing at import time, and `journal.note` never raises (§4.3), so a
+prompt cannot fail on its log.
+
+**What it says.** One `note` at `info`, carrying the question and the answer:
+
+```
++18.2s  info  note  Schedule these 7 workout(s) and push them to Google Calendar? → no
+```
+
+with `d: {"answer": false}`. The question is already prose written for a human, which is
+the same reason §5.2 costs so little; it is flattened to one line and stripped of colour,
+because it was written for a terminal and this is not one. `info`, not `warn` — declining
+is not a problem, and `warn` would flip a healthy run's END column.
+
+**Three things it keeps apart.**
+
+*An answer is not a default.* `TtyPrompt` falls back to the default on EOF, which is cron
+or a pipe — nobody answered. Those records carry `"defaulted": true` and the log does not
+claim a decision that was never made. A structured front-end that replies without an
+`answer` field is the same case.
+
+*An answer is not a cancel.* A cancelled prompt records the question that was open, so a
+`cancelled` run says what it was waiting on rather than only that it stopped.
+
+*A yes/no is not free text.* `ask_text` is not journalled at all. Its answer is the
+athlete's own words, which §4.4 keeps out. The one confirm whose question contains
+athlete-derived text — "Add constraint: {title}?", extracted from the `-m` note — is
+already covered, because that note is in `run.start` verbatim.
+
+**Why `note` and not a tenth `ev`.** §4.2 says a name is earned by turning out to be worth
+filtering on repeatedly, and `d.answer` is queryable today. The honest counter-argument is
+that every other `note` is the app deciding for itself and this is the only record of the
+athlete deciding, which is a real difference in kind. If `tm journal --declined` ever wants
+to be a flag, that is the moment it earns `prompt.answer`.
+
+**Which run it lands on.** `record()` reads the innermost open run of the process that
+writes, so the note carries the run of the command that asked. On a TTY that is the
+`run_once` bracket around the handler. Under the bot the CLI is a subprocess and
+`JsonPrompt.confirm` blocks and returns *inside the child*, so the note lands on the
+child's run — the same id as that command's other events, not the bot's long-lived one.
+This matters because the bot already logs `answer: Yes` through `_log`, and that record is
+written in the bot's process, on the bot's run. The two are not redundant: one says a
+button was tapped, the other says which question got which answer, and only the second is
+in the run you open when you ask what that command did.
+
+**The outcome vocabulary does not grow.** A fourth outcome cannot work: a multi-goal `plan
+generate` asks once per goal and one run may hold two yeses and a no. If the listing later
+wants to mark declined runs, the way in is a `declines` counter on the `run.end` rollup
+beside `warns` and `errors`, which keeps the §3 promise that the list view never scans a
+run's events. Not built.
 
 ## 6. The LLM exchange log, joined in
 
@@ -685,7 +774,7 @@ re-read is a benchmark you have to re-run.
 
 ## 11. Testing
 
-Four tests, matching the kinds `AGENTS.md` asks for.
+Six tests, matching the kinds `AGENTS.md` asks for.
 
 **A unit test on the writer.** A record round-trips; a record never contains a newline; an
 over-long traceback is elided in the middle and the whole record stays under 8 KB; a line
@@ -698,12 +787,24 @@ raises records the traceback and `outcome: failed`; a cancelled command records
 `outcome: cancelled` and not `failed`; and three lines typed into `tm shell` produce four
 runs — one for the shell and one per line, each naming the shell as its parent (§3).
 
+**A behavioural test on the answers.** §5.6 turns on a record nothing else writes, so it
+is pinned directly: a declined confirm lands on the run that asked it and the run still
+ends `ok`; EOF is marked `defaulted` rather than read as a no; a cancelled prompt names
+the question that was open; a confirm inside `tm shell` lands on the typed line's run and
+not the shell's; and `ask_text` writes nothing at all, which is the §4.4 rule.
+
 **A structural test on the read-only verbs.** §7.1 hides a run by matching the last word of
 its command against a set of names, and that set lives in `cli/journal.py` while the names
 live in the parser tree — two files, so the invariant needs a test that spans them.
 `TestReadOnlyVerbs` walks the real tree and fails on any verb that no longer names a
 command: a renamed or retired one would otherwise match nothing, silently, and its runs
 would drift back into the listing with no symptom to notice.
+
+**A structural test on where questions are asked.** The broker records every answer in one
+place (§5.6), which only holds while it is the only thing that asks. So walk the AST of
+`trainmate/cli/` and `trainmate/coach/` and fail on any call to `input`. Keyed on the
+shape, so a handler written tomorrow is covered tomorrow. The REPL's line reader and the
+Garmin MFA code sit outside both trees, and neither is a question about training.
 
 **A structural test on the swallows.** `AGENTS.md` asks for a test that spans files when
 the rule does, keyed on a shape rather than a list of names. The shape here is

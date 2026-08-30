@@ -20,8 +20,15 @@ Two transports ship here:
   timeout) raises ``PromptCancelled``, which the CLI dispatcher turns into a clean
   abort.
 
+Every answer is journalled here rather than at the ~29 call sites, so a run records
+that a plan was *declined* and not merely never applied (DESIGN_logging.md §5.6). The
+broker is the one place both transports and every command pass through, which is what
+keeps the record from drifting as questions are added. ``ask_text`` is the deliberate
+exception: its answer is the athlete's free text, which §4.4 keeps out of the journal.
+
 The module imports nothing beyond the stdlib so it stays unit-testable in
-isolation (feed ``JsonPrompt`` a pair of ``io.StringIO``-like streams).
+isolation (feed ``JsonPrompt`` a pair of ``io.StringIO``-like streams); the journal
+and colour helpers are imported inside ``_record_answer`` to keep that true.
 """
 from __future__ import annotations
 
@@ -95,6 +102,40 @@ class Choice:
     label: str
 
 
+def _record_answer(message: str, shown: str, **fields: Any) -> None:
+    """Journals one answered question on the run that asked it (DESIGN_logging.md §5.6).
+
+    Both imports are deferred so this module still imports nothing beyond the stdlib, and
+    `journal.note` never raises (§4.3), so a prompt cannot fail on its own log. The
+    question is flattened to one line and stripped of colour: it was written for a
+    terminal, and the journal is not one."""
+    from trainmate.journal import note
+    from trainmate.util import strip_ansi
+    note(" ".join(strip_ansi(message).split()) + f" → {shown}", **fields)
+
+
+def _yes_no(answer: bool) -> str:
+    return "yes" if answer else "no"
+
+
+def _resolve_choice(ans: str, choices: Sequence[Choice], default: Optional[str]) -> str:
+    """The value an entered line names: an index, a value, a label, else the default.
+
+    Split out of `TtyPrompt.choose` so the answer is resolved once and journalled once,
+    rather than at each of the four points that used to return it."""
+    fallback = default if default is not None else choices[0].value
+    if not ans:
+        return fallback
+    if ans.isdigit():
+        idx = int(ans) - 1
+        if 0 <= idx < len(choices):
+            return choices[idx].value
+    for c in choices:
+        if ans == c.value.lower() or ans == c.label.lower():
+            return c.value
+    return fallback
+
+
 class TtyPrompt:
     """Interactive-terminal transport — ``input()`` with the classic rendering.
 
@@ -107,10 +148,15 @@ class TtyPrompt:
         try:
             ans = input(message + suffix).strip().lower()
         except EOFError:
+            # Piped stdin or cron: nobody answered, so the record must not say they did.
+            _record_answer(message, _yes_no(default), answer=default, defaulted=True)
             return default
         if not ans:
-            return default
-        return ans in ("y", "yes")
+            answer = default
+        else:
+            answer = ans in ("y", "yes")
+        _record_answer(message, _yes_no(answer), answer=answer)
+        return answer
 
     def choose(self, message: str, choices: Sequence[Choice], *,
                default: Optional[str] = None) -> str:
@@ -118,20 +164,15 @@ class TtyPrompt:
         for i, c in enumerate(choices, 1):
             marker = " (default)" if c.value == default else ""
             print(f"  [{i}] {c.label}{marker}")
+        eof = False
         try:
             ans = input("Choice: ").strip().lower()
         except EOFError:
             ans = ""
-        if not ans:
-            return default if default is not None else choices[0].value
-        if ans.isdigit():
-            idx = int(ans) - 1
-            if 0 <= idx < len(choices):
-                return choices[idx].value
-        for c in choices:
-            if ans == c.value.lower() or ans == c.label.lower():
-                return c.value
-        return default if default is not None else choices[0].value
+            eof = True
+        answer = _resolve_choice(ans, choices, default)
+        _record_answer(message, answer, answer=answer, defaulted=eof or None)
+        return answer
 
     def ask_text(self, message: str, *, secret: bool = False,
                  default: Optional[str] = None) -> str:
@@ -174,6 +215,9 @@ class JsonPrompt:
         while True:
             line = self._inp.readline()
             if not line:  # answer channel closed — front-end is gone
+                # Journalled so a `cancelled` run says which question was still open —
+                # a morning push that timed out names the one it was waiting on (§5.6).
+                _record_answer(payload.get("message", ""), "cancelled", cancelled=True)
                 raise PromptCancelled()
             line = line.strip()
             if not line:
@@ -185,6 +229,7 @@ class JsonPrompt:
             if resp.get("id") != pid:  # stale / out-of-order; keep waiting
                 continue
             if resp.get("cancelled"):
+                _record_answer(payload.get("message", ""), "cancelled", cancelled=True)
                 raise PromptCancelled()
             return resp
 
@@ -194,7 +239,13 @@ class JsonPrompt:
             "type": "confirm", "message": message,
             "default": default, "danger": danger,
         })
-        return bool(resp.get("answer", default))
+        # A response with no `answer` is a front-end that did not answer, not a "no":
+        # `defaulted` keeps those apart in the journal exactly as EOF does on a TTY.
+        answered = "answer" in resp
+        answer = bool(resp.get("answer", default))
+        _record_answer(message, _yes_no(answer), answer=answer,
+                       defaulted=None if answered else True)
+        return answer
 
     def choose(self, message: str, choices: Sequence[Choice], *,
                default: Optional[str] = None) -> str:
@@ -205,9 +256,13 @@ class JsonPrompt:
         })
         answer = resp.get("answer")
         valid = {c.value for c in choices}
-        if answer in valid:
-            return answer
-        return default if default is not None else choices[0].value
+        usable = answer in valid
+        if usable:
+            chosen = answer
+        else:
+            chosen = default if default is not None else choices[0].value
+        _record_answer(message, chosen, answer=chosen, defaulted=None if usable else True)
+        return chosen
 
     def ask_text(self, message: str, *, secret: bool = False,
                  default: Optional[str] = None) -> str:
