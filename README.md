@@ -205,11 +205,12 @@ documentation staying in the template.) The blocks you must fill:
 - **`garmin:`** — `email` and `password` for Garmin Connect.
 - **`user_profile:`** — the athlete the coach is planning for: `gender`, `max_hr`,
   `weekly_target_hours`, sport preferences, chronic injuries, free-text
-  preferences, and a per-day `weekly_schedule` — how many hours and sessions
-  each weekday can hold, how *certain* you are to actually train that day
-  (the coach weights planning toward higher-certainty days), and what
-  equipment is at hand. The plan is built around this block, so fill it
-  honestly rather than optimistically.
+  preferences, and an optional per-day `weekly_schedule` — how many hours and
+  sessions each weekday can hold, how *certain* you are to actually train that
+  day (the coach weights planning toward higher-certainty days), and what
+  equipment is at hand. Omit `weekly_schedule` and the coach places sessions
+  on any day, sized by `weekly_target_hours`. The plan is built around this
+  block, so fill it honestly rather than optimistically.
 
 If you don't have a Google service account yet, it's a one-time setup:
 

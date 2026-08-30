@@ -1862,7 +1862,9 @@ Required fields:
 `user_profile` keys: `name`, `birth_year`, `gender`, `max_hr`, `weekly_target_hours`,
 `sport_preferences`, `chronic_injuries`, `preferences`, `equipment`,
 `weekly_schedule`. `weekly_schedule` maps day names to
-`{total_available_hours, max_sessions, certainty_percent, equipment}`. Trainable
+`{total_available_hours, max_sessions, certainty_percent, equipment}`; it is
+optional — without it the coach places sessions on any day, sized by
+`weekly_target_hours`, and the prompt says so instead of listing days. Trainable
 thresholds (`ftp`/`lthr`/…) are **not** here — they live in the `benchmark_results`
 logbook (`DESIGN_benchmark_workouts.md` §3.4); config keeps only quasi-fixed `max_hr`. A
 threshold-less profile is a valid cold start (the coach nudges, never refuses).

@@ -548,6 +548,20 @@ class TestPeriodization(unittest.TestCase):
             )
             self.assertIn("Wednesday: 0.0 hours", prompt)
 
+    def test_system_prompt_without_weekly_schedule(self):
+        # weekly_schedule is optional: the prompt must say so explicitly and must not
+        # instruct adherence to a day-by-day schedule that does not exist.
+        test_profile = {
+            "name": "Jane Doe",
+            "weekly_target_hours": 8.0,
+        }
+        with patch.dict(trainmate.coach.config.data, {"user_profile": test_profile}):
+            prompt = coach_service._get_coach_system_prompt([], [])
+            self.assertIn("no day-by-day schedule configured", prompt)
+            self.assertIn("No day-by-day availability schedule is configured", prompt)
+            self.assertNotIn("Adhere to the day-by-day weekly availability schedule", prompt)
+            self.assertNotIn("No availability configured", prompt)
+
     @patch("trainmate.coach.engine.openrouter_client")
     def test_plan_snapshots_goals_and_constraints(self, mock_client):
         import json

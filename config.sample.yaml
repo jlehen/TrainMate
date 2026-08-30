@@ -204,8 +204,10 @@ user_profile:
     - "smart trainer with Zwift"
     - "trail running shoes"
     - "16/24 kg kettlebells"
-  # Per-day availability. certainty_percent is how likely you are to actually
-  # train that day (the coach weights planning toward higher-certainty days).
+  # Per-day availability. Optional: omit the whole block and the coach places
+  # sessions on any day, sized by weekly_target_hours. certainty_percent is how
+  # likely you are to actually train that day (the coach weights planning toward
+  # higher-certainty days).
   weekly_schedule:
     Monday:
       total_available_hours: 1.3

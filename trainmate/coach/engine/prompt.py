@@ -84,6 +84,13 @@ class PromptBuildMixin:
                     )
                 else:
                     lines.append(f"  * {day}: {day_data} hours")
+        else:
+            # weekly_schedule is optional — without one, say so explicitly rather than
+            # leaving the coach to guess why no availability section appears.
+            lines.append(
+                "- Weekly Availability: no day-by-day schedule configured — any day can "
+                "hold a session; size the week by the weekly target hours."
+            )
 
         return "\n".join(lines)
 
@@ -142,6 +149,17 @@ class PromptBuildMixin:
         c_text = self._render_constraints(constraints)
 
         athlete_profile = self._format_athlete_profile(profile)
+        # weekly_schedule is optional; don't instruct adherence to a schedule that isn't there.
+        if (profile or {}).get("weekly_schedule"):
+            availability_rule = """\
+5. Adhere to the day-by-day weekly availability schedule and day-dependent equipment access
+   (e.g., do not schedule gym workouts on home-only days; do not schedule workouts on rest days;
+   do not exceed daily availability or max sessions). Respect certainty percentages (higher
+   values indicate more rigid constraints; lower values allow flexibility)."""
+        else:
+            availability_rule = """\
+5. No day-by-day availability schedule is configured: place sessions on whichever days serve
+   the plan best, within the weekly target hours and the active constraints."""
         system_prompt = f"""You are TrainMate Coach, an advanced AI sports science training coach.
 You design and adapt personalized training plans for endurance athletes using sports science
 principles.
@@ -155,10 +173,7 @@ principles.
 4. Shift or scale training volume and intensity around the athlete's active constraints
    (travel, injury, capacity/intensity caps, preferences) to manage fatigue and respect
    what they've asked you to work around.
-5. Adhere to the day-by-day weekly availability schedule and day-dependent equipment access
-   (e.g., do not schedule gym workouts on home-only days; do not schedule workouts on rest days;
-   do not exceed daily availability or max sessions). Respect certainty percentages (higher
-   values indicate more rigid constraints; lower values allow flexibility).
+{availability_rule}
 
 {guidelines}
 
