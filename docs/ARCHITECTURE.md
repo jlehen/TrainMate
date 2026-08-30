@@ -1817,9 +1817,16 @@ another one — that is how a second athlete runs from the same checkout: own co
 `database:`, own `science/` guidelines, own `logs/`, own Telegram token and Garmin
 account; only the code is shared. An explicitly named file must exist and parse (a typo
 aborts rather than silently running against the primary athlete's database). Relative
-`database:`, `science_dir:`, `logging.dir` and `service_account_file` values resolve
-against the config file's directory — two athletes share one set of guidelines only by
-pointing `science_dir:` at the same absolute path, never by default.
+`database:`, `science_dir:`, `logging.dir`, `service_account_file` and
+`garmin.token_dir` values resolve against the config file's directory — or, when the
+top-level `data_dir:` key is set, against that directory (itself config-file-relative),
+which moves the whole instance's state under one prefix without repeating it on every
+path key — the Garmin token store (default `.garminconnect` beside the config,
+DESIGN_garmin_direct_pull.md §11) included, so a `data_dir:` instance keeps its own:
+garminconnect resumes a stored token before it looks at the configured email, so two
+athletes sharing one store would silently pull one Garmin account's data. Two athletes
+share one set of guidelines only by pointing `science_dir:` at the same absolute path,
+never by default.
 
 Required fields:
 
@@ -1833,7 +1840,8 @@ Required fields:
 | `garmin_mutable_days` / `garmin_backfill_prompt_days` / `garmin_initial_backfill_days` / `garmin_throttle_seconds` | — | Auto-ensure tuning (see [§10 Data Pull](#data-pull-data-pull-and-auto-ensure)) |
 | `service_account_file` | str  | Path to service account JSON (default:                        |
 |                        |      | `service_account.json`)                                       |
-| `database`             | str  | SQLite file this instance operates on; a relative value resolves against the config file's directory (default: `trainmate.db`) |
+| `data_dir`             | str  | Directory every relative path key below resolves against, replacing the config file's directory as the base; itself config-file-relative. Absent → the config file's directory (the pre-`data_dir` rule) |
+| `database`             | str  | SQLite file this instance operates on; a relative value resolves against the config file's directory / `data_dir:` (default: `trainmate.db`) |
 | `science_dir`          | str  | Directory whose `*.md` files become the ATHLETE-PROVIDED science block in every coaching prompt (`coach/formatting.py:_load_science_guidelines`); a relative value resolves against the config file's directory (default: `science`). The app's own `trainmate/science/` is not configurable |
 | `logging.dir`          | str  | Root of the two operator log directories — `runs/` (the journal, read with `tm journal`) and `llm_exchanges/` (the full prompts). Relative to the config file's directory, like `database:` (default: `logs`). DESIGN_logging.md §6 |
 | `logging.level`        | str  | Lowest level that reaches the journal file: `debug`\|`info`\|`warn`\|`error` (default `info`). `debug` turns on the records for exceptions the app deliberately swallows on screen |

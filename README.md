@@ -258,7 +258,8 @@ be coached*.
 **What it is.** Every `.md` file in `science/` (gitignored, empty by default)
 is injected into TrainMate's coaching prompts alongside the built-in guidelines
 in `trainmate/science/`. The directory is the `science_dir:` config key — it
-defaults to `science/` beside your `config.yaml`, so a second athlete running
+defaults to `science/` beside your `config.yaml` (under `data_dir:` when that
+key is set), so a second athlete running
 under `TRAINMATE_CONFIG` gets their own philosophy rather than yours. It serves
 two purposes:
 

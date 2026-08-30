@@ -6,7 +6,9 @@ from typing import Any, Dict, List, Optional
 # that is how a second athlete runs from the same checkout (ARCHITECTURE.md §9); the
 # default is config.yaml at the repo root. Relative paths written in the file
 # (`database:`, `science_dir:`, `service_account_file`) resolve against the config file's
-# directory, so an instance's state lives beside its config, never beside the code.
+# directory — or against `data_dir:` when that key is set, which moves the whole
+# instance's state under one directory without repeating the prefix on every path key.
+# Either way an instance's state lives beside its config, never beside the code.
 _DEFAULT_CONFIG_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "config.yaml")
 CONFIG_PATH = os.path.abspath(
     os.path.expanduser(os.environ.get("TRAINMATE_CONFIG") or _DEFAULT_CONFIG_PATH))
@@ -107,48 +109,53 @@ class Config:
         return int(self.get("llm", {}).get("request_timeout_seconds", 120))
 
     @property
+    def data_dir(self) -> str:
+        """Base directory every relative path key resolves against: top-level `data_dir:`
+        key, itself resolved against the config file's directory; absent, the config
+        file's directory itself — the pre-`data_dir` rule, unchanged (ARCHITECTURE.md §9)."""
+        prefix = self.get("data_dir")
+        if not prefix:
+            return CONFIG_DIR
+        prefix = os.path.expanduser(str(prefix))
+        return prefix if os.path.isabs(prefix) else os.path.join(CONFIG_DIR, prefix)
+
+    def _resolve(self, path: str) -> str:
+        """The one resolution rule for path keys: ~ expands, an absolute path is
+        respected as written, a relative one lands in `data_dir` (ARCHITECTURE.md §9)."""
+        path = os.path.expanduser(str(path))
+        return path if os.path.isabs(path) else os.path.join(self.data_dir, path)
+
+    @property
     def service_account_file(self) -> str:
         """Gets the service account file path. A relative path resolves against the
-        config file's directory (the CONFIG_PATH rule above)."""
-        path = self.get("google", {}).get("service_account_file", "service_account.json")
-        path = os.path.expanduser(path)
-        if not os.path.isabs(path):
-            path = os.path.join(CONFIG_DIR, path)
-        return path
+        instance's `data_dir` (the CONFIG_PATH rule above)."""
+        return self._resolve(
+            self.get("google", {}).get("service_account_file", "service_account.json"))
 
     @property
     def db_path(self) -> str:
         """The SQLite file this instance operates on: top-level `database:` key, default
-        trainmate.db. A relative value resolves against the config file's directory, so a
+        trainmate.db. A relative value resolves against the instance's `data_dir`, so a
         TRAINMATE_CONFIG instance cannot silently open another instance's database."""
-        path = os.path.expanduser(str(self.get("database") or "trainmate.db"))
-        if not os.path.isabs(path):
-            path = os.path.join(CONFIG_DIR, path)
-        return path
+        return self._resolve(self.get("database") or "trainmate.db")
 
     @property
     def science_dir(self) -> str:
         """The athlete's own sports-science guidelines: top-level `science_dir:` key,
-        default science/. A relative value resolves against the config file's directory,
+        default science/. A relative value resolves against the instance's `data_dir`,
         so a TRAINMATE_CONFIG instance gets its own training philosophy rather than
         inheriting the primary athlete's (ARCHITECTURE.md §9)."""
-        path = os.path.expanduser(str(self.get("science_dir") or "science"))
-        if not os.path.isabs(path):
-            path = os.path.join(CONFIG_DIR, path)
-        return path
+        return self._resolve(self.get("science_dir") or "science")
 
     @property
     def logging_dir(self) -> str:
         """Root of the operator-facing logs — the run journal and the LLM exchanges
         (DESIGN_logging.md §6). Top-level `logging.dir` key, default logs/.
 
-        A relative value resolves against the config file's directory, like `database:`
+        A relative value resolves against the instance's `data_dir`, like `database:`
         and `science_dir:`, so a TRAINMATE_CONFIG instance keeps its logs beside its own
         config instead of interleaving them with the primary athlete's."""
-        path = os.path.expanduser(str(self.get("logging", {}).get("dir") or "logs"))
-        if not os.path.isabs(path):
-            path = os.path.join(CONFIG_DIR, path)
-        return path
+        return self._resolve(self.get("logging", {}).get("dir") or "logs")
 
     @property
     def llm_logs_dir(self) -> str:
@@ -322,14 +329,11 @@ class Config:
     @property
     def garmin_token_dir(self) -> str:
         """Directory where garminconnect persists OAuth tokens: `garmin.token_dir`,
-        default .garminconnect beside the config file. A relative value resolves against
-        the config file's directory (the CONFIG_PATH rule above) — configs sharing a
-        directory must set it apart, or the second silently resumes the first account's
-        session (DESIGN_garmin_direct_pull.md §11)."""
-        path = os.path.expanduser(str(self.get("garmin", {}).get("token_dir") or ".garminconnect"))
-        if not os.path.isabs(path):
-            path = os.path.join(CONFIG_DIR, path)
-        return path
+        default .garminconnect beside the config file (under `data_dir:` when set,
+        like every other path key) — configs sharing a directory must set it apart,
+        or the second silently resumes the first account's session
+        (DESIGN_garmin_direct_pull.md §11)."""
+        return self._resolve(self.get("garmin", {}).get("token_dir") or ".garminconnect")
 
     @property
     def data_refresh_minutes(self) -> int:

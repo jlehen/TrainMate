@@ -15,8 +15,15 @@ llm:
   # above — one allowlist for both roles. Absent -> the coaching model routes too.
   #router_model: "google/gemini-3.5-flash"
 
+# Where this instance's files live. When set, every relative path in this file — the
+# database, science_dir, logging dir, service_account_file, garmin token_dir — resolves
+# against this directory instead of the config file's directory. One key instead of
+# hand-prefixing each path below; an absolute per-key path still wins. Itself relative
+# to this config file's directory.
+#data_dir: "athlete2"
+
 # The SQLite database this install operates on. A relative path resolves against this
-# config file's directory; default trainmate.db beside it.
+# config file's directory (or `data_dir:` when set); default trainmate.db beside it.
 #database: "trainmate.db"
 
 # The athlete's own sports-science guidelines — the directory whose *.md files are
@@ -49,10 +56,12 @@ llm:
 # database and any relative paths in it will live there too), then point every command
 # at it:
 #   TRAINMATE_CONFIG=/path/to/other/config.yaml ./tm status     (and likewise ./tm-bot)
-# A file named via TRAINMATE_CONFIG must exist — a typo aborts instead of silently
-# falling back to the primary athlete's database. Each instance brings its own telegram
-# bot token, garmin credentials and token_dir, google calendar_id, its own logs/, and —
-# unless `science_dir:` says otherwise — its own science/ guidelines beside it.
+# Or keep both configs side by side and give the second one `data_dir:` (above) so its
+# state lands in its own subdirectory. A file named via TRAINMATE_CONFIG must exist — a
+# typo aborts instead of silently falling back to the primary athlete's database. Each
+# instance brings its own telegram bot token, garmin credentials and token_dir, google
+# calendar_id, its own logs/, and — unless `science_dir:` says otherwise — its own
+# science/ guidelines beside it.
 
 # Minimum minutes before an automatic refresh re-pulls — gates both Garmin hits and
 # Calendar-signal syncs; within this window reads reuse the local cache. Bypass a single
@@ -148,10 +157,10 @@ garmin:
   email: "you@example.com"
   password: "your-garmin-password"
   # Directory where the garminconnect OAuth tokens are persisted. A relative path
-  # resolves against this config file's directory, like `database:`; the default is
-  # .garminconnect beside it. A valid token store wins over the credentials above, so
-  # two configs sharing a directory MUST set this apart — otherwise the second one
-  # silently resumes the first athlete's Garmin session.
+  # resolves against this config file's directory (or `data_dir:` when set), like
+  # `database:`; the default is .garminconnect beside it. A valid token store wins over
+  # the credentials above, so two configs sharing a directory MUST set this apart —
+  # otherwise the second one silently resumes the first athlete's Garmin session.
   #token_dir: ".garminconnect"
   # Trailing days a forward-refresh re-fetches to catch late-finalizing data.
   #mutable_days: 3

@@ -17,11 +17,11 @@ import trainmate.config
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(trainmate.config.__file__)))
 
-# Prints the five resolved paths, one per line, from a fresh interpreter.
+# Prints the six resolved paths, one per line, from a fresh interpreter.
 _PRINT_PATHS = (
     "from trainmate.config import config, CONFIG_PATH; "
     "print(CONFIG_PATH); print(config.db_path); print(config.service_account_file); "
-    "print(config.science_dir); print(config.garmin_token_dir)"
+    "print(config.science_dir); print(config.logging_dir); print(config.garmin_token_dir)"
 )
 
 
@@ -48,20 +48,23 @@ class TestInstanceSelection(unittest.TestCase):
             cfg = os.path.join(d, "config.yaml")
             with open(cfg, "w") as f:
                 f.write("user_profile:\n  name: Other\n")
-            config_path, db_path, sa_path, science_dir, _ = self._paths(cfg)
+            config_path, db_path, sa_path, science_dir, logging_dir, token_dir = \
+                self._paths(cfg)
             self.assertEqual(config_path, cfg)
             self.assertEqual(db_path, os.path.join(d, "trainmate.db"))
             self.assertEqual(sa_path, os.path.join(d, "service_account.json"))
             # Guidelines follow the same rule as the database: a second athlete inherits
             # the primary's training philosophy only by asking for it (§9).
             self.assertEqual(science_dir, os.path.join(d, "science"))
+            self.assertEqual(logging_dir, os.path.join(d, "logs"))
+            self.assertEqual(token_dir, os.path.join(d, ".garminconnect"))
 
     def test_relative_database_key_resolves_beside_config(self):
         with tempfile.TemporaryDirectory() as d:
             cfg = os.path.join(d, "config.yaml")
             with open(cfg, "w") as f:
                 f.write("database: other.db\n")
-            _, db_path, _, _, _ = self._paths(cfg)
+            _, db_path, _, _, _, _ = self._paths(cfg)
             self.assertEqual(db_path, os.path.join(d, "other.db"))
 
     def test_absolute_database_key_is_respected(self):
@@ -69,7 +72,7 @@ class TestInstanceSelection(unittest.TestCase):
             cfg = os.path.join(d, "config.yaml")
             with open(cfg, "w") as f:
                 f.write("database: /somewhere/else/other.db\n")
-            _, db_path, _, _, _ = self._paths(cfg)
+            _, db_path, _, _, _, _ = self._paths(cfg)
             self.assertEqual(db_path, "/somewhere/else/other.db")
 
     def test_relative_science_dir_key_resolves_beside_config(self):
@@ -77,7 +80,7 @@ class TestInstanceSelection(unittest.TestCase):
             cfg = os.path.join(d, "config.yaml")
             with open(cfg, "w") as f:
                 f.write("science_dir: guidelines\n")
-            _, _, _, science_dir, _ = self._paths(cfg)
+            _, _, _, science_dir, _, _ = self._paths(cfg)
             self.assertEqual(science_dir, os.path.join(d, "guidelines"))
 
     def test_absolute_science_dir_key_is_respected(self):
@@ -86,7 +89,7 @@ class TestInstanceSelection(unittest.TestCase):
             cfg = os.path.join(d, "config.yaml")
             with open(cfg, "w") as f:
                 f.write("science_dir: /shared/science\n")
-            _, _, _, science_dir, _ = self._paths(cfg)
+            _, _, _, science_dir, _, _ = self._paths(cfg)
             self.assertEqual(science_dir, "/shared/science")
 
     def test_relative_garmin_token_dir_resolves_beside_config(self):
@@ -94,7 +97,7 @@ class TestInstanceSelection(unittest.TestCase):
             cfg = os.path.join(d, "config.yaml")
             with open(cfg, "w") as f:
                 f.write("garmin:\n  token_dir: .garminconnect\n")
-            _, _, _, _, token_dir = self._paths(cfg)
+            _, _, _, _, _, token_dir = self._paths(cfg)
             self.assertEqual(token_dir, os.path.join(d, ".garminconnect"))
 
     def test_absolute_garmin_token_dir_is_respected(self):
@@ -102,7 +105,7 @@ class TestInstanceSelection(unittest.TestCase):
             cfg = os.path.join(d, "config.yaml")
             with open(cfg, "w") as f:
                 f.write("garmin:\n  token_dir: /somewhere/tokens\n")
-            _, _, _, _, token_dir = self._paths(cfg)
+            _, _, _, _, _, token_dir = self._paths(cfg)
             self.assertEqual(token_dir, "/somewhere/tokens")
 
     def test_default_garmin_token_dir_resolves_beside_config(self):
@@ -115,7 +118,7 @@ class TestInstanceSelection(unittest.TestCase):
             cfg = os.path.join(d, "config.yaml")
             with open(cfg, "w") as f:
                 f.write("user_profile:\n  name: Other\n")
-            _, _, _, _, token_dir = self._paths(cfg)
+            _, _, _, _, _, token_dir = self._paths(cfg)
             self.assertEqual(token_dir, os.path.join(d, ".garminconnect"))
 
     def test_missing_explicit_config_aborts(self):
@@ -137,10 +140,66 @@ class TestInstanceSelection(unittest.TestCase):
         # therefore its db_path) belongs to the user, not to this test.
         proc = _run(None)
         self.assertEqual(proc.returncode, 0, proc.stderr)
-        config_path, _, _, science_dir, _ = proc.stdout.strip().splitlines()
+        config_path, _, _, science_dir, _, _ = proc.stdout.strip().splitlines()
         self.assertEqual(config_path, os.path.join(REPO_ROOT, "config.yaml"))
         # The primary install keeps the pre-`science_dir:` location, key or no key.
         self.assertEqual(science_dir, os.path.join(REPO_ROOT, "science"))
+
+
+class TestDataDirPrefix(unittest.TestCase):
+    """`data_dir:` — one key that moves every relative path under a shared prefix,
+    replacing the hand-prefixed database/science_dir/logging.dir trio (ARCHITECTURE.md §9)."""
+
+    def _paths(self, cfg):
+        proc = _run(cfg)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        return proc.stdout.strip().splitlines()
+
+    def test_relative_data_dir_prefixes_every_default(self):
+        with tempfile.TemporaryDirectory() as d:
+            cfg = os.path.join(d, "config.yaml")
+            with open(cfg, "w") as f:
+                f.write("data_dir: athlete2\n")
+            base = os.path.join(d, "athlete2")
+            _, db_path, sa_path, science_dir, logging_dir, token_dir = self._paths(cfg)
+            self.assertEqual(db_path, os.path.join(base, "trainmate.db"))
+            self.assertEqual(sa_path, os.path.join(base, "service_account.json"))
+            self.assertEqual(science_dir, os.path.join(base, "science"))
+            self.assertEqual(logging_dir, os.path.join(base, "logs"))
+            # Tokens follow the prefix like every other path key — a resumed token wins
+            # over the configured email, so instances must not share a token store.
+            self.assertEqual(token_dir, os.path.join(base, ".garminconnect"))
+
+    def test_absolute_data_dir_is_respected(self):
+        with tempfile.TemporaryDirectory() as d:
+            cfg = os.path.join(d, "config.yaml")
+            with open(cfg, "w") as f:
+                f.write("data_dir: /var/lib/trainmate\n")
+            _, db_path, _, _, _, _ = self._paths(cfg)
+            self.assertEqual(db_path, "/var/lib/trainmate/trainmate.db")
+
+    def test_relative_path_keys_resolve_under_data_dir(self):
+        with tempfile.TemporaryDirectory() as d:
+            cfg = os.path.join(d, "config.yaml")
+            with open(cfg, "w") as f:
+                f.write("data_dir: athlete2\ndatabase: other.db\n"
+                        "logging:\n  dir: journal\n"
+                        "garmin:\n  token_dir: tokens\n")
+            base = os.path.join(d, "athlete2")
+            _, db_path, _, _, logging_dir, token_dir = self._paths(cfg)
+            self.assertEqual(db_path, os.path.join(base, "other.db"))
+            self.assertEqual(logging_dir, os.path.join(base, "journal"))
+            self.assertEqual(token_dir, os.path.join(base, "tokens"))
+
+    def test_absolute_path_key_escapes_data_dir(self):
+        # An absolute per-key path still wins — how a data_dir instance deliberately
+        # shares something (e.g. one science/ between athletes).
+        with tempfile.TemporaryDirectory() as d:
+            cfg = os.path.join(d, "config.yaml")
+            with open(cfg, "w") as f:
+                f.write("data_dir: athlete2\nscience_dir: /shared/science\n")
+            _, _, _, science_dir, _, _ = self._paths(cfg)
+            self.assertEqual(science_dir, "/shared/science")
 
 
 if __name__ == "__main__":

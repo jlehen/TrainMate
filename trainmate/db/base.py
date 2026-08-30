@@ -1,3 +1,4 @@
+import os
 import sqlite3
 from contextlib import contextmanager
 from datetime import datetime, timezone
@@ -56,6 +57,11 @@ class BaseDB:
         (DESIGN_workout_revisions.md §8).
         """
         self.db_path: str = db_path or config.db_path
+        # A fresh `data_dir:` instance must run before its directory exists — sqlite
+        # won't create parents, and every other writer already makedirs its own.
+        parent = os.path.dirname(self.db_path)
+        if parent:
+            os.makedirs(parent, exist_ok=True)
         self._joined: Optional[_JoinedConnection] = None
         self.calendar_hook = calendar_hook
         self._init_db()
