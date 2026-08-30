@@ -61,6 +61,7 @@ from trainmate.clock import now as athlete_now, reset_cache as forget_timezone
 from trainmate.config import config
 from trainmate.prompt import (
     PROMPT_SENTINEL, PROMPT_PROTOCOL_VERSION, PHOTO_SENTINEL, BUTTONS_SENTINEL,
+    FLUSH_SENTINEL,
 )
 from trainmate.util import cmd, strip_ansi
 
@@ -331,6 +332,15 @@ def parse_buttons_request(line: str) -> Optional[dict]:
         return json.loads(line[len(BUTTONS_SENTINEL):])
     except json.JSONDecodeError:
         return None
+
+
+def is_flush_request(line: str) -> bool:
+    """True for a sentinel-framed flush marker, ``\\x1eTM-FLUSH {json}``.
+
+    Returns a bool rather than the payload its three siblings return: a flush carries
+    no fields, and an always-empty dict would read as falsy at every call site
+    (DESIGN_output_verbosity.md §7)."""
+    return line.startswith(FLUSH_SENTINEL)
 
 
 # Any other \x1e-prefixed sentinel a future CLI version might emit: recognised
@@ -753,6 +763,12 @@ def main() -> None:
                     await _flush_output(session, buf)
                     buf = []
                     await _send_ui_buttons(session, buttons_req)
+                    continue
+                if is_flush_request(raw):
+                    # Nothing to render: the marker's whole job is to end the message
+                    # here, before the CLI goes quiet for an LLM call (§7).
+                    await _flush_output(session, buf)
+                    buf = []
                     continue
                 req = parse_prompt_request(raw)
                 if req is None and raw.rstrip("\n").startswith(_SENTINEL_PREFIX):

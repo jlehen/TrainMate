@@ -487,9 +487,17 @@ def _wrap_paragraph(para: str, width: int, subsequent_indent: str) -> list:
 
     textwrap counts ANSI escape bytes as columns, so a coloured paragraph would wrap
     ~10 columns short per colour span; a greedy word wrap on visible_len avoids that.
-    Uncoloured text still goes through textwrap so existing layout is untouched."""
+    Uncoloured text still goes through textwrap so existing layout is untouched.
+
+    `break_on_hyphens=False` is what makes the two branches agree: the greedy loop
+    below splits on spaces only, so without it a `--show-llm-context` in a sentence
+    survives a coloured terminal and comes back as `--show-llm-` + `context` on a
+    piped run or over Telegram, where colour is stripped."""
     if not ANSI_ESCAPE.search(para):
-        return textwrap.wrap(para, width=width, subsequent_indent=subsequent_indent)
+        return textwrap.wrap(
+            para, width=width, subsequent_indent=subsequent_indent,
+            break_on_hyphens=False,
+        )
     lines, cur = [], ''
     for word in para.split(' '):
         if not cur:

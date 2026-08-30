@@ -470,10 +470,10 @@ class TestPeriodization(unittest.TestCase):
         self.assertFalse(proposal['reused'])
         self.assertEqual(proposal['strategy'], "New strategy")
 
-    @patch("trainmate.coach.engine.openrouter_client")
-    def test_plan_generate_injects_planned_vs_actual(self, mock_client):
-        # Option A (DESIGN_backward_evaluation.md §6): the prior plan's elapsed blocks are
-        # compared against what was actually completed, and fed into the strategy prompt.
+    def _prior_training_fixture(self, mock_client) -> int:
+        """A goal whose plan has one elapsed block with a session trained inside it —
+        the least that gives `_build_prior_training_context` something to say. Returns
+        the goal's ID."""
         obj_id = test_db.add_objective(
             title="Zurich Marathon", target_date=GOAL_DATE,
             sport_type="running",
@@ -500,6 +500,13 @@ class TestPeriodization(unittest.TestCase):
                 "end_date": "2026-10-15", "focus": "Threshold",
             }],
         }
+        return obj_id
+
+    @patch("trainmate.coach.engine.openrouter_client")
+    def test_plan_generate_injects_planned_vs_actual(self, mock_client):
+        # Option A (DESIGN_backward_evaluation.md §6): the prior plan's elapsed blocks are
+        # compared against what was actually completed, and fed into the strategy prompt.
+        obj_id = self._prior_training_fixture(mock_client)
         coach_service.plan_generate(force=True, objective_id=obj_id)
         system_prompt = mock_client.complete.call_args[0][0]
         self.assertIn("## PRIOR TRAINING REVIEW", system_prompt)
@@ -513,6 +520,53 @@ class TestPeriodization(unittest.TestCase):
                       " ".join(system_prompt.split()))
         self.assertIn("Z2 aerobic", system_prompt)
         self.assertNotIn("HR zones Z1-2/Z3/Z4-5", system_prompt)
+
+    @patch("trainmate.coach.engine.openrouter_client")
+    def test_the_review_is_not_echoed_to_the_screen_by_default(self, mock_client):
+        # It is the longest thing this command prints, and it lands above the strategy
+        # the athlete actually asked for (DESIGN_output_verbosity.md §7). What the model
+        # is shown does not change — only what the screen is.
+        obj_id = self._prior_training_fixture(mock_client)
+        with patch("sys.stdout", new_callable=io.StringIO) as out:
+            coach_service.plan_generate(force=True, objective_id=obj_id)
+        printed = out.getvalue()
+        self.assertNotIn("PRIOR TRAINING REVIEW", printed)
+        self.assertIn("--show-llm-context", printed)
+        self.assertIn("## PRIOR TRAINING REVIEW", mock_client.complete.call_args[0][0])
+
+    @patch("trainmate.coach.engine.openrouter_client")
+    def test_show_context_echoes_the_review(self, mock_client):
+        obj_id = self._prior_training_fixture(mock_client)
+        with patch("sys.stdout", new_callable=io.StringIO) as out:
+            coach_service.plan_generate(
+                force=True, objective_id=obj_id, show_context=True
+            )
+        printed = out.getvalue()
+        self.assertIn("PRIOR TRAINING REVIEW", printed)
+        self.assertIn("PLANNED vs ACTUAL", printed)
+        # Pointing at a flag the athlete just used is noise.
+        self.assertNotIn("--show-llm-context", printed)
+
+    @patch("trainmate.coach.engine.openrouter_client")
+    def test_the_display_copy_is_built_only_when_it_is_shown(self, mock_client):
+        # Showing it costs a second full pass over the same plans, re-laid-out at the
+        # terminal's width. Off the flag that pass buys nothing (§7).
+        obj_id = self._prior_training_fixture(mock_client)
+        # auto_apply=False on both, as the CLI does: saving between the two runs would
+        # change what the second one has to review.
+        with patch.object(
+            coach_service, "_build_prior_training_context",
+            wraps=coach_service._build_prior_training_context,
+        ) as spy, patch("sys.stdout", new_callable=io.StringIO):
+            coach_service.plan_generate(
+                force=True, objective_id=obj_id, auto_apply=False
+            )
+            self.assertEqual(spy.call_count, 1)
+            spy.reset_mock()
+            coach_service.plan_generate(
+                force=True, objective_id=obj_id, auto_apply=False, show_context=True
+            )
+            self.assertEqual(spy.call_count, 2)
 
     def test_system_prompt_inserts_athlete_profile(self):
         test_profile = {

@@ -209,3 +209,86 @@ No command gained or lost a capability, no data is stored differently, and the t
 sees the same output it always did — every suppressed line is one `TRAINMATE_VERBOSE=1`
 away. The bot is untouched: it already declared itself via `TRAINMATE_FRONTEND=json`, and
 this change simply gives that declaration a second meaning.
+
+## 7. The prompt context, and the wait
+
+Rev 2. §3 sorted every line into answer / warning / aside, and that held — until you
+measure the one thing it did not cover.
+
+`plan generate` echoed the whole `PRIOR TRAINING REVIEW` block to the screen before
+calling the model: the planned-vs-actual comparison of every plan the athlete has trained
+through, with a per-sport zone table per plan. On this athlete's real database that is
+**164 lines and about 1,900 words**, and re-laid-out at Telegram's 48 columns it becomes
+**321 lines**. All of it above the strategy the athlete asked for.
+
+### 7.1 Why it is not simply an aside
+
+By §3's taxonomy it looks like an aside — side information, suppress it in chat, keep it
+on the terminal. That is the wrong answer here, and the reason is the size. An aside is a
+line you skim past; 164 of them is a scroll past. A terminal reader loses the answer off
+the top of the screen just as surely as a phone reader loses it below the fold. So this
+one is off on **both** front-ends by default, which no aside is.
+
+It is also not free to produce. The block is built twice when shown — once at prompt
+width for the model, once re-laid-out at the terminal's width, because the zone tables are
+column-aligned and re-wrapping shreds the columns rather than fitting them
+(`DESIGN_intensity_distribution.md` §6). Off the flag, that second full pass over the same
+plans is skipped entirely.
+
+What the **model** sees does not change. This is a screen decision, not a prompt one.
+
+### 7.2 `--show-llm-context`, and why not `-v`
+
+§4 turned down a global `--verbose` because `-v` already means "more detail in this
+listing" on seven sub-commands. That argument has not weakened — `workout generate -v`
+means "name each Calendar event as it is deleted and created", and there is no reading of
+`-v` that covers both that and "echo the prompt context".
+
+So the flag is `--show-llm-context`, on `plan generate`, next to the
+`--show-llm-prompt-only` it is the sibling of: one prints the prompt and exits without
+sending, the other prints the context and carries on. Deliberately **not** added to the
+shared `llm_debug_parser`: `plan generate` is the only command that echoes prompt context,
+and a flag accepted by five commands that ignore it is worse than a flag on one. Move it
+there when a second command has something to show.
+
+Left behind in its place is a one-line aside naming the flag, so the block is discoverable
+rather than merely gone.
+
+### 7.3 Flushing before the wait
+
+Hiding the block fixes the terminal. Chat needs one more thing: `trainmate_bot._drive`
+buffers stdout and flushes at a photo, a button row, a prompt, or exit — so with
+`--show-llm-context` the 321 lines and the strategy arrive **in the same message**, after
+a wait of tens of seconds, which is exactly the shape §1 set out to kill.
+
+A fourth one-way sentinel, `\x1eTM-FLUSH` (`FLUSH_SENTINEL` / `emit_flush()` in
+`trainmate/prompt.py`, `is_flush_request()` in `trainmate_bot.py`), ends the message where
+it stands. Three details:
+
+- **It gates itself.** `emit_flush()` is a no-op unless `is_json_frontend()`. A flush has
+  no meaning where output already reaches the screen line by line, and putting the test
+  inside means no call site has to remember it. `emit_photo` leaves that choice to its
+  caller because a chart has a terminal story too; a flush does not.
+- **`is_flush_request` returns a bool**, not the `Optional[dict]` its three siblings
+  return. A flush carries no fields, and an always-empty dict reads as falsy at exactly
+  the call site that must not treat it as absent.
+- **It lives in `openrouter.complete()`**, immediately before the POST — not next to the
+  print it was added for. That is the one point where every LLM command is about to go
+  quiet, so all six get it, and the flush covers warnings printed before the call as well
+  as the context block. An empty buffer flushes to nothing, so the extra markers cost
+  nothing on a quiet run.
+
+An old bot build against a new CLI is safe by construction: `_drive` already drops
+unrecognised `\x1e` sentinels rather than forwarding them as chat text (§7.2 of
+`DESIGN_progress_timeline.md`).
+
+### 7.4 A wrap bug this surfaced
+
+`wrap_text` has two branches: coloured paragraphs take a greedy word wrap that splits on
+spaces only, uncoloured ones take `textwrap.wrap`, which breaks on hyphens. So a sentence
+naming a flag rendered correctly on a colour terminal and came back as `--show-llm-` +
+`context` on a piped run or over Telegram, where colour is stripped. `--force-pull` in
+`ensure_data`'s cache note had the same latent break.
+
+`break_on_hyphens=False` makes the two branches agree. Long words still break, so nothing
+overflows the width.

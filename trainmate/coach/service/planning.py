@@ -8,7 +8,8 @@ from trainmate.adherence import planned_load
 from trainmate.sports import canonical_sport
 from trainmate.db.periodization import repair_block_contiguity
 from trainmate.util import (
-    step, cyan, yellow, bold, cmd, wrap_text, format_labeled_block, default_wrap_width,
+    aside, step, cyan, yellow, bold, cmd, wrap_text, format_labeled_block,
+    default_wrap_width,
 )
 import trainmate.coach.service as _svc
 
@@ -232,7 +233,8 @@ class PlanningMixin:
 
     def plan_generate(
         self, force: bool = False, objective_id: Optional[int] = None,
-        auto_apply: bool = True, fresh: bool = False, start_date: Optional[str] = None
+        auto_apply: bool = True, fresh: bool = False, start_date: Optional[str] = None,
+        show_context: bool = False
     ) -> PlanProposal:
         """Determines the macrocycle strategy and mesocycle blocks.
 
@@ -247,7 +249,11 @@ class PlanningMixin:
         asked to continue it — a clean slate, not a revision. It implies `force`: there is
         nothing to reuse when the point is to depart. What the athlete *did* still feeds in
         (the planned-vs-actual review, the history summary, the learnings, their feedback);
-        only the old plan's stated intent is withheld."""
+        only the old plan's stated intent is withheld.
+
+        `show_context` echoes the prompt's planned-vs-actual review to the screen. Off by
+        default: it is the longest thing this command prints and it pushes the strategy
+        the athlete asked for below the fold (DESIGN_output_verbosity.md §7)."""
         force = force or fresh
         # Identify the target goal
         if objective_id is not None:
@@ -455,15 +461,23 @@ class PlanningMixin:
             prior_training_text = self._build_prior_training_context(
                 [preceding_macro, prev_macro], today_str
             )
-            if prior_training_text:
+            if prior_training_text and show_context:
                 # Rebuilt at the caller's own width rather than re-wrapping the prompt
                 # copy: the zone tables are column-aligned, so re-wrapping them (as
                 # opposed to re-laying them out at the target width) shreds the columns
-                # instead of fitting them (DESIGN_intensity_distribution.md §6).
+                # instead of fitting them (DESIGN_intensity_distribution.md §6). Built
+                # only when it will be shown — off the flag it is a second full pass
+                # over the same plans for nothing (DESIGN_output_verbosity.md §7).
                 prior_training_display = self._build_prior_training_context(
                     [preceding_macro, prev_macro], today_str, width=width,
                 )
                 _print_prior_training_review(prior_training_display, width)
+            elif prior_training_text:
+                aside(wrap_text(
+                    "A planned-vs-actual review of your past plans is feeding this "
+                    f"strategy. Pass {cmd('--show-llm-context')} to read what the coach "
+                    "is being shown."
+                ))
             self._maybe_warn_stale_analysis(today_str)
             macro_data = self.engine._plan_generate_strategy(
                 next_goal=next_goal,

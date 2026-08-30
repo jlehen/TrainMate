@@ -181,6 +181,13 @@ classes themselves.
     errors are unaffected. `TRAINMATE_VERBOSE=1/0` overrides either way; there is no CLI
     flag, since `-v/--verbose` already means "more detail in this listing" on seven
     sub-commands (DESIGN_output_verbosity.md).
+  - **Flush protocol:** a fourth one-way sentinel, `FLUSH_SENTINEL`/`emit_flush()`
+    (`\x1eTM-FLUSH {}`), recognised by `is_flush_request()` — it carries no payload and
+    its only effect is to end the buffered message where it stands. `openrouter.complete`
+    emits one immediately before the POST, so the setup an LLM command printed is
+    delivered *before* the tens of seconds it then spends silent, instead of arriving
+    glued to the answer. `emit_flush` is a no-op unless `is_json_frontend()`, so the
+    frame never reaches a terminal (DESIGN_output_verbosity.md §7.3).
 
 ### Package `trainmate/`
 
@@ -1681,7 +1688,7 @@ single read-only view that is its whole state (`settings`), which acts bare inst
 | `learnings`  | `demote`     | —        | Accept a pending confidence downgrade by ID                            |
 | `learnings`  | `keep`       | —        | Dismiss + affirm a pending downgrade by ID                             |
 | `learnings`  | `wipe`       | —        | Delete all coach learnings                                             |
-| `plan`       | `generate`   | `pl g`   | Generate/reuse macrocycle+mesocycles (`-f` to force, `--fresh` for a clean slate that withholds the plan in place from the prompt). `-g/--goal [RANGE]` takes the shared range grammar: one ID plans that goal alone, bounded to its own span (opening the day after the goal before it); a range plans every upcoming goal it covers, in date order, one strategy call each — `-g ..2` is everything through goal 2 (DESIGN_cli_selectors.md §9) |
+| `plan`       | `generate`   | `pl g`   | Generate/reuse macrocycle+mesocycles (`-f` to force, `--fresh` for a clean slate that withholds the plan in place from the prompt, `--show-llm-context` to also print the planned-vs-actual review the prompt carries — off by default, DESIGN_output_verbosity.md §7). `-g/--goal [RANGE]` takes the shared range grammar: one ID plans that goal alone, bounded to its own span (opening the day after the goal before it); a range plans every upcoming goal it covers, in date order, one strategy call each — `-g ..2` is everything through goal 2 (DESIGN_cli_selectors.md §9) |
 | `plan`       | `show`       | `pl s`   | Show a periodization plan: strategy, snapshotted inputs (goals, constraints, threshold anchors), mesocycle timeline with each block's workout count/duration/load. Flags: `-g/--goal ID` (any status, not just active), `-M/--macrocycle ID` for a superseded version — each plan version IS a macrocycle, `-a/--all` for every goal that has a plan, `-w/--workouts` to list each mesocycle's sessions |
 | `plan`       | `versions`   | `pl v`   | List a goal's kept plan versions — active + superseded — with IDs and dates (`-g/--goal ID`) |
 | `plan`       | `diff`       | `pl df`  | Compare two plan versions (`[PLAN_ID_A] [PLAN_ID_B]`, `-g/--goal ID`): strategy prose, each version's attached feedback notes, mesocycles added/removed/renamed/re-dated, and snapshotted input deltas. No ID → previous vs active; one ID → that vs active. Prose rewritten wholesale collapses to a note unless `--full`. Comparison logic in `trainmate/plan_diff.py`, shared with `/api/plan/diff` |
@@ -1911,10 +1918,15 @@ replan; the rest of the block does (`DESIGN_plan_staleness.md` §3–§4).
    intensity table, block-over-block delta, prescribed-zone table and per-week
    planned-vs-actual load lines, plus every cached reconstruction's summary,
    reverse-engineered macro/mesocycle blocks, and physiological insights;
-   written to no `feedback` field), prints it, and passes it as
+   written to no `feedback` field) and passes it as
    `prior_training_text` into `CoachEngine._plan_generate_strategy()` →
    LLM → `{strategy, mesocycles}`. Active coach learnings ride alongside it as
    `learnings`, read-only. See DESIGN_backward_evaluation.md §6, §10.1.
+   The review is echoed to the screen only under `--show-llm-context`
+   (`plan_generate(show_context=...)`): it runs to ~164 lines, 321 once re-laid-out at
+   Telegram's width, and pushes the strategy below the fold. Off the flag the display
+   copy — a second, width-specific build of the same review — is not made at all, and a
+   one-line aside names the flag instead (DESIGN_output_verbosity.md §7).
 5. The plan window runs from the start date to the goal, with **no minimum or
    maximum length** — how to periodize a three-week run-in or a two-year horizon
    is a question the science guidelines answer, and TrainMate does not pre-empt
@@ -2578,6 +2590,14 @@ eye to skip it"; this generalises it. The prompts got the matching half — a sh
 `## WRITING FOR THE ATHLETE` section plus per-field sentence caps on the rationale fields
 — with `plan generate`'s `strategy` deliberately exempt, because it is re-injected into
 every later prompt rather than read once. See DESIGN_output_verbosity.md.
+
+One thing the aside tier could not absorb: `plan generate` echoed its whole
+`PRIOR TRAINING REVIEW` prompt block, ~164 lines and 321 at Telegram's width. Too big to
+skim past on *either* front-end, so it is off by default on both — `--show-llm-context`
+asks for it — which no aside is. And because the wait is the other half of the problem,
+`openrouter.complete` emits a `\x1eTM-FLUSH` marker just before the POST, so whatever a
+command printed on its way in is delivered before it goes silent rather than after
+(DESIGN_output_verbosity.md §7).
 
 ### The journal reuses the lines it already prints
 The app used to record one thing well — the full text of every LLM call — and that pile of

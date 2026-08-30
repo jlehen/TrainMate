@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from typing import Any, Optional
 from trainmate import journal
 from trainmate.config import config
+from trainmate.prompt import emit_flush
 from trainmate.util import aside, warn
 
 # A fenced reply may be one line (```{"a":1}```) or many, with or without a language
@@ -276,6 +277,11 @@ class OpenRouterClient:
         started = time.monotonic()
         try:
             aside(f"Querying OpenRouter with model: {self.model}")
+            # Everything printed so far belongs to the setup, not the answer. A chat
+            # front-end buffers to a prompt or to exit, so without this the two arrive
+            # as one block after a wait of tens of seconds (DESIGN_output_verbosity.md
+            # §7). Every LLM command passes through here, so this is the one call site.
+            emit_flush()
             response = requests.post(
                 self.api_url, headers=headers, json=payload,
                 timeout=config.llm_request_timeout,

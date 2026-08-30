@@ -425,6 +425,38 @@ class ButtonsProtocolTest(unittest.TestCase):
         self.assertIsNone(bot.parse_photo_request(line))
 
 
+class FlushProtocolTest(unittest.TestCase):
+    """The payload-free flush marker (DESIGN_output_verbosity.md §7)."""
+
+    def test_roundtrips_through_emit_flush(self):
+        import io
+        from trainmate.prompt import emit_flush
+        out = io.StringIO()
+        with mock.patch.dict(os.environ, {"TRAINMATE_FRONTEND": "json"}):
+            emit_flush(out=out)
+        self.assertTrue(bot.is_flush_request(out.getvalue()))
+
+    def test_a_terminal_gets_nothing(self):
+        # Emitted unconditionally, the \x1e frame would land in the athlete's own
+        # scrollback as protocol bytes. The gate is inside emit_flush.
+        import io
+        from trainmate.prompt import emit_flush
+        out = io.StringIO()
+        with mock.patch.dict(os.environ, {"TRAINMATE_FRONTEND": ""}):
+            emit_flush(out=out)
+        self.assertEqual(out.getvalue(), "")
+
+    def test_ordinary_output_is_not_a_flush_request(self):
+        self.assertFalse(bot.is_flush_request("Plan discarded.\n"))
+
+    def test_a_sibling_sentinel_is_not_a_flush_request(self):
+        # Each sentinel has its own branch in _drive; matching a sibling here would
+        # swallow a prompt and hang the command waiting for an answer.
+        from trainmate.prompt import PROMPT_SENTINEL, PHOTO_SENTINEL, BUTTONS_SENTINEL
+        for sentinel in (PROMPT_SENTINEL, PHOTO_SENTINEL, BUTTONS_SENTINEL):
+            self.assertFalse(bot.is_flush_request(sentinel + '{"id": "p1"}\n'))
+
+
 class UiCallbackTest(unittest.TestCase):
     def test_roundtrips(self):
         data = bot.ui_callback_data("abc123", "2.1")

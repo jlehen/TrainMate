@@ -476,6 +476,9 @@ Two things to know when you regenerate:
   plan in place, and only that: the review of what you actually trained, your
   learnings and your plan feedback still go in, because a plan drawn blind to your
   training is a template, not a plan.
+  That planned-vs-actual review runs to a couple of hundred lines, so it is no longer
+  printed — it still goes to the coach either way. `plan generate --show-llm-context`
+  shows you what the coach was shown.
 - **`workout generate` archives and rebuilds the workouts in the span you asked for**,
   manual edits included (they are recoverable via `workout rollback` or `plan rollback`,
   not deleted; a session you've already completed today is preserved). The selectors name
@@ -531,6 +534,11 @@ cache-reuse notes and "you could now run X" hints would arrive after the work
 they describe, above the answer — they are suppressed there and kept in the
 terminal. Answers, warnings and errors always show. Set `TRAINMATE_VERBOSE=1`
 to get them back in chat, or `=0` to silence them in the terminal.
+
+A command that calls the coach also sends you whatever it printed on the way in
+*before* it starts waiting, rather than letting it arrive tens of seconds later
+stuck to the answer. So a long run reads as two messages: what it is working
+from, then what the coach said.
 
 Setup:
 

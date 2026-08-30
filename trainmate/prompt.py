@@ -83,6 +83,29 @@ def emit_buttons(buttons: Sequence[dict], out=None) -> None:
     out.flush()
 
 
+# Fourth sentinel: a payload-free "send what you have buffered" marker. The other
+# three flush the chat as a side effect of doing something else; this one exists only
+# to flush, so a command about to go quiet for an LLM call can deliver its setup first
+# instead of letting it arrive glued to the answer (DESIGN_output_verbosity.md §7).
+# The empty JSON object keeps the frame identical to its siblings, leaving room for a
+# field later without changing the wire shape.
+FLUSH_SENTINEL = "\x1eTM-FLUSH "
+
+
+def emit_flush(out=None) -> None:
+    """Writes one sentinel-framed flush marker: ``\\x1eTM-FLUSH {}``.
+
+    Does nothing on a terminal, where output already reaches the screen line by line.
+    The front-end test lives here rather than at each call site because a flush has no
+    meaning outside a buffering front-end (DESIGN_output_verbosity.md §7)."""
+    if not is_json_frontend():
+        return
+    if out is None:
+        out = sys.stdout
+    out.write(FLUSH_SENTINEL + json.dumps({}) + "\n")
+    out.flush()
+
+
 class PromptCancelled(Exception):
     """Raised when the front-end cancels an in-flight prompt (``/cancel`` or idle
     timeout), or when the answer channel closes.

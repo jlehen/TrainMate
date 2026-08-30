@@ -148,21 +148,21 @@ class TestCliPlans(unittest.TestCase):
         self.assertEqual(exit_code, 0)
         self.assertIn("Plan discarded", stdout)
         mock_coach.plan_generate.assert_called_once_with(
-            force=False, fresh=False, auto_apply=False
+            force=False, fresh=False, show_context=False, auto_apply=False
         )
 
         mock_coach.plan_generate.reset_mock()
         exit_code, stdout, stderr = self.run_cli(["plan", "generate", "-f"])
         self.assertEqual(exit_code, 0)
         mock_coach.plan_generate.assert_called_once_with(
-            force=True, fresh=False, auto_apply=False
+            force=True, fresh=False, show_context=False, auto_apply=False
         )
 
         mock_coach.plan_generate.reset_mock()
         exit_code, stdout, stderr = self.run_cli(["plan", "generate", "--force"])
         self.assertEqual(exit_code, 0)
         mock_coach.plan_generate.assert_called_once_with(
-            force=True, fresh=False, auto_apply=False
+            force=True, fresh=False, show_context=False, auto_apply=False
         )
 
         # --fresh forces regeneration on its own, so the staleness prompt never runs.
@@ -170,7 +170,17 @@ class TestCliPlans(unittest.TestCase):
         exit_code, stdout, stderr = self.run_cli(["plan", "generate", "--fresh"])
         self.assertEqual(exit_code, 0)
         mock_coach.plan_generate.assert_called_once_with(
-            force=True, fresh=True, auto_apply=False
+            force=True, fresh=True, show_context=False, auto_apply=False
+        )
+
+        # The prompt context is off unless asked for (DESIGN_output_verbosity.md §7).
+        mock_coach.plan_generate.reset_mock()
+        exit_code, stdout, stderr = self.run_cli(
+            ["plan", "generate", "--show-llm-context"]
+        )
+        self.assertEqual(exit_code, 0)
+        mock_coach.plan_generate.assert_called_once_with(
+            force=False, fresh=False, show_context=True, auto_apply=False
         )
 
         exit_code, stdout, stderr = self.run_cli(["workout", "generate"])

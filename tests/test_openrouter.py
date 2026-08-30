@@ -1,6 +1,9 @@
+import io
+import os
 import unittest
 from unittest.mock import patch, MagicMock
 from trainmate.openrouter import OpenRouterClient
+from trainmate.prompt import FLUSH_SENTINEL
 
 
 def _ok_response(content: str) -> MagicMock:
@@ -187,6 +190,40 @@ class TestOpenRouterClient(unittest.TestCase):
                 self.client.complete("s", "u")
         self.assertIn("API key is not configured", str(ctx.exception))
         mock_post.assert_not_called()
+
+
+class TestChatFlush(unittest.TestCase):
+    """Every LLM command goes quiet here for tens of seconds, and a chat front-end
+    buffers until a prompt or exit — so this is where the setup is sent
+    (DESIGN_output_verbosity.md §7)."""
+
+    def setUp(self):
+        self.client = OpenRouterClient()
+        self.client.model = "openai/gpt-5.4"
+
+    def _complete_capturing_stdout(self, frontend: str) -> str:
+        """Runs one completion with stdout captured, returning what had been written
+        by the time `requests.post` was entered — not at the end of the call, which
+        would pass whether the flush came before the wait or after it."""
+        buf = io.StringIO()
+        at_post = {}
+
+        def _record(*args, **kwargs):
+            at_post["stdout"] = buf.getvalue()
+            return _ok_response('{"ok": true}')
+
+        with patch.dict(os.environ, {"TRAINMATE_FRONTEND": frontend}), \
+                patch("sys.stdout", buf), \
+                patch("trainmate.openrouter.requests.post", side_effect=_record), \
+                patch.object(self.client, "_log_exchange"):
+            self.client.complete("SYSTEM", "USER", label="test")
+        return at_post["stdout"]
+
+    def test_the_chat_buffer_is_flushed_before_the_request_goes_out(self):
+        self.assertIn(FLUSH_SENTINEL, self._complete_capturing_stdout("json"))
+
+    def test_a_terminal_run_writes_no_marker(self):
+        self.assertNotIn(FLUSH_SENTINEL, self._complete_capturing_stdout(""))
 
 
 if __name__ == "__main__":

@@ -224,7 +224,8 @@ def _generate_one_plan(
     if span_start is not None:
         plan_kwargs['start_date'] = span_start
     proposal = runtime.coach_service.plan_generate(
-        force=force, fresh=bool(args.fresh), **plan_kwargs
+        force=force, fresh=bool(args.fresh),
+        show_context=getattr(args, 'show_llm_context', False), **plan_kwargs
     )
     mesocycles = proposal['mesocycles']
 
@@ -1168,6 +1169,16 @@ def add_plan_parser(subparsers, pull_bypass_parser, llm_debug_parser):
     p_gen.add_argument(
         "-y", "--yes", "--auto", action="store_true", dest="auto",
         help="Apply proposed plan updates automatically without prompting"
+    )
+    # Not -v: that letter already means "name each Calendar event" on three workout
+    # sub-commands, and one letter meaning two things is what DESIGN_output_verbosity.md
+    # §4 turned down a global --verbose for. This reads as the sibling it is of
+    # --show-llm-prompt-only (§7).
+    p_gen.add_argument(
+        "--show-llm-context", action="store_true", dest="show_llm_context",
+        help="Also print the planned-vs-actual review of your past plans that goes to "
+             "the coach as prompt context. Off by default: it is long, and it pushes "
+             "the new strategy below the fold"
     )
     p_gen.add_argument(
         "-g", "--goal", "--goal-id", dest="goal_range", nargs="?", const=CURRENT,
