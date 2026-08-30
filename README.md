@@ -228,6 +228,22 @@ If you don't have a Google service account yet, it's a one-time setup:
 Everything else in the template is optional tuning and documented inline —
 sensible defaults apply when a key is commented out.
 
+**Where your data lives.** Every relative path in `config.yaml` — `database:`,
+`science_dir:`, `logging.dir`, `google.service_account_file` — resolves against
+the directory containing the config file itself, never against the directory
+you run commands from. With the defaults, everything therefore lands beside
+`config.yaml`: the repo root for the primary install. That rule is also how a
+second athlete runs from the same checkout: put their `config.yaml` in a
+directory of its own and point every command at it with
+`TRAINMATE_CONFIG=/path/to/other/config.yaml ./tm …` (and likewise `./tm-bot`)
+— their database, logs, and science guidelines land in that directory
+automatically, with no path keys to set. The one exception is
+`garmin.token_dir`, which defaults to `~/.garminconnect` for every instance:
+give each athlete with their own Garmin account their own directory (an
+absolute or `~`-based path), because a token store that loads successfully is
+used as-is — the configured `garmin.email` is never checked against it, so two
+instances sharing one store would both pull whichever account logged in last.
+
 Note what is *not* in the config: trainable thresholds (FTP, LTHR, threshold
 pace, …) live in the dated benchmark logbook, recorded with
 `./tm benchmark record` — that logbook, not `config.yaml`, is what the coach
