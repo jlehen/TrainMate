@@ -241,6 +241,8 @@ coach:
   # of the plan's trailing weekly planned load...
   #replan_displaced_load_pct: 50
   # ...OR, independently, when a `rest` constraint spans at least this many days.
+  # An older config spelling this `replan_hard_span_days` is still honoured as a
+  # fallback, so a pre-rename file keeps working; write the current name in a new one.
   #replan_rest_span_days: 3
   # Relative drift (percent) an effective threshold anchor (max_hr, or a logbook
   # anchor like ftp/lthr) may move from the value the active plan was generated with
