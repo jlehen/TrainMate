@@ -147,7 +147,11 @@ google:
 garmin:
   email: "you@example.com"
   password: "your-garmin-password"
-  # Directory where the garminconnect OAuth tokens are persisted.
+  # Directory where the garminconnect OAuth tokens are persisted. The default is the
+  # SHARED ~/.garminconnect, and a valid token store wins over the credentials above —
+  # so a second instance MUST set its own token_dir or it silently resumes the primary
+  # athlete's Garmin session. A relative path resolves against this config file's
+  # directory, like `database:`.
   #token_dir: "~/.garminconnect"
   # Trailing days a forward-refresh re-fetches to catch late-finalizing data.
   #mutable_days: 3

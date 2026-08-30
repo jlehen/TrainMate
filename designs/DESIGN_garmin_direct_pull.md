@@ -443,6 +443,16 @@ the GarminScraper `.env` duplication disappears. FTP/LTHR remain in
 `config.yaml` `user_profile` for coaching context. Token store defaults to
 `~/.garminconnect`.
 
+> **Rev. 3 — the token store is per-instance state, and the default hides that.** The
+> default `~/.garminconnect` is shared machine-wide, and `login(tokenstore=…)` resumes
+> any valid tokens found there *without ever touching* `garmin.email`/`garmin.password`
+> — so a second athlete's TRAINMATE_CONFIG instance that leaves `token_dir` unset
+> silently pulls the **primary** athlete's Garmin data into its own database. Two
+> consequences: `token_dir` now resolves relative values against the config file's
+> directory (the same CONFIG_PATH rule as `database:`/`science_dir:`), and every
+> secondary instance must set it — the templates say so at the key. The primary keeps
+> the `~/.garminconnect` default; migrating it would force a pointless re-login/MFA.
+
 ---
 
 ## 12. Timezone fix — calendar dates vs instants

@@ -17,11 +17,11 @@ import trainmate.config
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(trainmate.config.__file__)))
 
-# Prints the four resolved paths, one per line, from a fresh interpreter.
+# Prints the five resolved paths, one per line, from a fresh interpreter.
 _PRINT_PATHS = (
     "from trainmate.config import config, CONFIG_PATH; "
     "print(CONFIG_PATH); print(config.db_path); print(config.service_account_file); "
-    "print(config.science_dir)"
+    "print(config.science_dir); print(config.garmin_token_dir)"
 )
 
 
@@ -48,7 +48,7 @@ class TestInstanceSelection(unittest.TestCase):
             cfg = os.path.join(d, "config.yaml")
             with open(cfg, "w") as f:
                 f.write("user_profile:\n  name: Other\n")
-            config_path, db_path, sa_path, science_dir = self._paths(cfg)
+            config_path, db_path, sa_path, science_dir, _ = self._paths(cfg)
             self.assertEqual(config_path, cfg)
             self.assertEqual(db_path, os.path.join(d, "trainmate.db"))
             self.assertEqual(sa_path, os.path.join(d, "service_account.json"))
@@ -61,7 +61,7 @@ class TestInstanceSelection(unittest.TestCase):
             cfg = os.path.join(d, "config.yaml")
             with open(cfg, "w") as f:
                 f.write("database: other.db\n")
-            _, db_path, _, _ = self._paths(cfg)
+            _, db_path, _, _, _ = self._paths(cfg)
             self.assertEqual(db_path, os.path.join(d, "other.db"))
 
     def test_absolute_database_key_is_respected(self):
@@ -69,7 +69,7 @@ class TestInstanceSelection(unittest.TestCase):
             cfg = os.path.join(d, "config.yaml")
             with open(cfg, "w") as f:
                 f.write("database: /somewhere/else/other.db\n")
-            _, db_path, _, _ = self._paths(cfg)
+            _, db_path, _, _, _ = self._paths(cfg)
             self.assertEqual(db_path, "/somewhere/else/other.db")
 
     def test_relative_science_dir_key_resolves_beside_config(self):
@@ -77,7 +77,7 @@ class TestInstanceSelection(unittest.TestCase):
             cfg = os.path.join(d, "config.yaml")
             with open(cfg, "w") as f:
                 f.write("science_dir: guidelines\n")
-            _, _, _, science_dir = self._paths(cfg)
+            _, _, _, science_dir, _ = self._paths(cfg)
             self.assertEqual(science_dir, os.path.join(d, "guidelines"))
 
     def test_absolute_science_dir_key_is_respected(self):
@@ -86,8 +86,36 @@ class TestInstanceSelection(unittest.TestCase):
             cfg = os.path.join(d, "config.yaml")
             with open(cfg, "w") as f:
                 f.write("science_dir: /shared/science\n")
-            _, _, _, science_dir = self._paths(cfg)
+            _, _, _, science_dir, _ = self._paths(cfg)
             self.assertEqual(science_dir, "/shared/science")
+
+    def test_relative_garmin_token_dir_resolves_beside_config(self):
+        with tempfile.TemporaryDirectory() as d:
+            cfg = os.path.join(d, "config.yaml")
+            with open(cfg, "w") as f:
+                f.write("garmin:\n  token_dir: .garminconnect\n")
+            _, _, _, _, token_dir = self._paths(cfg)
+            self.assertEqual(token_dir, os.path.join(d, ".garminconnect"))
+
+    def test_absolute_garmin_token_dir_is_respected(self):
+        with tempfile.TemporaryDirectory() as d:
+            cfg = os.path.join(d, "config.yaml")
+            with open(cfg, "w") as f:
+                f.write("garmin:\n  token_dir: /somewhere/tokens\n")
+            _, _, _, _, token_dir = self._paths(cfg)
+            self.assertEqual(token_dir, "/somewhere/tokens")
+
+    def test_default_garmin_token_dir_is_the_shared_home_store(self):
+        # The one per-instance path whose default does NOT land beside the config: it
+        # stays ~/.garminconnect so the primary install keeps its tokens. A second
+        # instance must therefore set token_dir explicitly, or it resumes the primary
+        # account's session (DESIGN_garmin_direct_pull.md §11 rev. 3).
+        with tempfile.TemporaryDirectory() as d:
+            cfg = os.path.join(d, "config.yaml")
+            with open(cfg, "w") as f:
+                f.write("user_profile:\n  name: Other\n")
+            _, _, _, _, token_dir = self._paths(cfg)
+            self.assertEqual(token_dir, os.path.join(os.path.expanduser("~"), ".garminconnect"))
 
     def test_missing_explicit_config_aborts(self):
         proc = _run("/nonexistent/nowhere/config.yaml")
@@ -108,7 +136,7 @@ class TestInstanceSelection(unittest.TestCase):
         # therefore its db_path) belongs to the user, not to this test.
         proc = _run(None)
         self.assertEqual(proc.returncode, 0, proc.stderr)
-        config_path, _, _, science_dir = proc.stdout.strip().splitlines()
+        config_path, _, _, science_dir, _ = proc.stdout.strip().splitlines()
         self.assertEqual(config_path, os.path.join(REPO_ROOT, "config.yaml"))
         # The primary install keeps the pre-`science_dir:` location, key or no key.
         self.assertEqual(science_dir, os.path.join(REPO_ROOT, "science"))
