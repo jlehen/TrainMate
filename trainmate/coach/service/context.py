@@ -516,7 +516,8 @@ class PmcContextMixin:
         )
 
     def _intensity_history_context(
-        self, macros: List[Dict[str, Any]], today_str: str
+        self, macros: List[Dict[str, Any]], today_str: str,
+        width: int = intensity.PROMPT_WIDTH,
     ) -> List[str]:
         """One intensity report per elapsed block across `macros`, each carrying the
         delta against the block before it (§4.1) — the strategy prompt's view.
@@ -532,7 +533,7 @@ class PmcContextMixin:
             text = intensity.block_report(
                 meso, today_str, self._db.get_completed_activities,
                 previous=blocks[i - 1] if i else None, benchmarks=benchmarks,
-                fetch_workouts=self._db.get_workouts,
+                fetch_workouts=self._db.get_workouts, width=width,
             )
             if not text:
                 continue
@@ -551,7 +552,8 @@ class PmcContextMixin:
         return reports
 
     def _build_prior_training_context(
-        self, prior_macros: List[Optional[Dict[str, Any]]], today_str: str
+        self, prior_macros: List[Optional[Dict[str, Any]]], today_str: str,
+        width: int = intensity.PROMPT_WIDTH,
     ) -> Optional[str]:
         """Builds a read-only "planned vs actual" review for the strategy prompt
         (DESIGN_backward_evaluation.md §6, Option A).
@@ -573,12 +575,13 @@ class PmcContextMixin:
 
         # The whole review is pre-wrapped here, not at print time: the zone tables are
         # column-aligned and re-wrapping shreds them (DESIGN_intensity_distribution.md §6).
-        width = intensity.PROMPT_WIDTH
+        # `width` defaults to the model's prompt width; callers rendering this for a
+        # narrower surface (e.g. Telegram) pass their own to keep the tables intact there.
 
         # The current plan's elapsed blocks join the prior plans': drift diagnosed only
         # one macrocycle late is history (gap 2 of DESIGN_intensity_distribution.md §3).
         reports = self._intensity_history_context(
-            [*prior_macros, self._db.get_governing_macrocycle()], today_str
+            [*prior_macros, self._db.get_governing_macrocycle()], today_str, width=width,
         )
         if reports:
             sections.append(

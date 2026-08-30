@@ -456,7 +456,14 @@ class PlanningMixin:
                 [preceding_macro, prev_macro], today_str
             )
             if prior_training_text:
-                _print_prior_training_review(prior_training_text, width)
+                # Rebuilt at the caller's own width rather than re-wrapping the prompt
+                # copy: the zone tables are column-aligned, so re-wrapping them (as
+                # opposed to re-laying them out at the target width) shreds the columns
+                # instead of fitting them (DESIGN_intensity_distribution.md §6).
+                prior_training_display = self._build_prior_training_context(
+                    [preceding_macro, prev_macro], today_str, width=width,
+                )
+                _print_prior_training_review(prior_training_display, width)
             self._maybe_warn_stale_analysis(today_str)
             macro_data = self.engine._plan_generate_strategy(
                 next_goal=next_goal,
