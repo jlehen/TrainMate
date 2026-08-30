@@ -191,9 +191,17 @@ data from the logbook.
 
 Copy `config_template.yaml` to `config.yaml` and fill it in. `config.yaml` is
 gitignored, so your credentials stay in the file and out of git and the
-environment. (`config.sample.yaml` shows what a working install's config
-actually looks like filled in — all values fictional — with the full knob
-documentation staying in the template.) The blocks you must fill:
+environment. Three files describe the same schema at three lengths:
+
+| File | What it is |
+| --- | --- |
+| `config_template.yaml` | The short template — only the settings you must fill in. Start here. |
+| `config_template_full.yaml` | Every knob the app reads, commented out at its default, with the reasoning behind each. Copy a block over when you want to change one. |
+| `config.sample.yaml` | A realistic filled-in config to imitate — all values fictional. |
+
+Everything outside the short template has a working default, so a config
+holding only the blocks below is complete and runnable. The blocks you must
+fill:
 
 - **`llm:`** — `api_key` (an `OPENROUTER_API_KEY` env var overrides it) and
   `models`, the list of OpenRouter models this install may use;

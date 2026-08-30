@@ -295,7 +295,8 @@ One accessor, one relocated threshold read, one skip rule and one `e1rm` exclusi
 
 The logbook is the *only* home for trainable thresholds. `user_profile.ftp` and
 `user_profile.lthr` were **removed** from `config.yaml` and
-`config_template.yaml` (replaced by a pointer comment, `config_template.yaml:156-160`).
+the config templates (replaced by a pointer comment, carried in both
+`config_template.yaml` and `config_template_full.yaml`).
 `max_hr` stays in config: the split is principled — config keeps quasi-fixed physiology
 and life logistics (age, availability, equipment), the logbook keeps *trainable,
 measured* quantities. This deletes the "seed value that becomes inert" concept

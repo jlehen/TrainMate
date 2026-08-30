@@ -328,7 +328,7 @@ long enough yet.
 ### 3.4 Configurable windows (ACWR + PMC) and the derivation pad
 
 All four window/time-constant numbers become config params via the existing
-`config.py` property + `config_template.yaml` pattern (like `hr_zone_coverage_min`,
+`config.py` property + `config_template_full.yaml` pattern (like `hr_zone_coverage_min`,
 already a `garmin:` param), under the **`garmin:`** section (they are computation
 constants living beside the windows they replace; the coach never reads them
 directly):
@@ -656,7 +656,7 @@ status/summary code produces.
 - **Docs:** update `ARCHITECTURE.md` (AGENTS.md L2–3 requires it) — the
   derived-metrics `garmin.py` row (add CTL/ATL/TSB to "the load model") and the
   wipe/analysis-cache note (`wipe_garmin_data` now recomputes). Note the four new
-  config params where `config_template.yaml` is documented.
+  config params where `config_template_full.yaml` is documented.
 
 **Known limitation — PMC is dark for the first ~6 weeks of a fresh install.**
 CTL is a 42-day EWMA, so it needs months of history to be trustworthy. Cold-start

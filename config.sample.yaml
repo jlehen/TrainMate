@@ -1,178 +1,39 @@
-# A realistic, fully filled-in config to imitate — every value here is
-# fictional. Every knob the app reads appears below: the ones a working install
-# actually fills in carry values, the tuning knobs are commented at their
-# defaults. See config_template.yaml for the long-form documentation of each.
-# Copy this to config.yaml (gitignored) and make it yours.
+# A realistic, fully filled-in config to imitate — every value here is fictional.
 #
-# What makes a profile useful is honesty and texture: the free-text blocks
-# below (injuries, preferences) are read verbatim by the LLM coach, so write
-# them the way you'd brief a human coach — specifics, quirks, non-negotiables.
+# This is what a working install actually looks like: the credentials and the athlete
+# profile, plus the handful of knobs this particular install had a reason to change.
+# Everything else is left at its default and simply absent, which is the normal state —
+# a config file is not meant to restate the defaults back to the app.
+#
+# config_template.yaml is the blank version of this file; config_template_full.yaml
+# documents every knob that could appear here. Copy this to config.yaml (gitignored)
+# and make it yours.
+#
+# What makes a profile useful is honesty and texture: the free-text blocks below
+# (injuries, preferences) are read verbatim by the LLM coach, so write them the way
+# you'd brief a human coach — specifics, quirks, non-negotiables.
 
 llm:
-  api_key: "YOUR_OPENROUTER_API_KEY"   # or set OPENROUTER_API_KEY in the env
-  # `model` lists these, numbered; `model set` switches; first entry is default.
+  api_key: "sk-or-v1-EXAMPLEKEYEXAMPLEKEYEXAMPLEKEYEXAMPLEKEY"   # or OPENROUTER_API_KEY
+  # `model list` numbers these; `settings set coach-model` switches; first is default.
   models:
     - model: "anthropic/claude-opus-5"
     - model: "openai/gpt-5.6-sol"
     - model: "google/gemini-3.1-pro-preview"
-  # Seconds an OpenRouter request may run before it's aborted. Generation is slow.
-  #request_timeout_seconds: 120
-  # Cheaper model the bot's free-text intent router uses (simple ui mode only).
-  # Seeds the `router-model` setting, and must be one of the `models:` above.
-  #router_model: "google/gemini-3.5-flash"
-
-# Where this instance's files live: every relative path in this file (db, science_dir,
-# logging dir, service_account_file, garmin token_dir) resolves against it. DEFAULT:
-# this config file's directory. Setting it moves the whole instance under one prefix.
-#data_dir: "athlete2"
-
-# The SQLite database this install operates on. Relative to this file's directory
-# (or `data_dir:` when set).
-# A second athlete gets their own directory + config.yaml, selected by TRAINMATE_CONFIG.
-#database: "trainmate.db"
-
-# The athlete's own science/*.md guidelines, injected into every coaching prompt.
-# Relative to this file's directory, so each instance gets its own by default; give an
-# absolute path to share one between athletes.
-#science_dir: "science"
-
-# The run journal (`tm journal`) and the LLM exchange files. Relative to this file's
-# directory, so each instance keeps its own. See DESIGN_logging.md §9.
-#logging:
-#  #dir: "logs"
-#  #level: "info"              # debug | info | warn | error
-#  #retain_days: 90
-#  #retain_exchange_days: 90
-
-# Minimum minutes before an automatic refresh re-pulls (Garmin and Calendar both).
-#refresh_minutes: 120
-
-# Days a learning may go unreinforced before it goes dormant, per confidence level.
-#learning_staleness_days:
-#  tentative: 21
-#  moderate: 60
-#  established: 180
-
-# Distinct net supporting weeks a learning needs to reach each confidence level.
-#learning_confidence_thresholds:
-#  moderate: 3
-#  established: 5
-
-# Days the cached training-history reconstruction may lag today before
-# `plan generate` warns. Only `data bootstrap` / `data reflect` rebuild it.
-#analysis_staleness_days: 14
+  # A cheap model is plenty for routing free-text chat messages to a command.
+  router_model: "google/gemini-3.1-pro-preview"
 
 google:
   service_account_file: "service_account.json"
-  calendar_id: "YOUR_CALENDAR_ID@group.calendar.google.com"
-  # Source tag for calendar events carrying daily signals.
-  #calendar_signal_tag: "trainmate-context"
+  calendar_id: "trainmate-workouts@group.calendar.google.com"
 
 garmin:
-  email: "you@example.com"
-  password: "your-garmin-password"
-  # Where garminconnect persists its OAuth tokens. Relative paths resolve against this
-  # config file's directory; the default is .garminconnect beside it. A valid token
-  # store wins over the credentials above, so two configs sharing a directory MUST set
-  # this apart — otherwise the second silently resumes the first athlete's session.
-  #token_dir: ".garminconnect"
-  # Trailing days a forward-refresh re-fetches to catch late-finalizing data.
-  #mutable_days: 3
-  # Backward-gap size above which a backfill is surfaced as a command, not run.
-  #backfill_prompt_days: 30
-  # Range used to build the cold-start backfill command.
-  #initial_backfill_days: 90
-  # Sleep between Garmin API calls (`data pull --sleep` overrides it).
-  #throttle_seconds: 0.2
-  # Minimum share of an activity inside a known HR zone before hrTSS is trusted;
-  # below it, RPE is preferred.
-  #hr_zone_coverage_min: 0.5
-  # Shortest activity that may raise an undercount marker in `tm progress`.
-  #zone_min_activity_minutes: 20
-  # Share of a sport's duration inside a known zone before its weekly row stops
-  # marking itself incomplete — a display bar, not a trust bar.
-  #zone_coverage_display_min: 0.8
-  # Per-sport overrides of that bar (trainmate/intensity.py ships sensible defaults
-  # for strength, skiing, climbing, hiking and yoga).
-  #zone_coverage_display_min_by_sport:
-  #  strength_training: 0.45
-  #  hiking: 0.10
-  # PMC time constants. Experimentation ONLY — the interpretation bands and CLI
-  # colors are calibrated to the defaults. Takes effect on the next pull/backfill.
-  #pmc_ctl_days: 42
-  #pmc_atl_days: 7
+  email: "sam@example.com"
+  password: "correct-horse-battery-staple"
 
 coach:
-  # Days of recent metrics history fed to the coach as context.
-  #metrics_lookback_days: 15
-  # Days to look back for a preceding goal when generating a new one.
-  #goals_lookback_days: 90
-  # Default span generated by the workout-generation command.
-  #workout_generation_span_days: 28
-  # How close to a block's end counts as its terminal window: inside it the coach
-  # holds planned load instead of adapting into a block it cannot finish.
-  #adapt_terminal_window_days: 3
-  # A constraint proposes a replan when its overlapping planned load reaches this
-  # percentage of the trailing weekly planned load...
-  #replan_displaced_load_pct: 50
-  # ...or, independently, when a `rest` constraint spans at least this many days.
-  #replan_rest_span_days: 3
-  # Percent a threshold anchor (max_hr, or a logbook ftp/lthr) may drift from the
-  # value the active plan was generated with before the plan is flagged stale.
-  #threshold_replan_pct: 5
-  # Thresholds above which a session counts as high intensity.
-  #high_intensity_rpe_threshold: 8
-  #high_intensity_tss_threshold: 120.0
-  # Signal-impact alignment (alcohol, big meal, …): mornings bracketing each episode,
-  # and the floor of signal-days a category needs before the coach sees its rows.
-  #signal_days_lookahead: 3
-  #signal_days_min_days: 1
-  # Workload below which an activity counts as "minor": widens the planned-vs-actual
-  # tolerance and labels unplanned activities as minor.
-  #minor_activity_load_threshold: 25.0
-  # Ratio of RPE-implied to measured load above which a session is flagged
-  # "felt harder than it measured". Set very high to disable.
-  #rpe_divergence_ratio: 1.5
-  # Tolerance band for the planned-vs-actual duration/workload check: easy_pct at
-  # planned loads <= low_load, hard_pct at >= high_load, interpolated between.
-  #adherence_tolerance:
-  #  easy_pct: 0.50
-  #  hard_pct: 0.15
-  #  low_load: 20.0
-  #  high_load: 100.0
-
-# Optional: drive TrainMate from your phone (./tm-bot). Omit to disable.
-#telegram:
-#  bot_token: "123456789:ABCdef..."    # from @BotFather
-#  allowed_chat_ids:
-#    - 123456789
-#  command_timeout_seconds: 600
-#  # Seconds to wait for you to answer an interactive prompt before cancelling.
-#  #prompt_timeout_seconds: 300
-#  # Column width replies wrap to; ~48 fits a phone in portrait. Ignored in
-#  # simple ui mode, where prose flows and the client wraps it.
-#  #wrap_width: 48
-#  # Persona: 'expert' is the raw CLI-over-chat; 'simple' is the companion mode
-#  # for a non-technical athlete (reply keyboard, free-text routing, morning push).
-#  #ui: expert
-#  # Morning push, simple ui mode only. Each key seeds a setting of the same name;
-#  # `settings set morning-time 07:00` changes one without editing this file.
-#  #push:
-#  #  #enabled: true
-#  #  #morning_time: "08:00"
-#  #  # After this local time a missed push is skipped rather than caught up.
-#  #  #morning_deadline: "15:00"
-#  #  # Run `workout adapt -y` before rendering the push. Costs an LLM call daily.
-#  #  #adapt_first: false
-
-# Flask web front-end (run trainmate_web.py directly). Optional — omit for defaults.
-#web:
-#  # Loopback by default so the dev server isn't exposed on every interface;
-#  # 0.0.0.0 serves the LAN.
-#  #host: "127.0.0.1"
-#  #port: 5000
-#  # Werkzeug debugger/reloader. Leave off — it is an RCE vector on any traceback.
-#  #debug: false
+  # This athlete rides a 3-week block and wants generation to match it.
+  workout_generation_span_days: 21
 
 user_profile:
   name: "Sam"
@@ -213,10 +74,6 @@ user_profile:
     - "smart trainer with Zwift"
     - "trail running shoes"
     - "16/24 kg kettlebells"
-  # Per-day availability. Optional: omit the whole block and the coach places
-  # sessions on any day, sized by weekly_target_hours. certainty_percent is how
-  # likely you are to actually train that day (the coach weights planning toward
-  # higher-certainty days).
   weekly_schedule:
     Monday:
       total_available_hours: 1.3
@@ -268,3 +125,10 @@ user_profile:
         - "smart trainer"
         - "trail shoes"
         - "kettlebells"
+
+telegram:
+  bot_token: "123456789:AAExampleExampleExampleExampleExampleExa"   # or TELEGRAM_BOT_TOKEN
+  allowed_chat_ids:
+    - 123456789
+  # Plan generation runs long; the 180s default was killing it mid-answer.
+  command_timeout_seconds: 600

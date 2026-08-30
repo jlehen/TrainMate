@@ -1,0 +1,360 @@
+# TrainMate — the complete configuration reference.
+#
+# Every key the application reads appears below. The ones a working install must fill
+# in carry values; every tuning knob is commented out at its coded default, so deleting
+# a commented line changes nothing and uncommenting one takes effect immediately.
+#
+# Three files describe the same schema at three lengths:
+#   config_template.yaml       the short template — what you must fill in. Start here.
+#   config_template_full.yaml  this file — every knob, with the reasoning behind it.
+#   config.sample.yaml         a realistic filled-in config to imitate (values fictional).
+#
+# Copy whichever suits you to config.yaml (gitignored) and make it yours.
+#
+# Environment overrides, for secrets you would rather not write to disk:
+#   TRAINMATE_CONFIG      path to the config file this process runs against. This is how
+#                         a second athlete runs from the same checkout (see `data_dir:`
+#                         below). A named file must exist — a typo aborts rather than
+#                         silently falling back to the primary athlete's database.
+#   OPENROUTER_API_KEY    overrides `llm.api_key`.
+#   TELEGRAM_BOT_TOKEN    overrides `telegram.bot_token`.
+
+llm:
+  # An OPENROUTER_API_KEY environment variable overrides this.
+  api_key: "YOUR_OPENROUTER_API_KEY"
+  # Models this install may use. `model list` numbers them in this order; the first entry
+  # is the default until `model set` picks another (DESIGN_model_selection.md §1).
+  # An entry is either a bare identifier or a `model:` mapping, as below.
+  models:
+    - model: "google/gemini-3.5-flash"
+    - model: "anthropic/claude-opus-5"
+  # Seconds an OpenRouter HTTP request may run before it's aborted. Generation is
+  # slow (large plans), so keep this generous. Default 120.
+  #request_timeout_seconds: 120
+  # Cheaper model the Telegram bot's free-text intent router uses (simple ui mode,
+  # DESIGN_bot_simple_frontend.md §5.4). Seeds the `router-model` setting; change it
+  # live with `settings set router-model`. It must be one of the `models:` entries
+  # above — one allowlist for both roles. Absent -> the coaching model routes too.
+  #router_model: "google/gemini-3.5-flash"
+
+# Where this instance's files live. Every relative path in this file — the database,
+# science_dir, logging dir, service_account_file, garmin token_dir — resolves against
+# this directory. DEFAULT: the directory containing this config file, so with the key
+# unset all state lands beside the config. Set it to move the whole instance under one
+# prefix instead of hand-prefixing each path key below; an absolute per-key path still
+# wins. The value is itself relative to this config file's directory.
+#data_dir: "athlete2"
+
+# The SQLite database this install operates on. A relative path resolves against this
+# config file's directory (or `data_dir:` when set); default trainmate.db beside it.
+#database: "trainmate.db"
+
+# The athlete's own sports-science guidelines — the directory whose *.md files are
+# injected into every coaching prompt as the ATHLETE-PROVIDED block (see the README's
+# "Personalizing TrainMate"). A relative path resolves against this config file's
+# directory; default science/ beside it. Point a second athlete at their own directory
+# so they get their own training philosophy instead of the primary athlete's; point two
+# instances at the same absolute path to share one. The app's built-in guidelines
+# (trainmate/science/) are unaffected either way.
+#science_dir: "science"
+
+# The operator-facing logs: the run journal (runs/YYYY-MM-DD.jsonl, one line per event,
+# read with `tm journal`) and the full LLM exchanges (llm_exchanges/*.md). Nothing the
+# app itself reads back lives here — see DESIGN_logging.md §2.1. Every key below has a
+# working default, so omitting the whole block behaves exactly as shown.
+#logging:
+#  # Where both directories go. A relative path resolves against this config file's
+#  # directory, like `database:` and `science_dir:`, so a second instance keeps its own
+#  # logs. Default logs/ beside the config.
+#  #dir: "logs"
+#  # Lowest level that reaches the journal file: debug | info | warn | error.
+#  # `debug` adds the records for exceptions the app deliberately swallows on screen.
+#  #level: "info"
+#  # Days each directory keeps. The sweep runs at most once a day, off the first
+#  # command that finishes after midnight UTC; `tm journal prune` forces one.
+#  #retain_days: 90
+#  #retain_exchange_days: 90
+
+# Second athlete, same checkout: copy this file into a directory of its own (the
+# database and any relative paths in it will live there too), then point every command
+# at it:
+#   TRAINMATE_CONFIG=/path/to/other/config.yaml ./tm status     (and likewise ./tm-bot)
+# Or keep both configs side by side and give the second one `data_dir:` (above) so its
+# state lands in its own subdirectory. A file named via TRAINMATE_CONFIG must exist — a
+# typo aborts instead of silently falling back to the primary athlete's database. Each
+# instance brings its own telegram bot token, garmin credentials and token_dir, google
+# calendar_id, its own logs/, and — unless `science_dir:` says otherwise — its own
+# science/ guidelines beside it.
+
+# Minimum minutes before an automatic refresh re-pulls — gates both Garmin hits and
+# Calendar-signal syncs; within this window reads reuse the local cache. Bypass a single
+# run with --force-pull.
+#refresh_minutes: 120
+
+# Days a coaching learning may go unreinforced before it goes dormant (dropped from
+# coach prompts) and earns a one-level staleness demotion, per confidence level. A
+# dormant learning revives the moment new supporting evidence lands.
+#learning_staleness_days:
+#  tentative: 21
+#  moderate: 60
+#  established: 180
+
+# Days the cached training-history reconstruction may lag behind today before
+# 'plan generate' warns that it is planning against an out-of-date picture. The cache
+# is only rebuilt by 'data bootstrap' / 'data reflect', so it does not refresh itself.
+#analysis_staleness_days: 14
+
+# Distinct net supporting weeks (supporting minus contradicting) a learning needs to
+# reach each confidence level. Tentative is always >=1 and proposed-retirement <=0 —
+# those are not knobs. Retuning re-levels learnings on the next recompute, no migration.
+#learning_confidence_thresholds:
+#  moderate: 3
+#  established: 5
+
+# Flask web front-end (run trainmate_web.py directly). Optional — omit to use defaults.
+#web:
+#  # Interface to bind. Loopback by default so the dev server isn't exposed on all
+#  # interfaces; set to 0.0.0.0 to serve the LAN.
+#  #host: "127.0.0.1"
+#  #port: 5000
+#  # Werkzeug debugger/reloader. Leave off — the interactive debugger is a remote
+#  # code-execution vector on any traceback and must never be on for a reachable bind.
+#  #debug: false
+
+# Telegram chat front-end (run with ./tm-bot). Optional — omit the whole block to
+# disable it. Create a bot with @BotFather to get the token; message the bot once
+# and check the logs (or @userinfobot) for your numeric chat id.
+#telegram:
+#  # Bot token from @BotFather. May instead be set via the TELEGRAM_BOT_TOKEN env var.
+#  bot_token: "123456789:ABCdef..."
+#  # Allowlist of chat ids permitted to drive the bot. Empty/absent = nobody.
+#  allowed_chat_ids:
+#    - 123456789
+#  # Seconds a command may go silent before it's killed (generation is slow).
+#  #command_timeout_seconds: 180
+#  # Seconds to wait for you to answer an interactive prompt (tap a button or send
+#  # text) before the command is cancelled. Default 300.
+#  #prompt_timeout_seconds: 300
+#  # Column width replies wrap to. The CLI's terminal default (80) double-wraps on a
+#  # phone; ~48 fits portrait without the client re-wrapping. Raise on tablets.
+#  # Ignored in simple ui mode, where prose flows and the client wraps it.
+#  #wrap_width: 48
+#  # Which persona the bot presents (DESIGN_bot_simple_frontend.md). 'expert' (the
+#  # default) is the raw CLI-over-chat; 'simple' is the companion mode for a
+#  # non-technical athlete: reply keyboard, free-text intent routing, the morning
+#  # push below, and plain-prose rendering. Typed /commands still work in simple mode.
+#  #ui: expert
+#  # Morning push (simple ui mode only): the bot opens the day with today's session
+#  # and follow-up buttons. State lives in the instance's database, so restarts
+#  # never double-send.
+#  # Each key below seeds a setting; change any of them live with `settings set`
+#  # (`push`, `morning-time`, `morning-deadline`, `adapt-first`) and the running bot
+#  # picks it up within five minutes. Quote the times — an unquoted 07:30 is not a
+#  # time to YAML.
+#  #push:
+#  #  # Off-switch for the push without leaving simple mode.
+#  #  #enabled: true
+#  #  # Local time the push fires.
+#  #  #morning_time: "08:00"
+#  #  # If the machine or bot was down at morning_time, catch up until this local
+#  #  # time; after it the day is skipped (a workout briefing at 9 PM is noise).
+#  #  #morning_deadline: "15:00"
+#  #  # Run the daily adaptation non-interactively (workout adapt -y) before
+#  #  # rendering the push, so it reflects overnight signals. Costs an LLM call
+#  #  # every morning.
+#  #  #adapt_first: false
+
+google:
+  # Service-account JSON file used to authenticate to the Google APIs.
+  service_account_file: "service_account.json"
+  # Google Calendar that planned workouts are written to / read from.
+  calendar_id: "YOUR_CALENDAR_ID@group.calendar.google.com"
+  # Source tag for calendar events containing daily signals.
+  #calendar_signal_tag: "trainmate-context"
+
+garmin:
+  email: "you@example.com"
+  password: "your-garmin-password"
+  # Directory where the garminconnect OAuth tokens are persisted. A relative path
+  # resolves against this config file's directory (or `data_dir:` when set), like
+  # `database:`; the default is .garminconnect beside it. A valid token store wins over
+  # the credentials above, so two configs sharing a directory MUST set this apart —
+  # otherwise the second one silently resumes the first athlete's Garmin session.
+  #token_dir: ".garminconnect"
+  # Trailing days a forward-refresh re-fetches to catch late-finalizing data.
+  #mutable_days: 3
+  # Backward-gap size above which a backfill is surfaced as a command rather
+  # than run automatically; also gates interior gaps.
+  #backfill_prompt_days: 30
+  # Range used to build the cold-start backfill command.
+  #initial_backfill_days: 90
+  # Sleep between Garmin API calls (--sleep overrides it on `data pull`).
+  #throttle_seconds: 0.2
+  # Minimum fraction of an activity that must fall inside a known HR zone before
+  # hrTSS is trusted; below it, effort sat under zone 1 and hrTSS undercounts, so
+  # RPE is preferred. Calibrated against the activity history. Default 0.5.
+  #hr_zone_coverage_min: 0.5
+  # Shortest activity that may raise an undercount marker ('?' on the load table, '!'
+  # on the zone tables) in `tm progress`. A 5-minute mobility session with a cold strap
+  # is not evidence that a 340-TSS week is undercounted, nor evidence about the strap.
+  # Sessions below this still contribute their load and their zone minutes; they only
+  # lose their vote on the markers. Default 20 minutes.
+  #zone_min_activity_minutes: 20
+  # Share of a sport's duration that must land inside a known zone before its weekly row
+  # stops marking itself incomplete. Higher than hr_zone_coverage_min on purpose: that
+  # one decides whether load is trustworthy, this one only decides whether a table says
+  # it is patchy. Default 0.8.
+  #zone_coverage_display_min: 0.8
+  # Per-sport overrides, by canonical sport name. Uncovered time is not always a failed
+  # recording — it is also the rest between sets, the chairlift back up, the gentle
+  # walking on a hike, the held pose, all of which sit below zone 1 where no zone claims
+  # them. trainmate/intensity.py ships defaults for the sports where that is structural
+  # (strength_training 0.45, downhill_skiing and indoor_climbing 0.15, hiking
+  # 0.10, yoga 0.05); everything else uses the bar above. Set an entry here to override.
+  #zone_coverage_display_min_by_sport:
+  #  strength_training: 0.45
+  #  hiking: 0.10
+  # PMC (CTL/ATL) time constants. For deliberate experimentation ONLY: the
+  # interpretation bands (TSB -30/+25, ramp 3-5/8, ATL:CTL 1.3/1.5) and CLI colors
+  # are calibrated to the defaults, so a non-default value changes what the numbers
+  # MEAN while the bands keep judging them at the standard values. The defaults are
+  # the supported configuration; see DESIGN_pmc_fitness_fatigue.md §3.4. Takes effect
+  # on the next data pull/wipe/backfill (nothing recomputes on a config edit alone).
+  # Both must be positive integers (EWMA divisors).
+  #pmc_ctl_days: 42        # CTL (fitness) EWMA time constant, in days
+  #pmc_atl_days: 7         # ATL (fatigue) EWMA time constant, in days
+
+coach:
+  # Days of recent metrics history fed to the coach as context.
+  #metrics_lookback_days: 15
+  # Days to look back for a preceding goal when generating a new one.
+  #goals_lookback_days: 90
+  # Default span generated by the workout-generation command.
+  #workout_generation_span_days: 28
+  # How close to a block's end counts as its terminal window: inside it an adaptation
+  # has no runway to rebound and the next block is out of reach, so the coach is told to
+  # hold planned load and the CLI points at `workout generate --until-mesocycle`
+  # (DESIGN_block_boundary.md §3/§4).
+  #adapt_terminal_window_days: 3
+  # `constraint add`/`edit` replan proposal (DESIGN_constraints.md §7): propose a
+  # replan when a constraint's overlapping planned load is at least this percentage
+  # of the plan's trailing weekly planned load...
+  #replan_displaced_load_pct: 50
+  # ...OR, independently, when a `rest` constraint spans at least this many days.
+  #replan_rest_span_days: 3
+  # Relative drift (percent) an effective threshold anchor (max_hr, or a logbook
+  # anchor like ftp/lthr) may move from the value the active plan was generated with
+  # before the plan is flagged stale. Small retest corrections flow into workout
+  # targets without invalidating the periodization strategy.
+  #threshold_replan_pct: 5
+  # Thresholds to compute high intensity workouts.
+  #high_intensity_rpe_threshold: 8
+  #high_intensity_tss_threshold: 120.0
+  # Quantitative signal-impact alignment (alcohol, big meal, …). 'lookahead' (k) is
+  # how many mornings bracket each signal episode before/after, and the drink-free gap
+  # below which two signal runs merge into one episode. 'min_days' is the floor
+  # of total signal-days a category needs before its rows are shown to the coach.
+  #signal_days_lookahead: 3
+  #signal_days_min_days: 1
+  # Workload score below which an activity counts as "minor": widens the
+  # planned-vs-actual mismatch tolerance and labels unplanned activities as minor.
+  #minor_activity_load_threshold: 25.0
+  # Ratio of RPE-implied load to measured (power/HR) load above which a session is
+  # flagged to the coach as "felt harder than it measured" (hidden fatigue: heat,
+  # sleep debt, muscular damage, e.g. kettlebell HIIT). Set very high to disable.
+  #rpe_divergence_ratio: 1.5
+  # Dynamic +/- tolerance band for the planned-vs-actual duration/workload check:
+  # easy_pct applies at planned loads <= low_load, hard_pct at loads >= high_load,
+  # linearly interpolated between (looser for easy sessions, tighter for hard ones).
+  #adherence_tolerance:
+  #  easy_pct: 0.50
+  #  hard_pct: 0.15
+  #  low_load: 20.0
+  #  high_load: 100.0
+
+# Editing most of this block flags the active periodization stale and offers a replan.
+# The exceptions — `name`, `equipment`, and each day's `equipment` below — reach the coach
+# but cannot reshape a periodization, so changing them is silent. See
+# designs/DESIGN_plan_staleness.md.
+user_profile:
+  name: "Athlete"
+  birth_year: 1980
+  # Free text. Reaches every coaching prompt so sex-specific physiology — hormonal
+  # cycle, substrate use, injury profile — can shape the plan. Omit it and the coach
+  # plans sex-neutral.
+  gender: "female"
+  max_hr: 185
+  # Trainable thresholds (FTP, LTHR, threshold pace, CSS, e1RM, …) are recorded in the
+  # dated benchmark logbook, not here — it is the source the coach reads.
+  # Record one with e.g.  `tm benchmark record cycling --ftp 220`
+  # or  `tm benchmark record running --lthr 165`. With none on record the coach
+  # prescribes by RPE/HR feel and schedules a benchmark to establish them. A logbook
+  # value always overrides a same-named key here.
+  weekly_target_hours: 6.0
+  sport_preferences:
+    - "running"
+    - "cycling"
+    - "hiking"
+    - "strength_training"
+    - "yoga"
+    - "ski_touring"
+  chronic_injuries: |
+    Sensitive lower back. Avoid high-impact running on pavement when flared up.
+  preferences: |
+    Enjoys morning workouts. Prefers outdoor trail runs and road cycling.
+  equipment:
+    - "Garmin watch"
+    - "running shoes"
+    - "road bike"
+  # Per-day availability. Optional: omit the whole block and the coach places
+  # sessions on any day, sized by weekly_target_hours. certainty_percent is how
+  # likely you are to actually train that day (the coach weights planning toward
+  # higher-certainty days).
+  weekly_schedule:
+    Monday:
+      total_available_hours: 1.0
+      max_sessions: 1
+      certainty_percent: 100
+      equipment:
+        - "kettlebells"
+        - "dumbbells"
+        - "yoga mat"
+    Tuesday:
+      total_available_hours: 1.5
+      max_sessions: 1
+      certainty_percent: 80
+      equipment:
+        - "road bike"
+        - "home trainer"
+    Wednesday:
+      total_available_hours: 0.0
+      max_sessions: 0
+      certainty_percent: 100
+      equipment: []
+    Thursday:
+      total_available_hours: 1.5
+      max_sessions: 1
+      certainty_percent: 80
+      equipment:
+        - "road bike"
+        - "home trainer"
+    Friday:
+      total_available_hours: 1.0
+      max_sessions: 1
+      certainty_percent: 90
+      equipment:
+        - "kettlebells"
+        - "dumbbells"
+        - "yoga mat"
+    Saturday:
+      total_available_hours: 3.0
+      max_sessions: 2
+      certainty_percent: 70
+      equipment:
+        - "road bike"
+    Sunday:
+      total_available_hours: 2.0
+      max_sessions: 1
+      certainty_percent: 70
+      equipment:
+        - "running shoes"

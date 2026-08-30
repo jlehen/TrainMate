@@ -12,7 +12,7 @@ from trainmate.garmin.load import _hr_zone_coverage, activity_load, compute_load
 
 # The PMC CTL/ATL EWMA time constants are config-backed under `garmin:` and read live
 # every sweep (not frozen at import) so an edit can't drift derived values apart.
-# Non-default windows are experimental — calibration caveat in config_template.yaml and
+# Non-default windows are experimental — calibration caveat in config_template_full.yaml and
 # DESIGN_pmc_fitness_fatigue.md §3.4.
 
 def load_ratio(atl: Optional[float], ctl: Optional[float]) -> Optional[float]:

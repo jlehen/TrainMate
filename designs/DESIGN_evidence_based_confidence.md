@@ -136,7 +136,7 @@ learning_confidence_thresholds:   # distinct net supporting weeks to reach each 
 ```
 
 A loader reads these with the defaults above as fallback (tentative is always ≥1,
-retirement always ≤0 — not knobs); `config_template.yaml` carries the commented block
+retirement always ≤0 — not knobs); `config_template_full.yaml` carries the commented block
 next to `learning_staleness_days`. Tuning the map re-levels learnings on the next
 recompute without a migration — `db.recompute_all_confidence()` is the entry point that
 re-derives every learning from its basis on demand.

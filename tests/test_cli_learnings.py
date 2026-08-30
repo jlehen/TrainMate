@@ -96,12 +96,14 @@ class TestCliLearnings(unittest.TestCase):
 
 
 class TestLearningTuningKnobsAreDocumented(unittest.TestCase):
-    """`config_template.yaml` is the discovery surface for the learning knobs
+    """`config_template_full.yaml` is the discovery surface for the learning knobs
     (DESIGN_evidence_based_confidence.md §3): a loader with no commented example is
-    invisible to the user it exists for."""
+    invisible to the user it exists for. The short `config_template.yaml` carries only
+    the keys an install must fill in, so the knobs are documented in the full one."""
 
     TEMPLATE = os.path.join(
-        os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "config_template.yaml"
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        "config_template_full.yaml",
     )
 
     def test_both_learning_knobs_have_a_commented_example(self):

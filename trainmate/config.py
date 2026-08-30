@@ -404,7 +404,7 @@ class Config:
         return {str(k).strip().lower(): float(v) for k, v in raw.items()}
 
     # --- PMC time constants, config-backed under `garmin:`. Non-default values are
-    # experimental; calibration caveat in config_template.yaml and
+    # experimental; calibration caveat in config_template_full.yaml and
     # DESIGN_pmc_fitness_fatigue.md §3.4. ---
     def _load_window_days(self, key: str, default: int) -> int:
         """A `garmin:` load time-constant, validated positive — both are EWMA divisors,

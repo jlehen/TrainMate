@@ -511,7 +511,7 @@ Each gets a typed accessor on `Config` alongside the existing properties.
 > **Rev. 2 — the keys are nested; rev. 1's YAML was silently ignored.** Rev. 1 wrote
 > flat top-level keys (`garmin_mutable_days`, `garmin_email`, …). Everything Garmin-owned
 > actually lives under a `garmin:` section with the prefix **stripped**, as shown above and
-> in `config_template.yaml`. Only `refresh_minutes` is top-level (it gates Calendar
+> in `config_template_full.yaml`. Only `refresh_minutes` is top-level (it gates Calendar
 > syncs too, so it isn't Garmin's) — that one line rev. 1 got right. The confusion is
 > easy to inherit because the Python *accessors* kept the flat names —
 > `config.garmin_mutable_days` reads `garmin: mutable_days:` — so code and config do not
