@@ -22,6 +22,8 @@ class PromptBuildMixin:
             current_year = _today_date().year
             age = current_year - profile['birth_year']
             lines.append(f"- Birth Year: {profile['birth_year']} (Age: {age})")
+        if profile.get("gender"):
+            lines.append(f"- Gender: {profile['gender']}")
         # Render whatever threshold anchors the (effective) profile carries, generically
         # with each kind's unit — no kind is privileged (DESIGN_benchmark_workouts.md §3.5),
         # so a first swim/strength test shows up here with zero further code. Ordered by the

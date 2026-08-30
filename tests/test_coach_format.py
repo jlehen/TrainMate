@@ -5,6 +5,7 @@ import unittest
 from trainmate.coach import format_completed_activities
 from trainmate.coach.formatting import format_metrics_history
 from trainmate.util import PMC_TSB_LAG_NOTE
+from trainmate.coach.engine.prompt import PromptBuildMixin
 
 
 def _activity(**overrides):
@@ -89,3 +90,18 @@ class TestFormatMetricsHistory(unittest.TestCase):
         out = format_metrics_history(rows)
         self.assertIn("CTL=62.4", out)
         self.assertNotIn(PMC_TSB_LAG_NOTE, out)
+
+
+# ==============================================================================
+# _format_athlete_profile — the prompt's who-you-are block
+# ==============================================================================
+class TestFormatAthleteProfile(unittest.TestCase):
+    def _render(self, **profile):
+        return PromptBuildMixin._format_athlete_profile(None, profile)
+
+    def test_gender_rendered_when_set(self):
+        self.assertIn("- Gender: female", self._render(name="Sam", gender="female"))
+
+    def test_gender_omitted_when_absent_or_blank(self):
+        self.assertNotIn("Gender", self._render(name="Sam"))
+        self.assertNotIn("Gender", self._render(name="Sam", gender=""))

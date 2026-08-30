@@ -1857,7 +1857,7 @@ Required fields:
 |                         |      | (default: 5). Under `coach:`.                                |
 | `user_profile`          | dict | Athlete profile block (see below); no threshold required     |
 
-`user_profile` keys: `name`, `birth_year`, `max_hr`, `weekly_target_hours`,
+`user_profile` keys: `name`, `birth_year`, `gender`, `max_hr`, `weekly_target_hours`,
 `sport_preferences`, `chronic_injuries`, `preferences`, `equipment`,
 `weekly_schedule`. `weekly_schedule` maps day names to
 `{total_available_hours, max_sessions, certainty_percent, equipment}`. Trainable

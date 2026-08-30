@@ -168,6 +168,7 @@ coach:
 user_profile:
   name: "Sam"
   birth_year: 1986
+  gender: "female"
   max_hr: 188
   weekly_target_hours: 8.0
   sport_preferences:

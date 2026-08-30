@@ -203,7 +203,7 @@ documentation staying in the template.) The blocks you must fill:
   and `service_account_file`, the service-account JSON used to authenticate
   (`service_account.json` in the repo root by default).
 - **`garmin:`** — `email` and `password` for Garmin Connect.
-- **`user_profile:`** — the athlete the coach is planning for: `max_hr`,
+- **`user_profile:`** — the athlete the coach is planning for: `gender`, `max_hr`,
   `weekly_target_hours`, sport preferences, chronic injuries, free-text
   preferences, and a per-day `weekly_schedule` — how many hours and sessions
   each weekday can hold, how *certain* you are to actually train that day

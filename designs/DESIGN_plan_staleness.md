@@ -43,6 +43,7 @@ whether the block structure, phase ordering, or volume ramp depends on it.
 | `name` | **no** | A label. Nothing downstream branches on it. |
 | `equipment` | **no** | Edits are additive and session-level; per-day kit in `weekly_schedule` is what actually gates a session. |
 | `birth_year` | yes | Age drives recovery capacity and intensity distribution. Changes only as a *correction* — you do not age into a new birth year — so it fires rarely, and when it does the plan was built on a materially wrong age. |
+| `gender` | yes | Sex-specific physiology (hormonal cycle, substrate use, injury risk) belongs in the block structure, not just the session detail. Like `birth_year` it changes rarely, so over-triggering costs nothing. |
 | `weekly_target_hours` | yes | Volume is the spine of the periodization. |
 | `sport_preferences` | yes | The modality palette. Adding or dropping a sport changes the mesocycle mix wholesale. |
 | `chronic_injuries` | yes | Free text, but structural in content ("no court sports"). The one field where *under*-triggering has a physical cost. |

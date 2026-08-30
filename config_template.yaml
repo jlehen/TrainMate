@@ -247,6 +247,10 @@ coach:
 user_profile:
   name: "Athlete"
   birth_year: 1980
+  # Free text. Reaches every coaching prompt so sex-specific physiology — hormonal
+  # cycle, substrate use, injury profile — can shape the plan. Omit it and the coach
+  # plans sex-neutral.
+  gender: "female"
   max_hr: 185
   # Trainable thresholds (FTP, LTHR, threshold pace, CSS, e1RM, …) are recorded in the
   # dated benchmark logbook, not here — it is the source the coach reads.
