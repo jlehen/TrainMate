@@ -15,11 +15,12 @@ llm:
   # above — one allowlist for both roles. Absent -> the coaching model routes too.
   #router_model: "google/gemini-3.5-flash"
 
-# Where this instance's files live. When set, every relative path in this file — the
-# database, science_dir, logging dir, service_account_file, garmin token_dir — resolves
-# against this directory instead of the config file's directory. One key instead of
-# hand-prefixing each path below; an absolute per-key path still wins. Itself relative
-# to this config file's directory.
+# Where this instance's files live. Every relative path in this file — the database,
+# science_dir, logging dir, service_account_file, garmin token_dir — resolves against
+# this directory. DEFAULT: the directory containing this config file, so with the key
+# unset all state lands beside the config. Set it to move the whole instance under one
+# prefix instead of hand-prefixing each path key below; an absolute per-key path still
+# wins. The value is itself relative to this config file's directory.
 #data_dir: "athlete2"
 
 # The SQLite database this install operates on. A relative path resolves against this

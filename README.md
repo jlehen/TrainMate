@@ -229,20 +229,23 @@ Everything else in the template is optional tuning and documented inline —
 sensible defaults apply when a key is commented out.
 
 **Where your data lives.** Every relative path in `config.yaml` — `database:`,
-`science_dir:`, `logging.dir`, `google.service_account_file` — resolves against
-the directory containing the config file itself, never against the directory
-you run commands from. With the defaults, everything therefore lands beside
-`config.yaml`: the repo root for the primary install. That rule is also how a
-second athlete runs from the same checkout: put their `config.yaml` in a
-directory of its own and point every command at it with
-`TRAINMATE_CONFIG=/path/to/other/config.yaml ./tm …` (and likewise `./tm-bot`)
-— their database, logs, and science guidelines land in that directory
-automatically, with no path keys to set. The one exception is
-`garmin.token_dir`, which defaults to `~/.garminconnect` for every instance:
-give each athlete with their own Garmin account their own directory (an
-absolute or `~`-based path), because a token store that loads successfully is
-used as-is — the configured `garmin.email` is never checked against it, so two
-instances sharing one store would both pull whichever account logged in last.
+`science_dir:`, `logging.dir`, `google.service_account_file`,
+`garmin.token_dir` — resolves against the top-level `data_dir:` directory,
+which **defaults to the directory containing the config file itself** — never
+the directory you run commands from. With everything at its default, all state
+therefore lands beside `config.yaml`: the repo root for the primary install.
+That rule gives a second athlete on the same checkout two equivalent setups,
+both selected by pointing every command at their config with
+`TRAINMATE_CONFIG=/path/to/other/config.yaml ./tm …` (and likewise `./tm-bot`):
+put their `config.yaml` in a directory of its own and their database, logs,
+and science guidelines land there automatically with no path keys set — or
+keep their config beside yours and set `data_dir:` to push all of their state
+into a subdirectory. The Garmin token store (`garmin.token_dir`, default
+`.garminconnect` beside the config — under `data_dir:` when set) follows the
+same rule, and keeping it per-instance matters: a token store that loads
+successfully is used as-is — the configured `garmin.email` is never checked
+against it — so two instances sharing one store would both pull whichever
+account logged in last.
 
 Note what is *not* in the config: trainable thresholds (FTP, LTHR, threshold
 pace, …) live in the dated benchmark logbook, recorded with

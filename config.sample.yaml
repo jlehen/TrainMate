@@ -21,9 +21,9 @@ llm:
   # Seeds the `router-model` setting, and must be one of the `models:` above.
   #router_model: "google/gemini-3.5-flash"
 
-# Where this instance's files live. When set, every relative path in this file (db,
-# science_dir, logging dir, service_account_file, garmin token_dir) resolves against
-# this directory instead of this file's. Itself relative to this file's directory.
+# Where this instance's files live: every relative path in this file (db, science_dir,
+# logging dir, service_account_file, garmin token_dir) resolves against it. DEFAULT:
+# this config file's directory. Setting it moves the whole instance under one prefix.
 #data_dir: "athlete2"
 
 # The SQLite database this install operates on. Relative to this file's directory
