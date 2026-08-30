@@ -737,6 +737,38 @@ and re-pushes the Calendar event, and that is all: `_eased` (§7) counts a revis
 `adaptation_count` and never renders the `ALREADY EASED` tag. The keep marker exists to make
 intent expressible, not to suppress rewording.
 
+### 9.2 A completed session is held by history
+
+§9.1 gives the coach a way to say *this date keeps that session*. A session the athlete has
+already trained needs no such statement: it is spoken for by having happened. The service
+seeds `held` with every locked slot in the proposal's range, so the displacement rule reads
+a finished session the way it reads a keep marker — present, and not up for removal.
+
+**Why the drop guard was not enough.** Adapt already refuses any proposal aimed *at* a
+locked slot (§4, "you cannot adapt a workout you have already finished today"). But that
+guard matches on `(date, sport)`, and the way a session gets dropped is by *not being
+named*: a rest day proposed for the date takes everything on it that the response does not
+mention. So the one encoding the coach reaches for most — "rest, the lift is off" — walked
+straight past a guard that was only ever watching the front door.
+
+Observed 2026-08-30. The athlete rode a 150-minute Z2 session in the morning and then wrote
+*"Not going to do the KB workout today."* The coach returned exactly one entry — a `rest`
+day titled *"Rest — Kettlebell Session Dropped"* — and the pass offered to void the ride,
+rendering it as `CYCLING->REST, 120m/RPE4/TSS92 -> 0m/RPE0/TSS0`. Two and a half hours of
+completed work, proposed for deletion by a change that was about the lift. Under §9.2 the
+ride is held, the rest entry lands on the lift it was always about, and the day reads
+`STRENGTH_TRAINING->REST`.
+
+**A `rest` constraint does not release it.** §6 outranks a hold and clears a constrained day
+outright, but that authority runs forward, not backward: a constraint cannot un-train a
+session. Locked slots are the one thing a forced-rest day leaves standing.
+
+**Where this leaves the record.** The vacated session still becomes a planned rest day (§2,
+"RE-FILLING A DATE YOU VACATE"), so a day can carry both a completed ride and a rest row.
+That is not a rest violation: the day's sessions pair in `id` order, the ride's own session
+is older than the rest row appended beside it, so the activity is consumed by the session
+that planned it and the rest day reads `rest_ok`.
+
 ## 10. Undo — the batch key moves from death to birth
 
 Today a batch is `archived_at`: a timestamp stamped on the rows a command *displaced*. That
@@ -981,6 +1013,10 @@ migration function.
 - A text-only revision is applied like any other change, does not bump `adaptation_count`,
   and the preview prints the sentences that moved (§9.1). The backstop is exact, not fuzzy:
   the keep marker is what separates a hold from a rewrite, not a similarity threshold.
+- A completed session survives a rest day proposed for its date (§9.2): the ride stays live
+  with a zero tally, the rest entry pairs with the lift instead, and the day reports no rest
+  violation afterwards. Pinned twice — once against the coach's own rest entry, once against
+  the forced rest a `rest` constraint writes.
 - Restoring an archived revision appends a copy and makes it live, and the previously live
   revision stays in the chain.
 - An adapt that drops a session leaves a void, and `workout rollback` on that change brings

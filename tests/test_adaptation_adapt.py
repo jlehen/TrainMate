@@ -1,6 +1,7 @@
 import io
 import os
 import unittest
+from datetime import date
 from contextlib import redirect_stdout
 from unittest.mock import patch
 
@@ -16,6 +17,7 @@ import trainmate.coach
 test_db = Database(db_path=TEST_DB_PATH)
 rebind_test_db(test_db)
 
+from trainmate.adherence import REST_VIOLATION, analyze_adherence
 from trainmate.coach import coach_service
 from trainmate.coach.proposals import RevisionProposal
 from trainmate.sports import canonical_sport
@@ -481,6 +483,144 @@ class TestAdaptationAdapt(unittest.TestCase):
                 "[COMPLETED — locked history, not adaptable]",
                 prompt_user_content,
             )
+
+    @patch("trainmate.coach.engine.openrouter_client")
+    def test_adapt_rest_day_does_not_displace_a_completed_session(self, mock_client):
+        """Dropping the day's OTHER session must not take the finished one with it.
+
+        Observed 2026-08-30: the athlete rode a 150-minute Z2 session and then said they
+        were skipping the afternoon kettlebell workout. The coach encoded that as a single
+        `rest` entry for the day, and the displacement rule read the finished ride — whose
+        sport the entry never names — as a session the coach wanted gone
+        (DESIGN_workout_revisions.md §9.2).
+        """
+        test_profile = {"lthr": 165, "max_hr": 185}
+        with patch.dict(trainmate.coach.config.data, {
+            "user_profile": test_profile,
+            "coach": {
+                "metrics_lookback_days": 3,
+                "minor_activity_load_threshold": 10.0,
+            }
+        }):
+            mock_client.complete.return_value = {
+                "change_needed": True,
+                "reason": "Athlete is dropping today's lift.",
+                "adapted_workouts": [
+                    {
+                        "date": "2026-06-03",
+                        "sport_type": "rest",
+                        "title": "Rest — Kettlebell Session Dropped",
+                        "description": "No lift today; the long Z2 ride is done.",
+                        "duration_minutes": 0,
+                        "rpe": 0,
+                        "tss": 0,
+                    },
+                ],
+            }
+
+            test_db.save_metric_cache("2026-06-03", 56, 42, 60, 35, 14.0, 8.0, 1.75)
+            test_db.save_baseline("2026-06-03", 50.0, 2.0, 60.0, 5.0, 80.0, 5.0)
+
+            save_workout(test_db,
+                "2026-06-03", "cycling", "Long Indoor Z2", "120 mins",
+                duration_minutes=120, rpe=4, tss=92,
+            )
+            save_workout(test_db,
+                "2026-06-03", "strength_training", "Kettlebell Strength", "45 mins",
+                duration_minutes=45, rpe=5, tss=20,
+            )
+
+            # Ridden in full — longer than planned, so it locks.
+            test_db.save_completed_activity(
+                "act_ride", "2026-06-03", "2026-06-03 09:00:00", "Indoor Cycling",
+                "indoor_cycling", 8994.0, 55.0, 0.0, 133, 147, 4, 107.7,
+            )
+
+            proposal = coach_service.workout_adapt("2026-06-03")
+
+            # The ride is spoken for by history, so it is neither rewritten nor deleted.
+            self.assertIn(("2026-06-03", "cycling"), proposal.held)
+            self.assertEqual(proposal.removals, ())
+            # The rest entry lands on the session actually being dropped.
+            swaps = [p for p in proposal.pairs if p.is_swap]
+            self.assertEqual(len(swaps), 1)
+            self.assertEqual(swaps[0].original["sport_type"], "strength_training")
+
+            service = trainmate.coach.CoachService(db_instance=test_db)
+            with redirect_stdout(io.StringIO()):
+                service.workout_revision_apply(proposal)
+
+            ride = test_db.get_workout("2026-06-03", "cycling")
+            self.assertIsNotNone(ride, "the completed ride was voided by the rest day")
+            self.assertEqual(ride["title"], "Long Indoor Z2")
+            self.assertEqual(ride["duration_minutes"], 120)
+            self.assertEqual(ride["adaptation_count"], 0)
+            self.assertIsNone(test_db.get_workout("2026-06-03", "strength_training"))
+
+            # And the rest day it left behind is not read back as a rest broken: the ride
+            # pairs with its own session first, so tomorrow's coach sees a day that went
+            # as revised, not an athlete who trained through a rest day.
+            discrepancies, _m, _i = analyze_adherence(
+                planned_workouts=test_db.get_workouts(
+                    start_date="2026-06-03", end_date="2026-06-03"
+                ),
+                completed_activities=test_db.get_completed_activities(
+                    start_date="2026-06-03", end_date="2026-06-03"
+                ),
+                start_date_obj=date(2026, 6, 3), history_days=1,
+                minor_activity_load_threshold=10.0,
+            )
+            self.assertEqual([d for d in discrepancies if d.kind == REST_VIOLATION], [])
+
+    @patch("trainmate.coach.engine.openrouter_client")
+    def test_rest_constraint_does_not_clear_a_completed_session(self, mock_client):
+        """A `rest` constraint outranks a hold (§6 over §9.1) but not history: the day's
+        remaining session is forced to rest while the finished one stands (§9.2)."""
+        test_profile = {"lthr": 165, "max_hr": 185}
+        with patch.dict(trainmate.coach.config.data, {
+            "user_profile": test_profile,
+            "coach": {
+                "metrics_lookback_days": 3,
+                "minor_activity_load_threshold": 10.0,
+            }
+        }):
+            mock_client.complete.return_value = {
+                "change_needed": False,
+                "reason": "On track.",
+                "adapted_workouts": [],
+            }
+
+            test_db.save_metric_cache("2026-06-03", 56, 42, 60, 35, 14.0, 8.0, 1.75)
+            test_db.save_baseline("2026-06-03", 50.0, 2.0, 60.0, 5.0, 80.0, 5.0)
+            test_db.add_constraint(
+                title="Family day", start_date="2026-06-03", end_date="2026-06-03",
+                rest=1,
+            )
+
+            save_workout(test_db,
+                "2026-06-03", "cycling", "Long Indoor Z2", "120 mins",
+                duration_minutes=120, rpe=4, tss=92,
+            )
+            save_workout(test_db,
+                "2026-06-03", "strength_training", "Kettlebell Strength", "45 mins",
+                duration_minutes=45, rpe=5, tss=20,
+            )
+            test_db.save_completed_activity(
+                "act_ride", "2026-06-03", "2026-06-03 09:00:00", "Indoor Cycling",
+                "indoor_cycling", 8994.0, 55.0, 0.0, 133, 147, 4, 107.7,
+            )
+
+            proposal = coach_service.workout_adapt("2026-06-03")
+            self.assertIn(("2026-06-03", "cycling"), proposal.held)
+
+            service = trainmate.coach.CoachService(db_instance=test_db)
+            with redirect_stdout(io.StringIO()):
+                service.workout_revision_apply(proposal)
+
+            ride = test_db.get_workout("2026-06-03", "cycling")
+            self.assertIsNotNone(ride, "the rest constraint voided a finished ride")
+            self.assertEqual(ride["title"], "Long Indoor Z2")
+            self.assertIsNone(test_db.get_workout("2026-06-03", "strength_training"))
 
     @patch("trainmate.coach.engine.openrouter_client")
     def test_adapt_abandoned_session_is_partial_not_completed(self, mock_client):

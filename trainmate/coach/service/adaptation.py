@@ -340,6 +340,12 @@ class AdaptationMixin:
                 changed.append(w)
         adapted = changed
 
+        # A completed session is held by history, not by the coach naming it: the drop
+        # guard above only catches a proposal aimed AT its slot, while a rest day (or any
+        # other sport) proposed for the same date displaces it without ever naming it
+        # (DESIGN_workout_revisions.md §9.2).
+        held.extend(key for key in completed_keys if key[0] >= target_date_str)
+
         # Deterministic rest-window pre-pass (§6): force rest onto any future,
         # not-yet-completed planned session that falls under a `rest` constraint, so the
         # guarantee holds regardless of what the model proposed.
@@ -347,11 +353,16 @@ class AdaptationMixin:
             adapted, planned_workouts, constraints, completed_keys, target_date_str
         )
         # A forced-rest day is cleared outright, so nothing on it is held: the constraint
-        # outranks the coach's wish to keep the session (§6 over §9.1).
+        # outranks the coach's wish to keep the session (§6 over §9.1). A session already
+        # trained is the exception — no constraint reaches backwards into work that is
+        # already done (§9.2).
         forced_rest = self._forced_rest_days(
             planned_workouts, constraints, completed_keys, target_date_str
         )
-        held = [(date, sport) for date, sport in held if date not in forced_rest]
+        held = [
+            (date, sport) for date, sport in held
+            if date not in forced_rest or (date, sport) in completed_keys
+        ]
 
         # §8: constraint-shaped directives the same LLM call extracted from the athlete's
         # note, if any — raw and UNCONFIRMED. The caller must confirm each with the
