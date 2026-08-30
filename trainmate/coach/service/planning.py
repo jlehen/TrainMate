@@ -6,6 +6,7 @@ from trainmate.types import PlanProposal, Workout
 from trainmate.coach.proposals import PlanFingerprints
 from trainmate.adherence import planned_load
 from trainmate.sports import canonical_sport
+from trainmate import signals
 from trainmate.db.periodization import repair_block_contiguity
 from trainmate.util import (
     aside, step, cyan, yellow, bold, cmd, wrap_text, format_labeled_block,
@@ -206,6 +207,35 @@ class PlanningMixin:
                 + " or " + cmd("plan generate") + "."
             ))
         return cid
+
+    def known_signal_metrics(self) -> List[str]:
+        """`signals.known_metrics` for this instance's config and history (§5)."""
+        return signals.known_metrics(config.signal_metrics, self._db.list_signal_metrics())
+
+    def capture_message_signal(
+        self, candidate: Dict[str, Any], default_date_str: str,
+        metric_override: Optional[str] = None
+    ) -> List[dict]:
+        """Creates the daily-signal rows for one `new_signals` candidate the CLI has
+        already confirmed with the athlete (DESIGN_signal_extraction.md §2).
+
+        `metric_override` is the category the athlete settled on, which may differ from the
+        one the model proposed (§6). A `value` that is not a number is dropped rather than
+        coerced: the model may only pass through a number the note stated, and a fabricated
+        one would enter the quantitative path as a measurement (§3).
+        """
+        metric = signals.normalize_metric(metric_override or candidate.get("metric"))
+        if not metric:
+            return []
+        start = candidate.get("date") or default_date_str
+        end = candidate.get("end_date") or start
+        if end < start:
+            end = start
+        value = candidate.get("value")
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            value = None
+        text = signals.signal_summary(metric, value, str(candidate.get("text") or "").strip())
+        return signals.write_signal_days(start, end, metric, value, text)
 
     @staticmethod
     def constraint_is_plan_shaping(

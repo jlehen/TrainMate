@@ -170,6 +170,43 @@ conclude a block was too soft from heart rate alone.
 """
 
 
+def _signal_extraction_task(vocabulary: Optional[str], earliest_date: str) -> str:
+    """The adapt-prompt section that turns a note into `new_signals` candidates.
+
+    Shows the category vocabulary so one string is reused per category instead of a new one
+    coined per occasion, and forbids inventing a `value` the note never stated
+    (DESIGN_signal_extraction.md §2, §5).
+    """
+    catalogue = vocabulary or "(no categories configured yet — propose one, kept short.)"
+    return f"""
+### RECORDING A DAILY SIGNAL FROM THE NOTE
+Also decide whether the note reports something that HAPPENED TO the athlete on particular
+days and would help explain their recovery readings: a heavy night's drinking, a broken
+night, a heatwave, illness, life stress. If so, return it in "new_signals" below, one entry
+per category per span.
+
+Tell it apart from a constraint by what the coach must do with it. A CONSTRAINT is a rule to
+plan around ("no run Thursday"). A SIGNAL is an external cause acting on the body on given
+days, which the coach reads beside the HRV/sleep/RHR numbers. A note that is only a mood
+report with no cause ("felt flat today") is NEITHER — leave both lists empty for it.
+
+Use one of these categories, spelled EXACTLY as shown, whenever one fits:
+{catalogue}
+Propose a category outside the list only when none fits. A category is a reusable label you
+would expect to log again — one or two words, lowercase, underscore-separated. It is never a
+description of this occasion: "kid_was_ill_all_night" is wrong, "disturbed_sleep" is right.
+
+"date"/"end_date" carry the days the signal ACTED ON, which is usually the recent past —
+"last night" is yesterday, "over the weekend" is those dates. Default to today when the note
+gives no day. Never go earlier than {earliest_date}.
+
+Set "value" ONLY when the note states a number, in the unit named by the category above
+("three beers" -> 3; "it hit 38" -> 38). Otherwise omit it or send null. NEVER invent a
+severity score: a category with free text and no number is complete and useful, and a
+fabricated number is read as a measurement.
+"""
+
+
 def _planned_zone_task(zone_currencies: Optional[Dict[str, str]]) -> str:
     """The PRESCRIBING INTENSITY section (DESIGN_intensity_distribution.md §9.8).
 
@@ -530,7 +567,9 @@ class WorkoutLogicMixin:
         pmc_warmup_cutoff: Optional[str] = None,
         pmc_context: Optional[str] = None,
         intensity_context: Optional[str] = None,
-        zone_currencies: Optional[Dict[str, str]] = None
+        zone_currencies: Optional[Dict[str, str]] = None,
+        signal_vocabulary: Optional[str] = None,
+        signal_earliest_date: Optional[str] = None
     ) -> Dict[str, Any]:
         """Queries LLM to evaluate metrics/activities and adapt workouts if needed.
 
@@ -539,9 +578,10 @@ class WorkoutLogicMixin:
         model is told to weigh it as today's intent without treating it as a durable
         signal about the block.
         """
-        # has_message gates FOUR regions that sit hundreds of lines apart: the clause
+        # has_message gates SIX regions that sit hundreds of lines apart: the clause
         # spliced into the change_reason wording, the note-handling instructions, the
-        # "new_constraints" schema member, and the note DATA section. They must appear
+        # constraint- and signal-extraction instructions, the "new_constraints" and
+        # "new_signals" schema members, and the note DATA section. They must appear
         # together or the model is told about a section that isn't present.
         # tests/test_prompt_gates.py asserts that, so the invariant survives edits here.
         has_message = bool(athlete_message and athlete_message.strip())
@@ -715,13 +755,18 @@ layoff, a venue/equipment limit, or a stated preference with a date or date rang
 "no run Thursday", "only 45 min today", "broke my ankle, out 6 weeks"). If so, return it in
 "new_constraints" below — one entry per distinct directive, exactly as if the athlete had
 run `constraint add`. A note only about how they feel right now ("felt flat, ease today") is
-NOT durable — leave "new_constraints" empty for it. When unsure, leave it out: a
+NOT a constraint — leave "new_constraints" empty for it (it may still be a signal, below).
+When unsure, leave it out: a
 durable-looking note mis-filed as a constraint is worse than a missed one. This is
 extraction only — never invent a plan-shaping escalation, and never omit "start_date"/
 "end_date" (default both to today when the note doesn't say). Extracted constraints are
 always advisory; the deterministic-rest and plan-shaping escalations are deliberate human
 actions and the app, not you, decides those.
 """
+
+            custom_task += _signal_extraction_task(
+                signal_vocabulary, signal_earliest_date or target_date_str
+            )
 
         custom_task += """
 ### DURABLE OBSERVATIONS ARE READ-ONLY HERE
@@ -795,6 +840,23 @@ evidence-backed observations are authored only by the weekly history analysis
                 '      "start_date": "YYYY-MM-DD (required; default today)",\n'
                 '      "end_date": "YYYY-MM-DD (required; == start for a single day)",\n'
                 '      "description": "optional richer context or null/omit"\n'
+                "    }\n"
+                "  ]"
+            )
+            schema_members.append(
+                '  "new_signals": [\n'
+                "    // Optional. Daily signals extracted from the athlete's note this run\n"
+                "    // (see RECORDING A DAILY SIGNAL above). Every entry is created exactly as\n"
+                "    // if the athlete had run `signal add`. Omit entirely, or leave empty, when\n"
+                "    // the note reports no external cause.\n"
+                "    {\n"
+                '      "metric": "the category, spelled exactly as listed where one fits\n'
+                '        (required)",\n'
+                '      "date": "YYYY-MM-DD, the first day it acted on (required)",\n'
+                '      "end_date": "YYYY-MM-DD (required; == date for a single day)",\n'
+                '      "value": 3 (the number the note stated, in the unit named for that\n'
+                "        category; null or omitted when the note gave none — never invent one),\n"
+                '      "text": "the athlete\'s own words for it, short (optional)"\n'
                 "    }\n"
                 "  ]"
             )

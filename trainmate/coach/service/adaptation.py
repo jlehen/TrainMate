@@ -5,7 +5,7 @@ from trainmate.adherence import (
     analyze_adherence, format_discrepancies, performed_sessions,
 )
 from trainmate.sports import canonical_sport
-from trainmate import intensity
+from trainmate import intensity, signals
 from trainmate.util import yellow, cmd
 from trainmate.coach.formatting import format_baseline
 from trainmate.coach import honoring
@@ -295,7 +295,13 @@ class AdaptationMixin:
             pmc_warmup_cutoff=pmc_cutoff,
             pmc_context=pmc_context,
             intensity_context=intensity_context,
-            zone_currencies=self._planning_zone_currencies(target_date_str)
+            zone_currencies=self._planning_zone_currencies(target_date_str),
+            # Config-merged categories annotated with what is actually logged, so the model
+            # reuses a category rather than coining one (DESIGN_signal_extraction.md §5).
+            signal_vocabulary=signals.format_vocabulary(
+                config.signal_metrics, self._db.list_signal_metrics()
+            ),
+            signal_earliest_date=start_date_str,
         )
 
         # NOTE: daily adaptation is read-only w.r.t. coach learnings
@@ -369,6 +375,9 @@ class AdaptationMixin:
         # athlete before persisting it (via capture_message_constraint); nothing here
         # writes a row.
         new_constraints = (decision.get("new_constraints") or []) if message else []
+        # Same gate, same rule: candidates only, confirmed and written by the caller via
+        # `capture_message_signal` (DESIGN_signal_extraction.md §2).
+        new_signals = (decision.get("new_signals") or []) if message else []
 
         # The row shape both revision commands write, built in one place (§7).
         structured = structure_revision(adapted, reason)
@@ -384,6 +393,7 @@ class AdaptationMixin:
             reason=reason,
             workouts=structured,
             new_constraints=tuple(new_constraints),
+            new_signals=tuple(new_signals),
             range_start=target_date_str,
             range_end=meso_end_date_str,
             pairs=pairs,

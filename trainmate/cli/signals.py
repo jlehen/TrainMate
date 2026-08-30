@@ -8,32 +8,11 @@ full re-pull (`data wipe --calendar`) can't resurrect it.
 """
 import argparse
 import sys
-from datetime import datetime, timedelta
-from typing import Iterator, Optional
-from trainmate import runtime
+from trainmate import runtime, signals
 from trainmate.config import config
 from trainmate.util import bold, dim, green, red, yellow, cyan, magenta, fmt_date, fmt_span
 from trainmate.util import today_str as _today_str
 from trainmate.cli.selectors import add_selector_args, has_selector, resolve_window
-
-
-def _date_range(start: str, end: str) -> Iterator[str]:
-    """Yields each YYYY-MM-DD from start to end inclusive."""
-    d = datetime.strptime(start, "%Y-%m-%d").date()
-    last = datetime.strptime(end, "%Y-%m-%d").date()
-    while d <= last:
-        yield d.strftime("%Y-%m-%d")
-        d += timedelta(days=1)
-
-
-def _signal_summary(metric: str, value: Optional[float], label: str) -> str:
-    """Builds the calendar entry / LLM blurb. A provided label gets the value
-    appended in parentheses (`severe heatwave (38.0)`); with no label it's
-    `Metric: value` (matching ingested events like `Alcohol: 2.0`)."""
-    if label:
-        return f"{label} ({value})" if value is not None else label
-    base = metric[:1].upper() + metric[1:]
-    return f"{base}: {value}" if value is not None else base
 
 
 def _signal_line(row: dict) -> str:
@@ -59,24 +38,27 @@ def run_signal_add(args: argparse.Namespace) -> None:
         print(red("A signal needs a bounded range: -d DATE or -d A..B."))
         sys.exit(1)
 
-    metric = args.metric
+    # Normalized here as well as on the adapt-capture path, so `Heat` typed by hand and
+    # `heat` proposed by the coach are one category (DESIGN_signal_extraction.md §3).
+    metric = signals.normalize_metric(args.metric)
     value = args.value
 
     label = (args.label or " ".join(args.text or [])).strip()
-    text = _signal_summary(metric, value, label)
+    text = signals.signal_summary(metric, value, label)
 
-    written = []
-    for day in _date_range(start, end):
-        existing = runtime.db.get_daily_signals(day, day, metric=metric)
-        existing_id = existing[0]["google_event_id"] if existing else None
-        event_id = runtime.calendar_syncer.add_signal_event(
-            day, metric, value, text, existing_id
-        )
-        if not event_id:
-            print(red(f"Failed to write signal event for {day}."))
-            continue
-        runtime.db.upsert_daily_signal_by_event(event_id, day, metric, value, text)
-        written.extend(runtime.db.get_daily_signals(day, day, metric=metric))
+    # The vocabulary is a suggestion, never a whitelist (§5): an unlisted category is
+    # written, with a nudge in case it is a misspelling of one already in use.
+    known = signals.known_metrics(config.signal_metrics, runtime.db.list_signal_metrics())
+    if metric not in known:
+        near = signals.nearest_known(metric, known)
+        hint = f" Close to existing '{near}'." if near else ""
+        print(yellow(f"'{metric}' is a new signal category.{hint}"))
+
+    days = list(signals.date_range(start, end))
+    written = signals.write_signal_days(start, end, metric, value, text)
+    missing = sorted(set(days) - {row["date"] for row in written})
+    if missing:
+        print(red(f"Failed to write signal event for: {', '.join(missing)}."))
 
     for row in written:
         print(_signal_line(row))

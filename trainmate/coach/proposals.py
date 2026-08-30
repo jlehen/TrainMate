@@ -44,6 +44,9 @@ class RevisionProposal:
     # Candidate directives extracted from the athlete's note, raw and unconfirmed
     # (DESIGN_constraints.md §8).
     new_constraints: Tuple[Dict[str, Any], ...] = ()
+    # Candidate daily signals extracted from the same note, raw and unconfirmed
+    # (DESIGN_signal_extraction.md §2).
+    new_signals: Tuple[Dict[str, Any], ...] = ()
     # Constraints this pass had authority over every remaining day of, so apply stamps
     # exactly the set decided at proposal time (DESIGN_constraint_honoring.md §3). See
     # `coach/honoring.py`.

@@ -258,6 +258,21 @@ coach:
   # of total signal-days a category needs before its rows are shown to the coach.
   #signal_days_lookahead: 3
   #signal_days_min_days: 1
+  # Daily-signal categories offered to the coach, as 'name: what counts as this'. These
+  # AUGMENT the shipped set (alcohol, disturbed_sleep, illness, heat, stress, travel,
+  # underfuelling); reuse a shipped name here to reword its description. The list is a
+  # suggestion, not a whitelist — `signal add` and the coach may both use a category
+  # outside it, and a new one is flagged for confirmation rather than refused.
+  # Where a category has a natural unit, say so: the coach fills 'value' only from a
+  # number you actually stated, and the description is where it learns the unit.
+  # WARNING: a category about sleep MUST have "sleep" in its name. The self-correlation
+  # guard that stops the analysis "discovering" that bad sleep predicts bad sleep matches
+  # on that substring, so 'insomnia' would silently lose it (DESIGN_signal_extraction.md
+  # §4). Renaming a category also splits its history: the name is an exact-match key.
+  #signal_metrics:
+  #  altitude: "sleeping or training above ~1500 m; value = altitude in metres"
+  #  medication: "a drug that moves recovery — antihistamine, steroid, decongestant"
+  #  menstrual_cycle: "cycle phase or symptoms affecting recovery"
   # Workload score below which an activity counts as "minor": widens the
   # planned-vs-actual mismatch tolerance and labels unplanned activities as minor.
   #minor_activity_load_threshold: 25.0

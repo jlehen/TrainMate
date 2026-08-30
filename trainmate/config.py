@@ -1,6 +1,7 @@
 import os
 import yaml
 from typing import Any, Dict, List, Optional
+from trainmate.signals import DEFAULT_SIGNAL_METRICS, normalize_metric
 
 # Which config file this process runs against. TRAINMATE_CONFIG selects one explicitly —
 # that is how a second athlete runs from the same checkout (ARCHITECTURE.md §9); the
@@ -461,6 +462,23 @@ class Config:
         (DESIGN_quantitative_signal_impact.md §5). Counts signal-days, not episodes.
         Default 1 (show whatever exists; the LLM judges from the visible count)."""
         return int(self.get("coach", {}).get("signal_days_min_days", 1))
+
+    @property
+    def signal_metrics(self) -> Dict[str, str]:
+        """Daily-signal categories offered to the coach, as `metric -> gloss`. Under
+        `coach:`. Augments `signals.DEFAULT_SIGNAL_METRICS` rather than replacing it, and
+        a config entry reusing a shipped name overrides that gloss
+        (DESIGN_signal_extraction.md §5). Keys are normalized, so `Heat` and `heat` are
+        one category. Suggested, never enforced: `signal add` and the coach may both use
+        a category outside this list."""
+        merged = dict(DEFAULT_SIGNAL_METRICS)
+        raw = self.get("coach", {}).get("signal_metrics") or {}
+        for name, gloss in raw.items():
+            key = normalize_metric(name)
+            if not key:
+                continue
+            merged[key] = str(gloss or "").strip()
+        return merged
 
     @property
     def telegram_bot_token(self) -> Optional[str]:

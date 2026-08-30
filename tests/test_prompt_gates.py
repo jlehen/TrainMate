@@ -24,6 +24,8 @@ NOTE_INSTRUCTIONS = "### ATHLETE'S NOTE FOR TODAY"
 NOTE_SCHEMA_MEMBER = '"new_constraints"'
 NOTE_CLAUSE = "constraint from the athlete's note drove the change"
 NOTE_DATA = "## ATHLETE'S NOTE FOR THIS ADAPTATION"
+NOTE_SIGNAL_INSTRUCTIONS = "### RECORDING A DAILY SIGNAL FROM THE NOTE"
+NOTE_SIGNAL_SCHEMA_MEMBER = '"new_signals"'
 
 import trainmate.coach.engine.workouts as wk
 
@@ -98,13 +100,19 @@ def build_generate_prompt(**extra):
         return client.complete.call_args[0][0], client.complete.call_args[0][1]
 
 
+NOTE_REGIONS = (
+    NOTE_INSTRUCTIONS, NOTE_SCHEMA_MEMBER, NOTE_CLAUSE, NOTE_DATA,
+    NOTE_SIGNAL_INSTRUCTIONS, NOTE_SIGNAL_SCHEMA_MEMBER,
+)
+
+
 class TestAthleteNoteGate(unittest.TestCase):
     NOTE = "knee is sore, keep impact low"
 
     def test_a_note_reaches_every_region_it_governs(self):
         system, user = build_prompt(athlete_message=self.NOTE)
         whole = system + user
-        for region in (NOTE_INSTRUCTIONS, NOTE_SCHEMA_MEMBER, NOTE_CLAUSE, NOTE_DATA):
+        for region in NOTE_REGIONS:
             with self.subTest(region=region):
                 self.assertIn(region, whole)
         self.assertIn(self.NOTE, user, "the note itself must be in the data")
@@ -112,7 +120,7 @@ class TestAthleteNoteGate(unittest.TestCase):
     def test_without_a_note_none_of_them_appear(self):
         system, user = build_prompt()
         whole = system + user
-        for region in (NOTE_INSTRUCTIONS, NOTE_SCHEMA_MEMBER, NOTE_CLAUSE, NOTE_DATA):
+        for region in NOTE_REGIONS:
             with self.subTest(region=region):
                 self.assertNotIn(region, whole)
 

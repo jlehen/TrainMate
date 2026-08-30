@@ -1337,6 +1337,18 @@ category and `value` an optional numeric magnitude. Reconciled by
 `google_event_id` (upsert on edit, delete on cancellation). See §13 and
 `DESIGN_calendar_signal_ingest.md`.
 
+Three producers write these rows: the external syncer, `signal add`
+(`DESIGN_signal_authoring.md`), and `workout adapt --message`, which extracts signal
+candidates from the note and writes the ones the athlete confirms
+(`DESIGN_signal_extraction.md`). All three go through the calendar first —
+`google_event_id` is NOT NULL — and all three share `signals.write_signal_days`.
+`trainmate/signals.py` also holds the suggested category vocabulary
+(`DEFAULT_SIGNAL_METRICS`, augmented by `coach.signal_metrics` in config) and
+`SIGNAL_CHANNEL_EXCLUSIONS`, the substring table that stops a category being correlated
+against a reading measuring the same thing. Vocabulary and exclusion table live in one
+file because the exclusion matches on the category's spelling: a sleep category named
+without "sleep" in it silently loses the guard.
+
 | Column            | Type        | Notes                                          |
 |-------------------|-------------|------------------------------------------------|
 | `id`              | INTEGER PK  | Autoincrement                                  |

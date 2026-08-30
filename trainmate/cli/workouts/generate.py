@@ -2,7 +2,7 @@
 import argparse
 from datetime import datetime, timedelta
 from typing import Optional
-from trainmate import runtime
+from trainmate import runtime, signals
 from trainmate.config import config
 from trainmate.adherence import analyze_adherence, date_covered, format_discrepancies
 from trainmate.google_calendar import event_url
@@ -92,6 +92,55 @@ def _print_block_boundary_hint(date_str: str) -> None:
     print()
 
 
+def _confirm_new_signals(candidates, date_str: str) -> None:
+    """Asks about each daily signal the note produced, then writes the confirmed ones
+    (DESIGN_signal_extraction.md §2).
+
+    A category close to one already in use is offered as a ladder of two y/N questions —
+    the existing category first, the coined one second — so the reflexive `y` lands on
+    reuse and coining a category takes a deliberate second answer (§6). Declining both
+    logs nothing.
+    """
+    for candidate in candidates:
+        metric = signals.normalize_metric(candidate.get('metric'))
+        if not metric:
+            continue
+        start = candidate.get('date') or date_str
+        end = candidate.get('end_date') or start
+        span = start if start == end else f"{start}..{end}"
+        value = candidate.get('value')
+        shown = ""
+        if isinstance(value, (int, float)) and not isinstance(value, bool):
+            shown = f" = {value}"
+
+        known = runtime.coach_service.known_signal_metrics()
+        near = None
+        if metric not in known:
+            near = signals.nearest_known(metric, known)
+
+        # Reuse is offered first, so the reflexive `y` lands on the safe outcome and
+        # coining a category needs a deliberate second answer (§6).
+        chosen = None
+        if near and runtime.prompt.confirm(f"Log signal: {near}{shown} on {span}?"):
+            chosen = near
+        elif metric in known:
+            if runtime.prompt.confirm(f"Log signal: {metric}{shown} on {span}?"):
+                chosen = metric
+        elif runtime.prompt.confirm(f"Log as NEW category '{metric}'{shown} on {span}?"):
+            chosen = metric
+
+        if not chosen:
+            print("Discarded — not logged as a signal.")
+            continue
+        rows = runtime.coach_service.capture_message_signal(candidate, date_str, chosen)
+        if not rows:
+            print(yellow(f"Could not log '{chosen}' — no calendar write succeeded."))
+            continue
+        print(green(
+            f"Logged {chosen} ({len(rows)} day{'s' if len(rows) != 1 else ''}, {span})."
+        ))
+
+
 def run_workout_adapt(args: argparse.Namespace) -> None:
     # Executes the daily workout Garmin adaptation checks command.
     date_str = args.date or _today_str()
@@ -147,6 +196,12 @@ def run_workout_adapt(args: argparse.Namespace) -> None:
                     print(green(f"Captured constraint [{cid}]: {title} ({span})"))
             else:
                 print("Discarded — not saved as a constraint.")
+
+        # Step 1b: the same note may also carry daily signals. Confirmed one at a time and
+        # written the same way, before the adaptation preview (DESIGN_signal_extraction.md
+        # §2). A signal confirmed here informs the NEXT run, not this one — the LLM call
+        # that proposed it has already returned.
+        _confirm_new_signals(proposal.new_signals, date_str)
 
         # Simple mode drops the report-style header and softens the no-change line —
         # the reason itself is already prose (DESIGN_bot_simple_frontend.md §6).

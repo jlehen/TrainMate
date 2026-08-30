@@ -108,6 +108,16 @@ user_profile:
       equipment:
         - "running shoes"
 
+# Extra daily-signal categories, on top of the shipped ones (alcohol, disturbed_sleep,
+# illness, heat, stress, travel, underfuelling). A signal is something that HAPPENED TO
+# you on given days and helps explain your recovery numbers. The description tells the
+# coach what counts and, where there is one, what unit 'value' is in.
+# A sleep-related category must keep "sleep" in its name — see config_template_full.yaml.
+coach:
+  signal_metrics:
+    altitude: "sleeping or training above ~1500 m; value = altitude in metres"
+    medication: "a drug that moves recovery — antihistamine, steroid, decongestant"
+
 # Optional: drive TrainMate from your phone (./tm-bot). Omit the whole block to disable
 # it. Create a bot with @BotFather for the token; message it once and use @userinfobot
 # to find your numeric chat id. See config_template_full.yaml for the timeouts, the

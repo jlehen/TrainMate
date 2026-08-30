@@ -4,6 +4,7 @@ from trainmate.config import config
 from trainmate.types import Constraint, Workout
 from trainmate import garmin
 from trainmate.garmin import activity_load
+from trainmate.signals import excluded_channels
 from trainmate.util import (
     today_date as _today_date, step, cyan, yellow, cmd, wrap_text
 )
@@ -76,15 +77,6 @@ class DataAnalysisMixin:
         ("rhr", "rhr", "rhr_baseline_mean", "rhr_baseline_std"),
         ("hrv", "hrv", "hrv_baseline_mean", "hrv_baseline_std"),
         ("sleep", "sleep_score", "sleep_baseline_mean", "sleep_baseline_std"),
-    )
-
-    # Response channels to omit for a signal whose own construct overlaps them,
-    # so the LLM cannot "discover" that bad sleep predicts bad sleep — an echo, not an
-    # impact (DESIGN_quantitative_signal_impact.md §3.2). Keyed by a substring of the
-    # opaque, free-form metric name; the common signals (alcohol, meals) match nothing
-    # and exclude nothing.
-    _SIGNAL_CHANNEL_EXCLUSIONS = (
-        ("sleep", {"sleep"}),
     )
 
     def _resolve_until(self, until_date_str: Optional[str]):
@@ -425,11 +417,7 @@ class DataAnalysisMixin:
             if len(signal_dates) < min_signal_days:
                 continue  # too few signal-days to be worth prompting on (§5)
 
-            excluded: set = set()
-            cat_l = cat.lower()
-            for sub, chans in DataAnalysisMixin._SIGNAL_CHANNEL_EXCLUSIONS:
-                if sub in cat_l:
-                    excluded |= chans
+            excluded = excluded_channels(cat)
 
             # Cluster signal-days into episodes: two consecutive signal-days join the same
             # episode when fewer than k drink-free days separate them (§3.0).
