@@ -13,10 +13,9 @@ from typing import Optional
 from trainmate import journal, runtime
 from trainmate.prompt import PromptCancelled
 from trainmate.util import (
-    bold, dim, green, red, yellow, cyan, blue, magenta, gray, aside,
-    visible_len, pad_visible, wrap_text, format_labeled_text,
-    format_labeled_block, default_wrap_width,
-    today_str as _today_str, today_date as _today_date,
+    bold, dim, green, red, cyan, blue, magenta, gray, aside, visible_len, pad_visible,
+    wrap_text, format_labeled_text, format_labeled_block, default_wrap_width,
+    today_str as _today_str, today_date as _today_date, notice,
 )
 
 from trainmate.cli.argparse_ext import (
@@ -316,7 +315,7 @@ def _repl(parser, named_subparsers) -> None:
         try:
             argv = shlex.split(line)
         except ValueError as exc:  # e.g. an unbalanced quote
-            print(red(f"Parse error: {exc}"))
+            notice(f"Parse error: {exc}", red)
             continue
 
         try:
@@ -332,7 +331,7 @@ def _repl(parser, named_subparsers) -> None:
         except KeyboardInterrupt:  # Ctrl-C mid-command: cancel it, keep the shell
             print()
         except Exception as exc:  # a handler blew up; report and keep going
-            print(red(f"Error: {exc}"))
+            notice(f"Error: {exc}", red)
 
 
 def main(argv=None) -> None:
@@ -360,7 +359,7 @@ def main(argv=None) -> None:
     except Exception as e:
         if debug:
             raise
-        print(red(f"Error: {e}"))
+        notice(f"Error: {e}", red)
         aside("Re-run with --debug for the full traceback.")
         sys.exit(1)
 

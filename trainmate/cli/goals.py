@@ -2,7 +2,7 @@ import argparse
 import sys
 from trainmate import runtime
 from trainmate.util import (
-    bold, green, red, yellow, cyan, gray, cmd, format_labeled_block, fmt_date,
+    bold, green, red, cyan, gray, cmd, format_labeled_block, fmt_date,
     today_str as _today_str, notice,
 )
 from trainmate.cli.common import (
@@ -63,7 +63,7 @@ def run_goal_edit(args: argparse.Namespace) -> None:
     """Edits an existing goal/objective."""
     goal = runtime.db.get_objective(args.id)
     if not goal:
-        print(red(f"Goal with ID {args.id} not found."))
+        notice(f"Goal with ID {args.id} not found.", red)
         sys.exit(1)
 
     kwargs = {}
@@ -81,7 +81,7 @@ def run_goal_edit(args: argparse.Namespace) -> None:
         kwargs['date_type'] = args.date_type
 
     if not kwargs:
-        print(yellow("No fields to update. Provide at least one field to change."))
+        notice("No fields to update. Provide at least one field to change.")
         return
 
     was_archived = goal.get('status') == ARCHIVED
@@ -166,11 +166,11 @@ def run_goal_rm(args: argparse.Namespace) -> None:
     inventory is printed first because the cascade reaches further than the goal row."""
     goal = runtime.db.get_objective(args.id)
     if not goal:
-        print(red(f"Goal with ID {args.id} not found."))
+        notice(f"Goal with ID {args.id} not found.", red)
         sys.exit(1)
 
     if not args.yes:
-        print(yellow(f"Removing goal '{goal['title']}' (ID {args.id}) also deletes:"))
+        notice(f"Removing goal '{goal['title']}' (ID {args.id}) also deletes:")
         print_plan_cascade(args.id)
         print(gray(
             "To call the goal off reversibly instead, use "

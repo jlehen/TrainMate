@@ -13,8 +13,8 @@ import sys
 from typing import Optional
 from trainmate import runtime
 from trainmate.util import (
-    aside, bold, dim, green, red, yellow, cyan, gray, cmd, format_labeled_block,
-    fmt_date, fmt_span, wrap_text, today_str as _today_str,
+    aside, bold, dim, green, red, cyan, gray, cmd, format_labeled_block, fmt_date,
+    fmt_span, today_str as _today_str, notice,
 )
 from trainmate.cli.selectors import add_selector_args, has_selector, resolve_window
 from trainmate.cli.common import constraint_line, is_simple_render
@@ -31,7 +31,7 @@ def _resolve_dates(args: argparse.Namespace) -> tuple:
     start = args.start or _today_str()
     end = args.end or start
     if end < start:
-        print(red("--end is before --start."))
+        notice("--end is before --start.", red)
         sys.exit(1)
     return start, end
 
@@ -72,29 +72,29 @@ def _maybe_point_at_honor(constraint_id: int) -> None:
     # Straddling the boundary: adapt honors the near days from this block and the rest
     # only once its window rolls on, so no single run ever sees the whole of it.
     if constraint['start_date'] <= active_meso['end_date']:
-        print(yellow(wrap_text(
+        notice(
             f"Straddles the end of {active_meso['name']} "
             f"({fmt_date(active_meso['end_date'])}): daily adapt honors the days up to "
             f"there, {landing['name']} holds the rest, "
-            "and no one run sees both."
-        )))
-        print(yellow(wrap_text(
+            "and no one run sees both.",
+        )
+        notice(
             f"Build the whole of it in with {build} — that rebuilds the plan from today "
-            f"through {fmt_date(landing['end_date'])}."
-        )))
+            f"through {fmt_date(landing['end_date'])}.",
+        )
         return
 
-    print(yellow(wrap_text(
+    notice(
         f"Lands in {landing['name']} "
         f"({fmt_span(landing['start_date'], landing['end_date'], sep=' — ')}), "
-        "outside daily adapt's reach."
-    )))
+        "outside daily adapt's reach.",
+    )
     # Adapt at date D reaches from D to the end of D's block, so it sees this constraint
     # once its window rolls onto the landing block — i.e. on that block's first day.
-    print(yellow(wrap_text(
+    notice(
         f"Leave it — adapt reaches it on {fmt_date(landing['start_date'])} — or build it "
-        f"in now with {build}, which rebuilds the plan from today through that block's end."
-    )))
+        f"in now with {build}, which rebuilds the plan from today through that block's end.",
+    )
 
 
 def _report_past_plan_end(constraint: dict) -> None:
@@ -102,18 +102,18 @@ def _report_past_plan_end(constraint: dict) -> None:
     on its FIRST day: a plan covering part of the window can still be built around it,
     one covering none of it cannot."""
     if runtime.db.get_covering_mesocycle(constraint['start_date']):
-        print(yellow(wrap_text(
+        notice(
             f"Runs to {fmt_date(constraint['end_date'])}, past the end of your plan. "
             + cmd("workout generate") + " builds the days your plan covers around it; "
             "run " + cmd("plan generate")
-            + " to extend the periodization over the rest."
-        )))
+            + " to extend the periodization over the rest.",
+        )
         return
-    print(yellow(wrap_text(
+    notice(
         f"Starts {fmt_date(constraint['start_date'])}, past the end of the plan — no block "
-        "governs it yet, so nothing can schedule around it."
-    )))
-    print(yellow("Extend the periodization with " + cmd("plan generate") + " first."))
+        "governs it yet, so nothing can schedule around it.",
+    )
+    notice("Extend the periodization with " + cmd("plan generate") + " first.")
 
 
 def _maybe_replan(constraint_id: int, title: str, replan_flag: Optional[bool]) -> None:
@@ -144,7 +144,7 @@ def _maybe_replan(constraint_id: int, title: str, replan_flag: Optional[bool]) -
         return
 
     detail = f"displaces ~{impact['displaced_pct']:.0f}% of a typical week's planned load"
-    print(yellow(f"This {impact['days']}-day constraint {detail}."))
+    notice(f"This {impact['days']}-day constraint {detail}.")
     if runtime.prompt.confirm("Replan around it?"):
         runtime.db.update_constraint(constraint_id, replan=1)
         _run_replan_flow(title)
@@ -190,7 +190,7 @@ def run_constraint_edit(args: argparse.Namespace) -> None:
     """Adjusts scope / rest / text / replan of an existing directive."""
     constraint = runtime.db.get_constraint(args.id)
     if not constraint:
-        print(red(f"Constraint with ID {args.id} not found."))
+        notice(f"Constraint with ID {args.id} not found.", red)
         sys.exit(1)
 
     kwargs = {}
@@ -206,7 +206,7 @@ def run_constraint_edit(args: argparse.Namespace) -> None:
         kwargs['description'] = args.desc or None
 
     if not kwargs and args.replan is None:
-        print(yellow("No fields to update. Provide at least one field to change."))
+        notice("No fields to update. Provide at least one field to change.")
         return
 
     # An explicit --replan/--no-replan lands in the same write, so the echo below shows
@@ -264,7 +264,7 @@ def run_constraint_show(args: argparse.Namespace) -> None:
     """Displays a directive in detail, including whether it is plan-shaping (§7)."""
     constraint = runtime.db.get_constraint(args.id)
     if not constraint:
-        print(red(f"Constraint with ID {args.id} not found."))
+        notice(f"Constraint with ID {args.id} not found.", red)
         return
     needs_a_pass = _needs_a_pass(constraint)
     print(constraint_line(constraint, needs_a_pass))
@@ -286,14 +286,14 @@ def run_constraint_show(args: argparse.Namespace) -> None:
         print(gray(f"  Coach pass: covered it on "
                    f"{fmt_date(str(constraint['honored_at'])[:10])}."))
     elif needs_a_pass:
-        print(yellow("  Coach pass: none yet — run "
-                     + cmd("workout generate") + " to build it into the plan."))
+        notice("  Coach pass: none yet — run "
+               + cmd("workout generate") + " to build it into the plan.")
 
 
 def run_constraint_rm(args: argparse.Namespace) -> None:
     """Removes a directive by ID."""
     if not runtime.db.get_constraint(args.id):
-        print(yellow(f"No constraint with ID {args.id}."))
+        notice(f"No constraint with ID {args.id}.")
         return
     runtime.db.delete_constraint(args.id)
     # The §5.5 picker's leaves land here; companion prose over the expert ID echo

@@ -13,7 +13,7 @@ from datetime import datetime, timedelta
 from typing import Optional
 
 from trainmate.util import (
-    fmt_span, red, today_date as _today_date, today_str as _today_str,
+    fmt_span, red, today_date as _today_date, today_str as _today_str, notice,
 )
 
 # `trainmate_cli` (the db facade) is imported lazily inside the resolvers: it imports the
@@ -303,7 +303,7 @@ def add_single_date_arg(parser, help_text: str):
 
 
 def _fail(message: str) -> None:
-    print(red(f"Error: {message}"))
+    notice(f"Error: {message}", red)
     sys.exit(1)
 
 

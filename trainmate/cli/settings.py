@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 from trainmate import clock, llm_models, settings
 from trainmate.util import (
     aside, bold, cmd, cyan, dim, fmt_timestamp, green, pad_visible, red, visible_len,
-    yellow,
+    yellow, notice,
 )
 
 
@@ -73,9 +73,9 @@ def run_settings_list(args: argparse.Namespace) -> None:
     ignored = [(setting, resolved.config_error) for setting, resolved in rows
                if resolved.config_error]
     if ignored:
-        print(yellow("\nIgnored in config.yaml:"))
+        notice("\nIgnored in config.yaml:")
         for setting, problem in ignored:
-            print(yellow(f"  {setting.name}: {problem}"))
+            notice(f"  {setting.name}: {problem}")
 
     aside(f"\nChange one with {cmd('settings set <name> <value>')}, or "
           f"{cmd('settings reset <name>')} to fall back to config.yaml. "
@@ -87,7 +87,7 @@ def _print_detail(name: str) -> None:
     try:
         setting = settings.get(name)
     except ValueError as e:
-        print(red(str(e)))
+        notice(str(e), red)
         sys.exit(1)
 
     resolved = settings.resolve(setting.name)
@@ -162,7 +162,7 @@ def run_settings_set(args: argparse.Namespace) -> None:
         before = _shown_value(setting, settings.resolve(setting.name))
         stored = settings.write(setting.name, args.value)
     except ValueError as e:
-        print(red(str(e)))
+        notice(str(e), red)
         sys.exit(1)
     if stored == before:
         print(green(f"{setting.name} is {stored} (unchanged)."))
@@ -177,7 +177,7 @@ def run_settings_reset(args: argparse.Namespace) -> None:
         setting = settings.get(args.name)
         had_value = settings.clear(setting.name)
     except ValueError as e:
-        print(red(str(e)))
+        notice(str(e), red)
         sys.exit(1)
     resolved = settings.resolve(setting.name)
     now_reads = f"{_shown_value(setting, resolved)} ({_source_note(resolved)})"

@@ -9,8 +9,8 @@ from trainmate.sports import canonical_sport
 from trainmate import signals
 from trainmate.db.periodization import repair_block_contiguity
 from trainmate.util import (
-    aside, step, cyan, yellow, bold, cmd, wrap_text, format_labeled_block,
-    default_wrap_width, notice,
+    aside, step, cyan, bold, cmd, wrap_text, format_labeled_block, default_wrap_width,
+    notice,
 )
 import trainmate.coach.service as _svc
 
@@ -339,13 +339,13 @@ class PlanningMixin:
                 datetime.strptime(start_date, "%Y-%m-%d").date(), today_date
             )
             if requested != plan_start_date:
-                print(yellow(wrap_text(
+                notice(
                     "Note: -g now plans this goal's own span. This plan starts on "
                     f"{requested.strftime('%Y-%m-%d')} — the day after the goal before "
                     f"it. It used to start on {plan_start_date.strftime('%Y-%m-%d')}, "
                     "swallowing that earlier goal's days into this plan. Plan that goal "
-                    "separately to cover them."
-                )))
+                    "separately to cover them.",
+                )
                 print()
             plan_start_date = requested
 
@@ -560,7 +560,7 @@ class PlanningMixin:
         # write boundary re-applies the same repair as a no-op (DOMAIN_MODEL.md §4).
         mesocycles, repair_notes = repair_block_contiguity(mesocycles)
         for note in repair_notes:
-            print(yellow(wrap_text(f"Note: block dates repaired — {note}.")))
+            notice(f"Note: block dates repaired — {note}.")
 
         if fingerprints is None:
             today_str = _svc._today_str()

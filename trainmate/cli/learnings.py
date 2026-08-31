@@ -3,8 +3,8 @@ import sys
 
 from trainmate import runtime
 from trainmate.util import (
-    bold, green, red, yellow, cyan, magenta, gray, cmd,
-    fmt_timestamp, format_labeled_block,
+    bold, green, red, yellow, cyan, magenta, gray, cmd, fmt_timestamp, format_labeled_block,
+    notice,
 )
 
 
@@ -39,8 +39,8 @@ def _print_learning(l: dict) -> None:
     proposed = l.get("proposed_confidence")
     if proposed:
         target = "retire" if proposed == "retire" else proposed
-        print(yellow(f"     ⚠ proposed demotion → {target} (confirm with "
-                     + cmd("learnings demote") + "/" + cmd("learnings keep") + ")"))
+        notice(f"     ⚠ proposed demotion → {target} (confirm with "
+               + cmd("learnings demote") + "/" + cmd("learnings keep") + ")")
 
 
 def _echo_learning(learning_id: int) -> None:
@@ -79,10 +79,8 @@ def run_learning_list(args: argparse.Namespace) -> None:
             or getattr(args, "confidence", None)
         ) else "None yet."))
         if not runtime.db.get_learnings():
-            print(
-                yellow("Run " + cmd("data bootstrap")
-                       + " to reconstruct your training history and seed observations.")
-            )
+            notice("Run " + cmd("data bootstrap")
+                   + " to reconstruct your training history and seed observations.")
         return
 
     verbose = getattr(args, "verbose", False)
@@ -96,7 +94,7 @@ def run_learning_show(args: argparse.Namespace) -> None:
     """Displays one learning with its full evidence basis (the 'why' behind its confidence)."""
     learning = next((l for l in runtime.db.get_learnings() if l['id'] == args.id), None)
     if not learning:
-        print(red(f"Learning with ID {args.id} not found."))
+        notice(f"Learning with ID {args.id} not found.", red)
         sys.exit(1)
 
     _print_learning(learning)
@@ -122,7 +120,7 @@ def run_learning_edit(args: argparse.Namespace) -> None:
     """Revises the text of an existing learning."""
     learning = next((l for l in runtime.db.get_learnings() if l['id'] == args.id), None)
     if not learning:
-        print(red(f"Learning with ID {args.id} not found."))
+        notice(f"Learning with ID {args.id} not found.", red)
         sys.exit(1)
 
     runtime.db.update_learning(args.id, args.text)
@@ -134,7 +132,7 @@ def run_learning_rm(args: argparse.Namespace) -> None:
     """Deletes a learning by ID (its evidence basis cascades)."""
     learning = next((l for l in runtime.db.get_learnings() if l['id'] == args.id), None)
     if not learning:
-        print(red(f"Learning with ID {args.id} not found."))
+        notice(f"Learning with ID {args.id} not found.", red)
         sys.exit(1)
 
     runtime.db.delete_learning(args.id)
@@ -145,7 +143,7 @@ def run_learning_demote(args: argparse.Namespace) -> None:
     """Accepts a pending confidence downgrade for a learning."""
     result = runtime.db.demote_learning(args.id)
     if result is None:
-        print(yellow(f"Learning with ID {args.id} has no pending demotion."))
+        notice(f"Learning with ID {args.id} has no pending demotion.")
         return
     if result == "retired":
         # A retirement deletes the row, so there is nothing left to echo.
@@ -159,10 +157,10 @@ def run_learning_keep(args: argparse.Namespace) -> None:
     """Dismisses + affirms a pending downgrade (the affirmation counts as reinforcement)."""
     learning = next((l for l in runtime.db.get_learnings() if l['id'] == args.id), None)
     if not learning:
-        print(red(f"Learning with ID {args.id} not found."))
+        notice(f"Learning with ID {args.id} not found.", red)
         sys.exit(1)
     if not learning.get("proposed_confidence"):
-        print(yellow(f"Learning with ID {args.id} has no pending demotion to dismiss."))
+        notice(f"Learning with ID {args.id} has no pending demotion to dismiss.")
         return
 
     runtime.db.keep_learning(args.id)

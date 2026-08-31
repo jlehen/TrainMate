@@ -43,7 +43,7 @@ def _selected_kind(args: argparse.Namespace) -> Tuple[Optional[str], Optional[st
     ]
     if len(present) > 1:
         flags = ", ".join(_KIND_FLAGS[k] for k, _ in present)
-        print(red(f"Give exactly one anchor value per record — got {flags}."))
+        notice(f"Give exactly one anchor value per record — got {flags}.", red)
         sys.exit(1)
     if not present:
         return None, None
@@ -79,12 +79,12 @@ def run_benchmark_record(args: argparse.Namespace) -> None:
     kind, raw = _selected_kind(args)
     if kind is None:
         flags = ", ".join(_KIND_FLAGS[k] for k in LOGBOOK_KINDS)
-        print(red(f"Give an anchor value, one of: {flags}."))
+        notice(f"Give an anchor value, one of: {flags}.", red)
         sys.exit(1)
     try:
         value = _parse_value(kind, str(raw))
     except (ValueError, IndexError):
-        print(red(f"Could not parse {_KIND_FLAGS[kind]} value {raw!r}."))
+        notice(f"Could not parse {_KIND_FLAGS[kind]} value {raw!r}.", red)
         sys.exit(1)
 
     sport = canonical_sport(args.sport)
@@ -96,10 +96,10 @@ def run_benchmark_record(args: argparse.Namespace) -> None:
     # accepted (§3.2).
     plausible = anchors_for_sport(sport)
     if plausible and kind not in plausible:
-        print(red(
+        notice(
             f"{label} is not an anchor {sport} is tested on — expected one of: "
-            f"{', '.join(ANCHOR_KINDS[k].label for k in plausible)}."
-        ))
+            f"{', '.join(ANCHOR_KINDS[k].label for k in plausible)}.", red,
+        )
         sys.exit(1)
 
     # Show the change against the current latest of this kind before touching anything.
@@ -176,7 +176,7 @@ def run_benchmark_rm(args: argparse.Namespace) -> None:
     """Removes a logbook row by ID — the correction path (delete-and-re-record, §6)."""
     row = runtime.db.get_benchmark_result(args.id)
     if not row:
-        print(red(f"Benchmark result with ID {args.id} not found."))
+        notice(f"Benchmark result with ID {args.id} not found.", red)
         sys.exit(1)
     runtime.db.delete_benchmark_result(args.id)
     print(green(f"Removed benchmark result ID {args.id}."))

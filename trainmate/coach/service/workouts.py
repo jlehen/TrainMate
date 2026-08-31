@@ -11,7 +11,7 @@ from trainmate.sports import canonical_sport
 from trainmate.benchmarks import MIN_RETEST_DAYS
 from trainmate.calendar_reconcile import verbose_events
 from trainmate import intensity
-from trainmate.util import green, yellow, cmd, notice
+from trainmate.util import green, cmd, notice
 import trainmate.coach.service as _svc
 
 
@@ -193,10 +193,10 @@ class WorkoutGenMixin:
             sport = canonical_sport(w.get('sport_type', ''))
             if (not w.get('benchmark_type')
                     and sport in bench_sports.get(day, set())):
-                print(yellow(
+                notice(
                     f"Dropping {w.get('sport_type', '')} session on {day}: it collides "
-                    f"with a scheduled benchmark of the same sport."
-                ))
+                    f"with a scheduled benchmark of the same sport.",
+                )
                 continue
             out.append(w)
         return out
@@ -656,11 +656,11 @@ class WorkoutGenMixin:
         # The plan owns the horizon, so a regeneration may replace a session the athlete
         # added — but it says which, and names the change to undo if they disagree (§12).
         for w in replaced_manual:
-            print(yellow(
+            notice(
                 f"Replaced the session you added on {w['date']}: {w['title']} "
                 f"({w['sport_type']}). Run {cmd(f'workout rollback --batch {change_id}')} "
-                "to bring it back."
-            ))
+                "to bring it back.",
+            )
 
         # The same warrant every other constraint this run built around gets (§8).
         honoring.stamp(self._db, proposal.covered_constraint_ids)

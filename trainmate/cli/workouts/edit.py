@@ -58,7 +58,7 @@ def run_workout_push(args: argparse.Namespace) -> None:
         runtime.calendar_syncer.sync_multiple(to_push)
         print(green("Google Calendar synchronization completed."))
     except Exception as e:
-        print(red(f"Error syncing to Google Calendar: {e}"))
+        notice(f"Error syncing to Google Calendar: {e}", red)
     warn_stale_before(start_date)
 def run_workout_rm(args: argparse.Namespace) -> None:
     """Cancels a planned session by appending a void revision.
@@ -70,11 +70,11 @@ def run_workout_rm(args: argparse.Namespace) -> None:
     "[Deleted]", by the reconcile the change schedules (§8)."""
     workout = runtime.db.get_workout_by_id(args.id)
     if not workout:
-        print(red(f"Workout with ID {args.id} not found."))
+        notice(f"Workout with ID {args.id} not found.", red)
         return
 
     if workout.get('removed'):
-        print(yellow(f"Workout with ID {args.id} ('{workout['title']}') is already removed."))
+        notice(f"Workout with ID {args.id} ('{workout['title']}') is already removed.")
         return
 
     with runtime.db.workout_change(kind="rm", summary=args.reason) as change:
@@ -94,11 +94,11 @@ def run_workout_restore(args: argparse.Namespace) -> None:
     live by the same rule as everything else (§5)."""
     workout = runtime.db.get_workout_by_id(args.id)
     if not workout:
-        print(red(f"Workout with ID {args.id} not found."))
+        notice(f"Workout with ID {args.id} not found.", red)
         return
 
     if not workout.get('removed'):
-        print(yellow(f"Workout with ID {args.id} ('{workout['title']}') is not removed."))
+        notice(f"Workout with ID {args.id} ('{workout['title']}') is not removed.")
         return
 
     revision = runtime.db.revision_before_live_void(args.id)
@@ -123,7 +123,7 @@ def run_workout_swap(args: argparse.Namespace) -> None:
     if warnings:
         print(bold(yellow("\nSwap warnings:")))
         for msg in warnings:
-            print(yellow(f"  - {msg}"))
+            notice(f"  - {msg}")
         if not args.force:
             if not runtime.prompt.confirm("Proceed with the swap anyway?"):
                 print("\nSwap cancelled.")
@@ -143,7 +143,7 @@ def run_workout_add(args: argparse.Namespace) -> None:
     try:
         datetime.strptime(args.date, "%Y-%m-%d")
     except ValueError:
-        print(red(f"Invalid date format: '{args.date}'. Use YYYY-MM-DD."))
+        notice(f"Invalid date format: '{args.date}'. Use YYYY-MM-DD.", red)
         sys.exit(1)
 
     # Normalize to the coach's canonical sport vocabulary so the stored session and the
@@ -156,10 +156,10 @@ def run_workout_add(args: argparse.Namespace) -> None:
         same = runtime.db.get_workout(args.date, args.sport_type)
         to_replace = [same] if same else []
     for w in to_replace:
-        print(yellow(
+        notice(
             f"Replacing existing {w['sport_type']} workout on {fmt_date(args.date)}: "
-            f"{w['title']}"
-        ))
+            f"{w['title']}",
+        )
 
     saved, replaced = runtime.coach_service.workout_add(
         date=args.date,
@@ -174,7 +174,7 @@ def run_workout_add(args: argparse.Namespace) -> None:
     )
 
     if not saved:
-        print(red("Failed to save workout."))
+        notice("Failed to save workout.", red)
         sys.exit(1)
 
     print(workout_line(saved))
@@ -222,7 +222,7 @@ def run_workout_prune_calendar(args: argparse.Namespace) -> None:
     try:
         events = runtime.calendar_syncer.list_workout_events()
     except Exception as e:
-        print(red(f"Error reading Google Calendar: {e}"))
+        notice(f"Error reading Google Calendar: {e}", red)
         sys.exit(1)
 
     # Every id any row still claims, removed rows included: a soft-removed workout
@@ -271,7 +271,7 @@ def run_workout_prune_calendar(args: argparse.Namespace) -> None:
     ))
 
     if getattr(args, 'dry_run', False):
-        print(yellow(f"Dry run: nothing deleted. Re-run without --dry-run to prune."))
+        notice(f"Dry run: nothing deleted. Re-run without --dry-run to prune.")
         return
 
     if not args.yes:
@@ -286,4 +286,4 @@ def run_workout_prune_calendar(args: argparse.Namespace) -> None:
     )
     print(green(f"Pruned {deleted} orphaned Calendar event{'s' if deleted != 1 else ''}."))
     if deleted != len(orphans):
-        print(yellow(f"{len(orphans) - deleted} event(s) could not be deleted (see above)."))
+        notice(f"{len(orphans) - deleted} event(s) could not be deleted (see above).")

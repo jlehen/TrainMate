@@ -6,7 +6,7 @@ from trainmate.config import config, changed_plan_profile_fields, plan_profile
 from trainmate.prompt import Choice
 from trainmate.types import Objective, Constraint
 from trainmate.util import (
-    cyan, green, yellow, bold, red, gray, cmd, format_labeled_block, wrap_text, notice,
+    cyan, green, bold, red, gray, cmd, format_labeled_block, notice,
 )
 from trainmate.coach.formatting import _load_science_guidelines
 from trainmate.coach.proposals import CoachContext
@@ -294,12 +294,12 @@ class PromptConfigMixin:
         )
         if tally["skipped"]:
             noun = "update" if tally["skipped"] == 1 else "updates"
-            print(yellow(wrap_text(
+            notice(
                 f"{tally['skipped']} coach-learning {noun} came back in a shape this app "
                 f"cannot read and {'was' if tally['skipped'] == 1 else 'were'} discarded "
                 f"({tally['applied']} applied). The full response is in the LLM exchange "
-                "log; re-running with " + cmd("--force") + " asks the model again."
-            )))
+                "log; re-running with " + cmd("--force") + " asks the model again.",
+            )
         return tally
 
     def _review_learning_proposals(self, auto: bool = False) -> None:
@@ -316,14 +316,14 @@ class PromptConfigMixin:
         pending = [l for l in self._db.get_learnings() if l.get("proposed_confidence")]
         if not pending:
             return
-        print(yellow(bold("\nPending coach-learning demotion proposals:")))
+        notice(bold("\nPending coach-learning demotion proposals:"))
         for l in pending:
             target = l["proposed_confidence"]
             target_disp = "retire" if target == "retire" else target
             print(format_labeled_block(
                 f"  [{l['id']}|{l.get('sports') or 'general'}|{l['confidence']}]", l['text']
             ))
-            print(yellow(f"    proposed demotion → {target_disp}"))
+            notice(f"    proposed demotion → {target_disp}")
             ans = self._prompt.choose(
                 f"Apply proposed demotion of learning [{l['id']}] → {target_disp}?",
                 [
@@ -336,7 +336,7 @@ class PromptConfigMixin:
             if ans == "demote":
                 result = self._db.demote_learning(l["id"])
                 if result == "retired":
-                    print(red(f"    Retired learning [{l['id']}]."))
+                    notice(f"    Retired learning [{l['id']}].", red)
                 else:
                     print(green(f"    Demoted [{l['id']}] → {result}."))
             elif ans == "skip":

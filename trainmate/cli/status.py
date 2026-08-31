@@ -100,19 +100,19 @@ def run_status(args) -> None:
             unhonored = honoring.constraints_needing_a_pass(runtime.db, _today_str())
             if unhonored:
                 noun = "constraint" if len(unhonored) == 1 else "constraints"
-                print(yellow(
+                notice(
                     f"Constraints: {len(unhonored)} {noun} your plan does not reflect — "
-                    + cmd("workout generate") + " builds them in."
-                ))
+                    + cmd("workout generate") + " builds them in.",
+                )
 
             # Pending notes are a plan input too, so they belong beside the staleness
             # warning (DESIGN_plan_feedback.md §8).
             pending = runtime.db.list_plan_feedback(macro['id'])
             if pending:
-                print(yellow(
+                notice(
                     f"Plan feedback: {len(pending)} pending — " + cmd("plan generate")
-                    + f" will address {'them' if len(pending) != 1 else 'it'}."
-                ))
+                    + f" will address {'them' if len(pending) != 1 else 'it'}.",
+                )
 
             mesos = runtime.db.get_mesocycles_for_macrocycle(macro['id'])
             active_meso = None
@@ -276,10 +276,8 @@ def run_status(args) -> None:
                 f"(std: {baseline['sleep_baseline_std']:.2f})"
             )
     else:
-        print(
-            yellow("\nRecent Garmin Metrics: No cached metrics. Run "
-                   + cmd("data pull") + " first.")
-        )
+        notice("\nRecent Garmin Metrics: No cached metrics. Run "
+               + cmd("data pull") + " first.")
 
     # Coach Learnings — one-line summary; the full list lives under 'learnings list'.
     learnings = runtime.db.get_learnings()

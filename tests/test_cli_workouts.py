@@ -1347,7 +1347,8 @@ class TestCliWorkouts(unittest.TestCase):
         with patch.object(test_db, "update_macrocycle_config_hash") as mock_stamp:
             exit_code, stdout, _ = self.run_cli(["workout", "generate", "-f"])
             self.assertEqual(exit_code, 0)
-            self.assertIn("Proceeding anyway (--force)", stdout)
+            # `notice` wraps, so the phrase can straddle a line break.
+            self.assertIn("Proceeding anyway (--force)", " ".join(stdout.split()))
             mock_stamp.assert_not_called()
         mock_coach.workout_generate.assert_called_once()
 

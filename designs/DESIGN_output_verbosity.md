@@ -196,6 +196,15 @@ only printer that would have wrapped them would also have mislabelled them.
 
 `notice(text, color_fn=red)` is that third printer — the wrap and nothing else. The rule
 is now a rule rather than a habit: **no line of the warning tier is printed by hand.**
+All 149 remaining `print(yellow(…))` / `print(red(…))` sites moved over in one pass, and
+a test walks the source to keep it that way, because a rule that holds only while
+everyone remembers it is the habit we just replaced. Sixteen of those sites were already
+calling `wrap_text` themselves and simply dropped it.
+
+What the test does *not* forbid is colour used as a fragment rather than a message: a
+bold yellow section heading, one red cell inside a row, `red(f"Error: {e}") + hint`.
+Those are layout, they are short by construction, and wrapping them would break the block
+they sit in.
 
 One thing this gives up. A wrapped warning can break a command across two lines —
 `Run 'workout push -d` / `2026-08-27..' to update them.` — which is not copy-pasteable.

@@ -10,7 +10,7 @@ import argparse
 import sys
 from trainmate import runtime, signals
 from trainmate.config import config
-from trainmate.util import bold, dim, green, red, yellow, cyan, magenta, fmt_date, fmt_span
+from trainmate.util import bold, dim, green, red, cyan, magenta, fmt_date, fmt_span, notice
 from trainmate.util import today_str as _today_str
 from trainmate.cli.selectors import add_selector_args, has_selector, resolve_window
 
@@ -29,13 +29,13 @@ def run_signal_add(args: argparse.Namespace) -> None:
     """Authors a daily signal over a day or date range, writing one tagged
     all-day event per day and mirroring the rows locally."""
     if not runtime.calendar_syncer.calendar_id:
-        print(red("No Google Calendar configured; cannot author signal events."))
+        notice("No Google Calendar configured; cannot author signal events.", red)
         sys.exit(1)
 
     start, end = resolve_window(args)
     start = start or _today_str()
     if end is None:
-        print(red("A signal needs a bounded range: -d DATE or -d A..B."))
+        notice("A signal needs a bounded range: -d DATE or -d A..B.", red)
         sys.exit(1)
 
     # Normalized here as well as on the adapt-capture path, so `Heat` typed by hand and
@@ -52,13 +52,13 @@ def run_signal_add(args: argparse.Namespace) -> None:
     if metric not in known:
         near = signals.nearest_known(metric, known)
         hint = f" Close to existing '{near}'." if near else ""
-        print(yellow(f"'{metric}' is a new signal category.{hint}"))
+        notice(f"'{metric}' is a new signal category.{hint}")
 
     days = list(signals.date_range(start, end))
     written = signals.write_signal_days(start, end, metric, value, text)
     missing = sorted(set(days) - {row["date"] for row in written})
     if missing:
-        print(red(f"Failed to write signal event for: {', '.join(missing)}."))
+        notice(f"Failed to write signal event for: {', '.join(missing)}.", red)
 
     for row in written:
         print(_signal_line(row))
@@ -114,18 +114,18 @@ def run_signal_rm(args: argparse.Namespace) -> None:
             if row:
                 rows.append(row)
             else:
-                print(yellow(f"No signal with ID {cid}."))
+                notice(f"No signal with ID {cid}.")
     else:
         if not (has_selector(args) or metric):
-            print(red(
+            notice(
                 "Refusing to remove everything: give IDs, a metric, or narrow with "
-                "-d/-m/-M/-g."
-            ))
+                "-d/-m/-M/-g.", red,
+            )
             sys.exit(1)
         start, end = resolve_window(args)
         rows = runtime.db.get_daily_signals(start, end, metric)
         if not rows:
-            print(yellow("No matching signals."))
+            notice("No matching signals.")
             return
         if len(rows) > 1 and not args.yes:
             for row in rows:

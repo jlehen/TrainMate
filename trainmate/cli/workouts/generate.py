@@ -8,8 +8,8 @@ from trainmate.adherence import analyze_adherence, date_covered, format_discrepa
 from trainmate.google_calendar import event_url
 from trainmate.util import (
     bold, green, red, yellow, cyan, magenta, gray, cmd, aside, step, pad_visible, wrap_text,
-    format_labeled_block, today_str as _today_str, today_date as _today_date,
-    days_between, fmt_date, fmt_span, fmt_timestamp,
+    format_labeled_block, today_str as _today_str, today_date as _today_date, days_between,
+    fmt_date, fmt_span, fmt_timestamp, notice,
 )
 from trainmate.cli.common import (
     adherence_verdicts, ensure_recent_data, format_actual,
@@ -35,7 +35,7 @@ def _resolve_ambiguous_matches(date_str: str, auto: bool) -> None:
     try:
         questions = runtime.coach_service.pending_match_questions(date_str)
     except Exception as e:
-        print(yellow(f"Warning: could not check activity matching: {e}"))
+        notice(f"Warning: could not check activity matching: {e}")
         return
     if not questions:
         return
@@ -85,11 +85,11 @@ def _print_block_boundary_hint(date_str: str) -> None:
     )
     # Actionable, so it reaches every front-end — but in two lines rather than the four
     # it used to take (DESIGN_output_verbosity.md §3.2).
-    print(yellow(f"This block ({meso['name']}) ends {when}."))
-    print(yellow(wrap_text(
+    notice(f"This block ({meso['name']}) ends {when}.")
+    notice(
         f"The next block ({next_meso['name']}) is outside adapt's reach — re-plan it with "
-        + cmd(f"workout generate -m ..{next_meso['id']}") + "."
-    )))
+        + cmd(f"workout generate -m ..{next_meso['id']}") + ".",
+    )
     print()
 
 
@@ -135,7 +135,7 @@ def _confirm_new_signals(candidates, date_str: str) -> None:
             continue
         rows = runtime.coach_service.capture_message_signal(candidate, date_str, chosen)
         if not rows:
-            print(yellow(f"Could not log '{chosen}' — no calendar write succeeded."))
+            notice(f"Could not log '{chosen}' — no calendar write succeeded.")
             continue
         print(green(
             f"Logged {chosen} ({len(rows)} day{'s' if len(rows) != 1 else ''}, {span})."
@@ -163,7 +163,7 @@ def run_workout_adapt(args: argparse.Namespace) -> None:
         step(f"\nUsing {len(metrics_history)} days of recovery metrics "
              f"(past {history_days}-day window).")
     except Exception as e:
-        print(yellow(f"Warning: Could not load metrics trajectory: {e}"))
+        notice(f"Warning: Could not load metrics trajectory: {e}")
 
     _print_block_boundary_hint(date_str)
 
@@ -245,7 +245,7 @@ def run_workout_adapt(args: argparse.Namespace) -> None:
     except ValueError as e:
         # A domain refusal (no active plan to adapt towards), not a failure: say it
         # plainly. Anything else belongs to the entry point's error boundary.
-        print(red(str(e)))
+        notice(str(e), red)
 
 
 def _confirm_regeneration(span_start: str, span_end: str) -> bool:
@@ -338,12 +338,12 @@ def _confirm_out_of_date_plans(
             + cmd("plan generate") + " first."
         )
         if force:
-            print(yellow(warning + " Proceeding anyway (--force)."))
+            notice(warning + " Proceeding anyway (--force).")
         elif not runtime.prompt.confirm(yellow(warning + " Proceed anyway?")):
-            print(yellow(
+            notice(
                 "Workout generation cancelled. Please run "
-                + cmd("plan generate") + " first."
-            ))
+                + cmd("plan generate") + " first.",
+            )
             return False
         else:
             # Confirming accepts the out-of-date plan, so stamp the current config;
@@ -376,10 +376,10 @@ def _resolve_span(args: argparse.Namespace) -> Optional[tuple[str, str]]:
     today = _today_str()
     start_date, end_date = resolve_window(args)
     if end_date and end_date < today:
-        print(red(
+        notice(
             f"That selection ends on {fmt_date(end_date)}, before today — there is "
-            f"nothing ahead of it to generate."
-        ))
+            f"nothing ahead of it to generate.", red,
+        )
         return None
     span_start = max(start_date or today, today)
     span_end = end_date or _shift(
@@ -412,22 +412,22 @@ def _warn_span_change(span_start: str, span_end: str) -> None:
             f"This run rebuilds today → {fmt_date(span_end)} and stops there; before, it "
             "also cancelled every session after that."
         )
-    print(yellow(wrap_text(lead)))
+    notice(lead)
     if span_start > today:
-        print(yellow(wrap_text(
+        notice(
             f"  - {fmt_date(today)} → {fmt_date(_shift(span_start, -1))} keeps the "
-            f"sessions it already has."
-        )))
+            f"sessions it already has.",
+        )
     if tail:
-        print(yellow(wrap_text(
+        notice(
             f"  - The {len(tail)} session(s) after {fmt_date(span_end)} keep their place "
-            f"instead of being cancelled."
-        )))
+            f"instead of being cancelled.",
+        )
     if span_start > today:
-        print(yellow(wrap_text(
+        notice(
             "  Pass " + cmd(f"-d today..{span_end}", quote=False)
-            + " to rebuild from today again."
-        )))
+            + " to rebuild from today again.",
+        )
     print()
 
 
@@ -450,7 +450,7 @@ def run_workout_generate(args: argparse.Namespace) -> None:
         return
 
     if not force and not _confirm_regeneration(span_start, span_end):
-        print(yellow("Workout generation cancelled — your current plan is unchanged."))
+        notice("Workout generation cancelled — your current plan is unchanged.")
         return
 
     proposal = runtime.coach_service.workout_generate(
@@ -459,7 +459,7 @@ def run_workout_generate(args: argparse.Namespace) -> None:
     print(bold(cyan("\n=== WORKOUTS PROPOSED BY COACH ===")))
     print(f"{bold('Reasoning')}:\n{wrap_text(proposal.reasoning)}\n")
     if not proposal.workouts:
-        print(yellow("The coach proposed no sessions — nothing to apply."))
+        notice("The coach proposed no sessions — nothing to apply.")
         return
 
     # The same one-line rendering as `workout list`, so the plan the athlete is asked to
@@ -469,7 +469,7 @@ def run_workout_generate(args: argparse.Namespace) -> None:
     print()
 
     if not force and not _confirm_apply(proposal):
-        print(yellow("Workouts discarded — your current plan is unchanged."))
+        notice("Workouts discarded — your current plan is unchanged.")
         return
 
     saved = runtime.coach_service.workout_generate_apply(
@@ -542,17 +542,15 @@ def run_workout_rollback(args: argparse.Namespace) -> None:
     today = _today_str()
     changes = runtime.db.get_workout_changes(from_date=today)
     if not changes:
-        print(yellow(
-            "No workout changes to roll back — nothing has written workouts yet."
-        ))
+        notice("No workout changes to roll back — nothing has written workouts yet.")
         return
 
     index = getattr(args, 'batch', None) or 1
     if not 1 <= index <= len(changes):
-        print(red(
+        notice(
             f"No change #{index} — there {'is' if len(changes) == 1 else 'are'} "
-            f"{len(changes)}."
-        ))
+            f"{len(changes)}.", red,
+        )
         print(green(f"Run {cmd('workout batches')} to list them."))
         return
     target = changes[index - 1]
@@ -574,7 +572,7 @@ def run_workout_rollback(args: argparse.Namespace) -> None:
             change_id=target['id'], verbose=getattr(args, 'verbose', False)
         )
     except ValueError as e:
-        print(red(str(e)))
+        notice(str(e), red)
         return
 
     span = (
@@ -593,10 +591,10 @@ def _workouts_by_id(ids: list, sport_type: Optional[str], include_removed: bool)
     for workout_id in ids:
         w = runtime.db.get_workout_by_id(workout_id)
         if not w:
-            print(yellow(f"No workout with ID {workout_id}."))
+            notice(f"No workout with ID {workout_id}.")
             continue
         if w.get('removed') and not include_removed:
-            print(yellow(f"Workout {workout_id} is removed; pass --removed to show it."))
+            notice(f"Workout {workout_id} is removed; pass --removed to show it.")
             continue
         if sport_type and w['sport_type'].lower() != sport_type.lower():
             continue
@@ -620,7 +618,7 @@ def _list_verdicts(workouts: list, args: argparse.Namespace) -> dict:
                 past[0], past[-1], force=getattr(args, 'force_pull', False)
             )
         except Exception as e:
-            print(yellow(f"Warning: Could not ensure recent data: {e}"))
+            notice(f"Warning: Could not ensure recent data: {e}")
     return adherence_verdicts(past[0], past[-1])
 
 
@@ -708,7 +706,7 @@ def run_workout_list(args: argparse.Namespace) -> None:
         if actual:
             print(gray(f"  Actual: {format_actual(actual)}"))
         for reason in (verdict or {}).get('reasons') or []:
-            print(yellow(f"  Discrepancy: {reason}"))
+            notice(f"  Discrepancy: {reason}")
         print(format_labeled_block("  Description:", w['description']))
         summary = w.get('adaptation_summary')
         # Show the per-workout note inline, unless it's just the batch reason echoed
@@ -739,7 +737,7 @@ def run_workout_compare(args: argparse.Namespace) -> None:
                 start_date, end_date, force=getattr(args, 'force_pull', False)
             )
         except Exception as e:
-            print(yellow(f"Warning: Could not ensure recent data: {e}"))
+            notice(f"Warning: Could not ensure recent data: {e}")
 
     all_workouts = runtime.db.get_workouts(start_date=start_date, end_date=end_date)
     activities = runtime.db.get_completed_activities(start_date=start_date, end_date=end_date)
@@ -854,7 +852,7 @@ def run_workout_compare(args: argparse.Namespace) -> None:
     if discrepancies:
         print(bold(yellow("=== DISCREPANCIES ===")))
         for line in format_discrepancies(discrepancies):
-            print(yellow(line))
+            notice(line)
         print()
         n = len(discrepancies)
         print(bold(yellow(f"{n} discrepanc{'ies' if n != 1 else 'y'} found.")))

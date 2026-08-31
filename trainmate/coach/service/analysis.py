@@ -6,7 +6,7 @@ from trainmate import garmin
 from trainmate.garmin import activity_load
 from trainmate.signals import excluded_channels
 from trainmate.util import (
-    today_date as _today_date, step, cyan, yellow, cmd, wrap_text, notice,
+    today_date as _today_date, step, cyan, cmd, notice,
 )
 import trainmate.coach.service as _svc
 
@@ -196,11 +196,11 @@ class DataAnalysisMixin:
             # record is news — otherwise the next command's cold-start nudge points the
             # user right back here with no hint that the run already happened (§13).
             if not any(not l.get("dormant") for l in self._db.get_learnings()):
-                print(yellow(wrap_text(
+                notice(
                     "Bootstrap finished with no active coach observations on record. The "
                     "reconstruction above is saved; re-run with "
-                    + cmd("data bootstrap --force") + " to ask the model again."
-                )))
+                    + cmd("data bootstrap --force") + " to ask the model again.",
+                )
         return decision
 
     def data_reflect(
@@ -778,11 +778,11 @@ class DataAnalysisMixin:
             )
         unreadable = _unreadable_parts(decision, cycles)
         if unreadable:
-            print(yellow(wrap_text(
+            notice(
                 "The model answered but these parts came back in an unreadable shape and "
                 f"render empty below: {', '.join(unreadable)}. The raw response is in the "
-                "LLM exchange log."
-            )))
+                "LLM exchange log.",
+            )
 
         if not inspect_only:
             # Apply evidence-cited learning deltas. The LLM attributes observations to the

@@ -24,7 +24,7 @@ from trainmate.intensity import (
 from trainmate.sports import SPORT_MAPPING, canonical_sport
 from trainmate.util import (
     asides_enabled, bold, green, red, yellow, gray, dim, cmd, pad_visible, visible_len,
-    wrap_text, color_tsb, fmt_date, today_str as _today_str, PMC_TSB_LAG_NOTE,
+    wrap_text, color_tsb, fmt_date, today_str as _today_str, PMC_TSB_LAG_NOTE, notice,
 )
 from trainmate.cli.common import ensure_recent_data, is_simple_render, simple_progress_lines
 
@@ -876,8 +876,8 @@ def _emit_chart(chart_arg: Any, payload: Dict[str, Any], caption: str) -> None:
     try:
         png = chart.render_timeline_png(payload)
     except ImportError:
-        print(red("matplotlib is not installed — run: "
-                  + cmd("venv/bin/pip install -r requirements.txt", quote=False)))
+        notice("matplotlib is not installed — run: "
+               + cmd("venv/bin/pip install -r requirements.txt", quote=False), red)
         return
 
     from trainmate.prompt import emit_photo, is_json_frontend
@@ -940,7 +940,7 @@ def run_progress(args: argparse.Namespace) -> None:
     if zones and not sports:
         preferences = list(config.user_profile.get("sport_preferences") or [])
         for warning in unknown_sport_preferences(preferences):
-            print(yellow(f"Warning: {warning}"))
+            notice(f"Warning: {warning}")
 
     zone_opts = {
         "preferences": preferences, "sports": sports, "currency": forced,

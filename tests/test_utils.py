@@ -1,3 +1,4 @@
+import ast
 import io
 import os
 import unittest
@@ -301,6 +302,33 @@ class TestWarningTierWraps(unittest.TestCase):
         out = self._emit(self.util.notice, "Backfill from 2026-01-01:\n  data pull -d …")
         self._assert_fits(out)
         self.assertIn("\n  data pull", out)
+
+    def test_no_warning_is_printed_by_hand(self):
+        """The rule the wrap depends on: a whole yellow or red message goes through
+        `notice`/`warn`/`fail`, never a bare print. Colour used as a *fragment* — a bold
+        heading, one cell of a row, `red(x) + hint` — is untouched by this: it is not a
+        message, and wrapping it would break the layout it sits in."""
+        root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        offenders = []
+        for dirpath, dirnames, filenames in os.walk(os.path.join(root, "trainmate")):
+            dirnames[:] = [d for d in dirnames if d != "__pycache__"]
+            for name in filenames:
+                if not name.endswith(".py"):
+                    continue
+                path = os.path.join(dirpath, name)
+                if os.path.samefile(path, os.path.join(root, "trainmate", "util.py")):
+                    continue        # where `notice`, `warn` and `fail` are defined
+                tree = ast.parse(open(path).read())
+                for node in ast.walk(tree):
+                    if not isinstance(node, ast.Call) or node.keywords:
+                        continue
+                    if getattr(node.func, "id", None) != "print" or len(node.args) != 1:
+                        continue
+                    arg = node.args[0]
+                    if (isinstance(arg, ast.Call)
+                            and getattr(arg.func, "id", None) in ("yellow", "red")):
+                        offenders.append(f"{os.path.relpath(path, root)}:{node.lineno}")
+        self.assertEqual(offenders, [], "use notice()/warn()/fail(): " + ", ".join(offenders))
 
     def test_the_journal_keeps_the_unwrapped_line(self):
         # A log is not read at 48 columns (DESIGN_logging.md §5.3).

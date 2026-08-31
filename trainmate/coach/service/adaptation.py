@@ -6,7 +6,7 @@ from trainmate.adherence import (
 )
 from trainmate.sports import canonical_sport
 from trainmate import intensity, signals
-from trainmate.util import yellow, cmd
+from trainmate.util import cmd, notice
 from trainmate.coach.formatting import format_baseline
 from trainmate.coach import honoring
 from trainmate.coach.proposals import RevisionProposal
@@ -458,10 +458,10 @@ class AdaptationMixin:
             kind="adapt", summary=proposal.reason
         ) as change:
             for ew in displaced_by_date.values():
-                print(yellow(
+                notice(
                     f"Removing overridden workout: {ew['title']} ({ew['sport_type']}) "
-                    f"on {ew['date']}"
-                ))
+                    f"on {ew['date']}",
+                )
                 change.void(
                     date=ew['date'], sport_type=ew['sport_type'],
                     reason=proposal.reason,

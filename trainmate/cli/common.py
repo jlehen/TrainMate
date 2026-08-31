@@ -5,7 +5,7 @@ from typing import Any, Dict, List, Optional
 from trainmate.config import config
 from trainmate.adherence import STATUS_LABELS, analyze_adherence, classify_adherence
 from trainmate.util import (
-    cyan, yellow, cmd, days_between, fmt_date, wrap_text, today_str as _today_str,
+    cyan, yellow, cmd, days_between, fmt_date, wrap_text, today_str as _today_str, notice,
 )
 
 # `trainmate_cli` (the `db`/`garmin`/`calendar_syncer` facade) is imported lazily
@@ -72,9 +72,9 @@ def ensure_recent_data(
             and rows[0].get('sleep_score') is None and rows[0].get('stress') is None
         )
         if not present:
-            print(yellow(
-                f"Note: Garmin metrics for today ({fmt_date(today)}) are not available yet."
-            ))
+            notice(
+                f"Note: Garmin metrics for today ({fmt_date(today)}) are not available yet.",
+            )
 
 
 def format_actual(act: Dict[str, Any], divergence: bool = False) -> str:
@@ -197,7 +197,7 @@ def mark_adherence_from_results(
                 runtime.db.mark_workout_adherence_pushed(w['id'], signature)
             marked += 1
         except Exception as e:
-            print(yellow(f"Warning: could not mark {fmt_date(w['date'])} on Calendar: {e}"))
+            notice(f"Warning: could not mark {fmt_date(w['date'])} on Calendar: {e}")
     return marked
 
 
@@ -246,11 +246,11 @@ def report_unhonored(constraints: List[Dict[str, Any]]) -> None:
     if not constraints:
         return
     names = ", ".join(f"[{c['id']}] {c['title']}" for c in constraints)
-    print(yellow(wrap_text(
+    notice(
         f"{len(constraints)} constraint(s) the restored plan predates are no longer "
         f"marked honored: {names}. Run " + cmd("workout generate") + " to build them "
-        "back in."
-    )))
+        "back in.",
+    )
 
 
 def print_plan_cascade(objective_id: int) -> None:
@@ -270,10 +270,10 @@ def print_plan_cascade(objective_id: int) -> None:
     print(f"  - {blocks} mesocycle block(s)")
     print(f"  - {notes} plan feedback note(s)")
     if orphaned:
-        print(yellow(
+        notice(
             f"  and leaves {orphaned} upcoming session(s) with no plan to explain "
-            "them."
-        ))
+            "them.",
+        )
 
 
 # --- Simple rendering (DESIGN_bot_simple_frontend.md §6) ---

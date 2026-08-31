@@ -155,7 +155,7 @@ def _resolve_swap_ops(args: argparse.Namespace) -> list | None:
             )
             return None
     if kind1 != kind2:
-        print(red("Swap two dates or two workout IDs, not one of each."))
+        notice("Swap two dates or two workout IDs, not one of each.", red)
         return None
 
     if kind1 == "id":
@@ -163,21 +163,21 @@ def _resolve_swap_ops(args: argparse.Namespace) -> list | None:
         w1 = runtime.db.get_workout_by_id(id1)
         w2 = runtime.db.get_workout_by_id(id2)
         if not w1:
-            print(red(f"Workout with ID {id1} not found."))
+            notice(f"Workout with ID {id1} not found.", red)
             return None
         if not w2:
-            print(red(f"Workout with ID {id2} not found."))
+            notice(f"Workout with ID {id2} not found.", red)
             return None
         if w1['date'] == w2['date']:
-            print(yellow("Both workouts are already on the same date; nothing to swap."))
+            notice("Both workouts are already on the same date; nothing to swap.")
             return None
         today = _today_str()
         for w in (w1, w2):
             if w['date'] < today:
-                print(red(
+                notice(
                     f"Cannot swap [{w['id']}] {w['title']} ({fmt_date(w['date'])}): "
-                    "it is in the past."
-                ))
+                    "it is in the past.", red,
+                )
                 return None
         print(
             f"Swapping [{w1['id']}] {w1['title']} ({fmt_date(w1['date'])}) <-> "
@@ -193,23 +193,23 @@ def _resolve_swap_ops(args: argparse.Namespace) -> list | None:
         try:
             datetime.strptime(d, "%Y-%m-%d")
         except ValueError:
-            print(red(f"Invalid date format: '{d}'. Use YYYY-MM-DD."))
+            notice(f"Invalid date format: '{d}'. Use YYYY-MM-DD.", red)
             return None
     if date1 == date2:
-        print(yellow("The two dates are identical; nothing to swap."))
+        notice("The two dates are identical; nothing to swap.")
         return None
     today = _today_str()
     for d in (date1, date2):
         if d < today:
-            print(red(f"Cannot swap {fmt_date(d)}: it is in the past."))
+            notice(f"Cannot swap {fmt_date(d)}: it is in the past.", red)
             return None
     on_1 = runtime.db.get_workouts(start_date=date1, end_date=date1)
     on_2 = runtime.db.get_workouts(start_date=date2, end_date=date2)
     if not on_1 and not on_2:
-        print(yellow(
+        notice(
             f"No workouts on either {fmt_date(date1)} or {fmt_date(date2)}; "
-            f"nothing to swap."
-        ))
+            f"nothing to swap.",
+        )
         return None
     desc_1 = ", ".join(w['title'] for w in on_1) or "(rest)"
     desc_2 = ", ".join(w['title'] for w in on_2) or "(rest)"

@@ -10,7 +10,7 @@ from trainmate.baselines import classify_metric, is_anomalous, UNKNOWN
 from trainmate.util import (
     aside, bold, green, red, yellow, cyan, magenta, gray, cmd, color_load_ratio, pmc_cells,
     visible_len, wrap_text, format_labeled_text, format_labeled_block, render_table,
-    is_narrow_client, default_wrap_width, fmt_date, fmt_span,
+    is_narrow_client, default_wrap_width, fmt_date, fmt_span, notice,
 )
 from trainmate.cli.common import mark_adherence_range, pmc_warmup_cutoff
 from trainmate.cli.selectors import add_selector_args, resolve_window
@@ -37,10 +37,10 @@ def run_data_pull(args: argparse.Namespace) -> None:
         )))
         pulled = True
     except runtime.garmin.GarminAuthRequired as e:
-        print(red(f"Garmin authentication required: {e}"))
-        print(yellow("Run this command in an interactive terminal to complete MFA."))
+        notice(f"Garmin authentication required: {e}", red)
+        notice("Run this command in an interactive terminal to complete MFA.")
     except Exception as e:
-        print(red(f"Error pulling from Garmin: {e}"))
+        notice(f"Error pulling from Garmin: {e}", red)
 
     # Ride-along: with fresh activity data in hand, stamp the adherence verdict
     # onto past Calendar events over the pulled range (best-effort — a Calendar
@@ -51,7 +51,7 @@ def run_data_pull(args: argparse.Namespace) -> None:
             if marked:
                 print(green(f"Marked {marked} past Calendar event(s) with adherence."))
         except Exception as e:
-            print(yellow(f"Warning: adherence Calendar marking skipped: {e}"))
+            notice(f"Warning: adherence Calendar marking skipped: {e}")
 
 
 def run_data_backfill_tss(args: argparse.Namespace) -> None:
@@ -120,7 +120,7 @@ def run_data_show_metrics(args: argparse.Namespace) -> None:
                 start_date, end_date, force=getattr(args, 'force_pull', False)
             )
         except Exception as e:
-            print(yellow(f"Warning: Could not ensure recent data: {e}"))
+            notice(f"Warning: Could not ensure recent data: {e}")
 
     metrics_history = runtime.db.get_metrics_cache(start_date=start_date, end_date=end_date)
 
@@ -315,7 +315,7 @@ def run_data_show_activities(args: argparse.Namespace) -> None:
                 start_date, end_date, force=getattr(args, 'force_pull', False)
             )
         except Exception as e:
-            print(yellow(f"Warning: Could not ensure recent data: {e}"))
+            notice(f"Warning: Could not ensure recent data: {e}")
 
     activities = runtime.db.get_completed_activities(
         start_date=start_date, end_date=end_date
@@ -513,8 +513,8 @@ def run_data_show_analysis(args: argparse.Namespace) -> None:
     horizon, source = ("short", "data reflect") if args.short else ("long", "data bootstrap")
     cached = runtime.db.get_analysis_cache(horizon)
     if not cached or not cached.get("reconstruction"):
-        print(yellow(wrap_text(f"No {horizon}-horizon reconstruction stored. Run "
-                               f"{cmd(source)} to build one.")))
+        notice(f"No {horizon}-horizon reconstruction stored. Run "
+               f"{cmd(source)} to build one.")
         return
 
     window = f"{cached.get('window_start')} to {cached.get('window_end')}"
@@ -542,10 +542,10 @@ def run_data_show_analysis(args: argparse.Namespace) -> None:
             f"Bootstrap builds it once, so it will not catch up. {cmd('data reflect')} "
             f"follows the training since. Read it with {cmd('data show-analysis --short')}."
         )
-    print(yellow(wrap_text(
+    notice(
         f"{len(newer)} {'activity' if one else 'activities'} since {window_end} "
-        f"{'post-dates' if one else 'post-date'} this analysis. {remedy}"
-    )))
+        f"{'post-dates' if one else 'post-date'} this analysis. {remedy}",
+    )
 
 
 def _render_analysis_report(result: dict, inspect_only: bool) -> None:
@@ -616,7 +616,7 @@ def _render_analysis_report(result: dict, inspect_only: bool) -> None:
             learnings_map = {}
         for u in updates:
             if not isinstance(u, dict):
-                print(yellow(f"  ! unreadable update ({type(u).__name__}) — skipped"))
+                notice(f"  ! unreadable update ({type(u).__name__}) — skipped")
                 continue
             op = u.get("op")
             meta = []
@@ -652,7 +652,7 @@ def _render_analysis_report(result: dict, inspect_only: bool) -> None:
                 # Named no op the app knows, so nothing was saved for it. Printing the
                 # skip keeps the block from rendering empty under a "Saved" header
                 # (DESIGN_backward_evaluation.md §13).
-                print(yellow(f"  ! unreadable update (op={op!r}) — skipped"))
+                notice(f"  ! unreadable update (op={op!r}) — skipped")
 
     print(bold(cyan("\n==========================================")))
 

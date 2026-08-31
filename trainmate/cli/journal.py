@@ -21,7 +21,7 @@ from trainmate.cli.selectors import add_selector_args, resolve_window
 from trainmate.clock import to_local
 from trainmate.util import (
     bold, cyan, dim, display_width, flex_width, fmt_timestamp, gray, green, pad_visible,
-    red, render_table, truncate_visible, visible_len, yellow,
+    red, render_table, truncate_visible, visible_len, yellow, notice,
 )
 
 # How many runs the listing shows when nothing else is asked for.
@@ -629,10 +629,10 @@ def run_journal_show(args: argparse.Namespace) -> None:
         key=lambda r: r.started, reverse=True,
     )
     if not matches:
-        print(red(f"No run whose id starts with '{prefix}'."))
+        notice(f"No run whose id starts with '{prefix}'.", red)
         return
     if len(matches) > 1:
-        print(yellow(f"'{prefix}' matches {len(matches)} runs:"))
+        notice(f"'{prefix}' matches {len(matches)} runs:")
         _print_listing(matches, len(matches))
         return
     _print_detail(matches[0], runs)
