@@ -390,6 +390,46 @@ class TestWarningTierWraps(unittest.TestCase):
                         offenders.append(f"{os.path.relpath(path, root)}:{node.lineno}")
         self.assertEqual(offenders, [], "use notice()/warn()/fail(): " + ", ".join(offenders))
 
+    def test_no_message_spells_the_prefix_itself(self):
+        """`warn` owns `Warning: `, and owning it is what puts the line in the journal
+        at warn level. A message that spells the word itself is one that skipped it.
+
+        `config.py` and `journal.py` say it by hand on purpose — config load runs before
+        `util` can be imported, and the journal cannot journal its own write failure."""
+        root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        exempt = {"util.py", "config.py", "journal.py"}
+        offenders = []
+
+        def leading_text(node):
+            while True:
+                if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
+                    node = node.left
+                elif (isinstance(node, ast.Call) and node.args
+                      and getattr(node.func, "id", None) in ("yellow", "red", "bold")):
+                    node = node.args[0]
+                else:
+                    break
+            if isinstance(node, ast.JoinedStr) and node.values:
+                node = node.values[0]
+            if isinstance(node, ast.Constant) and isinstance(node.value, str):
+                return node.value.lstrip("\n")
+            return ""
+
+        for dirpath, dirnames, filenames in os.walk(os.path.join(root, "trainmate")):
+            dirnames[:] = [d for d in dirnames if d != "__pycache__"]
+            for name in filenames:
+                if not name.endswith(".py") or name in exempt:
+                    continue
+                path = os.path.join(dirpath, name)
+                for node in ast.walk(ast.parse(open(path).read())):
+                    if not isinstance(node, ast.Call) or not node.args:
+                        continue
+                    if getattr(node.func, "id", None) not in ("print", "notice"):
+                        continue
+                    if leading_text(node.args[0]).startswith("Warning:"):
+                        offenders.append(f"{os.path.relpath(path, root)}:{node.lineno}")
+        self.assertEqual(offenders, [], "use warn(): " + ", ".join(offenders))
+
     def test_the_journal_keeps_the_unwrapped_line(self):
         # A log is not read at 48 columns (DESIGN_logging.md §5.3).
         with patch("trainmate.journal.note") as note:

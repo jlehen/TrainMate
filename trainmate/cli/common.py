@@ -6,6 +6,7 @@ from trainmate.config import config
 from trainmate.adherence import STATUS_LABELS, analyze_adherence, classify_adherence
 from trainmate.util import (
     cyan, yellow, cmd, days_between, fmt_date, wrap_text, today_str as _today_str, notice,
+    warn,
 )
 
 # `trainmate_cli` (the `db`/`garmin`/`calendar_syncer` facade) is imported lazily
@@ -197,7 +198,7 @@ def mark_adherence_from_results(
                 runtime.db.mark_workout_adherence_pushed(w['id'], signature)
             marked += 1
         except Exception as e:
-            notice(f"Warning: could not mark {fmt_date(w['date'])} on Calendar: {e}")
+            warn(f"could not mark {fmt_date(w['date'])} on Calendar: {e}")
     return marked
 
 

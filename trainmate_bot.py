@@ -63,7 +63,7 @@ from trainmate.prompt import (
     PROMPT_SENTINEL, PROMPT_PROTOCOL_VERSION, PHOTO_SENTINEL, BUTTONS_SENTINEL,
     FLUSH_SENTINEL,
 )
-from trainmate.util import cmd, strip_ansi
+from trainmate.util import cmd, strip_ansi, warn
 
 # Telegram caps a message at 4096 chars; we wrap replies in <pre>…</pre> (7 chars
 # of overhead) and want headroom, so chunk the body well under the hard limit.
@@ -558,10 +558,9 @@ def main() -> None:
         )
     allowed_ids = config.telegram_allowed_chat_ids
     if not allowed_ids:
-        print(
-            "Warning: telegram.allowed_chat_ids is empty — the bot will refuse every "
-            "message. Add your numeric chat id to authorize yourself.",
-            file=sys.stderr,
+        warn(
+            "telegram.allowed_chat_ids is empty — the bot will refuse every message. "
+            "Add your numeric chat id to authorize yourself."
         )
     prompt_timeout = config.telegram_prompt_timeout
     command_timeout = config.telegram_command_timeout

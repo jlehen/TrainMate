@@ -9,7 +9,7 @@ from trainmate.adherence import planned_load
 from trainmate.util import (
     aside, step, bold, green, red, yellow, cyan, blue, magenta, gray, cmd, visible_len,
     pad_visible, wrap_text, format_labeled_block, default_wrap_width, fmt_date, fmt_span,
-    today_date as _today_date, notice,
+    today_date as _today_date, notice, warn,
 )
 from trainmate.cli.common import (
     ensure_recent_data, is_simple_render, print_plan_cascade, report_unhonored,
@@ -162,7 +162,7 @@ def run_plan_generate(args: argparse.Namespace) -> None:
     ensure_recent_data(no_pull=args.no_pull, force_pull=getattr(args, 'force_pull', False))
     metrics = runtime.db.get_metrics_cache()
     if not metrics:
-        notice("Warning: Metrics cache is empty. Proceeding without Garmin metrics.")
+        warn("metrics cache is empty. Proceeding without Garmin metrics.")
         
     # First-run nudge: no reflect watermark means `data bootstrap` has never run, so
     # there are no history-derived coach learnings to inform the plan. Offer to seed
@@ -952,7 +952,7 @@ def run_plan_rm(args: argparse.Namespace) -> None:
 
     if subsequent_goals_with_plans:
         notice(
-            "\nWarning: The following subsequent active goals have existing plans that\n"
+            "\nCaution: The following subsequent active goals have existing plans that\n"
             "were aligned with the plan you just deleted. You may need to regenerate them\n"
             "so their dates align correctly (e.g. running "
             + cmd("plan generate --goal <ID> --force") + "):",

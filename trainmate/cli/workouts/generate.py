@@ -9,7 +9,7 @@ from trainmate.google_calendar import event_url
 from trainmate.util import (
     bold, green, red, yellow, cyan, magenta, gray, cmd, aside, step, pad_visible, wrap_text,
     format_labeled_block, today_str as _today_str, today_date as _today_date, days_between,
-    fmt_date, fmt_span, fmt_timestamp, notice, keep_whole,
+    fmt_date, fmt_span, fmt_timestamp, notice, keep_whole, warn,
 )
 from trainmate.cli.common import (
     adherence_verdicts, ensure_recent_data, format_actual,
@@ -38,7 +38,7 @@ def _resolve_ambiguous_matches(date_str: str, auto: bool) -> None:
     try:
         questions = runtime.coach_service.pending_match_questions(date_str)
     except Exception as e:
-        notice(f"Warning: could not check activity matching: {e}")
+        warn(f"could not check activity matching: {e}")
         return
     if not questions:
         return
@@ -135,7 +135,7 @@ def run_workout_adapt(args: argparse.Namespace) -> None:
         step(f"\nUsing {len(metrics_history)} days of recovery metrics "
              f"(past {history_days}-day window).")
     except Exception as e:
-        notice(f"Warning: Could not load metrics trajectory: {e}")
+        warn(f"could not load metrics trajectory: {e}")
 
     state = current_runway(date_str)
     if plan_is_behind(date_str):
@@ -614,7 +614,7 @@ def _list_verdicts(workouts: list, args: argparse.Namespace) -> dict:
                 past[0], past[-1], force=getattr(args, 'force_pull', False)
             )
         except Exception as e:
-            notice(f"Warning: Could not ensure recent data: {e}")
+            warn(f"could not ensure recent data: {e}")
     return adherence_verdicts(past[0], past[-1])
 
 
@@ -748,7 +748,7 @@ def run_workout_compare(args: argparse.Namespace) -> None:
                 start_date, end_date, force=getattr(args, 'force_pull', False)
             )
         except Exception as e:
-            notice(f"Warning: Could not ensure recent data: {e}")
+            warn(f"could not ensure recent data: {e}")
 
     all_workouts = runtime.db.get_workouts(start_date=start_date, end_date=end_date)
     activities = runtime.db.get_completed_activities(start_date=start_date, end_date=end_date)

@@ -41,7 +41,10 @@ class Config:
         except Exception as e:
             if explicit:
                 raise SystemExit(f"TRAINMATE_CONFIG file failed to load: {CONFIG_PATH} ({e})")
-            print(f"Warning: Failed to load config.yaml: {e}")
+            # Spelled out rather than `util.warn`: util imports the journal, the journal
+            # imports this module, and config load is what is running right now
+            # (DESIGN_output_verbosity.md §3.5).
+            print(f"Warning: failed to load config.yaml: {e}")
 
     def get(self, key: str, default: Any = None) -> Any:
         """Retrieves a configuration value by key with an optional default.

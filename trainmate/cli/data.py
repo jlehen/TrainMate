@@ -10,7 +10,7 @@ from trainmate.baselines import classify_metric, is_anomalous, UNKNOWN
 from trainmate.util import (
     aside, bold, green, red, yellow, cyan, magenta, gray, cmd, color_load_ratio, pmc_cells,
     visible_len, wrap_text, format_labeled_text, format_labeled_block, render_table,
-    is_narrow_client, default_wrap_width, fmt_date, fmt_span, notice,
+    is_narrow_client, default_wrap_width, fmt_date, fmt_span, notice, warn,
 )
 from trainmate.cli.common import mark_adherence_range, pmc_warmup_cutoff
 from trainmate.cli.selectors import add_selector_args, resolve_window
@@ -51,7 +51,7 @@ def run_data_pull(args: argparse.Namespace) -> None:
             if marked:
                 print(green(f"Marked {marked} past Calendar event(s) with adherence."))
         except Exception as e:
-            notice(f"Warning: adherence Calendar marking skipped: {e}")
+            warn(f"adherence Calendar marking skipped: {e}")
 
 
 def run_data_backfill_tss(args: argparse.Namespace) -> None:
@@ -120,7 +120,7 @@ def run_data_show_metrics(args: argparse.Namespace) -> None:
                 start_date, end_date, force=getattr(args, 'force_pull', False)
             )
         except Exception as e:
-            notice(f"Warning: Could not ensure recent data: {e}")
+            warn(f"could not ensure recent data: {e}")
 
     metrics_history = runtime.db.get_metrics_cache(start_date=start_date, end_date=end_date)
 
@@ -315,7 +315,7 @@ def run_data_show_activities(args: argparse.Namespace) -> None:
                 start_date, end_date, force=getattr(args, 'force_pull', False)
             )
         except Exception as e:
-            notice(f"Warning: Could not ensure recent data: {e}")
+            warn(f"could not ensure recent data: {e}")
 
     activities = runtime.db.get_completed_activities(
         start_date=start_date, end_date=end_date

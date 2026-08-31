@@ -206,6 +206,15 @@ bold yellow section heading, one red cell inside a row, `red(f"Error: {e}") + hi
 Those are layout, they are short by construction, and wrapping them would break the block
 they sit in.
 
+The same pass settled thirteen messages that had been spelling `Warning: ` into their own
+text. Twelve were operational faults — a Calendar write that failed, Garmin data that
+could not be ensured, an empty metrics cache — so they became `warn` and are now in the
+journal at `warn` level, which they had been skipping for as long as they printed the
+word by hand. The thirteenth is about the athlete's own goals, so it stayed a `notice`
+and says `Caution:` instead. Two keep the prefix by hand and always will: `config.py`
+loads before `util` can be imported (the journal imports config), and `journal.py`
+cannot journal its own write failure. A test holds the rest.
+
 What the wrap must not cost is the commands themselves, which is §3.6.
 
 ### 3.6 A command is never broken across lines

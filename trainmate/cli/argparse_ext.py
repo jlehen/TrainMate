@@ -10,7 +10,7 @@ import textwrap
 from typing import Optional
 
 from trainmate.util import (
-    bold, dim, red, yellow, cmd, default_wrap_width, format_labeled_block, wrap_text
+    bold, dim, red, yellow, cmd, default_wrap_width, format_labeled_block, wrap_text, warn,
 )
 
 
@@ -212,7 +212,7 @@ def _build_keyword_spec(parser: argparse.ArgumentParser) -> dict:
         for opt in action.option_strings:
             kw = opt.lstrip("-")
             if kw in spec and spec[kw] is not action:
-                print(yellow(f"Warning: ambiguous dashless keyword '{kw}'"), file=sys.stderr)
+                warn(f"ambiguous dashless keyword '{kw}'")
             spec[kw] = action
     return spec
 

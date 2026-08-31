@@ -221,6 +221,8 @@ def _report_write_failure(exc: Exception) -> None:
     try:
         from trainmate.util import asides_enabled
         if asides_enabled():
+            # Spelled out rather than `util.warn`, which would journal it: the journal
+            # is what just failed (DESIGN_output_verbosity.md §3.5).
             print(f"Warning: journal write failed ({exc}).", file=sys.stderr)
     except Exception as inner:
         debug("internal", f"could not report a journal write failure: {inner}")

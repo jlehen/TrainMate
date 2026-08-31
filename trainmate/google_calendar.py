@@ -259,8 +259,8 @@ class CalendarSyncer:
                 return google_event_id
             except HttpError as e:
                 if e.resp.status in (404, 410):
-                    print(
-                        f"Warning: Calendar event {google_event_id} was deleted on Google "
+                    warn(
+                        f"Calendar event {google_event_id} was deleted on Google "
                         f"Calendar. Re-creating a new one..."
                     )
                     # Fall through to insert new event
@@ -507,7 +507,7 @@ class CalendarSyncer:
                 print(f"Deleted Google Calendar event {google_event_id}.")
             return True
         except Exception as e:
-            print(f"Warning: Failed to delete Google Calendar event {google_event_id}: {e}")
+            warn(f"failed to delete Google Calendar event {google_event_id}: {e}")
             return False
 
     # Back-compat alias: workout teardown paths call this name.
