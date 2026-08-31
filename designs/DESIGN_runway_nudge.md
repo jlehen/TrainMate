@@ -69,6 +69,11 @@ Output: `None` when nothing fires, else:
   fires: `progression.plan_end` is the last generated *row* (right for the progress
   banner, which asks "do the workouts reach the goal?"), while classification here asks
   "does the *periodization* reach a goal?" — a span cliff must not read as a goal gap.
+  (`plan_end` is itself a misnomer by the project vocabulary — the plan is the
+  periodization, never the sessions. Renaming it `schedule_end`, payload field and
+  `beyond_plan_end` warning code included, is companion work to this design; "schedule"
+  is the word every wording here already uses for the generated sessions. Not "horizon",
+  which elsewhere means the generation span.)
 
 ### 2.1 The coverage invariant
 
