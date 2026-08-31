@@ -284,7 +284,10 @@ earns it is expert detail, and the chat surface does not audit.
 - The router's intent table only reaches read-only views, `adapt -m`, and the §5.5
   constraints view. Nothing plan-shaping or expensive is routable: `plan generate`,
   `workout generate`, rollback/wipe, `model set`, `restart` require the typed expert
-  vocabulary. The one destructive action a tap can reach is `constraint rm <id>`, and
+  vocabulary. One narrow amendment (2026-08-31, DESIGN_runway_nudge.md §6): the morning
+  push's runway button may send `workout generate` (or `workout generate -m ..<id>`) —
+  a fixed argv from the CLI, never reachable through the router, and still gated on the
+  preview/confirm pipeline. The one destructive action a tap can reach is `constraint rm <id>`, and
   only through the §5.5 picker: single ID, offered by the CLI, chosen by the athlete —
   never by the model. (Typed commands still work in simple mode, so the operator can
   drive an instance from its own chat when allowlisted there.)
