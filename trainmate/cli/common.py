@@ -292,7 +292,8 @@ SIMPLE_DONE_STATUSES = ("done", "partial")
 
 # Emoji per canonical sport for the simple session lines, keyed by the names in
 # `sports.CANONICAL_SPORTS`; unknown sports get the generic one rather than nothing,
-# so a new sport never renders bare.
+# so a new sport never renders bare. `rest` is in the table so a taper week reads as
+# intended rest rather than as a generic session (DESIGN_runway_nudge.md §6).
 SPORT_EMOJI = {
     "running": "🏃",
     "cycling": "🚴",
@@ -360,6 +361,7 @@ def simple_day_lines(
 def simple_week_lines(
     workouts: List[Dict[str, Any]],
     verdicts: Optional[Dict[int, Dict[str, Any]]] = None,
+    end_note: Optional[str] = None,
 ) -> List[str]:
     """Simple rendering of a multi-day window: one dated line per session, no
     descriptions, ending on an encouraging count. An empty window is a break, not
@@ -367,9 +369,14 @@ def simple_week_lines(
 
     `verdicts` is `adherence_verdicts`' map; a session already trained gets a ✅
     instead of its sport emoji, so the listing doubles as her calendar — done behind,
-    plan ahead (DESIGN_bot_simple_frontend.md §11)."""
+    plan ahead (DESIGN_bot_simple_frontend.md §11).
+
+    `end_note` names the end of the schedule when the window crosses it, the companion
+    form of the expert listing's marker (DESIGN_runway_nudge.md §6)."""
     if not workouts:
-        return ["Nothing on the schedule — enjoy the break 🎉"]
+        # An empty window past the cliff is the schedule having run out, not a break the
+        # coach chose — so the note replaces the break line rather than following it (§4).
+        return [end_note] if end_note else ["Nothing on the schedule — enjoy the break 🎉"]
     lines = ["🗓 Coming up:"]
     done = 0
     for w in workouts:
@@ -380,6 +387,8 @@ def simple_week_lines(
             lines.append(f"{day} · ✅ {simple_session_line(w)}")
         else:
             lines.append(f"{day} · {simple_session_line(w)}")
+    if end_note:
+        lines.append(end_note)
     count = len(workouts)
     session_word = "session" if count == 1 else "sessions"
     if done:

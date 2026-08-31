@@ -16,6 +16,9 @@ from trainmate.cli.common import (
     mark_adherence_from_results, report_unhonored,
     is_simple_render, simple_day_lines, simple_week_lines,
 )
+from trainmate.cli.runway import (
+    current_runway, list_end_marker, plan_is_behind, print_runway_hint, simple_end_note,
+)
 from trainmate.coach.proposals import GenerateProposal
 from trainmate.cli.workouts.revisions import preview_and_confirm_revision
 
@@ -60,37 +63,6 @@ def _resolve_ambiguous_matches(date_str: str, auto: bool) -> None:
             print(gray("  Counted as that session, partially performed."))
         else:
             print(gray("  Discarded — the session reads as not done."))
-
-
-def _print_block_boundary_hint(date_str: str) -> None:
-    """Points at `workout generate` when the current block is about to end.
-
-    Adapt cannot reach the next block, whose sessions may have been planned long ago against
-    stale metrics. Prints on every run in the terminal window, not only when adaptations are
-    proposed (DESIGN_block_boundary.md §4).
-    """
-    meso = runtime.db.get_active_mesocycle(date_str)
-    if not meso:
-        return
-    days_left = days_between(date_str, meso['end_date'])
-    if not 0 <= days_left <= config.adapt_terminal_window_days:
-        return
-    next_meso = runtime.db.get_next_mesocycle(meso['end_date'])
-    if not next_meso:
-        return
-
-    when = (
-        "today" if days_left == 0
-        else f"in {days_left} day(s), on {fmt_date(meso['end_date'])}"
-    )
-    # Actionable, so it reaches every front-end — but in two lines rather than the four
-    # it used to take (DESIGN_output_verbosity.md §3.2).
-    notice(f"This block ({meso['name']}) ends {when}.")
-    notice(
-        f"The next block ({next_meso['name']}) is outside adapt's reach — re-plan it with "
-        + cmd(f"workout generate -m ..{next_meso['id']}") + ".",
-    )
-    print()
 
 
 def _confirm_new_signals(candidates, date_str: str) -> None:
@@ -165,7 +137,19 @@ def run_workout_adapt(args: argparse.Namespace) -> None:
     except Exception as e:
         notice(f"Warning: Could not load metrics trajectory: {e}")
 
-    _print_block_boundary_hint(date_str)
+    state = current_runway(date_str)
+    if plan_is_behind(date_str):
+        # Nothing to adapt *towards* once the whole periodization is behind us — say what
+        # to do instead of an all-clear over an empty calendar (DESIGN_runway_nudge.md §4,
+        # extending DESIGN_block_boundary.md §6's "adapt requires a block").
+        if not print_runway_hint(state, date_str):
+            notice(
+                "Your plan is behind you — there is nothing left to adapt towards. Set "
+                "what's next with " + cmd("goal add") + ", then " + cmd("plan generate")
+                + "."
+            )
+        return
+    print_runway_hint(state, date_str)
 
     # Before the coach is told anything: settle any pairing the matcher had to guess at.
     _resolve_ambiguous_matches(date_str, auto=args.auto)
@@ -456,17 +440,29 @@ def run_workout_generate(args: argparse.Namespace) -> None:
     proposal = runtime.coach_service.workout_generate(
         start_date=span_start, end_date=span_end, prefer_macro_id=prefer_macro_id
     )
-    print(bold(cyan("\n=== WORKOUTS PROPOSED BY COACH ===")))
-    print(f"{bold('Reasoning')}:\n{wrap_text(proposal.reasoning)}\n")
-    if not proposal.workouts:
-        notice("The coach proposed no sessions — nothing to apply.")
-        return
+    # Companion prose instead of the report: the reasoning is already prose, and the
+    # sessions render the way her week view does (DESIGN_runway_nudge.md §6 — the runway
+    # button makes this preview reachable by tap, so it must not be a table).
+    if is_simple_render():
+        print(f"\n{wrap_text(proposal.reasoning)}\n")
+        if not proposal.workouts:
+            notice("The coach proposed no sessions — nothing to apply.")
+            return
+        for line in simple_week_lines(list(proposal.workouts)):
+            print(line)
+        print()
+    else:
+        print(bold(cyan("\n=== WORKOUTS PROPOSED BY COACH ===")))
+        print(f"{bold('Reasoning')}:\n{wrap_text(proposal.reasoning)}\n")
+        if not proposal.workouts:
+            notice("The coach proposed no sessions — nothing to apply.")
+            return
 
-    # The same one-line rendering as `workout list`, so the plan the athlete is asked to
-    # accept reads exactly like the plan they will be living with.
-    for w in proposal.workouts:
-        print(workout_line(w))
-    print()
+        # The same one-line rendering as `workout list`, so the plan the athlete is asked
+        # to accept reads exactly like the plan they will be living with.
+        for w in proposal.workouts:
+            print(workout_line(w))
+        print()
 
     if not force and not _confirm_apply(proposal):
         notice("Workouts discarded — your current plan is unchanged.")
@@ -652,13 +648,20 @@ def run_workout_list(args: argparse.Namespace) -> None:
 
     verdicts = _list_verdicts(workouts, args)
 
+    # A pure ID lookup names no range, so there is no crossing of the end of the schedule
+    # to report on (DESIGN_runway_nudge.md §4).
+    names_a_range = windowed or not ids
+
     # Companion prose instead of the table: a single-day window reads as the day, any
     # other window as the week ahead (DESIGN_bot_simple_frontend.md §6).
     if is_simple_render():
         if start_date and start_date == end_date:
             lines = simple_day_lines(workouts, start_date, verdicts)
         else:
-            lines = simple_week_lines(workouts, verdicts)
+            lines = simple_week_lines(
+                workouts, verdicts,
+                end_note=simple_end_note(end_date) if names_a_range else None,
+            )
         for line in lines:
             print(line)
         return
@@ -718,6 +721,14 @@ def run_workout_list(args: argparse.Namespace) -> None:
             seen_summaries.add(summary)
             print(format_labeled_block("  Adapt summary:", summary, color_fn=gray))
         print(gray("-" * 40))
+    # Where the schedule stops, when the listed range runs past it (§4). A listing with
+    # nothing to show renders it alone: an empty range past the cliff is exactly where the
+    # gap needs naming rather than reading as a broken render.
+    end_marker = list_end_marker(end_date) if names_a_range else None
+    if end_marker:
+        print(end_marker)
+
+
 def run_workout_compare(args: argparse.Namespace) -> None:
     """Compares planned workouts against completed activities for the given date range."""
     today_str = _today_str()

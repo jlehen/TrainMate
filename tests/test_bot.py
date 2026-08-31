@@ -386,7 +386,8 @@ class RouterTablesTest(unittest.TestCase):
     here so the two tables cannot drift (§5.3)."""
 
     # Intents the bot answers itself or maps with the athlete's text attached.
-    SPECIAL = {"coach_message", "add_constraint", "help", "unclear"}
+    # `new_goal` is reply-only and deliberately runs nothing (DESIGN_runway_nudge.md §6).
+    SPECIAL = {"coach_message", "add_constraint", "help", "unclear", "new_goal"}
 
     def test_every_cli_intent_lands_somewhere_in_the_bot(self):
         from trainmate.cli.bot import ROUTER_INTENTS
@@ -498,6 +499,14 @@ class UiCallbackTest(unittest.TestCase):
         buttons = [{"label": "A"}, {"label": "B"}, {"label": "C"}]
         self.assertEqual(len(bot.ui_button_rows(buttons, "t")), 1)
         self.assertEqual(len(bot.ui_menu_rows(buttons, "t", "2")), 3)
+
+    def test_a_fourth_button_wraps_and_keeps_its_flat_position(self):
+        """The morning push gains one when the schedule is running out
+        (DESIGN_runway_nudge.md §6); four across would shrink all four past reading."""
+        buttons = [{"label": c} for c in "ABCD"]
+        rows = bot.ui_button_rows(buttons, "t")
+        self.assertEqual([len(r) for r in rows], [3, 1])
+        self.assertEqual(rows[1][0][1], bot.ui_callback_data("t", "3"))
 
 
 class PushScheduleTest(unittest.TestCase):

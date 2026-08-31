@@ -1,8 +1,20 @@
 # Design: End-of-runway nudges — suggesting the right action when the schedule runs out
 
-**Status:** Proposed · **Date:** 2026-08-30 · **Revised:** 2026-08-31 (review pass:
-coverage invariant replaces the rest-tail margin, block hint folded in, passed-state
-window, honest `new_goal` reply)
+**Status:** Implemented (2026-08-31) · **Date:** 2026-08-30 · **Revised:** 2026-08-31
+(review pass: coverage invariant replaces the rest-tail margin, block hint folded in,
+passed-state window, honest `new_goal` reply)
+
+Two readings the implementation settled, both narrower than they look:
+
+- **A periodization wholly behind today is a plan cliff**, whatever the sessions did.
+  §2's classification compares `last_covered_date` to the plan end, which on its own would
+  call "schedule stopped a week before the plan, and the plan has now ended too" a *span*
+  cliff — pointing at `workout generate` with no blocks left to generate against, and
+  disagreeing with §4's adapt refusal, which fires on exactly that state. The comparison
+  therefore runs only while the plan still reaches today.
+- **Dates are rendered by `fmt_date`** ("2026-09-03 Thu"), the CLI's one date renderer,
+  rather than the "Thu Sep 3" the §4 examples write as prose. The companion wordings keep
+  `simple_when`'s countdown, which is what §6's own surface already uses.
 
 ## 1. The problem
 

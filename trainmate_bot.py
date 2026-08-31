@@ -140,6 +140,14 @@ ROUTER_FALLBACK = (
     "I didn't quite get that 🤔 — try one of the buttons below, or say it another way."
 )
 
+# What a `new_goal` message gets back (DESIGN_runway_nudge.md §6). Reply-only, and honest
+# about it: nothing here persists the message and nothing forwards it, so the reply must
+# not promise a delivery that does not happen (§8 names both as future work).
+NEW_GOAL_REPLY = (
+    "A new goal — exciting! 🎯 Setting that up happens from the computer — tell your "
+    "coach directly so it isn't lost."
+)
+
 # Reply-keyboard label → fixed argv; None arms free-text capture (§5.1/§5.2).
 # Buttons never reach beyond this table; the keyboard renders it two per row, in order.
 SIMPLE_KEYBOARD = [
@@ -381,10 +389,20 @@ def resolve_ui_action(buttons: List[Any], path: str) -> Optional[dict]:
     return node if isinstance(node, dict) else None
 
 
+# Telegram divides a row's width between its buttons, so a fourth one shrinks all four
+# past reading. The morning push is exactly that case once the runway button joins its
+# three session buttons (DESIGN_runway_nudge.md §6), and the wrap puts it on its own line.
+UI_BUTTONS_PER_ROW = 3
+
+
 def ui_button_rows(buttons: List[dict], token: str) -> List[List[Tuple[str, str]]]:
-    """Top-level TM-BUTTONS layout: one row across, like the §4.1 mock."""
-    return [[(b.get("label", ""), ui_callback_data(token, str(i)))
-             for i, b in enumerate(buttons)]]
+    """Top-level TM-BUTTONS layout: across, like the §4.1 mock, wrapping every
+    `UI_BUTTONS_PER_ROW`. Positions stay flat — a callback path indexes the payload, not
+    the row it landed on."""
+    cells = [(b.get("label", ""), ui_callback_data(token, str(i)))
+             for i, b in enumerate(buttons)]
+    return [cells[i:i + UI_BUTTONS_PER_ROW]
+            for i in range(0, len(cells), UI_BUTTONS_PER_ROW)] or [[]]
 
 
 def ui_menu_rows(menu: List[dict], token: str, parent: str) -> List[List[Tuple[str, str]]]:
@@ -874,6 +892,11 @@ def main() -> None:
         elif intent == "help":
             await bot.send_message(
                 chat_id=chat_id, text=SIMPLE_HELP, reply_markup=_keyboard()
+            )
+            return None
+        elif intent == "new_goal":
+            await bot.send_message(
+                chat_id=chat_id, text=NEW_GOAL_REPLY, reply_markup=_keyboard()
             )
             return None
         else:

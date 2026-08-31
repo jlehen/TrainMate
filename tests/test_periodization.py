@@ -42,6 +42,16 @@ def _generate_workouts(**kwargs):
     return proposal.reasoning, coach_service.workout_generate_apply(proposal)
 
 
+def _session_titles(rows) -> list:
+    """The titles of the real sessions in a listing.
+
+    Generation now covers every date of its span, filling the ones the model left out
+    with explicit rest (DESIGN_runway_nudge.md §2.1), so a fixture whose mocked response
+    holds one session gets that session plus a rest row per remaining day. These tests are
+    about which sessions survive a regeneration or a rollback, not about the coverage."""
+    return [w["title"] for w in rows if w["sport_type"] != "rest"]
+
+
 class TestPeriodization(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -119,8 +129,7 @@ class TestPeriodization(unittest.TestCase):
         mock_client.complete.side_effect = [mock_macro_response, mock_workouts_response]
         reason, workouts = coach_service.replan(force=False)
         self.assertEqual(reason, "Microcycle generated reasoning")
-        self.assertEqual(len(workouts), 1)
-        self.assertEqual(workouts[0]["title"], "Base Run")
+        self.assertEqual(_session_titles(workouts), ["Base Run"])
         self.assertEqual(mock_client.complete.call_count, 2)
 
         macro = test_db.get_macrocycle_for_objective(obj_id)
@@ -706,8 +715,7 @@ class TestPeriodization(unittest.TestCase):
         }
         reason, workouts = _generate_workouts()
         self.assertEqual(reason, "Separate workout reasoning")
-        self.assertEqual(len(workouts), 1)
-        self.assertEqual(workouts[0]["title"], "Base Run")
+        self.assertEqual(_session_titles(workouts), ["Base Run"])
         mock_client.complete.assert_called_once()
 
     @patch("trainmate.runtime.calendar_syncer")
@@ -755,7 +763,7 @@ class TestPeriodization(unittest.TestCase):
         _generate_workouts()
 
         # Today's completed workout survives; the new plan begins tomorrow.
-        titles = [w["title"] for w in test_db.get_workouts(start_date=today)]
+        titles = _session_titles(test_db.get_workouts(start_date=today))
         self.assertEqual(titles, ["Today Done", "Tomorrow Run"])
         # Today's Calendar event was left untouched (only future days are torn down).
         for call in mock_calendar.delete_workout_event.call_args_list:
@@ -800,7 +808,7 @@ class TestPeriodization(unittest.TestCase):
 
         # The stale synced workout is gone, and only the new workout remains.
         remaining = test_db.get_workouts(start_date=today)
-        titles = [w["title"] for w in remaining]
+        titles = _session_titles(remaining)
         self.assertNotIn("Old Plan Run", titles)
         self.assertEqual(titles, ["New Run"])
         # Its Google Calendar event was deleted.
@@ -846,7 +854,7 @@ class TestPeriodization(unittest.TestCase):
         _generate_workouts()
 
         remaining = test_db.get_workouts(start_date=today)
-        self.assertEqual([w["title"] for w in remaining], ["New Run"])
+        self.assertEqual(_session_titles(remaining), ["New Run"])
         mock_calendar.delete_workout_event.assert_called_once_with("evt-stale-456")
 
     @patch("trainmate.coach.engine.openrouter_client")
@@ -919,7 +927,7 @@ class TestPeriodization(unittest.TestCase):
         }
         _generate_workouts()
         self.assertEqual(
-            [w["title"] for w in test_db.get_workouts(start_date=today)], ["V2 Run"]
+            _session_titles(test_db.get_workouts(start_date=today)), ["V2 Run"]
         )
 
         # --- Roll back to v1 ---
@@ -930,7 +938,7 @@ class TestPeriodization(unittest.TestCase):
         self.assertEqual(test_db.get_macrocycle_for_objective(obj_id)["strategy"], "v1")
         # V1's workout is live again; V2's is an older sibling in the same slot.
         live = test_db.get_workouts(start_date=today)
-        self.assertEqual([w["title"] for w in live], ["V1 Run"])
+        self.assertEqual(_session_titles(live), ["V1 Run"])
         self.assertEqual(result["restored_workouts"], 1)
         # The restored workout was re-pushed to Calendar.
         self.assertTrue(mock_calendar.sync_workout.called)
@@ -998,7 +1006,7 @@ class TestPeriodization(unittest.TestCase):
         obj_id = test_db.get_active_objective()["id"]
         self.assertEqual(test_db.get_macrocycle_for_objective(obj_id)["id"], v2_id)
         self.assertEqual(
-            [w["title"] for w in test_db.get_workouts(start_date=today)], ["V1 Run"]
+            _session_titles(test_db.get_workouts(start_date=today)), ["V1 Run"]
         )
         self.assertEqual(result["restored_workouts"], 1)
         self.assertTrue(mock_calendar.sync_workout.called)
@@ -1023,13 +1031,13 @@ class TestPeriodization(unittest.TestCase):
         coach_service.workout_rollback()
 
         live = test_db.get_workouts(start_date=today)
-        self.assertEqual([w["title"] for w in live], ["First Run"])
+        self.assertEqual(_session_titles(live), ["First Run"])
         self.assertEqual(live[0]["macrocycle_id"], macro_id)
 
         # A second rollback steps forward again: the batch just archived is now newest.
         coach_service.workout_rollback()
         self.assertEqual(
-            [w["title"] for w in test_db.get_workouts(start_date=today)], ["Second Run"]
+            _session_titles(test_db.get_workouts(start_date=today)), ["Second Run"]
         )
 
     def test_workout_rollback_without_archive_raises(self):

@@ -51,6 +51,12 @@ def _plural(n: int) -> str:
     return "s" if n != 1 else ""
 
 
+def _days_between(start: str, end: str) -> int:
+    """Whole days from `start` to `end`, negative when `end` precedes it. The same
+    arithmetic as `util.days_between`, kept here so this module stays import-light."""
+    return (_to_date(end) - _to_date(start)).days
+
+
 def plan_end(workouts: List[Dict[str, Any]]) -> Optional[str]:
     """Last non-removed **generated** workout date (DESIGN_progress_timeline.md §3
     'Plan end'). The projection runs exactly to here and stops — no zero-fill ghost
@@ -538,6 +544,98 @@ def plan_gap(
         0, round((_to_date(next_obj["target_date"]) - _to_date(plan_end_date)).days / 7)
     )
     return next_obj, weeks_before
+
+
+# --- End-of-runway detection (DESIGN_runway_nudge.md §2) ---
+# The shapes the end of the schedule can take. Surfaces dispatch on these rather than on
+# the wording, the same contract `_warning`'s `code` gives the payload banners.
+RUNWAY_BLOCK = "block"
+RUNWAY_SPAN = "span"
+RUNWAY_PLAN_END_NEXT_GOAL = "plan_end_next_goal"
+RUNWAY_PLAN_END_NO_GOAL = "plan_end_no_goal"
+
+
+def coverage_end(workouts: List[Dict[str, Any]]) -> Optional[str]:
+    """The last date the generated schedule covers — planned rest rows included, manual
+    rows excluded (DESIGN_runway_nudge.md §2). None when nothing was ever generated.
+
+    Deliberately not `plan_end`, which falls back to manual rows for a fully-manual
+    database: a race put on the calendar by hand weeks out must not make the schedule
+    look as if it reaches that far while the generated sessions end next Thursday.
+
+    No margin and no guessing at a quiet tail: §2.1's coverage invariant makes every date
+    of a generated span carry a row, so the last covered date is read straight off them."""
+    dates = [
+        w["date"] for w in workouts
+        if not w.get("removed") and w.get("source") == "generated"
+    ]
+    return max(dates) if dates else None
+
+
+def runway(
+    workouts: List[Dict[str, Any]],
+    mesocycles: List[Dict[str, Any]],
+    objectives: List[Dict[str, Any]],
+    today: str,
+    warning_days: int,
+) -> Optional[Dict[str, Any]]:
+    """The end-of-schedule fact, or None when nothing fires (DESIGN_runway_nudge.md §2).
+
+    Pure over rows the caller fetched, following `plan_gap`'s contract: every surface
+    words the same structured answer itself, so `status`, `workout adapt` and the morning
+    push cannot diverge on *when* the schedule runs out or on which command fixes it (§3).
+
+    `mesocycles` are the blocks of the plan the current workouts implement, whichever
+    goal it was drawn for. `warning_days` is `config.runway_warning_days`; it bounds both
+    the run-up and the passed-state window (§7).
+
+    Returns `{last_covered_date, days_left, kind, plan_end}`, plus `next_mesocycle` on a
+    block cliff and `objective`/`weeks_before` on a plan cliff with a goal beyond it.
+    `days_left` is negative once the cliff is behind the athlete."""
+    last_covered = coverage_end(workouts)
+    ends = [str(m["end_date"]) for m in mesocycles if m.get("end_date")]
+    if last_covered is None or not ends:
+        return None
+    plan_end_date = max(ends)
+    days_left = _days_between(today, last_covered)
+
+    # The run-up window, then the passed state — still worth saying for `warning_days`
+    # after the plan's own end, which is the morning the wrap-up matters most (§2).
+    if days_left > warning_days:
+        return None
+    if (days_left < 0
+            and _days_between(max(last_covered, plan_end_date), today) > warning_days):
+        return None
+
+    state: Dict[str, Any] = {
+        "last_covered_date": last_covered,
+        "days_left": days_left,
+        "plan_end": plan_end_date,
+    }
+
+    # A periodization wholly behind today is a plan cliff whatever the sessions did:
+    # there is nothing left to generate towards, which is the same judgement `workout
+    # adapt` refuses on (§4). Otherwise the comparison is the exact one the coverage
+    # invariant makes possible.
+    if plan_end_date >= today and last_covered < plan_end_date:
+        blocks = sorted(mesocycles, key=lambda m: str(m["start_date"]))
+        next_block = next(
+            (m for m in blocks if str(m["start_date"]) > last_covered), None
+        )
+        ends_a_block = any(str(m["end_date"]) == last_covered for m in mesocycles)
+        if ends_a_block and next_block is not None:
+            return {**state, "kind": RUNWAY_BLOCK, "next_mesocycle": next_block}
+        return {**state, "kind": RUNWAY_SPAN}
+
+    # Fed the mesocycle-derived plan end, not `plan_end`: the question here is whether the
+    # PERIODIZATION reaches a goal, so a span cliff cannot read as a goal gap (§2).
+    gap = plan_gap(objectives, plan_end_date)
+    if gap is None:
+        return {**state, "kind": RUNWAY_PLAN_END_NO_GOAL}
+    return {
+        **state, "kind": RUNWAY_PLAN_END_NEXT_GOAL,
+        "objective": gap[0], "weeks_before": gap[1],
+    }
 
 
 def _warning(code: str, text: str, command: Optional[str] = None) -> Dict[str, Any]:

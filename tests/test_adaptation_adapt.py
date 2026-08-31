@@ -24,7 +24,6 @@ from trainmate.sports import canonical_sport
 
 # trainmate_cli re-exports names from trainmate.cli.workouts, so it must be imported first.
 import trainmate_cli  # noqa: F401
-from trainmate.cli.workouts import generate as workouts_cli
 
 
 class TestAdaptationAdapt(unittest.TestCase):
@@ -330,42 +329,6 @@ class TestAdaptationAdapt(unittest.TestCase):
         self.assertIn(
             "The next generated block re-places the test when it is due.", system_prompt
         )
-
-    def test_block_boundary_hint_names_next_mesocycle(self):
-        """Inside the terminal window the CLI names the ending block and the exact generate
-        command for the next one; mid-block it stays silent (DESIGN_block_boundary.md §4)."""
-        self._save_two_block_plan()
-        next_meso = test_db.get_next_mesocycle("2026-06-30")
-        self.assertEqual(next_meso["name"], "Peak & Taper")
-
-        def hint_output(date_str: str) -> str:
-            buf = io.StringIO()
-            with patch("trainmate.cli.workouts.generate.runtime") as mock_cli, redirect_stdout(buf):
-                mock_cli.db = test_db
-                workouts_cli._print_block_boundary_hint(date_str)
-            # Collapsed: the hint is wrapped prose and the wrap width varies per
-            # front-end, so a line break may fall inside any block name.
-            return " ".join(buf.getvalue().split()) if buf.getvalue().strip() else buf.getvalue()
-
-        # One day before the block ends -> hint fires, even with no adaptation proposed.
-        out = hint_output("2026-06-29")
-        self.assertIn("Base Building", out)
-        self.assertIn("in 1 day(s), on 2026-06-30", out)
-        self.assertIn("Peak & Taper", out)
-        self.assertIn(f"workout generate -m ..{next_meso['id']}", out)
-
-        # Mid-block -> nothing printed.
-        self.assertEqual(hint_output("2026-06-10"), "")
-
-    def test_block_boundary_hint_silent_without_next_block(self):
-        """The final block of a plan has nothing to regenerate, so the hint stays silent."""
-        self._save_two_block_plan()
-        buf = io.StringIO()
-        with patch("trainmate.cli.workouts.generate.runtime") as mock_cli, redirect_stdout(buf):
-            mock_cli.db = test_db
-            # 2026-07-20 is one day before the LAST block ends; get_next_mesocycle -> None.
-            workouts_cli._print_block_boundary_hint("2026-07-20")
-        self.assertEqual(buf.getvalue(), "")
 
     @patch("trainmate.coach.engine.openrouter_client")
     def test_adapt_drops_proposal_past_block_end(self, mock_client):

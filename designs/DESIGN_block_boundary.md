@@ -70,6 +70,14 @@ prompt to before.
 
 ## 4. Regeneration nudge (CLI)
 
+**Superseded (2026-08-31) by DESIGN_runway_nudge.md §3.** A block boundary with no fresh
+sessions after it is one of the four ways the schedule can run out, so this hint is now the
+`block` kind of `progression.runway`, printed by `cli/runway.py` on every daily surface —
+`workout adapt`, `status` and the morning push — rather than on adapt alone, and from the
+first day of `config.runway_warning_days` rather than the terminal window. §3's prompt-side
+`THIS BLOCK IS ENDING` section is untouched and stays on `adapt_terminal_window_days`. The
+rest of this section is the original design, kept for the reasoning it records.
+
 `cli/workouts/generate.py::_print_block_boundary_hint` (called by `run_workout_adapt`) prints
 a hint whenever the evaluation date is in the terminal window and a next block exists: which
 block is ending, when, and the exact `workout generate -m ..<id>` invocation that

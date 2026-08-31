@@ -14,6 +14,10 @@ from trainmate.cli.common import (
     SIMPLE_DONE_STATUSES, adherence_verdicts, ensure_recent_data,
     simple_constraint_lines, simple_day_lines,
 )
+from trainmate.cli.runway import (
+    SIMPLE_PASSED_LINE, current_runway, runway_buttons, schedule_exhausted,
+    simple_runway_lines,
+)
 from trainmate.prompt import emit_buttons
 from trainmate.util import step, today_str as _today_str, wrap_text
 
@@ -77,6 +81,11 @@ ROUTER_INTENTS = {
     "remove_constraint": (
         "the athlete wants to drop or cancel one of those rules ('I can run again', "
         "'forget the Wednesday rule')"
+    ),
+    "new_goal": (
+        "the athlete says what they want to train for next — a race, an event, a new "
+        "target ('I signed up for a marathon in May', 'I'd like to do a triathlon next "
+        "year')"
     ),
     "help": "the athlete asks what they can say or how this works",
     "unclear": "anything else, or too ambiguous to route",
@@ -171,11 +180,25 @@ def run_bot_morning(args: argparse.Namespace) -> None:
     Idempotent per day via the settings marker; the bot's scheduler may fire it
     repeatedly (catch-up after sleep, restarts) without double-sending. A day with no
     session gets the one-line rest message and a day already trained the congratulation,
-    both without buttons — neither has anything left to offer."""
+    both without buttons — neither has anything left to offer.
+
+    Once the schedule has run out the push says so and offers to extend it, and once even
+    that has nothing left to say it sends nothing at all (DESIGN_runway_nudge.md §6)."""
     from trainmate import runtime
     today = _today_str()
     if not args.force and runtime.db.get_setting(MORNING_MARKER) == today:
         return
+    runway = current_runway(today)
+
+    # An exhausted schedule past the passed-state window has nothing honest left to say on
+    # an empty day: not the rest-day line, which would describe a hole as a coaching
+    # decision, and not a stale celebration. Silence, until a schedule exists again (§6).
+    # Decided before the adaptation, so a dead plan does not spend an LLM call each morning.
+    if (runway is None and schedule_exhausted(today)
+            and not runtime.db.get_workouts(start_date=today, end_date=today)):
+        runtime.db.set_setting(MORNING_MARKER, today)
+        return
+
     adapt_note = _auto_adapt_note(today) if settings.adapt_first() else None
     # After the adaptation, so the verdicts grade the sessions this push is about to show.
     workouts = runtime.db.get_workouts(start_date=today, end_date=today)
@@ -184,15 +207,24 @@ def run_bot_morning(args: argparse.Namespace) -> None:
         w for w in workouts
         if (verdicts.get(w.get("id")) or {}).get("status") not in SIMPLE_DONE_STATUSES
     ]
+
     if workouts and not ahead:
         print(PUSH_ALL_DONE_LINE)
+    elif not workouts and runway is not None and runway["days_left"] < 0:
+        print(SIMPLE_PASSED_LINE)
     else:
         for line in simple_day_lines(workouts, today, verdicts):
             print(line)
     if adapt_note:
         print(wrap_text(adapt_note))
-    if ahead:
-        emit_buttons(MORNING_BUTTONS)
+    if runway:
+        for line in simple_runway_lines(runway, today):
+            print(wrap_text(line))
+    # Two independent gates, each answering its own question, so relaxing one cannot
+    # resurrect the other's buttons (§6).
+    buttons = (MORNING_BUTTONS if ahead else []) + runway_buttons(runway)
+    if buttons:
+        emit_buttons(buttons)
     runtime.db.set_setting(MORNING_MARKER, today)
 
 

@@ -403,9 +403,10 @@ by `plan generate` and `workout generate`; a daily readiness check must not rewr
 
 Rather than widening the firewall, both sides are made aware of it. Inside
 `config.adapt_terminal_window_days` of a block's end, the adapt prompt gains a
-`THIS BLOCK IS ENDING` section, and the CLI prints the exact
-`workout generate -m <id>` invocation that re-plans the next block against current
-metrics.
+`THIS BLOCK IS ENDING` section. The CLI half is now one of the four ways the schedule can
+run out: inside `config.runway_warning_days` of the last scheduled session, **every** daily
+surface prints the exact `workout generate -m ..<id>` invocation that re-plans the next
+block against current metrics (`DESIGN_runway_nudge.md §3`).
 
 Nothing crosses that boundary. A constraint dated past it is built in by the next
 `workout generate` whose horizon reaches it — which re-plans those days against the blocks

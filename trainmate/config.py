@@ -213,6 +213,15 @@ class Config:
         return self.get("coach", {}).get("adapt_terminal_window_days", 3)
 
     @property
+    def runway_warning_days(self) -> int:
+        """How many days ahead the end of the scheduled workouts is announced, and how
+        many days past it the announcement keeps going, defaulting to 7.
+
+        Wider than the terminal window above on purpose — see DESIGN_runway_nudge.md §7.
+        """
+        return self.get("coach", {}).get("runway_warning_days", 7)
+
+    @property
     def goals_lookback_days(self) -> int:
         """Gets the number of days into the past to look for preceding goals, defaulting to 90."""
         return self.get("coach", {}).get("goals_lookback_days", 90)

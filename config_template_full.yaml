@@ -233,9 +233,15 @@ coach:
   #workout_generation_span_days: 28
   # How close to a block's end counts as its terminal window: inside it an adaptation
   # has no runway to rebound and the next block is out of reach, so the coach is told to
-  # hold planned load and the CLI points at `workout generate -m ..<id>`
-  # (DESIGN_block_boundary.md §3/§4).
+  # hold planned load (DESIGN_block_boundary.md §3). This gates what the coach MODEL is
+  # told; the CLI's own end-of-schedule hint runs on runway_warning_days below.
   #adapt_terminal_window_days: 3
+  # How many days ahead `workout adapt`, `status` and the morning push announce that the
+  # scheduled workouts are about to run out — and how many days past the end they keep
+  # saying so before going quiet (DESIGN_runway_nudge.md §7). Wider than the terminal
+  # window above: extending the schedule is a deliberate act the athlete may sit on for a
+  # few days, so a week gives the nudge room to be seen twice.
+  #runway_warning_days: 7
   # `constraint add`/`edit` replan proposal (DESIGN_constraints.md §7): propose a
   # replan when a constraint's overlapping planned load is at least this percentage
   # of the plan's trailing weekly planned load...

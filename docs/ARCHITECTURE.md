@@ -91,7 +91,9 @@ classes themselves.
   handler anywhere (DESIGN_logging.md §3/§5.4).
 - **`trainmate/cli/`** — per-command-family handler modules (`run_*()`): `status`,
   `progress`, `goals`, `constraints`, `benchmarks`, `signal`, `learnings`,
-  `plans`, `data`, `models`, `journal`, the `workouts/` package, plus shared `common`.
+  `plans`, `data`, `models`, `journal`, the `workouts/` package, plus shared `common`
+  and `runway` (the end-of-schedule nudge every daily surface draws — the db-reads
+  wrapper around `progression.runway` plus the wordings, DESIGN_runway_nudge.md §3).
 - **`trainmate_web.py`** — Flask REST API behind the dashboard. **Read-only**: GET
   handlers over `db` and the shared pure modules, no writes, no Garmin, no LLM, no
   Calendar ([§8](#8-web-api-endpoints)).
@@ -160,7 +162,8 @@ classes themselves.
     `constraint rm` taps (DESIGN_bot_simple_frontend.md §5.5). Subprocesses
     additionally get `TRAINMATE_RENDER=simple` (interpreted by
     `cli/common.is_simple_render`) so opted-in commands (`workout list`, `progress`,
-    the adapt result, `bot morning`, `goal list`, `plan show`) render companion prose,
+    the adapt result, `bot morning`, `goal list`, `plan show`, `workout generate`'s
+    preview) render companion prose,
     sent plain instead of `<pre>`. A third one-way sentinel, `BUTTONS_SENTINEL`/
     `emit_buttons` (`\x1eTM-BUTTONS {json}`), attaches a *non-blocking* inline button
     row (`ui:` callback namespace, token-invalidated) whose taps feed a canned
@@ -170,7 +173,14 @@ classes themselves.
     process stays stateless. That window runs into the afternoon, so the push grades
     today's sessions (§5) before briefing them: a day already trained gets a
     congratulation and no buttons, since the button row's only offers are ways to change
-    a session still ahead. Slash-prefixed text is always the expert path, and `/ui`
+    a session still ahead. When the schedule is about to run out the push adds one line
+    and, on a span or block cliff, one further button whose argv comes from the detector
+    (`workout generate [-m ..<id>]`) — the single narrow exception to the guardrail that
+    keeps generation off the tappable surface, and never reachable through the router
+    (DESIGN_runway_nudge.md §6). Free text saying what to train for next routes to
+    `new_goal`, which the bot answers itself: goal capture is operator work, and the
+    reply says so rather than promising a delivery nothing performs.
+    Slash-prefixed text is always the expert path, and `/ui`
     flips the persona of a running bot in memory — `telegram.ui` decides again at the
     next restart (DESIGN_bot_simple_frontend.md §5.6).
   - **Output is quieter here than on a terminal.** Because `_drive` buffers the whole
@@ -407,6 +417,8 @@ flow for each lives in [§10](#10-key-data-flows).
 | Plan version comparison / display | `trainmate/plan_diff.py` (comparison + snapshot parsing), `cli/plans.py` (text rendering), `/api/plan/diff` in `trainmate_web.py`, `loadPlanDiff()`/`render*` in `static/app.js` |
 | Plan feedback (the athlete's notes on the plan) | `db/periodization.py` (`add_/list_/get_/rm_plan_feedback` over the `plan_feedback` table), `cli/plans.py:run_plan_feedback` + `cli/selectors.py:resolve_meso_atom` (the `-m` atom), `coach/service/planning.py` (the regen gate disjunct + prompt assembly), `coach/engine/planning.py` (the prompt section), DESIGN_plan_feedback.md |
 | Workout generation span          | `coach/service/workouts.py:workout_generate`, `cli/workouts/generate.py:_resolve_span`, `cli/workouts/parser.py` (flag parsing), `config.workout_generation_span_days` |
+| Telling the athlete the schedule is running out | `progression.py` (`coverage_end`, `runway` — the pure detector and its four kinds), `cli/runway.py` (the row fetch, every wording, the morning-push button), and the four surfaces that draw it: `cli/workouts/generate.py` (`workout adapt`'s hint and refusal, `workout list`'s marker), `cli/status.py`, `cli/bot.py:run_bot_morning`, `config.runway_warning_days`, DESIGN_runway_nudge.md. The wording is built in **one** place on purpose — the hint used to live on `workout adapt` alone, which is how `status` came to answer differently on the same morning (§3 of that doc) |
+| Generation covering every date of its span | `coach/engine/workouts.py` (the TASK sentence), `coach/service/workouts.py:_fill_coverage_gaps` (the deterministic backstop, over the same `_rest_workout` factory the rest-window pre-pass uses), DESIGN_runway_nudge.md §2.1. The invariant is what lets the end of the schedule be read straight off the rows, with no margin |
 | Knowing whether the plan reflects a constraint | `coach/honoring.py` (**canonical** for `honored_at`: what it means, who may stamp it, the write, and `needs_a_pass` — whether the plan is missing a directive at all), `coach/proposals.py` (`covered_constraint_ids`, decided at proposal time on both proposal types so apply never re-derives it), `coach/service/adaptation.py` + `coach/service/workouts.py` (the two stamping commands), `cli/constraints.py:_maybe_point_at_honor` (the add-time message naming the block and the run that would build it in), `cli/status.py`, `cli/common.py:constraint_line`/`report_unhonored`, `db/constraints.py` (`mark_honored`, `clear_honored`, `clear_honored_after`), DESIGN_constraint_honoring.md. There is deliberately **no dedicated command** and no SQL half-copy of the predicate in `db/` — §5 of that doc records why |
 | Coach-learnings / confidence     | `db/learnings.py`, `coach/service/prompt.py` (`_apply_learning_updates`), model is **canonical** in [§3](#3-coach-package-architecture) |
 | Backward analysis (bootstrap/reflect) | `coach/service/analysis.py:_run_workout_analysis`, `coach/engine/analysis.py:_data_analyze_logic` ([§10](#data-analysis-data-bootstrap--data-reflect)) |
@@ -563,6 +575,10 @@ default the user layer overrides.
   name. The flag rides separately from `block_progress` because that section quotes the
   zone tables and must not be promised when they have no rows. **Read-only** w.r.t.
   learnings. Label `workout_generation`.
+  Its TASK also states the coverage invariant — every date of the span carries an entry,
+  a rest day explicitly (DESIGN_runway_nudge.md §2.1) — and
+  `coach/service/workouts.py:_fill_coverage_gaps` backstops it deterministically, so the
+  end of the schedule can be read off the rows rather than guessed at.
 - **`_workout_adapt_logic(...)`** — LLM call →
   `{change_needed, reason, adapted_workouts[]}`. **Read-only** w.r.t. learnings.
   The TASK states its cross-cutting rules once, as `STANDING RULES` immediately after
@@ -1691,7 +1707,7 @@ single read-only view that is its whole state (`settings`), which acts bare inst
 | Command      | Subcommand   | Short form | Description                                                            |
 |--------------|--------------|----------|--------------------------------------------------------------------------|
 | `help`       | —            | —        | Print every command and sub-command with its one-line help, recursing through the whole sub-parser tree (unlike `--help`, which only shows one level) |
-| `status`     | —            | `s`      | Show active goals, recent metrics, coach learnings                       |
+| `status`     | —            | `s`      | Show active goals, recent metrics, coach learnings. Also names the end of the scheduled workouts when it is near or just behind, with the exact command that extends it — printed outside the goal branch, so the "nothing is planned beyond it" case reaches the athlete who has no goal on record (DESIGN_runway_nudge.md §4) |
 | `goal`       | `add`        | `g a`    | Add objective (`TITLE DATE SPORT…` positional, `--desc`, `--date-type`)  |
 | `goal`       | `edit`       | `g e`    | Edit objective by ID. `--status archived` calls the goal off: it stands its upcoming sessions down and clears their Calendar events, keeping the plan, its versions and its feedback. `--status active` reinstates the goal and offers those sessions back, floored at today (DESIGN_backward_evaluation.md §14) |
 | `goal`       | `rm`         | `g r`    | Delete an objective and everything the cascade takes with it — every plan version, its blocks, and its feedback log. Prints that inventory plus the count of sessions it would strand, then asks; `-y` skips. To drop a goal reversibly use `goal edit --status archived` instead (§14) |
@@ -1723,14 +1739,14 @@ single read-only view that is its whole state (`settings`), which acts bare inst
 | `plan`       | `feedback`   | `pl f`   | Append a note about the plan to its append-only log — bare text is plan-level, `-m [ATOM]` files it to one block by name-infix / date / mesocycle ID (bare `-m` = the current block). Bare run lists what is pending, `--rm ID [-y]` deletes one, `--replan` regenerates straight away, `-g/--goal ID` targets another goal's plan. No LLM at capture; the next `plan generate` reads the whole log and must address every note (DESIGN_plan_feedback.md) |
 | `plan`       | `wipe`       | —        | Delete all plans                                                         |
 | `progress`   | `[SPORT ...]` | `pr`    | Show the progress timeline: measured load to date, plan-projected forward (CTL/ATL/TSB), weekly planned-vs-actual bars (`-w/--weeks N`, `--chart [PATH]` for a PNG; DESIGN_progress_timeline.md). `-z`/`--zones` (implied by naming a sport) adds one weekly time-in-zone table per sport — measured behind today, prescribed ahead of it (`--blocks` for block grain, `--power`/`--hr` to force the currency; DESIGN_intensity_distribution.md §9.6/§9.8). The sport argument scopes the **zone tables only**: CTL/ATL/TSB, the projection and the load table stay whole-athlete |
-| `workout`    | `list`       | `w l`    | Show planned workouts. Defaults to a 7-day window from today. Positional `TARGET…` (workout IDs and/or date selectors, e.g. `wo li 12 15 -v`) plus the shared selectors `-d`/`-m`/`-M`/`-g` and `-t/--type TYPE`, `--removed` (DESIGN_cli_selectors.md). Every listed session dated **today or earlier** also carries its adherence verdict — `[DONE]`/`[PARTIAL]`/`[MISSED]`/`[REST OK]`/`[REST BROKEN]`, or `[NOT YET]` for one still ahead today — and `-v` adds the matched activity and the mismatch behind a `[PARTIAL]`. Freshens Garmin over that past span unless `--no-pull` ([§5](#workout-state--three-orthogonal-axes-not-one-enum)). |
+| `workout`    | `list`       | `w l`    | Show planned workouts. Defaults to a 7-day window from today. Positional `TARGET…` (workout IDs and/or date selectors, e.g. `wo li 12 15 -v`) plus the shared selectors `-d`/`-m`/`-M`/`-g` and `-t/--type TYPE`, `--removed` (DESIGN_cli_selectors.md). Every listed session dated **today or earlier** also carries its adherence verdict — `[DONE]`/`[PARTIAL]`/`[MISSED]`/`[REST OK]`/`[REST BROKEN]`, or `[NOT YET]` for one still ahead today — and `-v` adds the matched activity and the mismatch behind a `[PARTIAL]`. Freshens Garmin over that past span unless `--no-pull` ([§5](#workout-state--three-orthogonal-axes-not-one-enum)). A listing whose range runs past the last scheduled session ends on one gray marker naming that — unconditional, a fact of the listing rather than a warning; an empty listing renders it alone (DESIGN_runway_nudge.md §4). |
 | `workout`    | `compare`    | `w c`    | Compare planned vs completed (`analyze_adherence()`): prints PLANNED/ACTUAL per day, flags misses (red), rest violations (red), unplanned high-load (yellow), then a discrepancy summary. Today's untrained sessions read `(not yet — still ahead today)` and are not misses (`pending_from`, [§10](#10-key-data-flows)). Same selectors as `workout list`; default 14-day lookback; a bare span (`-d 7d`) looks *back*; end capped at today. |
 | `workout`    | `generate`   | `w g`    | Generate workouts from the plan blocks covering the days generated (the dates pick the plan, not a goal — DESIGN_cli_selectors.md §8). No selector → today for `config.workout_generation_span_days` (28 default). Span flags (mutually exclusive, **both** ends of the resolved window are used, and a span never opens before today): `-g/--goal [ID]` = the goal's whole plan span; `-d`; `-m` = that block's own days; `-M` (which also settles which plan to follow where two cover the same days). Lists the proposed sessions the way `workout list` renders them and asks before writing; on a `y` it archives the span's existing workouts, leaves the days outside it alone, and pushes the new ones to Calendar immediately. `-f/-y` skips both prompts. |
 | `workout`    | `rm`         | `w rm`   | Soft-remove by ID (`ID REASON`, both positional): marks `removed`, marks the Calendar event deleted; kept in DB, hidden from list/compare, shown to coach as a cancellation. |
 | `workout`    | `restore`    | `w res`  | Bring a cancelled session back by ID: appends a copy of the revision its void ended, and the reconcile removes the `[Deleted]` mark. Unrelated to `workout rollback`, which undoes a whole change. |
 | `workout`    | `rollback`   | `w rb`   | Undo a workout change **and every change after it**, putting the sessions back the way they were the moment before it ran (`--batch N` per `workout batches`, default #1 the newest; `-y`). Any change qualifies, an adapt included. Leaves the active plan version alone — unlike `plan rollback` (DESIGN_workout_revisions.md §10). Unrelated to `workout restore`. |
 | `workout`    | `batches`    | `w b`    | List every command that wrote workouts, newest first: positional `#N`, when, kind, revision count, date span, plan version. A pass that appended nothing reads `(held)`. Every entry is undoable, including the newest — there is no separate unnumbered `live` row, because the change that wrote the plan in force is itself in the list (DESIGN_workout_revisions.md §10) |
-| `workout`    | `adapt`      | `w a`    | Run daily adaptation check (`-d/--date` one day: `YYYY-MM-DD`, `today`, `-1d`; `-m` athlete note — kept, since adapt takes no block selector; `-y` auto-apply) |
+| `workout`    | `adapt`      | `w a`    | Run daily adaptation check (`-d/--date` one day: `YYYY-MM-DD`, `today`, `-1d`; `-m` athlete note — kept, since adapt takes no block selector; `-y` auto-apply). Draws the same end-of-schedule hint `status` does, and **refuses** outright when every block of the plan is behind today — there is nothing to adapt towards, and it used to close with a green all-clear over an empty calendar (DESIGN_runway_nudge.md §4) |
 | `workout`    | `push`       | `w p`    | Sync planned workouts to Google Calendar. Defaults to today onward; pushes only unsynced unless `-f`/`--force` re-pushes already-synced ones. |
 | `workout`    | `swap`       | `w s`    | Swap two workouts by dates (`<date> <date>`) or IDs (`<id> <id>`), same kind on both sides, plus a mandatory positional `REASON`. Runs recovery checks (consecutive hard days, load spikes, mesocycle crossings), prompts on warnings unless `-f`; syncs unless `--no-sync`; the reason is folded into `modification_reason`. |
 | `workout`    | `wipe`       | —        | Delete all workouts                                                      |
@@ -1895,6 +1911,8 @@ Required fields:
 | `telegram.ui`          | str  | Bot persona: `expert` (default) or `simple` — the companion mode (DESIGN_bot_simple_frontend.md §3) |
 | `telegram.push.*`      | —    | Morning push (simple ui only): `enabled` (default true), `morning_time` (`08:00`), `morning_deadline` (`15:00`), `adapt_first` (default false → run `workout adapt -y` before rendering) |
 | `metrics_lookback_days`  | int  | Rolling window for adaptation (default: 15)                  |
+| `adapt_terminal_window_days` | int | How close to a block's end counts as its terminal window (default: 3). Gates what the coach **model** is told (`THIS BLOCK IS ENDING`); the CLI's end-of-schedule hint runs on the knob below. Under `coach:` |
+| `runway_warning_days`    | int  | How many days ahead the daily surfaces announce that the scheduled workouts run out — and how many days past the end they keep saying so before going quiet (default: 7). Under `coach:`, DESIGN_runway_nudge.md §7 |
 | `workout_generation_span_days` | int  | Default span length for `workout generate` (default: 28)     |
 | `minor_activity_load_threshold`    | float| Workload score below which an activity is "minor"            |
 |                         |      | (default: 25). Controls rest-day violations and unplanned    |
@@ -2501,6 +2519,14 @@ venv/bin/python -m unittest discover -s tests -p "test_*.py"
 |                                | elapsed split (today only once synced), §6.1 majority-overlap     |
 |                                | labeling, part-week plan coverage, band trimming,             |
 |                                | `assemble_timeline` payload + coded warnings, `select_weeks`/`clip_payload`, empty states |
+| `tests/test_runway.py`         | End-of-runway nudges: `progression.runway`'s four kinds and its   |
+|                                | two windows (run-up + passed state), the manual-row and rest-row  |
+|                                | rules, the §4 wordings (day zero, past tense, the `-m ..<id>` the |
+|                                | block cliff names), the surfaces — `status` outside its goal      |
+|                                | branch, `workout adapt`'s refusal over a finished plan, `workout  |
+|                                | list`'s marker, the morning push's line/button/silence — plus the |
+|                                | §2.1 coverage invariant and a structural check that nothing       |
+|                                | outside `cli/runway.py` builds the wording again                  |
 | `tests/test_cli_progress.py`   | `cli/progress.py` formatting helpers + `render_progress`: sparkline/|
 |                                | bar scaling, label truncation, weekly-row rendering (past/in-      |
 |                                | progress/future/uncovered), plan-gap vs per-objective projection, |
@@ -2573,10 +2599,16 @@ date, so its runway shrinks to nothing as that block ends. Widening the range in
 next block would let a daily, lag-prone recovery signal rewrite periodization that
 `plan`/`workout generate` own. Instead both sides are made aware of the boundary: the
 prompt gains a terminal-window section, and the CLI points at
-`workout generate -m <id>` (`_print_block_boundary_hint` in
-`cli/workouts/generate.py`), which already re-reads the same recent-metrics window. That
+`workout generate -m ..<id>`, which already re-reads the same recent-metrics window. That
 flag names the next block's own span, so the ending block's remaining days are left as
 they stand (DESIGN_cli_selectors.md §8).
+
+The CLI half of that hint has since been folded into the end-of-runway detector
+(`cli/runway.py`, DESIGN_runway_nudge.md §3): a block boundary with no fresh sessions
+after it is one of the four ways the schedule can run out, and it is now announced on
+every daily surface rather than on `workout adapt` alone. Only the *prompt* side still
+runs on `adapt_terminal_window_days` — that gate is about what the coach model is told
+and must stay tight.
 
 The firewall is enforced on **both** sides: the read bound (`get_workouts` capped at the
 block end) and, on the write side, `workout_adapt` dropping any proposal dated past the

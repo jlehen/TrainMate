@@ -47,14 +47,18 @@ class WorkoutGenMixin:
         return any(r['completed'] for r in matching)
 
     @staticmethod
-    def _rest_workout(date: str, cause: str) -> Dict[str, Any]:
+    def _rest_workout(
+        date: str, cause: str, title: str = 'Rest (forced constraint)'
+    ) -> Dict[str, Any]:
         """A deterministic rest session the rest-window pre-pass places on a date the
         athlete has barred from training (DESIGN_constraints.md §6). The title/description
         are tagged "(forced constraint)" so it reads unmistakably as a code-enforced
         override rather than an ordinary planned/adapted rest day. The change_reason names
         the constraint so a later adaptation, which won't see the live constraint list in
-        the same run, reads the cause back with the plan."""
-        title = 'Rest (forced constraint)'
+        the same run, reads the cause back with the plan.
+
+        `title` names which pass placed the row: the coverage backstop
+        (DESIGN_runway_nudge.md §2.1) fills an ordinary "Rest Day", not a forced one."""
         return {
             'date': date,
             'sport_type': 'rest',
@@ -116,6 +120,33 @@ class WorkoutGenMixin:
             for day, title in sorted(forced.items())
         )
         return out
+
+    @classmethod
+    def _fill_coverage_gaps(
+        cls, workouts: List[Dict[str, Any]], gen_start: str, gen_end: str
+    ) -> List[Dict[str, Any]]:
+        """Writes an explicit rest row on every date of the span the proposal left empty,
+        so generation covers its whole span by construction (DESIGN_runway_nudge.md §2.1).
+
+        That coverage is what lets the end of the schedule be read straight off the rows:
+        a hole then means the schedule stopped, never a rest day the model didn't bother
+        to name. A proposal with no sessions at all is left alone — an empty answer is a
+        failed generation, and a span of rest is not the way to salvage it."""
+        if not workouts:
+            return workouts
+        covered = {w.get('date', '') for w in workouts}
+        day = datetime.strptime(gen_start, "%Y-%m-%d").date()
+        last = datetime.strptime(gen_end, "%Y-%m-%d").date()
+        filled = list(workouts)
+        while day <= last:
+            date_str = day.strftime("%Y-%m-%d")
+            day += timedelta(days=1)
+            if date_str in covered:
+                continue
+            filled.append(cls._rest_workout(
+                date_str, "no session planned for this day", title='Rest Day'
+            ))
+        return filled
 
     @classmethod
     def _forced_rest_days(
@@ -547,6 +578,11 @@ class WorkoutGenMixin:
         self._warn_missing_boundary_benchmarks(
             workouts, constraints, blocks, gen_start_str
         )
+
+        # Coverage backstop (DESIGN_runway_nudge.md §2.1): every date of the span carries a
+        # row, so a hole is the schedule ending rather than a rest day the model skipped.
+        # After the benchmark post-check, which reads the span the model actually reached.
+        workouts = self._fill_coverage_gaps(workouts, gen_start_str, gen_end_str)
 
         # Which plan version each session belongs to, per date: a span long enough to run
         # from one goal's last block into the next goal's first produces workouts from two
