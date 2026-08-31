@@ -49,8 +49,15 @@ plan version. That is the **domain record**. It is permanent, it is backed up wi
 database, and it is read by the app itself.
 
 The journal is the **operational record**: which process ran, when, for how long, what it
-called out to, what it decided to skip, how it ended. It is disposable after a few months
-and nothing in the app ever reads it back.
+called out to, what it decided to skip, how it ended. It is disposable after a few months.
+
+It is read back in exactly one place, and the exception is worth stating because it is
+the shape any future one has to keep. `journal.llm_durations()` reads past `llm.call`
+durations so a command can say how long it is about to take
+(`DESIGN_output_verbosity.md` §8). That stays inside the rule above: the answer is a
+courtesy the athlete forgets in a minute, it is *about* runs rather than about training,
+and losing the whole directory costs the estimate and nothing else. A read that the app
+would be wrong without belongs in a table.
 
 Different lifetimes mean different homes. Nothing that already has a table gets copied
 into the journal, and nothing in the journal is allowed to become the only copy of

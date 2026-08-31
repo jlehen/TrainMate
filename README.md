@@ -540,6 +540,13 @@ A command that calls the coach also sends you whatever it printed on the way in
 stuck to the answer. So a long run reads as two messages: what it is working
 from, then what the coach said.
 
+That first message ends by telling you how long the wait will be — "Working on
+it — this usually takes about 70s." The number is the median of how long that
+same command took on that same model recently, read back from the run journal
+(`logs/runs/`), so it is your own machine's history and not a guess. Until two
+past runs exist it just says the wait is coming. In the terminal the same figure
+rides along on the "Querying OpenRouter…" line.
+
 Setup:
 
 1. Create a bot with [@BotFather](https://t.me/BotFather) and copy its token.

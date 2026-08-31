@@ -2,12 +2,13 @@ import requests
 import json
 import os
 import re
+import statistics
 import time
 from datetime import datetime, timezone
 from typing import Any, Optional
 from trainmate import journal
 from trainmate.config import config
-from trainmate.prompt import emit_flush
+from trainmate.prompt import emit_flush, is_json_frontend
 from trainmate.util import aside, warn
 
 # A fenced reply may be one line (```{"a":1}```) or many, with or without a language
@@ -16,6 +17,24 @@ from trainmate.util import aside, warn
 # hands both to the decoder — see `_parse_json_content`.
 _FENCED_JSON = re.compile(r"^```[A-Za-z0-9_+-]*\s*(.*?)\s*```\s*$", re.DOTALL)
 _OPEN_FENCE = re.compile(r"^```[A-Za-z0-9_+-]*[ \t]*\n?")
+
+
+# How the wait estimate reads the journal (DESIGN_output_verbosity.md §8). Thirty days
+# of history is enough to survive a quiet week without dragging in a model the athlete
+# has since moved off; two samples is the point where a number beats "a while".
+_ESTIMATE_DAYS = 30
+_ESTIMATE_SAMPLES = 20
+_ESTIMATE_MIN_SAMPLES = 2
+
+
+def _human_wait(seconds: float) -> str:
+    """A duration the athlete reads at a glance: `40s`, `1.5 minutes`.
+
+    Rounded hard on purpose. This is a median of past runs, and the next call will not
+    match it — a five-second bucket says "roughly", where `37s` would promise."""
+    if seconds < 90:
+        return f"{max(5, int(round(seconds / 5.0)) * 5)}s"
+    return f"{round(seconds / 30.0) / 2:g} minutes"
 
 
 class OpenRouterClient:
@@ -163,6 +182,49 @@ class OpenRouterClient:
             path=path, error=error,
         )
 
+    def _wait_estimate(self, label: str) -> Optional[float]:
+        """How long past calls of this kind took, in seconds, or None with no history.
+
+        The median, not the mean: one call that crawled behind a rate limit must not
+        move the number the athlete reads every day. Samples are matched on the model
+        first, because model choice dominates latency far more than the prompt does; a
+        model the athlete has only just switched to has no history of its own, so the
+        fallback answers from the same command on whatever model ran it before — the
+        right order of magnitude, which is all "usually" claims."""
+        samples = journal.llm_durations(
+            label, self.model, days=_ESTIMATE_DAYS, limit=_ESTIMATE_SAMPLES
+        )
+        if len(samples) < _ESTIMATE_MIN_SAMPLES:
+            samples = journal.llm_durations(
+                label, days=_ESTIMATE_DAYS, limit=_ESTIMATE_SAMPLES
+            )
+        if len(samples) < _ESTIMATE_MIN_SAMPLES:
+            return None
+        return statistics.median(samples) / 1000.0
+
+    def _announce_wait(self, label: str, notice: bool) -> None:
+        """Says the command is about to go quiet, and for roughly how long
+        (DESIGN_output_verbosity.md §8).
+
+        Two renderings of one estimate. A terminal already narrates its progress, so the
+        number rides along on the aside it prints anyway; chat suppresses every aside,
+        so the wait is the one thing worth saying there and it goes out at answer level.
+        The estimate is a courtesy, so a journal that cannot be read costs the athlete
+        the number and never the call."""
+        try:
+            seconds = self._wait_estimate(label)
+        except Exception as exc:
+            journal.debug("internal", f"wait estimate failed: {exc}")
+            seconds = None
+        took = f" (past runs: ~{_human_wait(seconds)})" if seconds else ""
+        aside(f"Querying OpenRouter with model: {self.model}{took}")
+        if not notice or not is_json_frontend():
+            return
+        if seconds:
+            print(f"Working on it — this usually takes about {_human_wait(seconds)}.")
+            return
+        print("Working on it — this can take a while.")
+
     @staticmethod
     def _parse_json_content(content: str) -> dict[str, Any]:
         """Parses the model's JSON response, tolerating common chatty output.
@@ -217,7 +279,8 @@ class OpenRouterClient:
             found += 1
 
     def complete(
-        self, system_content: str, user_content: str, label: str = "exchange"
+        self, system_content: str, user_content: str, label: str = "exchange",
+        wait_notice: bool = True,
     ) -> dict[str, Any]:
         """Sends a request to OpenRouter with system and user prompts.
 
@@ -226,7 +289,10 @@ class OpenRouterClient:
         Args:
             system_content: Large context / rules placed in system role prompt.
             user_content: Immediate instruction or data payload for the LLM.
-            label: Descriptive name of the action being logged.
+            label: Descriptive name of the action being logged. Also the key the wait
+                estimate groups past calls by, so it names the *command*, not the call.
+            wait_notice: Whether to tell the athlete how long this will take (§8). Off
+                for a call whose output nobody is watching.
 
         Returns:
             The parsed JSON response dictionary from the model.
@@ -276,7 +342,9 @@ class OpenRouterClient:
         logged = False
         started = time.monotonic()
         try:
-            aside(f"Querying OpenRouter with model: {self.model}")
+            # One line about the wait that begins on the next: the terminal's own
+            # narration, or the athlete's notice in chat (DESIGN_output_verbosity.md §8).
+            self._announce_wait(label, wait_notice)
             # Everything printed so far belongs to the setup, not the answer. A chat
             # front-end buffers to a prompt or to exit, so without this the two arrive
             # as one block after a wait of tens of seconds (DESIGN_output_verbosity.md

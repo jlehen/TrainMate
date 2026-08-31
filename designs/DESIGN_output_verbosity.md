@@ -315,3 +315,81 @@ naming a flag rendered correctly on a colour terminal and came back as `--show-l
 
 `break_on_hyphens=False` makes the two branches agree. Long words still break, so nothing
 overflows the width.
+
+## 8. Saying how long the wait will be
+
+Rev 3. §7.3 fixed *where* the message ends. It did not fix what the athlete reads while
+nothing happens.
+
+§3 sorted every line into answer / warning / aside, and progress narration went to
+aside — suppressed in chat. That is right for "Auto-syncing Garmin...", which describes
+work that is over by the time it arrives. But it left the chat athlete with **nothing at
+all** between sending `adapt` and reading its answer seventy seconds later. The three
+`step("Querying OpenRouter to ...")` lines that sit immediately before each call are
+asides, so on a phone they do not exist.
+
+Seventy seconds of silence from a chat bot reads as a bot that died. The athlete sends
+the message again, and now two adapts are running.
+
+### 8.1 Why this line is not an aside
+
+It is the one piece of progress narration that is about the **future**. §2's rule is
+whether a line is still true when it arrives, and "this is going to take about a minute"
+is true for the whole minute it describes. Every other progress line fails that test in
+chat; this one passes it, so it prints at answer level on every front-end.
+
+### 8.2 Where it lives, and why there is only one of them
+
+In `openrouter.complete()`, immediately before the flush of §7.3 and for the same
+reason: that is the single point where every LLM command is about to go quiet, so all
+six get the notice from one call site. Putting it beside each `step(...)` would mean six
+copies drifting apart, and a seventh command added later with none.
+
+The estimate replaces the aside that already stood there rather than adding a line
+beside it. A terminal narrates live and does not need to be told a wait is coming; what
+it gains is the number, so the number rides along on the aside it prints anyway:
+
+```
+terminal   Querying OpenRouter with model: openai/gpt-5.4 (past runs: ~40s)
+chat       Working on it — this usually takes about 40s.
+```
+
+One estimate, two renderings, and no front-end reads the same sentence twice.
+
+### 8.3 The estimate comes from the journal, not a new table
+
+`llm.call` has recorded `label`, `model` and `ms` for every completion since
+`DESIGN_logging.md` §6, in `logs/runs/YYYY-MM-DD.jsonl` with 90 days of retention. The
+timing the athlete wants is already written down; nothing new is stored and nothing new
+is measured. `journal.llm_durations(label, model)` reads it back.
+
+Four choices inside it:
+
+- **Keyed on `label`.** The six labels — `plan_generate`, `workout_generate`,
+  `workout_adapt`, `data_bootstrap`, `data_reflect`, `bot_route` — are already one per
+  command, which is what makes "the time this *command* takes" answerable without a new
+  concept. A `label` names the command, not the call site, and must keep doing so.
+- **Matched on the model too.** Model choice moves latency far more than prompt size
+  does: on this athlete's own history `workout_generate` runs to 3.5 minutes where
+  `workout_adapt` runs to 70s, and swapping models moves either one by more than the
+  gap between commands. A model with no history of its own falls back to the same
+  command on whatever ran it before — the right order of magnitude, which is all
+  "usually" claims.
+- **The median, not the mean.** One call that crawled behind a rate limit would drag a
+  mean up for weeks. Two samples is the minimum; below that "a while" is the honest
+  answer.
+- **Rounded hard** — five-second buckets under 90s, half-minutes above. `37s` promises;
+  `about 35s` says roughly, which is what a median of past runs actually supports.
+
+Reading is newest-file-first and stops at 20 samples, so the usual answer costs one file
+read of a few tens of KB rather than the whole retention window. The whole lookup is
+wrapped: an estimate is a courtesy, so a journal that cannot be read costs the athlete
+the number and never the call.
+
+### 8.4 The one call with no notice
+
+`tm bot route` classifies free text before the real command starts. Its stdout is
+captured by `trainmate_bot._route_intent` and discarded but for the last JSON line, so a
+notice there reaches nobody and the journal read is pure waste on the hot path of every
+chat message. `complete(..., wait_notice=False)` turns it off, and that flag is the
+place to say "nobody is waiting on this output" if a second such call ever appears.

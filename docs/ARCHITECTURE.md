@@ -188,6 +188,15 @@ classes themselves.
     delivered *before* the tens of seconds it then spends silent, instead of arriving
     glued to the answer. `emit_flush` is a no-op unless `is_json_frontend()`, so the
     frame never reaches a terminal (DESIGN_output_verbosity.md §7.3).
+  - **The wait notice:** the last line inside that flushed message. Chat suppresses every
+    aside, so without it the athlete reads nothing at all for the tens of seconds an LLM
+    command spends silent. `openrouter._announce_wait` prints
+    `Working on it — this usually takes about 40s.`, where the number is the median `ms`
+    of recent successful `llm.call` records for the same label and model
+    (`journal.llm_durations`) — no new storage, and no estimate at all until two past
+    calls exist. A terminal gets the same number folded into the aside it already prints.
+    `complete(..., wait_notice=False)` suppresses it for `tm bot route`, whose output
+    nobody reads (DESIGN_output_verbosity.md §8).
 
 ### Package `trainmate/`
 
@@ -222,8 +231,10 @@ classes themselves.
 | `openrouter.py`      | `openrouter_client`  | HTTP client for OpenRouter; always expects       |
 |                      |                      | `json_object` response. `.model` resolves lazily |
 |                      |                      | on first use (see `llm_models.py`).              |
-|                      |                      | Two objects in one reply (a model                |
-|                      |                      | correcting itself): the last wins.               |
+|                      |                      | Two objects in one reply (a model               |
+|                      |                      | correcting itself): the last wins. Prints the    |
+|                      |                      | wait notice before every call — see the flush    |
+|                      |                      | protocol above.                                  |
 | `llm_models.py`      | —                    | Which model to query: the `llm.models` config    |
 |                      |                      | menu and the stored choice read back through the |
 |                      |                      | registry (`list_models`, `active_model`,         |
@@ -345,8 +356,11 @@ classes themselves.
 |                      |                      | one JSON object per line, bracketed by a         |
 |                      |                      | `run.start`/`run.end` pair per command. The      |
 |                      |                      | operational record, as opposed to the domain     |
-|                      |                      | one the tables hold — nothing in the app ever    |
-|                      |                      | reads it back. Owns the writer (one `os.write`   |
+|                      |                      | one the tables hold. Read back in exactly one    |
+|                      |                      | place: `llm_durations()` answers "how long does  |
+|                      |                      | this command usually take" from past `llm.call`  |
+|                      |                      | rows (DESIGN_output_verbosity.md §8). Owns the   |
+|                      |                      | writer (one `os.write`                           |
 |                      |                      | on an O_APPEND fd, records bounded at 8 KB,      |
 |                      |                      | never raises), the module-level run stack, the   |
 |                      |                      | reader, and retention. Imports nothing but       |

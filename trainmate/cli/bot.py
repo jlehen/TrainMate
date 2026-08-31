@@ -211,6 +211,10 @@ def run_bot_route(args: argparse.Namespace) -> None:
         data = openrouter_client.complete(
             ROUTER_SYSTEM_PROMPT, "## MESSAGE\n\n" + (args.text or ""),
             label="bot_route",
+            # This process's stdout is captured by the bot and thrown away but for the
+            # last JSON line; a wait notice would reach nobody
+            # (DESIGN_output_verbosity.md §8).
+            wait_notice=False,
         )
         candidate = str(data.get("intent", "")).strip()
         if candidate in ROUTER_INTENTS:

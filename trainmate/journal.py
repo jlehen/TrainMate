@@ -441,6 +441,49 @@ def day_paths(
     return [path for _, path in sorted(found)]
 
 
+def llm_durations(
+    label: str, model: Optional[str] = None, *, days: int = 30, limit: int = 20
+) -> List[int]:
+    """The durations in ms of the most recent successful ``llm.call`` records matching
+    `label` (and `model`, when given), newest first.
+
+    This is what lets a command say how long it is about to take
+    (DESIGN_output_verbosity.md §8). Day files are read newest-first and the scan stops
+    at `limit` samples, so the usual answer costs one file read rather than the whole
+    retention window. Failed calls are skipped: a call that died on a timeout says
+    nothing about how long a working one takes."""
+    today = _utc_now().date()
+    found: List[int] = []
+    for path in reversed(day_paths(today - timedelta(days=days), today)):
+        found.extend(reversed(_llm_durations_in(path, label, model)))
+        if len(found) >= limit:
+            break
+    return found[:limit]
+
+
+def _llm_durations_in(path: str, label: str, model: Optional[str]) -> List[int]:
+    """The matching durations in one day file, oldest first. Unreadable file: no rows —
+    an estimate is a courtesy and must never be the reason a command fails (§4.3)."""
+    rows: List[int] = []
+    try:
+        with open(path, "r", encoding="utf-8", errors="replace") as handle:
+            for line in handle:
+                rec = parse_record(line)
+                if rec is None or rec.get("ev") != "llm.call":
+                    continue
+                d = rec.get("d") or {}
+                if d.get("label") != label or not d.get("ok"):
+                    continue
+                if model is not None and d.get("model") != model:
+                    continue
+                ms = d.get("ms")
+                if isinstance(ms, int) and ms > 0:
+                    rows.append(ms)
+    except OSError:
+        return []
+    return rows
+
+
 def parse_record(line: str) -> Optional[Dict[str, Any]]:
     """One line as a record, or None when it is not one — see `iter_records`."""
     line = line.strip()

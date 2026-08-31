@@ -196,6 +196,77 @@ class TestReader(JournalTestCase):
         self.assertEqual(journal.day_paths(), [])
 
 
+class TestLlmDurations(JournalTestCase):
+    """The wait estimate's data source (DESIGN_output_verbosity.md §8)."""
+
+    def _write_day(self, day: str, calls) -> None:
+        """One day file carrying `calls` as `(label, model, ms, ok)` tuples."""
+        os.makedirs(journal.runs_dir(), exist_ok=True)
+        path = os.path.join(journal.runs_dir(), f"{day}.jsonl")
+        with open(path, "w", encoding="utf-8") as handle:
+            for label, model, ms, ok in calls:
+                handle.write(json.dumps({
+                    "ts": f"{day}T09:00:00.000Z", "run": "aaaa", "ev": "llm.call",
+                    "msg": label,
+                    "d": {"label": label, "model": model, "ms": ms, "ok": ok},
+                }) + "\n")
+
+    def _days_ago(self, count: int) -> str:
+        return (datetime.now(timezone.utc).date() - timedelta(days=count)).isoformat()
+
+    def test_only_this_label_and_model_count(self):
+        self._write_day(self._days_ago(1), [
+            ("workout_adapt", "m1", 40000, True),
+            ("workout_adapt", "m2", 90000, True),   # another model
+            ("plan_generate", "m1", 99000, True),   # another command
+        ])
+        self.assertEqual(journal.llm_durations("workout_adapt", "m1"), [40000])
+
+    def test_a_failed_call_is_not_a_sample(self):
+        # A call that died on a timeout says nothing about how long a working one takes.
+        self._write_day(self._days_ago(1), [
+            ("workout_adapt", "m1", 40000, True),
+            ("workout_adapt", "m1", 600000, False),
+        ])
+        self.assertEqual(journal.llm_durations("workout_adapt", "m1"), [40000])
+
+    def test_newest_first_across_days_and_within_one(self):
+        self._write_day(self._days_ago(2), [("workout_adapt", "m1", 10000, True)])
+        self._write_day(self._days_ago(1), [
+            ("workout_adapt", "m1", 20000, True),
+            ("workout_adapt", "m1", 30000, True),
+        ])
+        self.assertEqual(
+            journal.llm_durations("workout_adapt", "m1"), [30000, 20000, 10000]
+        )
+
+    def test_the_scan_stops_at_the_limit(self):
+        for age in range(1, 6):
+            self._write_day(self._days_ago(age), [("workout_adapt", "m1", age, True)])
+        self.assertEqual(journal.llm_durations("workout_adapt", "m1", limit=2), [1, 2])
+
+    def test_a_day_outside_the_window_is_not_read(self):
+        self._write_day(self._days_ago(40), [("workout_adapt", "m1", 40000, True)])
+        self.assertEqual(journal.llm_durations("workout_adapt", "m1", days=30), [])
+
+    def test_no_model_given_takes_every_model(self):
+        self._write_day(self._days_ago(1), [
+            ("workout_adapt", "m1", 40000, True),
+            ("workout_adapt", "m2", 90000, True),
+        ])
+        self.assertEqual(
+            sorted(journal.llm_durations("workout_adapt")), [40000, 90000]
+        )
+
+    def test_a_torn_line_costs_only_itself(self):
+        os.makedirs(journal.runs_dir(), exist_ok=True)
+        day = self._days_ago(1)
+        self._write_day(day, [("workout_adapt", "m1", 40000, True)])
+        with open(os.path.join(journal.runs_dir(), f"{day}.jsonl"), "a") as handle:
+            handle.write("{not json\n")
+        self.assertEqual(journal.llm_durations("workout_adapt", "m1"), [40000])
+
+
 class TestRunBracket(JournalTestCase):
     """Every command opens and closes a run, and says how it ended (§3, §5.4)."""
 
