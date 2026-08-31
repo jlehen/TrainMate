@@ -313,7 +313,7 @@ def _confirm_out_of_date_plans(
         if not change_reason:
             continue
         warning = (
-            "Warning: a plan-shaping input has "
+            "Caution: a plan-shaping input has "
             "changed since the active periodization plan was "
             f"generated ({change_reason}).\n"
             "Generating workouts using the out-of-date plan might "
