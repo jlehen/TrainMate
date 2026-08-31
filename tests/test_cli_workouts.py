@@ -1469,3 +1469,43 @@ class TestCliWorkouts(unittest.TestCase):
         self.assertIsNone(
             mock_coach.workout_generate.call_args.kwargs["prefer_macro_id"]
         )
+
+    @patch("trainmate.runtime.prompt")
+    @patch("trainmate.runtime.coach_service")
+    def test_the_ambiguous_match_question_carries_its_own_pairing(
+        self, mock_coach, mock_prompt
+    ):
+        """The pairing must travel inside the question, not in a preceding aside.
+
+        Asides are suppressed on the chat front-end, so a `step()` premise left Telegram
+        asking "Was that the session, cut short?" about nothing the athlete could see
+        (DESIGN_output_verbosity.md §3, ARCHITECTURE.md §15)."""
+        from trainmate.cli.workouts.generate import _resolve_ambiguous_matches
+
+        mock_coach.pending_match_questions.return_value = [{
+            "activity_id": "act_warmup",
+            "sport": "strength_training",
+            "planned": {
+                "date": "2026-06-03", "sport_type": "strength_training",
+                "title": "Full-Body Strength", "description": "65 mins",
+                "duration_minutes": 65, "rpe": 6, "tss": 30,
+            },
+            "completed": {
+                "activity_name": "Warm-up", "activity_type": "indoor_cardio",
+                "duration_sec": 600.0,
+            },
+        }]
+        mock_prompt.confirm.return_value = False
+
+        # Asides off is the chat front-end's own setting; the question must survive it.
+        with patch.dict(os.environ, {"TRAINMATE_VERBOSE": "0"}):
+            _resolve_ambiguous_matches("2026-06-03", auto=False)
+
+        asked = " ".join(mock_prompt.confirm.call_args[0][0].split())
+        self.assertIn("Full-Body Strength", asked)
+        self.assertIn("'Warm-up'", asked)
+        self.assertIn("10m", asked)
+        self.assertIn("Was that the session, cut short?", asked)
+        mock_coach.record_match_decision.assert_called_once_with(
+            "act_warmup", "strength_training", False
+        )

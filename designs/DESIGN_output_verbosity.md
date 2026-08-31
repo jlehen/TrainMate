@@ -150,6 +150,29 @@ and provenance footers (you cannot read the numbers without them), and
 `pmc_warming_note` (a transient caveat that changes what the numbers mean, and disappears
 on its own once the PMC settles).
 
+### 3.4 A question's premise is not an aside
+
+The facts a question is *about* belong inside the question's own message, never in a
+`step`/`aside` printed just before it. An aside is suppressed on the chat front-end, so the
+premise vanishes and the athlete is asked something unanswerable.
+
+This is not hypothetical. `_resolve_ambiguous_matches` (ARCHITECTURE.md §15) narrated the
+pairing with `step` — *"Planned: Full-Body Strength … Only matching activity is 'Warm-up'
+(indoor_cardio) at 10m — far short of it"* — and then asked the question on its own. On a
+terminal it read fine. Over Telegram, on 2026-08-31, the athlete received exactly:
+
+> Was that the session, cut short? (No = it was something else, e.g. a warm-up to discard)
+
+Which session? Which activity? Nothing on screen said. Both answers were a coin flip, and
+both are consequential: one records the session as partially performed, the other as not
+done at all, and the coach reads whichever comes back.
+
+Every other `prompt.confirm` in the codebase already carried its full premise — the regen
+gate names the span and the session count, the apply gate names what it archives. This one
+was the outlier, and the tier rules made it look correct: the narration *was* progress
+narration, right up until a question depended on it. The gate is not "is this line
+chatter?" but "does the next thing the athlete must answer depend on it?"
+
 ## 4. Why an env var and not a flag
 
 `TRAINMATE_VERBOSE=1` forces asides on; `=0` forces them off. There is no CLI flag, and
