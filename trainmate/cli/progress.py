@@ -24,7 +24,7 @@ from trainmate.intensity import (
 from trainmate.sports import SPORT_MAPPING, canonical_sport
 from trainmate.util import (
     asides_enabled, bold, green, red, yellow, gray, dim, cmd, pad_visible, visible_len,
-    wrap_text, color_tsb, fmt_date, today_str as _today_str, PMC_TSB_LAG_NOTE, notice,
+    wrap_text, color_tsb, fmt_date, today_str as _today_str, PMC_TSB_LAG_NOTE, notice, keep_whole,
 )
 from trainmate.cli.common import ensure_recent_data, is_simple_render, simple_progress_lines
 
@@ -877,7 +877,7 @@ def _emit_chart(chart_arg: Any, payload: Dict[str, Any], caption: str) -> None:
         png = chart.render_timeline_png(payload)
     except ImportError:
         notice("matplotlib is not installed — run: "
-               + cmd("venv/bin/pip install -r requirements.txt", quote=False), red)
+               + cmd(keep_whole("venv/bin/pip install -r requirements.txt"), quote=False), red)
         return
 
     from trainmate.prompt import emit_photo, is_json_frontend

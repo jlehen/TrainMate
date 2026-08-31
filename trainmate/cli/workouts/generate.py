@@ -9,7 +9,7 @@ from trainmate.google_calendar import event_url
 from trainmate.util import (
     bold, green, red, yellow, cyan, magenta, gray, cmd, aside, step, pad_visible, wrap_text,
     format_labeled_block, today_str as _today_str, today_date as _today_date, days_between,
-    fmt_date, fmt_span, fmt_timestamp, notice,
+    fmt_date, fmt_span, fmt_timestamp, notice, keep_whole,
 )
 from trainmate.cli.common import (
     adherence_verdicts, ensure_recent_data, format_actual,
@@ -409,7 +409,7 @@ def _warn_span_change(span_start: str, span_end: str) -> None:
         )
     if span_start > today:
         notice(
-            "  Pass " + cmd(f"-d today..{span_end}", quote=False)
+            "  Pass " + cmd(keep_whole(f"-d today..{span_end}"), quote=False)
             + " to rebuild from today again.",
         )
     print()

@@ -11,7 +11,7 @@ from trainmate.sports import canonical_sport
 from trainmate.benchmarks import MIN_RETEST_DAYS
 from trainmate.calendar_reconcile import verbose_events
 from trainmate import intensity
-from trainmate.util import green, cmd, notice
+from trainmate.util import green, cmd, notice, keep_whole
 import trainmate.coach.service as _svc
 
 
@@ -483,7 +483,7 @@ class WorkoutGenMixin:
             notice(
                 f"Plan ID {macro_id} also covers part of this span; following the more "
                 f"recently generated plan instead. Pass "
-                + cmd(f"-M {macro_id}", quote=False) + " to follow that one.",
+                + cmd(keep_whole(f"-M {macro_id}"), quote=False) + " to follow that one.",
             )
         plan_end = max(b['end_date'] for b in blocks)
         if plan_end < gen_end_str:

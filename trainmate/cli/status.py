@@ -88,7 +88,7 @@ def run_status(args) -> None:
             change_reason = runtime.coach_service.config_changed(macro)
             if change_reason:
                 notice(
-                    "\nWarning: a plan-shaping input has changed since the "
+                    "\nCaution: a plan-shaping input has changed since the "
                     f"active periodization plan was generated ({change_reason}).\nRun "
                     + cmd("plan generate") + " to regenerate.",
                 )

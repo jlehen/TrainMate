@@ -252,6 +252,66 @@ class TestAsides(unittest.TestCase):
         self.assertEqual(self._emit(), "")
 
 
+class TestCommandsSurviveTheWrap(unittest.TestCase):
+    """A command the athlete is told to run has to be copy-pastable, so the wrap never
+    splits one across two lines (DESIGN_output_verbosity.md §3.6)."""
+
+    def _wrapped(self, text: str, width: int = 48) -> list:
+        from trainmate.util import wrap_text
+        return wrap_text(text, width=width).split("\n")
+
+    def test_a_quoted_command_lands_on_one_line(self):
+        lines = self._wrapped(
+            "The plan ran out on 2026-09-30, so run 'workout generate -d today..2026-10-14' "
+            "to extend it."
+        )
+        self.assertTrue(
+            any("'workout generate -d today..2026-10-14'" in line for line in lines),
+            lines,
+        )
+
+    def test_two_commands_in_one_sentence_stay_separate(self):
+        # The prose between them must still wrap: a match that ran from the first
+        # command's closing quote to the second's would glue the sentence into one line.
+        lines = self._wrapped(
+            "Swap two dates (e.g. 'workout swap 2026-06-09 2026-06-11 'travelling'') "
+            "or two workout IDs (e.g. 'workout swap 5 8 'travelling'')."
+        )
+        self.assertGreater(len(lines), 2, lines)
+        self.assertTrue(any("'workout swap 5 8 'travelling''" in l for l in lines), lines)
+
+    def test_an_apostrophe_does_not_open_a_command(self):
+        lines = self._wrapped(
+            "the athlete's own plan is what the coach reads, and the athlete's notes "
+            "are what shapes it next time"
+        )
+        for line in lines:
+            self.assertLessEqual(len(line), 48, lines)
+
+    def test_a_bare_command_is_marked_by_its_caller(self):
+        from trainmate.util import keep_whole
+        text = "To backfill, run:\n  " + keep_whole(
+            "python trainmate_cli.py data pull 2026-01-01 2026-08-31"
+        )
+        lines = self._wrapped(text)
+        # Whole, still indented, and over the budget: a command longer than the width
+        # cannot both fit and stay in one piece, and staying in one piece wins.
+        self.assertIn("  python trainmate_cli.py data pull 2026-01-01 2026-08-31", lines)
+
+    def test_the_marks_never_reach_a_log(self):
+        from trainmate.util import keep_whole, strip_ansi
+        self.assertEqual(strip_ansi(keep_whole("data pull -d 2026-01-01")),
+                         "data pull -d 2026-01-01")
+
+    def test_an_indent_survives_the_greedy_branch(self):
+        lines = self._wrapped(
+            "  - a list item quoting 'plan generate --force' that has to wrap because "
+            "it is far too long for one line"
+        )
+        self.assertTrue(lines[0].startswith("  - "), lines)
+        self.assertTrue(all(l.startswith("    ") for l in lines[1:]), lines)
+
+
 class TestWarningTierWraps(unittest.TestCase):
     """Every printer of the warning tier wraps to the client's width
     (DESIGN_output_verbosity.md §3.5) — the whole reason `notice` exists."""

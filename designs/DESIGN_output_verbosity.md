@@ -206,12 +206,50 @@ bold yellow section heading, one red cell inside a row, `red(f"Error: {e}") + hi
 Those are layout, they are short by construction, and wrapping them would break the block
 they sit in.
 
-One thing this gives up. A wrapped warning can break a command across two lines —
-`Run 'workout push -d` / `2026-08-27..' to update them.` — which is not copy-pasteable.
-That was accepted rather than fixed: the commands long enough to break are longer than a
-phone's 48 columns anyway, so the alternative is not an unbroken command but the
-178-column line we started with. If it ever needs solving it is one exception inside
-`_wrap_paragraph`, decided in one place, which is the point of having a printer at all.
+What the wrap must not cost is the commands themselves, which is §3.6.
+
+### 3.6 A command is never broken across lines
+
+Wrapping a warning immediately cost something the warning was for. Half these messages
+end in a command to run, and the wrap put its line break in the middle of one:
+
+```
+Note: 1 workout before 2026-08-31 Mon still read [STALE] — their calendar
+events are out of date and this push did not cover them. Run 'workout push -d
+2026-08-27..' to update them.
+```
+
+In the expert front-end that command is inside a `<pre>` block, which is where the
+athlete copies it from. Split over two lines it cannot be copied, and a hint nobody can
+act on is not worth the line it takes. So the rule: **a command occupies whole lines or
+none.** A command longer than the width overflows rather than splits — the two cannot
+both be had, and the one that keeps the hint usable wins. Only the command overflows;
+the prose around it still wraps.
+
+`cmd()` already single-quotes what it renders, so a quoted run with a space inside is a
+command on sight, and `_wrap_paragraph` marks those spaces unbreakable before it wraps.
+The boundary conditions are what the tests are for: an apostrophe opens nothing (in
+"the athlete's plan" the quote follows a letter), and an opener has to start the line or
+follow a space or `(`, or a sentence naming two commands matches from the first one's
+closing quote and swallows the prose between them.
+
+The marking is a substitution, not an annotation `cmd()` leaves behind, and that is
+deliberate: `cmd()` output reaches the screen through about twenty plain `print` calls
+that never wrap, and a mark inserted at render time would sit there as a stray byte in
+all of them. Recognising the quotes at wrap time cannot leak, because nothing is
+inserted until the wrapper — the one thing that also removes it — is already running.
+
+That leaves `cmd(…, quote=False)`, the bare form for a command printed alone on its own
+line, which by construction has no quotes to recognise. Those callers opt in with
+`keep_whole()`, and it is opt-in precisely because it *is* a mark: safe on the four call
+sites that print through `notice`/`warn`, wrong on the two that hand their text straight
+to `print` or `sys.exit`. `strip_ansi` clears the marks too, so a journal line reads
+normally whether or not it was wrapped first.
+
+Not done: giving the command its own Telegram message, which would copy in one tap.
+`format_reply` already returns a list of messages, so the bot half is small, but the CLI
+would need to mark the command in a way that survives to the bot and shows on no other
+front-end — a protocol, not a wrap rule, and more than the tap is worth today.
 
 ## 4. Why an env var and not a flag
 

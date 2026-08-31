@@ -5,7 +5,7 @@ from typing import Any, List, Optional, Tuple
 
 from trainmate import runtime
 from trainmate.config import config
-from trainmate.util import today_str, cmd, fail, step, warn
+from trainmate.util import today_str, cmd, fail, step, warn, keep_whole
 import trainmate.garmin as _g
 from trainmate.garmin.client import (GarminAuthRequired, GarminClient, _date_range,
     _derivation_pad_days, _shift, _to_date)
@@ -320,7 +320,7 @@ def _warn_manual(start: str, end: str, *, cold: bool) -> None:
             f"warm up over the first ~{config.pmc_ctl_days} days of history, so on a "
             "shallow backfill freshness can read artificially low. To backfill, run:"
         )
-    warn(headline + "\n  " + cmd(_pull_command(start, end), quote=False))
+    warn(headline + "\n  " + cmd(keep_whole(_pull_command(start, end)), quote=False))
 def _remember(start: str, end: str) -> None:
     global _ensured
     if _ensured is None:

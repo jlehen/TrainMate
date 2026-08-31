@@ -218,8 +218,11 @@ def notice(text: str, color_fn=None) -> None:
 
 
 def strip_ansi(text: str) -> str:
-    """Drops ANSI colour codes — for surfaces that aren't a terminal (JSON, logs)."""
-    return ANSI_ESCAPE.sub("", text)
+    """Drops ANSI colour codes — for surfaces that aren't a terminal (JSON, logs).
+
+    Also puts back any space `keep_whole` marked, so a journal line reads normally
+    whether or not it went through the wrap first."""
+    return ANSI_ESCAPE.sub("", text).replace(_KEEP, ' ')
 
 
 def cmd(text: str, *, quote: bool = True) -> str:
@@ -497,6 +500,35 @@ def render_table(
     return "\n".join(out)
 
 
+# A command the text tells the athlete to run: `cmd()` single-quotes it, so a quoted
+# run with a space inside is one, and its spaces must survive the wrap — a command
+# split over two lines cannot be copied (DESIGN_output_verbosity.md §3.6). Quote
+# boundaries keep apostrophes out: in "the athlete's plan" the `'` follows a letter,
+# so it opens nothing. An opener has to start the line or follow a space or `(`, or a
+# sentence quoting two commands would match from the first one's closing quote and
+# swallow the prose between them.
+_QUOTED_COMMAND = re.compile(r"(?:^|(?<=[\s(]))'[^\n]*?'(?![A-Za-z0-9])")
+_KEEP = '\x00'      # stands in for a space that may not be broken on
+
+
+def _keep_commands_whole(para: str) -> str:
+    """Marks the spaces inside quoted commands as unbreakable."""
+    return _QUOTED_COMMAND.sub(
+        lambda m: m.group(0).replace(' ', _KEEP) if ' ' in m.group(0) else m.group(0),
+        para,
+    )
+
+
+def keep_whole(text: str) -> str:
+    """Marks `text` so no wrap splits it — for a bare command, which the quotes rule
+    above cannot recognise (§3.6).
+
+    Only for text that reaches the screen through `wrap_text`, which is what clears the
+    marks: `notice`, `warn`, `fail` and the labelled blocks do, a plain `print` does
+    not. `cmd(…, quote=False)` inside one of those is the whole use."""
+    return text.replace(' ', _KEEP)
+
+
 def _wrap_paragraph(para: str, width: int, subsequent_indent: str) -> list:
     """One paragraph wrapped to `width`, measured in visible columns.
 
@@ -507,16 +539,23 @@ def _wrap_paragraph(para: str, width: int, subsequent_indent: str) -> list:
     `break_on_hyphens=False` is what makes the two branches agree: the greedy loop
     below splits on spaces only, so without it a `--show-llm-context` in a sentence
     survives a coloured terminal and comes back as `--show-llm-` + `context` on a
-    piped run or over Telegram, where colour is stripped."""
-    if not ANSI_ESCAPE.search(para):
+    piped run or over Telegram, where colour is stripped.
+
+    A quoted command takes the greedy branch whatever its colour, because that one
+    never splits a word: the athlete has to be able to select the line and run it."""
+    para = _keep_commands_whole(para)
+    if _KEEP not in para and not ANSI_ESCAPE.search(para):
         return textwrap.wrap(
             para, width=width, subsequent_indent=subsequent_indent,
             break_on_hyphens=False,
         )
+    # The paragraph's own indent belongs to its first word: `split(' ')` hands it back
+    # as empty strings, and an empty `cur` below would swallow them.
+    lead = para[:len(para) - len(para.lstrip(' '))]
     lines, cur = [], ''
-    for word in para.split(' '):
+    for word in para[len(lead):].split(' '):
         if not cur:
-            cur = word
+            cur = (lead if not lines else subsequent_indent) + word
         elif visible_len(cur) + 1 + visible_len(word) <= width:
             cur += ' ' + word
         else:
@@ -524,7 +563,7 @@ def _wrap_paragraph(para: str, width: int, subsequent_indent: str) -> list:
             cur = subsequent_indent + word
     if cur:
         lines.append(cur)
-    return lines
+    return [line.replace(_KEEP, ' ') for line in lines]
 
 
 def wrap_text(text: str, width: Optional[int] = None) -> str:
