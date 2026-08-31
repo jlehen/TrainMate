@@ -8,7 +8,7 @@ from trainmate.calendar_state import calendar_status
 from trainmate.sports import canonical_sport
 from trainmate.util import (
     step, bold, dim, green, red, yellow, cyan, gray, cmd, fmt_date, fmt_span,
-    today_str as _today_str,
+    today_str as _today_str, notice,
 )
 from trainmate.cli.selectors import resolve_window
 
@@ -103,10 +103,10 @@ def run_workout_restore(args: argparse.Namespace) -> None:
 
     revision = runtime.db.revision_before_live_void(args.id)
     if revision is None:
-        print(red(
+        notice(
             f"Workout with ID {args.id} has no earlier version to restore — it was "
-            "cancelled before it was ever scheduled."
-        ))
+            "cancelled before it was ever scheduled.", red,
+        )
         return
 
     with runtime.db.workout_change(kind="restore") as change:

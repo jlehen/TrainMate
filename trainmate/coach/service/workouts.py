@@ -11,7 +11,7 @@ from trainmate.sports import canonical_sport
 from trainmate.benchmarks import MIN_RETEST_DAYS
 from trainmate.calendar_reconcile import verbose_events
 from trainmate import intensity
-from trainmate.util import green, yellow, cmd
+from trainmate.util import green, yellow, cmd, notice
 import trainmate.coach.service as _svc
 
 
@@ -320,11 +320,11 @@ class WorkoutGenMixin:
                 )
             )
             if not recent_test:
-                print(yellow(
+                notice(
                     f"No benchmark scheduled in the boundary week of '{m.get('name', '')}' "
                     f"({win_start} to {end}), and none tested in the {MIN_RETEST_DAYS} "
-                    f"days before it. If a test is due, consider regenerating."
-                ))
+                    f"days before it. If a test is due, consider regenerating.",
+                )
 
     def workout_rollback(
         self, change_id: Optional[int] = None, verbose: bool = False
@@ -449,18 +449,18 @@ class WorkoutGenMixin:
                 + cmd("plan generate") + " first."
             )
         for macro_id in dropped_macros:
-            print(yellow(
+            notice(
                 f"Plan ID {macro_id} also covers part of this span; following the more "
                 f"recently generated plan instead. Pass "
-                + cmd(f"-M {macro_id}", quote=False) + " to follow that one."
-            ))
+                + cmd(f"-M {macro_id}", quote=False) + " to follow that one.",
+            )
         plan_end = max(b['end_date'] for b in blocks)
         if plan_end < gen_end_str:
-            print(yellow(
+            notice(
                 f"The plan runs out on {plan_end}, before this horizon ({gen_end_str}) — "
                 f"sessions after it have no block to follow. Run "
-                + cmd("plan generate") + " to extend the periodization first."
-            ))
+                + cmd("plan generate") + " to extend the periodization first.",
+            )
 
         # All upcoming goals still reach the prompt as context; only the blocks above
         # decide what the sessions are shaped like.

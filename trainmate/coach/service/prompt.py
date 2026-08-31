@@ -6,7 +6,7 @@ from trainmate.config import config, changed_plan_profile_fields, plan_profile
 from trainmate.prompt import Choice
 from trainmate.types import Objective, Constraint
 from trainmate.util import (
-    cyan, green, yellow, bold, red, gray, cmd, format_labeled_block, wrap_text
+    cyan, green, yellow, bold, red, gray, cmd, format_labeled_block, wrap_text, notice,
 )
 from trainmate.coach.formatting import _load_science_guidelines
 from trainmate.coach.proposals import CoachContext
@@ -356,11 +356,11 @@ class PromptConfigMixin:
         recorded = {k for k in self.effective_thresholds() if k != 'max_hr'}
         if recorded:
             return
-        print(yellow(
+        notice(
             "No fitness thresholds on record — prescriptions will use RPE/HR feel until "
             "you record one (" + cmd("benchmark record …")
-            + ") or complete the scheduled benchmark."
-        ))
+            + ") or complete the scheduled benchmark.",
+        )
 
     def _maybe_nudge_bootstrap(self) -> None:
         """Prints a cold-start hint to run `data bootstrap` when there are no active coach
@@ -376,15 +376,15 @@ class PromptConfigMixin:
         prior = self._db.get_sync_state("bootstrap")
         if prior and not self._db.get_learnings():
             ran_on = (prior.get("last_pull_utc") or "")[:10] or "?"
-            print(yellow(
+            notice(
                 f"No coach learnings yet — bootstrap ran on {ran_on} but seeded none. "
-                "Re-run " + cmd("data bootstrap --force") + " to ask the model again."
-            ))
+                "Re-run " + cmd("data bootstrap --force") + " to ask the model again.",
+            )
             return
-        print(yellow(
+        notice(
             "No coach learnings yet. Run " + cmd("data bootstrap")
-            + " to reconstruct your training history and seed evidence-based observations."
-        ))
+            + " to reconstruct your training history and seed evidence-based observations.",
+        )
 
     def _maybe_warn_stale_analysis(self, today_str: str) -> None:
         """Warns when the cached analyses fed to the strategy prompt have fallen behind
@@ -406,11 +406,11 @@ class PromptConfigMixin:
                - datetime.strptime(window_end, "%Y-%m-%d").date()).days
         if lag <= config.analysis_staleness_days:
             return
-        print(yellow(
+        notice(
             f"The training history read into this plan ends {window_end} ({lag} days ago); "
             f"sessions since then did not shape it. Run " + cmd("data reflect")
-            + " first to bring it up to date."
-        ))
+            + " first to bring it up to date.",
+        )
 
     def _get_coach_system_prompt(
         self, objectives: List[Objective], constraints: List[Constraint],

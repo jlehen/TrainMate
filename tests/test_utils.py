@@ -251,5 +251,63 @@ class TestAsides(unittest.TestCase):
         self.assertEqual(self._emit(), "")
 
 
+class TestWarningTierWraps(unittest.TestCase):
+    """Every printer of the warning tier wraps to the client's width
+    (DESIGN_output_verbosity.md §3.5) — the whole reason `notice` exists."""
+
+    LONG = ("The plan runs out on 2026-09-30, before this horizon (2026-10-14) — "
+            "sessions after it have no block to follow. Run 'plan generate' to extend "
+            "the periodization first.")
+
+    def setUp(self):
+        self._saved = os.environ.pop("TRAINMATE_WRAP_WIDTH", None)
+        os.environ["TRAINMATE_WRAP_WIDTH"] = "48"
+        from trainmate import util
+        self.util = util
+
+    def tearDown(self):
+        if self._saved is None:
+            os.environ.pop("TRAINMATE_WRAP_WIDTH", None)
+        else:
+            os.environ["TRAINMATE_WRAP_WIDTH"] = self._saved
+
+    def _emit(self, fn, *args) -> str:
+        buf = io.StringIO()
+        with patch("sys.stdout", buf):
+            fn(*args)
+        return self.util.strip_ansi(buf.getvalue())
+
+    def _assert_fits(self, out: str) -> None:
+        for line in out.splitlines():
+            self.assertLessEqual(visible_len(line), 48, f"too wide: {line!r}")
+
+    def test_notice_wraps(self):
+        out = self._emit(self.util.notice, self.LONG)
+        self._assert_fits(out)
+        self.assertIn("The plan runs out on", out)
+
+    def test_warn_wraps_its_prefix_along_with_the_text(self):
+        # The prefix is part of the first line's budget, so it wraps with the text.
+        out = self._emit(self.util.warn, self.LONG)
+        self._assert_fits(out)
+        self.assertTrue(out.startswith("Warning: "))
+
+    def test_fail_wraps(self):
+        out = self._emit(self.util.fail, self.LONG)
+        self._assert_fits(out)
+        self.assertTrue(out.startswith("Error: "))
+
+    def test_hand_made_layout_survives_the_wrap(self):
+        out = self._emit(self.util.notice, "Backfill from 2026-01-01:\n  data pull -d …")
+        self._assert_fits(out)
+        self.assertIn("\n  data pull", out)
+
+    def test_the_journal_keeps_the_unwrapped_line(self):
+        # A log is not read at 48 columns (DESIGN_logging.md §5.3).
+        with patch("trainmate.journal.note") as note:
+            self._emit(self.util.warn, self.LONG)
+        self.assertEqual(note.call_args.args[0], self.LONG)
+
+
 if __name__ == "__main__":
     unittest.main()

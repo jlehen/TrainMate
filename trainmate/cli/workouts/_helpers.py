@@ -7,7 +7,7 @@ from trainmate import runtime
 from trainmate.calendar_state import calendar_status
 from trainmate.util import (
     bold, gray, green, red, yellow, cyan, blue, magenta, cmd, fmt_date, fmt_span,
-    today_str as _today_str,
+    today_str as _today_str, notice,
 )
 
 
@@ -125,11 +125,11 @@ def warn_stale_before(start_date: str) -> None:
         return
     label = "workout" if len(stale) == 1 else "workouts"
     earliest = min(w['date'] for w in stale)
-    print(yellow(
+    notice(
         f"Note: {len(stale)} {label} before {fmt_date(start_date)} still read [STALE] "
         f"— their calendar events are out of date and this push did not cover them. "
-        f"Run {cmd(f'workout push -d {earliest}..')} to update them."
-    ))
+        f"Run {cmd(f'workout push -d {earliest}..')} to update them.",
+    )
 
 def _classify_swap_target(value: str) -> str | None:
     """Classifies a swap positional as 'date' (YYYY-MM-DD) or 'id' (bare integer)."""
@@ -146,13 +146,13 @@ def _resolve_swap_ops(args: argparse.Namespace) -> list | None:
     kind2 = _classify_swap_target(args.target2)
     for target, kind in ((args.target1, kind1), (args.target2, kind2)):
         if kind is None:
-            print(red(
+            notice(
                 f"'{target}' is neither a date (YYYY-MM-DD) nor a workout ID. Swap "
                 "two dates (e.g. "
                 + cmd("workout swap 2026-06-09 2026-06-11 'travelling'")
                 + ") or two workout IDs (e.g. "
-                + cmd("workout swap 5 8 'travelling'") + ")."
-            ))
+                + cmd("workout swap 5 8 'travelling'") + ").", red,
+            )
             return None
     if kind1 != kind2:
         print(red("Swap two dates or two workout IDs, not one of each."))

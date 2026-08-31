@@ -187,19 +187,34 @@ def warn(text: str) -> None:
     """An operational warning: something outside the app did not work, and it changes
     what the answer means (DESIGN_logging.md §5.3).
 
-    Always prints, and folds in both the colour and the `Warning: ` prefix that used to
-    be twenty independent decisions. A domain refusal — "no active plan", "nothing
+    Always prints, and folds in the colour, the `Warning: ` prefix and the wrap that used
+    to be twenty independent decisions. A domain refusal — "no active plan", "nothing
     scheduled for Thursday" — is the app correctly reporting the athlete's own data, so
-    it is an answer and keeps its own `print`."""
-    print(yellow("Warning: " + text))
+    it is an answer, and takes `notice` instead.
+
+    The prefix is wrapped with the text so the first line fits the budget too; the
+    journal keeps the unwrapped original, since a log is not read at 48 columns."""
+    print(yellow(wrap_text("Warning: " + text)))
     journal.note(strip_ansi(text), lvl="warn")
 
 
 def fail(text: str) -> None:
     """The command could not do its job, for a reason outside the app (§5.3). Prints in
-    red with an `Error: ` prefix, and lands in the journal at `error`."""
-    print(red("Error: " + text))
+    red with an `Error: ` prefix, wrapped like `warn`, and lands in the journal at
+    `error`."""
+    print(red(wrap_text("Error: " + text)))
     journal.note(strip_ansi(text), lvl="error")
+
+
+def notice(text: str, color_fn=None) -> None:
+    """The athlete's own data reported back: no plan yet, a version kept for rollback, a
+    selector that matched nothing, a hint that the answer needs a follow-up command.
+
+    Warning tier on screen (DESIGN_output_verbosity.md §3) — always printed, on every
+    front-end — but not an operational fault, so unlike `warn` it takes no prefix and
+    leaves no journal entry. It exists for the third thing they share, the wrap, which
+    every yellow and red line used to decide for itself (§3.5). `red` for a refusal."""
+    print((color_fn or yellow)(wrap_text(text)))
 
 
 def strip_ansi(text: str) -> str:

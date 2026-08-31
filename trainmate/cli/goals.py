@@ -2,8 +2,8 @@ import argparse
 import sys
 from trainmate import runtime
 from trainmate.util import (
-    bold, green, red, yellow, cyan, gray, cmd, format_labeled_block,
-    fmt_date, today_str as _today_str,
+    bold, green, red, yellow, cyan, gray, cmd, format_labeled_block, fmt_date,
+    today_str as _today_str, notice,
 )
 from trainmate.cli.common import (
     is_simple_render, print_plan_cascade, report_unhonored, simple_goal_lines,
@@ -116,11 +116,11 @@ def _report_archived_sessions(result: dict) -> None:
     else:
         print(gray("No upcoming sessions belonged to this goal."))
     if result['untagged']:
-        print(yellow(
+        notice(
             f"Left {result['untagged']} upcoming session(s) in place: they carry no plan "
             "version, so no goal owns them. Remove them with " + cmd("workout rm")
-            + " if they were for this goal."
-        ))
+            + " if they were for this goal.",
+        )
 
 
 def _offer_reinstated_sessions(objective_id: int) -> None:

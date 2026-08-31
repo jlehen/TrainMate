@@ -6,7 +6,7 @@ from trainmate import garmin
 from trainmate.garmin import activity_load
 from trainmate.signals import excluded_channels
 from trainmate.util import (
-    today_date as _today_date, step, cyan, yellow, cmd, wrap_text
+    today_date as _today_date, step, cyan, yellow, cmd, wrap_text, notice,
 )
 import trainmate.coach.service as _svc
 
@@ -170,9 +170,9 @@ class DataAnalysisMixin:
         prior = self._db.get_sync_state("bootstrap")
         if prior and not force and not inspect_only:
             ran_on = (prior.get("last_pull_utc") or "")[:10] or "?"
-            print(
-                yellow(f"Bootstrap already ran on {ran_on} (through {prior.get('through_date')}). "
-                       "For incremental updates use " + cmd("data reflect") + " instead.")
+            notice(
+                f"Bootstrap already ran on {ran_on} (through {prior.get('through_date')}). "
+                "For incremental updates use " + cmd("data reflect") + " instead.",
             )
             if auto:
                 print(cyan("Skipping bootstrap (pass --force to re-run)."))
@@ -243,11 +243,11 @@ class DataAnalysisMixin:
             from_date = (
                 until_date - timedelta(weeks=_svc.DEFAULT_REFLECT_WEEKS) + timedelta(days=1)
             )
-            print(yellow(
+            notice(
                 f"No reflect baseline found; reflecting over the last {_svc.DEFAULT_REFLECT_WEEKS} "
                 f"weeks. Run {cmd('data bootstrap')} to reconstruct your full training "
-                "history first."
-            ))
+                "history first.",
+            )
 
         if from_date > until_date:
             # Only a range the caller gave BOTH ends of can be self-contradictory; a start

@@ -4,8 +4,8 @@ from typing import Optional, Tuple
 
 from trainmate import runtime
 from trainmate.util import (
-    aside, bold, dim, green, red, yellow, cyan, gray, cmd, format_labeled_block,
-    fmt_date, today_str as _today_str,
+    aside, bold, dim, green, red, cyan, gray, cmd, format_labeled_block, fmt_date,
+    today_str as _today_str, notice,
 )
 from trainmate.cli.selectors import add_single_date_arg
 from trainmate.sports import canonical_sport
@@ -137,11 +137,11 @@ def run_benchmark_record(args: argparse.Namespace) -> None:
         print(_benchmark_line(row, float(prev["value"]) if prev else None))
     print(green("Benchmark result recorded successfully."))
     if _crosses_replan_band(kind, value, prev):
-        print(yellow(
+        notice(
             "This moves your effective threshold past the replan band — run "
             + cmd("plan generate")
-            + " to rebuild the next block against the fresh number."
-        ))
+            + " to rebuild the next block against the fresh number.",
+        )
 
 
 def _crosses_replan_band(kind: str, value: float, prev: Optional[dict]) -> bool:

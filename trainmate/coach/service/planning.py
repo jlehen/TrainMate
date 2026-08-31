@@ -10,7 +10,7 @@ from trainmate import signals
 from trainmate.db.periodization import repair_block_contiguity
 from trainmate.util import (
     aside, step, cyan, yellow, bold, cmd, wrap_text, format_labeled_block,
-    default_wrap_width,
+    default_wrap_width, notice,
 )
 import trainmate.coach.service as _svc
 
@@ -200,12 +200,12 @@ class PlanningMixin:
         constraint = self._db.get_constraint(cid)
         impact = self.constraint_plan_impact(constraint)
         if self.constraint_is_plan_shaping(constraint, impact):
-            print(yellow(
+            notice(
                 f"  This looks plan-shaping ({impact['days']} days, displaces "
                 f"~{impact['displaced_pct']:.0f}% of a typical week). To build it into "
                 "the plan, run " + cmd(f"constraint edit {cid} --replan")
-                + " or " + cmd("plan generate") + "."
-            ))
+                + " or " + cmd("plan generate") + ".",
+            )
         return cid
 
     def known_signal_metrics(self) -> List[str]:

@@ -173,6 +173,37 @@ was the outlier, and the tier rules made it look correct: the narration *was* pr
 narration, right up until a question depended on it. The gate is not "is this line
 chatter?" but "does the next thing the athlete must answer depend on it?"
 
+### 3.5 Who wraps the warning tier
+
+The answer tier is wrapped by whoever prints it — 53 call sites reach for `wrap_text`
+before a `print`, because a table or a listing knows its own layout. The warning tier had
+inherited that habit without the discipline: nothing wrapped, and by 2026-08-31 sixteen
+warnings and errors were going out as a single line of 107 to 178 characters. On a
+terminal they soft-wrap and nobody notices. Over Telegram they land inside a `<pre>`
+block, which does not wrap, so the phone renders a 178-column line the athlete has to
+drag sideways — while every table beside them fits, because §7 taught them to.
+
+The fix is not sixteen `wrap_text` calls. It is that the tier had two printers and needed
+three. `warn` and `fail` already exist to hold the decisions that used to be made
+independently at every call site — colour, prefix, journal level — so the wrap joins
+them. What had no printer at all was the third shape: a line that is yellow or red and
+*not* an operational fault. "No coach learnings yet", "this is a past version, kept for
+rollback", "'foo' is neither a date nor a workout ID" — §5.3 of DESIGN_logging.md is
+explicit that these are the app correctly reporting the athlete's own data, so they must
+not take a `Warning:` prefix and must not file a journal entry at `warn`. Fourteen of the
+sixteen were exactly that, which is why they had stayed on a raw `print(yellow(…))`: the
+only printer that would have wrapped them would also have mislabelled them.
+
+`notice(text, color_fn=red)` is that third printer — the wrap and nothing else. The rule
+is now a rule rather than a habit: **no line of the warning tier is printed by hand.**
+
+One thing this gives up. A wrapped warning can break a command across two lines —
+`Run 'workout push -d` / `2026-08-27..' to update them.` — which is not copy-pasteable.
+That was accepted rather than fixed: the commands long enough to break are longer than a
+phone's 48 columns anyway, so the alternative is not an unbroken command but the
+178-column line we started with. If it ever needs solving it is one exception inside
+`_wrap_paragraph`, decided in one place, which is the point of having a printer at all.
+
 ## 4. Why an env var and not a flag
 
 `TRAINMATE_VERBOSE=1` forces asides on; `=0` forces them off. There is no CLI flag, and

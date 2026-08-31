@@ -5,9 +5,9 @@ from trainmate.baselines import classify_metric, is_anomalous, UNKNOWN
 from trainmate.config import config
 from trainmate.util import (
     aside, asides_enabled, bold, dim, green, red, yellow, cyan, magenta, gray, cmd,
-    color_load_ratio, color_ramp,
-    pmc_cells, pmc_warming_note, format_labeled_block, default_wrap_width, PMC_TSB_LAG_NOTE,
-    fmt_date, today_str as _today_str, today_date as _today_date,
+    color_load_ratio, color_ramp, pmc_cells, pmc_warming_note, format_labeled_block,
+    default_wrap_width, PMC_TSB_LAG_NOTE, fmt_date, today_str as _today_str,
+    today_date as _today_date, notice,
 )
 from trainmate.cli.common import (
     constraint_line, ensure_recent_data, pmc_warmup_cutoff,
@@ -86,10 +86,11 @@ def run_status(args) -> None:
         if macro:
             change_reason = runtime.coach_service.config_changed(macro)
             if change_reason:
-                print(yellow(
+                notice(
                     "\nWarning: a plan-shaping input has changed since the "
                     f"active periodization plan was generated ({change_reason}).\nRun "
-                    + cmd("plan generate") + " to regenerate."))
+                    + cmd("plan generate") + " to regenerate.",
+                )
 
             # Constraints the plan does not reflect yet are the same kind of fact — a
             # directive on record that nothing has acted on

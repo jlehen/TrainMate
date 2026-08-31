@@ -359,7 +359,8 @@ class TestCliWorkouts(unittest.TestCase):
         self.assertEqual(exit_code, 0)
         self.assertIn("1 workout before", stdout)
         self.assertIn("[STALE]", stdout)
-        self.assertIn(f"workout push -d {past}..", stdout)
+        # `notice` wraps, and the command can land across the break.
+        self.assertIn(f"workout push -d {past}..", " ".join(stdout.split()))
         # Warning only — the past row stays outside the pushed window.
         mock_calendar.sync_multiple.assert_not_called()
 

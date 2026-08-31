@@ -435,8 +435,9 @@ class TestBenchmarkPlacementGuards(unittest.TestCase):
             coach_service._warn_missing_boundary_benchmarks,
             workouts, [], test_db.get_mesocycles_for_macrocycle(macro_id), "2026-08-03",
         )
-        self.assertIn("No benchmark scheduled in the boundary week of 'Base 1'", out)
-        self.assertIn("2026-08-24 to 2026-08-30", out)
+        flat = " ".join(out.split())    # `notice` wraps, so match across line breaks
+        self.assertIn("No benchmark scheduled in the boundary week of 'Base 1'", flat)
+        self.assertIn("2026-08-24 to 2026-08-30", flat)
 
     def test_boundary_week_with_a_benchmark_is_silent(self):
         macro_id = self._macrocycle_with_boundary()
