@@ -428,8 +428,38 @@ Nothing sets `replan = 1` or regenerates a plan without a human `y`. This is the
 same confirm-before-regen posture `plan generate` / `workout generate` already
 take — just constraint-triggered instead of pre-classified.
 
+**Which goals the replan rebuilds.** The ones whose **own span holds the disrupted
+days** — never "the next goal on the calendar". Goals partition the timeline (a goal
+owns from the day after the goal before it, clamped to today, through its target date),
+so the overlapping set is contiguous and `cli/plans.py`'s `goal_range_for_window` names
+it as an `IdRange` over the shared `-g` grammar (DESIGN_cli_selectors.md §9). Three
+cases fall out:
+
+- **Inside one goal's span** — that goal alone. A holiday in November replans the
+  November race, not the September one whose plan ends before it starts.
+- **Straddling a goal boundary** — every goal it crosses. A three-week injury running
+  from one race's taper into the next race's base invalidates *both* plans the moment
+  it is known, so both are offered; §9's range machinery gives each its own strategy
+  call, preview and `y`, so declining one does not stop the other. Deferring the far
+  one would also work — escalating any constraint to `replan = 1` changes
+  `constraints_hash`, which is computed over *every* active plan-shaping constraint, so
+  the far plan is flagged stale at its next `plan generate` regardless. Doing both now
+  is the choice: the athlete learned about the disruption once, and both plans became
+  wrong at that moment.
+- **No goal's span holds any of them** — a window wholly behind us, or one dated past
+  the last goal. Nothing is regenerated and the reason is printed. This case is
+  reachable rather than theoretical: the rest-window floor reads the constraint's
+  *full* span, so a back-dated `--rest` window trips it, and it is exactly the case
+  where "the next goal" silently looked plausible. The proposal is not even raised for
+  it — *"replan around it?"* presupposes a plan holding those days — but an explicit
+  `--replan` still records the tier, which fingerprints the next plan generated.
+
+This follows from the magnitude being measured over the constraint's **own** window
+(the displaced-load sum below): the plan a `y` rewrites has to be the plan that number
+was read from, or the proposal and its action describe two different plans.
+
 **Between the two fates above there is a gap, and it is named rather than filled.**
-Honoring by daily `adapt` reaches only the current block, and a replan rewrites the whole
+Honoring by daily `adapt` reaches only the current block, and a replan rewrites a whole
 plan; a directive that is too far off for the first and too small for the second waits for
 the next `workout generate` whose horizon reaches it. `constraints.honored_at` records
 whether any pass has had it in scope yet, so `status`, `constraint list`/`show` and the

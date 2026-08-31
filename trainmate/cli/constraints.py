@@ -16,7 +16,9 @@ from trainmate.util import (
     aside, bold, dim, green, red, cyan, gray, cmd, format_labeled_block, fmt_date,
     fmt_span, today_str as _today_str, notice,
 )
-from trainmate.cli.selectors import add_selector_args, has_selector, resolve_window
+from trainmate.cli.selectors import (
+    IdRange, add_selector_args, has_selector, resolve_window,
+)
 from trainmate.cli.common import constraint_line, is_simple_render
 from trainmate.coach import honoring
 
@@ -127,40 +129,81 @@ def _maybe_replan(constraint_id: int, title: str, replan_flag: Optional[bool]) -
         runtime.db.update_constraint(constraint_id, replan=0)
         return
 
-    if replan_flag is True:
-        runtime.db.update_constraint(constraint_id, replan=1)
-        _run_replan_flow(title)
-        return
-
-    # Undecided: derive magnitude and, if plan-shaping, propose.
     constraint = runtime.db.get_constraint(constraint_id)
     if not constraint:
         return
+
+    if replan_flag is True:
+        runtime.db.update_constraint(constraint_id, replan=1)
+        _run_replan_flow(title, constraint)
+        return
+
+    # Undecided: derive magnitude and, if plan-shaping, propose.
     try:
         impact = runtime.coach_service.constraint_plan_impact(constraint)
     except Exception:
         return
     if not runtime.coach_service.constraint_is_plan_shaping(constraint, impact):
         return
+    # "Replan around it?" presupposes a plan holding those days. With no goal spanning
+    # them there is nothing a `y` could rebuild, so the question is not asked (§7).
+    if _replan_targets(constraint) is None:
+        return
 
     detail = f"displaces ~{impact['displaced_pct']:.0f}% of a typical week's planned load"
     notice(f"This {impact['days']}-day constraint {detail}.")
     if runtime.prompt.confirm("Replan around it?"):
         runtime.db.update_constraint(constraint_id, replan=1)
-        _run_replan_flow(title)
+        _run_replan_flow(title, constraint)
     else:
         runtime.db.update_constraint(constraint_id, replan=0)
         print(dim("Left out of the plan; still honored by daily 'workout adapt'."))
 
 
-def _run_replan_flow(title: str) -> None:
+def _replan_targets(constraint: dict) -> Optional[IdRange]:
+    """The goals a replan of this directive would rebuild — the ones whose own span holds
+    the disrupted days (DESIGN_constraints.md §7). None when no goal's span does."""
+    from trainmate.cli.plans import goal_range_for_window
+    return goal_range_for_window(constraint['start_date'], constraint['end_date'])
+
+
+def _report_nothing_to_replan(constraint: dict) -> None:
+    """Says why an escalation rebuilt nothing, rather than letting it pick a goal at
+    random. The tier still stands: it fingerprints the next plan generated (§7)."""
+    if constraint['end_date'] < _today_str():
+        notice(
+            f"Those days ended {fmt_date(constraint['end_date'])} — training already "
+            "behind you cannot be planned around, so nothing was regenerated.",
+        )
+    else:
+        notice(
+            "No goal's plan covers "
+            f"{fmt_span(constraint['start_date'], constraint['end_date'], sep=' — ')}, "
+            "so there is no periodization to rebuild around it.",
+        )
+        notice("Add a goal past those days, then run " + cmd("plan generate") + ".")
+    print(dim("Still recorded as plan-shaping: it feeds the next plan you generate."))
+
+
+def _run_replan_flow(title: str, constraint: dict) -> None:
     """Escalates a directive to plan-shaping and runs the existing plan-generate confirm
     flow (each step of which still confirms before applying). Imported lazily to avoid a
-    CLI import cycle."""
+    CLI import cycle.
+
+    It rebuilds the goals whose own span holds the disrupted days, so a window straddling
+    a race replans both of the plans it breaks — one strategy call, preview and `y` each
+    (DESIGN_constraints.md §7)."""
     from trainmate.cli.plans import run_plan_generate
-    print(green(f"Marked '{title}' as plan-shaping. Regenerating the plan around it..."))
+    targets = _replan_targets(constraint)
+    if targets is None:
+        _report_nothing_to_replan(constraint)
+        return
+    print(green(
+        f"Marked '{title}' as plan-shaping. Regenerating the periodization around it..."
+    ))
     ns = argparse.Namespace(
-        no_pull=False, force_pull=False, auto=False, goal_id=None, force=False, fresh=False
+        no_pull=False, force_pull=False, auto=False, goal_range=targets,
+        force=False, fresh=False,
     )
     run_plan_generate(ns)
     aside("If you applied the new plan, run " + cmd("workout generate")

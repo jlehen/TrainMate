@@ -79,6 +79,27 @@ def _goals_in_range(rng) -> Optional[list]:
     return goals
 
 
+def goal_range_for_window(start: str, end: str) -> Optional[IdRange]:
+    """The `-g` selector naming every upcoming goal whose own span overlaps [start, end].
+
+    What a constraint-triggered replan targets: the plans that actually cover the
+    disrupted days, never the next goal on the calendar (DESIGN_constraints.md §7).
+    None when no goal's span holds any of them — a window wholly behind us, or one
+    dated past the last goal — where there is no plan to reshape.
+
+    Goals partition the timeline, so the overlap is contiguous and an IdRange over its
+    two ends re-derives exactly this set through the shared grammar (§9).
+    """
+    overlapping = [
+        g for g in runtime.db.upcoming_objectives()
+        if str(g['target_date']) >= start and str(_goal_span_start(g)) <= end
+    ]
+    if not overlapping:
+        return None
+    overlapping.sort(key=lambda g: (str(g['target_date']), g['id']))
+    return IdRange(start=overlapping[0]['id'], end=overlapping[-1]['id'])
+
+
 def _plan_targets(args: argparse.Namespace) -> Optional[list]:
     """The goals `plan generate` plans for, chronologically, each paired with the day its
     own plan window opens.

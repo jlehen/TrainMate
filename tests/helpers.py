@@ -14,6 +14,9 @@ _CLOCK_SITES = [
     # A goal's completed/upcoming split is now decided by the date, so the accessors that
     # ask "is this goal behind us?" are clock sites too (DESIGN_backward_evaluation.md §12).
     ("trainmate.db.periodization.today_date", True),
+    # `_goal_span_start` opens a goal's own plan window at today, so the goal timeline
+    # the `-g` grammar walks is a clock site too (DESIGN_cli_selectors.md §9).
+    ("trainmate.cli.plans._today_date", True),
 ]
 
 
