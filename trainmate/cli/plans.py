@@ -12,7 +12,8 @@ from trainmate.util import (
     fmt_date, fmt_span, today_date as _today_date,
 )
 from trainmate.cli.common import (
-    ensure_recent_data, is_simple_render, report_unhonored, simple_plan_lines,
+    ensure_recent_data, is_simple_render, print_plan_cascade, report_unhonored,
+    simple_plan_lines,
 )
 from trainmate.cli.selectors import (
     CURRENT, IdRange, SelectorError, parse_id_range, resolve_meso_atom,
@@ -892,7 +893,10 @@ def run_plan_diff(args: argparse.Namespace) -> None:
 
 
 def run_plan_rm(args: argparse.Namespace) -> None:
-    """Deletes the periodization plan for a specific goal."""
+    """Deletes every periodization plan version a goal owns, superseded ones included.
+
+    The inventory is printed first because the cascade reaches past the one version the
+    athlete has in mind (DESIGN_cli_noargs.md §b1)."""
     goal = runtime.db.get_objective(args.id)
     if not goal:
         print(red(f"Goal with ID {args.id} not found."))
@@ -903,7 +907,19 @@ def run_plan_rm(args: argparse.Namespace) -> None:
         print(yellow(f"No periodization plan exists for goal '{goal['title']}' (ID {args.id})."))
         return
 
-    # Delete the plan
+    if not args.yes:
+        print(yellow(
+            f"Removing the plan for goal '{goal['title']}' (ID {args.id}) deletes:"
+        ))
+        print_plan_cascade(args.id)
+        print(gray(
+            "To replace the plan reversibly instead, use "
+            + cmd(f"plan generate --goal {args.id} --force") + "."
+        ))
+        if not runtime.prompt.confirm("Delete it anyway?", danger=True):
+            print("Removal cancelled.")
+            return
+
     runtime.coach_service.plan_rm(args.id)
     print(green(f"Periodization plan for goal '{goal['title']}' removed successfully."))
 
@@ -1276,12 +1292,24 @@ def add_plan_parser(subparsers, pull_bypass_parser, llm_debug_parser):
     # plan rm
     p_rm = plan_subparsers.add_parser(
         "rm", advanced=True,
-        help="Remove/delete a specific periodization plan by Goal ID"
+        help="Remove/delete a specific periodization plan by Goal ID",
+        description=(
+            "Delete every periodization plan version a goal owns — superseded ones "
+            "included, so the goal is left with no plan history at all. Its mesocycle "
+            "blocks and plan feedback go with them, and upcoming sessions are left "
+            "behind with no plan to explain them. The inventory is shown before "
+            f"anything is deleted. Use '{green('plan generate --force')}' to replace a "
+            f"plan reversibly, or '{green('plan rollback')}' to step back one "
+            "regeneration."
+        )
     )
     p_rm.set_defaults(func=run_plan_rm)
     p_rm.add_argument(
         "id", type=int,
         help="Goal ID whose periodization plan should be removed"
+    )
+    p_rm.add_argument(
+        "-y", "--yes", action="store_true", help="Skip confirmation prompt"
     )
 
     # plan rollback

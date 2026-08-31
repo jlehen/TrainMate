@@ -128,6 +128,31 @@ nearest active goal, it echoes the chosen target up front (dimmed) so a bare run
 is never silent about what it decided to operate on. The write still happens only
 after the existing confirm prompt.
 
+## §b1 — A delete that cascades names what it takes before it asks
+
+Naming the *target* (§b) is enough while the target is the whole story. It stops
+being enough when the delete reaches rows the athlete never named: `goal rm` and
+`plan rm` both remove **every** macrocycle the goal owns, so mesocycles and plan
+feedback cascade with them, while sessions keep a `macrocycle_id` that no longer
+resolves — the workouts table holds no foreign key, by design, so a session
+outlives its plan.
+
+Both therefore print the inventory first — versions, blocks, notes, and the count
+of upcoming sessions left stranded — then a dimmed pointer at the reversible
+alternative, and only then the confirm, which defaults to **no** so piped stdin
+and cron decline rather than proceed. `-y` skips it for scripted use. They differ
+only in the lead line and which alternative they name: `goal edit --status
+archived` (DESIGN_backward_evaluation.md §14.5) and `plan generate --force`. The
+inventory itself is one renderer, `print_plan_cascade`
+(trainmate/cli/common.py) — two copies of a blast-radius count drift into
+disagreeing about one cascade.
+
+`plan rm` is the member worth stating, because its name undersells it: it reads as
+"delete the current plan" but deletes the goal's whole plan history, superseded
+versions included. So it is neither the way to undo one regeneration
+(`plan rollback`) nor the way to replace a plan (`plan generate --force`, which
+supersedes and stays reversible).
+
 ## §c — Help lists commands by usefulness, not registration order
 
 argparse renders sub-commands in the order they are registered, which is an

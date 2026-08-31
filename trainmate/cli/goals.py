@@ -5,7 +5,9 @@ from trainmate.util import (
     bold, green, red, yellow, cyan, gray, cmd, format_labeled_block,
     fmt_date, today_str as _today_str,
 )
-from trainmate.cli.common import is_simple_render, report_unhonored, simple_goal_lines
+from trainmate.cli.common import (
+    is_simple_render, print_plan_cascade, report_unhonored, simple_goal_lines,
+)
 from trainmate.db.objectives import goal_state, GOAL_UPCOMING, ARCHIVED
 from trainmate.sports import CANONICAL_SPORTS
 
@@ -167,25 +169,9 @@ def run_goal_rm(args: argparse.Namespace) -> None:
         print(red(f"Goal with ID {args.id} not found."))
         sys.exit(1)
 
-    versions = runtime.db.get_macrocycle_versions(args.id)
-    blocks = sum(
-        len(runtime.db.get_mesocycles_for_macrocycle(m['id'])) for m in versions
-    )
-    notes = sum(len(runtime.db.list_plan_feedback(m['id'])) for m in versions)
-    orphaned = runtime.db.count_future_workouts_for_macrocycles(
-        [m['id'] for m in versions], _today_str()
-    )
-
     if not args.yes:
         print(yellow(f"Removing goal '{goal['title']}' (ID {args.id}) also deletes:"))
-        print(f"  - {len(versions)} periodization plan version(s)")
-        print(f"  - {blocks} mesocycle block(s)")
-        print(f"  - {notes} plan feedback note(s)")
-        if orphaned:
-            print(yellow(
-                f"  and leaves {orphaned} upcoming session(s) with no plan to explain "
-                "them."
-            ))
+        print_plan_cascade(args.id)
         print(gray(
             "To call the goal off reversibly instead, use "
             + cmd(f"goal edit {args.id} --status archived") + "."

@@ -253,6 +253,29 @@ def report_unhonored(constraints: List[Dict[str, Any]]) -> None:
     )))
 
 
+def print_plan_cascade(objective_id: int) -> None:
+    """The blast radius `goal rm` and `plan rm` both print before asking — one renderer,
+    so two copies cannot drift into disagreeing about one cascade
+    (DESIGN_cli_noargs.md §b1)."""
+    from trainmate import runtime
+    versions = runtime.db.get_macrocycle_versions(objective_id)
+    blocks = sum(
+        len(runtime.db.get_mesocycles_for_macrocycle(m['id'])) for m in versions
+    )
+    notes = sum(len(runtime.db.list_plan_feedback(m['id'])) for m in versions)
+    orphaned = runtime.db.count_future_workouts_for_macrocycles(
+        [m['id'] for m in versions], _today_str()
+    )
+    print(f"  - {len(versions)} periodization plan version(s)")
+    print(f"  - {blocks} mesocycle block(s)")
+    print(f"  - {notes} plan feedback note(s)")
+    if orphaned:
+        print(yellow(
+            f"  and leaves {orphaned} upcoming session(s) with no plan to explain "
+            "them."
+        ))
+
+
 # --- Simple rendering (DESIGN_bot_simple_frontend.md §6) ---
 # Commands opt in one at a time; anything that hasn't opted in falls back to the
 # expert form. Tone rule: lead with what was done and what is next, state gaps as

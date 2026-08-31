@@ -235,10 +235,53 @@ class TestCliPlans(unittest.TestCase):
             constraints_hash="lhash",
             mesocycles=[],
         )
-        exit_code, stdout, stderr = self.run_cli(["plan", "rm", str(obj_to_rm)])
+        exit_code, stdout, stderr = self.run_cli(["plan", "rm", str(obj_to_rm), "-y"])
         self.assertEqual(exit_code, 0)
         self.assertIn("removed successfully", stdout)
         mock_coach.plan_rm.assert_called_once_with(obj_to_rm)
+
+    @patch("trainmate.runtime.calendar_syncer")
+    @patch("trainmate.runtime.coach_service")
+    def test_plan_rm_inventories_the_cascade_before_deleting(self, mock_coach, _cal):
+        """`plan rm` deletes every version a goal owns, superseded ones included, so it
+        names the cascade and asks first (DESIGN_cli_noargs.md §b1)."""
+        def days_out(n):
+            return (
+                datetime.now(timezone.utc).date() + timedelta(days=n)
+            ).strftime("%Y-%m-%d")
+
+        oid = test_db.add_objective(
+            title="Spring Race", target_date=days_out(60), sport_type="running"
+        )
+        mid = test_db.save_macrocycle(
+            objective_id=oid,
+            strategy="strategy",
+            goals_hash="gh",
+            constraints_hash="ch",
+            mesocycles=[{
+                "name": "Base", "start_date": days_out(0), "end_date": days_out(30),
+                "focus": "aerobic",
+            }],
+        )
+        test_db.add_plan_feedback(mid, "too much volume in week 3")
+        save_workout(
+            test_db, days_out(3), "running", "Long run", "x", macrocycle_id=mid
+        )
+
+        # `run_cli` answers "n" by default: the inventory is shown and nothing is deleted.
+        exit_code, stdout, _stderr = self.run_cli(["plan", "rm", str(oid)])
+        self.assertEqual(exit_code, 0)
+        self.assertIn("1 periodization plan version(s)", stdout)
+        self.assertIn("1 mesocycle block(s)", stdout)
+        self.assertIn("1 plan feedback note(s)", stdout)
+        self.assertIn("leaves 1 upcoming session(s)", stdout)
+        self.assertIn("Removal cancelled", stdout)
+        mock_coach.plan_rm.assert_not_called()
+
+        exit_code, stdout, _stderr = self.run_cli(["plan", "rm", str(oid)], input_value="y")
+        self.assertEqual(exit_code, 0)
+        self.assertIn("removed successfully", stdout)
+        mock_coach.plan_rm.assert_called_once_with(oid)
 
     @patch("trainmate.runtime.garmin")
     def test_plan_show_never_pulls(self, mock_garmin):

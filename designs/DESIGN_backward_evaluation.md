@@ -996,6 +996,10 @@ upcoming sessions it would strand — names `goal edit --status archived` as the
 reversible alternative, and asks. `-y` skips the prompt for scripted use, as on
 `goal wipe`.
 
+`plan rm` deletes the same cascade minus the goal row, so it prints the same
+inventory from the same renderer; the shared convention is
+DESIGN_cli_noargs.md §b1.
+
 ---
 
 ## 15. Out of Scope
