@@ -163,11 +163,104 @@ class TestCliWorkouts(unittest.TestCase):
         self.assertEqual(exit_code, 0)
         self.assertIn("85m/RPE7/TSS84 -> 85m/RPE7/TSS84", stdout)
         self.assertIn("[text revised]", stdout)
-        # The sentence that moved, both halves, and not the one that stayed put.
+        # The passage that moved, both halves labelled in words rather than as a
+        # `-`/`+` diff (which loses its signs once a phone re-flows the lines), and
+        # not the sentence that stayed put.
         self.assertIn("TEXT REVISED", stdout)
-        self.assertIn("builds the pacing discipline", stdout)
-        self.assertIn("Wednesday's execution was exactly right", stdout)
-        self.assertNotIn("- 2x20 at threshold, seated.", stdout)
+        self.assertIn("Was: Even power beats a good average", stdout)
+        self.assertIn("Now: Wednesday's execution was exactly right", stdout)
+        self.assertNotIn("2x20 at threshold, seated.", stdout.split("TEXT REVISED")[1])
+        self.assertNotIn("\n    - ", stdout)
+        self.assertNotIn("\n    + ", stdout)
+
+    @patch("trainmate.cli.workouts.generate.ensure_recent_data")
+    @patch("trainmate.runtime.coach_service")
+    def test_a_text_revision_wraps_at_the_client_width(self, mock_coach, _mock_ensure):
+        """Over the bot the CLI is told the phone's width; the wording block used to wrap
+        at a fixed 88 columns regardless, so the phone re-wrapped every line and the
+        old/new halves became indistinguishable."""
+        original = {
+            "date": "2026-06-05", "sport_type": "cycling", "title": "Climb Threshold",
+            "description": (
+                "2x20 at threshold, seated. Even power beats a good average — this "
+                "builds the pacing discipline for the goal climb, and a steady first "
+                "rep is what makes the second one possible."
+            ),
+            "duration_minutes": 85, "rpe": 7, "tss": 84,
+        }
+        adapted = dict(original, description=(
+            "2x20 at threshold, seated. Wednesday's execution was exactly right — same "
+            "discipline again, and hold the second rep to the first rep's number rather "
+            "than chasing a higher average."
+        ))
+        mock_coach.workout_adapt.return_value = RevisionProposal(
+            reason="Holding the block.", workouts=[adapted], new_constraints=[],
+            range_start="2026-06-05", range_end="2026-06-30",
+            pairs=(RevisionPair(proposal=adapted, original=original, is_swap=False),),
+        )
+
+        with patch.dict(os.environ, {"TRAINMATE_WRAP_WIDTH": "48"}):
+            exit_code, stdout, _stderr = self.run_cli(["workout", "adapt"])
+
+        self.assertEqual(exit_code, 0)
+        block = stdout.split("TEXT REVISED")[1]
+        self.assertIn("Was: Even power", block)
+        self.assertIn("Now: Wednesday's execution", block)
+        passages = [line for line in block.splitlines() if line.startswith("    ")]
+        self.assertTrue(passages and all(len(line) <= 48 for line in passages), block)
+
+    @patch("trainmate.cli.workouts.generate.ensure_recent_data")
+    @patch("trainmate.runtime.coach_service")
+    def test_simple_render_previews_the_revision_as_prose(self, mock_coach, _mock_ensure):
+        """Simple mode sends flowed text, not a <pre> block, so the preview is one
+        paragraph per touched day — no table, no diff signs — and the ask is in
+        companion words (DESIGN_bot_simple_frontend.md §6)."""
+        lift = {
+            "date": "2026-06-08", "sport_type": "strength_training",
+            "title": "Strength — Deload Volume", "description": "Gym, 55 min.",
+            "duration_minutes": 55, "rpe": 5, "tss": 22,
+        }
+        rest = {
+            "date": "2026-06-08", "sport_type": "rest", "title": "Rest Day",
+            "description": "Complete rest.", "duration_minutes": 0, "rpe": 0, "tss": 0,
+            "modification_reason": "No time for the lift today — it moves to Tuesday.",
+        }
+        original = {
+            "date": "2026-06-10", "sport_type": "cycling", "title": "Climb Threshold",
+            "description": "2x20 at threshold, seated. Even power beats a good average.",
+            "duration_minutes": 85, "rpe": 7, "tss": 84,
+        }
+        reworded = dict(original, description=(
+            "2x20 at threshold, seated. Wednesday's execution was exactly right."
+        ), modification_reason="Cue now references Wednesday.")
+        mock_coach.workout_adapt.return_value = RevisionProposal(
+            reason="Purely your time squeeze.", workouts=[rest, reworded],
+            new_constraints=[], range_start="2026-06-08", range_end="2026-06-30",
+            pairs=(
+                RevisionPair(proposal=rest, original=lift, is_swap=True),
+                RevisionPair(proposal=reworded, original=original, is_swap=False),
+            ),
+        )
+
+        with patch.dict(os.environ, {"TRAINMATE_RENDER": "simple"}):
+            exit_code, stdout, _stderr = self.run_cli(["workout", "adapt"])
+
+        self.assertEqual(exit_code, 0)
+        self.assertIn("Here's what I'd change:", stdout)
+        self.assertIn(
+            "🛌 Mon Jun 08: Rest Day (was Strength — Deload Volume, 55 min)\n"
+            "No time for the lift today — it moves to Tuesday.", stdout,
+        )
+        self.assertIn(
+            "🚴 Wed Jun 10: Climb Threshold — 85 min (same session, wording updated)\n"
+            "Cue now references Wednesday.\n\n"
+            "Was: Even power beats a good average.\n"
+            "Now: Wednesday's execution was exactly right.", stdout,
+        )
+        self.assertNotIn("PROPOSED WORKOUT ADAPTATIONS", stdout)
+        self.assertNotIn("Duration/RPE/TSS", stdout)
+        self.assertNotIn("TEXT REVISED", stdout)
+        self.assertIn("Okay — nothing changed.", stdout)
 
     @patch("trainmate.cli.workouts.generate.ensure_recent_data")
     @patch("trainmate.runtime.coach_service")

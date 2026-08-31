@@ -224,17 +224,23 @@ def run_workout_adapt(args: argparse.Namespace) -> None:
             runtime.coach_service.workout_revision_record_no_change(proposal)
             return
 
-        if not preview_and_confirm_revision(
-            proposal, "PROPOSED WORKOUT ADAPTATIONS:",
-            "Apply these adaptations to your training plan and sync to Calendar?",
-            auto=args.auto,
-        ):
-            print("\nAdaptations discarded.")
+        # Simple mode phrases the ask in companion words; the preview itself switches
+        # rendering on the same flag (DESIGN_bot_simple_frontend.md §6).
+        if is_simple_render():
+            heading, question = "Here's what I'd change:", "Shall I make these changes?"
+        else:
+            heading = "PROPOSED WORKOUT ADAPTATIONS:"
+            question = "Apply these adaptations to your training plan and sync to Calendar?"
+        if not preview_and_confirm_revision(proposal, heading, question, auto=args.auto):
+            print("\nOkay — nothing changed." if is_simple_render() else "\nAdaptations discarded.")
             return
 
         step("\nApplying adaptations...")
         runtime.coach_service.workout_revision_apply(proposal)
-        print(green("Adaptations applied and synced to calendar successfully."))
+        if is_simple_render():
+            print(green("Done — your plan is updated. 💪"))
+        else:
+            print(green("Adaptations applied and synced to calendar successfully."))
 
     except ValueError as e:
         # A domain refusal (no active plan to adapt towards), not a failure: say it

@@ -727,9 +727,21 @@ whole day, so anything held there is released.
 **The preview shows a text revision rather than merely marking it.** Its columns are title
 and load, so a session revised in words alone renders as
 `X | X | 85m/RPE7/TSS84 -> 85m/RPE7/TSS84` and reads as a change made for no reason. The row
-is tagged `[text revised]` and the changed sentences are printed under the table as a
-`-`/`+` diff. A preview that says a session changed but not how is what makes an honest
-revision look like a bug.
+is tagged `[text revised]` and the changed passages are printed under the table. A preview
+that says a session changed but not how is what makes an honest revision look like a bug.
+
+**The passages are shown as `Was:` / `Now:` pairs, not as a `-`/`+` diff.** The first
+version printed a unified diff: one line per sentence, signed. Observed 2026-08-31, over
+Telegram: the block was wrapped at a fixed 88 columns whatever the client had asked for, and
+the phone re-flowed every line, so the sign survived only on the first line of each
+sentence and the reader could not tell old from new. Even on a terminal a sentence-level
+`-`/`+` listing interleaves three dropped lines with four added ones and reads as noise. So
+the diff is grouped by block — each run of dropped sentences with the run that replaced
+it, joined back into a paragraph — and labelled in words: `Was:` / `Now:`, or `Dropped:` /
+`Added:` when a block has one side only. The text hangs under its label at the client's
+wrap width, so a narrow client keeps the label on every block. Simple mode
+(DESIGN_bot_simple_frontend.md §6) renders the whole preview as prose and reuses the same
+blocks, unwrapped, since that client flows text itself.
 
 **What a text revision costs, precisely.** Nothing that matters. It appends a revision row
 and re-pushes the Calendar event, and that is all: `_eased` (§7) counts a revision only when

@@ -1,15 +1,21 @@
 """Previewing an in-place revision before it is applied."""
 import difflib
 import re
-from typing import List
+from typing import List, Optional, Tuple
 
 from trainmate import runtime
 from trainmate.util import (
-    bold, green, red, yellow, cyan, magenta, gray, render_table, wrap_text,
+    bold, green, red, yellow, cyan, magenta, gray, render_table,
+    format_labeled_text, today_str,
 )
+from trainmate.cli.common import is_simple_render, simple_date_word, simple_session_line
 from trainmate.coach.proposals import RevisionProposal
 
 _SENTENCE_END = re.compile(r"(?<=[.!?])\s+")
+
+# A block of the wording diff: the sentences dropped and the sentences that took their
+# place, in reading order. Either side may be empty.
+WordingBlock = Tuple[List[str], List[str]]
 
 
 def _stats(w: dict) -> str:
@@ -46,16 +52,33 @@ def _sentences(text) -> List[str]:
     return out
 
 
-def _wording_diff(proposal: dict, original: dict) -> List[str]:
-    """The sentences that moved between two descriptions, as `-`/`+` lines."""
+def _wording_blocks(proposal: dict, original: dict) -> List[WordingBlock]:
+    """What moved between two descriptions, as (dropped, replacement) sentence blocks.
+
+    Blocks rather than a line-per-sentence `-`/`+` listing: a reader wants "this passage
+    became that passage", and sign-prefixed lines lose their sign the moment a phone
+    re-flows them (DESIGN_workout_revisions.md §9.1)."""
+    a = _sentences(original.get('description'))
+    b = _sentences(proposal.get('description'))
     return [
-        line for line in difflib.unified_diff(
-            _sentences(original.get('description')),
-            _sentences(proposal.get('description')),
-            lineterm="", n=0,
-        )
-        if not line.startswith(("---", "+++", "@@"))
+        (a[i1:i2], b[j1:j2])
+        for tag, i1, i2, j1, j2 in difflib.SequenceMatcher(None, a, b).get_opcodes()
+        if tag != 'equal'
     ]
+
+
+def _wording_block_lines(block: WordingBlock, indent: str = "") -> List[str]:
+    """One block as a labelled 'Was:' / 'Now:' pair (or 'Dropped:' / 'Added:' when one
+    side is empty), wrapped at the client's width with the text hanging under its label."""
+    dropped, added = block
+    lines: List[str] = []
+    if dropped:
+        label = "Was: " if added else "Dropped: "
+        lines.append(format_labeled_text(indent + label, " ".join(dropped), color_fn=red))
+    if added:
+        label = "Now: " if dropped else "Added: "
+        lines.append(format_labeled_text(indent + label, " ".join(added), color_fn=green))
+    return lines
 
 
 def _print_wording_changes(proposal: RevisionProposal) -> None:
@@ -74,11 +97,56 @@ def _print_wording_changes(proposal: RevisionProposal) -> None:
     print(bold(yellow("\nTEXT REVISED (same load, so the columns above cannot show it):")))
     for pw, existing in reworded:
         print(f"\n  {cyan(pw['date'])} {magenta(pw['sport_type'].upper())} — {pw['title']}")
-        for line in _wording_diff(pw, existing):
-            paint = red if line.startswith("-") else green
-            # "    - text": the space is what lets wrap_text see a list prefix and hang
-            # continuation lines under it.
-            print(paint(wrap_text(f"    {line[0]} {line[1:].strip()}", width=88)))
+        for block in _wording_blocks(pw, existing):
+            for line in _wording_block_lines(block, indent="    "):
+                print(line)
+
+
+def _is_rest(w: Optional[dict]) -> bool:
+    return bool(w) and (w.get('sport_type') or '').lower() == 'rest'
+
+
+def _simple_was_clause(pw: dict, existing: Optional[dict]) -> str:
+    """The parenthetical after a proposed session, saying what it replaces."""
+    if not existing:
+        return "new"
+    if _rewritten_text_only(pw, existing):
+        return "same session, wording updated"
+    if _is_rest(existing):
+        return "was a rest day"
+    parts = []
+    if existing.get('title') != pw.get('title'):
+        parts.append(existing['title'])
+    if (existing.get('duration_minutes') or 0) != (pw.get('duration_minutes') or 0):
+        parts.append(f"{existing.get('duration_minutes') or 0} min")
+    return "was " + ", ".join(parts) if parts else "adjusted"
+
+
+def _simple_preview_lines(proposal: RevisionProposal) -> List[str]:
+    """The revision as companion prose: one paragraph per touched day, no table and no
+    diff signs, so the phone can flow it (DESIGN_bot_simple_frontend.md §6). The
+    per-session reason is skipped when it merely repeats the batch reason printed above."""
+    today = today_str()
+    entries = []
+    for pair in proposal.pairs:
+        pw, existing = pair.proposal, pair.original
+        day = "Today" if pw['date'] == today else simple_date_word(pw['date'])
+        block = [f"{simple_session_line(pw, lead=day)} ({_simple_was_clause(pw, existing)})"]
+        why = (pw.get('modification_reason') or '').strip()
+        if why and why != (proposal.reason or '').strip():
+            block.append(why)
+        paragraphs = ["\n".join(block)]
+        if _rewritten_text_only(pw, existing):
+            # A blank line between blocks, so each Was/Now pair reads as one passage.
+            paragraphs.extend(
+                "\n".join(_wording_block_lines(b)) for b in _wording_blocks(pw, existing)
+            )
+        entries.append((pw['date'], "\n\n".join(paragraphs)))
+    for ew in proposal.removals:
+        day = "Today" if ew['date'] == today else simple_date_word(ew['date'])
+        entries.append((ew['date'], f"🗑 {day}: {ew['title']} — dropped"))
+    entries.sort(key=lambda e: e[0])
+    return [text for _, text in entries]
 
 
 def preview_and_confirm_revision(
@@ -89,6 +157,12 @@ def preview_and_confirm_revision(
     Everything drawn comes off the proposal — the range it evaluated and the sessions it
     saw — so the preview cannot disagree with what apply will do.
     """
+    if is_simple_render():
+        print(f"\n{heading}")
+        for entry in _simple_preview_lines(proposal):
+            print(f"\n{entry}")
+        return auto or runtime.prompt.confirm(question)
+
     print(bold(yellow(f"\n{heading}")))
     headers = ["Date", "Sport", "Original Workout", "Proposed Workout", "Duration/RPE/TSS"]
     rows = []

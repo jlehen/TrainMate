@@ -250,6 +250,19 @@ Initial opt-in set: `workout list` (today/week), `progress` (chart caption + two
 summary), the adapt result, and `bot morning`. The §11 breadth pass added `goal list`
 and `plan show`.
 
+**The adapt preview is prose too.** The first opt-in covered only the adapt *result*
+(the reason line and the no-change line); the preview between them still printed the
+expert table and the `-`/`+` wording diff, which simple mode then sent as flowed text —
+a 160-column table and signed diff lines re-wrapped by the phone (observed 2026-08-31).
+The preview now renders one paragraph per touched day under "Here's what I'd change:" —
+the session line in the day-view form, a parenthetical saying what it replaces ("was
+Strength — Deload Volume, 55 min", "was a rest day", "same session, wording updated"),
+the coach's per-session reason when it adds to the batch reason, and for a wording-only
+revision the changed passages as `Was:` / `Now:` pairs (DESIGN_workout_revisions.md
+§9.1). The confirm asks "Shall I make these changes?"; the outcome lines are companion
+words as well. Expert mode keeps the table, whose narrow-client form already stacks
+into records.
+
 **Tone rule** (the "not depressing" requirement): simple rendering leads with what was
 done and what is next, states gaps as neutral facts after the lead, and never opens
 with a miss. A skipped week reads "back on track Thursday — the coach adjusted for the
