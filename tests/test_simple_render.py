@@ -241,9 +241,9 @@ class PlanLinesTest(unittest.TestCase):
         lines = self._lines()
         self.assertEqual(lines[0], "🧭 The road to Marathon:")
         self.assertIn("✅ Base — done", lines[1])
-        self.assertIn("👉 Build — you're here, week 2 of 3", lines[2])
+        self.assertIn("📍 Build — you're here, week 2 of 3", lines[2])
         self.assertIn("Threshold work.", lines[3])
-        self.assertIn("🔜 Peak — starts Mon Sep 07, 10 days", lines[4])
+        self.assertIn("⚪ Peak — starts Mon Sep 07, 10 days", lines[4])
         self.assertIn("🏁 The big day: Sat Sep 26 (in 4 weeks)", lines[-1])
 
     def test_exact_week_blocks_read_in_weeks(self):
@@ -253,7 +253,7 @@ class PlanLinesTest(unittest.TestCase):
               "end_date": "2026-09-20", "focus": "Race sharpening."}],
             "2026-08-30",
         )
-        self.assertIn("🔜 Peak — starts Mon Sep 07, 2 weeks", lines[1])
+        self.assertIn("⚪ Peak — starts Mon Sep 07, 2 weeks", lines[1])
 
     def test_a_long_focus_shrinks_to_its_first_sentence(self):
         wall = ("Three weeks: two loading microcycles plus a deload. LOADING WEEKS: "

@@ -551,7 +551,7 @@ def simple_plan_lines(
             total_weeks = max(1, -(-total_days // 7))  # ceiling
             week_now = min(total_weeks, days_between(start, today) // 7 + 1)
             lines.append(
-                f"👉 {m['name']} — you're here, week {week_now} of {total_weeks}"
+                f"📍 {m['name']} — you're here, week {week_now} of {total_weeks}"
             )
             focus = (m.get("focus") or "").strip()
             if focus:
@@ -564,7 +564,7 @@ def simple_plan_lines(
             length = "1 week" if weeks == 1 else f"{weeks} weeks"
         else:
             length = f"{total_days} days"
-        lines.append(f"🔜 {m['name']} — starts {simple_date_word(start)}, {length}")
+        lines.append(f"⚪ {m['name']} — starts {simple_date_word(start)}, {length}")
     date_word = simple_date_word(str(goal["target_date"]))
     when = simple_when(str(goal["target_date"]), today)
     if goal.get("date_type") == "horizon":

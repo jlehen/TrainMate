@@ -417,7 +417,11 @@ companion form is the road to the goal, one line per block: done blocks get a �
 nothing more, the block she is in is located by week ("you're here, week 2 of 3") and
 carries the first sentence of its focus (`simple_focus_snippet` — the full prescription
 is dense coach prose and stays expert detail), and future blocks get their start day and
-length. The goal day closes the road, reusing the goal view's wording rule. Strategy
+length. The three line markers are stops on that road, sized to match the 🧭 opener and
+🏁 close: ✅ behind her, 📍 where she stands, ⚪ still ahead. Badge-style emoji (🔜, and
+its family) are out — at chat size they render as a coloured box with unreadable text,
+and they say nothing the "starts Mon Sep 07" already says.
+The goal day closes the road, reusing the goal view's wording rule. Strategy
 prose, feedback, snapshotted inputs, IDs and the progress bars all stay in the expert
 view; wherever that view would suggest `plan generate`, simple mode says the plan "will
 appear once your goal is set up" — the athlete in companion mode cannot run it, the
