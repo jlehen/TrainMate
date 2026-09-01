@@ -8,7 +8,7 @@ invocation.
 
 With ``telegram.ui: simple`` the same pipeline gains a companion persona
 (DESIGN_bot_simple_frontend.md): a persistent reply keyboard maps buttons onto fixed
-argv, unarmed free text goes through an intent router (``tm bot route``), a morning
+argv, free text goes through an intent router (``tm bot route``), a morning
 scheduler spawns ``tm bot morning``, and replies arrive as plain prose
 (``TRAINMATE_RENDER=simple``) instead of ``<pre>`` blocks. Expert mode (the default)
 is untouched; slash-prefixed text stays the expert path in both modes. ``/ui`` flips
@@ -128,8 +128,8 @@ SIMPLE_WELCOME = (
     "🎯 Goals — what you're training for\n"
     "🧭 My plan — the road to your goal\n"
     "📈 Progress — how your fitness is building\n"
-    "💬 Tell my coach — pass something on (tired, busy, sore…)\n\n"
-    "Or just type what you want, in your own words."
+    "💬 Talk to me — anything I should know (tired, busy, sore…)\n\n"
+    "Or just type what you want, in your own words — it's the same thing."
 )
 
 SIMPLE_HELP = SIMPLE_WELCOME
@@ -156,7 +156,7 @@ SIMPLE_KEYBOARD = [
     ("🎯 Goals", ["goal", "list"]),
     ("🧭 My plan", ["plan", "show"]),
     ("📈 Progress", ["progress", "--chart"]),
-    ("💬 Tell my coach", None),
+    ("💬 Talk to me", None),
 ]
 
 # The router's intent → argv table (§5.3): the model (via `tm bot route`) only picks
@@ -591,10 +591,11 @@ def main() -> None:
         )
 
     sessions: Dict[int, _Session] = {}
-    # Simple-mode chat state: chats armed for "Tell my coach" capture (chat_id →
-    # monotonic arm time, cleared after one message, /cancel or the prompt timeout,
-    # §5.2), and the live TM-BUTTONS payload per chat (chat_id → (token, buttons),
-    # valid until replaced by the next push, §4.4).
+    # Simple-mode chat state: chats that just tapped "💬 Talk to me" (chat_id →
+    # monotonic arm time, cleared after one message, /cancel or the prompt timeout);
+    # the tap only keeps an unroutable message from bouncing (§5.2). Plus the live
+    # TM-BUTTONS payload per chat (chat_id → (token, buttons), valid until replaced
+    # by the next push, §4.4).
     armed: Dict[int, float] = {}
     ui_actions: Dict[int, Tuple[str, List[dict]]] = {}
 
@@ -876,10 +877,15 @@ def main() -> None:
                 continue
         return "unclear"
 
-    async def _simple_route(chat_id: int, text: str) -> Optional[List[str]]:
-        """Maps unarmed simple-mode free text onto argv via the intent router (§5.3).
+    async def _simple_route(
+        chat_id: int, text: str, armed_tap: bool = False
+    ) -> Optional[List[str]]:
+        """Maps simple-mode free text onto argv via the intent router (§5.3).
         Replies itself (help text, gentle fallback) and returns None when nothing
-        should run; otherwise echoes the routed action and returns the argv."""
+        should run; otherwise echoes the routed action and returns the argv.
+
+        `armed_tap` — she just tapped "💬 Talk to me". It never changes a message the
+        router could read, so the tap has nothing to explain (§5.2)."""
         intent = await _route_intent(text)
         _log(chat_id, "  ", f"routed: {intent}")
         # add_constraint and add_signal share coach_message's inbox: the `adapt -m`
@@ -901,10 +907,15 @@ def main() -> None:
             )
             return None
         else:
-            await bot.send_message(
-                chat_id=chat_id, text=ROUTER_FALLBACK, reply_markup=_keyboard()
-            )
-            return None
+            if not armed_tap:
+                await bot.send_message(
+                    chat_id=chat_id, text=ROUTER_FALLBACK, reply_markup=_keyboard()
+                )
+                return None
+            # A note the router cannot place is still a note (§5.2).
+            _log(chat_id, "  ", "armed: unroutable text rides the inbox")
+            intent = "coach_message"
+            argv = ["workout", "adapt", "-m", text]
         echo = ROUTER_ECHO.get(intent)
         if echo:
             await bot.send_message(
@@ -914,13 +925,14 @@ def main() -> None:
         return argv
 
     def _capture_armed(chat_id: int) -> bool:
-        """Consumes a chat's "Tell my coach" arming; stale arming (past the prompt
-        timeout) reads as unarmed, so a next-morning message isn't swallowed (§5.2)."""
+        """Consumes a chat's "💬 Talk to me" tap; a stale one (past the prompt
+        timeout) reads as untapped, so a next-morning message isn't quietly taken as
+        a note (§5.2)."""
         armed_at = armed.pop(chat_id, None)
         return armed_at is not None and (time.monotonic() - armed_at) <= prompt_timeout
 
     async def _cancel(chat_id: int) -> str:
-        armed.pop(chat_id, None)  # /cancel also disarms "Tell my coach" (§5.2)
+        armed.pop(chat_id, None)  # /cancel also drops a "💬 Talk to me" tap (§5.2)
         session = sessions.get(chat_id)
         if session is None:
             return "Nothing to cancel."
@@ -1024,8 +1036,8 @@ def main() -> None:
             return
 
         # Simple mode: non-slash text is the companion surface — keyboard labels,
-        # armed capture, then the free-text router (§5). A leading slash stays the
-        # expert path, so the operator can still drive the instance from its chat.
+        # then the free-text router for everything else (§5). A leading slash stays
+        # the expert path, so the operator can still drive the instance from its chat.
         if simple_ui and not text.startswith("/"):
             action = keyboard_action(text)
             if action is not None and action[0] == "capture":
@@ -1034,11 +1046,10 @@ def main() -> None:
                 return
             if action is not None:
                 argv = list(action[1])
-            elif _capture_armed(chat.id):
-                argv = ["workout", "adapt", "-m", text]
             else:
                 await context.bot.send_chat_action(chat_id=chat.id, action="typing")
-                argv = await _simple_route(chat.id, text)
+                # Read the tap here so it is consumed once per message, routed or not.
+                argv = await _simple_route(chat.id, text, _capture_armed(chat.id))
                 if argv is None:
                     return
             _log(chat.id, "  ", f"run: {shlex.join(argv)}")

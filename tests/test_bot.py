@@ -319,7 +319,13 @@ class SimpleKeyboardTest(unittest.TestCase):
         )
 
     def test_capture_button_arms_instead_of_running(self):
-        self.assertEqual(bot.keyboard_action("💬 Tell my coach"), ("capture", None))
+        self.assertEqual(bot.keyboard_action("💬 Talk to me"), ("capture", None))
+
+    def test_welcome_names_every_keyboard_label(self):
+        """The welcome teaches the keyboard, so a relabelled button cannot drift
+        out of it (§5.1)."""
+        for label, _ in bot.SIMPLE_KEYBOARD:
+            self.assertIn(label, bot.SIMPLE_WELCOME, label)
 
     def test_non_label_text_is_not_a_button(self):
         self.assertIsNone(bot.keyboard_action("show me my week"))

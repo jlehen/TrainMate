@@ -153,10 +153,13 @@ classes themselves.
     The same pipeline gains a persona for a non-technical athlete; expert mode is
     untouched. A persistent reply keyboard (two labels per row) maps labels onto fixed
     argv (`SIMPLE_KEYBOARD`): today, the week, goals, the periodization plan, progress
-    (DESIGN_bot_simple_frontend.md §5.1, §11); "💬 Tell my coach" arms one free-text
-    message for `workout adapt -m`; other unarmed free text is classified by `tm bot route`
+    (DESIGN_bot_simple_frontend.md §5.1, §11); "💬 Talk to me" only shows the capture
+    prompt — every non-label message, tapped or not, is classified by `tm bot route`
     (a hidden CLI command calling `llm.router_model`) and mapped to argv from the bot's
-    own `ROUTER_INTENT_ARGV` table — the model picks an intent, never argv. Constraints
+    own `ROUTER_INTENT_ARGV` table — the model picks an intent, never argv. The tap's
+    one effect is invisible and can only help: while it is live, text the router calls
+    `unclear` rides the `adapt -m` inbox instead of bouncing, so the button never
+    redirects a message, only rescues one (§5.2). Constraints
     and daily signals are part of that surface: adding either rides the `adapt -m`
     capture flow (`add_constraint` and `add_signal` share `coach_message`'s inbox and
     build identical argv — they differ only in the echo line), and showing/removing

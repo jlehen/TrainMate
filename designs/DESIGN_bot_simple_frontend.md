@@ -161,19 +161,37 @@ of six buttons (two per row, in table order), each mapping to fixed argv:
 | 🎯 Goals         | `goal list` (§11)             |
 | 🧭 My plan       | `plan show` (§11)             |
 | 📈 Progress      | `progress --chart`            |
-| 💬 Tell my coach | arms free-text capture (§5.2) |
+| 💬 Talk to me    | shows the capture prompt (§5.2)|
 
 The `/start` welcome and `set_my_commands` menu get simple-mode variants to match.
 Labels live in one table in `trainmate_bot.py` beside `MENU_COMMANDS`, import-safe and
 unit-testable like the existing pure helpers.
 
-### 5.2 "Tell my coach"
+### 5.2 "Talk to me"
 
-Tapping it arms the chat: the next free-text message goes verbatim to
-`workout adapt -m "<text>"` — the classifier there already separates durable
-constraint-shaped notes from one-off hints, which is exactly the fast-capture contract.
-Arming shows "I'm listening — what should I know?" and clears after one message,
-`/cancel`, or the prompt timeout.
+The button is an *invitation*, not a channel. It exists so the keyboard says out
+loud that free text works at all — something five view buttons otherwise hide from
+a receiving-first athlete. Tapping it replies "I'm listening — what should I know?"
+and changes nothing else: the next message goes through the same router (§5.3) as
+any typed message and lands exactly where that message would have landed anyway.
+
+One thing does differ, and deliberately never shows. While a tap is live, a message
+the router returns `unclear` for rides the `adapt -m` inbox instead of bouncing off
+`ROUTER_FALLBACK`. She has just been asked what the coach should know, so an
+unreadable answer is far likelier to be a note the router failed than a stray
+remark. The tap can therefore only ever *rescue* a message, never redirect one —
+which is what keeps it explicable: "tap 💬 or just type, same thing" stays true in
+every case the athlete can observe. The tap clears after one message, `/cancel`, or
+the prompt timeout, so a next-morning message is routed normally rather than quietly
+taken as a note.
+
+**Why this is not a mode.** Until 2026-09-01 the tap *bypassed* the router: the next
+message went verbatim to `adapt -m`. A question typed after a tap ("What are my
+constraints?") therefore became a training note, and a full adaptation ran on it.
+The rule was correct, documented, and still unusable — because nobody could state it
+in one sentence to the athlete it was written for. In simple mode that is the test:
+an affordance whose behaviour cannot be explained in one sentence is a design defect,
+not a documentation gap. Collapse the behaviours instead of writing better copy.
 
 ### 5.3 The free-text router
 
@@ -318,7 +336,7 @@ earns it is expert detail, and the chat surface does not audit.
 
 | File | Change |
 |---|---|
-| `trainmate_bot.py` | ui-mode switch (config at start, `/ui` flips it live, §5.6), reply keyboard + label→argv table, armed-capture chat state, `ui:` callback namespace, `TM-BUTTONS` parsing, push scheduler task |
+| `trainmate_bot.py` | ui-mode switch (config at start, `/ui` flips it live, §5.6), reply keyboard + label→argv table, capture-tap chat state (§5.2), `ui:` callback namespace, `TM-BUTTONS` parsing, push scheduler task |
 | `trainmate/prompt.py` | `BUTTONS_SENTINEL` + `emit_buttons()` (mirror of `emit_photo`) |
 | `trainmate/cli/bot.py` | new hidden family: `bot morning`, `bot route`, `bot constraints` |
 | `trainmate/config.py` | `telegram_ui`; the push knobs and the router role resolve through `trainmate/settings.py` |
