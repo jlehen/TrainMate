@@ -385,9 +385,13 @@ class RouterTablesTest(unittest.TestCase):
     argv in trainmate_bot.py (what each intent runs) — a rule that spans files, pinned
     here so the two tables cannot drift (§5.3)."""
 
+    # The intents that carry the athlete's text into the `adapt -m` inbox. They run the
+    # same argv and differ only in the echo, so a misroute among them stores the same
+    # thing — which is why the inbox needs no per-kind intent (§5.5).
+    INBOX = {"coach_message", "add_constraint", "add_signal"}
     # Intents the bot answers itself or maps with the athlete's text attached.
     # `new_goal` is reply-only and deliberately runs nothing (DESIGN_runway_nudge.md §6).
-    SPECIAL = {"coach_message", "add_constraint", "help", "unclear", "new_goal"}
+    SPECIAL = INBOX | {"help", "unclear", "new_goal"}
 
     def test_every_cli_intent_lands_somewhere_in_the_bot(self):
         from trainmate.cli.bot import ROUTER_INTENTS
@@ -400,6 +404,17 @@ class RouterTablesTest(unittest.TestCase):
         from trainmate.cli.bot import ROUTER_INTENTS
         for intent in list(bot.ROUTER_INTENT_ARGV) + list(bot.ROUTER_ECHO):
             self.assertIn(intent, ROUTER_INTENTS)
+
+    def test_inbox_intents_carry_text_and_differ_only_in_the_echo(self):
+        from trainmate.cli.bot import ROUTER_INTENTS
+        for intent in self.INBOX:
+            self.assertIn(intent, ROUTER_INTENTS, intent)
+            # No argv of their own: the text rides along, so the dispatch builds it.
+            self.assertNotIn(intent, bot.ROUTER_INTENT_ARGV, intent)
+            # An echo each, and a distinct one — the only thing the split buys.
+            self.assertIn(intent, bot.ROUTER_ECHO, intent)
+        echoes = [bot.ROUTER_ECHO[i] for i in self.INBOX]
+        self.assertEqual(len(set(echoes)), len(echoes))
 
 
 class ButtonsProtocolTest(unittest.TestCase):

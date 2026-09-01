@@ -186,8 +186,8 @@ flags the table doesn't expose.
 
 Intent table: `show_today`, `show_week`, `show_goals` / `show_plan` (§11),
 `show_progress`, `coach_message` (→ `adapt -m`, carrying the original text),
-`add_constraint` (→ the same `adapt -m` inbox, §5.5), `show_constraints` /
-`remove_constraint` (→ `bot constraints`, §5.5), `help`, `unclear`. `unclear` renders a gentle fallback with the keyboard as the suggestion. The
+`add_constraint` / `add_signal` (→ the same `adapt -m` inbox, §5.5),
+`show_constraints` / `remove_constraint` (→ `bot constraints`, §5.5), `help`, `unclear`. `unclear` renders a gentle fallback with the keyboard as the suggestion. The
 routed command is echoed in one short italic line ("→ showing your week") so she learns
 the vocabulary and misroutes are visible immediately.
 
@@ -206,7 +206,7 @@ both roles (DESIGN_settings.md §4.1). `coach-model` and `settings set coach-mod
 meaning the coaching model; `settings list coach-model` marks which menu entry currently
 holds which role.
 
-### 5.5 Constraints in chat
+### 5.5 Constraints and signals in chat
 
 "Show my rules" / "I can run again" route to a hidden `tm bot constraints`: the
 current-and-upcoming directives in companion prose (day words, no IDs or tier tags)
@@ -214,10 +214,25 @@ plus a §4.4 button picker whose leaves each send the deterministic `constraint 
 <id>`. The model only ever picks the *intent*; which row is removed is decided by the
 athlete's tap on a button the CLI built from real IDs.
 
-Adding needs no new machinery: `add_constraint` lands in the same `workout adapt -m`
-inbox as `coach_message` — the two-confirmation capture flow there
-(DESIGN_constraints.md §8) already extracts the rule and asks before persisting it — so
-a state-vs-rule misroute between the two intents is harmless by construction.
+Adding needs no new machinery, for either kind. `add_constraint` and `add_signal` land
+in the same `workout adapt -m` inbox as `coach_message`, and the one call there extracts
+both: the two-confirmation capture flow asks before persisting a rule
+(DESIGN_constraints.md §8) or a signal (DESIGN_signal_extraction.md §2). The three
+intents build identical argv and differ only in the echo line, so a misroute among them
+changes what the athlete is told the coach heard, never what is stored. A kind of note
+therefore earns an intent only to be echoed in its own words — never to reach a
+different command.
+
+**Why there is no `remove_signal`, and no signal counterpart to `bot constraints`.**
+The two records point in opposite directions. A constraint points *forward*: it shapes
+every plan and adaptation until it expires, so a stale one keeps bending the schedule,
+and the athlete is the only one who knows it should go. That is what earns
+`constraint rm` its place as the single tap-reachable mutation in §7. A signal points
+*backward*: it records what acted on the body on days already lived, read beside the
+HRV/RHR/sleep numbers as evidence, and never consulted when a future session is written.
+A wrong one costs a little accuracy in one correlation; it cannot mis-shape training.
+So `signal rm` stays expert-only — the cleanup is real, but it is not urgent, not
+phone-shaped, and not worth widening the §7 guardrail for.
 
 ### 5.6 The `/ui` runtime switch
 

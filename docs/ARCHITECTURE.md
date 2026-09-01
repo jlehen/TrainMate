@@ -157,9 +157,13 @@ classes themselves.
     message for `workout adapt -m`; other unarmed free text is classified by `tm bot route`
     (a hidden CLI command calling `llm.router_model`) and mapped to argv from the bot's
     own `ROUTER_INTENT_ARGV` table — the model picks an intent, never argv. Constraints
-    are part of that surface: adding rides the `adapt -m` capture flow, and
-    showing/removing map to `tm bot constraints`, whose button picker offers single-ID
-    `constraint rm` taps (DESIGN_bot_simple_frontend.md §5.5). Subprocesses
+    and daily signals are part of that surface: adding either rides the `adapt -m`
+    capture flow (`add_constraint` and `add_signal` share `coach_message`'s inbox and
+    build identical argv — they differ only in the echo line), and showing/removing
+    constraints map to `tm bot constraints`, whose button picker offers single-ID
+    `constraint rm` taps. Signals get no removal counterpart on purpose: they are
+    backward-looking evidence, not a rule that keeps shaping the schedule
+    (DESIGN_bot_simple_frontend.md §5.5). Subprocesses
     additionally get `TRAINMATE_RENDER=simple` (interpreted by
     `cli/common.is_simple_render`) so opted-in commands (`workout list`, `progress`,
     the adapt result, `bot morning`, `goal list`, `plan show`, `workout generate`'s
@@ -723,16 +727,25 @@ called by the UIs.
 - **`replan(force, objective_id)`** — convenience: `plan_generate` then
   `workout_generate`.
 - **`workout_adapt(target_date_str, message=None)`** — fetches metrics + workouts in
-  the rolling window, calls `CoachEngine._workout_adapt_logic()`, returns the 3-tuple
-  `(reason, proposed_workouts, new_constraints)`; caller decides whether to apply.
-  - **`message`** (CLI `-m/--message`): a fast-capture inbox (DESIGN_constraints.md §8).
-    There is no separate classification call — the same adapt call may return
-    constraint-shaped directives extracted from the note as `new_constraints`, raw and
-    **unconfirmed**. The CLI confirms each with the athlete, then persists it via
-    `capture_message_constraint` (singular, one call per confirmed candidate) as a
-    `constraint` row (`source='message'`, `replan=0`, honored this run and every future
-    run). Auto-capture never sets `replan=1` — a plan-shaping capture only *surfaces a
-    suggestion* to escalate.
+  the rolling window, calls `CoachEngine._workout_adapt_logic()`, returns a
+  `RevisionProposal` (`coach/proposals.py`) carrying `reason`, `workouts`, `pairs`/
+  `removals` and the two candidate lists below; caller decides whether to apply.
+  - **`message`** (CLI `-m/--message`): a fast-capture inbox. There is no separate
+    classification call — the same adapt call may return two kinds of candidate
+    extracted from the note, both raw and **unconfirmed**, both gated on the same
+    `has_message` flag:
+    - `new_constraints` — constraint-shaped directives (DESIGN_constraints.md §8). The
+      CLI confirms each with the athlete, then persists it via
+      `capture_message_constraint` (singular, one call per confirmed candidate) as a
+      `constraint` row (`source='message'`, `replan=0`, honored this run and every
+      future run). Auto-capture never sets `replan=1` — a plan-shaping capture only
+      *surfaces a suggestion* to escalate.
+    - `new_signals` — the external causes acting on the athlete on given days
+      (DESIGN_signal_extraction.md). Confirmed one at a time before the adaptation
+      preview, then written through `capture_message_signal` → `signals.write_signal_days`,
+      the same calendar-first path `signal add` uses ([§13](#13-daily-signal-calendar-ingest)).
+      `value` survives only when it is a real number, so a model's guess cannot enter
+      the quantitative path as a measurement.
   - **Rest-window pre-pass** (`_enforce_rest_windows_revision`): eases any future,
     not-yet-completed planned session under a `rest = 1` constraint to rest, regardless
     of the model's proposals.
