@@ -51,8 +51,10 @@ one macrocycle plus its mesocycle blocks. The scheduled sessions are *workouts*,
 
 The dashed line matters. `workouts.macrocycle_id` records which plan version produced a
 session, but there is no foreign key and therefore no cascade. Deleting a goal removes
-its plan versions, blocks and feedback, and leaves its sessions behind — which is why
-`goal rm` counts them and warns before it runs (§9.7).
+its plan versions, blocks and feedback, and leaves its sessions behind. That is the
+reason deleting is not what `goal rm` does — it calls the goal off instead, which stands
+those sessions down properly. The delete survives as `goal rm --purge`, and it counts the
+sessions it would strand and warns before it runs (§9.7).
 
 ---
 
@@ -128,8 +130,9 @@ one by accident:
 |---|---|
 | `goal add TITLE DATE SPORT…` | Create. `--desc`, `--date-type`. |
 | `goal edit ID` | Change any field. `--status archived` / `--status active` — see below. |
-| `goal list` | List all. |
-| `goal rm ID` | **Destructive.** Deletes the goal and cascades to every plan version, block and feedback note. Prints that inventory plus the number of upcoming sessions it would strand, then asks. |
+| `goal list` | List the goals that matter — upcoming and completed. `-a/--all` adds the ones called off. |
+| `goal rm ID` | Calls the goal off — the same thing as `--status archived`, under the verb people reach for. Reversible, so it does not ask. |
+| `goal rm ID --purge` | **Destructive.** Deletes the goal and cascades to every plan version, block and feedback note. Prints that inventory plus the number of upcoming sessions it would strand, then asks. For a goal entered by mistake. |
 | `goal wipe` | Delete all goals. |
 
 **Archiving is not deleting, and the difference is the point.**
@@ -831,21 +834,23 @@ macrocycle is inserted. **Workouts are untouched** — they still carry the old 
 `macrocycle_id` — until `workout generate` runs, which archives from today forward and
 rebuilds.
 
-### 9.6 A goal is archived and later reinstated
+### 9.6 A goal is called off and later reinstated
 
-Archiving stands down the upcoming sessions of *that goal's* plan versions and clears their
+`goal rm ID` and `goal edit ID --status archived` are two names for this one action.
+It stands down the upcoming sessions of *that goal's* plan versions and clears their
 Calendar events. The plan, its versions and its feedback survive intact. Past sessions stay.
 Reinstating restores the stood-down batch, floored at today, and re-pushes it.
 
-### 9.7 A goal is deleted
+### 9.7 A goal is purged
 
-The cascade takes every plan version, every block and every feedback note. It does **not**
+Only `goal rm --purge` gets here; plain `goal rm` calls the goal off (§9.6). The cascade
+takes every plan version, every block and every feedback note. It does **not**
 take the workouts, because `workouts.macrocycle_id` is a plain integer with no foreign key.
-Those sessions are left with no plan to explain them, which is why `goal rm` counts them
+Those sessions are left with no plan to explain them, which is why the purge counts them
 first and says so:
 
 ```
-Removing goal 'Autumn Marathon' (ID 3) also deletes:
+Purging goal 'Autumn Marathon' (ID 3) also deletes:
   - 2 periodization plan version(s)
   - 8 mesocycle block(s)
   - 3 plan feedback note(s)
@@ -894,8 +899,10 @@ Worth knowing, because each of these is a decision rather than an oversight:
   would put the app back in the business of correcting the model rather than aligning for it.
 - **A block having any load target at all.** A block states a name, a span and a focus.
   Everything quantitative is derived downstream from the sessions.
-- **Workouts pointing at a real macrocycle.** No foreign key, so no cascade, so a deleted
-  goal strands its sessions — reported at `goal rm` time rather than prevented.
+- **Workouts pointing at a real macrocycle.** No foreign key, so no cascade, so a purged
+  goal strands its sessions — reported at `goal rm --purge` time rather than prevented.
+  Calling a goal off does not have this problem: it sweeps the sessions by plan version
+  before archiving anything.
 - **The gap between plans.** `get_active_mesocycle` snaps from "one day left" to "the whole
   next block" across a calendar gap rather than tapering. Within one plan such a gap no
   longer exists (invariant 16); one can still open between two goals' plans. Both features

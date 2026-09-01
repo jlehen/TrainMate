@@ -131,11 +131,12 @@ after the existing confirm prompt.
 ## §b1 — A delete that cascades names what it takes before it asks
 
 Naming the *target* (§b) is enough while the target is the whole story. It stops
-being enough when the delete reaches rows the athlete never named: `goal rm` and
-`plan rm` both remove **every** macrocycle the goal owns, so mesocycles and plan
+being enough when the delete reaches rows the athlete never named: `goal rm --purge`
+and `plan rm` both remove **every** macrocycle the goal owns, so mesocycles and plan
 feedback cascade with them, while sessions keep a `macrocycle_id` that no longer
 resolves — the workouts table holds no foreign key, by design, so a session
-outlives its plan.
+outlives its plan. (Plain `goal rm` calls the goal off and destroys nothing, so it
+is not a §b1 command at all — DESIGN_backward_evaluation.md §14.5.)
 
 Both therefore print the inventory first — versions, blocks, notes, and the count
 of upcoming sessions left stranded — then a dimmed pointer at the reversible

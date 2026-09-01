@@ -600,8 +600,8 @@ class WorkoutsMixin:
     ) -> int:
         """How many live sessions on/after `from_date` those plan versions generated.
 
-        What `goal rm` would strand: deleting the goal cascades the versions away but not
-        the sessions tagged with them (DESIGN_backward_evaluation.md §14)."""
+        What `goal rm --purge` would strand: deleting the goal cascades the versions away
+        but not the sessions tagged with them (DESIGN_backward_evaluation.md §14.5)."""
         if not macrocycle_ids:
             return 0
         with self._get_connection() as conn:

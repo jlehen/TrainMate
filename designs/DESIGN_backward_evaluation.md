@@ -958,8 +958,9 @@ sessions are tagged with a macrocycle, not owned by it, so a cascade leaves them
 exactly as live as archiving did — only now nothing remains that could explain
 what they were for. Deletion strands the sessions *and* burns the history.
 
-So archiving is the normal path and it stands the sessions down; `goal rm` stays
-as the escape hatch for a goal entered by mistake.
+So archiving is the normal path and it stands the sessions down. §14.5 then
+took the last step this reasoning implies: `goal rm` *is* that path, and the
+delete became a flag on it.
 
 ### 14.3 The sweep is scoped by plan version, not by date
 
@@ -988,17 +989,41 @@ a plan that no longer suits the athlete. The restore is floored at today by
 `restore_workout_batch`, so a late reinstate recovers only what is still ahead;
 declining leaves the batch archived and `workout batches` still lists it.
 
-### 14.5 `goal rm` says what it is about to take
+### 14.5 `goal rm` calls the goal off; `--purge` deletes it
 
-Deleting a goal remains possible and remains a cascade. It now prints the
-inventory first — plan versions, blocks, feedback notes, and the count of
-upcoming sessions it would strand — names `goal edit --status archived` as the
-reversible alternative, and asks. `-y` skips the prompt for scripted use, as on
-`goal wipe`.
+§14.2 argued that deleting a goal is a strictly worse answer than archiving it,
+then left `goal rm` pointing at the worse one. Naming the better path
+`goal edit --status archived` did not help: `rm` is the verb an athlete reaches
+for when a race is off, and it is the verb the command list puts in front of
+them. Warning them off the default, every time, is a sign the default is wrong.
+
+So `goal rm ID` now calls the goal off. It is the same action as
+`goal edit --status archived` under a second name — it writes `status`, runs the
+same `goal_archive` sweep, and prints the same summary of what stood down. It
+does not ask, for the reason §14.4 gives: archival is reversible and the summary
+line says what it took. It names `goal edit --status active` as the way back.
+Running it on a goal already called off says so and stops.
+
+What was left of the case for deleting is that a goal entered by mistake — a
+typo, a duplicate — had nowhere to go but a permanent grey `[ARCHIVED]` line in
+`goal list`. That is a real annoyance and it is the *only* thing archiving does
+not answer, so it keeps a hatch and not a default: `goal rm ID --purge` is the
+old cascade, unchanged. It prints the inventory first — plan versions, blocks,
+feedback notes, and the count of upcoming sessions it would strand — points at
+plain `goal rm` as the reversible alternative, and asks. `-y` skips that prompt
+for scripted use, as on `goal wipe`.
 
 `plan rm` deletes the same cascade minus the goal row, so it prints the same
 inventory from the same renderer; the shared convention is
 DESIGN_cli_noargs.md §b1.
+
+The clutter that argument rests on is worth removing rather than tolerating, so
+`goal list` now hides called-off goals and counts them in a footer, with
+`-a/--all` to show them. The list is then about the goals that matter — the same
+population `upcoming_objectives` already means everywhere else — and calling a
+goal off leaves no tombstone to want deleted. The simple frontend needed no
+change: `simple_goal_lines` already said nothing about an archived goal (§6 tone
+rule).
 
 ---
 

@@ -87,18 +87,42 @@ class TestCliGoals(unittest.TestCase):
         self.assertIn("Hybrid Strength Endurance", stdout)
         self.assertIn("cycling,strength_training", stdout)
 
-        # Unconfirmed `goal rm` shows the cascade inventory and keeps the goal (§14).
+        # `goal rm` calls the goal off: no prompt, and the row survives archived (§14.5).
         exit_code, stdout, stderr = self.run_cli(["goal", "rm", "1"])
         self.assertEqual(exit_code, 0)
-        self.assertIn("also deletes", stdout)
-        self.assertIn("--status archived", stdout)
-        self.assertIn("Removal cancelled", stdout)
+        self.assertIn("Goal called off", stdout)
+        self.assertEqual(test_db.get_objective(1)["status"], "archived")
 
-        exit_code, stdout, stderr = self.run_cli(["goal", "rm", "1", "-y"])
-        self.assertEqual(exit_code, 0)
-        self.assertIn("Goal with ID 1 removed successfully", stdout)
-
+        # A called-off goal drops out of the list and is counted in the footer instead.
         exit_code, stdout, stderr = self.run_cli(["goal", "list"])
+        self.assertEqual(exit_code, 0)
+        self.assertNotIn("Zurich Marathon", stdout)
+        self.assertIn("1 called-off goal(s) hidden", stdout)
+
+        exit_code, stdout, stderr = self.run_cli(["goal", "list", "--all"])
+        self.assertEqual(exit_code, 0)
+        self.assertIn("[ARCHIVED] ID: 1 | Zurich Marathon", stdout)
+        self.assertNotIn("hidden", stdout)
+
+        # Calling off a goal that is already off says so and points at the delete.
+        exit_code, stdout, stderr = self.run_cli(["goal", "rm", "1"])
+        self.assertEqual(exit_code, 0)
+        self.assertIn("already called off", stdout)
+        self.assertIn("--purge", stdout)
+
+        # Unconfirmed `--purge` shows the cascade inventory and keeps the goal (§14.5).
+        exit_code, stdout, stderr = self.run_cli(["goal", "rm", "1", "--purge"])
+        self.assertEqual(exit_code, 0)
+        self.assertIn("also deletes", stdout)
+        self.assertIn("Purge cancelled", stdout)
+        self.assertIsNotNone(test_db.get_objective(1))
+
+        exit_code, stdout, stderr = self.run_cli(["goal", "rm", "1", "--purge", "-y"])
+        self.assertEqual(exit_code, 0)
+        self.assertIn("Goal with ID 1 purged", stdout)
+        self.assertIsNone(test_db.get_objective(1))
+
+        exit_code, stdout, stderr = self.run_cli(["goal", "list", "--all"])
         self.assertEqual(exit_code, 0)
         self.assertNotIn("Zurich Marathon", stdout)
 
@@ -311,17 +335,61 @@ class TestCliGoalArchival(unittest.TestCase):
         self.assertEqual(test_db.get_workouts(start_date=_days_out(0)), [])
 
     @patch("trainmate.runtime.calendar_syncer")
-    def test_goal_rm_inventories_what_the_cascade_will_take(self, _cal):
-        """`goal rm` names the plan history it destroys and points at the reversible
-        alternative before asking (§14)."""
+    def test_goal_rm_calls_the_goal_off_and_is_reversible(self, _cal):
+        """`goal rm` is the same action as `goal edit --status archived` under the verb
+        people reach for: sessions stand down, the plan survives, and reinstating brings
+        both back (§14.5)."""
+        oid, mid = self._goal_with_session()
+
+        exit_code, stdout, _stderr = self.run_cli(["goal", "rm", str(oid)])
+        self.assertEqual(exit_code, 0)
+        self.assertIn("Stood down 1 upcoming session", stdout)
+        self.assertIn("Goal called off", stdout)
+        self.assertEqual(test_db.get_workouts(start_date=_days_out(0)), [])
+        # The whole point of archiving over deleting: the plan history is still there.
+        self.assertIsNotNone(test_db.get_macrocycle(mid))
+
+        exit_code, stdout, _stderr = self.run_cli(
+            ["goal", "edit", str(oid), "--status", "active"], input_value="y"
+        )
+        self.assertEqual(exit_code, 0)
+        self.assertIn("Restored 1 session", stdout)
+        self.assertEqual(
+            [w["title"] for w in test_db.get_workouts(start_date=_days_out(0))],
+            ["Long run"],
+        )
+
+    @patch("trainmate.runtime.calendar_syncer")
+    def test_goal_rm_purge_inventories_what_the_cascade_will_take(self, _cal):
+        """`--purge` names the plan history it destroys and points at plain `goal rm` as
+        the reversible alternative before asking (§14.5)."""
         oid, mid = self._goal_with_session()
         test_db.add_plan_feedback(mid, "too much volume in week 3")
 
-        exit_code, stdout, _stderr = self.run_cli(["goal", "rm", str(oid)])
+        exit_code, stdout, _stderr = self.run_cli(["goal", "rm", str(oid), "--purge"])
         self.assertEqual(exit_code, 0)
         self.assertIn("1 periodization plan version(s)", stdout)
         self.assertIn("1 mesocycle block(s)", stdout)
         self.assertIn("1 plan feedback note(s)", stdout)
         self.assertIn("leaves 1 upcoming session(s)", stdout)
-        self.assertIn("--status archived", stdout)
+        self.assertIn(f"goal rm {oid}", stdout)
         self.assertIsNotNone(test_db.get_objective(oid))
+
+    @patch("trainmate.runtime.calendar_syncer")
+    def test_goal_list_hides_called_off_goals_but_keeps_the_others(self, _cal):
+        """Hiding is what makes calling a goal off leave no tombstone worth deleting, so
+        it must not swallow a completed goal — that is history the athlete earned
+        (§14.5)."""
+        upcoming = test_db.add_objective("Spring Race", _days_out(60), "running", "", 1)
+        past = test_db.add_objective("Last Autumn 10k", _days_out(-60), "running", "", 1)
+        called_off = test_db.add_objective("Cancelled Tri", _days_out(90), "running", "", 1)
+        self.run_cli(["goal", "rm", str(called_off)])
+
+        _exit, stdout, _stderr = self.run_cli(["goal", "list"])
+        self.assertIn(f"[UPCOMING] ID: {upcoming}", stdout)
+        self.assertIn(f"[COMPLETED] ID: {past}", stdout)
+        self.assertNotIn("Cancelled Tri", stdout)
+        self.assertIn("1 called-off goal(s) hidden", stdout)
+
+        _exit, stdout, _stderr = self.run_cli(["goal", "list", "-a"])
+        self.assertIn(f"[ARCHIVED] ID: {called_off} | Cancelled Tri", stdout)

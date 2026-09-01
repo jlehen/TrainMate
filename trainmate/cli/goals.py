@@ -8,7 +8,9 @@ from trainmate.util import (
 from trainmate.cli.common import (
     is_simple_render, print_plan_cascade, report_unhonored, simple_goal_lines,
 )
-from trainmate.db.objectives import goal_state, GOAL_UPCOMING, ARCHIVED
+from trainmate.db.objectives import (
+    goal_state, GOAL_UPCOMING, GOAL_ARCHIVED, ARCHIVED,
+)
 from trainmate.sports import CANONICAL_SPORTS
 
 
@@ -146,8 +148,14 @@ def _offer_reinstated_sessions(objective_id: int) -> None:
 
 
 def run_goal_list(args=None) -> None:
-    """Lists all active and past training objective goals."""
+    """Lists the goals that matter — upcoming and completed. A called-off goal is history
+    the athlete asked to put away, so it shows only under `--all`
+    (DESIGN_backward_evaluation.md §14.5)."""
+    show_all = bool(getattr(args, "all", False))
     goals = runtime.db.get_objectives()
+    called_off = [g for g in goals if goal_state(g) == GOAL_ARCHIVED]
+    if not show_all:
+        goals = [g for g in goals if goal_state(g) != GOAL_ARCHIVED]
     # Companion prose instead of the tagged list (DESIGN_bot_simple_frontend.md §11).
     if is_simple_render():
         for line in simple_goal_lines(goals, _today_str()):
@@ -156,32 +164,65 @@ def run_goal_list(args=None) -> None:
     print(bold(cyan("=== GOALS ===")))
     for g in goals:
         _print_goal(g)
+    if called_off and not show_all:
+        print(gray(
+            f"({len(called_off)} called-off goal(s) hidden — "
+            + cmd("goal list --all") + " shows them.)"
+        ))
 
 
 def run_goal_rm(args: argparse.Namespace) -> None:
-    """Deletes an objective goal by ID, with everything the delete cascades to.
-
-    The escape hatch for a goal entered by mistake, not the way to call one off — that is
-    `goal edit --status archived`, which keeps the history and is reversible (§14). The
-    inventory is printed first because the cascade reaches further than the goal row."""
+    """Calls the goal off: archives it and stands its upcoming sessions down, keeping the
+    plan, its versions and its feedback. Reversible, so it does not ask (§14.4). `--purge`
+    is the destructive form, kept only for a goal entered by mistake (§14.5)."""
     goal = runtime.db.get_objective(args.id)
     if not goal:
         notice(f"Goal with ID {args.id} not found.", red)
         sys.exit(1)
 
+    if args.purge:
+        _purge_goal(args, goal)
+        return
+
+    if goal.get('status') == ARCHIVED:
+        notice(
+            f"Goal '{goal['title']}' (ID {args.id}) is already called off. To delete it "
+            "and its plan history for good, add --purge."
+        )
+        return
+
+    runtime.db.update_objective(args.id, status=ARCHIVED)
+    updated = runtime.db.get_objective(args.id)
+    if updated:
+        _print_goal(updated)
+    # The same stand-down `goal edit --status archived` runs: one action, two names (§14.5).
+    _report_archived_sessions(runtime.coach_service.goal_archive(args.id))
+    print(green(
+        "Goal called off. Its plan, versions and feedback are kept — "
+        + cmd(f"goal edit {args.id} --status active") + " brings it back."
+    ))
+
+
+def _purge_goal(args: argparse.Namespace, goal: dict) -> None:
+    """Deletes the goal row and everything `ON DELETE CASCADE` takes with it.
+
+    The escape hatch for a goal entered by mistake. The inventory is printed first because
+    the cascade reaches further than the goal row (§14.5)."""
     if not args.yes:
-        notice(f"Removing goal '{goal['title']}' (ID {args.id}) also deletes:")
+        notice(f"Purging goal '{goal['title']}' (ID {args.id}) also deletes:")
         print_plan_cascade(args.id)
-        print(gray(
-            "To call the goal off reversibly instead, use "
-            + cmd(f"goal edit {args.id} --status archived") + "."
-        ))
+        # Only worth offering to a goal still live — one already called off has taken it.
+        if goal.get('status') != ARCHIVED:
+            print(gray(
+                "To call the goal off reversibly instead, drop the flag: "
+                + cmd(f"goal rm {args.id}") + " archives it and keeps all of that."
+            ))
         if not runtime.prompt.confirm("Delete it anyway?", danger=True):
-            print("Removal cancelled.")
+            print("Purge cancelled.")
             return
 
     runtime.db.delete_objective(args.id)
-    print(green(f"Goal with ID {args.id} removed successfully."))
+    print(green(f"Goal with ID {args.id} purged: the goal and its plan history are gone."))
 
 
 def run_goal_wipe(args: argparse.Namespace) -> None:
@@ -260,16 +301,32 @@ def add_goal_parser(subparsers):
     # goal rm
     g_rm = goal_subparsers.add_parser(
         "rm",
-        help="Delete a goal and its plan history (to call a goal off reversibly, "
-             "use 'goal edit --status archived')"
+        help="Call a goal off: it stops driving the plan and its upcoming sessions stand "
+             "down, but the plan history is kept and 'goal edit --status active' brings "
+             "it back"
     )
     g_rm.set_defaults(func=run_goal_rm)
-    g_rm.add_argument("id", type=int, help="Goal ID to remove")
-    g_rm.add_argument("-y", "--yes", action="store_true", help="Skip confirmation prompt")
+    g_rm.add_argument("id", type=int, help="Goal ID to call off")
+    # The mistake hatch, not the normal path: deleting strands the sessions and burns the
+    # plan history, which calling the goal off does not (DESIGN_backward_evaluation.md §14.5).
+    g_rm.add_argument(
+        "--purge", action="store_true",
+        help="Delete the goal outright instead of calling it off, with every plan "
+             "version, block and feedback note it owns. For a goal entered by mistake; "
+             "cannot be undone."
+    )
+    g_rm.add_argument(
+        "-y", "--yes", action="store_true",
+        help="Skip the --purge confirmation prompt (calling a goal off never asks)"
+    )
     
     # goal list
-    _list_parser = goal_subparsers.add_parser("list", help="Show all goals")
+    _list_parser = goal_subparsers.add_parser("list", help="Show your goals")
     _list_parser.set_defaults(func=run_goal_list)
+    _list_parser.add_argument(
+        "-a", "--all", action="store_true",
+        help="Include the goals you called off"
+    )
 
     # goal wipe
     g_wipe = goal_subparsers.add_parser(

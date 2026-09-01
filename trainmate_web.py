@@ -192,7 +192,8 @@ def get_status() -> Any:
 
 @app.route("/api/objectives", methods=["GET"])
 def list_objectives() -> Any:
-    """Every objective (mirrors `goal list`)."""
+    """Every objective, called-off ones included — the raw inventory. `goal list` hides
+    the called-off ones unless `--all` (DESIGN_backward_evaluation.md §14.5)."""
     return jsonify(runtime.db.get_objectives())
 
 

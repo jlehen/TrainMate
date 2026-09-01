@@ -255,8 +255,8 @@ def report_unhonored(constraints: List[Dict[str, Any]]) -> None:
 
 
 def print_plan_cascade(objective_id: int) -> None:
-    """The blast radius `goal rm` and `plan rm` both print before asking — one renderer,
-    so two copies cannot drift into disagreeing about one cascade
+    """The blast radius `goal rm --purge` and `plan rm` both print before asking — one
+    renderer, so two copies cannot drift into disagreeing about one cascade
     (DESIGN_cli_noargs.md §b1)."""
     from trainmate import runtime
     versions = runtime.db.get_macrocycle_versions(objective_id)
