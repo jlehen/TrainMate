@@ -155,6 +155,40 @@ def unstamp_schema(db) -> None:
         conn.commit()
 
 
+_UNBOUND = object()   # "nothing was bound yet", as opposed to "bound to None"
+
+
+def restore_db_handles(testcase) -> None:
+    """Puts the process-wide db handles back the way they were once `testcase` ends.
+
+    Call it *before* binding, in a module that must not leave its own Database behind for
+    whatever runs next. Saving them is the whole difficulty: both resolve through a module
+    `__getattr__`, so simply reading one in order to remember it BUILDS the real Database
+    against the production file — which `tests/__init__.py`'s guard then refuses. Two test
+    modules each wrote that by hand and each hit it, but only when run on their own: inside
+    the full suite an earlier module had already bound a handle, so the read found one
+    cached and the bug stayed invisible. Hence one copy, here, next to `rebind_test_db`,
+    which dodges the same trap for the same reason.
+
+    A handle nothing had built is restored to *absent*, not to some value: leaving a
+    concrete singleton where the lazy accessor used to be would hand the next module a
+    stale database instead of one it can still bind.
+    """
+    from trainmate import runtime
+    import trainmate.db
+
+    saved = [(runtime, vars(runtime).get("db", _UNBOUND)),
+             (trainmate.db, vars(trainmate.db).get("db", _UNBOUND))]
+
+    def _restore():
+        for module, previous in saved:
+            if previous is _UNBOUND:
+                vars(module).pop("db", None)
+            else:
+                module.db = previous
+    testcase.addCleanup(_restore)
+
+
 def bind_test_db(db_path: str, fresh: bool = True):
     """Builds an isolated Database at `db_path` and binds it everywhere."""
     from trainmate.db import Database

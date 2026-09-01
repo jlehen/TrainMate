@@ -1,4 +1,4 @@
-from tests.helpers import save_workout
+from tests.helpers import restore_db_handles, save_workout
 import os
 import unittest
 
@@ -16,15 +16,14 @@ class TestCalendarState(unittest.TestCase):
     def setUp(self):
         if os.path.exists(TEST_DB_PATH):
             os.remove(TEST_DB_PATH)
-        # Restore the singleton in tearDown: other modules resolve the db through the
+        # Put the singleton back afterwards: other modules resolve the db through the
         # live `trainmate.db.db` (or capture it lazily), so leaving it pointed at this
         # test's Database — whose file we delete below — breaks later tests.
-        self._orig_db = trainmate.db.db
+        restore_db_handles(self)
         self.db = Database(db_path=TEST_DB_PATH)
         trainmate.db.db = self.db
 
     def tearDown(self):
-        trainmate.db.db = self._orig_db
         if os.path.exists(TEST_DB_PATH):
             os.remove(TEST_DB_PATH)
 

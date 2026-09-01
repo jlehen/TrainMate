@@ -9,10 +9,8 @@ import unittest
 import unittest.mock
 from datetime import date, timedelta
 
-from tests.helpers import clear_all_tables, rebind_test_db
-from trainmate import runtime
+from tests.helpers import clear_all_tables, rebind_test_db, restore_db_handles
 from trainmate.db import Database
-import trainmate.db
 import trainmate.garmin as garmin
 from trainmate.garmin import compute_pmc, pmc_warmup_cutoff_for, pmc_ramp
 from trainmate.util import color_tsb, color_ramp, pmc_cells, pmc_warming_note
@@ -32,13 +30,8 @@ class _DBBackedTest(unittest.TestCase):
     rebind here would break another file regardless of collection order."""
 
     def _use_test_db(self):
-        prev_gdb, prev_tdb = runtime.db, trainmate.db.db
+        restore_db_handles(self)
         rebind_test_db(test_db)
-
-        def _restore():
-            runtime.db = prev_gdb
-            trainmate.db.db = prev_tdb
-        self.addCleanup(_restore)
 
 
 def _d(offset: int) -> str:
@@ -155,11 +148,19 @@ class TestWarmup(unittest.TestCase):
 class TestStaticFlag(unittest.TestCase):
     """garmin.pmc_data_caveat — the static "still warming up" flag (§3.3b): fires with a
     plain N=today-history_start while N < 3*tau_ctl, then drops. No convergence-% figure.
-    Pure: takes the history start the caller already fetched (pmc_history_start)."""
+    Pure: takes the history start the caller already fetched (pmc_history_start).
+
+    Every case passes `as_of` rather than letting it default. The default is `today_str()`,
+    which resolves the athlete's timezone out of the settings table — so a "pure" call
+    reaches for a database, and with no handle bound this file tripped tests/__init__.py's
+    production-database guard when run on its own. Naming the day also stops the
+    comparison straddling midnight in a timezone that is not the system's."""
+
+    AS_OF = _d(0)
 
     def test_flag_fires_for_young_history_with_right_n(self):
-        start = (date.today() - timedelta(days=30)).isoformat()
-        cav = garmin.pmc_data_caveat(start)
+        start = _d(-30)
+        cav = garmin.pmc_data_caveat(start, as_of=self.AS_OF)
         self.assertIsNotNone(cav)
         self.assertEqual(cav["n_days"], 30)
         self.assertEqual(cav["history_start"], start)
@@ -168,14 +169,13 @@ class TestStaticFlag(unittest.TestCase):
     def test_flag_fires_on_first_pull_day(self):
         # N = 0 (history starts today) is the youngest possible DB — the flag must
         # fire, not be excluded by an off-by-one at the boundary.
-        cav = garmin.pmc_data_caveat(date.today().isoformat())
+        cav = garmin.pmc_data_caveat(self.AS_OF, as_of=self.AS_OF)
         self.assertIsNotNone(cav)
         self.assertEqual(cav["n_days"], 0)
 
     def test_flag_drops_once_history_exceeds_three_tau(self):
         # >= 3*tau_ctl (126 days) of history -> artifact negligible, no flag.
-        start = (date.today() - timedelta(days=130)).isoformat()
-        self.assertIsNone(garmin.pmc_data_caveat(start))
+        self.assertIsNone(garmin.pmc_data_caveat(_d(-130), as_of=self.AS_OF))
 
     def test_no_history_no_flag(self):
         self.assertIsNone(garmin.pmc_data_caveat(None))
