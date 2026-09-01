@@ -207,7 +207,9 @@ Intent table: `show_today`, `show_week`, `show_goals` / `show_plan` (§11),
 `add_constraint` / `add_signal` (→ the same `adapt -m` inbox, §5.5),
 `show_constraints` / `remove_constraint` (→ `bot constraints`, §5.5), `help`, `unclear`. `unclear` renders a gentle fallback with the keyboard as the suggestion. The
 routed command is echoed in one short italic line ("→ showing your week") so she learns
-the vocabulary and misroutes are visible immediately.
+the vocabulary and misroutes are visible immediately. The writes pass (2026-09-01)
+widens this table with capture and picker intents; §12.8 is now the authoritative
+table.
 
 Routing through a CLI subcommand rather than in-process keeps every OpenRouter call —
 client, retries, exchange logs under `logs/llm_exchanges/` — on the one existing path,
@@ -239,7 +241,9 @@ both: the two-confirmation capture flow asks before persisting a rule
 intents build identical argv and differ only in the echo line, so a misroute among them
 changes what the athlete is told the coach heard, never what is stored. A kind of note
 therefore earns an intent only to be echoed in its own words — never to reach a
-different command.
+different command. *(Superseded in part, 2026-09-01: the note intents now share
+the `bot capture note` inbox instead of `adapt -m` — §12.3 carries the reasoning;
+the echo-only rule between `add_constraint` and `add_signal` stands.)*
 
 **Why there is no `remove_signal`, and no signal counterpart to `bot constraints`.**
 The two records point in opposite directions. A constraint points *forward*: it shapes
@@ -346,7 +350,10 @@ earns it is expert detail, and the chat surface does not audit.
   preview/confirm pipeline. The one destructive action a tap can reach is `constraint rm <id>`, and
   only through the §5.5 picker: single ID, offered by the CLI, chosen by the athlete —
   never by the model. (Typed commands still work in simple mode, so the operator can
-  drive an instance from its own chat when allowlisted there.)
+  drive an instance from its own chat when allowlisted there.) Amended 2026-09-01:
+  the writes pass (§12) makes a bounded set of reversible-or-confirm-gated
+  mutations routable and lets the model *nominate* (never execute) — §12.9 is now
+  the authoritative statement of this posture.
 - Free text reaching the router or `adapt -m` is data, not instructions, and the argv
   table bounds its blast radius; the exposure is the same one `adapt -m` already has
   today.
@@ -409,11 +416,25 @@ Each phase ships alone; her onboarding starts at phase 1.
   buttons and router intents, `goal list` / `plan show` opted into simple rendering,
   and ✅ verdicts folded into the week view. Both new targets are read-only, so the §7
   guardrail posture is unchanged.
+- Writes are routable through three shapes — view, picker, capture — and an
+  operation fitting none belongs to the expert vocabulary (2026-09-01, §12).
+  Capture is two router-model calls (route, then a domain-focused extraction);
+  `add_constraint`/`add_signal` move off adapt onto `bot capture note`, with the
+  adaptation offered as a button instead of ridden as a toll; edits nominate
+  their object against CLI-given rows, previewed from the real row, tap-confirmed;
+  goal delete means archive (`goal rm`, `--purge` unreachable from chat); settings
+  are routable only over the §12.7 key allowlist. The capture family stays hidden
+  under `tm bot` (option A) — promoting free-text authoring to public CLI flags
+  (`constraint add -m`) is a possible later, purely additive step.
 
 **Open**
 1. Router echo: always show "→ …", or only when confidence is low? Draft: always;
    applies unless objected to before phase 3 (rollout §9). Implemented as: always
    (`ROUTER_ECHO` in trainmate_bot.py); trivially revisitable.
+2. Whether the router model is enough for §12.2's extraction calls — transcription,
+   not judgment, says yes; watched in practice, and the role is already a setting.
+3. Multi-intent messages and sloted views (§12.8): deferred until a real message
+   demands them.
 
 ## 11. Breadth: goals, the plan, and a calendar-shaped week (2026-08-30)
 
@@ -459,3 +480,207 @@ view follows.
 Both new argv targets are read-only, so the §7 guardrail table gains two entries and
 nothing else changes: plan-shaping and destructive commands still require the typed
 expert vocabulary.
+
+## 12. Writes: chat reaches operations (2026-09-01)
+
+The router to date is a reader with one inbox: every intent either shows something or
+drops the message into `adapt -m`. Three things it cannot do. It has **no slots** — the
+model returns an intent name and nothing else, so "move my marathon to October 12" has
+nowhere to put the date. It has **no way to name an object** — companion prose hides
+IDs, so "I'm not doing the 10k" cannot safely become `goal rm 3`. And **recording a
+rule rides the coach** — `add_constraint` pays for a full adaptation call on the
+coaching model when all the athlete wanted was to be heard. This pass closes all three
+without giving the model any new authority.
+
+### 12.1 Three shapes, and the extension rule
+
+Every routable operation takes exactly one of three shapes, and inherits its shape's
+guardrails:
+
+- **View** — intent → fixed argv from the bot's table. Exists (§5.3); unchanged.
+- **Picker** — the CLI renders the list in companion prose and attaches a §4.4 button
+  row whose leaves each carry a deterministic command with a real ID. The model picks
+  *that* something should change; the athlete's tap picks *which*. Exists for
+  `constraint rm` (§5.5); this pass adds a goals counterpart (§12.6).
+- **Capture** — for anything that needs values from the message. A second,
+  domain-focused LLM call extracts a typed proposal, the CLI previews it in companion
+  prose rendered from real data, and a §4.4 prompt confirm makes it real. New (§12.2).
+
+The rule that keeps the surface honest as it grows: **an operation that fits none of
+the three shapes belongs to the expert vocabulary.** That is not a gap in the router;
+it is the §7 line, restated as a design test. `plan generate`, wipes, model roles and
+`restart` fail the test by construction — no shape gives the model authority over
+anything plan-shaping, expensive, or irreversible.
+
+### 12.2 Capture: two calls, both on the router model
+
+`bot route` stays exactly as dumb as it is — one intent, no slots. A write intent then
+runs a second hidden command, `tm bot capture <intent> "<text>"`, whose one LLM call is
+domain-focused: it sees only the fields its intent can fill, plus today's date and
+weekday so "next Friday" resolves, plus (for edits, §12.4) the current rows to nominate
+from. Two small calls instead of one do-everything prompt, because the classifier's job
+must not get harder every time a domain is added, and because read intents — the
+overwhelming majority — keep paying for exactly one call.
+
+Both calls run on the `router-model` role (§5.4). Extraction is transcription, not
+coaching judgment, so the cheap model is the right default; whether it is *enough* is
+an open question to watch (§10), and the escape hatch already exists — the role is a
+setting.
+
+Capture runs as an ordinary routed command: its questions are `TM-PROMPT` confirms, its
+offers are `TM-BUTTONS` rows, its output is simple-rendered. Nothing new crosses the
+CLI↔bot channel.
+
+### 12.3 Notes move off the coach: `bot capture note`
+
+`add_constraint` and `add_signal` stop mapping to `adapt -m` and map to one shared
+`bot capture note` instead. Its extraction call returns the same candidate shapes the
+adapt inbox yields — `new_constraints` and `new_signals` — and persists them through
+the same confirmed-candidate paths (`capture_message_constraint`,
+`capture_message_signal` in `coach/service/planning.py`), so the trust boundary moves
+not at all: still advisory-only, still no LLM-set `rest` or `replan`, still no
+fabricated numbers, still nothing stored without the athlete's yes. One capture call
+extracts *both* kinds, so a mixed note — "knee's acting up, no running for two weeks,
+and I slept terribly" — loses nothing by being routed here rather than to adapt.
+
+The decoupling is the point: recording becomes instant and cheap, and the coach becomes
+an offer. After a constraint persists, the reply carries a §4.4 button — "🔄 Adjust the
+plan around it" → `workout adapt`. Prompts ask and block; buttons offer and exit
+(§4.4): she is heard immediately, and invoking the coach is her call, not a toll.
+Signals end with no offer — they point backward (§5.5) and adapt nothing. When the
+extraction finds no durable note at all, the reply says so gently and offers one
+button: send the original text to the coach (`adapt -m`), so a miss costs one tap, not
+the message.
+
+**What §5.5's invariant becomes.** The note intents still share one argv and differ
+only in their echo — a misroute between `add_constraint` and `add_signal` still changes
+what the athlete is told, never what is stored, and `RouterTablesTest` keeps pinning
+that. What changes is that `coach_message` now genuinely differs: state and
+availability go to the coach, records go to capture. A misroute across *that* line
+degrades gracefully in both directions — a rule misread as state still lands in adapt,
+whose inbox still extracts it (just paying the coach call the athlete would have been
+offered anyway); state misread as a rule is caught at the capture confirm, and the
+no-find fallback's button walks it to the coach. The 💬 Tell-my-coach armed capture
+(§5.2) stays verbatim-to-adapt: the explicit "just give this to the coach" path is the
+standing escape hatch from routing altogether. From the terminal, `workout adapt -m`
+is untouched — the CLI inbox keeps its extraction exactly as DESIGN_constraints.md §8
+and DESIGN_signal_extraction.md §2 describe it.
+
+### 12.4 Edits nominate their object
+
+`edit_goal` and `edit_constraint` need an object *and* a value: "move my marathon to
+October 12" names both. The capture call gets the current rows as context — id, title,
+dates, nothing more — and returns `{id, changes}`, or an ambiguity marker when nothing
+matches cleanly, which falls back to the picker. That relaxes one clause of §7 ("which
+row is decided by the athlete's tap, never by the model") into its load-bearing form:
+
+> **The model may *nominate* an object, but the preview is rendered by the CLI from
+> the real row, and nothing executes without the athlete's confirmation on it.**
+
+A wrong nomination shows the wrong goal in the preview — "Your goal **Marathon**
+(Sat Oct 26) → move to **Sun Oct 12**. OK?" — and dies visibly on "no". The tap
+remains the only thing that fires a write, and the argv it fires is assembled by the
+CLI from the confirmed proposal, never authored by the model.
+
+Chat-editable fields are the transcribable ones: a goal's title, target date and
+description; a constraint's title, dates and description. Everything that changes an
+object's *semantics tier* stays expert vocabulary — a goal's status, sports and
+date-type; a constraint's `--rest` and `--replan` (the same trust boundary the capture
+paths already enforce on add).
+
+### 12.5 New goals: `bot capture add_goal`
+
+"I want to run a half marathon on May 10" is a capture: title, date, sports (mapped
+into `CANONICAL_SPORTS` by the extraction prompt, never free-typed into the enum), and
+the event/horizon reading, previewed in the goal view's own on/"by ~" wording (§11) so
+a wrong `date_type` guess is visible in the preview's first line. Confirm runs
+`goal add`. What it does *not* do is shape the plan: the reply closes with the §11
+line — the plan appears once the coach lays it out — and `plan generate` remains the
+operator's typed act. A goal row is cheap and editable; the periodization built on it
+is neither, and stays behind the §7 line.
+
+### 12.6 Calling a goal off: the goals picker
+
+`remove_goal` mirrors `remove_constraint`: a hidden `tm bot goals` renders the active
+goals in companion prose and attaches a picker whose leaves send `goal rm <id>`. Since
+`goal rm` archives (the reversible-deletes pass; the hard cascade lives behind
+`--purge`, which no chat surface can reach), the one goal mutation a tap fires is the
+same reversible call-off `goal edit --status archived` performs — sessions stood down,
+history kept, reinstatable by the operator. "I'm not doing the 10k anymore" *means*
+calling it off; the athlete who truly wants a goal expunged is describing an operator
+task. Archived goals then say nothing anywhere in companion mode (§11), which is the
+tone rule doing the mourning.
+
+### 12.7 Settings: an allowlist, not a surface
+
+"Can you message me at 7 instead?" earns `change_setting` → `bot capture
+change_setting`. The extraction returns `{key, value}` where the key must come from the
+**routable-keys allowlist** — `morning-time`, `morning-deadline`, `push` — the knobs
+that shape the athlete's own experience of the chat. The allowlist is context given to
+the extraction, and it is also enforced after: a key outside it (a model role,
+`adapt-first`, anything operator- or cost-shaped) renders the §5.3 unclear fallback, so
+"use a smarter model" cannot become a settings write no matter what the extraction
+says. Values pass through the settings layer's own validation, and the preview reads
+back the *effect*, not the key — "I'll open your day at 07:00 from tomorrow. OK?".
+There is no `show_settings` view: the confirm echoes the value, and the full listing
+is expert detail.
+
+### 12.8 The intent table after this pass
+
+| Intent | Shape | Runs |
+|---|---|---|
+| `show_today` `show_week` `show_goals` `show_plan` `show_progress` `show_constraints` | view | *(unchanged, §5.3/§11)* |
+| `coach_message` | — | `adapt -m` *(unchanged — state should invoke the coach)* |
+| `add_constraint` / `add_signal` | capture | `bot capture note` *(off adapt, §12.3)* |
+| `edit_constraint` | capture+nominate | → `constraint edit <id> …` (§12.4) |
+| `remove_constraint` | picker | `constraint rm <id>` *(unchanged)* |
+| `add_goal` | capture | → `goal add …` (§12.5) |
+| `edit_goal` | capture+nominate | → `goal edit <id> …` (§12.4) |
+| `remove_goal` | picker | `goal rm <id>` — archives (§12.6) |
+| `change_setting` | capture | → `settings set <key> <value>` (§12.7) |
+| `help` / `unclear` | — | *(unchanged)* |
+
+One intent per message stays the rule. A compound message is nearly always a
+state dump, and `coach_message` → adapt handles those holistically — that is what
+adapt is *for*; multi-intent routing is deferred until a real message demands it
+(§10). The sanctioned next extension, when someone asks the router for a specific
+day and gets this week, is a *sloted view* — `show_week` plus one validated date
+selector — which is capture machinery applied to a read and needs no new rules.
+
+### 12.9 Guardrails, restated
+
+The §7 posture after this pass, in full:
+
+- Routable mutations: `constraint rm`/`edit`, `goal add`/`edit`/`rm`(=archive),
+  `settings set` over the §12.7 allowlist. Every one is reversible or confirm-gated;
+  most are both. The hard deletes (`--purge`, wipes), plan-shaping (`plan generate`,
+  `workout generate` outside the §7 runway button), model roles and `restart` remain
+  typed expert vocabulary.
+- The model never authors argv. It picks intents from a fixed table, fills typed
+  fields the CLI validates, and may nominate an object or allowlisted key *from
+  context the CLI gave it* — and none of that executes without the athlete confirming
+  a preview the CLI rendered from real rows.
+- Free text remains data, never instructions, at both calls; the blast radius of a
+  hostile message is bounded by the argv tables and the allowlist, exactly as §7
+  argued for the read-only router.
+
+### 12.10 Touch points and rollout
+
+| File | Change |
+|---|---|
+| `trainmate/cli/bot.py` | `bot capture <intent>` family (extraction prompts beside `ROUTER_SYSTEM_PROMPT`), `bot goals` picker, new `ROUTER_INTENTS` rows |
+| `trainmate_bot.py` | new intent→argv and echo rows; text-carrying intents pass the message to `bot capture` |
+| `trainmate/coach/service/planning.py` | none — `capture_message_constraint`/`_signal` reused as-is |
+| `trainmate/cli/settings.py` | routable-keys allowlist named beside the settings it guards |
+| `tests/` | `RouterTablesTest` reshaped (note intents share `bot capture note`; every capture intent maps to `bot capture <intent>`), mocked-extraction tests per capture kind, nomination-ambiguity → picker fallback |
+
+Rollout continues §9's numbering, each phase shipping alone:
+
+4. **Note capture** — `add_constraint`/`add_signal` off adapt, the adjust-plan offer.
+   The machinery foundation and the biggest felt win (recording becomes instant).
+5. **Goal writes** — `add_goal`, `edit_goal`, the `bot goals` picker.
+6. **Constraint edit** — capture+nominate over the §5.5 view's rows.
+7. **Settings** — the allowlist capture.
+
+Phase 5 depends on `goal rm` archiving (the reversible-deletes change, in flight on
+`worktree-goal-rm-archives` as of this writing); the picker ships only on top of it.
