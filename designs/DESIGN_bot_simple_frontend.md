@@ -271,6 +271,19 @@ the way out — Telegram clients keep the old keyboard until told otherwise.
 Only the expert menu advertises `/ui`; the simple menu stays the athlete's two entries,
 and the confirmation lines teach the way back.
 
+**A tap on a keyboard the process has forgotten flips the persona back.** Telegram keeps
+a persistent reply keyboard on the client until a `ReplyKeyboardRemove` tells it
+otherwise, so a bot restarted into `telegram.ui: expert` leaves six live companion
+buttons on a phone whose bot no longer understands them: the label reached the expert
+path, was shlex-split into argv, and came back as `tm: error: argument <command>:
+invalid choice: '🗓'` (observed 2026-09-02, all six buttons). A label arriving in expert
+mode is therefore read as what it is — the athlete is looking at the companion — and
+switches the persona back, confirmation and all, before the tap runs. Honouring the
+label's argv while staying expert was the smaller change and the worse one: it leaves
+the screen and the bot disagreeing about which persona is on, and leaves "💬 Talk to me"
+with nowhere to arm. One rule instead: the keyboard you can see is the keyboard that
+answers.
+
 ## 6. Simple rendering
 
 Simple mode sets `TRAINMATE_RENDER=simple` in the subprocess env (beside

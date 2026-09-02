@@ -211,6 +211,16 @@ def keyboard_action(text: str) -> Optional[Tuple[str, Optional[List[str]]]]:
     return None
 
 
+def stale_keyboard_tap(text: str, simple_now: bool) -> bool:
+    """A companion label arriving while the persona is expert: the §5.1 keyboard lives
+    on the phone and outlives the process that attached it (§5.6)."""
+    return (
+        not simple_now
+        and not (text or "").startswith("/")
+        and keyboard_action(text) is not None
+    )
+
+
 # --- The /ui runtime persona switch (§5.6) ---
 # Advertised in the expert menu only; the confirmation lines teach the way back, so
 # the switch stays reachable from simple mode without cluttering the athlete's menu.
@@ -1034,6 +1044,12 @@ def main() -> None:
                 "A command is still running. Use the buttons above, or /cancel."
             )
             return
+
+        # A tap on the companion keyboard is the companion, whatever persona this
+        # process last settled on: the keyboard sits on the phone until Telegram is
+        # told to drop it, so a restart back into expert leaves it live (§5.6).
+        if stale_keyboard_tap(text, simple_ui):
+            await _set_ui(chat.id, True)
 
         # Simple mode: non-slash text is the companion surface — keyboard labels,
         # then the free-text router for everything else (§5). A leading slash stays

@@ -346,6 +346,24 @@ class SimpleKeyboardTest(unittest.TestCase):
         )
 
 
+class StaleKeyboardTest(unittest.TestCase):
+    """A restart returns to config's persona while the phone keeps the §5.1 keyboard;
+    a tap on it must reach the companion, not shlex (§5.6)."""
+
+    def test_label_tapped_in_expert_is_a_stale_tap(self):
+        for label, _ in bot.SIMPLE_KEYBOARD:
+            self.assertTrue(bot.stale_keyboard_tap(label, simple_now=False), label)
+
+    def test_nothing_is_stale_while_simple(self):
+        for label, _ in bot.SIMPLE_KEYBOARD:
+            self.assertFalse(bot.stale_keyboard_tap(label, simple_now=True), label)
+
+    def test_expert_typing_is_untouched(self):
+        self.assertFalse(bot.stale_keyboard_tap("workout list", simple_now=False))
+        self.assertFalse(bot.stale_keyboard_tap("/ui", simple_now=False))
+        self.assertFalse(bot.stale_keyboard_tap("", simple_now=False))
+
+
 class GuardrailTest(unittest.TestCase):
     """§7: buttons and router intents only reach read-only views, `adapt -m`, and the
     §5.5 constraints view (whose picker offers single-ID `constraint rm` — pinned in
