@@ -437,6 +437,12 @@ Each phase ships alone; her onboarding starts at phase 1.
   persona; adapt's confirm loops and the candidate schema fragments are shared, not
   duplicated; a stale button tap says so; `add_goal` supersedes reply-only
   `new_goal`; disallowed setting keys are refused honestly, not routed to "unclear".
+- The typed `/` expert path stays open in simple mode (2026-09-02). The router
+  firewalls free text and buttons, not typing: every CLI command still runs when
+  typed with a leading `/` from an allowlisted chat (§7). Deliberate — the operator
+  can live in the simple UI and still reach the expert CLI from the same chat, and a
+  receiving-first athlete has no reason to type slash commands; the danger confirms
+  remain the backstop.
 
 **Open**
 1. Router echo: always show "→ …", or only when confidence is low? Draft: always;
@@ -446,12 +452,6 @@ Each phase ships alone; her onboarding starts at phase 1.
    not judgment, says yes; watched in practice, and the role is already a setting.
 3. Multi-intent messages and slotted views (§12.8): deferred until a real message
    demands them.
-4. Whether simple mode should keep the typed expert path open (raised 2026-09-02).
-   Today every CLI command runs when typed with a leading `/` from an allowlisted
-   chat (§7) — the router firewalls free text and buttons, not typing — which is how
-   `--purge` stays technically reachable from the athlete's own chat (§12.6). An
-   instance knob gating slash commands to operator chats would close that door; weigh
-   it against the operator's §7 use of the same chat to drive an instance.
 
 ## 11. Breadth: goals, the plan, and a calendar-shaped week (2026-08-30)
 
@@ -677,7 +677,7 @@ is neither, and stays behind the §7 line.
 goals in companion prose and attaches a picker whose leaves send `goal rm <id>`. Since
 `goal rm` archives (the reversible-deletes pass; the hard cascade lives behind
 `--purge`, which neither the router nor any button can reach — the typed `/` expert
-path can, like every expert command, which is §10 open question 4), the one goal
+path can, like every expert command, a door §10 keeps open deliberately), the one goal
 mutation a tap fires is the
 same reversible call-off `goal edit --status archived` performs — sessions stood down,
 history kept, reinstatable by the operator. "I'm not doing the 10k anymore" *means*
