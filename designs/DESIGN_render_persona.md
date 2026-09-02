@@ -7,7 +7,7 @@
 Companion mode (DESIGN_bot_simple_frontend.md) started as four opted-in surfaces and a
 single helper, `is_simple_render()`. The §11 breadth pass, the runway nudge
 (DESIGN_runway_nudge.md §6) and the prose adapt preview each added more, and the
-switch is now consulted at fifteen sites across eight CLI files:
+switch is now consulted at fifteen sites across seven CLI files:
 
 | File | Sites | What varies |
 |---|---|---|
@@ -96,16 +96,16 @@ class ExpertRenderer:
     def adapt_applied(self) -> None: ...
 
     # -- listings --
-    def workout_list(self, workouts, verdicts, *, start_date, end_date, ids, sport_type, names_a_range) -> None: ...
+    def workout_list(self, workouts, verdicts, args, *, start_date, end_date, ids, names_a_range) -> None: ...
     def workout_generate_preview(self, proposal) -> bool:  # False when nothing to apply
     def goal_list(self, goals, called_off, show_all, today) -> None: ...
-    def plan(self, goal, macrocycle, mesocycles, args) -> None: ...
+    def plan(self, goal, macrocycle, args) -> None: ...
     def progress(self, payload, args, today, weeks_window) -> None: ...
     def revision_preview(self, proposal, heading: str) -> None: ...
 
     # -- one-liners --
     def constraint_removed(self, constraint_id: int) -> None: ...
-    def no_upcoming_goal(self) -> None: ...                # was _resolve_goal's notice
+    def no_upcoming_goal(self) -> None: ...                # the `plan show` empty state
     def no_plan_yet(self, goal) -> None: ...               # was the "Run plan generate" pair
     def runway_hint(self, state, today) -> bool: ...       # was print_runway_hint
 
@@ -155,10 +155,14 @@ want to diverge at that point — if the answer is no, it is not a method, it is
 expert `workout_list` wants the filter echo; the companion ignores it) so that a
 command builds one call and never a per-persona one.
 
-**Renderers print; they do not compute.** A method receives finished data — the
-verdicts, the payload, the resolved goal — and draws it. The plan's mesocycles are
-loaded by the command and passed in, exactly as `_print_plan` receives them today.
-The one rule from the bot design's §10 stands: no coaching judgement in a formatter.
+**Renderers draw; they do not judge.** The one rule from the bot design's §10 stands:
+no coaching judgement in a formatter. A method may read what the code it wraps reads
+today: `_print_plan` loads its mesocycles and, under `--workouts`, the plan's
+revisions; the listings ask `schedule_coverage()` where the schedule ends; `progress`
+reads the sport preferences from config. Hoisting those reads into the commands would
+be a rewrite, not a relocation, and would make the companion form pay for queries only
+the expert form uses. Nothing writes between a command's data gathering and its draw,
+so where a read happens does not change what it returns.
 
 **Where the confirm lives.** `preview_and_confirm_revision` today both draws the
 preview and asks. It splits: `runtime.render.revision_preview(proposal, heading)`
@@ -186,18 +190,18 @@ structure, different sentence), **shape** (same data, different rendering), or
 | `revisions.py:160` preview | shape | `render.revision_preview(...)` |
 | `constraints.py:344` done line | words | `render.constraint_removed(id)` |
 | `plans.py:552` no macrocycle | words | `render.no_plan_yet(goal)` |
-| `plans.py:517` empty-state short-circuit | behaviour | **deleted** — see below |
+| `plans.py:517` empty-state short-circuit | words | `render.no_upcoming_goal()` — the guard stays, its persona branch goes |
 | `runway.py:148` hint silence | behaviour | `render.runway_hint(state, today)` |
 
-**The behaviour sites dissolve.** They look like control flow but are wording in
-disguise:
+**The behaviour sites are wording in disguise:**
 
-- The `plan show` short-circuit at `plans.py:517` exists only because `_resolve_goal`
-  prints "No active goals found" itself, and the companion must never see that
-  sentence. Once `_resolve_goal` says `runtime.render.no_upcoming_goal()`, the
-  companion form prints the 🌱 line at the same point the expert form prints the
-  nudge, and the guard has nothing left to protect. `plan show` gets shorter in both
-  modes.
+- The `plan show` guard at `plans.py:517` keeps its shape — no `--goal`, no `--all`, no
+  upcoming goal — and calls `runtime.render.no_upcoming_goal()`, whose expert form
+  prints the same notice `_resolve_goal` would have printed one line later.
+  `_resolve_goal` itself is untouched: it also serves `plan versions`, `plan diff`,
+  `plan rollback` and `plan feedback`, and the 🌱 line is the wrong sentence out of
+  `plan rollback`. None of those four has a companion-mode test, so routing the helper
+  through the renderer would have changed their output unseen.
 - The runway hint's silence is a companion override that returns `False` without
   drawing. The reason — "the companion week view words this fact itself, one fact
   gets one wording per message" — moves from a docstring on a guard to a docstring on
@@ -209,34 +213,35 @@ first summary line to `_emit_chart` as the caption. That stays inside the compan
 draws the tables and the chart with the expert caption. The command body calls
 `render.progress(...)` once.
 
+**A sixteenth site the grep does not find.** `workout adapt` at `generate.py:145`
+never asks which persona it has, but its output still depends on it: when the plan is
+behind, it calls the runway hint and, if that drew nothing, prints its own refusal —
+"Your plan is behind you … set what's next with `goal add`, then `plan generate`".
+The companion hint draws nothing by design, so the companion athlete reads two commands
+they have no way to type (bot design §7). `test_runway.py` asserts the refusal speaks
+on the simple surface, so the sentence is wanted; its wording is not. This design
+carries the leak over unchanged — it is a relocation and adds no companion sentence —
+and lists the fix in §10: a renderer method for the refusal, so the companion words it
+without command names.
+
 ## 6. Tests
 
-`runtime.render` is a cached singleton, so `patch.dict(os.environ,
-{"TRAINMATE_RENDER": "simple"})` stops working the moment any earlier test has built
-the expert one: the patch changes the env, not the object. Thirteen places do this
-today (`test_runway.py`, `test_cli_bot.py`, `test_cli_workouts.py`,
-`test_simple_render.py`).
+`runtime.render` is a cached singleton, so once any test has built it,
+`patch.dict(os.environ, {"TRAINMATE_RENDER": "simple"})` changes the env and not the
+object. The failure runs both ways, and the quiet direction is the worse one: the
+class-level patcher in `test_runway.py` would build a companion renderer first, and
+every expert test after it in the process would print companion prose — most assert on
+an exit code or a row, and would pass. Nothing in the harness resets the runtime
+between tests today.
 
-The `runtime` module's own rule applies — "an assignment from a test still wins" —
-and the suites already do exactly this for the sibling axis (`runtime.prompt = Mock()`
-in `test_signal_extraction.py`). Tests set the object, not the variable. One context
-manager in `tests/helpers.py`, since the suites are `unittest.TestCase` classes:
-
-```python
-@contextmanager
-def simple_render():
-    runtime.render = CompanionRenderer()
-    try:
-        yield
-    finally:
-        runtime.reset("render")
-```
-
-Tests of the pure line builders (`simple_goal_lines` and friends) need neither; they
-call the function and check the lines, as they do today. Tests of a *surface* in
-companion mode wrap the command in `with simple_render():`. `is_simple_render()` keeps
-working until the last caller is gone (§7 step 5), so the two test styles coexist
-during the migration.
+The fix is in the harness, not the tests. `run_cli` in `tests/helpers.py` drops the
+cached renderer (`runtime.reset("render")`) before invoking `main()`, so each run builds
+its voice from the environment exactly as a real CLI process does. The twelve
+env-patching sites (`test_runway.py`, `test_cli_bot.py`, `test_cli_workouts.py`,
+`test_simple_render.py`) keep working unchanged. The three in `test_simple_render.py`
+that exercise `is_simple_render()` itself become tests of `make_renderer()`. Tests of
+the pure line builders (`simple_goal_lines` and friends) need nothing; they call the
+function and check the lines, as they do today.
 
 ## 7. Migration
 
@@ -245,26 +250,38 @@ byte-identical. Steps 2–4 can be split further (one command per commit) if a d
 gets uncomfortable.
 
 1. **Scaffold.** Add `cli/render.py` with both classes, every method on
-   `ExpertRenderer` delegating to the existing code it will later absorb, and
-   `make_renderer()`. Add the `render` builder to `runtime.py` and the `simple_render`
-   helper. No caller changes; nothing observable moves.
+   `ExpertRenderer` delegating to the existing code, and `make_renderer()`. Add the
+   `render` builder to `runtime.py` and the `reset("render")` in `run_cli`. No caller
+   changes; nothing observable moves.
 2. **Words.** The six one-sentence sites (adapt's five, `constraint rm`). Pure string
    relocation; six branches gone.
-3. **Shape.** One command at a time: lift the expert block out of the command body
-   into the `ExpertRenderer` method, point the companion override at the existing
-   line builder. Order by size — `goal list`, `constraint`, `revision_preview`,
-   `workout generate`, `workout list`, `progress`, `plan show` (`_print_plan` is the
-   largest, about a hundred lines of timeline).
-4. **Behaviour.** Route `_resolve_goal`'s notice and `print_runway_hint` through the
-   renderer; delete the `plan show` guard.
+3. **Shape.** One command at a time: the expert method delegates to the function
+   that draws today, and the companion override calls the existing line builder.
+   Where the expert block is inline in a command body (`workout list`, the
+   `workout generate` preview) it becomes a named function in its own module first.
+   The expert blocks stay where they are: they are hundred-line table renderers with
+   no sentence-level twin, and moving them would make `render.py` the owner of three
+   commands' internals for no reviewable gain. Only the six word sites earn
+   side-by-side.
+4. **Behaviour.** Route `print_runway_hint` through the renderer (callers:
+   `generate.py`, `status.py`); the `plan show` guard calls `no_upcoming_goal()`.
 5. **Sweep.** Move the `simple_*` line builders and the `SIMPLE_*` constants from
-   `cli/common.py`, `cli/runway.py` and `cli/plans.py` into `cli/render.py` so the
-   companion voice is one file; update the `bot.py` imports. Delete
-   `is_simple_render()`; `TRAINMATE_RENDER` is now read in `make_renderer` only.
-   Update DESIGN_bot_simple_frontend.md §6 and §8 to point here.
+   `cli/common.py`, `cli/runway.py`, `cli/plans.py` and `cli/workouts/revisions.py`
+   (`_simple_preview_lines`) into `cli/render.py` so the companion voice is one file;
+   update the `bot.py` imports. Delete `is_simple_render()`; `TRAINMATE_RENDER` is
+   now read in `make_renderer` only. Update DESIGN_bot_simple_frontend.md §6 and §8 to
+   point here.
 
-Roughly four hundred lines relocate. No sentence changes, so the existing golden
-tests are the acceptance criterion at every step.
+**Import direction.** `render.py` imports expert helpers from the command modules at
+module level, and the command modules never import `render.py`: they reach it through
+`runtime.render`, whose builder defers the import exactly as `prompt`'s does. `bot.py`
+is the one module that imports `render.py` directly, and nothing in `render.py`
+imports `bot.py`. That graph has no cycle. A function-local import of `render.py`
+inside a command module would be the sign the graph has gone wrong, not a fix.
+
+The companion builders and six sentences relocate; the expert table renderers stay
+put. No sentence changes, so the existing golden tests are the acceptance criterion at
+every step.
 
 ## 8. The bot side (deferred)
 
@@ -284,14 +301,17 @@ what makes it cheap to add a third persona later. Not scheduled.
 - `trainmate/cli/render.py` — new: line builders, `ExpertRenderer`,
   `CompanionRenderer`, `make_renderer`.
 - `trainmate/runtime.py` — the `render` builder.
-- `trainmate/cli/common.py`, `cli/runway.py`, `cli/plans.py` — lose the `simple_*`
-  builders and constants (step 5).
+- `trainmate/cli/common.py`, `cli/runway.py`, `cli/plans.py`,
+  `cli/workouts/revisions.py` — lose the `simple_*` builders and constants (step 5).
 - `trainmate/cli/workouts/generate.py`, `cli/goals.py`, `cli/plans.py`,
   `cli/progress.py`, `cli/workouts/revisions.py`, `cli/constraints.py`,
-  `cli/runway.py` — command bodies call `runtime.render.*`; expert blocks move out.
+  `cli/runway.py`, `cli/status.py` — command bodies call `runtime.render.*`; inline
+  expert blocks become named functions in place.
 - `trainmate/cli/bot.py` — import path of the line builders only.
-- `tests/helpers.py` — the `simple_render` context manager; the thirteen env-patching
-  sites switch to it.
+- `tests/helpers.py` — `run_cli` resets the renderer per invocation; the env-patching
+  tests are untouched.
+- `tests/test_simple_render.py` — the three `is_simple_render()` tests become
+  `make_renderer()` tests.
 - `designs/DESIGN_bot_simple_frontend.md` §6, §8 — pointer here.
 - `trainmate_bot.py` — untouched.
 
@@ -305,8 +325,14 @@ what makes it cheap to add a third persona later. Not scheduled.
   calling them directly (§3).
 - The renderer draws, the command asks: `preview_and_confirm_revision` splits into a
   render method and a `runtime.prompt.confirm` at the call site (§4).
-- Tests assign `runtime.render`; env patching is retired with `is_simple_render()`
-  (§6).
+- Renderers may read what the code they wrap reads; they may not judge (§4).
+- Expert table renderers stay in their command modules; `ExpertRenderer` delegates
+  (§7 step 3).
+- `_resolve_goal` is untouched; only the `plan show` guard goes through the renderer
+  (§5).
+- `run_cli` rebuilds `runtime.render` per invocation; env patching in tests stays (§6).
+- Command modules never import `render.py`; only `bot.py` and the `runtime` builder do
+  (§7).
 - The bot-side persona branches are out of scope (§8).
 
 **Open**
@@ -314,7 +340,10 @@ what makes it cheap to add a third persona later. Not scheduled.
    `NullRenderer` for the JSON-only paths that print nothing (the web dashboard's
    worker)? Today those paths never reach a rendering command, so: no, until one
    does.
-2. The `progress` method carries `args` through for its half-dozen flags (`--sports`,
-   `--blocks`, `--weeks`…). Cleaner would be a small options record, but that is a
-   `progress` refactor, not a persona one. Pass `args`; revisit if a second method
-   wants the same.
+2. `progress` and `workout_list` carry `args` through for their flags (`--sports`,
+   `--blocks`, `--weeks`; `--link`, `--verbose`). Cleaner would be a small options
+   record, but that is a command refactor, not a persona one. Pass `args`.
+3. The `workout adapt` plan-behind refusal (§5, the sixteenth site) still names
+   `goal add` and `plan generate` on the companion surface. The fix is a renderer
+   method for the refusal with companion wording; it is a new companion sentence, so
+   it is a follow-up to this relocation, not part of it.
