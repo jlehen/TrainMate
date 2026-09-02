@@ -1188,7 +1188,11 @@ class TestCliWorkouts(unittest.TestCase):
         self, mock_coach, mock_prompt, _ensure
     ):
         """A regen is archive-and-rebuild, so an existing upcoming plan is confirmed
-        before the LLM call; --force skips the prompt."""
+        before the LLM call; --force skips the prompt.
+
+        A bare run opens the day after the generated schedule stops (§8), so the sessions
+        at stake are the ones sitting past it — here the hand-added one, not the generated
+        session that defines where coverage ends."""
         mock_coach.workout_generate.return_value = _proposal()
         today = datetime.now(timezone.utc).date()
         d1 = (today + timedelta(days=1)).strftime("%Y-%m-%d")
@@ -1219,8 +1223,9 @@ class TestCliWorkouts(unittest.TestCase):
         question = " ".join(mock_prompt.confirm.call_args.args[0].split())
         # Counted over the span about to be rebuilt, not "everything from today on" — a
         # bounded regen only puts the sessions inside it at stake (§8).
-        self.assertIn("You already have 2 workout(s) planned in this span", question)
-        self.assertIn(fmt_date(d1), question)
+        self.assertIn("You already have 1 workout(s) planned in this span", question)
+        # d1 is the generated session the span now opens after, so it is not at stake.
+        self.assertNotIn(fmt_date(d1), question)
         self.assertIn(fmt_date(d2), question)
         self.assertIn("1 added by hand", question)
         self.assertIn("your current plan is unchanged", stdout)

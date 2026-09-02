@@ -21,9 +21,9 @@ def _days_out(n: int) -> str:
 # (same rot 2a7cd71 fixed in test_constraints.py).
 GOAL_DATE = _days_out(71)
 
-from trainmate import progression
 from trainmate.cli.workouts import generate as generate_cli
 from trainmate.config import config
+from trainmate.cli.selectors import IdRange
 from trainmate.db import Database
 from trainmate.db.periodization import repair_block_contiguity
 import trainmate.db
@@ -2302,86 +2302,61 @@ class TestGenerationSpanIsBounded(unittest.TestCase):
         self.assertNotIn("Inside", live)
         self.assertIn(f"Run {_days_out(31)}", live)
 
-    @patch("trainmate.runtime.calendar_syncer")
-    @patch("trainmate.coach.engine.openrouter_client")
-    def test_no_span_at_all_stops_at_the_cap_inside_a_long_block(
-        self, mock_client, _mock_calendar
-    ):
-        """With no selector the span is still bounded at both ends. This fixture's block
-        runs 90 days, so the cap is what bounds it — the clamp below never bites."""
-        mock_client.complete.return_value = self._response(_days_out(1))
-        proposal = coach_service.workout_generate()
-        self.assertEqual(proposal.gen_start, _days_out(0))
-        self.assertEqual(
-            proposal.gen_end, _days_out(config.workout_generation_span_days - 1)
-        )
-
-    @patch("trainmate.runtime.calendar_syncer")
-    @patch("trainmate.coach.engine.openrouter_client")
-    def test_the_default_span_stops_at_the_block_boundary(
-        self, mock_client, _mock_calendar
-    ):
-        """Coverage stopping on a boundary is what keeps the schedule aligned with the
-        periodization: `adapt` already treats the block end as its far edge, and the
-        runway detector reads that end as a block cliff rather than a span one."""
-        clear_all_tables(test_db)
-        obj_id = test_db.add_objective(
-            title="Autumn Marathon", target_date=_days_out(90), sport_type="running",
-        )
-        test_db.save_macrocycle(
-            objective_id=obj_id, strategy="build", goals_hash="g", constraints_hash="c",
-            mesocycles=[
-                {"name": "Base", "start_date": _days_out(0),
-                 "end_date": _days_out(10), "focus": "aerobic"},
-                {"name": "Build", "start_date": _days_out(11),
-                 "end_date": _days_out(90), "focus": "threshold"},
-            ],
-        )
-        mock_client.complete.return_value = self._response(_days_out(1))
-        proposal = coach_service.workout_generate()
-        self.assertEqual(proposal.gen_start, _days_out(0))
-        self.assertEqual(proposal.gen_end, _days_out(10))
-
-    def test_the_cli_span_clamps_at_the_block_too(self):
-        """`_resolve_span` is the interactive path's copy of the same rule — the two must
-        not disagree about which days a bare `workout generate` writes."""
-        clear_all_tables(test_db)
-        obj_id = test_db.add_objective(
-            title="Autumn Marathon", target_date=_days_out(90), sport_type="running",
-        )
-        test_db.save_macrocycle(
-            objective_id=obj_id, strategy="build", goals_hash="g", constraints_hash="c",
-            mesocycles=[
-                {"name": "Base", "start_date": _days_out(0),
-                 "end_date": _days_out(10), "focus": "aerobic"},
-                {"name": "Build", "start_date": _days_out(11),
-                 "end_date": _days_out(90), "focus": "threshold"},
-            ],
-        )
+    def test_a_bare_span_opens_after_the_generated_schedule_stops(self):
+        """Generation carries the schedule on rather than rewriting days it already
+        covers — a run that rewrote them would leave the runway nudge standing (§8)."""
+        self._existing(_days_out(3), "Planned")
         self.assertEqual(
             generate_cli._resolve_span(argparse.Namespace()),
-            (_days_out(0), _days_out(10)),
+            (_days_out(4), _days_out(4 + config.workout_generation_span_days - 1)),
         )
 
-    def test_the_cli_span_falls_back_to_the_cap_in_a_long_block(self):
+    def test_a_bare_span_opens_today_once_the_schedule_has_run_out(self):
+        self._existing(_days_out(-3), "History")
         self.assertEqual(
             generate_cli._resolve_span(argparse.Namespace()),
             (_days_out(0), _days_out(config.workout_generation_span_days - 1)),
         )
 
-    def test_the_clamp_is_one_rule_both_generation_paths_read(self):
-        """Pure over the one block row the caller fetched, so the CLI and the unattended
-        plan-then-generate path cannot clamp differently."""
+    def test_a_bare_span_opens_today_with_nothing_generated_yet(self):
         self.assertEqual(
-            progression.generation_span_end("2026-09-02", "2026-09-10", 28),
-            "2026-09-10",
+            generate_cli._resolve_span(argparse.Namespace()),
+            (_days_out(0), _days_out(config.workout_generation_span_days - 1)),
+        )
+
+    def test_a_plan_covered_to_its_last_day_has_nothing_left_to_generate(self):
+        """Carrying on past the plan would write days no block governs — the plan-cliff
+        state, whose fix is a new goal rather than another span."""
+        self._existing(_days_out(90), "Final")
+        self.assertIsNone(generate_cli._resolve_span(argparse.Namespace()))
+
+    def test_a_selector_still_opens_today(self):
+        """Only the unselected case carries on. A forward-direction selector fills its own
+        start in `resolve_window`, so `-m ..<id>` keeps meaning today through that block."""
+        self._existing(_days_out(3), "Planned")
+        meso_id = test_db.get_mesocycles_for_macrocycle(
+            test_db.get_governing_macrocycle()["id"]
+        )[0]["id"]
+        args = argparse.Namespace(
+            meso_range=IdRange(start=None, end=meso_id),
+            _selector_policy=("forward", None, 7),
         )
         self.assertEqual(
-            progression.generation_span_end("2026-09-02", "2026-12-01", 28),
-            "2026-09-29",
+            generate_cli._resolve_span(args), (_days_out(0), _days_out(90)),
         )
+
+    @patch("trainmate.runtime.calendar_syncer")
+    @patch("trainmate.coach.engine.openrouter_client")
+    def test_no_span_at_all_is_the_config_horizon_from_today(
+        self, mock_client, _mock_calendar
+    ):
+        """With no selector the span is still bounded at both ends, so the default run
+        behaves like every other one."""
+        mock_client.complete.return_value = self._response(_days_out(1))
+        proposal = coach_service.workout_generate()
+        self.assertEqual(proposal.gen_start, _days_out(0))
         self.assertEqual(
-            progression.generation_span_end("2026-09-02", None, 28), "2026-09-29",
+            proposal.gen_end, _days_out(config.workout_generation_span_days - 1)
         )
 
 class TestEasedSessionsAreCarriedIntoGeneration(unittest.TestCase):

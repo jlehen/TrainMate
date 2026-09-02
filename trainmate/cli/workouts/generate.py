@@ -2,7 +2,7 @@
 import argparse
 from datetime import datetime, timedelta
 from typing import Optional
-from trainmate import progression, runtime, signals
+from trainmate import runtime, signals
 from trainmate.config import config
 from trainmate.adherence import analyze_adherence, date_covered, format_discrepancies
 from trainmate.google_calendar import event_url
@@ -15,7 +15,9 @@ from trainmate.cli.common import (
     adherence_verdicts, ensure_recent_data, format_actual,
     mark_adherence_from_results, report_unhonored,
 )
-from trainmate.cli.runway import current_runway, list_end_marker, plan_is_behind
+from trainmate.cli.runway import (
+    current_runway, list_end_marker, plan_is_behind, schedule_coverage,
+)
 from trainmate.coach.proposals import GenerateProposal
 
 from trainmate.cli.selectors import has_selector as _has_selector, resolve_window, split_targets
@@ -325,24 +327,14 @@ def _shift(date_str: str, days: int) -> str:
     ).strftime("%Y-%m-%d")
 
 
-def _default_span_end(span_start: str) -> str:
-    """`progression.generation_span_end` over the block this span opens in — the db read
-    beside the pure rule, as `runway` splits (DESIGN_cli_selectors.md §8)."""
-    block = runtime.db.get_covering_mesocycle(span_start)
-    return progression.generation_span_end(
-        span_start,
-        str(block["end_date"]) if block and block.get("end_date") else None,
-        config.workout_generation_span_days,
-    )
-
-
 def _resolve_span(args: argparse.Namespace) -> Optional[tuple[str, str]]:
     """The days this run rebuilds: both ends of whatever `-d`/`-m`/`-M`/`-g` selected.
 
-    An unselected start is today and an unselected end is `_default_span_end`, so the span
-    is always bounded (DESIGN_cli_selectors.md §8). None when the selection is entirely
-    behind us — a block that has already run is history, and silently regenerating today
-    instead is not what was asked for."""
+    An unselected start is the day after the schedule stops (today once it has run out)
+    and an unselected end is the config horizon, so the span is always bounded
+    (DESIGN_cli_selectors.md §8). None when the selection is entirely behind us — a block
+    that has already run is history, and silently regenerating today instead is not what
+    was asked for — or when the plan is already covered to its last day."""
     today = _today_str()
     start_date, end_date = resolve_window(args)
     if end_date and end_date < today:
@@ -351,15 +343,34 @@ def _resolve_span(args: argparse.Namespace) -> Optional[tuple[str, str]]:
             f"nothing ahead of it to generate.", red,
         )
         return None
+    # With nothing selected, generation carries the schedule on from where it stops
+    # rather than rewriting the days it already covers (§8). Only this case: every
+    # selector fills its own start, forward-direction, before this runs.
+    if start_date is None:
+        covered, plan_end = schedule_coverage()
+        if covered and covered >= today:
+            if plan_end and covered >= plan_end:
+                notice(
+                    f"The schedule already covers your plan through its last day "
+                    f"({fmt_date(plan_end)}) — there is nothing further to generate.",
+                    red,
+                )
+                return None
+            start_date = _shift(covered, 1)
     span_start = max(start_date or today, today)
-    return span_start, end_date or _default_span_end(span_start)
+    span_end = end_date or _shift(
+        span_start, config.workout_generation_span_days - 1
+    )
+    return span_start, span_end
 
 
 def _warn_span_change(span_start: str, span_end: str) -> None:
     """Names the days this run no longer touches, now that the selectors bound BOTH ends
     of the span instead of only its end (DESIGN_cli_selectors.md §8).
 
-    Transitional: it fires only when the old reading and the new one differ."""
+    Transitional, and only for a selected span: it fires when the old reading and the new
+    one differ. An unselected run opens after the covered days by rule, so its caller does
+    not ask."""
     today = _today_str()
     tail = runtime.db.get_workouts(start_date=_shift(span_end, 1))
     if span_start <= today and not tail:
@@ -430,7 +441,11 @@ def run_workout_generate(args: argparse.Namespace) -> None:
         return
     span_start, span_end = span
     prefer_macro_id = _preferred_macro_id(args)
-    _warn_span_change(span_start, span_end)
+    # Only for a span the athlete bounded: the transitional notice is about selectors
+    # naming both ends, and the default opening after the covered days is now the rule
+    # rather than a deviation worth a note on every run (§8).
+    if _has_selector(args):
+        _warn_span_change(span_start, span_end)
 
     # The staleness check looks over the days about to be written.
     if not _confirm_out_of_date_plans(span_start, span_end, prefer_macro_id, force):

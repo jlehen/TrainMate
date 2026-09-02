@@ -266,27 +266,28 @@ Both halves are now read off the same window `resolve_window` already builds:
   rebuilds the days it was given and leaves the rest of the plan alone — which is what
   makes `workout generate -g 1` a way to re-plan the near goal without wiping the far one.
 
-With no selector at all the span is still bounded at both ends: today through
-`progression.generation_span_end` — the config cap, or the end of the block the span opens
-in, whichever comes first (revised 2026-09-02). There is still no second rule for the
-default case: it is one span with two ends like every other, and only its far end is
-computed rather than given.
+With no selector at all the span is still bounded at both ends: the day after the
+schedule stops, through `config.workout_generation_span_days` from there (revised
+2026-09-02 — it used to open at today). There is still no second rule for the default
+case; what changed is which day the command's own policy fills in.
 
-The clamp is there so generated coverage never crosses a block boundary. Crossing one cost
-two things. The `-m ..<id>` re-plan that DESIGN_block_boundary.md §1 relies on to carry the
-fatigue signal into the next block was never reached, because the schedule stopped on an
-arbitrary date instead of a boundary and the runway detector therefore never saw a block
-cliff. And a bare `workout generate` — tappable in companion mode since
-DESIGN_runway_nudge.md §6 — de-aligned the schedule from the plan it implements, with no
-way back: block-scoped spans stay aligned, bare ones stay misaligned, and one tap moved the
-athlete permanently into the second regime.
+Opening at today left the default unable to answer its own nudge. When the generated
+sessions run out mid-plan, the runway hint (DESIGN_runway_nudge.md §4) asks for a
+`workout generate` — and a span opening at today rebuilt the days already covered and
+stopped where it always did. `coverage_end` never moved, so the same hint returned the
+next morning, and the athlete's planned week had been replaced for nothing. Opening after
+the covered days makes the run add days, which is the only thing that changes the fact the
+nudge reports.
 
-The cap keeps its own job rather than being retired into "one block per run". A block
-longer than the cap is generated in cap-sized pieces, each authored against what the
-previous piece actually banked — which is a stronger correction than `adapt` can make,
-since `adapt` eases transiently within a block and is instructed not to reshape it (§2
-there). `BLOCK PROGRESS SO FAR` (DESIGN_block_progress.md) already exists to make a partial
-block generate well, so this is the path the prompt was built for, not a new one.
+Two edges. Once the schedule has run out — coverage behind today — the start is today
+again, there being nothing to carry on from. And when coverage already reaches the plan's
+last day the run is refused, rather than opening past the periodization and writing days no
+block governs: that is the plan cliff, whose fix is a new goal rather than another span
+(DESIGN_runway_nudge.md §2).
+
+Only the fully unselected case moves. `resolve_window` fills a forward-direction command's
+unbounded start with today before this runs, so `-m ..<id>`, `-d ..DATE` and their siblings
+still open at today and keep the meaning §2 gives them.
 
 The change is not backwards compatible, so a run says which days it no longer touches:
 when the span opens later than today, or when live sessions sit past its end,

@@ -572,19 +572,6 @@ def coverage_end(workouts: List[Dict[str, Any]]) -> Optional[str]:
     return max(dates) if dates else None
 
 
-def generation_span_end(
-    span_start: str, block_end: Optional[str], span_days: int
-) -> str:
-    """Where an unselected generation span stops: the config cap, or the end of the block
-    containing its start, whichever comes first (DESIGN_cli_selectors.md §8).
-
-    Pure over the one block row the caller fetched, like `runway` over its rows, so the
-    CLI and the unattended plan-then-generate path cannot clamp differently. With no block
-    covering the start the cap stands alone."""
-    cap_end = _date_str(_to_date(span_start) + timedelta(days=span_days - 1))
-    return min(cap_end, block_end) if block_end else cap_end
-
-
 def runway(
     workouts: List[Dict[str, Any]],
     mesocycles: List[Dict[str, Any]],

@@ -6,6 +6,7 @@ The surface half drives the real CLI against a temp database, because the point 
 design is that `workout adapt`, `status`, `workout list` and the morning push cannot
 answer the same morning differently (§3).
 """
+import argparse
 import os
 import re
 import unittest
@@ -26,6 +27,7 @@ rebind_test_db(test_db)
 
 from trainmate import progression, runtime  # noqa: E402
 from trainmate.cli import render as render_cli, runway as runway_cli  # noqa: E402
+from trainmate.cli.workouts import generate as generate_cli  # noqa: E402
 from trainmate.cli.bot import MORNING_MARKER  # noqa: E402
 from trainmate.cli.render import SPORT_EMOJI, SIMPLE_PASSED_LINE  # noqa: E402
 from trainmate.cli.runway import RUNWAY_BUTTON_LABEL  # noqa: E402
@@ -429,6 +431,16 @@ class RunwaySurfaceTest(unittest.TestCase):
         flowed = " ".join(out.split())
         self.assertIn("setting up a new goal happens from the computer", flowed)
         self.assertNotIn("goal add", flowed)
+
+    def test_the_nudge_is_answerable_by_the_command_it_names(self):
+        """A cliff must not survive the run that answers it. The generation span opens the
+        day after the covered days, so acting on the nudge adds days rather than rewriting
+        the ones already on record (DESIGN_cli_selectors.md §8)."""
+        self._plan([(-30, 3), (4, 45)])
+        self._sessions(0, 3)
+        self.assertEqual(runway_cli.current_runway()["kind"], RUNWAY_BLOCK)
+        span = generate_cli._resolve_span(argparse.Namespace())
+        self.assertEqual(span[0], _out(4))
 
     def test_the_companion_week_view_names_the_end_of_the_schedule(self):
         self._plan([(-30, 45)])

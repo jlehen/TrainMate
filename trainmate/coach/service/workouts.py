@@ -10,7 +10,7 @@ from trainmate.coach.revisions import normalize_load_fields
 from trainmate.sports import canonical_sport
 from trainmate.benchmarks import MIN_RETEST_DAYS
 from trainmate.calendar_reconcile import verbose_events
-from trainmate import intensity, progression
+from trainmate import intensity
 from trainmate.util import green, cmd, notice, keep_whole
 import trainmate.coach.service as _svc
 
@@ -463,17 +463,8 @@ class WorkoutGenMixin:
             num_days = max(1, (end_date_obj - gen_start_obj).days + 1)
             gen_end_str = max(end_date, gen_start_str)
         else:
-            # Same clamp the CLI applies, so the unattended plan-then-generate path does
-            # not cross a block boundary the interactive one stops at (§8).
-            block = self._db.get_covering_mesocycle(gen_start_str)
-            gen_end_str = progression.generation_span_end(
-                gen_start_str,
-                str(block["end_date"]) if block and block.get("end_date") else None,
-                config.workout_generation_span_days,
-            )
-            num_days = (
-                datetime.strptime(gen_end_str, "%Y-%m-%d").date() - gen_start_obj
-            ).days + 1
+            num_days = config.workout_generation_span_days
+            gen_end_str = (gen_start_obj + timedelta(days=num_days - 1)).strftime("%Y-%m-%d")
 
         constraints = self._db.get_constraints(gen_start_str)
         self._maybe_nudge_no_threshold()
