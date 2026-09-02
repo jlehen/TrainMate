@@ -549,7 +549,7 @@ class TestHonoredAt(unittest.TestCase):
             ("Base 2", "2026-06-01", "2026-06-30"),
             ("Build 1", "2026-07-01", "2026-08-15"),
         ])
-        from trainmate.cli.constraints import _maybe_point_at_honor
+        from trainmate.cli.constraints import point_at_honor
         for start, end, should_fire in (
             ("2026-07-05", "2026-07-10", True),    # wholly beyond the active block
             ("2026-06-28", "2026-07-04", True),    # straddling its boundary
@@ -560,7 +560,7 @@ class TestHonoredAt(unittest.TestCase):
                 buf = io.StringIO()
                 with patch("trainmate.cli.constraints._today_str", return_value="2026-06-01"), \
                         redirect_stdout(buf):
-                    _maybe_point_at_honor(cid)
+                    point_at_honor(cid)
                 out = " ".join(buf.getvalue().split())
                 self.assertEqual("workout generate -m" in out, should_fire)
 
@@ -572,12 +572,12 @@ class TestHonoredAt(unittest.TestCase):
             ("Base 2", "2026-06-01", "2026-06-30"),
             ("Build 1", "2026-07-01", "2026-08-15"),
         ])
-        from trainmate.cli.constraints import _maybe_point_at_honor
+        from trainmate.cli.constraints import point_at_honor
         cid = self._constraint("2026-07-20", "2026-07-24")
         buf = io.StringIO()
         with patch("trainmate.cli.constraints._today_str", return_value="2026-06-01"), \
                 redirect_stdout(buf):
-            _maybe_point_at_honor(cid)
+            point_at_honor(cid)
         out = " ".join(buf.getvalue().split())
         self.assertIn("Lands in Build 1 (2026-07-01 Wed — 2026-08-15 Sat)", out)
         self.assertIn("adapt reaches it on 2026-07-01 Wed", out)
@@ -590,12 +590,12 @@ class TestHonoredAt(unittest.TestCase):
             ("Build 1", "2026-08-15", "2026-09-14"),
             ("Build 2", "2026-09-15", "2026-10-04"),
         ])
-        from trainmate.cli.constraints import _maybe_point_at_honor
+        from trainmate.cli.constraints import point_at_honor
         cid = self._constraint("2026-09-12", "2026-09-20")
         buf = io.StringIO()
         with patch("trainmate.cli.constraints._today_str", return_value="2026-08-21"), \
                 redirect_stdout(buf):
-            _maybe_point_at_honor(cid)
+            point_at_honor(cid)
         out = " ".join(buf.getvalue().split())
         self.assertIn("Straddles the end of Build 1 (2026-09-14 Mon)", out)
         self.assertIn("Build 2 holds the rest", out)
@@ -612,12 +612,12 @@ class TestHonoredAt(unittest.TestCase):
         """Its last day is ungoverned but its first is not, so there are still governed
         days to build around — named, with `plan generate` for the rest."""
         self._plan_blocks([("Build 1", "2026-08-15", "2026-09-14")])
-        from trainmate.cli.constraints import _maybe_point_at_honor
+        from trainmate.cli.constraints import point_at_honor
         cid = self._constraint("2026-09-10", "2026-09-25")
         buf = io.StringIO()
         with patch("trainmate.cli.constraints._today_str", return_value="2026-08-21"), \
                 redirect_stdout(buf):
-            _maybe_point_at_honor(cid)
+            point_at_honor(cid)
         out = " ".join(buf.getvalue().split())
         self.assertIn("past the end of your plan", out)
         self.assertIn("workout generate", out)
@@ -629,12 +629,12 @@ class TestHonoredAt(unittest.TestCase):
         # `get_active_mesocycle` falls back to a neighbouring block when none covers the
         # date, so naming one here would name a block the constraint is not in.
         self._plan("2026-06-01", "2026-06-30")
-        from trainmate.cli.constraints import _maybe_point_at_honor
+        from trainmate.cli.constraints import point_at_honor
         cid = self._constraint("2026-09-01", "2026-09-05")
         buf = io.StringIO()
         with patch("trainmate.cli.constraints._today_str", return_value="2026-06-01"), \
                 redirect_stdout(buf):
-            _maybe_point_at_honor(cid)
+            point_at_honor(cid)
         out = " ".join(buf.getvalue().split())
         self.assertIn("past the end of the plan", out)
         self.assertIn("plan generate", out)
@@ -643,13 +643,13 @@ class TestHonoredAt(unittest.TestCase):
     def test_the_add_time_message_stays_quiet_on_a_plan_shaping_constraint(self):
         # It is being built into the plan, so pointing at a rebuild is the wrong tier.
         self._plan("2026-06-01", "2026-06-30")
-        from trainmate.cli.constraints import _maybe_point_at_honor
+        from trainmate.cli.constraints import point_at_honor
         cid = self._constraint("2026-07-05", "2026-07-10")
         test_db.update_constraint(cid, replan=1)
         buf = io.StringIO()
         with patch("trainmate.cli.constraints._today_str", return_value="2026-06-01"), \
                 redirect_stdout(buf):
-            _maybe_point_at_honor(cid)
+            point_at_honor(cid)
         self.assertEqual(buf.getvalue(), "")
 
     def test_a_pass_that_ended_before_the_range_never_covered_it(self):
@@ -670,7 +670,7 @@ class TestHonoredAt(unittest.TestCase):
         it for itself, which is how `constraint show` came to flag a plan-shaping
         directive the count deliberately skips (§2).
         """
-        from trainmate.cli.constraints import _maybe_point_at_honor, run_constraint_show
+        from trainmate.cli.constraints import point_at_honor, run_constraint_show
         self._plan_blocks([("Base 2", "2026-06-01", "2026-06-30"),
                            ("Build 1", "2026-07-01", "2026-08-15")])
         cases = {
@@ -692,7 +692,7 @@ class TestHonoredAt(unittest.TestCase):
                     buf = io.StringIO()
                     with redirect_stdout(buf):
                         run_constraint_show(argparse.Namespace(id=cid))
-                        _maybe_point_at_honor(cid)
+                        point_at_honor(cid)
                     line = constraint_line(constraint, cid in swept)
                 offered = cid in swept
                 # All four surfaces say the same thing, whatever that thing is.

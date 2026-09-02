@@ -268,9 +268,13 @@ class TestConfirmationLadder(unittest.TestCase):
         )
         runtime.calendar_syncer = syncer
 
-    def _run(self, candidate, answers):
-        """Drives one candidate through the ladder; returns the questions asked."""
-        from trainmate.cli.workouts.generate import _confirm_new_signals
+    def _run(self, candidate, answers, render=""):
+        """Drives one candidate through the ladder; returns the questions asked.
+
+        The ladder now lives in cli/candidates.py, where `workout adapt -m` and `bot
+        capture note` both reach it (DESIGN_bot_simple_frontend.md §12.10), and the
+        questions come from the active renderer — so the voice is pinned here too."""
+        from trainmate.cli.candidates import confirm_new_signals
         asked = []
         replies = iter(answers)
 
@@ -280,8 +284,16 @@ class TestConfirmationLadder(unittest.TestCase):
 
         runtime.prompt = Mock()
         runtime.prompt.confirm.side_effect = confirm
-        with patch("builtins.print"):
-            _confirm_new_signals([candidate], "2026-08-30")
+        # Both handles are process-wide singletons: an assignment shadows the accessor
+        # for good, and a cached renderer outlives the env var that chose it.
+        self.addCleanup(runtime.reset, "prompt", "render")
+        runtime.reset("render")
+        with patch("builtins.print"), patch.dict(
+            os.environ, {"TRAINMATE_RENDER": render} if render else {}, clear=False
+        ):
+            if not render:
+                os.environ.pop("TRAINMATE_RENDER", None)
+            confirm_new_signals([candidate], "2026-08-30")
         return asked
 
     def test_a_known_category_asks_once(self):
@@ -317,6 +329,20 @@ class TestConfirmationLadder(unittest.TestCase):
     def test_a_declined_single_question_logs_nothing(self):
         self._run({"metric": "alcohol", "date": "2026-08-29"}, [False])
         self.assertEqual(test_db.get_daily_signals("2026-08-29", "2026-08-29"), [])
+
+    def test_the_companion_asks_the_same_ladder_in_its_own_words(self):
+        """`bot capture note` runs this ladder in companion chat, so the same two rungs
+        must arrive without underscores, ISO spans or the word NEW
+        (DESIGN_bot_simple_frontend.md §6, §12.3)."""
+        asked = self._run(
+            {"metric": "heatwave", "date": "2026-08-29"}, [False, True], render="simple"
+        )
+        self.assertEqual(len(asked), 2, "the ladder keeps both rungs in either voice")
+        self.assertNotIn("NEW", asked[1])
+        self.assertIn("new one for me", asked[1])
+        for question in asked:
+            self.assertNotIn("2026-08-29", question)
+            self.assertNotIn("_", question)
 
 
 if __name__ == "__main__":

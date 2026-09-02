@@ -158,15 +158,34 @@ classes themselves.
     (a hidden CLI command calling `llm.router_model`) and mapped to argv from the bot's
     own `ROUTER_INTENT_ARGV` table — the model picks an intent, never argv. The tap's
     one effect is invisible and can only help: while it is live, text the router calls
-    `unclear` rides the `adapt -m` inbox instead of bouncing, so the button never
-    redirects a message, only rescues one (§5.2). Constraints
-    and daily signals are part of that surface: adding either rides the `adapt -m`
-    capture flow (`add_constraint` and `add_signal` share `coach_message`'s inbox and
-    build identical argv — they differ only in the echo line), and showing/removing
-    constraints map to `tm bot constraints`, whose button picker offers single-ID
-    `constraint rm` taps. Signals get no removal counterpart on purpose: they are
-    backward-looking evidence, not a rule that keeps shaping the schedule
-    (DESIGN_bot_simple_frontend.md §5.5). Subprocesses
+    `unclear` rides the `bot capture note` inbox instead of bouncing, so the button never
+    redirects a message, only rescues one (§5.2, §12.3).
+  - **Writes reach chat through three shapes, and no fourth**
+    (DESIGN_bot_simple_frontend.md §12). A **view** runs fixed argv. A **picker** —
+    `tm bot constraints`, `tm bot goals` — renders the list in companion prose and
+    attaches a button row whose leaves carry a deterministic single-ID command
+    (`constraint rm <id>`, `goal rm <id>`, which archives); the model picks *that*
+    something should change, the athlete's tap picks *which*. A **capture** —
+    `tm bot capture <intent> "<text>" [--id N]` — is a second, domain-focused LLM call on
+    the same router role: it extracts typed fields, the CLI previews them in companion
+    prose *rendered from real rows*, and a `TM-PROMPT` confirm makes it real. An
+    operation fitting none of the three belongs to the expert vocabulary, which is why
+    `plan generate`, wipes, `--purge`, model roles and `restart` stay typed. Notes
+    (`add_constraint`/`add_signal`) share one `bot capture note` inbox instead of riding
+    `adapt -m`: recording is instant and cheap, and the coach becomes an *offer* — a
+    "🔄 Adjust the plan around it" button after every persisted capture, and a "📨 Send it
+    to your coach as written" button when the extraction finds nothing. Edits
+    (`edit_goal`, `edit_constraint`) *nominate* their object from rows the CLI gave the
+    model — its own domain plus the upcoming sessions, because "my long run" and "my
+    marathon" do not respect domain lines; a session-shaped ask is handed to the coach,
+    several close candidates become a picker whose leaves re-enter the capture with
+    `--id` pinned, and nothing anywhere executes without a confirm on a CLI-rendered
+    preview. `change_setting` is bounded by the `ROUTABLE_SETTINGS` allowlist in
+    `cli/settings.py` (`morning-time`, `morning-deadline`, `push`), given to the
+    extraction *and* enforced after it; anything else earns a one-line refusal naming
+    the operator rather than the router's "unclear". Signals get no removal counterpart
+    on purpose: they are backward-looking evidence, not a rule that keeps shaping the
+    schedule (DESIGN_bot_simple_frontend.md §5.5). Subprocesses
     additionally get `TRAINMATE_RENDER=simple`, read once by
     `cli/render.make_renderer` and handed out as `runtime.render` — the voice axis,
     beside `runtime.prompt`'s transport axis. A command calls one method per thing it
@@ -174,10 +193,14 @@ classes themselves.
     `ExpertRenderer`, so its override set *is* the opted-in list (`workout list`,
     `progress`, the five adapt outcome lines, `goal list`, `plan show`, `workout
     generate`'s preview, the revision preview, `constraint rm`, the runway hint's
-    silence, the adapt plan-behind refusal) and anything else falls back to the expert
-    form (DESIGN_render_persona.md). `bot morning` and `bot constraints` are
-    companion-only by definition and call the line builders in `cli/render.py`
-    directly. Companion output is prose,
+    silence, the adapt plan-behind refusal, the note-candidate confirms, `goal
+    add`/`edit`/`rm`, `settings set`, the plan-shaping and replan notices) and anything
+    else falls back to the expert form (DESIGN_render_persona.md). Every command a tap
+    can reach goes through it, which is what keeps expert command text — `plan
+    generate`, `constraint edit --replan`, `goal edit --status active` — out of a chat
+    whose reader cannot run any of them. `bot morning`, `bot constraints`, `bot goals`
+    and the `bot capture` family are companion-only by definition and call the line
+    builders in `cli/render.py` directly. Companion output is prose,
     sent plain instead of `<pre>`. A third one-way sentinel, `BUTTONS_SENTINEL`/
     `emit_buttons` (`\x1eTM-BUTTONS {json}`), attaches a *non-blocking* inline button
     row (`ui:` callback namespace, token-invalidated) whose taps feed a canned
@@ -193,9 +216,12 @@ classes themselves.
     keeps generation off the tappable surface, and never reachable through the router
     (DESIGN_runway_nudge.md §6). The companion week view draws that same button under its
     end-of-schedule note, gated on the listing crossing the cliff as well as the detector
-    firing, so the surface that names the gap is also the one that can close it. Free text saying what to train for next routes to
-    `new_goal`, which the bot answers itself: goal capture is operator work, and the
-    reply says so rather than promising a delivery nothing performs.
+    firing, so the surface that names the gap is also the one that can close it. Only one
+    button row is live per chat: a newer row — the morning push included — retires the
+    pending one, and a tap that finds its row stale says so rather than silently losing
+    the message behind it (§12.3). Free text saying what to train for next routes to
+    `add_goal`, a capture that creates the goal row; the periodization built on it stays
+    the operator's typed work, and the reply says so by name.
     Slash-prefixed text is always the expert path, and `/ui`
     flips the persona of a running bot in memory — `telegram.ui` decides again at the
     next restart (DESIGN_bot_simple_frontend.md §5.6).
@@ -1704,8 +1730,10 @@ patchable singletons; the handler functions, named
 `run_<command>_<subcommand>()`, live in the `trainmate/cli/` package
 (one module per command family: `status`, `progress`, `goals`, `constraints`,
 `benchmarks`, `signal`, `learnings`, `plans`, `data`, `models`, `journal`, `bot` (hidden:
-`bot morning`/`bot route`/`bot constraints`, spawned by the Telegram bot —
-DESIGN_bot_simple_frontend.md),
+`bot morning`/`route`/`constraints`/`goals`/`capture`, spawned by the Telegram bot —
+DESIGN_bot_simple_frontend.md; `candidates.py` holds the confirm loops that turn a
+note's extracted constraints and signals into rows, shared by `workout adapt -m` and
+`bot capture note` so both inboxes ask the same questions),
 plus the
 `workouts/` **package** — `parser`/`generate`/`edit`/`_helpers`; `selectors.py` holds the
 shared range grammar and `argparse_ext.py` the parser/help extensions). `help` is the one
@@ -1949,7 +1977,7 @@ Required fields:
 | `logging.dir`          | str  | Root of the two operator log directories — `runs/` (the journal, read with `tm journal`) and `llm_exchanges/` (the full prompts). Relative to the config file's directory, like `database:` (default: `logs`). DESIGN_logging.md §6 |
 | `logging.level`        | str  | Lowest level that reaches the journal file: `debug`\|`info`\|`warn`\|`error` (default `info`). `debug` turns on the records for exceptions the app deliberately swallows on screen |
 | `logging.retain_days` / `logging.retain_exchange_days` | int | Days each directory keeps (default 90 each). The sweep runs at most once a UTC day, off the first command to finish; `tm journal prune` forces one |
-| `llm.router_model`     | str  | Cheaper model the bot's free-text router (`tm bot route`) uses; a role, not a `model list` entry. Absent → the active coaching model (DESIGN_bot_simple_frontend.md §5.4) |
+| `llm.router_model`     | str  | Cheaper model the bot's free-text router (`tm bot route`) and its capture extractions (`tm bot capture`) use; a role, not a `model list` entry. Absent → the active coaching model (DESIGN_bot_simple_frontend.md §5.4, §12.2) |
 | `telegram.ui`          | str  | Bot persona: `expert` (default) or `simple` — the companion mode (DESIGN_bot_simple_frontend.md §3) |
 | `telegram.operator_name` | str | What the companion calls the human who runs the CLI. "Coach" is already the app in the athlete's vocabulary, so the operator gets a word of their own; absent → "the person who set this up for you" (DESIGN_render_persona.md §5) |
 | `telegram.push.*`      | —    | Morning push (simple ui only): `enabled` (default true), `morning_time` (`08:00`), `morning_deadline` (`15:00`), `adapt_first` (default false → run `workout adapt -y` before rendering) |

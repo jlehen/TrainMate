@@ -12,7 +12,7 @@ from trainmate.db.objectives import (
 from trainmate.sports import CANONICAL_SPORTS
 
 
-def _print_goal(g: dict) -> None:
+def print_goal_row(g: dict) -> None:
     """Prints one goal in the 'goal list' format.
 
     The state is derived, never read off the row: UPCOMING is the live one, COMPLETED
@@ -51,12 +51,12 @@ def run_goal_add(args: argparse.Namespace) -> None:
         date_type=args.date_type
     )
     goal = runtime.db.get_objective(goal_id)
+    # Through the renderer: the `bot capture add_goal` confirm lands here, and in
+    # companion chat the next step is the operator's, not a command to type
+    # (DESIGN_bot_simple_frontend.md §12.5).
     if goal:
-        _print_goal(goal)
-    print(
-        green("Goal added successfully. Run " + cmd("plan generate")
-              + " to generate training cycles.")
-    )
+        runtime.render.goal_row(goal, _today_str())
+    runtime.render.goal_added()
 
 
 def run_goal_edit(args: argparse.Namespace) -> None:
@@ -88,21 +88,18 @@ def run_goal_edit(args: argparse.Namespace) -> None:
     runtime.db.update_objective(args.id, **kwargs)
     updated = runtime.db.get_objective(args.id)
     if updated:
-        _print_goal(updated)
+        runtime.render.goal_row(updated, _today_str())
 
     now_archived = (updated or {}).get('status') == ARCHIVED
     if now_archived and not was_archived:
-        _report_archived_sessions(runtime.coach_service.goal_archive(args.id))
+        runtime.render.goal_stood_down(runtime.coach_service.goal_archive(args.id))
     elif was_archived and not now_archived:
         _offer_reinstated_sessions(args.id)
 
-    print(
-        green("Goal updated successfully. Run " + cmd("plan generate")
-              + " to regenerate training cycles if needed.")
-    )
+    runtime.render.goal_updated()
 
 
-def _report_archived_sessions(result: dict) -> None:
+def report_archived_sessions(result: dict) -> None:
     """Says what calling the goal off stood down, and what it deliberately left alone.
 
     Untagged sessions belong to no plan version, so no goal can claim them (§14); saying
@@ -165,7 +162,7 @@ def print_goal_table(goals: list, called_off: list, show_all: bool) -> None:
     (DESIGN_render_persona.md §5)."""
     print(bold(cyan("=== GOALS ===")))
     for g in goals:
-        _print_goal(g)
+        print_goal_row(g)
     if called_off and not show_all:
         print(gray(
             f"({len(called_off)} called-off goal(s) hidden — "
@@ -195,14 +192,12 @@ def run_goal_rm(args: argparse.Namespace) -> None:
 
     runtime.db.update_objective(args.id, status=ARCHIVED)
     updated = runtime.db.get_objective(args.id)
-    if updated:
-        _print_goal(updated)
-    # The same stand-down `goal edit --status archived` runs: one action, two names (§14.5).
-    _report_archived_sessions(runtime.coach_service.goal_archive(args.id))
-    print(green(
-        "Goal called off. Its plan, versions and feedback are kept — "
-        + cmd(f"goal edit {args.id} --status active") + " brings it back."
-    ))
+    # The same stand-down `goal edit --status archived` runs: one action, two names
+    # (§14.5). Through the renderer because the §12.6 picker's leaves land here, and the
+    # reinstate command they would otherwise name is the operator's to type.
+    runtime.render.goal_called_off(
+        updated or goal, runtime.coach_service.goal_archive(args.id), _today_str()
+    )
 
 
 def _purge_goal(args: argparse.Namespace, goal: dict) -> None:

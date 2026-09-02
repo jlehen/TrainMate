@@ -200,12 +200,12 @@ class PlanningMixin:
         constraint = self._db.get_constraint(cid)
         impact = self.constraint_plan_impact(constraint)
         if self.constraint_is_plan_shaping(constraint, impact):
-            notice(
-                f"  This looks plan-shaping ({impact['days']} days, displaces "
-                f"~{impact['displaced_pct']:.0f}% of a typical week). To build it into "
-                "the plan, run " + cmd(f"constraint edit {cid} --replan")
-                + " or " + cmd("plan generate") + ".",
-            )
+            # Through the renderer, because the escalation this names is the operator's
+            # typed work: in companion chat the same fact is said without commands, and
+            # the plan-adjusting tap is the offer the capture ends on
+            # (DESIGN_bot_simple_frontend.md §12.10).
+            from trainmate import runtime
+            runtime.render.constraint_plan_shaping(cid, impact)
         return cid
 
     def known_signal_metrics(self) -> List[str]:

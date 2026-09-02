@@ -38,9 +38,13 @@ def _resolve_dates(args: argparse.Namespace) -> tuple:
     return start, end
 
 
-def _maybe_point_at_honor(constraint_id: int) -> None:
+def point_at_honor(constraint_id: int) -> None:
     """Names the block a constraint lands in when it is past daily adapt's reach, and
     says what would build it into the plan now (DESIGN_constraint_honoring.md §4).
+
+    Reached through `runtime.render.constraint_honor_hint`, which draws nothing in
+    companion chat: every route named below is operator work
+    (DESIGN_bot_simple_frontend.md §12.9).
 
     Its own function called AFTER `_maybe_replan`, not a branch appended to it: that
     function returns early on a magnitude below the threshold, which is exactly the case
@@ -150,9 +154,14 @@ def _maybe_replan(constraint_id: int, title: str, replan_flag: Optional[bool]) -
     if _replan_targets(constraint) is None:
         return
 
-    detail = f"displaces ~{impact['displaced_pct']:.0f}% of a typical week's planned load"
-    notice(f"This {impact['days']}-day constraint {detail}.")
-    if runtime.prompt.confirm("Replan around it?"):
+    # The renderer states the magnitude and hands back the question to ask — or None,
+    # where escalating is not the reader's to do: `plan generate` is operator work, so
+    # companion chat says how big it is and leaves the tier alone
+    # (DESIGN_bot_simple_frontend.md §12.9).
+    question = runtime.render.constraint_replan_offer(impact)
+    if question is None:
+        return
+    if runtime.prompt.confirm(question):
         runtime.db.update_constraint(constraint_id, replan=1)
         _run_replan_flow(title, constraint)
     else:
@@ -226,7 +235,7 @@ def run_constraint_add(args: argparse.Namespace) -> None:
         print(constraint_line(constraint, _needs_a_pass(constraint)))
     print(green("Constraint added successfully."))
     _maybe_replan(cid, title, args.replan)
-    _maybe_point_at_honor(cid)
+    runtime.render.constraint_honor_hint(cid)
 
 
 def run_constraint_edit(args: argparse.Namespace) -> None:
@@ -272,7 +281,7 @@ def run_constraint_edit(args: argparse.Namespace) -> None:
 
     title = kwargs.get('title', constraint['title'])
     _maybe_replan(args.id, title, args.replan)
-    _maybe_point_at_honor(args.id)
+    runtime.render.constraint_honor_hint(args.id)
 
 
 def run_constraint_list(args: argparse.Namespace) -> None:

@@ -22,10 +22,10 @@ from trainmate.config import config
 from trainmate.progression import RUNWAY_BLOCK, RUNWAY_PLAN_END_NEXT_GOAL, RUNWAY_SPAN
 from trainmate.prompt import emit_buttons
 from trainmate.util import (
-    bold, cmd, days_between, fmt_date, green, notice, wrap_text,
+    bold, cmd, days_between, dim, fmt_date, green, notice, wrap_text,
     today_date as _today_date, today_str as _today_str,
 )
-from trainmate.cli.goals import print_goal_table
+from trainmate.cli.goals import print_goal_row, print_goal_table, report_archived_sessions
 from trainmate.cli.plans import print_plan
 from trainmate.cli.progress import emit_chart, print_progress_report
 from trainmate.cli.runway import (
@@ -175,6 +175,26 @@ def simple_when(date_str: str, today: str) -> str:
     return f"in {round(days / 30.4)} months"
 
 
+def simple_day_word(date_str: str, today: str) -> str:
+    """One date as the companion names it: 'today', else the day word (§6)."""
+    return "today" if date_str == today else simple_date_word(date_str)
+
+
+def simple_span_words(start: str, end: str, today: str) -> str:
+    """A window in companion words: one day word, or 'Thu Sep 04 to Sun Sep 07'. The
+    companion never shows an ISO span, on any surface that renders one (§6)."""
+    span = simple_day_word(start, today)
+    if end != start:
+        span = f"{span} to {simple_day_word(end, today)}"
+    return span
+
+
+def simple_metric_words(metric: str) -> str:
+    """A signal category as prose: `disturbed_sleep` reads 'disturbed sleep'. The
+    underscore form is the storage key and stays expert detail (§6)."""
+    return (metric or "").replace("_", " ").strip()
+
+
 def simple_constraint_lines(constraints: List[Dict[str, Any]], today: str) -> List[str]:
     """Simple rendering of the directives the coach works around: one bullet per
     constraint, dates as day words, no IDs or tier tags (the expert `constraint list`
@@ -182,18 +202,10 @@ def simple_constraint_lines(constraints: List[Dict[str, Any]], today: str) -> Li
     if not constraints:
         return ["Nothing on the list — no rules to work around right now. "
                 "Just tell me when something comes up 💬"]
-
-    def day_word(date_str: str) -> str:
-        if date_str == today:
-            return "today"
-        return simple_date_word(date_str)
-
     lines = ["📌 I'm working around:"]
     for c in constraints:
-        span = day_word(c["start_date"])
-        if c["end_date"] != c["start_date"]:
-            span = f"{span} to {day_word(c['end_date'])}"
         bullet = "🛌" if c.get("rest") else "•"
+        span = simple_span_words(c["start_date"], c["end_date"], today)
         lines.append(f"{bullet} {c['title']} — {span}")
     return lines
 
@@ -230,6 +242,24 @@ def simple_progress_lines(payload: Dict[str, Any], today: str) -> List[str]:
     ]
 
 
+def simple_goal_line(goal: Dict[str, Any], today: str) -> str:
+    """One goal as the companion says it: sport emoji(s), title, day word and countdown.
+
+    Its own function because a capture previews a goal it has not stored yet in exactly
+    this wording — which is what makes a wrong `date_type` guess visible in the preview's
+    first line rather than in the database (DESIGN_bot_simple_frontend.md §12.5)."""
+    date_word = simple_date_word(str(goal["target_date"]))
+    when = simple_when(str(goal["target_date"]), today)
+    # 'on' a date something happens on; 'by ~' a horizon that only bounds the plan —
+    # the same wording rule as the expert view.
+    if goal.get("date_type") == "horizon":
+        date_part = f"by ~{date_word} ({when})"
+    else:
+        date_part = f"on {date_word} ({when})"
+    emoji = " ".join(sport_emoji(s) for s in str(goal["sport_type"]).split(","))
+    return f"{emoji} {goal['title']} — {date_part}"
+
+
 def simple_goal_lines(goals: List[Dict[str, Any]], today: str) -> List[str]:
     """Simple rendering of the goals view: each goal still ahead with a day word and a
     countdown, then the completed ones as one celebration line. No IDs or state tags
@@ -242,16 +272,7 @@ def simple_goal_lines(goals: List[Dict[str, Any]], today: str) -> List[str]:
     if upcoming:
         lines.append("🎯 What you're training for:")
         for g in upcoming:
-            date_word = simple_date_word(str(g["target_date"]))
-            when = simple_when(str(g["target_date"]), today)
-            # 'on' a date something happens on; 'by ~' a horizon that only bounds the
-            # plan — the same wording rule as the expert view.
-            if g.get("date_type") == "horizon":
-                date_part = f"by ~{date_word} ({when})"
-            else:
-                date_part = f"on {date_word} ({when})"
-            emoji = " ".join(sport_emoji(s) for s in str(g["sport_type"]).split(","))
-            lines.append(f"{emoji} {g['title']} — {date_part}")
+            lines.append(simple_goal_line(g, today))
             description = (g.get("description") or "").strip()
             if description:
                 lines.append(wrap_text(description))
@@ -265,6 +286,55 @@ def simple_goal_lines(goals: List[Dict[str, Any]], today: str) -> List[str]:
         goal_word = "goal" if count == 1 else "goals"
         lines.append(f"\n🏁 {count} {goal_word} already behind you — nice collection 🏆")
     return lines
+
+
+def simple_goal_edit_lines(
+    goal: Dict[str, Any], changes: Dict[str, Any], today: str
+) -> List[str]:
+    """A proposed goal edit, drawn from the REAL row beside what it would become
+    (DESIGN_bot_simple_frontend.md §12.4).
+
+    The row half is what makes a wrong nomination die visibly: the athlete reads the goal
+    the model picked, in the words she knows it by, before anything is written."""
+    lines = [f"Your goal {simple_goal_line(goal, today)}"]
+    if "title" in changes:
+        lines.append(f"→ rename it to “{changes['title']}”")
+    if "target_date" in changes:
+        lines.append(
+            f"→ move it to {simple_date_word(changes['target_date'])} "
+            f"({simple_when(changes['target_date'], today)})"
+        )
+    if "description" in changes:
+        lines.append(f"→ note against it: {changes['description']}")
+    return lines
+
+
+def simple_constraint_edit_lines(
+    constraint: Dict[str, Any], changes: Dict[str, Any], today: str
+) -> List[str]:
+    """A proposed change to one of the rules the coach works around (§12.4), rendered
+    from the stored row the same way `simple_constraint_lines` renders the list."""
+    span = simple_span_words(constraint["start_date"], constraint["end_date"], today)
+    lines = [f"Your rule “{constraint['title']}” — {span}"]
+    if "title" in changes:
+        lines.append(f"→ restate it as “{changes['title']}”")
+    if "start_date" in changes or "end_date" in changes:
+        start = changes.get("start_date", constraint["start_date"])
+        end = changes.get("end_date", constraint["end_date"])
+        lines.append(f"→ make it {simple_span_words(start, end, today)}")
+    if "description" in changes:
+        lines.append(f"→ note against it: {changes['description']}")
+    return lines
+
+
+def simple_plan_shaping_line(impact: Dict[str, Any]) -> str:
+    """How big a directive just captured turns out to be, without the commands that would
+    escalate it: building it into the plan is `plan generate`, which is operator work, and
+    the adjust offer beside this capture is what the athlete can actually do (§12.10)."""
+    return (
+        f"That's a big one — it covers {impact['days']} days and takes out a good part "
+        "of a normal week."
+    )
 
 
 def simple_focus_snippet(text: str, limit: int = 220) -> str:
@@ -419,6 +489,19 @@ def simple_plan_wrapped_line() -> str:
     )
 
 
+def simple_plan_setup_line() -> str:
+    """What the companion says once a goal exists but the periodization for it does not
+    (DESIGN_bot_simple_frontend.md §12.5).
+
+    `simple_plan_wrapped_line`'s sentence family — never "your coach", which formally
+    means the app: a plan gets set up from the computer, by the operator, and a goal row
+    being cheap is exactly why the periodization built on it stays behind the §7 line."""
+    return (
+        "The training plan for it gets set up from the computer — "
+        f"{config.telegram_operator_name} takes care of that part."
+    )
+
+
 def simple_runway_lines(state: Dict[str, Any], today: str) -> List[str]:
     """The morning push's companion wording for one runway state
     (DESIGN_runway_nudge.md §6).
@@ -445,6 +528,12 @@ def simple_runway_lines(state: Dict[str, Any], today: str) -> List[str]:
         return [f"{lead} Next up is {obj['title']} ({when}) — that stretch gets set up "
                 f"from the computer, by {config.telegram_operator_name}."]
     return [f"{lead} {simple_plan_wrapped_line()}"]
+
+
+def _iso_span(start: str, end: str) -> str:
+    """A window the expert way — one date, or `start..end`, the form the candidate
+    confirms have always asked in."""
+    return start if start == end else f"{start}..{end}"
 
 
 # --- The two voices (DESIGN_render_persona.md §4) ---
@@ -482,6 +571,58 @@ class ExpertRenderer:
     def adapt_applied(self) -> None:
         print(green("Adaptations applied and synced to calendar successfully."))
 
+    # -- confirming a note's candidates (cli/candidates.py) --
+
+    def constraint_candidate_question(
+        self, title: str, start: str, end: str, today: str
+    ) -> str:
+        return f"Add constraint: {title} ({_iso_span(start, end)})?"
+
+    def constraint_captured(
+        self, constraint_id: int, title: str, start: str, end: str, today: str
+    ) -> None:
+        print(green(
+            f"Captured constraint [{constraint_id}]: {title} ({_iso_span(start, end)})"
+        ))
+
+    def constraint_candidate_discarded(self) -> None:
+        print("Discarded — not saved as a constraint.")
+
+    def constraint_plan_shaping(self, constraint_id: int, impact: Dict[str, Any]) -> None:
+        """What a capture says when the directive it just stored is big enough to
+        reshape the plan (DESIGN_constraints.md §7). Names the escalation commands,
+        which is the operator's next step and no one else's."""
+        notice(
+            f"  This looks plan-shaping ({impact['days']} days, displaces "
+            f"~{impact['displaced_pct']:.0f}% of a typical week). To build it into "
+            "the plan, run " + cmd(f"constraint edit {constraint_id} --replan")
+            + " or " + cmd("plan generate") + ".",
+        )
+
+    def signal_candidate_question(
+        self, metric: str, value: Optional[float], start: str, end: str, today: str,
+        *, new_category: bool,
+    ) -> str:
+        shown = "" if value is None else f" = {value}"
+        span = _iso_span(start, end)
+        if new_category:
+            return f"Log as NEW category '{metric}'{shown} on {span}?"
+        return f"Log signal: {metric}{shown} on {span}?"
+
+    def signal_logged(
+        self, metric: str, days: int, start: str, end: str, today: str
+    ) -> None:
+        print(green(
+            f"Logged {metric} ({days} day{'s' if days != 1 else ''}, "
+            f"{_iso_span(start, end)})."
+        ))
+
+    def signal_candidate_discarded(self) -> None:
+        print("Discarded — not logged as a signal.")
+
+    def signal_not_logged(self, metric: str) -> None:
+        notice(f"Could not log '{metric}' — no calendar write succeeded.")
+
     # -- listings --
 
     def workout_list(
@@ -508,6 +649,64 @@ class ExpertRenderer:
 
     def revision_preview(self, proposal: RevisionProposal, heading: str) -> None:
         print_revision_preview(proposal, heading)
+
+    # -- goals a tap can reach (DESIGN_bot_simple_frontend.md §12.5, §12.6) --
+
+    def goal_row(self, goal: dict, today: str) -> None:
+        """The goal as it now stands, after an add or an edit."""
+        print_goal_row(goal)
+
+    def goal_added(self) -> None:
+        print(green("Goal added successfully. Run " + cmd("plan generate")
+                    + " to generate training cycles."))
+
+    def goal_updated(self) -> None:
+        print(green("Goal updated successfully. Run " + cmd("plan generate")
+                    + " to regenerate training cycles if needed."))
+
+    def goal_stood_down(self, archived: dict) -> None:
+        """What calling a goal off did to the schedule."""
+        report_archived_sessions(archived)
+
+    def goal_called_off(self, goal: dict, archived: dict, today: str) -> None:
+        """`goal rm` in full — the row, what stood down, and the way back. Its own
+        method rather than the three above in sequence because the companion says the
+        whole of it in one sentence (§12.6)."""
+        print_goal_row(goal)
+        self.goal_stood_down(archived)
+        print(green(
+            "Goal called off. Its plan, versions and feedback are kept — "
+            + cmd(f"goal edit {goal['id']} --status active") + " brings it back."
+        ))
+
+    # -- constraints an edit can reach (§12.4) --
+
+    def constraint_replan_offer(self, impact: Dict[str, Any]) -> Optional[str]:
+        """States a directive's magnitude and returns the question that offers to build
+        it into the plan — or None where that escalation is not the reader's to make.
+
+        Returning the question rather than asking it keeps voice and transport apart
+        (§4); returning None is how the companion says the fact and stops, since
+        `plan generate` is operator work (DESIGN_bot_simple_frontend.md §12.9)."""
+        notice(
+            f"This {impact['days']}-day constraint displaces "
+            f"~{impact['displaced_pct']:.0f}% of a typical week's planned load."
+        )
+        return "Replan around it?"
+
+    def constraint_honor_hint(self, constraint_id: int) -> None:
+        """Where a plan-shaping directive lands, and what would build it in
+        (DESIGN_constraint_honoring.md §4)."""
+        from trainmate.cli.constraints import point_at_honor
+        point_at_honor(constraint_id)
+
+    # -- settings (§12.7) --
+
+    def setting_changed(self, name: str, stored: str, before: str) -> None:
+        if stored == before:
+            print(green(f"{name} is {stored} (unchanged)."))
+            return
+        print(green(f"{name} set to {stored}") + dim(f" — was {before}."))
 
     # -- one-liners --
 
@@ -571,6 +770,54 @@ class CompanionRenderer(ExpertRenderer):
 
     def adapt_applied(self) -> None:
         print(green("Done — your plan is updated. 💪"))
+
+    # -- confirming a note's candidates --
+    # The companion's main felt surface once notes stop riding the coach: she says
+    # something, and this is what asks before anything is stored
+    # (DESIGN_bot_simple_frontend.md §12.3). Day words, no IDs, no ISO spans (§6).
+
+    def constraint_candidate_question(
+        self, title: str, start: str, end: str, today: str
+    ) -> str:
+        return f"Shall I remember that? “{title}” — {simple_span_words(start, end, today)}"
+
+    def constraint_captured(
+        self, constraint_id: int, title: str, start: str, end: str, today: str
+    ) -> None:
+        print(green("Noted — I'll work around that 👍"))
+
+    def constraint_candidate_discarded(self) -> None:
+        print("Okay — I won't note that one.")
+
+    def constraint_plan_shaping(self, constraint_id: int, impact: Dict[str, Any]) -> None:
+        """The same fact, without the commands: reshaping the plan around it is one tap
+        away on the offer that follows this capture, and `plan generate` is operator work
+        the athlete cannot run (DESIGN_bot_simple_frontend.md §12.10)."""
+        print(wrap_text(simple_plan_shaping_line(impact)))
+
+    def signal_candidate_question(
+        self, metric: str, value: Optional[float], start: str, end: str, today: str,
+        *, new_category: bool,
+    ) -> str:
+        words = simple_metric_words(metric)
+        shown = "" if value is None else f" ({value:g})"
+        when = simple_span_words(start, end, today)
+        if new_category:
+            # The ladder's second rung still reads as one question, but says plainly that
+            # this is a kind of note she has not logged before (§6 of the signal design).
+            return f"That's a new one for me — log it as “{words}”{shown}, {when}?"
+        return f"Shall I log that? “{words}”{shown} — {when}"
+
+    def signal_logged(
+        self, metric: str, days: int, start: str, end: str, today: str
+    ) -> None:
+        print(green("Logged — thanks for telling me 👍"))
+
+    def signal_candidate_discarded(self) -> None:
+        print("Okay — I won't log that one.")
+
+    def signal_not_logged(self, metric: str) -> None:
+        print("Hmm — that didn't save. Tell me again in a bit?")
 
     # -- listings --
 
@@ -639,6 +886,55 @@ class CompanionRenderer(ExpertRenderer):
         print(f"\n{heading}")
         for entry in simple_revision_lines(proposal):
             print(f"\n{entry}")
+
+    # -- goals a tap can reach --
+
+    def goal_row(self, goal: dict, today: str) -> None:
+        from trainmate.db.objectives import GOAL_ARCHIVED, goal_state
+        # An archived goal was called off and says nothing at all in companion mode
+        # (§11 tone rule) — the sentence that follows is the whole of what she hears.
+        if goal_state(goal, today) == GOAL_ARCHIVED:
+            return
+        print(simple_goal_line(goal, today))
+
+    def goal_added(self) -> None:
+        print(green("All set 🎯"))
+        print(wrap_text(simple_plan_setup_line()))
+
+    def goal_updated(self) -> None:
+        print(green("Done — that's updated 👍"))
+
+    def goal_stood_down(self, archived: dict) -> None:
+        if archived.get('archived_workouts'):
+            print(wrap_text(
+                "I've cleared the sessions that were building toward it — nothing else "
+                "on your schedule changes."
+            ))
+
+    def goal_called_off(self, goal: dict, archived: dict, today: str) -> None:
+        # The tone rule does the mourning: this is the last time she hears about it, and
+        # nothing here names the reinstate command, which is the operator's (§12.6).
+        print(green(f"Okay — {goal['title']} is off the list."))
+        self.goal_stood_down(archived)
+
+    # -- constraints an edit can reach --
+
+    def constraint_replan_offer(self, impact: Dict[str, Any]) -> Optional[str]:
+        print(wrap_text(simple_plan_shaping_line(impact)))
+        return None
+
+    def constraint_honor_hint(self, constraint_id: int) -> None:
+        """Draws nothing: every route it names — `workout generate`, `plan generate` —
+        is operator work the athlete cannot run (§12.9). The same shape as
+        `runway_hint`, and for the same reason."""
+
+    # -- settings --
+
+    def setting_changed(self, name: str, stored: str, before: str) -> None:
+        # The confirm already read the change back as its effect; this only says it took
+        # (DESIGN_bot_simple_frontend.md §12.7).
+        print(green("Done — that's set 👍" if stored != before
+                    else "That's already how it is 👍"))
 
     # -- one-liners --
 

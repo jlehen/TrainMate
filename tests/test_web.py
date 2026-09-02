@@ -744,8 +744,12 @@ class TestNewReadEndpoints(unittest.TestCase):
         self.assertEqual(actives[0]["model"], data["active"])
 
     def test_plan_show_returns_macro_and_mesocycles(self):
+        # Relative to today: `/api/plan` resolves the next ACTIVE goal, so a hard-coded
+        # target date silently stops testing anything once it passes.
+        from datetime import date, timedelta
+        target = (date.today() + timedelta(days=60)).isoformat()
         goal_id = test_db.add_objective(
-            title="A race", target_date="2026-09-01", sport_type="running",
+            title="A race", target_date=target, sport_type="running",
             description="", status="active",
         )
         test_db.save_macrocycle(

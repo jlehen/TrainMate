@@ -1,6 +1,7 @@
 # Design: Simple Bot Front-End ("companion mode")
 
-**Status:** Implemented (all three rollout phases, 2026-08-25) · **Date:** 2026-08-25 ·
+**Status:** Implemented — rollout phases 1-3 (2026-08-25), the §11 breadth pass
+(2026-08-30), the §12 writes pass, phases 4-7 (2026-09-02) · **Date:** 2026-08-25 ·
 **Branch:** worktree-config-env-and-frontend-design
 
 ## 1. Motivation
@@ -376,6 +377,7 @@ earns it is expert detail, and the chat surface does not audit.
 | `trainmate/cli/bot.py` | new hidden family: `bot morning`, `bot route`, `bot constraints` |
 | `trainmate/config.py` | `telegram_ui`; the push knobs and the router role resolve through `trainmate/settings.py` |
 | `trainmate/cli/render.py` | the companion voice: line builders, `ExpertRenderer`/`CompanionRenderer`, `TRAINMATE_RENDER` interpretation (was a helper in `cli/common.py` — DESIGN_render_persona.md §7) |
+| `trainmate/cli/candidates.py` | the confirm loops a note's candidates pass through, shared by `workout adapt -m` and `bot capture note` (§12.10, §12.11) |
 | `docs/ARCHITECTURE.md` | §2 entry points, §9 config keys, bot section |
 | `tests/` | pure-helper tests (keyboard table, sentinel codec, router table→argv, tone renderer), `bot morning` idempotency against a temp DB, `bot route` with a mocked OpenRouter |
 
@@ -801,3 +803,37 @@ Rollout continues §9's numbering, each phase shipping alone:
 Phase 5 depended on `goal rm` archiving; the reversible-deletes change landed on main
 2026-09-01, so the picker builds on what `goal rm` already is — the §12.6 wording
 ("archives", `--purge` unreachable from chat) describes shipped behaviour, not a plan.
+
+### 12.11 What the implementation settled (2026-09-02)
+
+Phases 4-7 shipped together; the machinery each needed was the same, and splitting the
+release would have meant carrying half a capture family. Four things the design left to
+the implementation, recorded here rather than rediscovered:
+
+**The shared confirm helper got a module, not a home in `generate.py`.** §12.10 said to
+factor the constraint confirm and the signal ladder out of `cli/workouts/generate.py`
+without saying where to. They live in `trainmate/cli/candidates.py`, which both inboxes
+import — putting them in `generate.py` would have made `bot capture note` import the
+adapt command to ask a question, and the dependency points the wrong way round.
+
+**The nomination call answers `{kind, id, candidate_ids, changes}`.** `kind` is the
+domain, `"session"` or `"none"`; `candidate_ids` carries every plausible row, so "several
+close candidates" is the model saying so rather than the app inferring it from a
+confidence score it has no calibration for. The picker fires when that list holds more
+than one, and its leaves re-enter with `--id` pinned exactly as §12.4 specifies.
+
+**"No" on the preview offers the picker over the *other* rows.** §12.4 lists a declined
+preview and an ambiguous nomination as one outcome. They differ by one row: the one she
+just rejected. Offering it again would be the app not listening.
+
+**Two more notices had to learn the persona than §12.10 named.** The capture-time
+plan-shaping notice was the one the design found; the `edit_constraint` path reaches two
+others — `_maybe_replan`'s "Replan around it?" offer and `constraint`'s
+`point_at_honor` hint, both of which name `plan generate` / `workout generate`. Both are
+now renderer methods: the companion states the size and stops, and draws the honor hint
+not at all (the `runway_hint` shape). Without them the athlete would be offered an
+escalation she cannot perform — the §12.9 line, breached by a route the design opened
+in the same pass. The rule that catches this class: **every command a tap can reach
+speaks through `runtime.render`**, so `goal add`/`edit`/`rm` and `settings set` gained
+methods too, and "no expert command text in companion chat" became structural rather
+than a thing to remember.

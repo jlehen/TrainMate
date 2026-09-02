@@ -2,7 +2,7 @@
 import argparse
 from datetime import datetime, timedelta
 from typing import Optional
-from trainmate import runtime, signals
+from trainmate import runtime
 from trainmate.config import config
 from trainmate.adherence import analyze_adherence, date_covered, format_discrepancies
 from trainmate.google_calendar import event_url
@@ -11,6 +11,7 @@ from trainmate.util import (
     format_labeled_block, today_str as _today_str, today_date as _today_date, days_between,
     fmt_date, fmt_span, fmt_timestamp, notice, keep_whole, warn,
 )
+from trainmate.cli.candidates import confirm_new_constraints, confirm_new_signals
 from trainmate.cli.common import (
     adherence_verdicts, ensure_recent_data, format_actual,
     mark_adherence_from_results, report_unhonored,
@@ -63,55 +64,6 @@ def _resolve_ambiguous_matches(date_str: str, auto: bool) -> None:
             print(gray("  Discarded — the session reads as not done."))
 
 
-def _confirm_new_signals(candidates, date_str: str) -> None:
-    """Asks about each daily signal the note produced, then writes the confirmed ones
-    (DESIGN_signal_extraction.md §2).
-
-    A category close to one already in use is offered as a ladder of two y/N questions —
-    the existing category first, the coined one second — so the reflexive `y` lands on
-    reuse and coining a category takes a deliberate second answer (§6). Declining both
-    logs nothing.
-    """
-    for candidate in candidates:
-        metric = signals.normalize_metric(candidate.get('metric'))
-        if not metric:
-            continue
-        start = candidate.get('date') or date_str
-        end = candidate.get('end_date') or start
-        span = start if start == end else f"{start}..{end}"
-        value = candidate.get('value')
-        shown = ""
-        if isinstance(value, (int, float)) and not isinstance(value, bool):
-            shown = f" = {value}"
-
-        known = runtime.coach_service.known_signal_metrics()
-        near = None
-        if metric not in known:
-            near = signals.nearest_known(metric, known)
-
-        # Reuse is offered first, so the reflexive `y` lands on the safe outcome and
-        # coining a category needs a deliberate second answer (§6).
-        chosen = None
-        if near and runtime.prompt.confirm(f"Log signal: {near}{shown} on {span}?"):
-            chosen = near
-        elif metric in known:
-            if runtime.prompt.confirm(f"Log signal: {metric}{shown} on {span}?"):
-                chosen = metric
-        elif runtime.prompt.confirm(f"Log as NEW category '{metric}'{shown} on {span}?"):
-            chosen = metric
-
-        if not chosen:
-            print("Discarded — not logged as a signal.")
-            continue
-        rows = runtime.coach_service.capture_message_signal(candidate, date_str, chosen)
-        if not rows:
-            notice(f"Could not log '{chosen}' — no calendar write succeeded.")
-            continue
-        print(green(
-            f"Logged {chosen} ({len(rows)} day{'s' if len(rows) != 1 else ''}, {span})."
-        ))
-
-
 def run_workout_adapt(args: argparse.Namespace) -> None:
     # Executes the daily workout Garmin adaptation checks command.
     date_str = args.date or _today_str()
@@ -154,32 +106,19 @@ def run_workout_adapt(args: argparse.Namespace) -> None:
         )
         reason = proposal.reason
         proposed_workouts = proposal.workouts
-        new_constraints = proposal.new_constraints
 
         # §8 two-confirmation flow, step 1: confirm any constraint(s) extracted from the
         # athlete's note BEFORE the adaptation preview below — an independent commit that
         # runs even when no workout changes are proposed. Declining discards the
         # extraction; the note still informed this run's adaptation via the advisory text
         # (already baked into `reason`/`proposed_workouts` from the same LLM call).
-        for candidate in new_constraints:
-            title = (candidate.get('title') or '').strip()
-            if not title:
-                continue
-            start = candidate.get('start_date') or date_str
-            end = candidate.get('end_date') or start
-            span = start if start == end else f"{start}..{end}"
-            if runtime.prompt.confirm(f"Add constraint: {title} ({span})?"):
-                cid = runtime.coach_service.capture_message_constraint(candidate, date_str)
-                if cid is not None:
-                    print(green(f"Captured constraint [{cid}]: {title} ({span})"))
-            else:
-                print("Discarded — not saved as a constraint.")
-
-        # Step 1b: the same note may also carry daily signals. Confirmed one at a time and
-        # written the same way, before the adaptation preview (DESIGN_signal_extraction.md
-        # §2). A signal confirmed here informs the NEXT run, not this one — the LLM call
-        # that proposed it has already returned.
-        _confirm_new_signals(proposal.new_signals, date_str)
+        # Step 1b: the same note may also carry daily signals, confirmed one at a time and
+        # written the same way (DESIGN_signal_extraction.md §2). A signal confirmed here
+        # informs the NEXT run, not this one — the call that proposed it has returned.
+        # Both loops live in cli/candidates.py: `bot capture note` asks the same questions
+        # about the same candidates (DESIGN_bot_simple_frontend.md §12.10).
+        confirm_new_constraints(proposal.new_constraints, date_str)
+        confirm_new_signals(proposal.new_signals, date_str)
 
         runtime.render.adapt_reason(reason)
 

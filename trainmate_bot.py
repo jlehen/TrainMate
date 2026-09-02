@@ -132,23 +132,24 @@ SIMPLE_WELCOME = (
     "Or just type what you want, in your own words — it's the same thing."
 )
 
-SIMPLE_HELP = SIMPLE_WELCOME
+# The two lanes, taught rather than discovered (§12.3). The surface has exactly two
+# teachers — this card and the per-message router echoes — and both say the same thing:
+# what you want remembered is recorded here, after a question; what is about how you are
+# doing goes to the coach in your own words. No line promises verbatim delivery on a tap,
+# because no tap delivers it.
+SIMPLE_HELP = SIMPLE_WELCOME + (
+    "\n\nWhen you write to me, one of two things happens:\n"
+    "• Something to remember — a rule, a rough night, a new goal, a change of date — "
+    "I write it down and ask you first.\n"
+    "• Something about how you're doing or what's in the way — that goes to your coach "
+    "in your own words, and your plan comes back adjusted."
+)
 
 CAPTURE_PROMPT = "I'm listening — what should I know? (or /cancel)"
 
 ROUTER_FALLBACK = (
     "I didn't quite get that 🤔 — try one of the buttons below, or say it another way."
 )
-
-# What a `new_goal` message gets back (DESIGN_runway_nudge.md §6). Reply-only, and honest
-# about it: nothing here persists the message and nothing forwards it, so the reply must
-# not promise a delivery that does not happen (§8 names both as future work). A function
-# because it names the operator, which is config (DESIGN_render_persona.md §5).
-def new_goal_reply() -> str:
-    return (
-        "A new goal — exciting! 🎯 Setting that up happens from the computer — tell "
-        f"{config.telegram_operator_name} directly so it isn't lost."
-    )
 
 # Reply-keyboard label → fixed argv; None arms free-text capture (§5.1/§5.2).
 # Buttons never reach beyond this table; the keyboard renders it two per row, in order.
@@ -163,9 +164,8 @@ SIMPLE_KEYBOARD = [
 
 # The router's intent → argv table (§5.3): the model (via `tm bot route`) only picks
 # an intent from trainmate.cli.bot.ROUTER_INTENTS; this table owns the argv, so a
-# hostile or confused message cannot reach flags it doesn't expose. coach_message,
-# add_constraint and add_signal carry the athlete's original text into the `adapt -m`
-# inbox; help/unclear are answered by the bot itself.
+# hostile or confused message cannot reach flags it doesn't expose. Views and pickers
+# live here — fixed argv, no slots; help/unclear are answered by the bot itself.
 ROUTER_INTENT_ARGV = {
     "show_today": ["workout", "list", "-d", "today"],
     "show_week": ["workout", "list"],
@@ -174,10 +174,26 @@ ROUTER_INTENT_ARGV = {
     "show_progress": ["progress", "--chart"],
     "show_constraints": ["bot", "constraints"],
     "remove_constraint": ["bot", "constraints"],
+    "remove_goal": ["bot", "goals"],
+}
+
+# The intents that need values out of the message: each runs `bot capture <intent>` with
+# the athlete's text, and that second, domain-focused call extracts, previews and asks
+# (§12.2). The two note intents share one inbox — they differ only in the echo, so a
+# misroute between them changes what she is told, never what is stored (§12.3).
+ROUTER_CAPTURE_INTENTS = {
+    "add_constraint": "note",
+    "add_signal": "note",
+    "add_goal": "add_goal",
+    "edit_goal": "edit_goal",
+    "edit_constraint": "edit_constraint",
+    "change_setting": "change_setting",
 }
 
 # One short italic echo per routed intent, so the athlete learns the vocabulary and a
-# misroute is visible immediately (§5.3, open question 1: always shown).
+# misroute is visible immediately (§5.3, open question 1: always shown). They are also
+# the per-message half of teaching the two lanes: "noting that rule for your coach" and
+# "passing that on to your coach" say which inbox took the message (§12.3).
 ROUTER_ECHO = {
     "show_today": "showing today",
     "show_week": "showing your week",
@@ -188,8 +204,22 @@ ROUTER_ECHO = {
     "add_constraint": "noting that rule for your coach",
     "add_signal": "logging that for your coach",
     "show_constraints": "showing what I'm working around",
+    "edit_constraint": "updating that rule",
     "remove_constraint": "showing your rules — tap the one to drop",
+    "add_goal": "setting up a new goal",
+    "edit_goal": "updating your goal",
+    "remove_goal": "showing your goals — tap the one to call off",
+    "change_setting": "changing that for you",
 }
+
+# What the §5.2 rescue window echoes. Text the router could not place, sent while a
+# "💬 Talk to me" tap is live, rides the capture inbox rather than bouncing — she was
+# just asked what the coach should know, so an unreadable answer is likelier a note the
+# router failed. The inbox that asks before storing is the right landing (§12.3).
+CAPTURE_RESCUE_ECHO = "noting that for your coach"
+
+# What a tap on a row a newer one replaced gets back (§12.3).
+UI_STALE_TAP = "That offer expired — just send it again."
 
 # Simple mode trims the Telegram command menu to what the athlete needs; every CLI
 # command still works when typed with a leading slash.
@@ -900,22 +930,19 @@ def main() -> None:
         router could read, so the tap has nothing to explain (§5.2)."""
         intent = await _route_intent(text)
         _log(chat_id, "  ", f"routed: {intent}")
-        # add_constraint and add_signal share coach_message's inbox: the `adapt -m`
-        # capture flow already confirms and persists both the rule (DESIGN_constraints.md
-        # §8) and the signal (DESIGN_signal_extraction.md §2), so a misroute among the
-        # three changes only the echo line, never what is stored (§5.5).
-        if intent in ("coach_message", "add_constraint", "add_signal"):
+        echo = ROUTER_ECHO.get(intent)
+        # State and availability go to the coach in her own words; anything to be
+        # remembered goes to the capture inbox, which asks before it stores and costs no
+        # adaptation. A misroute across that line degrades gracefully both ways (§12.3).
+        if intent == "coach_message":
             argv = ["workout", "adapt", "-m", text]
+        elif intent in ROUTER_CAPTURE_INTENTS:
+            argv = ["bot", "capture", ROUTER_CAPTURE_INTENTS[intent], text]
         elif intent in ROUTER_INTENT_ARGV:
             argv = list(ROUTER_INTENT_ARGV[intent])
         elif intent == "help":
             await bot.send_message(
                 chat_id=chat_id, text=SIMPLE_HELP, reply_markup=_keyboard()
-            )
-            return None
-        elif intent == "new_goal":
-            await bot.send_message(
-                chat_id=chat_id, text=new_goal_reply(), reply_markup=_keyboard()
             )
             return None
         else:
@@ -924,11 +951,12 @@ def main() -> None:
                     chat_id=chat_id, text=ROUTER_FALLBACK, reply_markup=_keyboard()
                 )
                 return None
-            # A note the router cannot place is still a note (§5.2).
-            _log(chat_id, "  ", "armed: unroutable text rides the inbox")
-            intent = "coach_message"
-            argv = ["workout", "adapt", "-m", text]
-        echo = ROUTER_ECHO.get(intent)
+            # A note the router cannot place is still a note (§5.2), and the capture
+            # inbox is the one that asks before storing — and still offers the coach on
+            # a miss (§12.3).
+            _log(chat_id, "  ", "armed: unroutable text rides the capture inbox")
+            argv = ["bot", "capture", "note", text]
+            echo = CAPTURE_RESCUE_ECHO
         if echo:
             await bot.send_message(
                 chat_id=chat_id, text=f"<i>→ {html.escape(echo)}</i>",
@@ -1095,10 +1123,14 @@ def main() -> None:
         decoded = decode_ui_callback(data)
         current = ui_actions.get(chat_id)
         if decoded is None or current is None or decoded[0] != current[0]:
-            try:  # replaced by a newer push: drop the dead buttons
+            try:  # replaced by a newer row: drop the dead buttons
                 await query.edit_message_reply_markup(reply_markup=None)
             except Exception as exc:
                 journal.debug("bot.event", f"stale buttons not dropped: {exc}")
+            # One live row per chat, so any newer row — the morning push included —
+            # retires this one. Saying so matters: the message behind a retired offer
+            # was already consumed by the capture, so silence loses it twice (§12.3).
+            await bot.send_message(chat_id=chat_id, text=UI_STALE_TAP)
             return
         token, path = decoded
         action = resolve_ui_action(current[1], path)

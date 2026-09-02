@@ -346,6 +346,37 @@ class SimpleKeyboardTest(unittest.TestCase):
         )
 
 
+class TwoLanesTest(unittest.TestCase):
+    """The two lanes are taught, not discovered (§12.3). The surface has exactly two
+    teachers — the help card and the per-message router echoes — and neither may promise
+    a verbatim delivery that no tap performs."""
+
+    def test_the_help_card_names_both_lanes(self):
+        card = bot.SIMPLE_HELP
+        self.assertIn("ask you first", card)             # the recording lane
+        self.assertIn("in your own words", card)         # the coach lane
+        self.assertIn("your coach", card)                # named as the app, per §5
+
+    def test_the_echoes_say_which_inbox_took_the_message(self):
+        self.assertNotEqual(
+            bot.ROUTER_ECHO["add_constraint"], bot.ROUTER_ECHO["coach_message"]
+        )
+        self.assertIn("noting", bot.ROUTER_ECHO["add_constraint"])
+        self.assertIn("passing that on", bot.ROUTER_ECHO["coach_message"])
+
+    def test_the_rescue_echo_belongs_to_the_recording_lane(self):
+        """The §5.2 window sends unroutable text to `bot capture note`, so its echo must
+        not claim the coach heard the words as written."""
+        self.assertIn("noting", bot.CAPTURE_RESCUE_ECHO)
+        self.assertNotIn("as written", bot.CAPTURE_RESCUE_ECHO)
+
+    def test_a_retired_row_says_so_rather_than_vanishing(self):
+        """One live row per chat: the message behind a retired offer was already
+        consumed by the capture, so silence there loses it twice (§12.3)."""
+        self.assertIn("expired", bot.UI_STALE_TAP)
+        self.assertIn("send it again", bot.UI_STALE_TAP)
+
+
 class StaleKeyboardTest(unittest.TestCase):
     """A restart returns to config's persona while the phone keeps the §5.1 keyboard;
     a tap on it must reach the companion, not shlex (§5.6)."""
@@ -365,15 +396,32 @@ class StaleKeyboardTest(unittest.TestCase):
 
 
 class GuardrailTest(unittest.TestCase):
-    """§7: buttons and router intents only reach read-only views, `adapt -m`, and the
-    §5.5 constraints view (whose picker offers single-ID `constraint rm` — pinned in
-    tests/test_cli_bot.py) — nothing plan-shaping or expensive is reachable without
-    typing."""
+    """§7/§12.9: buttons and router intents reach read-only views, `adapt -m`, the two
+    companion pickers (whose leaves offer single-ID `constraint rm` / `goal rm` — pinned
+    in tests/test_cli_bot.py) and the capture command, which asks before it writes.
+    Nothing plan-shaping, expensive or irreversible is reachable without typing."""
 
     ALLOWED_PREFIXES = {
         ("workout", "list"), ("goal", "list"), ("plan", "show"),
-        ("progress", "--chart"), ("bot", "constraints"),
+        ("progress", "--chart"), ("bot", "constraints"), ("bot", "goals"),
+        ("bot", "capture"),
     }
+
+    def test_capture_intents_reach_only_the_capture_command(self):
+        for intent, captured_as in bot.ROUTER_CAPTURE_INTENTS.items():
+            argv = ["bot", "capture", captured_as, "some message"]
+            self.assertIn(tuple(argv[:2]), self.ALLOWED_PREFIXES, intent)
+
+    def test_the_captures_own_offers_stay_inside_the_guardrail(self):
+        """The two buttons a capture emits, and the picker leaf that re-enters it: none
+        may reach a command the router itself could not (§12.9)."""
+        from trainmate.cli.bot import adjust_plan_button, send_to_coach_button
+        adjust = bot.parse_message_to_argv(adjust_plan_button()["send"])
+        self.assertEqual(adjust, ["workout", "adapt"])
+        # The coach lane carries her words verbatim through one -m, quoting and all.
+        message = "knee's sore; \"no running\" for 2 weeks"
+        to_coach = bot.parse_message_to_argv(send_to_coach_button(message)["send"])
+        self.assertEqual(to_coach, ["workout", "adapt", "-m", message])
 
     def test_keyboard_argv_stays_read_only(self):
         for label, argv in bot.SIMPLE_KEYBOARD:
@@ -407,38 +455,50 @@ class GuardrailTest(unittest.TestCase):
 class RouterTablesTest(unittest.TestCase):
     """The intent names live in trainmate/cli/bot.py (what the model may pick) and the
     argv in trainmate_bot.py (what each intent runs) — a rule that spans files, pinned
-    here so the two tables cannot drift (§5.3)."""
+    here so the two tables cannot drift (§5.3, reshaped by the writes pass §12.10)."""
 
-    # The intents that carry the athlete's text into the `adapt -m` inbox. They run the
-    # same argv and differ only in the echo, so a misroute among them stores the same
-    # thing — which is why the inbox needs no per-kind intent (§5.5).
-    INBOX = {"coach_message", "add_constraint", "add_signal"}
-    # Intents the bot answers itself or maps with the athlete's text attached.
-    # `new_goal` is reply-only and deliberately runs nothing (DESIGN_runway_nudge.md §6).
-    SPECIAL = INBOX | {"help", "unclear", "new_goal"}
+    # The two note intents share one inbox. They run the same argv and differ only in
+    # the echo, so a misroute between them changes what the athlete is told the coach
+    # heard, never what is stored (§12.3).
+    NOTE_INTENTS = {"add_constraint", "add_signal"}
+    # Intents the bot answers itself, or maps with the athlete's text attached.
+    SPECIAL = {"coach_message", "help", "unclear"}
 
     def test_every_cli_intent_lands_somewhere_in_the_bot(self):
         from trainmate.cli.bot import ROUTER_INTENTS
         for intent in ROUTER_INTENTS:
             self.assertTrue(
-                intent in bot.ROUTER_INTENT_ARGV or intent in self.SPECIAL, intent
+                intent in bot.ROUTER_INTENT_ARGV
+                or intent in bot.ROUTER_CAPTURE_INTENTS
+                or intent in self.SPECIAL, intent
             )
 
     def test_bot_tables_name_no_unknown_intent(self):
         from trainmate.cli.bot import ROUTER_INTENTS
-        for intent in list(bot.ROUTER_INTENT_ARGV) + list(bot.ROUTER_ECHO):
+        for intent in (list(bot.ROUTER_INTENT_ARGV) + list(bot.ROUTER_ECHO)
+                       + list(bot.ROUTER_CAPTURE_INTENTS)):
             self.assertIn(intent, ROUTER_INTENTS)
 
-    def test_inbox_intents_carry_text_and_differ_only_in_the_echo(self):
-        from trainmate.cli.bot import ROUTER_INTENTS
-        for intent in self.INBOX:
+    def test_every_capture_intent_reaches_the_capture_command(self):
+        from trainmate.cli.bot import CAPTURE_INTENTS, ROUTER_INTENTS
+        for intent, captured_as in bot.ROUTER_CAPTURE_INTENTS.items():
             self.assertIn(intent, ROUTER_INTENTS, intent)
-            # No argv of their own: the text rides along, so the dispatch builds it.
+            self.assertIn(captured_as, CAPTURE_INTENTS, intent)
+            # A capture carries the message, so it can own no fixed argv (§12.2).
             self.assertNotIn(intent, bot.ROUTER_INTENT_ARGV, intent)
-            # An echo each, and a distinct one — the only thing the split buys.
             self.assertIn(intent, bot.ROUTER_ECHO, intent)
-        echoes = [bot.ROUTER_ECHO[i] for i in self.INBOX]
+
+    def test_note_intents_share_one_inbox_and_differ_only_in_the_echo(self):
+        landings = {bot.ROUTER_CAPTURE_INTENTS[i] for i in self.NOTE_INTENTS}
+        self.assertEqual(landings, {"note"})
+        echoes = [bot.ROUTER_ECHO[i] for i in self.NOTE_INTENTS]
         self.assertEqual(len(set(echoes)), len(echoes))
+
+    def test_the_coach_lane_stays_the_only_one_that_carries_her_words(self):
+        """`coach_message` is now genuinely different from the note intents: state goes
+        to the coach verbatim, records go to capture, which transcribes (§12.3)."""
+        self.assertNotIn("coach_message", bot.ROUTER_CAPTURE_INTENTS)
+        self.assertNotIn("coach_message", bot.ROUTER_INTENT_ARGV)
 
 
 class ButtonsProtocolTest(unittest.TestCase):

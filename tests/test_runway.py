@@ -29,6 +29,7 @@ from trainmate import progression, runtime  # noqa: E402
 from trainmate.cli import render as render_cli, runway as runway_cli  # noqa: E402
 from trainmate.cli.workouts import generate as generate_cli  # noqa: E402
 from trainmate.cli.bot import MORNING_MARKER  # noqa: E402
+from trainmate.config import config  # noqa: E402
 from trainmate.cli.render import SPORT_EMOJI, SIMPLE_PASSED_LINE  # noqa: E402
 from trainmate.cli.runway import RUNWAY_BUTTON_LABEL  # noqa: E402
 from trainmate.prompt import BUTTONS_SENTINEL  # noqa: E402
@@ -705,24 +706,29 @@ class SimpleGeneratePreviewTest(unittest.TestCase):
         self.assertIn(SPORT_EMOJI["rest"], out)
 
 
-class NewGoalIntentTest(unittest.TestCase):
-    """The `new_goal` intent is reply-only, and the reply is honest about it (§6)."""
+class AddGoalIntentTest(unittest.TestCase):
+    """`add_goal` supersedes the reply-only `new_goal` this design added
+    (DESIGN_bot_simple_frontend.md §12.5): the goal row is now captured for real, and
+    what stays behind the §7 line is the periodization built on it."""
 
-    def test_the_intent_is_offered_but_reaches_no_command(self):
+    def test_the_intent_reaches_the_capture_and_not_a_reply(self):
         from trainmate.cli.bot import ROUTER_INTENTS
         import trainmate_bot
-        self.assertIn("new_goal", ROUTER_INTENTS)
-        self.assertNotIn("new_goal", trainmate_bot.ROUTER_INTENT_ARGV)
-        self.assertNotIn("new_goal", trainmate_bot.ROUTER_ECHO)
+        self.assertIn("add_goal", ROUTER_INTENTS)
+        self.assertNotIn("new_goal", ROUTER_INTENTS)
+        # A capture, so it carries the athlete's text rather than running fixed argv.
+        self.assertNotIn("add_goal", trainmate_bot.ROUTER_INTENT_ARGV)
+        self.assertEqual(trainmate_bot.ROUTER_CAPTURE_INTENTS["add_goal"], "add_goal")
+        self.assertFalse(hasattr(trainmate_bot, "new_goal_reply"))
 
-    def test_the_reply_promises_no_delivery(self):
-        import trainmate_bot
-        reply = trainmate_bot.new_goal_reply()
-        self.assertIn("from the computer", reply)
-        # Nothing persists or forwards the message, so the reply must not say it does
-        # (§8 names both as future work).
-        for promise in ("passed on", "I'll tell", "sent", "forwarded", "noted"):
-            self.assertNotIn(promise, reply)
+    def test_the_plan_for_it_is_still_named_as_the_operators_work(self):
+        from trainmate.cli.render import simple_plan_setup_line, simple_plan_wrapped_line
+        for line in (simple_plan_setup_line(), simple_plan_wrapped_line()):
+            self.assertIn("from the computer", line)
+            # "coach" formally means the app, so the human who runs `plan generate` is
+            # named (DESIGN_render_persona.md §5).
+            self.assertNotIn("your coach", line)
+            self.assertIn(config.telegram_operator_name, line)
 
 
 if __name__ == "__main__":

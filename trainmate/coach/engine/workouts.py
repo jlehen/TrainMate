@@ -170,12 +170,39 @@ conclude a block was too soft from heart rate alone.
 """
 
 
-def _signal_extraction_task(vocabulary: Optional[str], earliest_date: str) -> str:
-    """The adapt-prompt section that turns a note into `new_signals` candidates.
+def constraint_extraction_task(lead: str) -> str:
+    """The prompt section that turns a note into `new_constraints` candidates.
+
+    `lead` is the one clause that differs between the two passes that ask for these
+    candidates — `workout adapt -m` extracts alongside adapting, `bot capture note`
+    extracts as its whole job — so the rules themselves stay one text on both paths
+    (DESIGN_bot_simple_frontend.md §12.10).
+    """
+    return f"""
+### EXTRACTING A DURABLE CONSTRAINT FROM THE NOTE
+{lead}
+Decide whether the note states something the coach must work around beyond today:
+unavailability, a time/intensity cap, an injury layoff, a venue/equipment limit, or a
+stated preference with a date or date range (e.g. "no run Thursday", "only 45 min today",
+"broke my ankle, out 6 weeks"). If so, return it in "new_constraints" below — one entry per
+distinct directive, exactly as if the athlete had run `constraint add`. A note only about
+how they feel right now ("felt flat, ease today") is NOT a constraint — leave
+"new_constraints" empty for it (it may still be a signal, below). When unsure, leave it
+out: a durable-looking note mis-filed as a constraint is worse than a missed one. This is
+extraction only — never invent a plan-shaping escalation, and never omit "start_date"/
+"end_date" (default both to today when the note doesn't say). Extracted constraints are
+always advisory; the deterministic-rest and plan-shaping escalations are deliberate human
+actions and the app, not you, decides those.
+"""
+
+
+def signal_extraction_task(vocabulary: Optional[str], earliest_date: str) -> str:
+    """The prompt section that turns a note into `new_signals` candidates.
 
     Shows the category vocabulary so one string is reused per category instead of a new one
     coined per occasion, and forbids inventing a `value` the note never stated
-    (DESIGN_signal_extraction.md §2, §5).
+    (DESIGN_signal_extraction.md §2, §5). Shared with `bot capture note` for the same
+    reason its constraint sibling is (DESIGN_bot_simple_frontend.md §12.10).
     """
     catalogue = vocabulary or "(no categories configured yet — propose one, kept short.)"
     return f"""
@@ -205,6 +232,43 @@ Set "value" ONLY when the note states a number, in the unit named by the categor
 severity score: a category with free text and no number is complete and useful, and a
 fabricated number is read as a measurement.
 """
+
+
+# The two candidate members, written once. `workout adapt -m` and `bot capture note` both
+# ask for them, and a divergence between the two schemas would mean the same sentence
+# stored two different ways depending on which inbox read it (§12.10).
+NEW_CONSTRAINTS_SCHEMA = (
+    '  "new_constraints": [\n'
+    "    // Optional. Directives extracted from the athlete's note this run (see\n"
+    "    // EXTRACTING A DURABLE CONSTRAINT above). Every entry is created exactly as\n"
+    "    // if the athlete had run `constraint add`. Omit entirely, or leave empty, if\n"
+    "    // the note was only a one-off nudge about today.\n"
+    "    {\n"
+    '      "title": "the directive, stated short (required)",\n'
+    '      "start_date": "YYYY-MM-DD (required; default today)",\n'
+    '      "end_date": "YYYY-MM-DD (required; == start for a single day)",\n'
+    '      "description": "optional richer context or null/omit"\n'
+    "    }\n"
+    "  ]"
+)
+
+NEW_SIGNALS_SCHEMA = (
+    '  "new_signals": [\n'
+    "    // Optional. Daily signals extracted from the athlete's note this run\n"
+    "    // (see RECORDING A DAILY SIGNAL above). Every entry is created exactly as\n"
+    "    // if the athlete had run `signal add`. Omit entirely, or leave empty, when\n"
+    "    // the note reports no external cause.\n"
+    "    {\n"
+    '      "metric": "the category, spelled exactly as listed where one fits\n'
+    '        (required)",\n'
+    '      "date": "YYYY-MM-DD, the first day it acted on (required)",\n'
+    '      "end_date": "YYYY-MM-DD (required; == date for a single day)",\n'
+    '      "value": 3 (the number the note stated, in the unit named for that\n'
+    "        category; null or omitted when the note gave none — never invent one),\n"
+    '      "text": "the athlete\'s own words for it, short (optional)"\n'
+    "    }\n"
+    "  ]"
+)
 
 
 def _planned_zone_task(zone_currencies: Optional[Dict[str, str]]) -> str:
@@ -751,24 +815,12 @@ they feel). Weigh it as today's intent alongside the data: honour stated constra
 let it tip a judgement call. It is advisory, not an override — do NOT schedule clearly
 unsafe load just because the athlete asks (if recovery signals warrant easing, ease and say
 why). It speaks for this adaptation only and is never durable evidence about the block.
-
-### EXTRACTING A DURABLE CONSTRAINT FROM THE NOTE
-Separately from adapting today's sessions, decide whether the note ALSO states something
-the coach must work around beyond today: unavailability, a time/intensity cap, an injury
-layoff, a venue/equipment limit, or a stated preference with a date or date range (e.g.
-"no run Thursday", "only 45 min today", "broke my ankle, out 6 weeks"). If so, return it in
-"new_constraints" below — one entry per distinct directive, exactly as if the athlete had
-run `constraint add`. A note only about how they feel right now ("felt flat, ease today") is
-NOT a constraint — leave "new_constraints" empty for it (it may still be a signal, below).
-When unsure, leave it out: a
-durable-looking note mis-filed as a constraint is worse than a missed one. This is
-extraction only — never invent a plan-shaping escalation, and never omit "start_date"/
-"end_date" (default both to today when the note doesn't say). Extracted constraints are
-always advisory; the deterministic-rest and plan-shaping escalations are deliberate human
-actions and the app, not you, decides those.
 """
 
-            custom_task += _signal_extraction_task(
+            custom_task += constraint_extraction_task(
+                "Separately from adapting today's sessions, this is a second job."
+            )
+            custom_task += signal_extraction_task(
                 signal_vocabulary, signal_earliest_date or target_date_str
             )
 
@@ -833,37 +885,8 @@ evidence-backed observations are authored only by the weekly history analysis
             ),
         ]
         if has_message:
-            schema_members.append(
-                '  "new_constraints": [\n'
-                "    // Optional. Directives extracted from the athlete's note this run (see\n"
-                "    // EXTRACTING A DURABLE CONSTRAINT above). Every entry is created exactly as\n"
-                "    // if the athlete had run `constraint add`. Omit entirely, or leave empty, if\n"
-                "    // the note was only a one-off nudge about today.\n"
-                "    {\n"
-                '      "title": "the directive, stated short (required)",\n'
-                '      "start_date": "YYYY-MM-DD (required; default today)",\n'
-                '      "end_date": "YYYY-MM-DD (required; == start for a single day)",\n'
-                '      "description": "optional richer context or null/omit"\n'
-                "    }\n"
-                "  ]"
-            )
-            schema_members.append(
-                '  "new_signals": [\n'
-                "    // Optional. Daily signals extracted from the athlete's note this run\n"
-                "    // (see RECORDING A DAILY SIGNAL above). Every entry is created exactly as\n"
-                "    // if the athlete had run `signal add`. Omit entirely, or leave empty, when\n"
-                "    // the note reports no external cause.\n"
-                "    {\n"
-                '      "metric": "the category, spelled exactly as listed where one fits\n'
-                '        (required)",\n'
-                '      "date": "YYYY-MM-DD, the first day it acted on (required)",\n'
-                '      "end_date": "YYYY-MM-DD (required; == date for a single day)",\n'
-                '      "value": 3 (the number the note stated, in the unit named for that\n'
-                "        category; null or omitted when the note gave none — never invent one),\n"
-                '      "text": "the athlete\'s own words for it, short (optional)"\n'
-                "    }\n"
-                "  ]"
-            )
+            schema_members.append(NEW_CONSTRAINTS_SCHEMA)
+            schema_members.append(NEW_SIGNALS_SCHEMA)
         custom_task += (
             "\n## RESPONSE FORMAT\n"
             "You MUST respond with a JSON object containing:\n{\n"

@@ -14,6 +14,25 @@ from trainmate.util import (
 )
 
 
+# The settings a chat message may change (DESIGN_bot_simple_frontend.md §12.7): the knobs
+# that shape the athlete's own experience of the chat, and nothing else. Named here rather
+# than in the bot, beside the registry it guards, so a knob added to SETTINGS is not
+# routable until someone deliberately puts it on this list. Anything operator- or
+# cost-shaped — a model role, adapt-first — is off it by construction.
+ROUTABLE_SETTINGS = (settings.MORNING_TIME, settings.MORNING_DEADLINE, settings.PUSH)
+
+
+def routable_setting(name: str) -> "settings.Setting | None":
+    """The setting a captured key names, or None when the key is off the allowlist.
+
+    Exact names only: the prefix matching `settings.get` allows is a convenience for a
+    human at a keyboard, and widening a guardrail by abbreviation is not one."""
+    token = (name or "").strip().lower()
+    if token not in ROUTABLE_SETTINGS:
+        return None
+    return settings.get(token)
+
+
 def _since(iso_utc: str) -> str:
     """Compact 'today'/'Nd ago' for a UTC ISO instant, or '' if unparseable."""
     try:
@@ -164,10 +183,12 @@ def run_settings_set(args: argparse.Namespace) -> None:
     except ValueError as e:
         notice(str(e), red)
         sys.exit(1)
+    # Through the renderer: `bot capture change_setting` lands here, and its confirm has
+    # already read the change back as its effect (§12.7).
+    from trainmate import runtime
+    runtime.render.setting_changed(setting.name, stored, before)
     if stored == before:
-        print(green(f"{setting.name} is {stored} (unchanged)."))
         return
-    print(green(f"{setting.name} set to {stored}") + dim(f" — was {before}."))
     _print_effect(setting)
 
 
