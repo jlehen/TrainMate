@@ -236,3 +236,15 @@ def runway_buttons(state: Optional[Dict[str, Any]]) -> List[dict]:
     if not utterance:
         return []
     return [{"label": RUNWAY_BUTTON_LABEL, "send": utterance}]
+
+
+def simple_end_buttons(end_date: Optional[str]) -> List[dict]:
+    """The offer beside the companion week view's end note (§6).
+
+    Two gates, so the rule stays one sentence: the listing must cross the end of the
+    schedule (else the button has no context to sit under) and the nudge must be live
+    (else `runway_buttons` returns nothing anyway). The note can therefore draw alone,
+    but a button never draws without it."""
+    if _crossing(end_date) is None:
+        return []
+    return runway_buttons(current_runway())

@@ -433,6 +433,58 @@ class RunwaySurfaceTest(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertIn("That's the end of the current schedule", out)
 
+    def test_the_companion_week_view_offers_the_one_tap_fix(self):
+        """The week view is where she looks at the schedule, so it is where noticing that
+        it stops should turn into acting on it — the push's offer, without the wait."""
+        self._plan([(-30, 45)])
+        self._sessions(0, 2)
+        with patch.dict(os.environ, {"TRAINMATE_RENDER": "simple"}):
+            code, out, _ = run_cli(["workout", "list"])
+        self.assertEqual(code, 0)
+        self.assertIn(RUNWAY_BUTTON_LABEL.split(" ", 1)[1], out)
+        self.assertIn("workout generate", out)
+
+    def test_the_week_view_button_carries_the_block_flagged_command(self):
+        self._plan([(-30, 2), (3, 45)])
+        self._sessions(0, 2)
+        with patch.dict(os.environ, {"TRAINMATE_RENDER": "simple"}):
+            code, out, _ = run_cli(["workout", "list"])
+        self.assertEqual(code, 0)
+        self.assertRegex(out, r"workout generate -m \.\.\d+")
+
+    def test_the_week_view_states_a_plan_cliff_and_offers_nothing(self):
+        """Periodization stays operator work in companion mode, so the end of the plan is
+        named and no button follows it."""
+        self._plan([(-30, 2)], goal_offset=2)
+        self._sessions(0, 2)
+        with patch.dict(os.environ, {"TRAINMATE_RENDER": "simple"}):
+            code, out, _ = run_cli(["workout", "list"])
+        self.assertEqual(code, 0)
+        self.assertIn("That's the end of the current schedule", out)
+        self.assertNotIn(RUNWAY_BUTTON_LABEL.split(" ", 1)[1], out)
+
+    def test_the_end_note_draws_alone_while_the_cliff_is_still_far_off(self):
+        """The note is a fact of the listing, the button an offer worth making — so a
+        schedule that stops next month names its end without pressing for action."""
+        self._plan([(-30, 45)])
+        self._sessions(0, 20)
+        with patch.dict(os.environ, {"TRAINMATE_RENDER": "simple"}):
+            code, out, _ = run_cli(
+                ["workout", "list", "-d", f"{_out(0)}..{_out(30)}"])
+        self.assertEqual(code, 0)
+        self.assertIn("That's the end of the current schedule", out)
+        self.assertNotIn(RUNWAY_BUTTON_LABEL.split(" ", 1)[1], out)
+
+    def test_a_week_view_stopping_short_of_the_cliff_offers_nothing(self):
+        """The crossing gate stands on its own: the nudge is live, but this listing never
+        reaches the end of the schedule, so there is nothing for a button to sit under."""
+        self._plan([(-30, 45)])
+        self._sessions(0, 2, 5)
+        with patch.dict(os.environ, {"TRAINMATE_RENDER": "simple"}):
+            code, out, _ = run_cli(["workout", "list", "-d", f"{_out(0)}..{_out(2)}"])
+        self.assertEqual(code, 0)
+        self.assertNotIn(RUNWAY_BUTTON_LABEL.split(" ", 1)[1], out)
+
 
 class MorningPushRunwayTest(unittest.TestCase):
     """`bot morning` — the §6 line, its button, and the silence past the window."""

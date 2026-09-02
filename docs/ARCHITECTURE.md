@@ -184,7 +184,9 @@ classes themselves.
     and, on a span or block cliff, one further button whose argv comes from the detector
     (`workout generate [-m ..<id>]`) — the single narrow exception to the guardrail that
     keeps generation off the tappable surface, and never reachable through the router
-    (DESIGN_runway_nudge.md §6). Free text saying what to train for next routes to
+    (DESIGN_runway_nudge.md §6). The companion week view draws that same button under its
+    end-of-schedule note, gated on the listing crossing the cliff as well as the detector
+    firing, so the surface that names the gap is also the one that can close it. Free text saying what to train for next routes to
     `new_goal`, which the bot answers itself: goal capture is operator work, and the
     reply says so rather than promising a delivery nothing performs.
     Slash-prefixed text is always the expert path, and `/ui`

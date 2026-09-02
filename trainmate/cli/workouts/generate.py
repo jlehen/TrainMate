@@ -17,8 +17,10 @@ from trainmate.cli.common import (
     is_simple_render, simple_day_lines, simple_week_lines,
 )
 from trainmate.cli.runway import (
-    current_runway, list_end_marker, plan_is_behind, print_runway_hint, simple_end_note,
+    current_runway, list_end_marker, plan_is_behind, print_runway_hint, simple_end_buttons,
+    simple_end_note,
 )
+from trainmate.prompt import emit_buttons
 from trainmate.coach.proposals import GenerateProposal
 from trainmate.cli.workouts.revisions import preview_and_confirm_revision
 
@@ -656,14 +658,19 @@ def run_workout_list(args: argparse.Namespace) -> None:
     # other window as the week ahead (DESIGN_bot_simple_frontend.md §6).
     if is_simple_render():
         if start_date and start_date == end_date:
-            lines = simple_day_lines(workouts, start_date, verdicts)
-        else:
-            lines = simple_week_lines(
-                workouts, verdicts,
-                end_note=simple_end_note(end_date) if names_a_range else None,
-            )
-        for line in lines:
+            for line in simple_day_lines(workouts, start_date, verdicts):
+                print(line)
+            return
+        for line in simple_week_lines(
+            workouts, verdicts,
+            end_note=simple_end_note(end_date) if names_a_range else None,
+        ):
             print(line)
+        # The note states that the schedule stops; the button is what she does about it,
+        # offered where she is already looking (DESIGN_runway_nudge.md §6).
+        buttons = simple_end_buttons(end_date) if names_a_range else []
+        if buttons:
+            emit_buttons(buttons)
         return
 
     print(bold(cyan("=== WORKOUT SCHEDULE ===")))

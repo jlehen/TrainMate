@@ -265,7 +265,17 @@ rest line in the morning push: "You've finished everything on the schedule 🎉"
 by the span/block-cliff button or the plan-cliff prose as appropriate. Inside the window
 but before the cliff, the rest line stays and the runway line is appended after it.
 `simple_week_lines` gets the matching one-liner when its window crosses the cliff
-("that's the end of the current schedule"), mirroring §4's list marker.
+("that's the end of the current schedule"), mirroring §4's list marker — **and, revised
+2026-09-02, the same button under it.** The week view is where the athlete actually looks
+at her schedule, so it is where noticing that it stops should turn into acting on it;
+with the offer on the morning push alone, the surface that states the fact most plainly
+was the one surface that could do nothing about it, and the difference between the two
+was not explicable from her side. Two gates, one sentence: the listing must cross the end
+of the schedule, and the nudge must be live. So the note can draw alone — a schedule
+stopping next month names its end without pressing for action — but a button never draws
+without the note above it. Nothing else changes: same detector-chosen argv, same
+preview/confirm, and the single-day view keeps offering nothing (it renders the day, not
+the schedule).
 
 The push repeats each morning inside the window until acted on — the §2 unconditional
 rule. But the plan-cliff-no-goal passed state has no action the athlete can take (the fix
