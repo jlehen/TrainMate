@@ -17,6 +17,9 @@ _CLOCK_SITES = [
     # `_goal_span_start` opens a goal's own plan window at today, so the goal timeline
     # the `-g` grammar walks is a clock site too (DESIGN_cli_selectors.md §9).
     ("trainmate.cli.plans._today_date", True),
+    # The companion plan view dates its blocks against today, the same read the expert
+    # view's window makes (DESIGN_render_persona.md §4).
+    ("trainmate.cli.render._today_date", True),
 ]
 
 
@@ -203,6 +206,13 @@ def bind_test_db(db_path: str, fresh: bool = True):
 def run_cli(args: list, input_value: str = "n"):
     """Invoke trainmate_cli.main() and capture stdout/stderr."""
     import trainmate_cli
+    from trainmate import runtime
+
+    # The renderer is a cached singleton, so a test that patches TRAINMATE_RENDER after
+    # one was built would otherwise get the wrong voice — silently, in the direction
+    # that still passes (DESIGN_render_persona.md §6). Each run builds its own, exactly
+    # as a real CLI process does.
+    runtime.reset("render")
 
     stdout_buf = io.StringIO()
     stderr_buf = io.StringIO()

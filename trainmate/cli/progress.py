@@ -27,7 +27,7 @@ from trainmate.util import (
     wrap_text, color_tsb, fmt_date, today_str as _today_str, PMC_TSB_LAG_NOTE,
     notice, warn, keep_whole,
 )
-from trainmate.cli.common import ensure_recent_data, is_simple_render, simple_progress_lines
+from trainmate.cli.common import ensure_recent_data
 
 # `trainmate_cli` (the `db` facade) is imported lazily inside `run_progress`: it
 # imports this module, so a module-level import here is a cycle that breaks
@@ -866,7 +866,7 @@ def render_block_section(
 DEFAULT_CHART_PATH = "./progress.png"
 
 
-def _emit_chart(chart_arg: Any, payload: Dict[str, Any], caption: str) -> None:
+def emit_chart(chart_arg: Any, payload: Dict[str, Any], caption: str) -> None:
     """Renders the §2 two-panel chart and delivers it per front-end (§7.2): a sentinel
     photo line under the bot's json frontend (temp file, bot-owned cleanup), else a
     plain overwritten file path printed to stdout.
@@ -905,7 +905,6 @@ def run_progress(args: argparse.Namespace) -> None:
     as a 0-load day)."""
     from trainmate import runtime
     from trainmate import timeline
-    from trainmate.config import config
     ensure_recent_data(
         no_pull=args.no_pull, force_pull=getattr(args, "force_pull", False)
     )
@@ -913,24 +912,19 @@ def run_progress(args: argparse.Namespace) -> None:
     weeks_window = getattr(args, "weeks", None) or 8
 
     payload = timeline.build_timeline_payload(runtime.db)
+    runtime.render.progress(payload, args, today, weeks_window)
 
-    # Companion summary instead of the tables; the chart (when asked for) captions
-    # itself with the trend line (DESIGN_bot_simple_frontend.md §6).
-    if is_simple_render():
-        simple_lines = simple_progress_lines(payload, today)
-        for line in simple_lines:
-            print(wrap_text(line))
-        chart_arg = getattr(args, "chart", False)
-        if chart_arg:
-            _emit_chart(
-                chart_arg,
-                progression.clip_payload_for_weeks(
-                    payload, weeks_window, today, cap_future=True
-                ),
-                simple_lines[0],
-            )
-        return
 
+def print_progress_report(
+    payload: Dict[str, Any], args: argparse.Namespace, today: str, weeks_window: int,
+) -> None:
+    """The expert `progress` body: the load table, the optional zone and block sections,
+    and the chart captioned with the table's first line.
+
+    The companion form of this is CompanionRenderer.progress
+    (DESIGN_render_persona.md §5)."""
+    from trainmate import runtime
+    from trainmate.config import config
     sports = list(getattr(args, "sports", None) or [])
     blocks = getattr(args, "blocks", False)
     # Naming a sport IS a request for its zone table; otherwise the tables are opt-in
@@ -966,7 +960,7 @@ def run_progress(args: argparse.Namespace) -> None:
 
     chart_arg = getattr(args, "chart", False)
     if chart_arg:
-        _emit_chart(
+        emit_chart(
             chart_arg,
             progression.clip_payload_for_weeks(
                 payload, weeks_window, today, cap_future=True

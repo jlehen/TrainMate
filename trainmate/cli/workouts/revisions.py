@@ -1,14 +1,16 @@
-"""Previewing an in-place revision before it is applied."""
+"""Previewing an in-place revision before it is applied.
+
+The expert table lives here; the companion prose form of the same proposal is
+`render.simple_revision_lines`, which reuses the wording-diff helpers below
+(DESIGN_render_persona.md §7).
+"""
 import difflib
 import re
-from typing import List, Optional, Tuple
+from typing import List, Tuple
 
-from trainmate import runtime
 from trainmate.util import (
-    bold, green, red, yellow, cyan, magenta, gray, render_table,
-    format_labeled_text, today_str,
+    bold, green, red, yellow, cyan, magenta, gray, render_table, format_labeled_text,
 )
-from trainmate.cli.common import is_simple_render, simple_date_word, simple_session_line
 from trainmate.coach.proposals import RevisionProposal
 
 _SENTENCE_END = re.compile(r"(?<=[.!?])\s+")
@@ -27,7 +29,7 @@ def _stats(w: dict) -> str:
     )
 
 
-def _rewritten_text_only(proposal: dict, original: dict) -> bool:
+def rewritten_text_only(proposal: dict, original: dict) -> bool:
     """True when the prescription the table can SHOW is identical and only the text moved.
 
     Its columns are title and load, so a session the coach revised in words alone renders
@@ -52,7 +54,7 @@ def _sentences(text) -> List[str]:
     return out
 
 
-def _wording_blocks(proposal: dict, original: dict) -> List[WordingBlock]:
+def wording_blocks(proposal: dict, original: dict) -> List[WordingBlock]:
     """What moved between two descriptions, as (dropped, replacement) sentence blocks.
 
     Blocks rather than a line-per-sentence `-`/`+` listing: a reader wants "this passage
@@ -67,7 +69,7 @@ def _wording_blocks(proposal: dict, original: dict) -> List[WordingBlock]:
     ]
 
 
-def _wording_block_lines(block: WordingBlock, indent: str = "") -> List[str]:
+def wording_block_lines(block: WordingBlock, indent: str = "") -> List[str]:
     """One block as a labelled 'Was:' / 'Now:' pair (or 'Dropped:' / 'Added:' when one
     side is empty), wrapped at the client's width with the text hanging under its label."""
     dropped, added = block
@@ -90,79 +92,26 @@ def _print_wording_changes(proposal: RevisionProposal) -> None:
     but not how is what makes an honest text revision look like a bug (§9.1)."""
     reworded = [
         (pair.proposal, pair.original) for pair in proposal.pairs
-        if _rewritten_text_only(pair.proposal, pair.original)
+        if rewritten_text_only(pair.proposal, pair.original)
     ]
     if not reworded:
         return
     print(bold(yellow("\nTEXT REVISED (same load, so the columns above cannot show it):")))
     for pw, existing in reworded:
         print(f"\n  {cyan(pw['date'])} {magenta(pw['sport_type'].upper())} — {pw['title']}")
-        for block in _wording_blocks(pw, existing):
-            for line in _wording_block_lines(block, indent="    "):
+        for block in wording_blocks(pw, existing):
+            for line in wording_block_lines(block, indent="    "):
                 print(line)
 
 
-def _is_rest(w: Optional[dict]) -> bool:
-    return bool(w) and (w.get('sport_type') or '').lower() == 'rest'
-
-
-def _simple_was_clause(pw: dict, existing: Optional[dict]) -> str:
-    """The parenthetical after a proposed session, saying what it replaces."""
-    if not existing:
-        return "new"
-    if _rewritten_text_only(pw, existing):
-        return "same session, wording updated"
-    if _is_rest(existing):
-        return "was a rest day"
-    parts = []
-    if existing.get('title') != pw.get('title'):
-        parts.append(existing['title'])
-    if (existing.get('duration_minutes') or 0) != (pw.get('duration_minutes') or 0):
-        parts.append(f"{existing.get('duration_minutes') or 0} min")
-    return "was " + ", ".join(parts) if parts else "adjusted"
-
-
-def _simple_preview_lines(proposal: RevisionProposal) -> List[str]:
-    """The revision as companion prose: one paragraph per touched day, no table and no
-    diff signs, so the phone can flow it (DESIGN_bot_simple_frontend.md §6). The
-    per-session reason is skipped when it merely repeats the batch reason printed above."""
-    today = today_str()
-    entries = []
-    for pair in proposal.pairs:
-        pw, existing = pair.proposal, pair.original
-        day = "Today" if pw['date'] == today else simple_date_word(pw['date'])
-        block = [f"{simple_session_line(pw, lead=day)} ({_simple_was_clause(pw, existing)})"]
-        why = (pw.get('modification_reason') or '').strip()
-        if why and why != (proposal.reason or '').strip():
-            block.append(why)
-        paragraphs = ["\n".join(block)]
-        if _rewritten_text_only(pw, existing):
-            # A blank line between blocks, so each Was/Now pair reads as one passage.
-            paragraphs.extend(
-                "\n".join(_wording_block_lines(b)) for b in _wording_blocks(pw, existing)
-            )
-        entries.append((pw['date'], "\n\n".join(paragraphs)))
-    for ew in proposal.removals:
-        day = "Today" if ew['date'] == today else simple_date_word(ew['date'])
-        entries.append((ew['date'], f"🗑 {day}: {ew['title']} — dropped"))
-    entries.sort(key=lambda e: e[0])
-    return [text for _, text in entries]
-
-
-def preview_and_confirm_revision(
-    proposal: RevisionProposal, heading: str, question: str, *, auto: bool = False,
-) -> bool:
-    """Renders a revision and asks whether to apply it.
+def print_revision_preview(proposal: RevisionProposal, heading: str) -> None:
+    """Renders a revision as the expert table, plus the wording diff its columns cannot
+    show.
 
     Everything drawn comes off the proposal — the range it evaluated and the sessions it
-    saw — so the preview cannot disagree with what apply will do.
+    saw — so the preview cannot disagree with what apply will do. Drawing only: the
+    caller asks the question, through `runtime.prompt` (DESIGN_render_persona.md §4).
     """
-    if is_simple_render():
-        print(f"\n{heading}")
-        for entry in _simple_preview_lines(proposal):
-            print(f"\n{entry}")
-        return auto or runtime.prompt.confirm(question)
-
     print(bold(yellow(f"\n{heading}")))
     headers = ["Date", "Sport", "Original Workout", "Proposed Workout", "Duration/RPE/TSS"]
     rows = []
@@ -178,7 +127,7 @@ def preview_and_confirm_revision(
             if pair.is_swap else pw['sport_type'].upper()
         )
         proposed_label = green(pw['title'])
-        if _rewritten_text_only(pw, existing):
+        if rewritten_text_only(pw, existing):
             proposed_label += gray(" [text revised]")
         rows.append([
             cyan(pw['date']), magenta(sport_label), gray(orig_title),
@@ -196,4 +145,3 @@ def preview_and_confirm_revision(
     rows.sort(key=lambda r: r[0])
     print(render_table(headers, rows))
     _print_wording_changes(proposal)
-    return auto or runtime.prompt.confirm(question)

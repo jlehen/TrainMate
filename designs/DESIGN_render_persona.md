@@ -1,6 +1,26 @@
 # Design: The Render Persona
 
-**Status:** Proposed · **Date:** 2026-09-02 · **Branch:** worktree-render-persona-design
+**Status:** Implemented (2026-09-02) · **Date:** 2026-09-02 ·
+**Branch:** worktree-render-persona-design
+
+Three things came out differently from the sketch below, all for the same reason — the
+operator's name is config, so what the sketch wrote as a constant had to become a call:
+
+- `SIMPLE_PLAN_WRAPPED_LINE` (§4, §5) is `simple_plan_wrapped_line()`, and the bot's
+  `NEW_GOAL_REPLY` is `new_goal_reply()`.
+- The plan-cliff-with-a-next-goal sentence reads "that stretch gets set up from the
+  computer, by ⟨operator⟩" rather than "⟨operator⟩ sets that stretch up": the unnamed
+  fallback is "the person who set this up for you", and "…for you sets that up" reads
+  as a stutter. The wording with a name set is unaffected.
+- The three shared wording-diff helpers in `cli/workouts/revisions.py`
+  (`rewritten_text_only`, `wording_blocks`, `wording_block_lines`) lost their leading
+  underscore: the companion builder that moved to `render.py` in step 5 calls them, so
+  they are that module's interface now rather than its internals.
+
+Coverage went the other way too: `goal list`, `plan show` and `progress` had companion
+*builder* tests but nothing pinning that the command reaches the companion renderer at
+all, which is exactly what a relocation can break in silence. `tests/test_cli_bot.py`
+gained `CompanionSurfaceRoutingTest` for the four surfaces plus the expert direction.
 
 ## 1. Motivation
 

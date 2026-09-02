@@ -288,9 +288,17 @@ answers.
 
 Simple mode sets `TRAINMATE_RENDER=simple` in the subprocess env (beside
 `TRAINMATE_FRONTEND=json`, and interpreted in one place like `is_json_frontend`).
-Commands opt in one at a time through a renderer helper in `cli/common.py`; a command
-that hasn't opted in falls back to the expert `<pre>` form — the web dashboard's lesson
-applied: a fallback that cannot decay beats a parity promise nobody re-checks.
+Commands opt in one at a time; a command that hasn't opted in falls back to the expert
+`<pre>` form — the web dashboard's lesson applied: a fallback that cannot decay beats a
+parity promise nobody re-checks.
+
+> **Superseded by DESIGN_render_persona.md.** The opt-in was a `cli/common.is_simple_render()`
+> branch per surface, which reached fifteen sites across seven files. It is now a
+> renderer object on `runtime.render`: `CompanionRenderer` extends `ExpertRenderer`,
+> commands call one method per thing they have to say, and the override set *is* the
+> opt-in list — so the fallback below is inheritance rather than discipline. Everything
+> this section says about the *words* still holds; only where they live has moved
+> (`cli/render.py`).
 
 Initial opt-in set: `workout list` (today/week), `progress` (chart caption + two-line
 summary), the adapt result, and `bot morning`. The §11 breadth pass added `goal list`
@@ -355,7 +363,7 @@ earns it is expert detail, and the chat surface does not audit.
 | `trainmate/prompt.py` | `BUTTONS_SENTINEL` + `emit_buttons()` (mirror of `emit_photo`) |
 | `trainmate/cli/bot.py` | new hidden family: `bot morning`, `bot route`, `bot constraints` |
 | `trainmate/config.py` | `telegram_ui`; the push knobs and the router role resolve through `trainmate/settings.py` |
-| `trainmate/cli/common.py` | simple renderer helper + `TRAINMATE_RENDER` interpretation |
+| `trainmate/cli/render.py` | the companion voice: line builders, `ExpertRenderer`/`CompanionRenderer`, `TRAINMATE_RENDER` interpretation (was a helper in `cli/common.py` — DESIGN_render_persona.md §7) |
 | `docs/ARCHITECTURE.md` | §2 entry points, §9 config keys, bot section |
 | `tests/` | pure-helper tests (keyboard table, sentinel codec, router table→argv, tone renderer), `bot morning` idempotency against a temp DB, `bot route` with a mocked OpenRouter |
 

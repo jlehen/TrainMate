@@ -548,6 +548,14 @@ class Config:
         free-text router, morning push and simple rendering. Under `telegram:`."""
         return str(self.get("telegram", {}).get("ui", "expert")).strip().lower()
 
+    @property
+    def telegram_operator_name(self) -> str:
+        """What the companion calls the human who runs the CLI (DESIGN_render_persona.md
+        §5). "Coach" is already the app in the athlete's vocabulary, so the operator
+        needs a word of their own; unset falls back to a description. Under `telegram:`."""
+        name = str(self.get("telegram", {}).get("operator_name", "") or "").strip()
+        return name or "the person who set this up for you"
+
     # --- Web front-end (trainmate_web.py) ---
     @property
     def web_host(self) -> str:

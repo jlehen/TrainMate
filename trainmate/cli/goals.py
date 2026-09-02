@@ -5,9 +5,7 @@ from trainmate.util import (
     bold, green, red, cyan, gray, cmd, format_labeled_block, fmt_date,
     today_str as _today_str, notice,
 )
-from trainmate.cli.common import (
-    is_simple_render, print_plan_cascade, report_unhonored, simple_goal_lines,
-)
+from trainmate.cli.common import print_plan_cascade, report_unhonored
 from trainmate.db.objectives import (
     goal_state, GOAL_UPCOMING, GOAL_ARCHIVED, ARCHIVED,
 )
@@ -156,11 +154,15 @@ def run_goal_list(args=None) -> None:
     called_off = [g for g in goals if goal_state(g) == GOAL_ARCHIVED]
     if not show_all:
         goals = [g for g in goals if goal_state(g) != GOAL_ARCHIVED]
-    # Companion prose instead of the tagged list (DESIGN_bot_simple_frontend.md §11).
-    if is_simple_render():
-        for line in simple_goal_lines(goals, _today_str()):
-            print(line)
-        return
+    runtime.render.goal_list(goals, called_off, show_all, _today_str())
+
+
+def print_goal_table(goals: list, called_off: list, show_all: bool) -> None:
+    """The expert `goal list` body: every goal with its ID and state tag, and a count of
+    the called-off ones it is hiding.
+
+    The companion form of this is CompanionRenderer.goal_list
+    (DESIGN_render_persona.md §5)."""
     print(bold(cyan("=== GOALS ===")))
     for g in goals:
         _print_goal(g)

@@ -25,10 +25,10 @@ test_db = Database(db_path=TEST_DB_PATH)
 rebind_test_db(test_db)
 
 from trainmate import progression, runtime  # noqa: E402
-from trainmate.cli import runway as runway_cli  # noqa: E402
+from trainmate.cli import render as render_cli, runway as runway_cli  # noqa: E402
 from trainmate.cli.bot import MORNING_MARKER  # noqa: E402
-from trainmate.cli.common import SPORT_EMOJI  # noqa: E402
-from trainmate.cli.runway import RUNWAY_BUTTON_LABEL, SIMPLE_PASSED_LINE  # noqa: E402
+from trainmate.cli.render import SPORT_EMOJI, SIMPLE_PASSED_LINE  # noqa: E402
+from trainmate.cli.runway import RUNWAY_BUTTON_LABEL  # noqa: E402
 from trainmate.prompt import BUTTONS_SENTINEL  # noqa: E402
 from trainmate.progression import (  # noqa: E402
     RUNWAY_BLOCK, RUNWAY_PLAN_END_NEXT_GOAL, RUNWAY_PLAN_END_NO_GOAL, RUNWAY_SPAN,
@@ -246,13 +246,13 @@ class SimpleRunwayWordingTest(unittest.TestCase):
 
     def test_a_span_cliff_offers_to_plan_the_next_weeks(self):
         state = progression.runway([_w(4)], [_meso(-30, 45)], [], TODAY, WARN)
-        line = runway_cli.simple_runway_lines(state, TODAY)[0]
+        line = render_cli.simple_runway_lines(state, TODAY)[0]
         self.assertIn("your schedule runs out in 4 days", line)
         self.assertIn("Want me to plan the next few weeks?", line)
 
     def test_a_plan_cliff_celebrates_and_points_at_the_computer(self):
         state = progression.runway([_w(5)], [_meso(-30, 5)], [], TODAY, WARN)
-        line = runway_cli.simple_runway_lines(state, TODAY)[0]
+        line = render_cli.simple_runway_lines(state, TODAY)[0]
         self.assertIn("that's the goal you've been training toward", line)
         self.assertIn("happens from the computer", line)
 
@@ -413,7 +413,10 @@ class RunwaySurfaceTest(unittest.TestCase):
         self.assertNotIn("Scheduled workouts run out", out)
 
     def test_the_refusal_still_speaks_on_the_simple_surface(self):
-        """The hint is suppressed there, but a refusing adapt must still say why."""
+        """The hint is suppressed there, but a refusing adapt must still say why — in
+        words the athlete can act on. The expert refusal names `goal add` and `plan
+        generate`, two commands companion mode cannot type, so the companion form reuses
+        the morning push's plan-cliff wording (DESIGN_render_persona.md §5)."""
         self._plan([(-60, -2)], goal_offset=-2)
         self._sessions(-2)
         coach = MagicMock()
@@ -423,7 +426,9 @@ class RunwaySurfaceTest(unittest.TestCase):
             code, out, _ = run_cli(["workout", "adapt", "-y"])
         self.assertEqual(code, 0)
         coach.workout_adapt.assert_not_called()
-        self.assertIn("nothing left to adapt towards", " ".join(out.split()))
+        flowed = " ".join(out.split())
+        self.assertIn("setting up a new goal happens from the computer", flowed)
+        self.assertNotIn("goal add", flowed)
 
     def test_the_companion_week_view_names_the_end_of_the_schedule(self):
         self._plan([(-30, 45)])
@@ -700,7 +705,7 @@ class NewGoalIntentTest(unittest.TestCase):
 
     def test_the_reply_promises_no_delivery(self):
         import trainmate_bot
-        reply = trainmate_bot.NEW_GOAL_REPLY
+        reply = trainmate_bot.new_goal_reply()
         self.assertIn("from the computer", reply)
         # Nothing persists or forwards the message, so the reply must not say it does
         # (§8 names both as future work).

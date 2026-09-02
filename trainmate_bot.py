@@ -142,11 +142,13 @@ ROUTER_FALLBACK = (
 
 # What a `new_goal` message gets back (DESIGN_runway_nudge.md §6). Reply-only, and honest
 # about it: nothing here persists the message and nothing forwards it, so the reply must
-# not promise a delivery that does not happen (§8 names both as future work).
-NEW_GOAL_REPLY = (
-    "A new goal — exciting! 🎯 Setting that up happens from the computer — tell your "
-    "coach directly so it isn't lost."
-)
+# not promise a delivery that does not happen (§8 names both as future work). A function
+# because it names the operator, which is config (DESIGN_render_persona.md §5).
+def new_goal_reply() -> str:
+    return (
+        "A new goal — exciting! 🎯 Setting that up happens from the computer — tell "
+        f"{config.telegram_operator_name} directly so it isn't lost."
+    )
 
 # Reply-keyboard label → fixed argv; None arms free-text capture (§5.1/§5.2).
 # Buttons never reach beyond this table; the keyboard renders it two per row, in order.
@@ -913,7 +915,7 @@ def main() -> None:
             return None
         elif intent == "new_goal":
             await bot.send_message(
-                chat_id=chat_id, text=NEW_GOAL_REPLY, reply_markup=_keyboard()
+                chat_id=chat_id, text=new_goal_reply(), reply_markup=_keyboard()
             )
             return None
         else:

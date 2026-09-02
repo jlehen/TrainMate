@@ -10,14 +10,14 @@ import json
 from typing import Any, Dict, Optional
 
 from trainmate import settings
-from trainmate.cli.common import (
-    SIMPLE_DONE_STATUSES, adherence_verdicts, ensure_recent_data,
-    simple_constraint_lines, simple_day_lines,
-)
-from trainmate.cli.runway import (
-    SIMPLE_PASSED_LINE, current_runway, runway_buttons, schedule_exhausted,
+from trainmate.cli.common import adherence_verdicts, ensure_recent_data
+# The companion surfaces are companion-only by definition, so they call the line
+# builders directly rather than through `runtime.render` (DESIGN_render_persona.md §3).
+from trainmate.cli.render import (
+    SIMPLE_DONE_STATUSES, SIMPLE_PASSED_LINE, simple_constraint_lines, simple_day_lines,
     simple_runway_lines,
 )
+from trainmate.cli.runway import current_runway, runway_buttons, schedule_exhausted
 from trainmate.prompt import emit_buttons
 from trainmate.util import step, today_str as _today_str, wrap_text
 

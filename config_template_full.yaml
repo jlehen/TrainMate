@@ -144,6 +144,11 @@ llm:
 #  # non-technical athlete: reply keyboard, free-text intent routing, the morning
 #  # push below, and plain-prose rendering. Typed /commands still work in simple mode.
 #  #ui: expert
+#  # Your name, as the companion says it to the athlete (simple ui mode only). In the
+#  # athlete's vocabulary "coach" is already the app, so the person running the CLI
+#  # needs a word of their own: it is what "tell ... — setting up a new goal happens
+#  # from the computer" points at. Unset reads "the person who set this up for you".
+#  #operator_name: Alex
 #  # Morning push (simple ui mode only): the bot opens the day with today's session
 #  # and follow-up buttons. State lives in the instance's database, so restarts
 #  # never double-send.

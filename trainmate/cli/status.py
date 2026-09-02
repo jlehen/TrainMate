@@ -12,7 +12,7 @@ from trainmate.util import (
 from trainmate.cli.common import (
     constraint_line, ensure_recent_data, pmc_warmup_cutoff,
 )
-from trainmate.cli.runway import current_runway, print_runway_hint
+from trainmate.cli.runway import current_runway
 from trainmate.coach import honoring
 from trainmate.db.objectives import goal_state, GOAL_UPCOMING
 
@@ -163,7 +163,7 @@ def run_status(args) -> None:
     # Outside the `if objectives:` branch above, deliberately: the plan-cliff-with-no-goal
     # wording exists precisely because nothing is on record, so it would never be reached
     # from inside it (DESIGN_runway_nudge.md §4).
-    print_runway_hint(current_runway(), _today_str())
+    runtime.render.runway_hint(current_runway(), _today_str())
 
     # Fitness thresholds (the effective anchors the coach prescribes from). Each is the
     # latest logbook row for its kind, with when it was tested (DESIGN_benchmark_workouts

@@ -15,7 +15,7 @@ import trainmate_cli
 
 from trainmate import runtime
 from trainmate.cli.bot import MORNING_MARKER, PUSH_ALL_DONE_LINE
-from trainmate.cli.common import SIMPLE_DONE_LINE
+from trainmate.cli.render import SIMPLE_DONE_LINE
 from trainmate.config import config
 from trainmate.prompt import BUTTONS_SENTINEL
 from trainmate.util import today_str
@@ -356,6 +356,80 @@ class SimpleListRenderTest(unittest.TestCase):
         save_workout(test_db, today_str(), "running", "Easy run")
         _, out, _ = run_cli(["workout", "list", "-d", "today"])
         self.assertIn("WORKOUT SCHEDULE", out)
+
+
+class CompanionSurfaceRoutingTest(unittest.TestCase):
+    """Every companion surface, driven through the real CLI (DESIGN_render_persona.md §5).
+
+    The line builders have their own unit tests; what these pin is the *routing* — that
+    the command reaches `runtime.render` and that the renderer built for this process is
+    the companion one. A wrong argument order or a stale singleton is invisible to a
+    builder test and changes every one of these."""
+
+    def setUp(self):
+        rebind_test_db(test_db)
+        clear_all_tables(test_db)
+        patcher = patch.dict(os.environ, {"TRAINMATE_RENDER": "simple"})
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def _goal_with_plan(self):
+        """A goal 45 days out, with one block running from last week to the goal."""
+        from datetime import date, timedelta
+        today = date.fromisoformat(today_str())
+        out = lambda days: (today + timedelta(days=days)).isoformat()  # noqa: E731
+        goal_id = test_db.add_objective(
+            title="Zurich Marathon", target_date=out(45), sport_type="running",
+        )
+        test_db.save_macrocycle(
+            objective_id=goal_id, strategy="Build then sharpen.",
+            goals_hash="g", constraints_hash="c",
+            mesocycles=[{"name": "Base", "start_date": out(-7), "end_date": out(45),
+                         "focus": "Aerobic endurance, easy volume."}],
+        )
+        return goal_id
+
+    def test_goal_list_reads_as_what_youre_training_for(self):
+        self._goal_with_plan()
+        code, out, _ = run_cli(["goal", "list"])
+        self.assertEqual(code, 0)
+        self.assertIn("What you're training for", out)
+        self.assertIn("Zurich Marathon", out)
+        # No IDs, no state tags, no expert header (§11).
+        self.assertNotIn("=== GOALS ===", out)
+        self.assertNotIn("[UPCOMING]", out)
+
+    def test_plan_show_reads_as_the_road_to_the_goal(self):
+        self._goal_with_plan()
+        code, out, _ = run_cli(["plan", "show"])
+        self.assertEqual(code, 0)
+        self.assertIn("The road to Zurich Marathon", out)
+        self.assertIn("you're here", out)
+        self.assertNotIn("MACROCYCLE STRATEGY", out)
+        self.assertNotIn("Macrocycle ID", out)
+
+    def test_plan_show_without_a_goal_invites_instead_of_naming_a_command(self):
+        """The athlete cannot run `plan generate`, so the empty state must not name it
+        (DESIGN_bot_simple_frontend.md §11)."""
+        code, out, _ = run_cli(["plan", "show"])
+        self.assertEqual(code, 0)
+        self.assertIn("once your goal is set up", out)
+        self.assertNotIn("plan generate", out)
+
+    def test_progress_reads_as_a_summary_not_a_table(self):
+        code, out, _ = run_cli(["progress", "--no-pull"])
+        self.assertEqual(code, 0)
+        self.assertIn("The chart shows your fitness", out)
+        self.assertNotIn("FORM today", out)
+
+    def test_the_expert_voice_is_what_the_same_commands_speak_without_the_env(self):
+        """The other half of the switch: nothing above may leak into the default voice."""
+        os.environ.pop("TRAINMATE_RENDER", None)
+        self._goal_with_plan()
+        _, goals_out, _ = run_cli(["goal", "list"])
+        _, plan_out, _ = run_cli(["plan", "show"])
+        self.assertIn("=== GOALS ===", goals_out)
+        self.assertIn("MACROCYCLE STRATEGY", plan_out)
 
 
 if __name__ == "__main__":

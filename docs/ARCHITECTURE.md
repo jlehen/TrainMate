@@ -167,10 +167,17 @@ classes themselves.
     `constraint rm` taps. Signals get no removal counterpart on purpose: they are
     backward-looking evidence, not a rule that keeps shaping the schedule
     (DESIGN_bot_simple_frontend.md §5.5). Subprocesses
-    additionally get `TRAINMATE_RENDER=simple` (interpreted by
-    `cli/common.is_simple_render`) so opted-in commands (`workout list`, `progress`,
-    the adapt result, `bot morning`, `goal list`, `plan show`, `workout generate`'s
-    preview) render companion prose,
+    additionally get `TRAINMATE_RENDER=simple`, read once by
+    `cli/render.make_renderer` and handed out as `runtime.render` — the voice axis,
+    beside `runtime.prompt`'s transport axis. A command calls one method per thing it
+    has to say and never asks which persona answered; `CompanionRenderer` extends
+    `ExpertRenderer`, so its override set *is* the opted-in list (`workout list`,
+    `progress`, the five adapt outcome lines, `goal list`, `plan show`, `workout
+    generate`'s preview, the revision preview, `constraint rm`, the runway hint's
+    silence, the adapt plan-behind refusal) and anything else falls back to the expert
+    form (DESIGN_render_persona.md). `bot morning` and `bot constraints` are
+    companion-only by definition and call the line builders in `cli/render.py`
+    directly. Companion output is prose,
     sent plain instead of `<pre>`. A third one-way sentinel, `BUTTONS_SENTINEL`/
     `emit_buttons` (`\x1eTM-BUTTONS {json}`), attaches a *non-blocking* inline button
     row (`ui:` callback namespace, token-invalidated) whose taps feed a canned
@@ -1595,6 +1602,7 @@ runtime.coach_service    # CoachService
 runtime.calendar_syncer  # CalendarSyncer
 runtime.garmin           # module functions (pull, ensure_data, …)
 runtime.prompt           # the prompt broker (see below)
+runtime.render           # the renderer — the voice (see below)
 ```
 
 `runtime` resolves each name on first access and caches it, so **importing a module
@@ -1659,6 +1667,22 @@ athlete's free text (DESIGN_logging.md §4.4). The record lands on the innermost
 the process that writes — under the bot that is the CLI subprocess, so it carries the
 command's run id and not the bot's. The two imports it needs are deferred so this module
 still imports nothing beyond the stdlib. DESIGN_logging.md §5.6
+
+The **renderer** is `runtime.render`, the same shape one axis over: the broker chooses a
+*transport*, the renderer chooses a *voice*. `cli/render.make_renderer()` reads
+`TRAINMATE_RENDER` once and returns `ExpertRenderer` (reports, tables, IDs, operator
+nudges) or `CompanionRenderer` (prose, day words, no IDs, no commands the athlete cannot
+type). They are two objects and not one "persona" because the axes are independent:
+expert-over-Telegram is the operator's own daily surface, and the web dashboard is
+expert-voiced with no TTY. A command body holds no `if simple:` branch — it calls
+`runtime.render.<what happened>(…)`, and `CompanionRenderer`'s override set is the
+opted-in list; `cli/render.py` also holds every companion line builder, so the whole
+voice reads in one file. The expert table renderers stay in their command modules
+(`print_workout_table`, `print_plan`, `print_progress_report`, …) and `ExpertRenderer`
+delegates. Command modules never import `cli/render.py` — the builder in `runtime.py`
+defers that import, which is what keeps the graph acyclic. `tests/helpers.run_cli`
+drops the cached renderer per invocation so each run reads the environment as a real CLI
+process does. DESIGN_render_persona.md
 
 For tests, call `tests.helpers.rebind_test_db(test_db)`: it sets `runtime.db` plus the
 remaining by-value sites in one call, so a module cannot be left reading a different
@@ -1928,6 +1952,7 @@ Required fields:
 | `logging.retain_days` / `logging.retain_exchange_days` | int | Days each directory keeps (default 90 each). The sweep runs at most once a UTC day, off the first command to finish; `tm journal prune` forces one |
 | `llm.router_model`     | str  | Cheaper model the bot's free-text router (`tm bot route`) uses; a role, not a `model list` entry. Absent → the active coaching model (DESIGN_bot_simple_frontend.md §5.4) |
 | `telegram.ui`          | str  | Bot persona: `expert` (default) or `simple` — the companion mode (DESIGN_bot_simple_frontend.md §3) |
+| `telegram.operator_name` | str | What the companion calls the human who runs the CLI. "Coach" is already the app in the athlete's vocabulary, so the operator gets a word of their own; absent → "the person who set this up for you" (DESIGN_render_persona.md §5) |
 | `telegram.push.*`      | —    | Morning push (simple ui only): `enabled` (default true), `morning_time` (`08:00`), `morning_deadline` (`15:00`), `adapt_first` (default false → run `workout adapt -y` before rendering) |
 | `metrics_lookback_days`  | int  | Rolling window for adaptation (default: 15)                  |
 | `adapt_terminal_window_days` | int | How close to a block's end counts as its terminal window (default: 3). Gates what the coach **model** is told (`THIS BLOCK IS ENDING`); the CLI's end-of-schedule hint runs on the knob below. Under `coach:` |

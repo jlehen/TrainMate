@@ -4,30 +4,22 @@
 One fetch, one detector, one command named — so `workout adapt`, `status` and the
 morning push cannot answer the same morning differently (§3). The detection itself is
 `progression.runway`, pure over rows; this module is the thin db-reads wrapper around it
-plus the wordings each surface asks for, the same split `timeline.py` makes around
-`progression.assemble_timeline`.
+plus the expert wordings each surface asks for, the same split `timeline.py` makes around
+`progression.assemble_timeline`. The companion wordings of the same facts live in
+`cli/render.py` with the rest of that voice (DESIGN_render_persona.md §4).
 """
 from typing import Any, Dict, List, Optional, Tuple
 
 from trainmate import progression
 from trainmate.config import config
-from trainmate.cli.common import is_simple_render, simple_when
 from trainmate.progression import RUNWAY_BLOCK, RUNWAY_PLAN_END_NEXT_GOAL, RUNWAY_SPAN
 from trainmate.util import (
-    cmd, days_between, fmt_date, gray, notice, today_str as _today_str,
+    cmd, days_between, fmt_date, gray, today_str as _today_str,
 )
 
 # What the morning push offers on a span or block cliff (§6). The label is the athlete's;
 # the argv behind it comes from the detector, never from the free-text router.
 RUNWAY_BUTTON_LABEL = "📅 Plan my next weeks"
-
-# What the push says instead of the rest-day line once the schedule is exhausted (§6):
-# an empty day is then the schedule running out, not a coaching decision.
-SIMPLE_PASSED_LINE = "You've finished everything on the schedule 🎉"
-
-# The one-liner the companion week view ends on when its window crosses the cliff (§6),
-# mirroring the expert listing's marker.
-SIMPLE_END_NOTE = "That's the end of the current schedule."
 
 
 def _plan_blocks() -> List[Dict[str, Any]]:
@@ -140,21 +132,7 @@ def runway_hint_lines(state: Dict[str, Any], today: str) -> List[str]:
     ]
 
 
-def print_runway_hint(state: Optional[Dict[str, Any]], today: str) -> bool:
-    """Draws the §4 hint and says whether it drew anything.
-
-    Silent under `TRAINMATE_RENDER=simple`: the companion surface words the same fact
-    itself, and one fact gets one wording per message (§6)."""
-    if not state or is_simple_render():
-        return False
-    print()
-    for line in runway_hint_lines(state, today):
-        notice(line)
-    print()
-    return True
-
-
-def _crossing(end_date: Optional[str]) -> Optional[Tuple[str, Optional[str]]]:
+def crossing_the_end(end_date: Optional[str]) -> Optional[Tuple[str, Optional[str]]]:
     """`(last covered date, plan end)` when a listing ending on `end_date` runs past the
     end of the schedule, else None. An open-ended listing always crosses it."""
     last_covered, plan_end = schedule_coverage()
@@ -171,7 +149,7 @@ def list_end_marker(end_date: Optional[str]) -> Optional[str]:
 
     Unconditional — a fact of the listing, not a warning, so it ignores the runway
     window entirely."""
-    crossing = _crossing(end_date)
+    crossing = crossing_the_end(end_date)
     if crossing is None:
         return None
     last_covered, plan_end = crossing
@@ -180,39 +158,6 @@ def list_end_marker(end_date: Optional[str]) -> Optional[str]:
         if plan_end and plan_end > last_covered else "end of plan"
     )
     return gray(f"— end of scheduled workouts ({tail}) —")
-
-
-def simple_end_note(end_date: Optional[str]) -> Optional[str]:
-    """The companion week view's version of the marker above (§6)."""
-    return SIMPLE_END_NOTE if _crossing(end_date) else None
-
-
-def simple_runway_lines(state: Dict[str, Any], today: str) -> List[str]:
-    """The morning push's companion wording for one runway state (§6).
-
-    Span and block cliffs read as an offer, because the button beside them performs it;
-    a plan cliff reads as a wrap-up, because periodization is operator work in companion
-    mode and there is nothing here for the athlete to tap."""
-    kind, days_left = state["kind"], state["days_left"]
-    if kind in (RUNWAY_BLOCK, RUNWAY_SPAN):
-        if days_left < 0:
-            return ["Want me to plan the next few weeks?"]
-        when = simple_when(state["last_covered_date"], today)
-        return [f"Heads up — your schedule runs out {when}. "
-                "Want me to plan the next few weeks?"]
-
-    wrap_up = (
-        "wrapped up" if days_left < 0
-        else f"wraps up {simple_when(state['last_covered_date'], today)}"
-    )
-    lead = f"🎉 Your plan {wrap_up} — that's the goal you've been training toward!"
-    if kind == RUNWAY_PLAN_END_NEXT_GOAL:
-        obj = state["objective"]
-        when = simple_when(str(obj["target_date"]), today)
-        return [f"{lead} Next up is {obj['title']} ({when}) — your coach sets that "
-                "stretch up from the computer."]
-    return [f"{lead} When you know what you'd like to work toward next, tell your "
-            "coach — setting up a new goal happens from the computer."]
 
 
 def runway_argv(state: Optional[Dict[str, Any]]) -> Optional[str]:
@@ -236,15 +181,3 @@ def runway_buttons(state: Optional[Dict[str, Any]]) -> List[dict]:
     if not utterance:
         return []
     return [{"label": RUNWAY_BUTTON_LABEL, "send": utterance}]
-
-
-def simple_end_buttons(end_date: Optional[str]) -> List[dict]:
-    """The offer beside the companion week view's end note (§6).
-
-    Two gates, so the rule stays one sentence: the listing must cross the end of the
-    schedule (else the button has no context to sit under) and the nudge must be live
-    (else `runway_buttons` returns nothing anyway). The note can therefore draw alone,
-    but a button never draws without it."""
-    if _crossing(end_date) is None:
-        return []
-    return runway_buttons(current_runway())

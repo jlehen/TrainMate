@@ -12,8 +12,7 @@ from trainmate.util import (
     today_date as _today_date, notice, warn,
 )
 from trainmate.cli.common import (
-    ensure_recent_data, is_simple_render, print_plan_cascade, report_unhonored,
-    simple_plan_lines,
+    ensure_recent_data, print_plan_cascade, report_unhonored,
 )
 from trainmate.cli.selectors import (
     CURRENT, IdRange, SelectorError, parse_id_range, resolve_meso_atom,
@@ -502,21 +501,15 @@ def _print_mesocycle_workouts(
         )
 
 
-# What simple mode says wherever the expert view would suggest `plan generate`: the
-# athlete in companion mode cannot run it — the operator sets the plan up
-# (DESIGN_bot_simple_frontend.md §11).
-SIMPLE_NO_PLAN_LINE = (
-    "No training plan here yet — it will appear once your goal is set up 🌱"
-)
-
-
 def run_plan_show(args: argparse.Namespace) -> None:
     """Displays the training macrocycle(s) and mesocycles periodization timeline."""
-    # Companion empty state: without an upcoming goal, `_resolve_goal` below would
-    # print the expert nudge (DESIGN_bot_simple_frontend.md §11).
-    if (is_simple_render() and args.goal_id is None and not getattr(args, 'all', False)
+    # The empty state `plan show` alone owns. `_resolve_goal` below would say the same
+    # thing one line later, but it also serves `plan versions`, `plan diff`, `plan
+    # rollback` and `plan feedback`, where the companion sentence is the wrong one
+    # (DESIGN_render_persona.md §5).
+    if (args.goal_id is None and not getattr(args, 'all', False)
             and not runtime.db.upcoming_objectives()):
-        print(SIMPLE_NO_PLAN_LINE)
+        runtime.render.no_upcoming_goal()
         return
     if getattr(args, 'all', False):
         if args.goal_id is not None or getattr(args, 'macrocycle_id', None) is not None:
@@ -530,7 +523,7 @@ def run_plan_show(args: argparse.Namespace) -> None:
             print(green(f"Run {cmd('plan generate')} to create one."))
             return
         for goal, macrocycle in planned:
-            _print_plan(goal, macrocycle, args)
+            runtime.render.plan(goal, macrocycle, args)
         return
 
     next_goal = _resolve_goal(args.goal_id)
@@ -549,27 +542,17 @@ def run_plan_show(args: argparse.Namespace) -> None:
     else:
         macrocycle = runtime.db.get_macrocycle_for_objective(next_goal['id'])
     if not macrocycle:
-        if is_simple_render():
-            print(SIMPLE_NO_PLAN_LINE)
-            return
-        notice(f"No active macrocycle strategy found for goal '{next_goal['title']}'.")
-        print(green(f"Run {cmd('plan generate')} to create one."))
+        runtime.render.no_plan_yet(next_goal)
         return
 
-    _print_plan(next_goal, macrocycle, args)
+    runtime.render.plan(next_goal, macrocycle, args)
 
 
-def _print_plan(next_goal: dict, macrocycle: dict, args: argparse.Namespace) -> None:
-    """Renders one plan version: header, strategy, snapshotted inputs, mesocycle timeline."""
+def print_plan(next_goal: dict, macrocycle: dict, args: argparse.Namespace) -> None:
+    """Renders one plan version: header, strategy, snapshotted inputs, mesocycle timeline.
+
+    The companion form of this is CompanionRenderer.plan (DESIGN_render_persona.md §5)."""
     mesocycles = runtime.db.get_mesocycles_for_macrocycle(macrocycle['id'])
-
-    # Companion prose instead of the expert timeline: the road to the goal, no IDs,
-    # strategy or snapshots (DESIGN_bot_simple_frontend.md §11).
-    if is_simple_render():
-        today = _today_date().strftime("%Y-%m-%d")
-        for line in simple_plan_lines(next_goal, macrocycle, mesocycles, today):
-            print(line)
-        return
     show_workouts = getattr(args, 'workouts', False)
     workouts = _plan_workouts(macrocycle)
 

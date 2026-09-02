@@ -14,15 +14,9 @@ from trainmate.util import (
 from trainmate.cli.common import (
     adherence_verdicts, ensure_recent_data, format_actual,
     mark_adherence_from_results, report_unhonored,
-    is_simple_render, simple_day_lines, simple_week_lines,
 )
-from trainmate.cli.runway import (
-    current_runway, list_end_marker, plan_is_behind, print_runway_hint, simple_end_buttons,
-    simple_end_note,
-)
-from trainmate.prompt import emit_buttons
+from trainmate.cli.runway import current_runway, list_end_marker, plan_is_behind
 from trainmate.coach.proposals import GenerateProposal
-from trainmate.cli.workouts.revisions import preview_and_confirm_revision
 
 from trainmate.cli.selectors import has_selector as _has_selector, resolve_window, split_targets
 from trainmate.cli.workouts._helpers import workout_line
@@ -144,14 +138,9 @@ def run_workout_adapt(args: argparse.Namespace) -> None:
         # Nothing to adapt *towards* once the whole periodization is behind us — say what
         # to do instead of an all-clear over an empty calendar (DESIGN_runway_nudge.md §4,
         # extending DESIGN_block_boundary.md §6's "adapt requires a block").
-        if not print_runway_hint(state, date_str):
-            notice(
-                "Your plan is behind you — there is nothing left to adapt towards. Set "
-                "what's next with " + cmd("goal add") + ", then " + cmd("plan generate")
-                + "."
-            )
+        runtime.render.adapt_plan_behind(state, date_str)
         return
-    print_runway_hint(state, date_str)
+    runtime.render.runway_hint(state, date_str)
 
     # Before the coach is told anything: settle any pairing the matcher had to guess at.
     _resolve_ambiguous_matches(date_str, auto=args.auto)
@@ -190,43 +179,27 @@ def run_workout_adapt(args: argparse.Namespace) -> None:
         # that proposed it has already returned.
         _confirm_new_signals(proposal.new_signals, date_str)
 
-        # Simple mode drops the report-style header and softens the no-change line —
-        # the reason itself is already prose (DESIGN_bot_simple_frontend.md §6).
-        if is_simple_render():
-            print(f"\n{wrap_text(reason)}")
-        else:
-            print(f"\n{bold('Decision Summary')}:\n{wrap_text(reason)}")
+        runtime.render.adapt_reason(reason)
 
         if not proposed_workouts:
-            if is_simple_render():
-                print(green("\nAll clear — the plan stands as it is. 💪"))
-            else:
-                print(green(
-                    "\nAll metrics are green and workout plan is on track. "
-                    "No changes recommended."
-                ))
+            runtime.render.adapt_no_change()
             # The pass still had its constraints in scope, which is all `honored_at`
             # claims — requiring a *change* would flag them forever (§8).
             runtime.coach_service.workout_revision_record_no_change(proposal)
             return
 
-        # Simple mode phrases the ask in companion words; the preview itself switches
-        # rendering on the same flag (DESIGN_bot_simple_frontend.md §6).
-        if is_simple_render():
-            heading, question = "Here's what I'd change:", "Shall I make these changes?"
-        else:
-            heading = "PROPOSED WORKOUT ADAPTATIONS:"
-            question = "Apply these adaptations to your training plan and sync to Calendar?"
-        if not preview_and_confirm_revision(proposal, heading, question, auto=args.auto):
-            print("\nOkay — nothing changed." if is_simple_render() else "\nAdaptations discarded.")
+        # The renderer draws the preview, the prompt asks the question: voice and
+        # transport are two objects and neither calls the other
+        # (DESIGN_render_persona.md §4).
+        heading, question = runtime.render.adapt_confirm_words()
+        runtime.render.revision_preview(proposal, heading)
+        if not (args.auto or runtime.prompt.confirm(question)):
+            runtime.render.adapt_discarded()
             return
 
         step("\nApplying adaptations...")
         runtime.coach_service.workout_revision_apply(proposal)
-        if is_simple_render():
-            print(green("Done — your plan is updated. 💪"))
-        else:
-            print(green("Adaptations applied and synced to calendar successfully."))
+        runtime.render.adapt_applied()
 
     except ValueError as e:
         # A domain refusal (no active plan to adapt towards), not a failure: say it
@@ -425,6 +398,26 @@ def _warn_span_change(span_start: str, span_end: str) -> None:
     print()
 
 
+def print_generate_preview(proposal) -> bool:
+    """The expert `workout generate` preview: the reasoning, then the proposed sessions.
+
+    Returns False when the coach proposed nothing, so the caller stops before the apply
+    question. The companion form of this is CompanionRenderer.workout_generate_preview
+    (DESIGN_render_persona.md §5)."""
+    print(bold(cyan("\n=== WORKOUTS PROPOSED BY COACH ===")))
+    print(f"{bold('Reasoning')}:\n{wrap_text(proposal.reasoning)}\n")
+    if not proposal.workouts:
+        notice("The coach proposed no sessions — nothing to apply.")
+        return False
+
+    # The same one-line rendering as `workout list`, so the plan the athlete is asked
+    # to accept reads exactly like the plan they will be living with.
+    for w in proposal.workouts:
+        print(workout_line(w))
+    print()
+    return True
+
+
 def run_workout_generate(args: argparse.Namespace) -> None:
     """Executes the AI workout generation command based on active strategy."""
     force = getattr(args, 'force', False)
@@ -450,29 +443,8 @@ def run_workout_generate(args: argparse.Namespace) -> None:
     proposal = runtime.coach_service.workout_generate(
         start_date=span_start, end_date=span_end, prefer_macro_id=prefer_macro_id
     )
-    # Companion prose instead of the report: the reasoning is already prose, and the
-    # sessions render the way her week view does (DESIGN_runway_nudge.md §6 — the runway
-    # button makes this preview reachable by tap, so it must not be a table).
-    if is_simple_render():
-        print(f"\n{wrap_text(proposal.reasoning)}\n")
-        if not proposal.workouts:
-            notice("The coach proposed no sessions — nothing to apply.")
-            return
-        for line in simple_week_lines(list(proposal.workouts)):
-            print(line)
-        print()
-    else:
-        print(bold(cyan("\n=== WORKOUTS PROPOSED BY COACH ===")))
-        print(f"{bold('Reasoning')}:\n{wrap_text(proposal.reasoning)}\n")
-        if not proposal.workouts:
-            notice("The coach proposed no sessions — nothing to apply.")
-            return
-
-        # The same one-line rendering as `workout list`, so the plan the athlete is asked
-        # to accept reads exactly like the plan they will be living with.
-        for w in proposal.workouts:
-            print(workout_line(w))
-        print()
+    if not runtime.render.workout_generate_preview(proposal):
+        return
 
     if not force and not _confirm_apply(proposal):
         notice("Workouts discarded — your current plan is unchanged.")
@@ -662,25 +634,21 @@ def run_workout_list(args: argparse.Namespace) -> None:
     # to report on (DESIGN_runway_nudge.md §4).
     names_a_range = windowed or not ids
 
-    # Companion prose instead of the table: a single-day window reads as the day, any
-    # other window as the week ahead (DESIGN_bot_simple_frontend.md §6).
-    if is_simple_render():
-        if start_date and start_date == end_date:
-            for line in simple_day_lines(workouts, start_date, verdicts):
-                print(line)
-            return
-        for line in simple_week_lines(
-            workouts, verdicts,
-            end_note=simple_end_note(end_date) if names_a_range else None,
-        ):
-            print(line)
-        # The note states that the schedule stops; the button is what she does about it,
-        # offered where she is already looking (DESIGN_runway_nudge.md §6).
-        buttons = simple_end_buttons(end_date) if names_a_range else []
-        if buttons:
-            emit_buttons(buttons)
-        return
+    runtime.render.workout_list(
+        workouts, verdicts, args, start_date=start_date, end_date=end_date, ids=ids,
+        names_a_range=names_a_range,
+    )
 
+
+def print_workout_table(
+    workouts: list, verdicts: dict, args: argparse.Namespace, *,
+    start_date: Optional[str], end_date: Optional[str], ids: list, names_a_range: bool,
+) -> None:
+    """The expert `workout list` body: the filter echo, one line per session (`-v` adds
+    the detail block), and the end-of-schedule marker.
+
+    The companion form of this is CompanionRenderer.workout_list
+    (DESIGN_render_persona.md §5)."""
     print(bold(cyan("=== WORKOUT SCHEDULE ===")))
     if ids:
         print(gray(f"Filters: IDs {', '.join(str(i) for i in ids)}"))
