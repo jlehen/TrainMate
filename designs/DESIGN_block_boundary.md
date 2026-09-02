@@ -34,6 +34,12 @@ The real failure mode is **staleness**: a block generated far ahead (e.g. `worko
 DESIGN_cli_selectors.md §8, so this is now the easy thing to ask for) is never re-read against the athlete's present
 state, and `adapt` cannot reach it to say so.
 
+Since 2026-09-02 the *default* span no longer contributes to this: it stops at the end of
+the block it opens in (DESIGN_cli_selectors.md §8), so a bare `workout generate` cannot lay
+down part of the next block, and the loop above closes on its own — coverage ends on a
+boundary, which the runway detector reads as a block cliff and answers with `-m ..<id>`.
+`-g` remains the way to opt out of that, with the price this section names.
+
 ## 2. Why adapt does not reach across the boundary
 
 Extending the adaptation range into the next block would be a small code change. We

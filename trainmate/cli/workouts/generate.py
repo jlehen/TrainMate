@@ -2,7 +2,7 @@
 import argparse
 from datetime import datetime, timedelta
 from typing import Optional
-from trainmate import runtime, signals
+from trainmate import progression, runtime, signals
 from trainmate.config import config
 from trainmate.adherence import analyze_adherence, date_covered, format_discrepancies
 from trainmate.google_calendar import event_url
@@ -352,10 +352,21 @@ def _shift(date_str: str, days: int) -> str:
     ).strftime("%Y-%m-%d")
 
 
+def _default_span_end(span_start: str) -> str:
+    """`progression.generation_span_end` over the block this span opens in — the db read
+    beside the pure rule, as `runway` splits (DESIGN_cli_selectors.md §8)."""
+    block = runtime.db.get_covering_mesocycle(span_start)
+    return progression.generation_span_end(
+        span_start,
+        str(block["end_date"]) if block and block.get("end_date") else None,
+        config.workout_generation_span_days,
+    )
+
+
 def _resolve_span(args: argparse.Namespace) -> Optional[tuple[str, str]]:
     """The days this run rebuilds: both ends of whatever `-d`/`-m`/`-M`/`-g` selected.
 
-    An unselected start is today and an unselected end is the config horizon, so the span
+    An unselected start is today and an unselected end is `_default_span_end`, so the span
     is always bounded (DESIGN_cli_selectors.md §8). None when the selection is entirely
     behind us — a block that has already run is history, and silently regenerating today
     instead is not what was asked for."""
@@ -368,10 +379,7 @@ def _resolve_span(args: argparse.Namespace) -> Optional[tuple[str, str]]:
         )
         return None
     span_start = max(start_date or today, today)
-    span_end = end_date or _shift(
-        span_start, config.workout_generation_span_days - 1
-    )
-    return span_start, span_end
+    return span_start, end_date or _default_span_end(span_start)
 
 
 def _warn_span_change(span_start: str, span_end: str) -> None:

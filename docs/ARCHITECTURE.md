@@ -712,8 +712,9 @@ called by the UIs.
     matching completed activity (`_today_workout_completed`, a one-day
     `analyze_adherence` pass), generation starts *tomorrow*; otherwise today. A
     defensive filter drops any model-emitted workout dated before the start.
-  - **Horizon:** `num_days` from `end_date` (or `config.workout_generation_span_days`)
-    relative to the start, then `CoachEngine._workout_generate_logic()`.
+  - **Horizon:** `num_days` from `end_date`, or — with none given — from
+    `progression.generation_span_end`: the config cap or the end of the block the span
+    opens in, whichever comes first. Then `CoachEngine._workout_generate_logic()`.
 - **`workout_generate_apply(proposal)`** — the accepted half. Archives the previous
   proposed sessions under one `generate` change, voiding every day from `gen_start` the
   new plan does not fill and appending the rest with the `macrocycle_id` the proposal
@@ -1759,7 +1760,7 @@ single read-only view that is its whole state (`settings`), which acts bare inst
 | `progress`   | `[SPORT ...]` | `pr`    | Show the progress timeline: measured load to date, plan-projected forward (CTL/ATL/TSB), weekly planned-vs-actual bars (`-w/--weeks N`, `--chart [PATH]` for a PNG; DESIGN_progress_timeline.md). `-z`/`--zones` (implied by naming a sport) adds one weekly time-in-zone table per sport — measured behind today, prescribed ahead of it (`--blocks` for block grain, `--power`/`--hr` to force the currency; DESIGN_intensity_distribution.md §9.6/§9.8). The sport argument scopes the **zone tables only**: CTL/ATL/TSB, the projection and the load table stay whole-athlete |
 | `workout`    | `list`       | `w l`    | Show planned workouts. Defaults to a 7-day window from today. Positional `TARGET…` (workout IDs and/or date selectors, e.g. `wo li 12 15 -v`) plus the shared selectors `-d`/`-m`/`-M`/`-g` and `-t/--type TYPE`, `--removed` (DESIGN_cli_selectors.md). Every listed session dated **today or earlier** also carries its adherence verdict — `[DONE]`/`[PARTIAL]`/`[MISSED]`/`[REST OK]`/`[REST BROKEN]`, or `[NOT YET]` for one still ahead today — and `-v` adds the matched activity and the mismatch behind a `[PARTIAL]`. Freshens Garmin over that past span unless `--no-pull` ([§5](#workout-state--three-orthogonal-axes-not-one-enum)). A listing whose range runs past the last scheduled session ends on one gray marker naming that — unconditional, a fact of the listing rather than a warning; an empty listing renders it alone (DESIGN_runway_nudge.md §4). |
 | `workout`    | `compare`    | `w c`    | Compare planned vs completed (`analyze_adherence()`): prints PLANNED/ACTUAL per day, flags misses (red), rest violations (red), unplanned high-load (yellow), then a discrepancy summary. Today's untrained sessions read `(not yet — still ahead today)` and are not misses (`pending_from`, [§10](#10-key-data-flows)). Same selectors as `workout list`; default 14-day lookback; a bare span (`-d 7d`) looks *back*; end capped at today. |
-| `workout`    | `generate`   | `w g`    | Generate workouts from the plan blocks covering the days generated (the dates pick the plan, not a goal — DESIGN_cli_selectors.md §8). No selector → today for `config.workout_generation_span_days` (28 default). Span flags (mutually exclusive, **both** ends of the resolved window are used, and a span never opens before today): `-g/--goal [ID]` = the goal's whole plan span; `-d`; `-m` = that block's own days; `-M` (which also settles which plan to follow where two cover the same days). Lists the proposed sessions the way `workout list` renders them and asks before writing; on a `y` it archives the span's existing workouts, leaves the days outside it alone, and pushes the new ones to Calendar immediately. `-f/-y` skips both prompts. |
+| `workout`    | `generate`   | `w g`    | Generate workouts from the plan blocks covering the days generated (the dates pick the plan, not a goal — DESIGN_cli_selectors.md §8). No selector → today to the end of the current block, or `config.workout_generation_span_days` (28 default), whichever comes first. Span flags (mutually exclusive, **both** ends of the resolved window are used, and a span never opens before today): `-g/--goal [ID]` = the goal's whole plan span; `-d`; `-m` = that block's own days; `-M` (which also settles which plan to follow where two cover the same days). Lists the proposed sessions the way `workout list` renders them and asks before writing; on a `y` it archives the span's existing workouts, leaves the days outside it alone, and pushes the new ones to Calendar immediately. `-f/-y` skips both prompts. |
 | `workout`    | `rm`         | `w rm`   | Soft-remove by ID (`ID REASON`, both positional): marks `removed`, marks the Calendar event deleted; kept in DB, hidden from list/compare, shown to coach as a cancellation. |
 | `workout`    | `restore`    | `w res`  | Bring a cancelled session back by ID: appends a copy of the revision its void ended, and the reconcile removes the `[Deleted]` mark. Unrelated to `workout rollback`, which undoes a whole change. |
 | `workout`    | `rollback`   | `w rb`   | Undo a workout change **and every change after it**, putting the sessions back the way they were the moment before it ran (`--batch N` per `workout batches`, default #1 the newest; `-y`). Any change qualifies, an adapt included. Leaves the active plan version alone — unlike `plan rollback` (DESIGN_workout_revisions.md §10). Unrelated to `workout restore`. |
@@ -1931,7 +1932,7 @@ Required fields:
 | `metrics_lookback_days`  | int  | Rolling window for adaptation (default: 15)                  |
 | `adapt_terminal_window_days` | int | How close to a block's end counts as its terminal window (default: 3). Gates what the coach **model** is told (`THIS BLOCK IS ENDING`); the CLI's end-of-schedule hint runs on the knob below. Under `coach:` |
 | `runway_warning_days`    | int  | How many days ahead the daily surfaces announce that the scheduled workouts run out — and how many days past the end they keep saying so before going quiet (default: 7). Under `coach:`, DESIGN_runway_nudge.md §7 |
-| `workout_generation_span_days` | int  | Default span length for `workout generate` (default: 28)     |
+| `workout_generation_span_days` | int  | Cap on an unselected `workout generate` span; the block boundary can end it sooner (default: 28) |
 | `minor_activity_load_threshold`    | float| Workload score below which an activity is "minor"            |
 |                         |      | (default: 25). Controls rest-day violations and unplanned    |
 |                         |      | activity visibility (shown as gray/minor if below threshold,  |
@@ -2013,8 +2014,9 @@ event-day TSB over the plan's own workouts — is a deferred Phase 2 follow-up.
 1. CLI resolves the generation **span**, both ends of it (`_resolve_span`): whatever
    `-d`/`-m`/`-M`/`-g` select (`-g 7` = goal 7's whole plan; `-d 4w`; `-m 5` = block 5's
    own first-to-last day), with an unselected start meaning today and an unselected end
-   meaning `config.workout_generation_span_days` (default 28). A span never opens before
-   today. One mutually exclusive group: a span is one choice. `_warn_span_change` names
+   meaning `progression.generation_span_end` — `config.workout_generation_span_days`
+   (default 28) or the end of the block the span opens in, whichever comes first, so
+   generated coverage never crosses a block boundary. A span never opens before today. One mutually exclusive group: a span is one choice. `_warn_span_change` names
    the days a run no longer touches while that reading is still new. See
    DESIGN_cli_selectors.md §8.
 1b. Before spending the LLM call, the CLI confirms it when live workouts already exist
@@ -2292,7 +2294,8 @@ weekly-TSS-delta heuristic), and mesocycle-boundary crossings.
 
 Plan must be generated before workouts. Workouts cover the span the selector flags on
 `workout generate` name, both ends of it — by default today onward for
-`workout_generation_span_days` (in `config.yaml`, falling back to 28 days).
+`workout_generation_span_days` (in `config.yaml`, falling back to 28 days) or to the end of
+the block today falls in, whichever comes first.
 `replan()` calls `plan_generate` then `workout_generate` + `workout_generate_apply` in one
 step (always uses the config default, and applies without a preview — it is the
 unattended path).

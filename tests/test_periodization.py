@@ -1,3 +1,4 @@
+import argparse
 import io
 import os
 import shutil
@@ -20,6 +21,8 @@ def _days_out(n: int) -> str:
 # (same rot 2a7cd71 fixed in test_constraints.py).
 GOAL_DATE = _days_out(71)
 
+from trainmate import progression
+from trainmate.cli.workouts import generate as generate_cli
 from trainmate.config import config
 from trainmate.db import Database
 from trainmate.db.periodization import repair_block_contiguity
@@ -2301,16 +2304,84 @@ class TestGenerationSpanIsBounded(unittest.TestCase):
 
     @patch("trainmate.runtime.calendar_syncer")
     @patch("trainmate.coach.engine.openrouter_client")
-    def test_no_span_at_all_is_the_config_horizon_from_today(
+    def test_no_span_at_all_stops_at_the_cap_inside_a_long_block(
         self, mock_client, _mock_calendar
     ):
-        """With no selector the span is still bounded at both ends, so the default run
-        behaves like every other one."""
+        """With no selector the span is still bounded at both ends. This fixture's block
+        runs 90 days, so the cap is what bounds it — the clamp below never bites."""
         mock_client.complete.return_value = self._response(_days_out(1))
         proposal = coach_service.workout_generate()
         self.assertEqual(proposal.gen_start, _days_out(0))
         self.assertEqual(
             proposal.gen_end, _days_out(config.workout_generation_span_days - 1)
+        )
+
+    @patch("trainmate.runtime.calendar_syncer")
+    @patch("trainmate.coach.engine.openrouter_client")
+    def test_the_default_span_stops_at_the_block_boundary(
+        self, mock_client, _mock_calendar
+    ):
+        """Coverage stopping on a boundary is what keeps the schedule aligned with the
+        periodization: `adapt` already treats the block end as its far edge, and the
+        runway detector reads that end as a block cliff rather than a span one."""
+        clear_all_tables(test_db)
+        obj_id = test_db.add_objective(
+            title="Autumn Marathon", target_date=_days_out(90), sport_type="running",
+        )
+        test_db.save_macrocycle(
+            objective_id=obj_id, strategy="build", goals_hash="g", constraints_hash="c",
+            mesocycles=[
+                {"name": "Base", "start_date": _days_out(0),
+                 "end_date": _days_out(10), "focus": "aerobic"},
+                {"name": "Build", "start_date": _days_out(11),
+                 "end_date": _days_out(90), "focus": "threshold"},
+            ],
+        )
+        mock_client.complete.return_value = self._response(_days_out(1))
+        proposal = coach_service.workout_generate()
+        self.assertEqual(proposal.gen_start, _days_out(0))
+        self.assertEqual(proposal.gen_end, _days_out(10))
+
+    def test_the_cli_span_clamps_at_the_block_too(self):
+        """`_resolve_span` is the interactive path's copy of the same rule — the two must
+        not disagree about which days a bare `workout generate` writes."""
+        clear_all_tables(test_db)
+        obj_id = test_db.add_objective(
+            title="Autumn Marathon", target_date=_days_out(90), sport_type="running",
+        )
+        test_db.save_macrocycle(
+            objective_id=obj_id, strategy="build", goals_hash="g", constraints_hash="c",
+            mesocycles=[
+                {"name": "Base", "start_date": _days_out(0),
+                 "end_date": _days_out(10), "focus": "aerobic"},
+                {"name": "Build", "start_date": _days_out(11),
+                 "end_date": _days_out(90), "focus": "threshold"},
+            ],
+        )
+        self.assertEqual(
+            generate_cli._resolve_span(argparse.Namespace()),
+            (_days_out(0), _days_out(10)),
+        )
+
+    def test_the_cli_span_falls_back_to_the_cap_in_a_long_block(self):
+        self.assertEqual(
+            generate_cli._resolve_span(argparse.Namespace()),
+            (_days_out(0), _days_out(config.workout_generation_span_days - 1)),
+        )
+
+    def test_the_clamp_is_one_rule_both_generation_paths_read(self):
+        """Pure over the one block row the caller fetched, so the CLI and the unattended
+        plan-then-generate path cannot clamp differently."""
+        self.assertEqual(
+            progression.generation_span_end("2026-09-02", "2026-09-10", 28),
+            "2026-09-10",
+        )
+        self.assertEqual(
+            progression.generation_span_end("2026-09-02", "2026-12-01", 28),
+            "2026-09-29",
+        )
+        self.assertEqual(
+            progression.generation_span_end("2026-09-02", None, 28), "2026-09-29",
         )
 
 class TestEasedSessionsAreCarriedIntoGeneration(unittest.TestCase):

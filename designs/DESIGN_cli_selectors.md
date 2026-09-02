@@ -267,7 +267,26 @@ Both halves are now read off the same window `resolve_window` already builds:
   makes `workout generate -g 1` a way to re-plan the near goal without wiping the far one.
 
 With no selector at all the span is still bounded at both ends: today through
-`config.workout_generation_span_days`. There is no second rule for the default case.
+`progression.generation_span_end` — the config cap, or the end of the block the span opens
+in, whichever comes first (revised 2026-09-02). There is still no second rule for the
+default case: it is one span with two ends like every other, and only its far end is
+computed rather than given.
+
+The clamp is there so generated coverage never crosses a block boundary. Crossing one cost
+two things. The `-m ..<id>` re-plan that DESIGN_block_boundary.md §1 relies on to carry the
+fatigue signal into the next block was never reached, because the schedule stopped on an
+arbitrary date instead of a boundary and the runway detector therefore never saw a block
+cliff. And a bare `workout generate` — tappable in companion mode since
+DESIGN_runway_nudge.md §6 — de-aligned the schedule from the plan it implements, with no
+way back: block-scoped spans stay aligned, bare ones stay misaligned, and one tap moved the
+athlete permanently into the second regime.
+
+The cap keeps its own job rather than being retired into "one block per run". A block
+longer than the cap is generated in cap-sized pieces, each authored against what the
+previous piece actually banked — which is a stronger correction than `adapt` can make,
+since `adapt` eases transiently within a block and is instructed not to reshape it (§2
+there). `BLOCK PROGRESS SO FAR` (DESIGN_block_progress.md) already exists to make a partial
+block generate well, so this is the path the prompt was built for, not a new one.
 
 The change is not backwards compatible, so a run says which days it no longer touches:
 when the span opens later than today, or when live sessions sit past its end,

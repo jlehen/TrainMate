@@ -112,6 +112,11 @@ documented as gating prompt behavior.
 - covered short of plan end, ending exactly on a non-final block's boundary with a next
   block on record → **block** cliff;
 - covered short of plan end otherwise → **span** cliff;
+  (since DESIGN_cli_selectors.md §8's clamp, 2026-09-02, this means the generation cap bit
+  before the block ended — a block longer than the cap. Generation no longer crosses a
+  boundary, so the block cliff is the ordinary end-of-schedule case and the span cliff is
+  the long-block one; before the clamp the split was decided by whether `today + cap`
+  happened to land on a boundary.)
 - covered through plan end → **plan** cliff, split on whether `plan_gap` (fed the plan
   end, per above) finds a live objective beyond it.
 
