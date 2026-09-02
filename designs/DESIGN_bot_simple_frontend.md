@@ -448,6 +448,14 @@ Each phase ships alone; her onboarding starts at phase 1.
   "📨 Send it to your coach as written" button, the lanes are taught by the help
   card and the router echoes alone, and the §5.2 rescue window follows the notes
   onto `bot capture note` (§12.3).
+- The render persona landed under it too (2026-09-02, DESIGN_render_persona.md).
+  Wording splits are `runtime.render` overrides now, so §12.10's per-persona
+  plan-shaping notice names the mechanism instead of an abstraction in flight.
+  The naming rule — "coach" is the app; the human with the CLI is spoken of by
+  name, from `telegram.operator_name` — confirms §12.3's coach-lane copy as
+  written and reshapes the athlete-facing boundary lines: §12.7's refusal and
+  §12.5's close say ⟨operator⟩, and the `new_goal_reply()` card §12.5 retires is
+  one of the two sentences that naming pass had just fixed.
 - The typed `/` expert path stays open in simple mode (2026-09-02). The router
   firewalls free text and buttons, not typing: every CLI command still runs when
   typed with a leading `/` from an allowlisted chat (§7). Deliberate — the operator
@@ -682,10 +690,14 @@ the event/horizon reading, previewed in the goal view's own on/"by ~" wording (�
 a wrong `date_type` guess is visible in the preview's first line. Confirm runs
 `goal add`. A message with no date inherits §12.2's missing-field ask. The intent
 *replaces* the reply-only `new_goal` the runway pass added (DESIGN_runway_nudge.md §6,
-`NEW_GOAL_REPLY`): its honest "the operator sets this up" answer retires, the router
+`new_goal_reply()`): its honest tell-⟨operator⟩ answer retires — one of the two
+sentences the render-persona naming pass taught to say the operator's name
+(DESIGN_render_persona.md §5); the plan-cliff line keeps the other — the router
 row renames to `add_goal`, and the runway tests pinning reply-only-ness move with it.
-What it does *not* do is shape the plan: the reply closes with the §11
-line — the plan appears once the coach lays it out — and `plan generate` remains the
+What it does *not* do is shape the plan: the reply closes in the runway's own
+vocabulary — the plan for it gets set up from the computer, by ⟨operator⟩
+(`simple_plan_wrapped_line`'s sentence family, never "your coach", which now
+formally means the app) — and `plan generate` remains the
 operator's typed act. A goal row is cheap and editable; the periodization built on it
 is neither, and stays behind the §7 line.
 
@@ -713,7 +725,10 @@ change_setting`. The extraction returns `{key, value}` where the key must come f
 that shape the athlete's own experience of the chat. The allowlist is context given to
 the extraction, and it is also enforced after: a key outside it (a model role,
 `adapt-first`, anything operator- or cost-shaped) earns a one-line refusal that names
-the boundary — "That one's for the operator, not me." — so "use a smarter model"
+the boundary — "That one's for ⟨operator⟩ to change, not me.", spoken with the
+operator's actual name per the render-persona naming rule (DESIGN_render_persona.md
+§5: "coach" is the app; the human with the CLI gets a name of their own, from
+`telegram.operator_name`) — so "use a smarter model"
 cannot become a settings write no matter what the extraction says. (2026-09-02: a
 refusal, not the §5.3 unclear fallback — §5.3's whole argument is that misses should
 be *visible*, and a boundary disguised as incomprehension teaches nothing.) Values
@@ -771,7 +786,7 @@ The §7 posture after this pass, in full:
 | `trainmate_bot.py` | new intent→argv and echo rows; text-carrying intents pass the message to `bot capture`; the §5.2 rescue window retargets from `adapt -m` to `bot capture note` (§12.3); the stale-tap path speaks ("That offer expired — just send it again.", §12.3) instead of silently stripping the row |
 | `trainmate/cli/workouts/generate.py` | the per-candidate confirm loops — the constraint confirm and `_confirm_new_signals` with its reuse-first category ladder — factor out into a shared helper `bot capture note` calls: one behavior, ladder included, on both paths |
 | `trainmate/coach/engine/workouts.py` | the `new_constraints`/`new_signals` schema fragments and extraction-rule text become shared constants this prompt and the §12.2 capture prompts both include — one candidate vocabulary, no drift |
-| `trainmate/coach/service/planning.py` | `capture_message_constraint`/`_signal` reused as-is, but the plan-shaping notice renders per persona: under simple rendering its `constraint edit --replan` / `plan generate` suggestion becomes the §12.3 adjust-offer button, never expert command text in companion chat (the personas abstraction in flight owns the split) |
+| `trainmate/coach/service/planning.py` | `capture_message_constraint`/`_signal` reused as-is, but the plan-shaping notice renders per persona: under simple rendering its `constraint edit --replan` / `plan generate` suggestion becomes the §12.3 adjust-offer button, never expert command text in companion chat — a `runtime.render` method with a companion override, now that the render persona has landed (DESIGN_render_persona.md §4) |
 | `trainmate/cli/settings.py` | routable-keys allowlist named beside the settings it guards |
 | `tests/` | `RouterTablesTest` reshaped (note intents share `bot capture note`; every capture intent maps to `bot capture <intent>`), mocked-extraction tests per capture kind (missing-field marker included, §12.2), nomination outcomes per §12.4 (clean, session hand-off, pinned re-capture, no-match), the shared confirm helper exercised from both adapt and capture |
 
