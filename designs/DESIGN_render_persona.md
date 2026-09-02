@@ -231,12 +231,24 @@ The refusal becomes its own method, `adapt_plan_behind(state, today)`. The exper
 is today's two lines (the hint when the detector fires, the notice when it does not).
 The companion form reuses the wording the morning push already has for a plan cliff,
 `simple_runway_lines` — "🎉 Your plan wrapped up … when you know what you'd like to
-work toward next, tell your coach — setting up a new goal happens from the computer" —
+work toward next, tell ⟨operator⟩ — setting up a new goal happens from the computer" —
 and, when the detector has gone quiet because the plan ended long ago and `state` is
 None, the same closing sentence without the celebration lead. This is the one place
 the design changes what the companion says, and it is a reuse, not a new voice: the
 sentence exists, it was simply not reachable from adapt. The `test_runway.py` assertion
-changes with it, from "nothing left to adapt towards" to the coach sentence.
+changes with it, from "nothing left to adapt towards" to the operator sentence.
+
+**Who ⟨operator⟩ is.** Today that sentence says "tell your coach", and so does the
+bot's new-goal card. But in the athlete's vocabulary "coach" is already the app: the
+welcome says "I'm your training coach", and the "Tell my coach" button sends to the
+model. Three things share one word — the model, the app, and the human with the CLI —
+and the athlete cannot tell which one to go and find. The human gets a word of their
+own: the companion says the operator's name, from a new `telegram.operator_name`
+setting beside `telegram.ui`, and "the person who set this up for you" when it is
+unset. A name is what a real assistant would say; "admin" is accurate and cold.
+The two existing sentences (`runway.py`'s plan-cliff lines, the bot's new-goal card)
+switch to it in a small commit before step 1, so that what adapt reuses is already
+right.
 
 With adapt drawing its own refusal, nothing reads the hint's return value any more —
 `status.py` and the second call in `generate.py` already ignore it — so `runway_hint`
@@ -265,7 +277,9 @@ function and check the lines, as they do today.
 
 Five steps, each a commit, each green on the full suite, each leaving both modes
 byte-identical. Steps 2–4 can be split further (one command per commit) if a diff
-gets uncomfortable.
+gets uncomfortable. Before them, one wording commit: the operator's name replaces
+"your coach" in the plan-cliff lines and the new-goal card (§5), with the
+`telegram.operator_name` knob and its fallback.
 
 1. **Scaffold.** Add `cli/render.py` with both classes, every method on
    `ExpertRenderer` delegating to the existing code, and `make_renderer()`. Add the
@@ -334,7 +348,9 @@ what makes it cheap to add a third persona later. Not scheduled.
 - `tests/test_simple_render.py` — the three `is_simple_render()` tests become
   `make_renderer()` tests.
 - `designs/DESIGN_bot_simple_frontend.md` §6, §8 — pointer here.
-- `trainmate_bot.py` — untouched.
+- `trainmate/config.py`, `config.yaml.example` — the `telegram.operator_name` knob.
+- `trainmate_bot.py` — one sentence, the new-goal card's "tell your coach" (§5);
+  otherwise untouched.
 
 ## 10. Decisions & Open Questions
 
@@ -355,7 +371,9 @@ what makes it cheap to add a third persona later. Not scheduled.
 - Command modules never import `render.py`; only `bot.py` and the `runtime` builder do
   (§7).
 - The adapt plan-behind refusal gets a renderer method; the companion form reuses the
-  morning push's "tell your coach" wording rather than naming commands (§5).
+  morning push's plan-cliff wording rather than naming commands (§5).
+- "Coach" is the app in the athlete's vocabulary. The human with the CLI is named by
+  `telegram.operator_name`, falling back to "the person who set this up for you" (§5).
 - The bot-side persona branches are out of scope (§8).
 
 **Open**
