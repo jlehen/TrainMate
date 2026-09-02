@@ -42,8 +42,9 @@ deserves the same treatment.
 - The opted-in surface list is structural, not a convention: it is the set of methods
   the companion class overrides. Anything not overridden *is* the expert form — the §6
   "fallback that cannot decay" becomes inheritance instead of discipline.
-- Byte-for-byte identical output in both modes. This is a relocation, not a rewrite;
-  the existing `tests/test_simple_render.py` and `test_cli_*` suites are the proof.
+- Byte-for-byte identical output in both modes, with one deliberate exception (§5,
+  the sixteenth site). This is a relocation, not a rewrite; the existing
+  `tests/test_simple_render.py` and `test_cli_*` suites are the proof.
 
 **Non-goals**
 - Folding transport and voice into one "persona" object. Expert-over-Telegram
@@ -107,7 +108,8 @@ class ExpertRenderer:
     def constraint_removed(self, constraint_id: int) -> None: ...
     def no_upcoming_goal(self) -> None: ...                # the `plan show` empty state
     def no_plan_yet(self, goal) -> None: ...               # was the "Run plan generate" pair
-    def runway_hint(self, state, today) -> bool: ...       # was print_runway_hint
+    def runway_hint(self, state, today) -> None: ...       # was print_runway_hint
+    def adapt_plan_behind(self, state, today) -> None: ... # the adapt refusal (§5)
 
 
 class CompanionRenderer(ExpertRenderer):
@@ -125,7 +127,11 @@ class CompanionRenderer(ExpertRenderer):
     def no_upcoming_goal(self):         print(SIMPLE_NO_PLAN_LINE)
     def no_plan_yet(self, goal):        print(SIMPLE_NO_PLAN_LINE)
     def runway_hint(self, state, today):
-        return False   # the companion week view words this fact itself (runway §6)
+        pass           # the companion week view words this fact itself (runway §6)
+    def adapt_plan_behind(self, state, today):
+        lines = simple_runway_lines(state, today) if state else [SIMPLE_PLAN_WRAPPED_LINE]
+        for line in lines:
+            print(wrap_text(line))
     ...
 
 
@@ -192,6 +198,7 @@ structure, different sentence), **shape** (same data, different rendering), or
 | `plans.py:552` no macrocycle | words | `render.no_plan_yet(goal)` |
 | `plans.py:517` empty-state short-circuit | words | `render.no_upcoming_goal()` — the guard stays, its persona branch goes |
 | `runway.py:148` hint silence | behaviour | `render.runway_hint(state, today)` |
+| `generate.py:145` plan-behind refusal | behaviour | `render.adapt_plan_behind(state, today)` — the sixteenth site, see below |
 
 **The behaviour sites are wording in disguise:**
 
@@ -202,8 +209,7 @@ structure, different sentence), **shape** (same data, different rendering), or
   `plan rollback` and `plan feedback`, and the 🌱 line is the wrong sentence out of
   `plan rollback`. None of those four has a companion-mode test, so routing the helper
   through the renderer would have changed their output unseen.
-- The runway hint's silence is a companion override that returns `False` without
-  drawing. The reason — "the companion week view words this fact itself, one fact
+- The runway hint's silence is a companion override that draws nothing. The reason — "the companion week view words this fact itself, one fact
   gets one wording per message" — moves from a docstring on a guard to a docstring on
   the override, which is where a reader looking for companion behaviour will look.
 
@@ -215,14 +221,26 @@ draws the tables and the chart with the expert caption. The command body calls
 
 **A sixteenth site the grep does not find.** `workout adapt` at `generate.py:145`
 never asks which persona it has, but its output still depends on it: when the plan is
-behind, it calls the runway hint and, if that drew nothing, prints its own refusal —
+behind, it calls the runway hint and, if that returned `False`, prints its own refusal —
 "Your plan is behind you … set what's next with `goal add`, then `plan generate`".
-The companion hint draws nothing by design, so the companion athlete reads two commands
-they have no way to type (bot design §7). `test_runway.py` asserts the refusal speaks
-on the simple surface, so the sentence is wanted; its wording is not. This design
-carries the leak over unchanged — it is a relocation and adds no companion sentence —
-and lists the fix in §10: a renderer method for the refusal, so the companion words it
-without command names.
+The companion hint returns `False` by design, so the companion athlete reads two
+commands they have no way to type (bot design §7). `test_runway.py` asserts the refusal
+speaks on the simple surface, so the sentence is wanted; its wording is not.
+
+The refusal becomes its own method, `adapt_plan_behind(state, today)`. The expert form
+is today's two lines (the hint when the detector fires, the notice when it does not).
+The companion form reuses the wording the morning push already has for a plan cliff,
+`simple_runway_lines` — "🎉 Your plan wrapped up … when you know what you'd like to
+work toward next, tell your coach — setting up a new goal happens from the computer" —
+and, when the detector has gone quiet because the plan ended long ago and `state` is
+None, the same closing sentence without the celebration lead. This is the one place
+the design changes what the companion says, and it is a reuse, not a new voice: the
+sentence exists, it was simply not reachable from adapt. The `test_runway.py` assertion
+changes with it, from "nothing left to adapt towards" to the coach sentence.
+
+With adapt drawing its own refusal, nothing reads the hint's return value any more —
+`status.py` and the second call in `generate.py` already ignore it — so `runway_hint`
+returns None and the "did I draw, or did I choose not to" ambiguity goes away.
 
 ## 6. Tests
 
@@ -264,7 +282,9 @@ gets uncomfortable.
    commands' internals for no reviewable gain. Only the six word sites earn
    side-by-side.
 4. **Behaviour.** Route `print_runway_hint` through the renderer (callers:
-   `generate.py`, `status.py`); the `plan show` guard calls `no_upcoming_goal()`.
+   `generate.py`, `status.py`); the `plan show` guard calls `no_upcoming_goal()`; the
+   adapt refusal calls `adapt_plan_behind()` and its `test_runway.py` assertion moves to
+   the coach sentence.
 5. **Sweep.** Move the `simple_*` line builders and the `SIMPLE_*` constants from
    `cli/common.py`, `cli/runway.py`, `cli/plans.py` and `cli/workouts/revisions.py`
    (`_simple_preview_lines`) into `cli/render.py` so the companion voice is one file;
@@ -280,8 +300,9 @@ imports `bot.py`. That graph has no cycle. A function-local import of `render.py
 inside a command module would be the sign the graph has gone wrong, not a fix.
 
 The companion builders and six sentences relocate; the expert table renderers stay
-put. No sentence changes, so the existing golden tests are the acceptance criterion at
-every step.
+put. One companion sentence changes (step 4, by reuse); everything else is
+byte-identical, so the existing golden tests are the acceptance criterion at every
+step.
 
 ## 8. The bot side (deferred)
 
@@ -333,6 +354,8 @@ what makes it cheap to add a third persona later. Not scheduled.
 - `run_cli` rebuilds `runtime.render` per invocation; env patching in tests stays (§6).
 - Command modules never import `render.py`; only `bot.py` and the `runtime` builder do
   (§7).
+- The adapt plan-behind refusal gets a renderer method; the companion form reuses the
+  morning push's "tell your coach" wording rather than naming commands (§5).
 - The bot-side persona branches are out of scope (§8).
 
 **Open**
@@ -343,7 +366,3 @@ what makes it cheap to add a third persona later. Not scheduled.
 2. `progress` and `workout_list` carry `args` through for their flags (`--sports`,
    `--blocks`, `--weeks`; `--link`, `--verbose`). Cleaner would be a small options
    record, but that is a command refactor, not a persona one. Pass `args`.
-3. The `workout adapt` plan-behind refusal (§5, the sixteenth site) still names
-   `goal add` and `plan generate` on the companion surface. The fix is a renderer
-   method for the refusal with companion wording; it is a new companion sentence, so
-   it is a follow-up to this relocation, not part of it.
