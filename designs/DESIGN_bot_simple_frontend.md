@@ -184,7 +184,11 @@ remark. The tap can therefore only ever *rescue* a message, never redirect one �
 which is what keeps it explicable: "tap 💬 or just type, same thing" stays true in
 every case the athlete can observe. The tap clears after one message, `/cancel`, or
 the prompt timeout, so a next-morning message is routed normally rather than quietly
-taken as a note.
+taken as a note. *(Amended 2026-09-02, the writes pass: once the note intents move
+off adapt, the rescue rides `bot capture note` rather than `adapt -m` — §12.3. Same
+reasoning, better landing: "likelier a note the router failed" now names the capture
+inbox, which asks before storing and costs no adaptation, and whose no-find fallback
+still walks the message to the coach.)*
 
 **Why this is not a mode.** Until 2026-09-01 the tap *bypassed* the router: the next
 message went verbatim to `adapt -m`. A question typed after a tap ("What are my
@@ -196,7 +200,7 @@ not a documentation gap. Collapse the behaviours instead of writing better copy.
 
 ### 5.3 The free-text router
 
-Unarmed free text (anything that isn't a button label) goes to a small intent router
+Free text (anything that isn't a button label) goes to a small intent router
 instead of today's "Couldn't parse that". A new hidden command `tm bot route "<text>"`
 calls the router model with a fixed intent table and returns structured JSON; the bot
 maps the intent back to argv **from its own table** and runs it. The model picks an
@@ -429,14 +433,21 @@ Each phase ships alone; her onboarding starts at phase 1.
   (`constraint add -m`) is a possible later, purely additive step.
 - Review amendments (2026-09-02, §12): every persisted capture ends with the adjust
   offer — signals included, because the athlete reporting one expects forward notice;
-  the two lanes (free text talks to the app, 💬 Tell my coach talks to the coach
-  verbatim) are taught by the arming line and help card; nomination is cross-domain
+  the two lanes — recording vs the coach — are taught, not discovered (§12.3,
+  reshaped by the next bullet); nomination is cross-domain
   (goals + upcoming sessions), human-plausible, with the coach hand-off for
   session-shaped asks and a pinned re-capture picker as fallback; extraction never
   fills a missing required field — it asks; the plan-shaping notice renders per
   persona; adapt's confirm loops and the candidate schema fragments are shared, not
   duplicated; a stale button tap says so; `add_goal` supersedes reply-only
   `new_goal`; disallowed setting keys are refused honestly, not routed to "unclear".
+- The armed lane collapsed under this pass's feet (2026-09-02). §5.2's rework —
+  tapping 💬 no longer changes what the next message does; the button became "Talk
+  to me", an invitation — retired the verbatim channel §12.3's first teaching draft
+  hung its copy on. Reconciled: the word-for-word path is `coach_message` plus the
+  "📨 Send it to your coach as written" button, the lanes are taught by the help
+  card and the router echoes alone, and the §5.2 rescue window follows the notes
+  onto `bot capture note` (§12.3).
 - The typed `/` expert path stays open in simple mode (2026-09-02). The router
   firewalls free text and buttons, not typing: every CLI command still runs when
   typed with a leading `/` from an allowlisted chat (§7). Deliberate — the operator
@@ -584,15 +595,19 @@ no durable note at all, the reply says so gently and offers one button — "📨
 to your coach as written" (`adapt -m` with the original text) — so a miss costs one
 tap, not the message.
 
-**The two lanes are taught, not discovered** (2026-09-02). The offer runs bare
-`workout adapt`, so the coach reads the stored row, not the original words —
+**The two lanes are taught, not discovered** (2026-09-02; reworked the same day when
+§5.2 retired the armed channel this paragraph first hung its copy on). The offer runs
+bare `workout adapt`, so the coach reads the stored row, not the original words —
 transcription is the price of the instant lane. The lane that carries her exact words
-is 💬 Tell my coach (§5.2), and the surface teaches the difference instead of leaving
-it obscure: the arming line becomes "I'm listening — I'll pass your words straight to
-your coach.", and the help card names the lanes in athlete words — free text talks to
-the app, which routes, records and offers; the button talks to your coach directly,
-word for word. The router echoes carry the same lesson per message ("noting that rule
-for your coach" vs "passing that on to your coach").
+is `coach_message` → `adapt -m`, plus the "📨 Send it to your coach as written" button
+when capture finds nothing — a routing outcome now, not a button of its own, since
+tapping 💬 no longer changes what the next message does (§5.2). So the surface has
+exactly two teachers left, and uses both: the help card names the lanes in athlete
+words — your messages talk to the app, which routes, records and offers; what reads
+as state or feelings goes to your coach in your own words — and the router echoes
+carry the same lesson per message ("noting that rule for your coach" vs "passing
+that on to your coach"). No line of copy promises verbatim delivery on a tap,
+because no tap delivers it.
 
 **One live button row per chat** is a §4.4 mechanic this pass turns into a constraint:
 any new row — the morning push included — retires the pending one. An offer left
@@ -609,9 +624,12 @@ availability go to the coach, records go to capture. A misroute across *that* li
 degrades gracefully in both directions — a rule misread as state still lands in adapt,
 whose inbox still extracts it (just paying the coach call the athlete would have been
 offered anyway); state misread as a rule is caught at the capture confirm, and the
-no-find fallback's button walks it to the coach. The 💬 Tell-my-coach armed capture
-(§5.2) stays verbatim-to-adapt: the explicit "just give this to the coach" path is the
-standing escape hatch from routing altogether. From the terminal, `workout adapt -m`
+no-find fallback's button walks it to the coach. The §5.2 rescue window lands here
+too: while a 💬 tap is live, text the router returns `unclear` for rides this capture
+inbox rather than `adapt -m` — she was just asked what the coach should know, so an
+unreadable answer is likelier a note than a coaching brief, and this is the inbox
+that asks before storing, costs no adaptation, and still offers the coach on a miss.
+From the terminal, `workout adapt -m`
 is untouched — the CLI inbox keeps its extraction exactly as DESIGN_constraints.md §8
 and DESIGN_signal_extraction.md §2 describe it.
 
@@ -750,7 +768,7 @@ The §7 posture after this pass, in full:
 | File | Change |
 |---|---|
 | `trainmate/cli/bot.py` | `bot capture <intent>` family (extraction prompts beside `ROUTER_SYSTEM_PROMPT`), `bot goals` picker, new `ROUTER_INTENTS` rows (`new_goal` → `add_goal`, §12.5) |
-| `trainmate_bot.py` | new intent→argv and echo rows; text-carrying intents pass the message to `bot capture`; the stale-tap path speaks ("That offer expired — just send it again.", §12.3) instead of silently stripping the row |
+| `trainmate_bot.py` | new intent→argv and echo rows; text-carrying intents pass the message to `bot capture`; the §5.2 rescue window retargets from `adapt -m` to `bot capture note` (§12.3); the stale-tap path speaks ("That offer expired — just send it again.", §12.3) instead of silently stripping the row |
 | `trainmate/cli/workouts/generate.py` | the per-candidate confirm loops — the constraint confirm and `_confirm_new_signals` with its reuse-first category ladder — factor out into a shared helper `bot capture note` calls: one behavior, ladder included, on both paths |
 | `trainmate/coach/engine/workouts.py` | the `new_constraints`/`new_signals` schema fragments and extraction-rule text become shared constants this prompt and the §12.2 capture prompts both include — one candidate vocabulary, no drift |
 | `trainmate/coach/service/planning.py` | `capture_message_constraint`/`_signal` reused as-is, but the plan-shaping notice renders per persona: under simple rendering its `constraint edit --replan` / `plan generate` suggestion becomes the §12.3 adjust-offer button, never expert command text in companion chat (the personas abstraction in flight owns the split) |
@@ -765,5 +783,6 @@ Rollout continues §9's numbering, each phase shipping alone:
 6. **Constraint edit** — capture+nominate over the §5.5 view's rows.
 7. **Settings** — the allowlist capture.
 
-Phase 5 depends on `goal rm` archiving (the reversible-deletes change, in flight on
-`worktree-goal-rm-archives` as of this writing); the picker ships only on top of it.
+Phase 5 depended on `goal rm` archiving; the reversible-deletes change landed on main
+2026-09-01, so the picker builds on what `goal rm` already is — the §12.6 wording
+("archives", `--purge` unreachable from chat) describes shipped behaviour, not a plan.
