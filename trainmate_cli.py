@@ -42,7 +42,7 @@ COMMAND_ORDER = {
     "benchmark": ["list", "record", "rm"],
     "signal": ["list", "list-metrics", "add", "rm"],
     "learnings": ["list", "show", "edit", "demote", "keep", "rm"],
-    "plan": ["show", "generate", "feedback", "versions", "diff", "rollback"],
+    "plan": ["show", "generate", "keep", "feedback", "versions", "diff", "rollback"],
     "workout": ["list", "adapt", "compare", "generate", "swap", "add",
                 "restore", "rm", "rollback", "batches"],
     "data": ["pull", "reflect", "show-metrics", "show-activities"],

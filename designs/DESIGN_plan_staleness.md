@@ -121,4 +121,56 @@ not recoverable, and writing the *current* profile would erase a genuine pending
   `workouts/generate.py` and `status.py` each render and stamp their own way — design smell
   B-8 (`design_audit/design_smells_2026-08-06.md`). It is why `status.py` warns without
   offering to dismiss. Out of scope here; the partition change touched all three call sites
-  without making the duplication worse.
+  without making the duplication worse. **Resolved in §9.**
+
+## 9. Saying what the flag means, and where to find it
+
+**Date:** 2026-09-03 · **Branch:** worktree-staleness-prompt
+
+§5 made the flag name the fields that moved. Using it still needed two things it did not
+have.
+
+**The prompt stated a fact and asked for a decision, with nothing in between.** "A
+plan-shaping input has changed (athlete profile changed: preferences). Regenerate?" is
+only answerable by someone holding §2's test in their head. And because `preferences` is
+one blob that over-triggers by design (§4), the athlete meets this question most often in
+exactly the case where the answer is *no* — a reworded sentence about how sessions should
+be described. So the test is now printed with the question:
+
+> Regenerate only if the change would have altered the block structure, phase order or
+> volume ramp. Wording, tone or how sessions are described: keep the plan — your next
+> `workout generate` picks it up anyway.
+
+The second sentence is the load-bearing one, and it was missing everywhere. The profile
+reaches *every* prompt through `_format_athlete_profile`, so a session-level edit lands at
+the next workout generation whether or not the periodization is rebuilt. Without that,
+"keep the plan" reads as "discard what you just wrote".
+
+**The flag had no home.** It fired in `status` — the athlete overview — and in the two
+generate paths, which are where you go once you have already decided. `plan show`, the
+command whose whole job is to show a plan and the inputs it was generated from, did not
+check at all. So the notice appeared where it could not be acted on and was absent where
+it would be looked for.
+
+It now prints in `plan show`, immediately under the `Inputs considered` block it
+contradicts, naming both routes out. `status` keeps a one-line mention and points there
+rather than at `plan generate`: an overview reports, it does not adjudicate a replan.
+
+**`plan keep` is the second route.** Declining at the `plan generate` prompt was the only
+way to clear a false alarm, which meant invoking a command that otherwise proposes a whole
+new periodization and spends a strategy call in order to say that nothing needs doing.
+`plan keep` re-stamps the hash and both snapshots, prints what changed, and says the edit
+still reaches the sessions. Same write as the declined branch — one behaviour, three
+entry points, which is what makes it explicable.
+
+**One owner.** All of it lives in `cli/staleness.py`: `reason`, `guidance`, `stamp`,
+`kept_line`, `confirm_regenerate`, `report`. The four surfaces call it rather than each
+phrasing and stamping their own way, which closes B-8. The wording had to stop being
+copied before it could get longer — three call sites carrying a two-sentence explanation
+between them is how they drift.
+
+**Two exemptions.** A *superseded* version is out of date by definition, so `plan show
+--macrocycle <old>` does not flag it; the notice is about the plan in force. And the
+companion voice draws nothing — regenerating is operator work, and the companion athlete
+has no shell to run either command in (DESIGN_render_persona.md §5), the same silence
+`runway_hint` already takes.

@@ -11,6 +11,7 @@ from trainmate.util import (
     pad_visible, wrap_text, format_labeled_block, default_wrap_width, fmt_date, fmt_span,
     today_date as _today_date, notice, warn,
 )
+from trainmate.cli import staleness
 from trainmate.cli.common import (
     ensure_recent_data, print_plan_cascade, report_unhonored,
 )
@@ -219,25 +220,13 @@ def _generate_one_plan(
         if next_goal:
             macro = runtime.db.get_macrocycle_for_objective(next_goal['id'])
             if macro:
-                change_reason = runtime.coach_service.config_changed(macro)
+                change_reason = staleness.reason(macro)
                 if change_reason and not force:
-                    if runtime.prompt.confirm(wrap_text(
-                        "A plan-shaping input has changed since the last plan "
-                        f"generation ({change_reason}).\n"
-                        "Would you like to regenerate the periodization strategy?"
-                    )):
+                    if staleness.confirm_regenerate(change_reason):
                         force = True
                     else:
-                        print(wrap_text(
-                            "Keeping the current periodization strategy. It is now "
-                            "recorded against your current profile and thresholds, so "
-                            "this change won't be flagged again."
-                        ))
-                        runtime.db.update_macrocycle_config_hash(
-                            macro['id'], runtime.coach_service._get_config_hash(),
-                            runtime.coach_service._get_config_snapshot(),
-                            runtime.coach_service._get_profile_snapshot()
-                        )
+                        print(wrap_text(staleness.kept_line()))
+                        staleness.stamp(macro)
 
     plan_kwargs = {'auto_apply': False}
     if goal_id is not None:
@@ -584,6 +573,13 @@ def print_plan(next_goal: dict, macrocycle: dict, args: argparse.Namespace) -> N
     print()
     _print_plan_feedback(macrocycle, width)
     _print_considered_inputs(macrocycle)
+    # Right under the inputs it contradicts, and only for the version in force: a
+    # superseded one is out of date by definition (DESIGN_plan_staleness.md §9). Expert
+    # only — the companion body is `simple_plan_lines`, and a replan is operator work.
+    if not is_superseded:
+        change_reason = staleness.reason(macrocycle)
+        if change_reason:
+            staleness.report(change_reason)
     print(bold("Mesocycle Timeline:"))
     
     today = _today_date()
@@ -644,6 +640,32 @@ def print_plan(next_goal: dict, macrocycle: dict, args: argparse.Namespace) -> N
         _print_mesocycle_workouts(m, workouts, pad, width, show_workouts)
         _print_indented(m['focus'], pad, width)
         print(pad + gray("-" * min(40, max(10, width - len(pad)))))
+
+
+def run_plan_keep(args: argparse.Namespace) -> None:
+    """Records the current inputs against the active plan, without regenerating it: the
+    "that was a wording tweak" answer, reachable without a strategy call
+    (DESIGN_plan_staleness.md §9)."""
+    goal = _resolve_goal(getattr(args, 'goal_id', None))
+    if not goal:
+        return
+
+    macrocycle = runtime.db.get_macrocycle_for_objective(goal['id'])
+    if not macrocycle:
+        runtime.render.no_plan_yet(goal)
+        return
+
+    change_reason = staleness.reason(macrocycle)
+    if not change_reason:
+        notice("This plan already reflects your current inputs — nothing to keep.")
+        return
+
+    print(f"\n{bold('Changed since this plan was generated')}: {change_reason}\n")
+    print(green(wrap_text(staleness.kept_line())))
+    staleness.stamp(macrocycle)
+    print(gray(wrap_text(
+        f"Your next {cmd('workout generate')} still picks the change up."
+    )))
 
 
 def run_plan_versions(args: argparse.Namespace) -> None:
@@ -1209,7 +1231,8 @@ def add_plan_parser(subparsers, pull_bypass_parser, llm_debug_parser):
         description=(
             "Show a periodization plan: the macrocycle strategy, the inputs it was "
             "generated from (goals, constraints, threshold anchors) and its mesocycle "
-            "timeline. Defaults to the active plan of the next active goal; --goal reaches "
+            "timeline. Flags any of those inputs that have changed since, and what to do "
+            "about it. Defaults to the active plan of the next active goal; --goal reaches "
             "any goal including completed/archived ones, --macrocycle an earlier plan version, "
             "and --all every goal that has a plan."
         )
@@ -1233,6 +1256,24 @@ def add_plan_parser(subparsers, pull_bypass_parser, llm_debug_parser):
     p_show.add_argument(
         "-w", "--workouts", action="store_true",
         help="List each mesocycle's scheduled workouts, not just their count/load summary"
+    )
+
+    # plan keep
+    p_keep = plan_subparsers.add_parser(
+        "keep",
+        help="Keep the current plan and stop flagging the inputs that changed",
+        description=(
+            "Record your current profile, goals and thresholds against the active plan "
+            "without regenerating it. Use it when 'plan show' flags a changed input that "
+            "would not have altered the periodization — a reworded preference, a "
+            "corrected label — so the flag clears without spending a strategy call. The "
+            "change still reaches your sessions at the next 'workout generate'."
+        )
+    )
+    p_keep.set_defaults(func=run_plan_keep)
+    p_keep.add_argument(
+        "-g", "--goal", "--goal-id", type=int, dest="goal_id",
+        help="Target goal ID whose plan to keep (defaults to the next active goal)"
     )
 
     # plan diff

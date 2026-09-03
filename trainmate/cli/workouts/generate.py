@@ -11,6 +11,7 @@ from trainmate.util import (
     format_labeled_block, today_str as _today_str, today_date as _today_date, days_between,
     fmt_date, fmt_span, fmt_timestamp, notice, keep_whole, warn,
 )
+from trainmate.cli import staleness
 from trainmate.cli.candidates import confirm_new_constraints, confirm_new_signals
 from trainmate.cli.common import (
     adherence_verdicts, ensure_recent_data, format_actual,
@@ -225,7 +226,7 @@ def _confirm_out_of_date_plans(
         macro = runtime.db.get_macrocycle(macro_id)
         if not macro:
             continue
-        change_reason = runtime.coach_service.config_changed(macro)
+        change_reason = staleness.reason(macro)
         if not change_reason:
             continue
         warning = (
@@ -233,7 +234,8 @@ def _confirm_out_of_date_plans(
             "changed since the active periodization plan was "
             f"generated ({change_reason}).\n"
             "Generating workouts using the out-of-date plan might "
-            "result in incorrect training targets.\n"
+            "result in incorrect training targets.\n\n"
+            f"{staleness.guidance()}\n\n"
             "It is highly recommended to run "
             + cmd("plan generate") + " first."
         )
@@ -252,11 +254,7 @@ def _confirm_out_of_date_plans(
                 "Proceeding with the out-of-date plan. It is now recorded against your "
                 "current profile and thresholds, so this warning won't repeat."
             ))
-            runtime.db.update_macrocycle_config_hash(
-                macro['id'], runtime.coach_service._get_config_hash(),
-                runtime.coach_service._get_config_snapshot(),
-                runtime.coach_service._get_profile_snapshot()
-            )
+            staleness.stamp(macro)
     return True
 
 

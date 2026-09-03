@@ -12,6 +12,7 @@ from trainmate.util import (
 from trainmate.cli.common import (
     constraint_line, ensure_recent_data, pmc_warmup_cutoff,
 )
+from trainmate.cli import staleness
 from trainmate.cli.runway import current_runway
 from trainmate.coach import honoring
 from trainmate.db.objectives import goal_state, GOAL_UPCOMING
@@ -85,12 +86,15 @@ def run_status(args) -> None:
         # Query active mesocycle
         macro = runtime.db.get_macrocycle_for_objective(next_goal['id'])
         if macro:
-            change_reason = runtime.coach_service.config_changed(macro)
+            change_reason = staleness.reason(macro)
             if change_reason:
+                # Names the fact and hands off. `status` is the athlete's overview, not
+                # the place to weigh a replan: `plan show` prints the inputs this
+                # contradicts and both routes out (DESIGN_plan_staleness.md §9).
                 notice(
                     "\nCaution: a plan-shaping input has changed since the "
                     f"active periodization plan was generated ({change_reason}).\nRun "
-                    + cmd("plan generate") + " to regenerate.",
+                    + cmd("plan show") + " to see what changed and what to do about it.",
                 )
 
             # Constraints the plan does not reflect yet are the same kind of fact — a
