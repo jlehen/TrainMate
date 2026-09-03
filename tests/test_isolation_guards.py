@@ -5,6 +5,8 @@ a handle rebinding that misses a site would otherwise read the athlete's real tr
 data, and a live network call would hit Garmin/OpenRouter for real. A guard that stopped
 working would be invisible, so it is asserted here rather than trusted.
 """
+import ast
+import glob
 import os
 import socket
 import sqlite3
@@ -90,6 +92,55 @@ class TestNetworkIsUnreachable(unittest.TestCase):
         with self.assertRaises(RuntimeError) as caught:
             socket.socket().connect(("garmin.example.com", 443))
         self.assertIn("must not reach the network", str(caught.exception))
+
+
+def _dirname_depth(node) -> int:
+    """How many `os.path.dirname` calls wrap `__file__`, or 0 if this is not that shape.
+
+    One is the `tests/` directory itself; two is the repository root, which is how
+    PRODUCTION_DB above legitimately names the athlete's database.
+    """
+    depth = 0
+    while isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) \
+            and node.func.attr == "dirname" and node.args:
+        depth += 1
+        node = node.args[0]
+    if isinstance(node, ast.Name) and node.id == "__file__":
+        return depth
+    return 0
+
+
+class TestTestDatabasesStayOutOfTheTestsDirectory(unittest.TestCase):
+    """A module's SQLite file belongs in this process's own directory, via
+    `tests.test_db_path` — never beside the tests.
+
+    Two concurrent runs used to destroy each other: the files sat in `tests/` and the
+    exit sweep removed every `*.db` it found there, including the one another process
+    was still writing. Keyed on the shape that caused it rather than on a list of
+    modules, so a file written tomorrow is covered tomorrow.
+    """
+
+    def test_no_module_joins_a_database_name_onto_the_tests_directory(self):
+        offenders = []
+        for path in sorted(glob.glob(os.path.join(os.path.dirname(__file__), "*.py"))):
+            with open(path) as handle:
+                tree = ast.parse(handle.read())
+            for node in ast.walk(tree):
+                if not isinstance(node, ast.Call):
+                    continue
+                names_a_db = any(
+                    isinstance(arg, ast.Constant) and str(arg.value).endswith(".db")
+                    for arg in node.args
+                )
+                if not names_a_db:
+                    continue
+                if any(_dirname_depth(arg) == 1 for arg in node.args):
+                    offenders.append(f"{os.path.basename(path)}:{node.lineno}")
+        self.assertEqual(
+            offenders, [],
+            "these build a database path inside tests/; use tests.test_db_path() so "
+            f"concurrent runs cannot delete each other's files: {offenders}",
+        )
 
 
 if __name__ == "__main__":

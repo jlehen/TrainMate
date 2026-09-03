@@ -4,8 +4,9 @@ import unittest
 from unittest.mock import patch
 
 from tests.helpers import clear_all_tables, pin_clock, rebind_test_db, run_cli
+from tests import test_db_path
 
-TEST_DB_PATH = os.path.join(os.path.dirname(__file__), "test_trainmate_goal_date_type.db")
+TEST_DB_PATH = test_db_path("test_trainmate_goal_date_type.db")
 
 from trainmate.db import Database
 import trainmate.db

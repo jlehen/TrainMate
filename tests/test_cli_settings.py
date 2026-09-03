@@ -6,8 +6,9 @@ import unittest
 from unittest.mock import patch
 
 from tests.helpers import clear_all_tables, run_cli, rebind_test_db
+from tests import test_db_path
 
-TEST_DB_PATH = os.path.join(os.path.dirname(__file__), "test_trainmate_cli_settings.db")
+TEST_DB_PATH = test_db_path("test_trainmate_cli_settings.db")
 
 from trainmate import settings
 from trainmate.db import Database

@@ -12,11 +12,12 @@ import unittest
 SERVICE_DIR = pathlib.Path(__file__).resolve().parents[1] / "trainmate/coach/service"
 CLI_DIR = pathlib.Path(__file__).resolve().parents[1] / "trainmate/cli"
 
-# A `db` method starting with one of these writes. Readers are `get_*`/`list_*`/`count_*`.
-WRITE_PREFIXES = (
-    "save_", "add_", "update_", "delete_", "remove_", "rm_", "set_", "mark_", "clear_",
-    "archive_", "restore_", "apply_", "capture_", "wipe_", "insert_", "supersede_",
-)
+# The readers, so everything else on `db` counts as a write. Listing the *writers* was
+# the earlier shape and it had drifted past six of them, `workout_change` — the write
+# handle for the whole revision log — among them. This way round the list rots safely:
+# an unlisted reader fails the test loudly and gets added, where an unlisted writer used
+# to sail through unnoticed.
+READ_PREFIXES = ("get_", "list_", "count_", "upcoming_")
 
 
 def _functions(path: pathlib.Path):
@@ -32,7 +33,7 @@ def _db_writes(fn: ast.AST):
         if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Attribute):
             continue
         target = node.func
-        if not target.attr.startswith(WRITE_PREFIXES):
+        if target.attr.startswith(READ_PREFIXES):
             continue
         owner = target.value
         if isinstance(owner, ast.Attribute) and owner.attr in ("_db", "db"):
@@ -101,9 +102,33 @@ class TestPreviewsRenderTheProposal(unittest.TestCase):
     documents happened.
     """
 
-    def test_no_revision_preview_reads_the_database(self):
-        # Keyed on the shape — any `db.<anything>` access under the preview module — not
-        # on the one method name that happened to be the bug (AGENTS.md, structural tests).
+    def test_no_preview_reads_the_database(self):
+        # Keyed on every preview *function* under trainmate/cli/, not on the one file
+        # that happened to be the bug: `workouts/generate.py` and `render.py` draw
+        # previews too, and the old `revisions*.py` glob matched neither.
+        offenders, checked = [], set()
+        for path in sorted(CLI_DIR.rglob("*.py")):
+            for fn in _functions(path):
+                if "preview" not in fn.name.lower():
+                    continue
+                checked.add(f"{path.name}:{fn.name}")
+                for node in ast.walk(fn):
+                    if not isinstance(node, ast.Attribute):
+                        continue
+                    owner = node.value
+                    reads_db = (
+                        (isinstance(owner, ast.Attribute) and owner.attr in ("_db", "db"))
+                        or (isinstance(owner, ast.Name) and owner.id == "db")
+                    )
+                    if reads_db:
+                        offenders.append(f"{path.name}:{fn.name} reads db.{node.attr}")
+        self.assertEqual(offenders, [], "\n".join(offenders))
+        # A rule nothing matches is a rule that has quietly stopped being checked.
+        self.assertTrue(checked, "no preview function found under trainmate/cli/")
+
+    def test_the_revision_preview_module_reads_no_database_at_all(self):
+        """Whole-module, not just its preview-named functions: this file is nothing but
+        the preview, so a helper it delegates to must not read either."""
         offenders = []
         for path in sorted((CLI_DIR / "workouts").glob("revisions*.py")):
             for node in ast.walk(ast.parse(path.read_text())):

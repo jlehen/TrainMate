@@ -8,8 +8,9 @@ from datetime import datetime, timedelta, timezone
 from unittest.mock import patch
 
 from tests.helpers import clear_all_tables, pin_clock, rebind_test_db, save_workout
+from tests import test_db_path
 
-TEST_DB_PATH = os.path.join(os.path.dirname(__file__), "test_trainmate_periodization.db")
+TEST_DB_PATH = test_db_path("test_trainmate_periodization.db")
 
 
 def _days_out(n: int) -> str:
@@ -1496,12 +1497,13 @@ class TestPeriodization(unittest.TestCase):
             coach_service.plan_generate(objective_id=obj_id)
         self.assertIn("no window to plan in", str(ctx.exception))
 
-    @patch("trainmate.coach.service._today_str")
     @patch("trainmate.coach.engine.openrouter_client")
-    def test_far_goal_plans_one_macrocycle_to_the_goal(self, mock_client, mock_today):
+    def test_far_goal_plans_one_macrocycle_to_the_goal(self, mock_client):
         # A 30-week horizon is no longer split into interim goals: one macrocycle runs to
         # the goal itself, and the athlete's goal list is left alone.
-        mock_today.return_value = "2026-07-31"
+        # The whole clock, not one alias: the goal below is dated, and a site left live
+        # would read it as behind us once the real calendar passed it.
+        pin_clock(self, "2026-07-31")
         obj_id = test_db.add_objective(
             title="Ultra Marathon", target_date="2027-02-26",
             sport_type="running",
@@ -1776,10 +1778,11 @@ class TestLearningsReachTheStrategyPrompt(unittest.TestCase):
         return mock_client.complete.call_args_list[0][0][0]
 
     @patch("trainmate.runtime.calendar_syncer")
-    @patch("trainmate.coach.service._today_str")
     @patch("trainmate.coach.engine.openrouter_client")
-    def _generate(self, learning, mock_client, mock_today, mock_calendar):
-        mock_today.return_value = "2026-06-01"
+    def _generate(self, learning, mock_client, mock_calendar):
+        # The whole clock, not one alias: pinning only `service._today_str` left the goal
+        # date below to be judged against the real one, so these expired on 2026-09-27.
+        pin_clock(self, "2026-06-01")
         test_db.add_objective(
             title="Berlin Marathon", target_date="2026-09-27", sport_type="running",
         )

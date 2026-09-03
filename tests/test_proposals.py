@@ -9,8 +9,19 @@ import os
 import unittest
 
 from tests.helpers import clear_all_tables, rebind_test_db
+from tests import test_db_path
 
-TEST_DB_PATH = os.path.join(os.path.dirname(__file__), "test_proposals.db")
+TEST_DB_PATH = test_db_path("test_proposals.db")
+
+
+def _goal_ahead(days: int) -> str:
+    """A goal date in the future, on the app's clock. Nothing asserts these dates, but a
+    goal is only `upcoming` while it is ahead — a literal expired the fingerprint tests
+    the day it passed, and both hashes then described the same empty goal list."""
+    from datetime import timedelta
+    from trainmate.util import today_date
+    return (today_date() + timedelta(days=days)).isoformat()
+
 
 from trainmate.db import Database
 from trainmate.coach.proposals import RevisionProposal, PlanFingerprints
@@ -184,7 +195,7 @@ class TestPlanFingerprintsSurviveTheAcceptStep(unittest.TestCase):
         """Persisting a hash of the *current* goals would describe data the strategy was
         never generated against, marking a stale plan current."""
         goal_id = test_db.add_objective(
-            title="Autumn Marathon", target_date="2026-11-15",
+            title="Autumn Marathon", target_date=_goal_ahead(73),
             sport_type="running",
         )
         generated = PlanFingerprints(
@@ -219,7 +230,7 @@ class TestPlanFingerprintsSurviveTheAcceptStep(unittest.TestCase):
         generated from — which is exactly the state the staleness detector treats as
         "plan is current"."""
         goal_id = test_db.add_objective(
-            title="Spring Race", target_date="2027-04-01",
+            title="Spring Race", target_date=_goal_ahead(210),
             sport_type="running",
         )
         at_generate_time = coach_service.engine._get_goals_hash(
@@ -237,7 +248,7 @@ class TestPlanFingerprintsSurviveTheAcceptStep(unittest.TestCase):
 
         # Passing the generate-time fingerprints is what preserves it.
         second_goal = test_db.add_objective(
-            title="Summer Race", target_date="2027-07-01",
+            title="Summer Race", target_date=_goal_ahead(301),
             sport_type="running",
         )
         before_edit = coach_service.engine._get_goals_hash(test_db.upcoming_objectives())

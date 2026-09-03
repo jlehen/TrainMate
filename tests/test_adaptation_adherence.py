@@ -4,8 +4,9 @@ from datetime import date
 
 from tests.helpers import clear_all_tables, rebind_test_db
 from trainmate.adherence import analyze_adherence, format_discrepancies
+from tests import test_db_path
 
-TEST_DB_PATH = os.path.join(os.path.dirname(__file__), "test_adaptation_adherence.db")
+TEST_DB_PATH = test_db_path("test_adaptation_adherence.db")
 
 from trainmate.db import Database
 import trainmate.db

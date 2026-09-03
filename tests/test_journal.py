@@ -20,8 +20,9 @@ from trainmate.config import config
 from trainmate.prompt import PromptCancelled
 from trainmate.util import default_wrap_width, visible_len
 from tests.helpers import bind_test_db, run_cli
+from tests import test_db_path
 
-TEST_DB_PATH = os.path.join(os.path.dirname(__file__), "test_journal.db")
+TEST_DB_PATH = test_db_path("test_journal.db")
 
 
 def setUpModule():

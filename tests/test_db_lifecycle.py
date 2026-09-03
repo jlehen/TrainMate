@@ -6,8 +6,9 @@ import tempfile
 import unittest
 
 from tests.helpers import bind_test_db, clear_all_tables, unstamp_schema
+from tests import test_db_path
 
-TEST_DB_PATH = os.path.join(os.path.dirname(__file__), "test_db_lifecycle.db")
+TEST_DB_PATH = test_db_path("test_db_lifecycle.db")
 
 from trainmate.db import Database
 from trainmate.db.base import SCHEMA_VERSION

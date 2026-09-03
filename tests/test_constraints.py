@@ -10,11 +10,12 @@ import unittest
 from contextlib import redirect_stdout
 from unittest.mock import patch
 
+from tests import test_db_path
 from tests.helpers import (
     clear_all_tables, pin_clock, rebind_test_db, save_workout, unstamp_schema,
 )
 
-TEST_DB_PATH = os.path.join(os.path.dirname(__file__), "test_trainmate_constraints.db")
+TEST_DB_PATH = test_db_path("test_trainmate_constraints.db")
 
 from trainmate.db import Database
 import trainmate.db

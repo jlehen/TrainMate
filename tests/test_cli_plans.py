@@ -4,10 +4,13 @@ import unittest
 from datetime import datetime, timedelta, timezone
 from unittest.mock import patch
 
-from tests.helpers import clear_all_tables, run_cli, rebind_test_db, save_workout
+from tests.helpers import (
+    clear_all_tables, pin_clock, rebind_test_db, run_cli, save_workout,
+)
 from trainmate.coach.proposals import GenerateProposal
+from tests import test_db_path
 
-TEST_DB_PATH = os.path.join(os.path.dirname(__file__), "test_trainmate_cli_plans.db")
+TEST_DB_PATH = test_db_path("test_trainmate_cli_plans.db")
 
 from trainmate.db import Database
 import trainmate.db
@@ -36,6 +39,9 @@ class TestCliPlans(unittest.TestCase):
 
     def setUp(self):
         clear_all_tables(test_db)
+        # The goal dates below are written as literals and asserted as literals, so
+        # the clock is frozen just behind them rather than left to walk past.
+        pin_clock(self, "2026-09-01")
 
     def run_cli(self, args, input_value="n"):
         return run_cli(args, input_value)
@@ -71,7 +77,10 @@ class TestCliPlans(unittest.TestCase):
         """One goal named plans that goal, bounded to its OWN span; a range plans every
         goal it covers, in date order, one strategy call each
         (DESIGN_cli_selectors.md §9)."""
-        today = datetime.now(timezone.utc).date()
+        # The app's clock, not the machine's: the two must agree or the expected spans
+        # are computed against a different day than the command reads.
+        from trainmate.util import today_date
+        today = today_date()
 
         def out(n):
             return (today + timedelta(days=n)).strftime("%Y-%m-%d")

@@ -6,7 +6,19 @@ from datetime import date, timedelta
 
 from tests.helpers import clear_all_tables, rebind_test_db, save_workout
 
-TEST_DB_PATH = os.path.join(os.path.dirname(__file__), "test_trainmate_web.db")
+
+def _goal_ahead(days: int = 100) -> str:
+    """A goal date comfortably in the future, on the app's clock.
+
+    These goals are scaffolding — nothing asserts the date — but a plan is only active
+    while its goal is ahead, so a literal expired the tests the day it passed.
+    """
+    from trainmate.util import today_date
+    return (today_date() + timedelta(days=days)).isoformat()
+
+from tests import test_db_path
+
+TEST_DB_PATH = test_db_path("test_trainmate_web.db")
 
 from trainmate.db import Database
 from trainmate import progression
@@ -245,7 +257,7 @@ class TestPlanVersionsEndpoint(unittest.TestCase):
 
     def test_plan_versions_lists_active_and_superseded(self):
         oid = test_db.add_objective(
-            title="Web Goal", target_date="2026-12-15",
+            title="Web Goal", target_date=_goal_ahead(),
             sport_type="running",
         )
         meso = [{
@@ -349,7 +361,7 @@ class TestPlanDiffEndpoint(unittest.TestCase):
 
     def _seed(self):
         oid = test_db.add_objective(
-            title="Diff Goal", target_date="2026-12-15",
+            title="Diff Goal", target_date=_goal_ahead(),
             sport_type="running",
         )
         v1 = test_db.save_macrocycle(
@@ -421,7 +433,7 @@ class TestPlanDiffEndpoint(unittest.TestCase):
 
     def test_plan_diff_single_version(self):
         test_db.add_objective(
-            title="Lonely", target_date="2026-12-15", sport_type="running",
+            title="Lonely", target_date=_goal_ahead(), sport_type="running",
         )
         objectives = test_db.get_objectives(status='active')
         test_db.save_macrocycle(
@@ -536,7 +548,7 @@ class TestTimelinePayload(unittest.TestCase):
         self.assertEqual(self._payload()["plan_end"], "2026-07-10")
 
     def test_meso_bands_layers_inferred_and_plan(self):
-        oid = test_db.add_objective(title="Race", target_date="2026-12-01",
+        oid = test_db.add_objective(title="Race", target_date=_goal_ahead(),
                                     sport_type="running")
         test_db.save_macrocycle(
             objective_id=oid, strategy="s", goals_hash="g", constraints_hash="l",

@@ -4,8 +4,9 @@ from datetime import datetime, timedelta, timezone
 from unittest import mock
 
 from tests.helpers import clear_all_tables, pin_clock, unstamp_schema, rebind_test_db, save_workout
+from tests import test_db_path
 
-TEST_DB_PATH = os.path.join(os.path.dirname(__file__), "test_trainmate_db.db")
+TEST_DB_PATH = test_db_path("test_trainmate_db.db")
 
 from trainmate.db import (
     Database, normalize_sports, valid_confidence, learning_is_dormant,

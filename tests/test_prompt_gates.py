@@ -13,8 +13,9 @@ import unittest
 from unittest.mock import patch
 
 from tests.helpers import bind_test_db
+from tests import test_db_path
 
-TEST_DB_PATH = os.path.join(os.path.dirname(__file__), "test_prompt_gates.db")
+TEST_DB_PATH = test_db_path("test_prompt_gates.db")
 test_db = bind_test_db(TEST_DB_PATH)
 
 from trainmate.coach.engine import CoachEngine
@@ -307,6 +308,71 @@ class TestCarriedAdaptationsGate(unittest.TestCase):
         self.assertTrue(member.rstrip().endswith(","), msg=repr(member))
         self.assertIn('"benchmark_type"', block.split('"keep"')[1],
                       "keep must sit ahead of the block's last member")
+
+
+# The optional inputs whose regions are asserted above.
+GATES_WITH_A_TEST = {"athlete_message", "intensity_context", "carried_workouts"}
+
+# The rest of the two builders' optional inputs. Being here is not a claim that an input
+# is harmless — only that nobody has written a gate test for it yet. It is a ledger, so
+# `TestEveryOptionalPromptInputIsAccountedFor` can tell a *new* input from a known one.
+GATES_WITHOUT_A_TEST = {
+    # adapt
+    "informational", "removed_workouts", "daily_signals", "performed",
+    "pmc_warmup_cutoff", "pmc_context", "zone_currencies", "signal_vocabulary",
+    "signal_earliest_date",
+    # generate
+    "num_days", "start_str", "metrics", "completed_activities", "baseline",
+    "block_progress", "block_has_intensity", "anchor_history",
+}
+
+BUILDERS = ("_workout_adapt_logic", "_workout_generate_logic")
+
+
+def _optional_inputs():
+    """Every optional parameter of the two prompt builders, read off their signatures."""
+    import inspect
+
+    names = set()
+    for builder in BUILDERS:
+        signature = inspect.signature(getattr(CoachEngine, builder))
+        names.update(
+            parameter.name for parameter in signature.parameters.values()
+            if parameter.default is not inspect.Parameter.empty
+        )
+    return names
+
+
+class TestEveryOptionalPromptInputIsAccountedFor(unittest.TestCase):
+    """A twelfth gate added to a 380-line builder must not pass unnoticed.
+
+    The sentinels above cover three inputs; the builders take twenty. Reading the
+    parameter list off the signatures means a new one fails here until someone decides
+    whether it governs prompt regions and needs a gate test of its own — which is the
+    safe direction for a list to rot in.
+    """
+
+    def test_a_new_builder_input_must_be_classified(self):
+        declared = GATES_WITH_A_TEST | GATES_WITHOUT_A_TEST
+        unclassified = sorted(_optional_inputs() - declared)
+        self.assertEqual(
+            unclassified, [],
+            "these optional prompt inputs are new since this ledger was written. If one "
+            "switches whole prompt regions on and off, give it a gate test above and add "
+            "it to GATES_WITH_A_TEST; otherwise record it in GATES_WITHOUT_A_TEST: "
+            f"{unclassified}",
+        )
+
+    def test_the_ledger_does_not_name_inputs_that_are_gone(self):
+        declared = GATES_WITH_A_TEST | GATES_WITHOUT_A_TEST
+        departed = sorted(declared - _optional_inputs())
+        self.assertEqual(
+            departed, [],
+            f"the builders no longer take these; drop them from the ledger: {departed}",
+        )
+
+    def test_the_two_halves_of_the_ledger_do_not_overlap(self):
+        self.assertEqual(GATES_WITH_A_TEST & GATES_WITHOUT_A_TEST, set())
 
 
 if __name__ == "__main__":

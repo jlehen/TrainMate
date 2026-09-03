@@ -3,15 +3,20 @@ import unittest
 from datetime import datetime, timedelta, timezone
 from unittest.mock import patch
 
-from tests.helpers import clear_all_tables, run_cli, rebind_test_db, save_workout
+from tests.helpers import (
+    clear_all_tables, pin_clock, rebind_test_db, run_cli, save_workout,
+)
+from tests import test_db_path
 
-TEST_DB_PATH = os.path.join(os.path.dirname(__file__), "test_trainmate_cli_goals.db")
+TEST_DB_PATH = test_db_path("test_trainmate_cli_goals.db")
 
 
 def _days_out(n: int) -> str:
     """Fixtures ride on today: a plan window needs its goal in the future, so a
-    hardcoded date expires the test the day it passes."""
-    return (datetime.now(timezone.utc).date() + timedelta(days=n)).isoformat()
+    hardcoded date expires the test the day it passes. Reads the app's clock, so a
+    pinned test and the command it runs agree on which day it is."""
+    from trainmate.util import today_date
+    return (today_date() + timedelta(days=n)).isoformat()
 
 from trainmate.db import Database
 import trainmate.db
@@ -40,6 +45,10 @@ class TestCliGoals(unittest.TestCase):
 
     def setUp(self):
         clear_all_tables(test_db)
+        # This class writes goal dates as literals and asserts them as literals, so the
+        # clock is frozen just behind them rather than left to walk past. The archival
+        # class below dates everything relative to today and needs no pin.
+        pin_clock(self, "2026-09-01")
 
     def run_cli(self, args, input_value="n"):
         return run_cli(args, input_value)

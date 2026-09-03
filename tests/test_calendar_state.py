@@ -1,8 +1,9 @@
 from tests.helpers import restore_db_handles, save_workout
 import os
 import unittest
+from tests import test_db_path
 
-TEST_DB_PATH = os.path.join(os.path.dirname(__file__), "test_trainmate_calstate.db")
+TEST_DB_PATH = test_db_path("test_trainmate_calstate.db")
 
 from trainmate.db import Database
 import trainmate.db

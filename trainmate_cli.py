@@ -172,28 +172,21 @@ def build_parser():
     # direction (DESIGN_cli_selectors.md §3).
     add_status_parser(subparsers, pull_bypass_parser)
     add_progress_parser(subparsers, pull_bypass_parser)
-    goal_parser = add_goal_parser(subparsers)
-    constraint_parser = add_constraint_parser(subparsers)
-    benchmark_parser = add_benchmark_parser(subparsers)
-    signal_parser = add_signal_parser(subparsers)
-    learnings_parser = add_learnings_parser(subparsers)
-    plan_parser = add_plan_parser(subparsers, pull_bypass_parser, llm_debug_parser)
-    workout_parser = add_workout_parser(subparsers, pull_bypass_parser, llm_debug_parser)
-    data_parser = add_data_parser(subparsers, pull_bypass_parser, llm_debug_parser)
+    add_goal_parser(subparsers)
+    add_constraint_parser(subparsers)
+    add_benchmark_parser(subparsers)
+    add_signal_parser(subparsers)
+    add_learnings_parser(subparsers)
+    add_plan_parser(subparsers, pull_bypass_parser, llm_debug_parser)
+    add_workout_parser(subparsers, pull_bypass_parser, llm_debug_parser)
+    add_data_parser(subparsers, pull_bypass_parser, llm_debug_parser)
     add_settings_parser(subparsers)
     add_journal_parser(subparsers)
     add_bot_parser(subparsers)
 
-    named_subparsers = {
-        "goal": goal_parser,
-        "constraint": constraint_parser,
-        "benchmark": benchmark_parser,
-        "signal": signal_parser,
-        "learnings": learnings_parser,
-        "plan": plan_parser,
-        "workout": workout_parser,
-        "data": data_parser,
-    }
+    # Read off the tree rather than hand-listed: this was a literal dict and `bot` was
+    # never added to it, so bare `tm bot` printed the top-level help instead of its own.
+    named_subparsers = dict(subparsers.choices)
     sort_command_tree(parser, COMMAND_ORDER)
     return parser, named_subparsers
 

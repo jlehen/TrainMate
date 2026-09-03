@@ -14,8 +14,9 @@ from trainmate import calendar_lineage
 from trainmate.calendar_state import calendar_signature, calendar_status
 from trainmate.db import Database
 from trainmate.google_calendar import calendar_syncer
+from tests import test_db_path
 
-TEST_DB_PATH = os.path.join(os.path.dirname(__file__), "test_trainmate_cal_lineage.db")
+TEST_DB_PATH = test_db_path("test_trainmate_cal_lineage.db")
 
 ZONES = [None, 40 * 60, 90 * 60, None, None, None, None]
 

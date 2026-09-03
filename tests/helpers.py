@@ -1,26 +1,8 @@
 import io
 import os
 import sys
-from datetime import date
+from datetime import date, datetime, time
 from unittest.mock import MagicMock, patch
-
-# The clock is imported by value (`from trainmate.util import today_str`), so each
-# binding site has to be pinned separately. These are the ones the planning window
-# reads; leaving any of them live lets date-based fixtures expire with the calendar.
-_CLOCK_SITES = [
-    ("trainmate.coach.service._today_str", False),
-    ("trainmate.coach.service._today_date", True),
-    ("trainmate.db.objectives.today_date", True),
-    # A goal's completed/upcoming split is now decided by the date, so the accessors that
-    # ask "is this goal behind us?" are clock sites too (DESIGN_backward_evaluation.md §12).
-    ("trainmate.db.periodization.today_date", True),
-    # `_goal_span_start` opens a goal's own plan window at today, so the goal timeline
-    # the `-g` grammar walks is a clock site too (DESIGN_cli_selectors.md §9).
-    ("trainmate.cli.plans._today_date", True),
-    # The companion plan view dates its blocks against today, the same read the expert
-    # view's window makes (DESIGN_render_persona.md §4).
-    ("trainmate.cli.render._today_date", True),
-]
 
 
 def _m(minutes):
@@ -56,12 +38,22 @@ def _zweek(mon, rows=(), seconds=None, label="Base 1", in_progress=False, judged
 
 
 def pin_clock(testcase, day: str) -> None:
-    """Freezes every clock a plan/goal window consults, for the life of one test."""
+    """Freezes the clock at `day` for the life of one test.
+
+    Patches `trainmate.clock.now`, the one instant every "what day is it" computation
+    reads (DESIGN_user_timezone.md §1), so a module that imports `today_str` or
+    `today_date` by value is pinned too. This was a hand-written list of those import
+    sites and had drifted to 6 of the 24 that exist, letting real time reach fixtures
+    through the other 18.
+    """
     as_date = date.fromisoformat(day)
-    for target, wants_date in _CLOCK_SITES:
-        patcher = patch(target, return_value=as_date if wants_date else day)
-        patcher.start()
-        testcase.addCleanup(patcher.stop)
+    patcher = patch(
+        "trainmate.clock.now",
+        return_value=datetime.combine(as_date, time(12)).astimezone(),
+    )
+    patcher.start()
+    testcase.addCleanup(patcher.stop)
+
 
 # Delete children before parents to satisfy foreign-key constraints. `workouts` is
 # absent on purpose: it is append-only and guarded by a trigger, so it is reset through

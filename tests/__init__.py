@@ -5,7 +5,6 @@ guards are in place for every test.
 """
 
 import atexit
-import glob
 import os
 import shutil
 import socket
@@ -41,19 +40,22 @@ def _guarded_sqlite_connect(database, *args, **kwargs):
 sqlite3.connect = _guarded_sqlite_connect
 
 
-@atexit.register
-def _remove_test_databases() -> None:
-    """Sweep the per-module SQLite files at the very end of the run.
+# Beside the tests rather than under TMPDIR, which is a RAM-backed tmpfs on most Linux
+# boxes: the suite opens ~40 WAL databases at once and a machine short on memory fails
+# them with "disk I/O error". `dbs-*` is gitignored.
+_TEST_DB_DIR = tempfile.mkdtemp(prefix="dbs-", dir=os.path.dirname(__file__))
+atexit.register(shutil.rmtree, _TEST_DB_DIR, True)
 
-    Each module deletes its own, but a later module reaching a handle that still
-    points at the deleted path recreates an empty file there, so the last word has
-    to come after every module has finished.
+
+def test_db_path(name: str) -> str:
+    """The path a test module's SQLite file takes, inside this process's own directory.
+
+    Private per process so two concurrent runs cannot delete each other's databases:
+    the files used to sit directly in `tests/`, where the exit sweep removed every
+    `*.db` it found — including the ones a second run was still using.
     """
-    for path in glob.glob(os.path.join(os.path.dirname(__file__), "*.db")):
-        try:
-            os.remove(path)
-        except OSError:
-            pass
+    return os.path.join(_TEST_DB_DIR, name)
+
 
 # The Calendar ride-along inside ensure_data ran against the real account: it created
 # events and consumed the incremental sync token that `data pull` needs

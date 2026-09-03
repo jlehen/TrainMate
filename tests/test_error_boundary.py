@@ -12,8 +12,9 @@ import unittest
 from unittest.mock import patch
 
 from tests.helpers import bind_test_db, run_cli
+from tests import test_db_path
 
-TEST_DB_PATH = os.path.join(os.path.dirname(__file__), "test_error_boundary.db")
+TEST_DB_PATH = test_db_path("test_error_boundary.db")
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 test_db = bind_test_db(TEST_DB_PATH)

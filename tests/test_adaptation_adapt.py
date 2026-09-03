@@ -6,8 +6,9 @@ from contextlib import redirect_stdout
 from unittest.mock import patch
 
 from tests.helpers import clear_all_tables, rebind_test_db, save_workout
+from tests import test_db_path
 
-TEST_DB_PATH = os.path.join(os.path.dirname(__file__), "test_adaptation_adapt.db")
+TEST_DB_PATH = test_db_path("test_adaptation_adapt.db")
 
 from trainmate import runtime
 from trainmate.db import Database

@@ -9,8 +9,9 @@ import unittest
 from unittest.mock import Mock, patch
 
 from tests.helpers import clear_all_tables, rebind_test_db
+from tests import test_db_path
 
-TEST_DB_PATH = os.path.join(os.path.dirname(__file__), "test_signal_extraction.db")
+TEST_DB_PATH = test_db_path("test_signal_extraction.db")
 
 from trainmate import runtime, signals
 from trainmate.db import Database

@@ -15,8 +15,9 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from tests.helpers import clear_all_tables, rebind_test_db, run_cli, save_workout
+from tests import test_db_path
 
-TEST_DB_PATH = os.path.join(os.path.dirname(__file__), "test_trainmate_runway.db")
+TEST_DB_PATH = test_db_path("test_trainmate_runway.db")
 
 from trainmate.db import Database
 import trainmate.db

@@ -1719,8 +1719,11 @@ refuses remote hosts — because both seams otherwise fail silently and leave a 
 test that measured nothing. `tests/test_isolation_guards.py` asserts they still fire.
 
 Names still patched where they are *used* rather than through `runtime`:
-`trainmate.coach.engine.openrouter_client` (the LLM seam) and the clock sites listed in
-`tests/helpers._CLOCK_SITES`.
+`trainmate.coach.engine.openrouter_client` (the LLM seam). The clock is patched at its
+source instead — `tests/helpers.pin_clock` freezes `trainmate.clock.now`, the one instant
+`today_date()` reads — so a module that imported `today_str`/`today_date` by value is
+pinned with it. That was a list of the individual import sites and had drifted to 6 of
+the 24 that exist, which is how real dates reached fixtures and expired them.
 
 ---
 
@@ -1769,7 +1772,11 @@ resolved against one plan's blocks, which is what `plan feedback -m` files a not
 (DESIGN_plan_feedback.md §5).
 
 **A bare command group** (`goal`, `constraint`, `benchmark`, `signal`, `learnings`,
-`workout`, `data`, `plan`, and the root) prints that level's full help and exits 1. This
+`workout`, `data`, `plan`, `bot`, and the root) prints that level's full help and exits 1.
+`build_parser` reads `named_subparsers` off the parser tree rather than listing it, so a
+group added later is answered without a second edit — `bot` was missing from the old
+literal and fell through to the *root* help. `tests/test_dispatch.py` walks the same
+tree. This
 is *not* argparse's missing-argument path, so it gets neither the "the following
 arguments are required" line nor the chat short form — under `TRAINMATE_FRONTEND=json`
 the whole help block is sent to Telegram. The documented exception is a group with a
@@ -2550,14 +2557,17 @@ venv/bin/python -m unittest discover -s tests -p "test_*.py"
 
 | File                           | What it tests                                                   |
 |--------------------------------|-----------------------------------------------------------------|
-| `tests/test_adaptation.py`     | `CoachService.workout_adapt()` end-to-end, swap validation/apply, |
-|                                | `adherence.analyze_adherence()` (misses, tolerances, violations) |
+| `tests/test_adaptation_*.py`   | One file per service mixin: `_adapt` (`workout_adapt()` end-to-end), |
+|                                | `_swap` (validation/apply), `_add`, and `_adherence`             |
+|                                | (`analyze_adherence()` — misses, tolerances, violations)        |
 | `tests/test_analysis.py`       | `data_bootstrap`/`data_reflect`: date resolution, weekly |
 |                                | aggregation, cache reuse/force/inspect_only, learnings           |
 |                                | injection, reflect watermark advance/skip, bootstrap re-run      |
 |                                | guard, per-week constraints + body-response z-scores             |
 | `tests/test_constraints.py`    | constraint DB windowing, hard-rest pre-pass, §7 magnitude, §8 message capture |
-| `tests/test_cli.py`            | CLI command dispatch + output                                   |
+| `tests/test_cli_*.py`          | One file per command family: output and argument handling, with |
+|                                | the service mocked. `test_dispatch.py` walks the parser tree     |
+|                                | itself (every leaf binds a handler, every bare group self-helps) |
 | `tests/test_calendar.py`       | `calendar_syncer.sync_workout` event description formatting      |
 | `tests/test_calendar_lineage.py` | The `History` block an event carries: which revisions, in what order, and when the event goes stale |
 | `tests/test_coach_format.py`   | `coach/formatting.py` — the coach-prompt renderers:              |
@@ -2646,8 +2656,13 @@ via `@patch`.
 module is collected: the Calendar ride-along inside `garmin.ensure_data` is stubbed
 out, and any non-loopback socket connect raises. Without them the suite reached the
 real account — creating calendar events and consuming the incremental sync token
-that `data pull` depends on. A test needing network behaviour mocks its client. The
-same module sweeps the per-module `tests/*.db` files at exit.
+that `data pull` depends on. A test needing network behaviour mocks its client.
+
+The same module hands out the per-module SQLite paths through `tests.test_db_path`, from
+a temporary directory private to the process and removed at exit. The files used to sit
+in `tests/`, swept there by a glob — so a second concurrent run deleted the databases the
+first was still writing and both collapsed. `tests/test_isolation_guards.py` fails on any
+module that builds a database path beside the tests again.
 
 It installs a third seam for the same reason: every command a test runs opens a journal
 run, so `logging.dir` is redirected to a scratch directory (swept at exit) and

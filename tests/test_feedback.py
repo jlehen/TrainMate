@@ -10,6 +10,7 @@ from datetime import datetime, timedelta, timezone
 from unittest.mock import patch
 
 from tests.helpers import clear_all_tables, run_cli, rebind_test_db
+from tests import test_db_path
 
 
 def _days_out(n: int) -> str:
@@ -20,8 +21,8 @@ def _days_out(n: int) -> str:
 # day it passes (same rot 2a7cd71 fixed in test_constraints.py).
 GOAL_DATE = _days_out(71)
 
-TEST_DB_PATH = os.path.join(os.path.dirname(__file__), "test_trainmate_feedback.db")
-LEGACY_DB_PATH = os.path.join(os.path.dirname(__file__), "test_trainmate_fb_legacy.db")
+TEST_DB_PATH = test_db_path("test_trainmate_feedback.db")
+LEGACY_DB_PATH = test_db_path("test_trainmate_fb_legacy.db")
 
 from trainmate.db import Database
 import trainmate.db

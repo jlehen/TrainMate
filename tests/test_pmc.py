@@ -14,9 +14,10 @@ from trainmate.db import Database
 import trainmate.garmin as garmin
 from trainmate.garmin import compute_pmc, pmc_warmup_cutoff_for, pmc_ramp
 from trainmate.util import color_tsb, color_ramp, pmc_cells, pmc_warming_note
+from tests import test_db_path
 
 
-TEST_DB_PATH = os.path.join(os.path.dirname(__file__), "test_trainmate_pmc.db")
+TEST_DB_PATH = test_db_path("test_trainmate_pmc.db")
 test_db = Database(db_path=TEST_DB_PATH)
 
 
