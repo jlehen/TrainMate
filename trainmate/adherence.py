@@ -4,7 +4,7 @@ from typing import List, Dict, Any, Set, Tuple, Optional
 
 from trainmate.config import config
 from trainmate.garmin import activity_load, _rpe_tss
-from trainmate.sports import canonical_sport, sport_aliases
+from trainmate.sports import canonical_sport
 
 REST_VIOLATION = "rest_violation"
 MISSED = "missed"
@@ -375,16 +375,16 @@ def analyze_adherence(
                     ))
                     break
             else:
-                # Find a matching completed activity
-                allowed_types = sport_aliases(w_sport)
+                # Both sides canonicalized and compared exactly: a substring fallback
+                # folded `e_bike_fitness` into `strength_training` (ARCHITECTURE.md §15
+                # "The sport check only does its work if it matches exactly").
                 for act in day_acts:
                     if act["activity_id"] in used_act_ids:
                         continue
                     # The athlete has already told us this one is not that session.
                     if (act["activity_id"], w_sport) in rejected:
                         continue
-                    act_type = act["activity_type"].lower()
-                    if act_type in allowed_types or any(t in act_type for t in allowed_types):
+                    if canonical_sport(act["activity_type"]) == w_sport:
                         matched_act = act
                         used_act_ids.add(act["activity_id"])
                         break

@@ -3003,3 +3003,27 @@ rather than vanishing.
 The question is a refinement, never a gate: `--auto` and the unattended runs skip it and
 fall back to the matcher's own answer, which the duration rule above already makes sane.
 
+
+### The sport check only does its work if it matches exactly
+The section above rests on "a ride never reaches a strength session, whatever its length."
+It did. `SPORT_MAPPING` lists `fitness` among `strength_training`'s aliases, and matching
+fell back to a substring test — `t in act_type` — so Garmin's `e_bike_fitness` contained an
+alias and a 34-minute e-bike ride was handed a 10-minute evening circuit.
+
+The damage was not the mislabelled row. The pairing graded `partial`, and because the ride
+ran *longer* than the circuit there was no duration shortfall, so `is_ambiguous_match` had
+nothing to question and `performed_sessions` marked the session `locked` — history, not to
+be rewritten. When the athlete said that evening that the circuit was off, the adapt could
+only add a copy to the next day; it was not permitted to withdraw the original. A loose
+string test became a plan the athlete never chose.
+
+The substring fallback had no legitimate work to do: across both instances every real
+pairing was already an exact alias hit, and the only matches it added were wrong ones. It
+also quietly folded every resort ski day into `ski_touring` — each `downhill_skiing` alias
+ends in `skiing`, which `ski_touring` also lists — collapsing the one distinction
+`SPORT_MAPPING` draws most deliberately. Matching now canonicalizes both sides and compares
+them exactly, which is the rule the zone vocabulary already settled on for the same reason
+(DESIGN_intensity_distribution.md §6.1 "Exact over substring"): an unrecognised type stays
+unrecognised, visible as its own row, and is repaired by adding an alias — not by a net
+that guesses. `e_bike_fitness` is deliberately left unmapped; a motor-assisted ride is not
+a cycling session, and its load still reaches the PMC through `completed_activities`.

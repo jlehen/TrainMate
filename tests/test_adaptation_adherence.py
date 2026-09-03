@@ -380,8 +380,8 @@ class TestSportMatching(unittest.TestCase):
         self.assertEqual(disc, [])
 
     def test_capitalized_sport_still_matches(self):
-        # 'Running' is not a SPORT_MAPPING key and the substring fallback is
-        # case-sensitive, so uncanonicalized this read as a Complete Miss.
+        # 'Running' is not a SPORT_MAPPING key, so uncanonicalized this read as a
+        # Complete Miss.
         disc, matching, _ = self._pair("Running", "running")
         self.assertIsNotNone(matching[0]["completed"])
         self.assertEqual(disc, [])
@@ -400,6 +400,20 @@ class TestSportMatching(unittest.TestCase):
     def test_a_genuinely_different_sport_is_still_a_miss(self):
         # Canonicalizing must not make everything match.
         disc, matching, _ = self._pair("running", "cycling")
+        self.assertIsNone(matching[0]["completed"])
+        self.assertTrue(any(d.kind == "missed" for d in disc))
+
+    def test_an_unknown_type_sharing_a_word_is_not_that_sport(self):
+        # `e_bike_fitness` contains "fitness", an alias of strength_training, and the
+        # old substring net paired a 34-minute e-bike ride with a 10-minute circuit.
+        disc, matching, _ = self._pair("strength_training", "e_bike_fitness")
+        self.assertIsNone(matching[0]["completed"])
+        self.assertTrue(any(d.kind == "missed" for d in disc))
+
+    def test_a_resort_day_is_not_a_ski_tour(self):
+        # Every downhill_skiing alias ends in "skiing", which ski_touring also lists.
+        # The two are kept apart on purpose (sports.py), and matching must respect that.
+        disc, matching, _ = self._pair("ski_touring", "resort_skiing")
         self.assertIsNone(matching[0]["completed"])
         self.assertTrue(any(d.kind == "missed" for d in disc))
 
