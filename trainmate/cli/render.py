@@ -20,6 +20,7 @@ from trainmate import progression, runtime
 from trainmate.coach.proposals import RevisionProposal
 from trainmate.config import config
 from trainmate.progression import RUNWAY_BLOCK, RUNWAY_PLAN_END_NEXT_GOAL, RUNWAY_SPAN
+from trainmate.sports import canonical_sport
 from trainmate.prompt import emit_buttons
 from trainmate.util import (
     bold, cmd, days_between, dim, fmt_date, green, notice, wrap_text,
@@ -31,7 +32,10 @@ from trainmate.cli.progress import emit_chart, print_progress_report
 from trainmate.cli.runway import (
     crossing_the_end, current_runway, runway_buttons, runway_hint_lines,
 )
-from trainmate.cli.workouts.generate import print_generate_preview, print_workout_table
+from trainmate.cli.workouts.generate import (
+    print_calendar_marked, print_generate_preview, print_workout_compare,
+    print_workout_table,
+)
 from trainmate.cli.workouts.revisions import (
     print_revision_preview, rewritten_text_only, wording_block_lines, wording_blocks,
 )
@@ -148,6 +152,74 @@ def simple_week_lines(
         lines.append(f"\n{done} of {count} {session_word} already done — keep it rolling 💪")
     else:
         lines.append(f"\n{count} {session_word} planned — you've got this 💪")
+    return lines
+
+
+def simple_activity_line(act: Dict[str, Any]) -> str:
+    """One completed activity in companion words: '🚴 Morning Ride — 90 min'."""
+    name = act.get("activity_name") or act.get("activity_type") or "Activity"
+    emoji = sport_emoji(canonical_sport(act.get("activity_type")))
+    return f"{emoji} {name} — {simple_activity_minutes(act)} min"
+
+
+def simple_activity_minutes(act: Dict[str, Any]) -> int:
+    return round((act.get("duration_sec") or 0) / 60)
+
+
+def simple_compare_lines(
+    days: List[Tuple[str, list, list]], start: str, end: str, today: str,
+) -> List[str]:
+    """Simple rendering of a look back: one dated line per planned session and per
+    extra activity, in a four-glyph vocabulary that needs no legend — ✅ followed the
+    plan, ❌ did not, ➕ an effort the plan did not ask for, ⏳ still ahead today
+    (DESIGN_bot_simple_frontend.md §6). A kept rest day is a ✅ like any other session;
+    a rest day trained through is a ❌ that says what was done instead.
+
+    `days` is `compare_days`' list; the caller has already dropped the efforts too small
+    to mention. The closing count follows the §6 tone rule: what was done leads, the
+    gap is a plain number after it, and a window with nothing behind it is not a miss."""
+    lines = [f"🔎 Looking back, {simple_span_words(start, end, today)}:"]
+    total = done = 0
+    for date_str, results, unplanned in days:
+        day = datetime.strptime(date_str, "%Y-%m-%d").strftime("%a %d")
+        for r in results:
+            w = r["planned"]
+            act = r["completed"]
+            if w["sport_type"] == "rest":
+                if act:
+                    lines.append(
+                        f"{day} · ❌ 🛌 Rest day, but you trained: {simple_activity_line(act)}"
+                    )
+                elif r.get("pending"):
+                    lines.append(f"{day} · 🛌 Rest day")
+                else:
+                    lines.append(f"{day} · ✅ 🛌 Rest day")
+                continue
+            if r.get("pending"):
+                lines.append(f"{day} · ⏳ {simple_session_line(w)}")
+                continue
+            total += 1
+            if act:
+                done += 1
+                lines.append(
+                    f"{day} · ✅ {simple_session_line(w)} "
+                    f"(you did {simple_activity_minutes(act)} min)"
+                )
+            else:
+                lines.append(f"{day} · ❌ {simple_session_line(w)}")
+        for act in unplanned:
+            lines.append(f"{day} · ➕ {simple_activity_line(act)}, not on the plan")
+    if len(lines) == 1:
+        return ["Nothing to look back on yet — your sessions are ahead of you 💪"]
+    session_word = "session" if total == 1 else "sessions"
+    if total == 0:
+        lines.append("\nNo sessions were due — rest well 🎉")
+    elif done == total:
+        lines.append(f"\nAll {total} {session_word} done — brilliant 🎉")
+    elif done:
+        lines.append(f"\n{done} of {total} {session_word} done — keep it rolling 💪")
+    else:
+        lines.append(f"\n0 of {total} {session_word} done — the plan is ready when you are 💪")
     return lines
 
 
@@ -638,6 +710,19 @@ class ExpertRenderer:
         """Draws the proposal; False when there is nothing to apply."""
         return print_generate_preview(proposal)
 
+    def workout_compare(
+        self, days: list, *, start_date: str, end_date: str, sport_filter: Optional[str],
+        discrepancies: list, informational: list, covered_ranges: list,
+    ) -> None:
+        print_workout_compare(
+            days, start_date=start_date, end_date=end_date, sport_filter=sport_filter,
+            discrepancies=discrepancies, informational=informational,
+            covered_ranges=covered_ranges,
+        )
+
+    def calendar_marked(self, marked: int) -> None:
+        print_calendar_marked(marked)
+
     def goal_list(self, goals: list, called_off: list, show_all: bool, today: str) -> None:
         print_goal_table(goals, called_off, show_all)
 
@@ -853,6 +938,29 @@ class CompanionRenderer(ExpertRenderer):
             print(line)
         print()
         return True
+
+    def workout_compare(
+        self, days: list, *, start_date: str, end_date: str, sport_filter: Optional[str],
+        discrepancies: list, informational: list, covered_ranges: list,
+    ) -> None:
+        # The discrepancy list, the load-from-RPE note and the in-block/off-plan
+        # distinction are expert detail: the glyph on each line is the whole verdict here,
+        # and an effort under the minor-load bar is not mentioned at all
+        # (DESIGN_bot_simple_frontend.md §6).
+        kept = []
+        for date_str, results, unplanned in days:
+            worth_a_line = [
+                a for a in unplanned
+                if runtime.garmin.activity_load(a) >= config.minor_activity_load_threshold
+            ]
+            if results or worth_a_line:
+                kept.append((date_str, results, worth_a_line))
+        for line in simple_compare_lines(kept, start_date, end_date, _today_str()):
+            print(line)
+
+    def calendar_marked(self, marked: int) -> None:
+        # Bookkeeping on the operator's Calendar; chat is not the audit surface (§6).
+        return
 
     def goal_list(self, goals: list, called_off: list, show_all: bool, today: str) -> None:
         for line in simple_goal_lines(goals, today):

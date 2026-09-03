@@ -197,6 +197,92 @@ class WeekLinesTest(unittest.TestCase):
         self.assertIn("1 session planned", lines[-1])
 
 
+class CompareLinesTest(unittest.TestCase):
+    """The look back: one glyph per line is the whole verdict (§6)."""
+
+    TODAY = "2026-08-30"
+
+    @staticmethod
+    def planned(date, sport="running", title="Easy run", minutes=40, act=None, pending=False):
+        w = {"id": 1, "date": date, "sport_type": sport, "title": title,
+             "duration_minutes": minutes}
+        return {"date": date, "planned": w, "completed": act, "pending": pending}
+
+    @staticmethod
+    def activity(name="Morning Run", kind="running", minutes=43):
+        return {"activity_id": "a1", "activity_name": name, "activity_type": kind,
+                "duration_sec": minutes * 60}
+
+    def lines(self, days, start="2026-08-24", end=TODAY):
+        return render.simple_compare_lines(days, start, end, self.TODAY)
+
+    def test_a_trained_session_is_checked_with_what_was_done(self):
+        lines = self.lines([
+            ("2026-08-25", [self.planned("2026-08-25", act=self.activity())], []),
+        ])
+        self.assertEqual(lines[0], "🔎 Looking back, Mon Aug 24 to today:")
+        self.assertEqual(lines[1], "Tue 25 · ✅ 🏃 Easy run — 40 min (you did 43 min)")
+        self.assertIn("All 1 session done", lines[-1])
+
+    def test_a_missed_session_gets_the_cross_and_the_count_stays_kind(self):
+        lines = self.lines([
+            ("2026-08-25", [self.planned("2026-08-25", act=self.activity())], []),
+            ("2026-08-27", [self.planned("2026-08-27", "cycling", "Endurance ride", 60)], []),
+        ])
+        self.assertEqual(lines[2], "Thu 27 · ❌ 🚴 Endurance ride — 60 min")
+        self.assertIn("1 of 2 sessions done — keep it rolling", lines[-1])
+
+    def test_nothing_done_is_a_number_not_a_reproach(self):
+        lines = self.lines([("2026-08-25", [self.planned("2026-08-25")], [])])
+        self.assertTrue(lines[-1].startswith("\n0 of 1 session done"))
+        self.assertIn("ready when you are", lines[-1])
+
+    def test_today_is_still_ahead_and_not_counted(self):
+        lines = self.lines([
+            ("2026-08-30", [self.planned("2026-08-30", pending=True)], []),
+        ])
+        self.assertEqual(lines[1], "Sun 30 · ⏳ 🏃 Easy run — 40 min")
+        self.assertIn("No sessions were due", lines[-1])
+
+    def test_rest_days_kept_and_broken(self):
+        lines = self.lines([
+            ("2026-08-25", [self.planned("2026-08-25", "rest", "Rest", None)], []),
+            ("2026-08-26", [self.planned(
+                "2026-08-26", "rest", "Rest", None,
+                act=self.activity("Evening Ride", "road_biking", 90),
+            )], []),
+            ("2026-08-30", [self.planned("2026-08-30", "rest", "Rest", None, pending=True)], []),
+        ])
+        self.assertEqual(lines[1], "Tue 25 · ✅ 🛌 Rest day")
+        self.assertEqual(
+            lines[2], "Wed 26 · ❌ 🛌 Rest day, but you trained: 🚴 Evening Ride — 90 min"
+        )
+        self.assertEqual(lines[3], "Sun 30 · 🛌 Rest day")
+        # Rest days are not sessions to count.
+        self.assertIn("No sessions were due", lines[-1])
+
+    def test_an_extra_effort_is_a_plus_with_the_sport_emoji(self):
+        lines = self.lines([
+            ("2026-08-27", [], [self.activity("Zürich Loop", "road_biking", 90)]),
+        ])
+        self.assertEqual(lines[1], "Thu 27 · ➕ 🚴 Zürich Loop — 90 min, not on the plan")
+
+    def test_an_empty_window_is_not_a_miss(self):
+        lines = self.lines([])
+        self.assertEqual(len(lines), 1)
+        self.assertNotIn("❌", lines[0])
+        self.assertIn("ahead of you", lines[0])
+
+    def test_no_expert_vocabulary_leaks(self):
+        lines = self.lines([
+            ("2026-08-25", [self.planned("2026-08-25", act=self.activity())],
+             [self.activity("Walk", "walking", 20)]),
+        ])
+        text = "\n".join(lines)
+        for word in ("PLANNED", "ACTUAL", "UNPLANNED", "load", "TSS", "RPE", "2026-"):
+            self.assertNotIn(word, text)
+
+
 class WhenWordsTest(unittest.TestCase):
     """`simple_when` — the countdown vocabulary of the goal and plan views (§11)."""
 

@@ -1082,6 +1082,48 @@ class TestCliWorkouts(unittest.TestCase):
         self.assertEqual(exit_code, 0)
         self.assertIn("No planned workouts or completed activities found", stdout)
 
+    def test_workout_compare_in_companion_voice(self):
+        """Simple mode reads the same pairing as glyph lines, and never the expert table
+        (DESIGN_bot_simple_frontend.md §6)."""
+        today = datetime.now(timezone.utc).date()
+        yesterday_str = (today - timedelta(days=1)).strftime("%Y-%m-%d")
+        two_days_ago_str = (today - timedelta(days=2)).strftime("%Y-%m-%d")
+        save_workout(test_db,
+            date=two_days_ago_str, sport_type="running", title="Skipped Run",
+            description="40 mins", duration_minutes=40, rpe=5, tss=30,
+        )
+        save_workout(test_db,
+            date=yesterday_str, sport_type="running", title="Easy Run",
+            description="30 mins", duration_minutes=30, rpe=4, tss=20,
+        )
+        test_db.save_completed_activity(
+            activity_id="act_cmp_simple",
+            date=yesterday_str,
+            start_time=f"{yesterday_str} 08:00:00",
+            activity_name="Morning Run",
+            activity_type="running",
+            duration_sec=1800.0,
+            distance_km=5.0,
+            elevation_gain_m=50.0,
+            avg_hr=140,
+            max_hr=160,
+            rpe=4,
+            tss=20.0,
+        )
+
+        with patch.dict(os.environ, {"TRAINMATE_RENDER": "simple"}):
+            exit_code, stdout, _ = self.run_cli(
+                ["workout", "compare", "-d", "3d", "--no-pull", "--no-mark"]
+            )
+        self.assertEqual(exit_code, 0)
+        self.assertIn("🔎 Looking back,", stdout)
+        self.assertIn("❌ 🏃 Skipped Run — 40 min", stdout)
+        self.assertIn("✅ 🏃 Easy Run — 30 min (you did 30 min)", stdout)
+        self.assertIn("1 of 2 sessions done", stdout)
+        self.assertNotIn("WORKOUT COMPARE", stdout)
+        self.assertNotIn("DISCREPANCIES", stdout)
+        self.assertNotIn(yesterday_str, stdout)
+
     # Colour on: `informational` holds activity dicts, so a raw gray(dict) only blows
     # up on a terminal — piped output short-circuits colorize and hides the bug.
     @patch("trainmate.util.is_color_enabled", return_value=True)

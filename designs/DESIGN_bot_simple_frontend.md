@@ -160,6 +160,7 @@ of six buttons (two per row, in table order), each mapping to fixed argv:
 |------------------|-------------------------------|
 | 📅 Today         | `workout list -d today`       |
 | 🗓 My week       | `workout list`                |
+| ✅ Done lately   | `workout compare -d 7d --no-mark` (§6) |
 | 🎯 Goals         | `goal list` (§11)             |
 | 🧭 My plan       | `plan show` (§11)             |
 | 📈 Progress      | `progress --chart`            |
@@ -312,7 +313,22 @@ parity promise nobody re-checks.
 
 Initial opt-in set: `workout list` (today/week), `progress` (chart caption + two-line
 summary), the adapt result, and `bot morning`. The §11 breadth pass added `goal list`
-and `plan show`.
+and `plan show`; the look back (2026-09-03) added `workout compare`.
+
+**The look back is four glyphs.** `workout compare` in companion voice is the week
+view turned around: one dated line per planned session and per extra effort, and the
+glyph at the front is the whole verdict — ✅ followed the plan, ❌ did not, ➕ an effort
+the plan did not ask for, ⏳ still ahead today. A trained session says what was done
+("you did 43 min"); a kept rest day is a ✅; a rest day trained through is a ❌ that
+names the effort. The expert report's extra facts stay expert: the discrepancy list,
+the load-from-RPE note (it qualifies a load figure the companion line does not carry),
+the in-block versus off-plan distinction, and efforts under the minor-load bar, which
+the companion does not mention at all. The closing count follows the tone rule — what
+was done leads, the gap is a number after it — and a window with nothing behind it is
+not a miss. The ❌ is the one place the companion names a gap per line: in a look back
+the gap *is* the news, and the rule governs the opening and the closing, not the facts
+in between. The button passes `--no-mark`, so a tap is a read: stamping the Calendar
+with adherence stays with the morning push and the expert CLI.
 
 **The adapt preview is prose too.** The first opt-in covered only the adapt *result*
 (the reason line and the no-change line); the preview between them still printed the
@@ -746,6 +762,7 @@ is expert detail.
 | Intent | Shape | Runs |
 |---|---|---|
 | `show_today` `show_week` `show_goals` `show_plan` `show_progress` `show_constraints` | view | *(unchanged, §5.3/§11)* |
+| `show_done` | view | `workout compare -d 7d --no-mark` (§6, 2026-09-03) |
 | `coach_message` | — | `adapt -m` *(unchanged — state should invoke the coach)* |
 | `add_constraint` / `add_signal` | capture | `bot capture note` *(off adapt, §12.3)* |
 | `edit_constraint` | capture+nominate | → `constraint edit <id> …` (§12.4) |

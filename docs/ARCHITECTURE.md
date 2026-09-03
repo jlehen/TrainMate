@@ -190,7 +190,7 @@ classes themselves.
     `cli/render.make_renderer` and handed out as `runtime.render` — the voice axis,
     beside `runtime.prompt`'s transport axis. A command calls one method per thing it
     has to say and never asks which persona answered; `CompanionRenderer` extends
-    `ExpertRenderer`, so its override set *is* the opted-in list (`workout list`,
+    `ExpertRenderer`, so its override set *is* the opted-in list (`workout list`, `workout compare`,
     `progress`, the five adapt outcome lines, `goal list`, `plan show`, `workout
     generate`'s preview, the revision preview, `constraint rm`, the runway hint's
     silence, the adapt plan-behind refusal, the note-candidate confirms, `goal

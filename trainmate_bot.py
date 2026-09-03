@@ -105,6 +105,7 @@ SIMPLE_WELCOME = (
     "Use the buttons below:\n"
     "📅 Today — today's session\n"
     "🗓 My week — the days ahead\n"
+    "✅ Done lately — how the last days went\n"
     "🎯 Goals — what you're training for\n"
     "🧭 My plan — the road to your goal\n"
     "📈 Progress — how your fitness is building\n"
@@ -136,6 +137,8 @@ ROUTER_FALLBACK = (
 SIMPLE_KEYBOARD = [
     ("📅 Today", ["workout", "list", "-d", "today"]),
     ("🗓 My week", ["workout", "list"]),
+    # A look back is a read: --no-mark keeps the Calendar stamping out of a tap (§5.1).
+    ("✅ Done lately", ["workout", "compare", "-d", "7d", "--no-mark"]),
     ("🎯 Goals", ["goal", "list"]),
     ("🧭 My plan", ["plan", "show"]),
     ("📈 Progress", ["progress", "--chart"]),
@@ -149,6 +152,7 @@ SIMPLE_KEYBOARD = [
 ROUTER_INTENT_ARGV = {
     "show_today": ["workout", "list", "-d", "today"],
     "show_week": ["workout", "list"],
+    "show_done": ["workout", "compare", "-d", "7d", "--no-mark"],
     "show_goals": ["goal", "list"],
     "show_plan": ["plan", "show"],
     "show_progress": ["progress", "--chart"],
@@ -177,6 +181,7 @@ ROUTER_CAPTURE_INTENTS = {
 ROUTER_ECHO = {
     "show_today": "showing today",
     "show_week": "showing your week",
+    "show_done": "showing what you've done lately",
     "show_goals": "showing your goals",
     "show_plan": "showing your plan",
     "show_progress": "showing your progress",

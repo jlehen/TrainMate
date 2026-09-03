@@ -710,9 +710,31 @@ def run_workout_compare(args: argparse.Namespace) -> None:
     )
 
     sport_filter = (getattr(args, 'sport_type', None) or "").lower() or None
+    days = compare_days(
+        start_date_obj, history_days, matching_results, activities, sport_filter
+    )
 
+    runtime.render.workout_compare(
+        days, start_date=start_date, end_date=end_date, sport_filter=sport_filter,
+        discrepancies=discrepancies, informational=informational,
+        covered_ranges=covered_ranges,
+    )
+    if not days:
+        return
+    if getattr(args, 'no_mark', False) or not config.google_calendar_id:
+        return
+    runtime.render.calendar_marked(mark_adherence_from_results(matching_results, today_str))
+
+
+def compare_days(
+    start_date_obj, history_days: int, results: list, activities: list,
+    sport_filter: Optional[str],
+) -> list:
+    """The window day by day, keeping only days with something to say: a list of
+    ``(date, matched results, unmatched activities)`` with the sport filter applied.
+    Both personas walk this list, so the pairing is decided once (DESIGN_render_persona.md §3)."""
     matched_act_ids = {
-        r['completed']['activity_id'] for r in matching_results if r['completed']
+        r['completed']['activity_id'] for r in results if r['completed']
     }
 
     acts_by_date: dict = {}
@@ -720,17 +742,10 @@ def run_workout_compare(args: argparse.Namespace) -> None:
         acts_by_date.setdefault(act['date'], []).append(act)
 
     results_by_date: dict = {}
-    for r in matching_results:
+    for r in results:
         results_by_date.setdefault(r['date'], []).append(r)
 
-    print(bold(cyan("=== WORKOUT COMPARE ===")))
-    filter_parts = [f"From: {fmt_date(start_date)}", f"Until: {fmt_date(end_date)}"]
-    if sport_filter:
-        filter_parts.append(f"Type: {sport_filter}")
-    print(gray(f"Filters: {', '.join(filter_parts)}"))
-    print()
-
-    has_output = False
+    days = []
     for d in range(history_days):
         date_curr = (start_date_obj + timedelta(days=d)).strftime("%Y-%m-%d")
         day_results = results_by_date.get(date_curr, [])
@@ -749,8 +764,27 @@ def run_workout_compare(args: argparse.Namespace) -> None:
 
         if not day_results and not unplanned:
             continue
+        days.append((date_curr, day_results, unplanned))
+    return days
 
-        has_output = True
+
+def print_workout_compare(
+    days: list, *, start_date: str, end_date: str, sport_filter: Optional[str],
+    discrepancies: list, informational: list, covered_ranges: list,
+) -> None:
+    """The expert compare report: PLANNED/ACTUAL per day, then the discrepancy list."""
+    print(bold(cyan("=== WORKOUT COMPARE ===")))
+    filter_parts = [f"From: {fmt_date(start_date)}", f"Until: {fmt_date(end_date)}"]
+    if sport_filter:
+        filter_parts.append(f"Type: {sport_filter}")
+    print(gray(f"Filters: {', '.join(filter_parts)}"))
+    print()
+
+    if not days:
+        print(gray("No planned workouts or completed activities found in this range."))
+        return
+
+    for date_curr, day_results, unplanned in days:
         print(bold(cyan(fmt_date(date_curr))))
 
         for r in day_results:
@@ -792,10 +826,6 @@ def run_workout_compare(args: argparse.Namespace) -> None:
 
         print(gray("-" * 40))
 
-    if not has_output:
-        print(gray("No planned workouts or completed activities found in this range."))
-        return
-
     print()
     if discrepancies:
         print(bold(yellow("=== DISCREPANCIES ===")))
@@ -815,10 +845,11 @@ def run_workout_compare(args: argparse.Namespace) -> None:
                 f"- {fmt_date(act['date'])}: {format_actual(act, divergence=True)}"
             ))
 
-    if not getattr(args, 'no_mark', False) and config.google_calendar_id:
-        marked = mark_adherence_from_results(matching_results, today_str)
-        print()
-        if marked:
-            print(green(f"Marked {marked} past event(s) on Calendar with adherence."))
-        else:
-            print(gray("Calendar adherence already up to date for this range."))
+
+def print_calendar_marked(marked: int) -> None:
+    """What the adherence stamping did to the Calendar, after the expert report."""
+    print()
+    if marked:
+        print(green(f"Marked {marked} past event(s) on Calendar with adherence."))
+    else:
+        print(gray("Calendar adherence already up to date for this range."))

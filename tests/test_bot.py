@@ -402,7 +402,7 @@ class GuardrailTest(unittest.TestCase):
     Nothing plan-shaping, expensive or irreversible is reachable without typing."""
 
     ALLOWED_PREFIXES = {
-        ("workout", "list"), ("goal", "list"), ("plan", "show"),
+        ("workout", "list"), ("workout", "compare"), ("goal", "list"), ("plan", "show"),
         ("progress", "--chart"), ("bot", "constraints"), ("bot", "goals"),
         ("bot", "capture"),
     }
@@ -428,6 +428,16 @@ class GuardrailTest(unittest.TestCase):
             if argv is None:
                 continue
             self.assertIn(tuple(argv[:2]), self.ALLOWED_PREFIXES, label)
+
+    def test_a_look_back_never_stamps_the_calendar(self):
+        """`workout compare` writes adherence tags to Calendar events unless told not
+        to; from a tap or a routed message it is a read (§5.1)."""
+        argvs = [argv for _, argv in bot.SIMPLE_KEYBOARD if argv]
+        argvs += list(bot.ROUTER_INTENT_ARGV.values())
+        compares = [argv for argv in argvs if argv[:2] == ["workout", "compare"]]
+        self.assertTrue(compares)
+        for argv in compares:
+            self.assertIn("--no-mark", argv)
 
     def test_router_argv_stays_read_only(self):
         for intent, argv in bot.ROUTER_INTENT_ARGV.items():
