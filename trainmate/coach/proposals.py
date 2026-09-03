@@ -1,17 +1,10 @@
 """What the coach proposes, before the athlete has accepted it.
 
 These records exist to stop the same rule being written twice on both sides of a
-boundary. Two drift bugs came from that:
-
-* The CLI preview re-derived which planned session a proposal displaces, and rebuilt
-  the adaptation's date range from ``min``/``max`` of the proposal dates — a *narrower*
-  range than adapt actually evaluated — then handed that to apply, which uses it to
-  decide what to delete. Preview and apply could therefore disagree about what
-  disappears.
-* ``plan_generate`` fingerprinted its inputs at prompt time while ``plan_apply``
-  re-read them from the database at accept time, so editing a goal in between
-  persisted a fingerprint describing data the strategy was never generated against —
-  silently defeating the staleness detector whose whole job is catching that.
+boundary. When the CLI preview re-derived a proposal's displaced session and date range,
+preview and apply could disagree about what disappears; when ``plan_generate``
+fingerprinted at prompt time and ``plan_apply`` re-read at accept time, an edit in
+between silently defeated the staleness detector.
 
 So a proposal carries the facts it was computed from, and the consumer renders rather
 than recomputes. Records only: the logic that fills them in lives in `revisions.py`.

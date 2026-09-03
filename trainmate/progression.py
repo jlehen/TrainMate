@@ -6,13 +6,11 @@ Pure functions, no singleton state — same shape as `trainmate/adherence.py` an
 endpoint); nothing here touches `db` directly, so the same computation is
 shared verbatim by every front-end (DESIGN_progress_timeline.md §5).
 
-The past half is **read, not recomputed** (§4): CTL/ATL/TSB for days before today
-come verbatim from the stored `athlete_metrics_cache` rows that
-`garmin.compute_pmc` already wrote, so `tm progress` and `tm status` never
-disagree about the same day's fitness. The future half is an *anchored fold*: the
-same recurrence folded forward from the latest stored row over the merged daily
-loads — measured past → planned future — which is exactly the PMC design's
-deferred Phase 2 projection, generalized to the full daily series.
+The past half is **read, not recomputed** (§4): CTL/ATL/TSB for days before today come
+verbatim from the stored `athlete_metrics_cache` rows `garmin.compute_pmc` wrote, so
+`tm progress` and `tm status` never disagree about the same day's fitness. The future
+half is an *anchored fold*: the same recurrence folded forward from the latest stored
+row over the merged daily loads — measured past → planned future.
 
 One purity caveat, same as `adherence.py`'s: `garmin.activity_load` reads
 `config` thresholds, and importing `trainmate.garmin` imports the `db`
@@ -367,25 +365,16 @@ def weekly_aggregates(
          actual_load_by_sport, meso_label, meso_source, zone_rows, sport_seconds,
          judged_sport_seconds, load_sparse, planned_zone_rows}
 
-    The `_by_sport` dicts (canonical sport -> load) are the same totals bucketed by
-    `sports.canonical_sport`, so a caller can tell WHICH sport drove a week's gap
-    without re-deriving it from the activity/workout rows itself — the raw material
-    for the gap annotation in DESIGN_block_progress.md §3.3. Bucketed on
-    `activity_type` for `actual_load_by_sport` (the raw `completed_activities` column)
-    and on `sport_type` for the two planned dicts — the same split `intensity.py`'s
-    sport-keyed helpers already draw between the two row shapes.
+    The `_by_sport` dicts (canonical sport -> load) let a caller tell WHICH sport drove a
+    week's gap without re-deriving it — the raw material for DESIGN_block_progress.md
+    §3.3. Bucketed on `activity_type` for the actual dict and `sport_type` for the two
+    planned ones, the same split `intensity.py`'s sport-keyed helpers draw.
 
-    `planned_load` (Σ `adherence.planned_load` over non-removed workouts — the
-    *adapted* plan, "what the plan asked at the time") is None for a week the plan
-    never covered, matching `adherence.py`'s precedent that activity outside planned
-    coverage is informational, not a deviation.
-
-    `partial_plan` marks a week the plan covers only *part* of: it began or ended
-    mid-week, so its planned total spans fewer days than its actual does and no
-    honest percentage can be formed from the pair (§3 'comparable days'). The
-    current (in-progress) week additionally carries `planned_load_elapsed`, the
-    Monday-through-elapsed slice — today included only once its load has synced —
-    so a partial week doesn't read as poor adherence every Monday."""
+    `planned_load` is None for a week the plan never covered, matching `adherence.py`:
+    activity outside planned coverage is informational, not a deviation. `partial_plan`
+    marks a week the plan covers only part of, where no honest percentage can be formed
+    from the pair (§3 'comparable days'); the in-progress week also carries
+    `planned_load_elapsed` so it doesn't read as poor adherence every Monday."""
     non_removed_workouts = [w for w in workouts if not w.get("removed")]
     start = _series_start(activities, non_removed_workouts)
     if start is None:
@@ -748,7 +737,7 @@ def assemble_timeline(
         "meso_bands": bands,
         "objectives": objectives,
         # Structured, not a `warnings` string: the CLI draws it as a three-line banner
-        # and used to recognise it by prefix-matching the prose, then recompute it.
+        # rather than prefix-matching prose to recover the same facts.
         "plan_gap": (
             {"objective": gap[0], "weeks_before": gap[1], "plan_end": end}
             if gap else None

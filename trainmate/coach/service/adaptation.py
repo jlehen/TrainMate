@@ -171,14 +171,10 @@ class AdaptationMixin:
             start_date=signal_start_str, end_date=target_date_str
         )
 
-        # Determine mesocycle end date for the adaptation range. The plan we adapt runs
-        # FORWARD from the target date to here, so workouts must be fetched across the
-        # whole span (lookback start -> mesocycle end), not just the backward window —
-        # otherwise the LLM never sees already-scheduled future sessions and reinvents
-        # them from scratch (losing their sport/title and overwriting the athlete's plan).
-        # No plan, no adaptation: every judgement below is relative to the block — its
-        # focus, its remaining days, what a cut can still rebound from — so without one
-        # there is nothing to adapt *towards* (DESIGN_block_boundary.md §6).
+        # Workouts are fetched across the whole span (lookback start -> mesocycle end), not
+        # just the backward window: otherwise the LLM never sees already-scheduled future
+        # sessions and reinvents them, overwriting the athlete's plan. And no plan means no
+        # adaptation — there is nothing to adapt *towards* (DESIGN_block_boundary.md §6).
         active_meso = self._db.get_active_mesocycle(target_date_str)
         if not active_meso:
             raise ValueError(

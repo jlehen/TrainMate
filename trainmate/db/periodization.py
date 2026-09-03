@@ -485,18 +485,9 @@ class PeriodizationMixin:
     ) -> int:
         """Saves a macrocycle and its nested mesocycles for the objective.
 
-        goals_snapshot/constraints_snapshot are JSON of the goals and plan-shaping
-        constraints the plan was generated from (the same cleaned data the hashes
-        fingerprint), preserved so the inputs can be shown later even after the live
-        records change. all_constraints_snapshot is JSON of *every* constraint active
-        at generation time, replan or not, tagged per-entry with its `replan` flag —
-        display-only, since the prompt is built from all of them but only the
-        `replan = 1` subset fingerprints the plan (DESIGN_constraints.md §7). config_snapshot
-        is JSON of the physiological thresholds the plan was generated with, kept as raw
-        values (not a hash) so staleness can be judged against a drift tolerance
-        (coach/service.config_changed). profile_snapshot is JSON of the plan-shaping
-        profile fields, kept for the same reason in reverse: the hash detects the change,
-        the snapshot names the field that moved (DESIGN_plan_staleness.md §5).
+        The four `*_snapshot` arguments are JSON of the inputs the plan was generated from,
+        preserved so they can be shown and judged for drift after the live records change;
+        `db/base.py` documents each at its column.
 
         The previously-active macrocycle for the objective is *superseded* rather than
         deleted (see DESIGN_plan_rollback.md): it and its mesocycles are kept so that

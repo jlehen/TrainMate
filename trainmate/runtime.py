@@ -1,23 +1,15 @@
 """The process-wide singletons, in one place.
 
-Before this module there were four conventions for reaching the same handle — an
-import-bound ``db``, a late package attribute, an optional ``dbh=`` parameter, and
-``trainmate_cli.db`` — so whether a replacement "took" depended on which idiom the code
-under test happened to use, and several modules imported a name only to be patched
-through (a decoy that succeeded and did nothing). Everything now reads
-``runtime.<name>`` at use time, which makes one assignment authoritative for the whole
-process.
+Everything reads ``runtime.<name>`` at use time, so one assignment is authoritative for
+the whole process rather than depending on which import idiom the caller happened to use.
 
 Two properties matter and both come from resolving lazily, in ``__getattr__``:
 
-* **No import-time side effects.** Building ``db`` runs the schema migrations and
-  writes to the file, so constructing it merely because something imported a module is
-  a surprise — ``--help`` should not touch the database. Nothing is built until first
-  use.
+* **No import-time side effects.** Building ``db`` runs the schema migrations and writes
+  to the file, so constructing it merely because something imported a module is a
+  surprise — ``--help`` should not touch the database. Nothing is built until first use.
 * **No import cycles.** ``coach`` needs ``prompt``; ``prompt`` lives here; this module
-  needs ``coach``. Deferring every import into the accessor breaks the knot, which is
-  what the ``sys.modules`` self-alias in trainmate_cli.py and the package self-imports
-  in ``garmin`` were each working around.
+  needs ``coach``. Deferring every import into the accessor breaks the knot.
 
 Assigning a name (``runtime.db = fake``) shadows the accessor permanently for that
 process, which is how tests install their own handles — see tests/helpers.py.

@@ -353,29 +353,17 @@ def translate_dashless_argv(parser: argparse.ArgumentParser, tokens: list) -> li
     result to ``parse_args`` which still does all validation/help/choices. Both syntaxes —
     even mixed — therefore keep working, and the command handlers are untouched.
 
-    Rules per token, at the current command level:
-      * ``-…`` (already dashed) → passed through verbatim (classic syntax / its values).
-      * a known boolean keyword (``nargs == 0``) → ``--flag``, consumes nothing.
-      * a known multi-value keyword (``nargs`` in ``+``/``*``) → ``--flag`` then the next
-        token split on commas (``sport running,hiking`` → ``--sport running hiking``).
-      * a known optional-value keyword (``nargs == '?'``, e.g. ``mesocycle [ID]``) →
-        ``--flag``, consuming the next token only if it isn't itself a keyword/option.
-      * any other known keyword → ``--flag`` and binds the very next token as its value
-        unconditionally (so a value colliding with a keyword name — a goal literally
-        titled ``date`` — is still taken as the value).
-      * a sub-command/alias → emitted *as its canonical name*, then the remainder is
-        translated in that sub-parser's context (recursive descent mirroring the parser
-        tree). This also covers the top-level ``help`` command (a real sub-command), so
-        it takes priority over the next rule.
-      * the bare word ``help`` (not a sub-command at this level) → ``--help``,
-        argparse's own one-level help for the current command.
-      * an unambiguous *prefix* of a sub-command → the same descent, tried only after
-        the exact-keyword rules above so no existing spelling changes meaning
-        (DESIGN_cli_noargs.md §d).
-      * anything else → left as-is for argparse to bind positionally.
+    The loop below is the rule list, in precedence order. Three of its choices are
+    deliberate rather than mechanical:
 
-    Because every sub-command reaches argparse under its canonical name, the dispatcher
-    in ``trainmate_cli`` compares canonical names only.
+      * a known keyword binds the very next token as its value *unconditionally*, so a
+        value colliding with a keyword name — a goal literally titled ``date`` — is still
+        taken as the value.
+      * an unambiguous sub-command *prefix* descends only after every exact-keyword rule
+        has missed, so no existing spelling changes meaning (DESIGN_cli_noargs.md §d).
+      * a sub-command is emitted as its canonical name before the remainder is translated
+        in that sub-parser's context, so the dispatcher in ``trainmate_cli`` compares
+        canonical names only.
     """
     spec = _build_keyword_spec(parser)
     sub_action = _subparsers_action(parser)

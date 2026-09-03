@@ -312,8 +312,8 @@ class PlanningMixin:
 
         latest_preceding_target = None
         # Kept in its own name: `prev_macro` below is whichever plan the new one *replaces*,
-        # and on a re-plan that is this goal's own — which used to overwrite the preceding
-        # goal's season out of the review entirely (DESIGN_backward_evaluation.md §6.1).
+        # which on a re-plan is this goal's own — not the preceding goal's season, which the
+        # review still needs (DESIGN_backward_evaluation.md §6.1).
         preceding_macro = None
 
         for po in preceding_objs:

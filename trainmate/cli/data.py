@@ -237,12 +237,9 @@ def _show_metrics_csv(metrics_history: list) -> None:
 
 
 # Where `activity_load` took a row's number from, as a tag beside it
-# (DESIGN_intensity_distribution.md §9.7). The highest-value fact missing from this view
-# is not the zone breakdown, it is the provenance of the TSS: every downstream confusion
-# about the load half of `tm progress` disagreeing with the zone half traces back to a
-# provenance that was invisible. `rpe+` is a path `compute_load` has no word for — the
-# measurement was trustworthy but the athlete's RPE implied materially more strain, so
-# the load came from RPE anyway (the kettlebell case §6 exists for).
+# (DESIGN_intensity_distribution.md §9.7). `rpe+` is a path `compute_load` has no word
+# for — the measurement was trustworthy but the athlete's RPE implied materially more
+# strain, so the load came from RPE anyway (the kettlebell case §6 exists for).
 LOAD_TAGS = {
     "power": "pwr", "hr": "hr", "rpe": "rpe", "hr_sparse": "sparse!",
     "rpe_divergence": "rpe+", "measured": "tss", "none": "—",

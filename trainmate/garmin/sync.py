@@ -277,13 +277,10 @@ def ensure_data(start_date: str, end_date: str, force: bool = False) -> None:
     pad_days = _derivation_pad_days()
     for region in _contiguous_regions(to_fetch):
         span = (_to_date(region[1]) - _to_date(region[0])).days + 1
-        # Small gaps (incl. the cheap recent mutable-zone refresh, always <=
-        # mutable_days) pull automatically; large ones are surfaced as a command.
-        # Regions lying entirely BEFORE the requested window exist only to warm the
-        # derivation pad — they are bounded by the pad itself and were never asked
-        # for by the user, so they always auto-pull: without this, widening the pad
-        # (28 -> 63 days for CTL) would leave every pre-existing install nagging
-        # "run data pull -d ..." on each command instead of healing itself.
+        # Small gaps pull automatically; large ones are surfaced as a command. Regions
+        # lying entirely BEFORE the requested window exist only to warm the derivation
+        # pad — bounded by the pad itself and never asked for by the user — so they always
+        # auto-pull, letting a widened pad heal itself instead of nagging.
         limit = max(prompt_days, pad_days) if region[1] < start_date else prompt_days
         if span <= limit:
             auto_regions.append(region)

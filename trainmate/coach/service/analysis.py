@@ -515,13 +515,10 @@ class DataAnalysisMixin:
         # ones (DESIGN_calendar_signal_ingest.md §7).
         daily_signals = self._db.get_daily_signals(start_date=from_str, end_date=until_str)
 
-        # Quantitative signal-impact rows (alcohol, big meal, …): episode-aligned dose
-        # sequences + bracketing morning strips. These cover the athlete's FULL history of
-        # signal-days, not just [from,until] — the point is to let the LLM see the whole
-        # pattern, and an incremental reflect window contains almost no drinking history
-        # (DESIGN_quantitative_signal_impact.md §6). So they are fetched independently of
-        # the analysis window, and computed before the fingerprint because they are hashed
-        # into it (§8).
+        # Quantitative signal-impact rows cover the athlete's FULL history of signal-days,
+        # not just [from,until]: an incremental reflect window holds almost no drinking
+        # history to find a pattern in (DESIGN_quantitative_signal_impact.md §6). Computed
+        # before the fingerprint because they are hashed into it (§8).
         signal_days = self._signal_days(
             daily_signals=self._db.get_daily_signals(),
             metrics=self._db.get_metrics_cache(),

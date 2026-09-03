@@ -417,13 +417,9 @@ def _print_considered_inputs(macrocycle: dict) -> None:
     else:
         print(f"  {gray('None')}")
 
-    # `events` (constraints_snapshot) is only the replan=1 subset that fingerprints the
-    # plan — "None" here is literally true but can mislead, since the prompt is built
-    # from every active constraint, not just the plan-shaping ones. `all_events`
-    # (all_constraints_snapshot) is that full set, tagged with `replan`; when it's
-    # present, split it into the plan-shaping list (same as `events`) and a second,
-    # explicitly tactical list, so an active advisory constraint is never silently
-    # dropped from the render just because it didn't trigger a replan.
+    # `events` is only the replan=1 subset; `all_events` is every constraint the prompt
+    # actually saw. Split the latter so an active advisory one is never silently dropped
+    # from the render just because it didn't trigger a replan (DESIGN_constraints.md §7).
     tactical = [e for e in all_events if not e.get('replan')] if all_events is not None else None
 
     print(bold("Constraints considered (plan-shaping):"))

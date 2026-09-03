@@ -81,29 +81,18 @@ class PromptConfigMixin:
     def config_changed(self, macro: Dict[str, Any]) -> Optional[str]:
         """Whether config.yaml has drifted plan-shapingly since `macro` was generated.
 
-        Returns a human-readable reason, or None when the plan is still current. Two
-        axes (see engine._clean_profile): the fingerprint over plan-shaping profile
-        fields, and the effective threshold anchors (§3.3), which only count as drift past
-        `coach.threshold_replan_pct` relative change — a small FTP/LTHR retest
-        correction feeds the next workout generation without invalidating the
-        periodization strategy. Macrocycles predating the threshold snapshot judge on
-        the fingerprint alone.
+        Returns a human-readable reason, or None when the plan is still current. Two axes
+        (see engine._clean_profile): the fingerprint over plan-shaping profile fields, and
+        the effective threshold anchors (§3.3), which only count as drift past
+        `coach.threshold_replan_pct` relative change — a small FTP/LTHR retest correction
+        feeds the next workout generation without invalidating the periodization strategy.
+        The reason names the fields that moved (DESIGN_plan_staleness.md §5).
 
-        The profile reason names the fields that moved when the macrocycle carries a
-        profile snapshot, and falls back to the unnamed "athlete profile changed" when it
-        predates that column (DESIGN_plan_staleness.md §5).
-
-        Snapshot scope is uniform — every anchor kind on record joins it, ftp/lthr are not
-        special (§3.5). A kind absent from the OLD snapshot is a *newly recorded* one (e.g.
-        a first swim test): it starts feeding prompts immediately and joins drift-checking
-        from the next generated plan, so it is skipped here rather than read as instant
-        drift. A kind that *disappears* still reads as drift — a threshold the plan relied
-        on going missing is real.
-
-        `e1rm` is the one exclusion: it collides across lifts (a deadlift PR logged after a
-        squat PR reads as a 70% jump), so a squat PR would invalidate a whole periodization
-        (DESIGN_intensity_distribution.md §10). It still feeds the prompt; it just never
-        trips a replan.
+        Every anchor kind on record joins the snapshot uniformly (§3.5). A kind absent from
+        the OLD snapshot is a *newly recorded* one, so it is skipped rather than read as
+        instant drift; a kind that *disappears* is real drift. `e1rm` is the one exclusion:
+        it collides across lifts, so a squat PR would invalidate a whole periodization
+        (DESIGN_intensity_distribution.md §10). It still feeds the prompt, never a replan.
         """
         if macro.get('config_hash') != self.engine._get_config_hash():
             return _profile_change_reason(macro.get('profile_snapshot'))

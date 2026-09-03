@@ -44,21 +44,12 @@ CURRENCY_BY_KEY: Dict[str, Currency] = {c.key: c for c in CURRENCIES}
 # downstream — a screen-width re-wrap would shred the columns (§6).
 PROMPT_WIDTH = 100
 
-# A week's row admits it is incomplete below this — `config.zone_coverage_display_min`
-# (0.8). Deliberately NOT `hr_zone_coverage_min` (0.5), which is a "safe to compute load
-# from" bar: a week at 55% clears that while missing nearly half its recorded time (§9.6).
-#
-# The bar is PER SPORT, because uncovered time is not always a recording failure: it is
-# also the rest between sets, the chairlift back up, the gentle walking on a hike, the
-# held pose. Those seconds sit below zone 1 and no zone claims them, so one bar
-# calibrated on continuous efforts condemns every week of every sport that has them.
-# Over six months of history cycling and ski touring hold ~0.95 median coverage, while
-# strength training holds 0.90 with a 0.49 lower quartile, resort skiing 0.26 and hiking
-# 0.15. Each bar below sits near its own sport's 25th percentile, so `!` marks the worst
-# quarter of that sport's weeks rather than all of them (§11).
-#
-# Keys are CANONICAL sports, because the lookup canonicalizes first: an alias key here is
-# unreachable and the sport silently falls back to the global bar (§11 rev note 2026-08-04).
+# A week's row admits it is incomplete below this. Uncovered time is not always a
+# recording failure — it is also the rest between sets, the chairlift back up, the held
+# pose — so the bar is per sport, each set near that sport's own 25th percentile (§11).
+# Deliberately NOT `hr_zone_coverage_min`, which is a "safe to compute load from" bar
+# (§9.6). Keys must be CANONICAL sports: the lookup canonicalizes first, so an alias key
+# is unreachable and falls back to the global bar.
 COVERAGE_MIN_BY_SPORT: Dict[str, float] = {
     "strength_training": 0.45,
     "downhill_skiing": 0.15,

@@ -167,9 +167,9 @@ def build_parser():
         help="Print the prompt that would be sent to the LLM and exit without sending"
     )
 
-    # Date/mesocycle/macrocycle/goal filtering is no longer a shared parent parser: each
-    # command calls trainmate.cli.selectors.add_selector_args with its own default window
-    # and direction (DESIGN_cli_selectors.md §3).
+    # Date/mesocycle/macrocycle/goal filtering is not a shared parent parser: each command
+    # calls trainmate.cli.selectors.add_selector_args with its own default window and
+    # direction (DESIGN_cli_selectors.md §3).
     add_status_parser(subparsers, pull_bypass_parser)
     add_progress_parser(subparsers, pull_bypass_parser)
     goal_parser = add_goal_parser(subparsers)

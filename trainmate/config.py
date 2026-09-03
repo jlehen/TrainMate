@@ -3,13 +3,10 @@ import yaml
 from typing import Any, Dict, List, Optional
 from trainmate.signals import DEFAULT_SIGNAL_METRICS, normalize_metric
 
-# Which config file this process runs against. TRAINMATE_CONFIG selects one explicitly —
-# that is how a second athlete runs from the same checkout (ARCHITECTURE.md §9); the
-# default is config.yaml at the repo root. Relative paths written in the file
-# (`database:`, `science_dir:`, `service_account_file`) resolve against the config file's
-# directory — or against `data_dir:` when that key is set, which moves the whole
-# instance's state under one directory without repeating the prefix on every path key.
-# Either way an instance's state lives beside its config, never beside the code.
+# Which config file this process runs against; TRAINMATE_CONFIG is how a second athlete
+# runs from the same checkout (ARCHITECTURE.md §9). Relative paths in the file resolve
+# against its directory, or against `data_dir:` when set — either way an instance's state
+# lives beside its config, never beside the code.
 _DEFAULT_CONFIG_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "config.yaml")
 CONFIG_PATH = os.path.abspath(
     os.path.expanduser(os.environ.get("TRAINMATE_CONFIG") or _DEFAULT_CONFIG_PATH))
@@ -581,12 +578,10 @@ config = Config()
 
 
 # Threshold anchors are excluded from the config fingerprint: they anchor per-workout zone
-# targets (recomputed from live values at every generation), not the phase structure. They
-# are snapshotted on the macrocycle and only flag the plan stale past a relative drift
-# tolerance (`coach.threshold_replan_pct`) — see service.config_changed() /
-# service.effective_thresholds(). Post-DESIGN_benchmark_workouts §3.4 only `max_hr` still
-# lives in config (lthr/ftp moved to the benchmark logbook); the other two names are kept
-# here so any legacy config that still carries them is excluded from the hash.
+# targets, not the phase structure. They are snapshotted on the macrocycle and only flag
+# the plan stale past a relative drift tolerance (`coach.threshold_replan_pct`) — see
+# service.config_changed(). Only `max_hr` still lives in config; lthr/ftp are named here so
+# a config still carrying them stays out of the hash (DESIGN_benchmark_workouts.md §3.4).
 PROFILE_THRESHOLD_FIELDS = ('max_hr', 'lthr', 'ftp')
 
 # Profile fields that reach every prompt but cannot shape the *periodization*, so editing

@@ -294,10 +294,8 @@ def analyze_adherence(
     pending_from: Optional[str] = None,
     rejected_matches: Optional[Set[Tuple[str, str]]] = None,
 ) -> Tuple[List[str], List[Dict[str, Any]], List[Dict[str, Any]]]:
-    """Evaluates planned workouts vs completed Garmin activities over a rolling window.
-
-    Calculates adherence discrepancies (missed workouts, duration/workload mismatches, and
-    rest violations).
+    """Evaluates planned workouts vs completed Garmin activities over a rolling window,
+    reporting missed workouts, duration/workload mismatches and rest violations.
 
     Args:
         planned_workouts: List of planned workouts in the window.

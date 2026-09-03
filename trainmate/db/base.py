@@ -216,23 +216,16 @@ class BaseDB:
                 "UPDATE objectives SET status = 'active' WHERE status = 'completed'"
             )
 
-            # Drop the legacy `lifeevents` table (and its even older `life_events` name).
-            # It was superseded by `constraints` (DESIGN_constraints.md §5) and kept
-            # read-only for one release while the `lifeevent` forwarder deprecated out; both
-            # the forwarder and the table are now removed together (§10 step 8). The one-off
-            # row copy that migrated its contents into `constraints` has already run for any
-            # DB that had rows; dropping here reclaims the space. `DROP … IF EXISTS` is
-            # idempotent, so it is safe to leave in `_init_db` (which runs every invocation).
+            # Dead tables, replaced by `constraints` (DESIGN_constraints.md §5); the row
+            # copy across has already run. Idempotent, so it stays in `_init_db`.
             cursor.execute("DROP TABLE IF EXISTS lifeevents")
             cursor.execute("DROP TABLE IF EXISTS life_events")
 
             # Unified directives — everything the athlete asks the coach to work around, at
-            # any horizon (DESIGN_constraints.md §5). Supersedes `lifeevents`. A constraint is
-            # advisory prose the coach reads (title/description) unless `rest = 1`, the single
-            # deterministic edge: a full no-training window whose dates skip the LLM and are
-            # forced to rest (rev 6 — replaces the old hard/soft × sport matrix and the opaque
-            # `type` label). `replan` marks a directive escalated to plan-shaping (§7);
-            # `source` records how the row was authored ('manual'|'message'|'lifeevent').
+            # any horizon (DESIGN_constraints.md §5). A constraint is advisory prose the coach
+            # reads unless `rest = 1`, the single deterministic edge: a no-training window
+            # whose dates skip the LLM and are forced to rest. `replan` marks one escalated to
+            # plan-shaping (§7).
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS constraints (
                     id          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -250,15 +243,10 @@ class BaseDB:
                 "CREATE INDEX IF NOT EXISTS idx_constraints_start ON constraints(start_date)"
             )
 
-            # Simplify the constraint model to one deterministic `rest` flag (rev 6). The
-            # hard/soft × sport enforcement matrix and the never-branched-on `type` label are
-            # removed: the only combination that ever forced rest — `hard` with no sport —
-            # becomes rest=1; every other row becomes advisory prose (rest=0), which is how
-            # hard+sport and every soft row already behaved. Dropping binding/sport/type is
-            # pure DDL, guarded by column presence, so it is idempotent and lives here. It does
-            # change the constraints_hash of any plan-shaping (replan=1) constraint, so run
-            # scripts/migrate_constraints_drop_binding.py once to backfill that hash and avoid a
-            # one-time spurious "inputs changed" regen prompt (§7).
+            # Collapse binding/sport/type onto the one `rest` flag (DESIGN_constraints.md §5).
+            # Every dropped row already behaved as advisory prose, so only hard+no-sport
+            # carries over. Changes the constraints_hash of a replan=1 constraint: run
+            # scripts/migrate_constraints_drop_binding.py once to avoid a spurious regen (§7).
             cursor.execute("PRAGMA table_info(constraints)")
             ccols = [row['name'] for row in cursor.fetchall()]
             if 'rest' not in ccols:
@@ -380,14 +368,10 @@ class BaseDB:
                 BEGIN SELECT RAISE(ABORT, 'workouts is append-only: append a void revision'); END
             """)
 
-            # Benchmark results logbook (DESIGN_benchmark_workouts.md §3.2): a dated log of
-            # fitness-test outcomes, one row per measurement. With config's `ftp`/`lthr`
-            # removed (§3.4), this is the ONLY home for the athlete's trainable thresholds —
-            # the effective-threshold accessor reads the latest row per anchor_kind (newest
-            # by date, id as tiebreak) and feeds it to the coaching prompt and the plan
-            # staleness check. `workout_id` optionally links a result to the planned
-            # benchmark it satisfied. `source` records how the value arrived
-            # (test|manual|modeled — the last anticipates Phase-3 passive estimation).
+            # Benchmark results logbook (DESIGN_benchmark_workouts.md §3.2), one row per
+            # measurement and the ONLY home for the athlete's trainable thresholds (§3.4).
+            # The effective-threshold accessor reads the latest row per anchor_kind — newest
+            # by date, id as tiebreak — and feeds it to the prompt and the staleness check.
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS benchmark_results (
                     id          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -507,12 +491,11 @@ class BaseDB:
                 )
             """)
 
-            # Coach learnings: discrete, addressable athlete-observation records.
-            # The LLM updates these incrementally via deltas (see apply_learning_deltas)
-            # rather than overwriting a single blob. `confidence` is now APP-COMPUTED from
-            # the per-learning evidence basis (learning_evidence below), not LLM-asserted
-            # (DESIGN_evidence_based_confidence.md). `proposed_confidence` holds a pending,
-            # human-confirmable DOWNGRADE (NULL when none pending).
+            # Coach learnings: discrete, addressable athlete-observation records, updated
+            # incrementally via deltas (see apply_learning_deltas). `confidence` is
+            # APP-COMPUTED from the evidence basis in learning_evidence below, never
+            # LLM-asserted (DESIGN_evidence_based_confidence.md); `proposed_confidence`
+            # holds a pending human-confirmable DOWNGRADE.
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS coach_learnings (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -586,9 +569,8 @@ class BaseDB:
             # Fold the plan's staleness fingerprint back to `constraints_hash` and its
             # snapshot to `constraints_snapshot` (DESIGN_constraints.md §7/§9). The prior
             # `lifeevents_hash`/`lifeevents_snapshot` names are renamed in place; existing
-            # snapshot VALUES are left untouched as legacy (the display code tolerates plans
-            # that predate a snapshot key). The old constraints_hash→lifeevents_hash rename
-            # is gone — this is its reversal.
+            # snapshot VALUES are left untouched (the display code tolerates plans that
+            # predate a snapshot key).
             cursor.execute("PRAGMA table_info(macrocycles)")
             columns = [row['name'] for row in cursor.fetchall()]
             if 'lifeevents_hash' in columns and 'constraints_hash' not in columns:
@@ -606,10 +588,9 @@ class BaseDB:
                 cursor.execute(
                     "ALTER TABLE macrocycles ADD COLUMN config_hash TEXT"
                 )
-            # Snapshots of the goals and life events the plan was generated from, so they
-            # can be shown after the fact even once the live records have changed. Stored
-            # as the same cleaned JSON the goals_hash/lifeevents_hash fingerprint. NULL on
-            # macrocycles created before this column existed.
+            # Snapshots of the goals and constraints the plan was generated from, so they
+            # can be shown after the fact even once the live records have changed. Stored as
+            # the same cleaned JSON the goals_hash/constraints_hash fingerprint.
             if 'goals_snapshot' not in columns:
                 cursor.execute(
                     "ALTER TABLE macrocycles ADD COLUMN goals_snapshot TEXT"
@@ -618,22 +599,18 @@ class BaseDB:
                 cursor.execute(
                     "ALTER TABLE macrocycles ADD COLUMN constraints_snapshot TEXT"
                 )
-            # Every constraint active at generation time (not just the `replan = 1`
-            # subset `constraints_snapshot` fingerprints), tagged per-entry with its
-            # `replan` flag. Display-only: `plan show`'s "Constraints considered" used
-            # to read `constraints_snapshot` alone, which could print "None" even though
-            # a tactical constraint had visibly shaped the LLM's prompt (it sees every
-            # active constraint, not just plan-shaping ones — DESIGN_constraints.md §7).
-            # NULL on macrocycles created before this column existed.
+            # Every constraint active at generation time, not just the `replan = 1` subset
+            # `constraints_snapshot` fingerprints, tagged per-entry with its `replan` flag.
+            # Display-only: the prompt sees every active constraint, so "Constraints
+            # considered" must too (DESIGN_constraints.md §7).
             if 'all_constraints_snapshot' not in columns:
                 cursor.execute(
                     "ALTER TABLE macrocycles ADD COLUMN all_constraints_snapshot TEXT"
                 )
             # Physiological thresholds (max_hr/lthr/ftp) the plan was generated with,
             # as JSON. Unlike the profile fields folded into config_hash, thresholds
-            # only flag the plan stale past a relative drift tolerance, which needs
-            # the original values, not a hash (coach/service.config_changed). NULL on
-            # macrocycles created before this column existed (treated as no drift).
+            # only flag the plan stale past a relative drift tolerance, which needs the
+            # original values, not a hash (coach/service.config_changed). NULL is no drift.
             if 'config_snapshot' not in columns:
                 cursor.execute(
                     "ALTER TABLE macrocycles ADD COLUMN config_snapshot TEXT"
@@ -641,17 +618,15 @@ class BaseDB:
             # The plan-shaping profile fields (config.plan_profile) the plan was generated
             # with, as JSON. config_hash alone answers "did something change" but not
             # "what", so the staleness reason could not name the field that moved
-            # (DESIGN_plan_staleness.md §5). NULL on macrocycles created before this
-            # column existed — those fall back to the unnamed reason.
+            # (DESIGN_plan_staleness.md §5). NULL falls back to the unnamed reason.
             if 'profile_snapshot' not in columns:
                 cursor.execute(
                     "ALTER TABLE macrocycles ADD COLUMN profile_snapshot TEXT"
                 )
-            # Plan-version axis (see DESIGN_plan_rollback.md). Regenerating a plan no
-            # longer deletes the prior macrocycle: it is marked 'superseded' (with the
-            # moment recorded in superseded_at) and kept, so `plan rollback` can restore
-            # an earlier version. Exactly one macrocycle per objective is 'active' at a
-            # time; readers filter on status='active'. Legacy rows default to 'active'.
+            # Plan-version axis (see DESIGN_plan_rollback.md). Regenerating a plan keeps the
+            # prior macrocycle, marked 'superseded' at `superseded_at`, so `plan rollback` can
+            # restore it. Exactly one macrocycle per objective is 'active'; readers filter
+            # on status='active'.
             if 'status' not in columns:
                 cursor.execute(
                     "ALTER TABLE macrocycles ADD COLUMN status TEXT DEFAULT 'active'"
@@ -716,14 +691,10 @@ class BaseDB:
                 )
                 cursor.execute("ALTER TABLE mesocycles DROP COLUMN feedback")
 
-            # Backward-evaluation reconstruction cache (see DESIGN_backward_evaluation.md
-            # §5.1). Each row is a cached reconstruction (inferred cycles + physiological
-            # insights) of a past training window, keyed by an *evidence fingerprint* so
-            # that a re-run over unchanged data can reuse it instead of paying for another
-            # LLM pass. Retention is one row per `horizon` (UNIQUE): a new data pull shifts
-            # the fingerprint and overwrites the slot, because we only ever want the current
-            # reconstruction. The whole reconstruction is stored as one JSON blob — nothing
-            # queries inside it; it is fetched whole, fed to a prompt, or rendered.
+            # Backward-evaluation reconstruction cache (DESIGN_backward_evaluation.md §5.1),
+            # keyed by an *evidence fingerprint* so a re-run over unchanged data skips the
+            # LLM pass. One row per `horizon` (UNIQUE): a new data pull shifts the
+            # fingerprint and overwrites the slot. One JSON blob — nothing queries inside it.
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS analysis_cache (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,

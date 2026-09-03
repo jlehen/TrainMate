@@ -1,48 +1,28 @@
 """TrainMate Telegram front-end.
 
-A chat shim over the existing CLI: each incoming message is treated as a
-TrainMate command line (the leading slash Telegram requires is optional) and run
-through ``trainmate_cli.py`` as a subprocess. Driving the real CLI keeps the bot
-in permanent parity with every command/flag the CLI gains and isolates each
-invocation.
+A chat shim over the existing CLI: each incoming message is treated as a TrainMate
+command line (the leading slash Telegram requires is optional) and run through
+``trainmate_cli.py`` as a subprocess. Driving the real CLI keeps the bot in permanent
+parity with every command/flag the CLI gains, and isolates each invocation.
 
-With ``telegram.ui: simple`` the same pipeline gains a companion persona
-(DESIGN_bot_simple_frontend.md): a persistent reply keyboard maps buttons onto fixed
-argv, free text goes through an intent router (``tm bot route``), a morning
-scheduler spawns ``tm bot morning``, and replies arrive as plain prose
-(``TRAINMATE_RENDER=simple``) instead of ``<pre>`` blocks. Expert mode (the default)
-is untouched; slash-prefixed text stays the expert path in both modes. ``/ui`` flips
-between the two personae at runtime, in memory only — ``telegram.ui`` rules again at
-the next restart (DESIGN_bot_simple_frontend.md §5.6).
-
-Interactive commands work over chat via a structured-prompt protocol. The CLI is
-launched with ``TRAINMATE_FRONTEND=json`` so its prompt broker
-(``trainmate.prompt``), instead of blocking on ``input()``, emits a sentinel-framed
-JSON request line on stdout and blocks reading the answer from stdin. The bot
-keeps that subprocess alive, renders each request as an inline keyboard (confirm /
-choose) or an awaited text reply, and writes the athlete's answer back to stdin so
-the command resumes. ``/cancel`` (or an idle timeout) sends a cancellation the CLI
-turns into a clean abort. State for the single in-flight command per chat lives in
-``_Session``; a per-prompt ``nonce`` rejects stale button taps.
+Interactive commands work over chat because the CLI is launched with
+``TRAINMATE_FRONTEND=json``: its prompt broker (``trainmate.prompt``) emits a
+sentinel-framed JSON request instead of blocking on ``input()``, and the bot renders it
+as an inline keyboard and writes the answer back to stdin. One in-flight command per
+chat, state in ``_Session``, a per-prompt ``nonce`` against stale taps.
 
 The pure helpers (parse/format/auth/prompt-encoding) are import-safe without
 ``python-telegram-bot`` so they can be unit-tested; the library is imported lazily
 inside ``main``.
 
-``tm-bot`` runs this module twice removed: it's a supervisor loop that relaunches
-a worker (this process) whenever the worker exits with ``RESTART_EXIT_CODE`` —
-which is exactly what ``/restart`` does. This module doesn't know it's being
-supervised; it just exits with that code. See ``DESIGN_bot_restart.md``.
+``telegram.ui: simple`` swaps in the companion persona — reply keyboard, intent router,
+morning scheduler, prose replies; ``/ui`` flips it per-process
+(DESIGN_bot_simple_frontend.md). ``tm-bot`` supervises this process and relaunches it on
+``RESTART_EXIT_CODE``, which is what ``/restart`` exits with; polling is paused only
+while a command computes with no prompt open (DESIGN_bot_restart.md §5.1).
 
-Because a restart needs the athlete to be able to reach ``/restart`` at all, and
-because the athlete's answer to an open prompt has to arrive live, Telegram
-polling (``getUpdates``) is only paused while a command is silently computing
-with no prompt open — never while idle or while a prompt is awaiting an answer.
-See ``_pause_polling``/``_resume_polling`` in ``main``.
-
-Run with: ``./tm-bot`` (or ``venv/bin/python trainmate_bot.py``). Configure the
-token + allowlist under a ``telegram:`` block in config.yaml (see
-config_template.yaml).
+Run with: ``./tm-bot`` (or ``venv/bin/python trainmate_bot.py``). Configure the token +
+allowlist under a ``telegram:`` block in config.yaml (see config_template.yaml).
 """
 import asyncio
 import datetime

@@ -1,34 +1,27 @@
 """Front-end-agnostic prompt broker.
 
-Commands ask the athlete yes/no, one-of-N, or free-text questions through a
-``Prompt`` rather than calling ``input()`` directly, so the same handler works on
-a TTY, over the Telegram bot, or any future front-end. The active implementation
-is chosen at startup by ``make_prompt()`` from the ``TRAINMATE_FRONTEND`` env var
-and exposed as the patchable ``trainmate_cli.prompt`` singleton; handlers reach it
-as ``cli.prompt``.
+Commands ask the athlete yes/no, one-of-N, or free-text questions through a ``Prompt``
+rather than calling ``input()`` directly, so the same handler works on a TTY, over the
+Telegram bot, or any future front-end. The active implementation is chosen at startup by
+``make_prompt()`` from the ``TRAINMATE_FRONTEND`` env var and exposed as the patchable
+``trainmate_cli.prompt`` singleton; handlers reach it as ``cli.prompt``.
 
 Two transports ship here:
 
-* ``TtyPrompt`` — the original behaviour: ``input()`` with ``[y/N]`` rendering,
-  EOF falling back to the supplied default (this is what keeps piped/cron runs
-  aborting cleanly).
-* ``JsonPrompt`` — non-blocking *for the front-end*: it writes one structured
-  request line to ``out`` (sentinel-framed JSON, see ``PROMPT_SENTINEL``) and
-  blocks reading a single response line from ``inp``. The process stays alive,
-  parked on its stdin read, while the front-end renders buttons and waits for the
-  human. A response of ``{"cancelled": true}`` (an explicit ``/cancel`` or an idle
-  timeout) raises ``PromptCancelled``, which the CLI dispatcher turns into a clean
-  abort.
+* ``TtyPrompt`` — ``input()`` with ``[y/N]`` rendering, EOF falling back to the supplied
+  default (this is what keeps piped/cron runs aborting cleanly).
+* ``JsonPrompt`` — non-blocking *for the front-end*: it writes one sentinel-framed JSON
+  request line to ``out`` (see ``PROMPT_SENTINEL``) and blocks reading a single response
+  line from ``inp``, so the process stays parked on its stdin read while the front-end
+  waits for the human. ``{"cancelled": true}`` raises ``PromptCancelled``, which the CLI
+  dispatcher turns into a clean abort.
 
-Every answer is journalled here rather than at the ~29 call sites, so a run records
-that a plan was *declined* and not merely never applied (DESIGN_logging.md §5.6). The
-broker is the one place both transports and every command pass through, which is what
-keeps the record from drifting as questions are added. ``ask_text`` is the deliberate
-exception: its answer is the athlete's free text, which §4.4 keeps out of the journal.
+Every answer is journalled here rather than at the ~29 call sites, with ``ask_text`` the
+deliberate exception (DESIGN_logging.md §5.6, §4.4).
 
-The module imports nothing beyond the stdlib so it stays unit-testable in
-isolation (feed ``JsonPrompt`` a pair of ``io.StringIO``-like streams); the journal
-and colour helpers are imported inside ``_record_answer`` to keep that true.
+The module imports nothing beyond the stdlib so it stays unit-testable in isolation (feed
+``JsonPrompt`` a pair of ``io.StringIO``-like streams); the journal and colour helpers are
+imported inside ``_record_answer`` to keep that true.
 """
 from __future__ import annotations
 

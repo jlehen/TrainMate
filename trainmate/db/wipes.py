@@ -90,10 +90,9 @@ class WipesMixin:
         dataset is cleared and every non-calendar sync watermark (garmin/reflect/
         bootstrap) is reset, so the next run is a true cold start.
         """
-        # One unit of work: the cache purge used to need its own connection so it ran
-        # before the evidence deletion rather than nesting a second writer inside it
-        # (DESIGN_backward_evaluation.md §5.1). Joining one transaction gives the same
-        # ordering and makes the whole wipe atomic.
+        # One unit of work: the cache purge joins this transaction rather than opening a
+        # second writer, which makes the whole wipe atomic (DESIGN_backward_evaluation.md
+        # §5.1).
         with self.transaction() as conn:
             self.wipe_analysis_cache()
             cursor = conn.cursor()

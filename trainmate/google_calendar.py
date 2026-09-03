@@ -157,13 +157,9 @@ class CalendarSyncer:
                 f"{event_description}\n\n{target}" if event_description else target
             )
 
-        # Lifecycle footer, sitting just above the technical ID line so the two read as one
-        # block directly under the current prescription — before the history, because it
-        # describes this form of the session, not the earlier ones
-        # (DESIGN_calendar_lineage.md §5). It carries when the session entered the plan
-        # (`created_at`, always), and when/how often it has been eased (`adapted_at` /
-        # `adaptation_count`, only once adapted). The load it was planned with is not
-        # repeated here — the oldest history entry carries it, with its date and target.
+        # Lifecycle footer: before the history, because it describes this form of the
+        # session, not the earlier ones (DESIGN_calendar_lineage.md §5). The load it was
+        # planned with is not repeated here — the oldest history entry carries it.
         footer_lines: List[str] = []
         lifecycle_parts = []
         created_at = workout.get('created_at')

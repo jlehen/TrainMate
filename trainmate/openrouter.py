@@ -282,9 +282,7 @@ class OpenRouterClient:
         self, system_content: str, user_content: str, label: str = "exchange",
         wait_notice: bool = True,
     ) -> dict[str, Any]:
-        """Sends a request to OpenRouter with system and user prompts.
-
-        Expects a structured JSON object response from the LLM.
+        """Sends a request to OpenRouter, expecting a structured JSON object back.
 
         Args:
             system_content: Large context / rules placed in system role prompt.
