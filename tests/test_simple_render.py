@@ -329,7 +329,9 @@ class GoalLinesTest(unittest.TestCase):
         past = dict(self.EVENT, target_date="2026-05-01")
         lines = render.simple_goal_lines([past, self.EVENT], "2026-08-25")
         self.assertIn("Marathon — on Sat Sep 26", "\n".join(lines))
-        self.assertIn("1 goal already behind you", lines[-1])
+        # ✅, not 🏁: a goal behind her is checked off like anything else done, and 🏁
+        # is left to mean the target still ahead on every surface (§11.1).
+        self.assertIn("✅ 1 goal already behind you", lines[-1])
 
     def test_archived_goals_say_nothing(self):
         archived = dict(self.HORIZON, status="archived")
@@ -343,9 +345,9 @@ class GoalLinesTest(unittest.TestCase):
 
 
 class PlanLinesTest(unittest.TestCase):
-    """`simple_plan_lines` — the companion plan view (§11): done blocks checked, the
-    active block located by week with its focus, future blocks dated, the goal day
-    closing the road."""
+    """`simple_plan_lines` — the companion plan view (§11): every block led by its
+    window, then done blocks checked, the active block located by week with its focus,
+    future blocks sized, the goal day closing the road."""
 
     GOAL = {"id": 1, "title": "Marathon", "target_date": "2026-09-26",
             "sport_type": "running", "date_type": "event", "status": "active"}
@@ -367,11 +369,24 @@ class PlanLinesTest(unittest.TestCase):
     def test_the_road_by_block(self):
         lines = self._lines()
         self.assertEqual(lines[0], "🧭 The road to Marathon:")
-        self.assertIn("✅ Base — done", lines[1])
-        self.assertIn("📍 Build — you're here, week 2 of 3", lines[2])
+        self.assertEqual(lines[1], "Jul 27 – Aug 16 · ✅ Base")
+        self.assertEqual(
+            lines[2], "Aug 17 – Sep 06 · 📍 Build — you're here, week 2 of 3"
+        )
         self.assertIn("Threshold work.", lines[3])
-        self.assertIn("⚪ Peak — starts Mon Sep 07, 10 days", lines[4])
+        self.assertEqual(lines[4], "Sep 07 – Sep 16 · ⏳ Peak — 10 days")
         self.assertIn("🏁 The big day: Sat Sep 26 (in 4 weeks)", lines[-1])
+
+    def test_the_window_leads_every_block_line(self):
+        """The date column runs down the left edge, ahead of the marker, the way the
+        week and look-back views lead with the day (§11.1)."""
+        lines = self._lines()
+        for i in (1, 2, 4):  # the three block lines; 3 is the active block's focus
+            self.assertRegex(lines[i], r"^[A-Z][a-z]{2} \d\d – [A-Z][a-z]{2} \d\d · ")
+
+    def test_a_finished_block_says_nothing_past_its_check(self):
+        """The window says when and ✅ says done, so no '— done' tail behind them."""
+        self.assertNotIn("done", self._lines()[1])
 
     def test_exact_week_blocks_read_in_weeks(self):
         lines = render.simple_plan_lines(
@@ -380,7 +395,7 @@ class PlanLinesTest(unittest.TestCase):
               "end_date": "2026-09-20", "focus": "Race sharpening."}],
             "2026-08-30",
         )
-        self.assertIn("⚪ Peak — starts Mon Sep 07, 2 weeks", lines[1])
+        self.assertEqual(lines[1], "Sep 07 – Sep 20 · ⏳ Peak — 2 weeks")
 
     def test_a_long_focus_shrinks_to_its_first_sentence(self):
         wall = ("Three weeks: two loading microcycles plus a deload. LOADING WEEKS: "

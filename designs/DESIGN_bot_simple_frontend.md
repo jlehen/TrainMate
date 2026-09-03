@@ -1,7 +1,8 @@
 # Design: Simple Bot Front-End ("companion mode")
 
 **Status:** Implemented — rollout phases 1-3 (2026-08-25), the §11 breadth pass
-(2026-08-30), the §12 writes pass, phases 4-7 (2026-09-02) · **Date:** 2026-08-25 ·
+(2026-08-30), the §12 writes pass, phases 4-7 (2026-09-02), the §11.1 plan-view date
+column (2026-09-03) · **Date:** 2026-08-25 ·
 **Branch:** worktree-config-env-and-frontend-design
 
 ## 1. Motivation
@@ -480,6 +481,11 @@ Each phase ships alone; her onboarding starts at phase 1.
   can live in the simple UI and still reach the expert CLI from the same chat, and a
   receiving-first athlete has no reason to type slash commands; the danger confirms
   remain the backstop.
+- The plan view joins the date column (2026-09-03, §11.1): each block leads with its
+  window the way the week and look-back lines lead with the day, which leaves each tail
+  carrying only what the window cannot say. ⚪ becomes ⏳, borrowing the look back's word
+  for "still ahead", and ✅ takes over the goals view's completed line so 🏁 means the
+  target ahead everywhere.
 
 **Open**
 1. Router echo: always show "→ …", or only when confidence is low? Draft: always;
@@ -518,7 +524,8 @@ is dense coach prose and stays expert detail), and future blocks get their start
 length. The three line markers are stops on that road, sized to match the 🧭 opener and
 🏁 close: ✅ behind her, 📍 where she stands, ⚪ still ahead. Badge-style emoji (🔜, and
 its family) are out — at chat size they render as a coloured box with unreadable text,
-and they say nothing the "starts Mon Sep 07" already says.
+and they say nothing the "starts Mon Sep 07" already says. (§11.1 later moved the dates
+to the front of each line and retired ⚪.)
 The goal day closes the road, reusing the goal view's wording rule. Strategy
 prose, feedback, snapshotted inputs, IDs and the progress bars all stay in the expert
 view; wherever that view would suggest `plan generate`, simple mode says the plan "will
@@ -534,6 +541,39 @@ view follows.
 Both new argv targets are read-only, so the §7 guardrail table gains two entries and
 nothing else changes: plan-shaping and destructive commands still require the typed
 expert vocabulary.
+
+### 11.1 The date column, and one meaning per glyph (2026-09-03)
+
+Read on a phone, the plan view buried its dates. The eye had to cross a long mesocycle
+name to reach "starts Mon Sep 07", and a finished block carried no date at all. Every
+other list on this surface already leads with the date — "Thu 03 · ✅ 🏋️ Strength" in the
+week view, the same shape in the look back — so the plan now does too: the block's
+window, then the marker, then the name.
+
+    Jul 27 – Aug 16 · ✅ Base
+    Aug 17 – Sep 06 · 📍 Build — you're here, week 2 of 3
+    Sep 07 – Sep 16 · ⏳ Peak — 10 days
+
+The window is `simple_block_window`: month and day at both ends, dropping the weekday
+`simple_date_word` keeps. A block boundary is a week rather than an appointment, and the
+column has to stay narrow enough to scan. The §6 no-year rule is untouched — the closing
+countdown still carries the year.
+
+Leading with the window shrinks every tail to what the window cannot say. "starts Mon
+Sep 07" was the window restated, so a future block now carries only its length; "— done"
+was the ✅ restated, so a finished block carries nothing. The active block is the one
+with nothing to drop: how far into it she is — "week 2 of 3" — is the single fact
+neither the window nor the pin already gives her.
+
+Two emoji changes ride along. **⚪ becomes ⏳** for a block still ahead: the pale circle
+reads as a bullet rather than a status and all but disappears on a light background,
+where ⏳ already means "still ahead" in the look back (§6). The plan view's vocabulary is
+then ✅ and ⏳ borrowed whole from a screen she already reads, plus 📍 as its one private
+glyph — "✅ behind you, 📍 where you are, ⏳ still ahead" is the entire legend. **🏁 stops
+meaning two opposite things**: it led both "3 goals already behind you" in the goals view
+and the big day still ahead here. The goals line takes ✅ — a goal behind her is checked
+off like anything else done — which leaves 🏁 to mean the target you are heading for, on
+every surface.
 
 ## 12. Writes: chat reaches operations (2026-09-01)
 

@@ -356,7 +356,7 @@ def simple_goal_lines(goals: List[Dict[str, Any]], today: str) -> List[str]:
     if completed:
         count = len(completed)
         goal_word = "goal" if count == 1 else "goals"
-        lines.append(f"\n🏁 {count} {goal_word} already behind you — nice collection 🏆")
+        lines.append(f"\n✅ {count} {goal_word} already behind you — nice collection 🏆")
     return lines
 
 
@@ -422,13 +422,34 @@ def simple_focus_snippet(text: str, limit: int = 220) -> str:
     return text[:text.rfind(" ", 0, limit)] + "…"
 
 
+def simple_block_window(start: str, end: str) -> str:
+    """A training block's span as the plan view's leading column — 'Aug 17 – Sep 06'.
+    Weekday and year go, where `simple_date_word` keeps the weekday: a block boundary is
+    a week rather than an appointment, and the column has to stay scannable (§11.1)."""
+    def month_day(date_str: str) -> str:
+        return datetime.strptime(date_str, "%Y-%m-%d").strftime("%b %d")
+    return f"{month_day(start)} – {month_day(end)}"
+
+
+def simple_block_length(total_days: int) -> str:
+    """How long a block runs. Exact-week blocks read in weeks; anything ragged reads in
+    days rather than as a rounded lie."""
+    if total_days % 7 == 0:
+        weeks = total_days // 7
+        return "1 week" if weeks == 1 else f"{weeks} weeks"
+    return f"{total_days} days"
+
+
 def simple_plan_lines(
     goal: Dict[str, Any], macrocycle: Dict[str, Any],
     mesocycles: List[Dict[str, Any]], today: str,
 ) -> List[str]:
     """Simple rendering of one periodization plan: the road to the goal — blocks done,
     the block the athlete is in (with its focus), blocks ahead — closed by the goal day.
-    Strategy prose, IDs, feedback and snapshotted inputs stay expert detail (§11)."""
+    Strategy prose, IDs, feedback and snapshotted inputs stay expert detail (§11).
+
+    Each block leads with its window, then the marker, the way the week and look-back
+    views lead with the day: one date column down the left edge (§11.1)."""
     lines = [f"🧭 The road to {goal['title']}:"]
     if macrocycle.get("status") == "superseded":
         lines.append("(an older version of the plan — a newer one has replaced it)")
@@ -438,27 +459,23 @@ def simple_plan_lines(
     for m in mesocycles:
         start, end = str(m["start_date"]), str(m["end_date"])
         total_days = max(1, days_between(start, end) + 1)
+        lead = f"{simple_block_window(start, end)} · "
+        # The window already says when and how long, so each tail carries only what it
+        # cannot: nothing behind her, how far into the current block, length ahead.
         if end < today:
-            lines.append(f"✅ {m['name']} — done")
+            lines.append(f"{lead}✅ {m['name']}")
             continue
         if start <= today:
             total_weeks = max(1, -(-total_days // 7))  # ceiling
             week_now = min(total_weeks, days_between(start, today) // 7 + 1)
             lines.append(
-                f"📍 {m['name']} — you're here, week {week_now} of {total_weeks}"
+                f"{lead}📍 {m['name']} — you're here, week {week_now} of {total_weeks}"
             )
             focus = (m.get("focus") or "").strip()
             if focus:
                 lines.append(wrap_text(simple_focus_snippet(focus)))
             continue
-        # A future block: when it starts and how long it runs. Exact-week blocks read
-        # in weeks; anything ragged reads in days rather than as a rounded lie.
-        if total_days % 7 == 0:
-            weeks = total_days // 7
-            length = "1 week" if weeks == 1 else f"{weeks} weeks"
-        else:
-            length = f"{total_days} days"
-        lines.append(f"⚪ {m['name']} — starts {simple_date_word(start)}, {length}")
+        lines.append(f"{lead}⏳ {m['name']} — {simple_block_length(total_days)}")
     date_word = simple_date_word(str(goal["target_date"]))
     when = simple_when(str(goal["target_date"]), today)
     if goal.get("date_type") == "horizon":
@@ -466,6 +483,8 @@ def simple_plan_lines(
     else:
         lines.append(f"\n🏁 The big day: {date_word} ({when}) — you've got this 💪")
     return lines
+
+
 def _is_rest(w: Optional[dict]) -> bool:
     return bool(w) and (w.get('sport_type') or '').lower() == 'rest'
 
