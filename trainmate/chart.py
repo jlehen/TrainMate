@@ -116,7 +116,13 @@ def render_timeline_png(payload: Dict[str, Any]) -> bytes:
     ax_bottom.set_title("Weekly Load: Planned vs Actual")
     ax_bottom.grid(True, alpha=0.3)
 
-    fig.autofmt_xdate()
+    # Not `fig.autofmt_xdate()`: it blanks the x labels of every subplot but the
+    # bottom row, and the two panels don't share an x range, so the top panel would
+    # lose its dates. Rotate each axis's own labels instead.
+    for ax in (ax_top, ax_bottom):
+        for label in ax.get_xticklabels():
+            label.set_rotation(30)
+            label.set_horizontalalignment("right")
     # Reserve a bottom band for the warnings footer so tight_layout lays the axes
     # above it — the chart's counterpart of the CLI warning banners (§3/§6.0).
     reserve = min(0.04 + 0.025 * len(warnings), 0.35) if warnings else 0.0

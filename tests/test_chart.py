@@ -126,6 +126,45 @@ class TestPlanEndMarkerStaysInsideTheWindow(unittest.TestCase):
         self.assertLess(self._top_axis_right_edge(payload), "2026-07-15")
 
 
+class TestBothPanelsKeepTheirDateLabels(unittest.TestCase):
+    """The panels don't share an x range, so each must show its own dates —
+    `fig.autofmt_xdate()` would blank every row but the bottom one."""
+
+    def _axes(self):
+        import matplotlib.pyplot as plt
+        from trainmate import chart
+
+        days = [
+            {"date": f"2026-06-{d:02d}", "load": 10.0, "source": "actual",
+             "ctl": 40.0, "atl": 30.0, "tsb": 10.0}
+            for d in range(1, 21)
+        ]
+        weeks = [{"week_commencing": "2026-06-01", "planned_load": 100.0,
+                  "actual_load": 80.0}]
+        payload = {"today": "2026-06-10", "plan_end": None, "days": days,
+                   "weeks": weeks, "objectives": [], "warnings": [],
+                   "meso_bands": []}
+        captured = []
+        original = plt.subplots
+
+        def spy(*args, **kwargs):
+            fig, axes = original(*args, **kwargs)
+            captured.append(axes)
+            return fig, axes
+
+        plt.subplots = spy
+        try:
+            chart.render_timeline_png(payload)
+        finally:
+            plt.subplots = original
+        return captured[0]
+
+    def test_top_and_bottom_panels_both_show_dates(self):
+        for ax in self._axes():
+            visible = [t.label1.get_visible() for t in ax.xaxis.get_major_ticks()]
+            self.assertTrue(visible and all(visible), ax.get_title())
+
+
 class TestWeeklyBarsUseTheComparableSlice(unittest.TestCase):
     """§3's comparable-days rule holds on every surface: the in-progress week bars the
     ELAPSED planned figure the CLI table divides by, not the full week's."""
