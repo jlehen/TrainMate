@@ -452,6 +452,47 @@ class GoalsViewTest(unittest.TestCase):
         self.assertNotIn("[ARCHIVED]", out)
 
 
+class BlockViewTest(unittest.TestCase):
+    """`bot block` — §11.2: one block as its stanza plus the whole focus, and a stale
+    tap after a replan lands softly."""
+
+    def setUp(self):
+        rebind_test_db(test_db)
+        clear_all_tables(test_db)
+
+    def _block(self):
+        """A goal 45 days out, one block from last week to the goal; returns its id."""
+        from datetime import date, timedelta
+        today = date.fromisoformat(today_str())
+        out = lambda days: (today + timedelta(days=days)).isoformat()  # noqa: E731
+        goal_id = test_db.add_objective(
+            title="Zurich Marathon", target_date=out(45), sport_type="running",
+        )
+        test_db.save_macrocycle(
+            objective_id=goal_id, strategy="Build then sharpen.",
+            goals_hash="g", constraints_hash="c",
+            mesocycles=[{"name": "Base", "start_date": out(-7), "end_date": out(45),
+                         "focus": "Purpose: aerobic endurance, easy volume. "
+                                  "Long runs grow weekly."}],
+        )
+        macro = test_db.get_macrocycle_for_objective(goal_id)
+        return test_db.get_mesocycles_for_macrocycle(macro["id"])[0]["id"]
+
+    def test_renders_the_stanza_and_the_whole_focus(self):
+        mid = self._block()
+        code, out, _ = run_cli(["bot", "block", str(mid)])
+        self.assertEqual(code, 0)
+        self.assertIn("📍 Base", out)
+        self.assertIn("you're in week 2 of 8", out)
+        self.assertIn("Long runs grow weekly.", out)  # past the first sentence
+        self.assertNotIn("Mesocycle ID", out)
+
+    def test_an_unknown_block_lands_softly(self):
+        code, out, _ = run_cli(["bot", "block", "999"])
+        self.assertEqual(code, 0)
+        self.assertIn("isn't on your plan any more", out)
+
+
 class CaptureNoteTest(_CaptureCase):
     """`bot capture note` — §12.3: the note inbox that asks before storing, and offers
     the coach instead of riding it."""
@@ -837,9 +878,17 @@ class CompanionSurfaceRoutingTest(unittest.TestCase):
         code, out, _ = run_cli(["plan", "show"])
         self.assertEqual(code, 0)
         self.assertIn("The road to Zurich Marathon", out)
-        self.assertIn("you're here", out)
+        self.assertIn("you're in week", out)
         self.assertNotIn("MACROCYCLE STRATEGY", out)
         self.assertNotIn("Macrocycle ID", out)
+
+    def test_plan_show_offers_the_door_to_a_block(self):
+        """The road names the blocks; the button is how she reads one in full (§11.2)."""
+        self._goal_with_plan()
+        code, out, _ = run_cli(["plan", "show"])
+        self.assertEqual(code, 0)
+        self.assertIn(BUTTONS_SENTINEL, out)
+        self.assertIn("bot block ", out)
 
     def test_plan_show_without_a_goal_invites_instead_of_naming_a_command(self):
         """The athlete cannot run `plan generate`, so the empty state must not name it

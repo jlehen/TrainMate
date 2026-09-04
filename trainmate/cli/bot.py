@@ -24,9 +24,10 @@ from trainmate.cli.common import adherence_verdicts, ensure_recent_data
 # The companion surfaces are companion-only by definition, so they call the line
 # builders directly rather than through `runtime.render` (DESIGN_render_persona.md §3).
 from trainmate.cli.render import (
-    SIMPLE_DONE_STATUSES, SIMPLE_PASSED_LINE, simple_constraint_edit_lines,
-    simple_constraint_lines, simple_day_lines, simple_day_word, simple_goal_edit_lines,
-    simple_goal_line, simple_goal_lines, simple_runway_lines, simple_session_line,
+    SIMPLE_DONE_STATUSES, SIMPLE_PASSED_LINE, picker_label, simple_block_lines,
+    simple_constraint_edit_lines, simple_constraint_lines, simple_day_lines,
+    simple_day_word, simple_goal_edit_lines, simple_goal_line, simple_goal_lines,
+    simple_runway_lines, simple_session_line,
 )
 from trainmate.cli.runway import current_runway, runway_buttons, schedule_exhausted
 from trainmate.cli.settings import ROUTABLE_SETTINGS, routable_setting
@@ -153,21 +154,13 @@ ROUTER_SYSTEM_PROMPT = (
 
 # --- Pickers (§12.1: the model picks that something should change, the tap picks which) ---
 
-# Telegram renders inline labels short; the list line above the picker carries the
-# full title, so a leaf label only has to be recognisable.
-PICKER_LABEL_MAX = 28
-
-
 def _picker_leaves(rows: Sequence[Dict[str, Any]], command: str) -> List[dict]:
     """One leaf per row, each carrying the deterministic `<command> <id>` its tap sends.
     Which row is acted on is decided by the athlete's tap, never by the model (§5.5)."""
-    leaves = []
-    for row in rows:
-        title = row["title"]
-        if len(title) > PICKER_LABEL_MAX:
-            title = title[:PICKER_LABEL_MAX - 1] + "…"
-        leaves.append({"label": f"🗑 {title}", "send": f"{command} {row['id']}"})
-    return leaves
+    return [
+        {"label": f"🗑 {picker_label(row['title'])}", "send": f"{command} {row['id']}"}
+        for row in rows
+    ]
 
 
 def constraint_rm_buttons(constraints: list) -> list:
@@ -215,6 +208,27 @@ def run_bot_goals(args: argparse.Namespace) -> None:
     upcoming = [g for g in goals if goal_state(g, today) == GOAL_UPCOMING]
     if upcoming:
         emit_buttons(goal_rm_buttons(upcoming))
+
+
+def run_bot_block(args: argparse.Namespace) -> None:
+    """One training block in full: the stanza the plan view draws for it, then the
+    whole focus rather than its first sentence (§11.2). Read-only; reached from the
+    plan view's "Tell me more" leaves, so a stale tap after a replan has to land
+    softly rather than as an error."""
+    from trainmate import runtime
+    m = runtime.db.get_mesocycle(args.mesocycle_id)
+    if not m:
+        print("That block isn't on your plan any more — tap 🧭 My plan for the current road.")
+        return
+    macrocycle = runtime.db.get_macrocycle(m["macrocycle_id"])
+    if macrocycle and macrocycle.get("status") == "superseded":
+        print("(a block from an older version of the plan — a newer one has replaced it)")
+    for line in simple_block_lines(m, _today_str()):
+        print(line)
+    focus = (m.get("focus") or "").strip()
+    if focus:
+        print()
+        print(wrap_text(focus))
 
 
 def _auto_adapt_note(date_str: str) -> Optional[str]:
@@ -840,9 +854,7 @@ def _offer_row_picker(
 
 
 def _picker_label(title: str) -> str:
-    if len(title) > PICKER_LABEL_MAX:
-        title = title[:PICKER_LABEL_MAX - 1] + "…"
-    return f"✏️ {title}"
+    return f"✏️ {picker_label(title)}"
 
 
 def _picker_row_line(domain: str, row: Dict[str, Any], today: str) -> str:
@@ -1122,4 +1134,16 @@ def add_bot_parser(subparsers):
         ),
     )
     b_goals.set_defaults(func=run_bot_goals)
+
+    # bot block
+    b_block = bot_subparsers.add_parser(
+        "block",
+        help="Render one training block in full, in companion prose",
+        description=(
+            "Render one mesocycle the way the simple plan view draws it, followed by "
+            "its whole focus. Read-only; the plan view's \"Tell me more\" leaves run it."
+        ),
+    )
+    b_block.add_argument("mesocycle_id", type=int, help="The mesocycle to show")
+    b_block.set_defaults(func=run_bot_block)
     return bot_parser

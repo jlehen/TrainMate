@@ -13,6 +13,7 @@ import this one: they reach it through `runtime.render`, whose builder defers th
 import (§7).
 """
 import os
+import re
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -411,9 +412,12 @@ def simple_plan_shaping_line(impact: Dict[str, Any]) -> str:
 
 def simple_focus_snippet(text: str, limit: int = 220) -> str:
     """The opening of a mesocycle's focus, for the plan view: the first sentence when
-    one ends within `limit` chars, else a word-boundary cut with an ellipsis. The full
-    prescription is expert detail (§11); the companion gets the headline."""
+    one ends within `limit` chars, else a word-boundary cut with an ellipsis. A one-word
+    label the planner likes to open with ("Purpose: …") goes — it is a field name, not
+    a headline. The full prescription is a tap away (`bot block`, §11.2)."""
     text = " ".join(text.split())
+    text = re.sub(r"^[A-Za-z]+:\s+", "", text)
+    text = text[:1].upper() + text[1:]
     cut = text.find(". ")
     if 0 <= cut < limit:
         return text[:cut + 1]
@@ -440,49 +444,84 @@ def simple_block_length(total_days: int) -> str:
     return f"{total_days} days"
 
 
+# Telegram renders inline labels short; the prose above a picker carries the full
+# title, so a leaf label only has to be recognisable.
+PICKER_LABEL_MAX = 28
+
+
+def picker_label(text: str) -> str:
+    """A button label cut to what Telegram will show whole."""
+    if len(text) > PICKER_LABEL_MAX:
+        return text[:PICKER_LABEL_MAX - 1] + "…"
+    return text
+
+
+def simple_block_lines(m: Dict[str, Any], today: str) -> List[str]:
+    """One training block as a stanza head: the marker and name, then the window and
+    the one thing the window cannot say — nothing behind her, how far into the block
+    she is, length ahead (§11.2). The plan view adds the focus headline under the
+    active block; `bot block` adds the whole focus."""
+    start, end = str(m["start_date"]), str(m["end_date"])
+    total_days = max(1, days_between(start, end) + 1)
+    window = simple_block_window(start, end)
+    if end < today:
+        return [f"✅ {m['name']}", window]
+    if start <= today:
+        total_weeks = max(1, -(-total_days // 7))  # ceiling
+        week_now = min(total_weeks, days_between(start, today) // 7 + 1)
+        return [f"📍 {m['name']}", f"{window} · you're in week {week_now} of {total_weeks}"]
+    return [f"⏳ {m['name']}", f"{window} · {simple_block_length(total_days)}"]
+
+
 def simple_plan_lines(
     goal: Dict[str, Any], macrocycle: Dict[str, Any],
     mesocycles: List[Dict[str, Any]], today: str,
 ) -> List[str]:
     """Simple rendering of one periodization plan: the road to the goal — blocks done,
-    the block the athlete is in (with its focus), blocks ahead — closed by the goal day.
-    Strategy prose, IDs, feedback and snapshotted inputs stay expert detail (§11).
+    the block the athlete is in (with its focus headline), blocks ahead — closed by the
+    goal day. Strategy prose, IDs, feedback and snapshotted inputs stay expert detail
+    (§11).
 
-    Each block leads with its window, then the marker, the way the week and look-back
-    views lead with the day: one date column down the left edge (§11.1)."""
-    lines = [f"🧭 The road to {goal['title']}:"]
+    Each block is a stanza with a blank line before it: a phone flows the text, so
+    whitespace is the only column it can draw (§11.2)."""
+    lines = [f"🧭 The road to {goal['title']}"]
     if macrocycle.get("status") == "superseded":
         lines.append("(an older version of the plan — a newer one has replaced it)")
     if not mesocycles:
         lines.append("No training blocks drawn up yet — check back soon 🌱")
         return lines
     for m in mesocycles:
-        start, end = str(m["start_date"]), str(m["end_date"])
-        total_days = max(1, days_between(start, end) + 1)
-        lead = f"{simple_block_window(start, end)} · "
-        # The window already says when and how long, so each tail carries only what it
-        # cannot: nothing behind her, how far into the current block, length ahead.
-        if end < today:
-            lines.append(f"{lead}✅ {m['name']}")
-            continue
-        if start <= today:
-            total_weeks = max(1, -(-total_days // 7))  # ceiling
-            week_now = min(total_weeks, days_between(start, today) // 7 + 1)
-            lines.append(
-                f"{lead}📍 {m['name']} — you're here, week {week_now} of {total_weeks}"
-            )
-            focus = (m.get("focus") or "").strip()
-            if focus:
-                lines.append(wrap_text(simple_focus_snippet(focus)))
-            continue
-        lines.append(f"{lead}⏳ {m['name']} — {simple_block_length(total_days)}")
+        lines.append("")
+        lines.extend(simple_block_lines(m, today))
+        focus = (m.get("focus") or "").strip()
+        if focus and str(m["start_date"]) <= today <= str(m["end_date"]):
+            lines.append(wrap_text(simple_focus_snippet(focus)))
     date_word = simple_date_word(str(goal["target_date"]))
     when = simple_when(str(goal["target_date"]), today)
+    lines.append("")
     if goal.get("date_type") == "horizon":
-        lines.append(f"\n🏁 Building toward ~{date_word} ({when}) — keep stacking 💪")
+        lines.append(f"🏁 Building toward ~{date_word} ({when}) — keep stacking 💪")
     else:
-        lines.append(f"\n🏁 The big day: {date_word} ({when}) — you've got this 💪")
+        lines.append(f"🏁 The big day: {date_word} ({when}) — you've got this 💪")
     return lines
+
+
+def simple_block_buttons(mesocycles: List[Dict[str, Any]], today: str) -> List[dict]:
+    """The door under the plan view to a block's full prescription (§11.2): one leaf
+    per block under way or still ahead, each sending the read-only `bot block <id>`.
+    A lone candidate is offered directly; several sit behind one "Tell me more", so
+    the row is never wider than a thumb. Finished blocks say nothing here either (§6)."""
+    ahead = [m for m in mesocycles if str(m["end_date"]) >= today]
+    if not ahead:
+        return []
+    leaves = [
+        {"label": picker_label(simple_block_lines(m, today)[0]),
+         "send": f"bot block {m['id']}"}
+        for m in ahead
+    ]
+    if len(leaves) == 1:
+        return [{"label": "🔎 Tell me more", "send": leaves[0]["send"]}]
+    return [{"label": "🔎 Tell me more", "menu": leaves}]
 
 
 def _is_rest(w: Optional[dict]) -> bool:
@@ -987,10 +1026,15 @@ class CompanionRenderer(ExpertRenderer):
 
     def plan(self, goal: dict, macrocycle: dict, args) -> None:
         mesocycles = runtime.db.get_mesocycles_for_macrocycle(macrocycle['id'])
-        for line in simple_plan_lines(
-            goal, macrocycle, mesocycles, _today_date().strftime("%Y-%m-%d")
-        ):
+        today = _today_date().strftime("%Y-%m-%d")
+        for line in simple_plan_lines(goal, macrocycle, mesocycles, today):
             print(line)
+        # The road names the blocks; the button is how she reads one in full (§11.2).
+        # Only for the version in force — an older version's blocks are history.
+        if macrocycle.get("status") != "superseded":
+            buttons = simple_block_buttons(mesocycles, today)
+            if buttons:
+                emit_buttons(buttons)
 
     def progress(self, payload: dict, args, today: str, weeks_window: int) -> None:
         lines = simple_progress_lines(payload, today)

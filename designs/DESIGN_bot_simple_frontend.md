@@ -2,7 +2,7 @@
 
 **Status:** Implemented — rollout phases 1-3 (2026-08-25), the §11 breadth pass
 (2026-08-30), the §12 writes pass, phases 4-7 (2026-09-02), the §11.1 plan-view date
-column (2026-09-03) · **Date:** 2026-08-25 ·
+column (2026-09-03), the §11.2 stanzas and block door (2026-09-04) · **Date:** 2026-08-25 ·
 **Branch:** worktree-config-env-and-frontend-design
 
 ## 1. Motivation
@@ -376,7 +376,8 @@ earns it is expert detail, and the chat surface does not audit.
   drive an instance from its own chat when allowlisted there.) Amended 2026-09-01:
   the writes pass (§12) makes a bounded set of reversible-or-confirm-gated
   mutations routable and lets the model *nominate* (never execute) — §12.9 is now
-  the authoritative statement of this posture.
+  the authoritative statement of this posture. Amended 2026-09-04: the plan view's
+  "Tell me more" leaves send `bot block <id>`, a read-only view (§11.2).
 - Free text reaching the router or `adapt -m` is data, not instructions, and the argv
   table bounds its blast radius; the exposure is the same one `adapt -m` already has
   today.
@@ -391,7 +392,7 @@ earns it is expert detail, and the chat surface does not audit.
 |---|---|
 | `trainmate_bot.py` | ui-mode switch (config at start, `/ui` flips it live, §5.6), reply keyboard + label→argv table, capture-tap chat state (§5.2), `ui:` callback namespace, `TM-BUTTONS` parsing, push scheduler task |
 | `trainmate/prompt.py` | `BUTTONS_SENTINEL` + `emit_buttons()` (mirror of `emit_photo`) |
-| `trainmate/cli/bot.py` | new hidden family: `bot morning`, `bot route`, `bot constraints` |
+| `trainmate/cli/bot.py` | new hidden family: `bot morning`, `bot route`, `bot constraints`, `bot block` (§11.2) |
 | `trainmate/config.py` | `telegram_ui`; the push knobs and the router role resolve through `trainmate/settings.py` |
 | `trainmate/cli/render.py` | the companion voice: line builders, `ExpertRenderer`/`CompanionRenderer`, `TRAINMATE_RENDER` interpretation (was a helper in `cli/common.py` — DESIGN_render_persona.md §7) |
 | `trainmate/cli/candidates.py` | the confirm loops a note's candidates pass through, shared by `workout adapt -m` and `bot capture note` (§12.10, §12.11) |
@@ -574,6 +575,63 @@ meaning two opposite things**: it led both "3 goals already behind you" in the g
 and the big day still ahead here. The goals line takes ✅ — a goal behind her is checked
 off like anything else done — which leaves 🏁 to mean the target you are heading for, on
 every surface.
+
+*(Superseded in part by §11.2, 2026-09-04: the window now sits on its own line under
+the name — the column a phone could not draw became whitespace. The glyph vocabulary
+stands.)*
+
+### 11.2 Stanzas, and a door to the prescription (2026-09-04)
+
+§11.1 put the window first so that a date column would run down the left edge. On a
+phone the column never appeared: companion replies are proportional text the client
+flows (§6), so a block line like "Aug 30 – Sep 26 · 📍 Habit Foundation & Aerobic
+Re-Set — you're here, week 1 of 4" wrapped into three ragged lines, and the dates —
+the first thing on each — were the least useful thing to lead with. With no blank
+line between blocks, the active block's focus sentence sat between two block lines
+and belonged to neither. The view was still one dense paragraph.
+
+The plan is now a stanza per block, each opened by a blank line: the marker and the
+name on one line, then the window and the one thing the window cannot say — nothing
+behind her, "you're in week 1 of 4" for the block she is in, the length for a block
+ahead — and, under the active block only, the focus headline.
+
+    🧭 The road to Zürcher Sylvesterlauf
+
+    📍 Habit Foundation & Aerobic Re-Set
+    Aug 30 – Sep 26 · you're in week 1 of 4
+    Make the week non-negotiable and re-teach easy running.
+
+    ⏳ Aerobic Volume Build (Rolling Terrain)
+    Sep 27 – Oct 24 · 4 weeks
+
+    🏁 The big day: Sun Dec 13 (in 14 weeks) — you've got this 💪
+
+Whitespace is the only column a phone can draw, so it is the one the view uses. Each
+line now carries one kind of thing — a name, a window, a sentence — which is what
+lets it wrap without losing its shape. The §11.1 vocabulary (✅ 📍 ⏳ 🏁, one meaning
+each), `simple_block_window`, `simple_block_length` and the §6 no-year rule are
+unchanged. The headline drops a one-word label the planner likes to open with
+("Purpose: …"): a field name, not a headline.
+
+**The door.** The names are the planner's, and they are coach vocabulary —
+"Race-Specific Sharpening" says nothing to the athlete about what October will ask of
+her. The full focus is dense coach prose and stays out of the view (§11), but it is
+now one tap away: the view attaches a §4.4 row, "🔎 Tell me more", whose leaves — one
+per block under way or still ahead; finished blocks say nothing here as everywhere —
+each send the read-only `bot block <id>`. That renders the block's stanza followed by
+the whole focus. A lone candidate is offered directly rather than behind a menu of
+one. The leaves follow the picker shape (§12.1): the CLI builds them from real IDs,
+the tap chooses, and the model is nowhere in it. A stale tap after a replan lands
+softly — "That block isn't on your plan any more" — and a block from a superseded
+version says so, the way the plan view does. Only the version in force gets the row:
+an older version's blocks are history, not a road. The §7 guardrail widens by one
+read-only argv.
+
+Still open, and the bigger lever: the names themselves. A short athlete-facing line
+per block, written by the planner at plan time ("run easy, run often, start the
+10-minute strength habit"), would let the road say what each block is *for* without a
+tap. That is a schema and prompt change, not a rendering one, and it waits for the
+stanza shape to settle.
 
 ## 12. Writes: chat reaches operations (2026-09-01)
 

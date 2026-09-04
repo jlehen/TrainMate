@@ -198,8 +198,8 @@ classes themselves.
     else falls back to the expert form (DESIGN_render_persona.md). Every command a tap
     can reach goes through it, which is what keeps expert command text — `plan
     generate`, `constraint edit --replan`, `goal edit --status active` — out of a chat
-    whose reader cannot run any of them. `bot morning`, `bot constraints`, `bot goals`
-    and the `bot capture` family are companion-only by definition and call the line
+    whose reader cannot run any of them. `bot morning`, `bot constraints`, `bot goals`,
+    `bot block` and the `bot capture` family are companion-only by definition and call the line
     builders in `cli/render.py` directly. Companion output is prose,
     sent plain instead of `<pre>`. A third one-way sentinel, `BUTTONS_SENTINEL`/
     `emit_buttons` (`\x1eTM-BUTTONS {json}`), attaches a *non-blocking* inline button
