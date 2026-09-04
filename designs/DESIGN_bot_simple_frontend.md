@@ -290,8 +290,12 @@ buttons on a phone whose bot no longer understands them: the label reached the e
 path, was shlex-split into argv, and came back as `tm: error: argument <command>:
 invalid choice: '🗓'` (observed 2026-09-02, all six buttons). A label arriving in expert
 mode is therefore read as what it is — the athlete is looking at the companion — and
-switches the persona back, confirmation and all, before the tap runs. Honouring the
-label's argv while staying expert was the smaller change and the worse one: it leaves
+switches the persona back, silently, before the tap runs. Silently because the switch is
+the process catching up with the screen, not a change she asked for: the `/ui`
+confirmation answers a typed command, but on a restart it lands unbidden after her first
+tap and reads as the bot announcing a mode she never left (reported 2026-09-04). The
+answer to the tap is the feedback the switch earns; the keyboard rides that reply.
+Honouring the label's argv while staying expert was the smaller change and the worse one: it leaves
 the screen and the bot disagreeing about which persona is on, and leaves "💬 Talk to me"
 with nowhere to arm. One rule instead: the keyboard you can see is the keyboard that
 answers.
@@ -487,6 +491,9 @@ Each phase ships alone; her onboarding starts at phase 1.
   carrying only what the window cannot say. ⚪ becomes ⏳, borrowing the look back's word
   for "still ahead", and ✅ takes over the goals view's completed line so 🏁 means the
   target ahead everywhere.
+- The stale-tap persona re-arm is silent (2026-09-04, §5.6). Announcing it made every
+  restart open with "Simple mode on 🙌" against a mode the athlete never left; a
+  confirmation belongs to `/ui`, which someone typed.
 
 **Open**
 1. Router echo: always show "→ …", or only when confidence is low? Draft: always;

@@ -1,6 +1,8 @@
 """Tests for the Telegram front-end's pure helpers (no telegram dependency)."""
+import ast
 import asyncio
 import os
+import pathlib
 import sys
 import unittest
 from unittest import mock
@@ -393,6 +395,33 @@ class StaleKeyboardTest(unittest.TestCase):
         self.assertFalse(bot.stale_keyboard_tap("workout list", simple_now=False))
         self.assertFalse(bot.stale_keyboard_tap("/ui", simple_now=False))
         self.assertFalse(bot.stale_keyboard_tap("", simple_now=False))
+
+    def test_the_re_arm_is_silent_and_only_the_re_arm_is(self):
+        """§5.6: the tap's own answer is the feedback; a typed /ui still confirms.
+        `_set_ui` is a closure inside main(), so the call sites are read from source."""
+        tree = ast.parse(pathlib.Path(bot.__file__).read_text())
+        rearm, announced = [], []
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.If):
+                continue
+            stale = any(
+                isinstance(call.func, ast.Name)
+                and call.func.id == "stale_keyboard_tap"
+                for call in ast.walk(node.test)
+                if isinstance(call, ast.Call)
+            )
+            for call in ast.walk(node):
+                if not (isinstance(call, ast.Call)
+                        and isinstance(call.func, ast.Name)
+                        and call.func.id == "_set_ui"):
+                    continue
+                silent = any(
+                    kw.arg == "announce" and kw.value.value is False
+                    for kw in call.keywords
+                )
+                (rearm if stale else announced).append(silent)
+        self.assertEqual(rearm, [True])
+        self.assertEqual(announced, [False])
 
 
 class GuardrailTest(unittest.TestCase):

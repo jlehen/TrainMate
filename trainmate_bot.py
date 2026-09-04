@@ -972,10 +972,11 @@ def main() -> None:
                 pass
         return "Cancelling…"
 
-    async def _set_ui(chat_id: int, target: bool) -> None:
+    async def _set_ui(chat_id: int, target: bool, announce: bool = True) -> None:
         """Flips the persona in place (§5.6): swaps the command menu, then confirms —
         attaching the reply keyboard on the way into simple, removing it on the way
-        out. In-memory only; config.telegram_ui rules again at the next restart."""
+        out. `announce=False` skips the confirmation for a switch nobody asked for.
+        In-memory only; config.telegram_ui rules again at the next restart."""
         nonlocal simple_ui
         simple_ui = target
         commands = SIMPLE_MENU_COMMANDS if target else MENU_COMMANDS
@@ -983,11 +984,11 @@ def main() -> None:
             await bot.set_my_commands([BotCommand(n, d) for n, d in commands])
         except Exception as exc:  # the menu is cosmetic — never let it block the switch
             journal.debug("bot.event", f"command menu not updated: {exc}")
-        if target:
+        if announce and target:
             await bot.send_message(
                 chat_id=chat_id, text=UI_SIMPLE_ON, reply_markup=reply_keyboard
             )
-        else:
+        elif announce:
             await bot.send_message(
                 chat_id=chat_id, text=UI_EXPERT_ON, reply_markup=ReplyKeyboardRemove()
             )
@@ -1064,7 +1065,9 @@ def main() -> None:
         # process last settled on: the keyboard sits on the phone until Telegram is
         # told to drop it, so a restart back into expert leaves it live (§5.6).
         if stale_keyboard_tap(text, simple_ui):
-            await _set_ui(chat.id, True)
+            # Silently: she tapped a button, not /ui — the answer to the tap is the
+            # only feedback the switch earns (§5.6).
+            await _set_ui(chat.id, True, announce=False)
 
         # Simple mode: non-slash text is the companion surface — keyboard labels,
         # then the free-text router for everything else (§5). A leading slash stays
