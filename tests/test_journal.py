@@ -322,11 +322,55 @@ class TestRunBracket(JournalTestCase):
         self.assertEqual(end["d"]["outcome"], "cancelled")
         self.assertEqual(end["d"]["exit"], 130)
 
-    def test_a_domain_refusal_and_an_argparse_exit_both_read_as_ok(self):
-        run_cli(["goal"])          # a command group invoked bare: argparse exits 1
+    def test_a_domain_refusal_reads_as_ok(self):
+        # A handler that says no exits 1. That is an answer about the athlete's own data,
+        # not a failure (§3).
+        import trainmate_cli
+        with patch.object(trainmate_cli, "_dispatch", side_effect=SystemExit(1)):
+            run_cli(["status"])
         (end,) = self._ends()
         self.assertEqual(end["d"]["outcome"], "ok")
         self.assertEqual(end["d"]["exit"], 1)
+
+    def test_a_line_that_only_printed_help_is_not_a_run(self):
+        # Nothing happened but the help now on screen, so there is nothing to record —
+        # and the parse never named these, so the listing could not classify them either
+        # (§3, §7.1).
+        for argv in (
+            ["benchmark", "record"],   # a required argument missing: argparse exits 2
+            ["b"],                     # an ambiguous prefix: exits 2
+            ["goal"],                  # a command group invoked bare: exits 1
+            [],                        # no command at all: exits 1
+            ["progress", "-h"],        # help asked for by name: exits 0
+        ):
+            with self.subTest(argv=argv):
+                run_cli(argv)
+        self.assertEqual(list(journal.iter_records()), [])
+
+    def test_a_named_run_is_on_disk_before_it_does_anything(self):
+        # Deferring the bracket must not cost §3's `?` row: the parse writes `run.start`,
+        # so a run killed anywhere it could actually be killed still left one behind.
+        journal.start_run(["plan", "generate"], defer=True)
+        self.assertEqual(self.records(), [])
+        journal.name_run("plan", "generate")
+        (start,) = self.records()
+        self.assertEqual(start["ev"], "run.start")
+
+    def test_a_deferred_start_still_opens_the_bracket_it_belongs_to(self):
+        journal.start_run(["plan", "generate"], defer=True)
+        journal.note("Querying OpenRouter...")
+        self.assertEqual([r["ev"] for r in self.records()], ["run.start", "note"])
+        self.assertEqual([r["seq"] for r in self.records()], [0, 1])
+
+    def test_dropping_a_run_that_already_spoke_closes_it_instead(self):
+        # A `run.start` with no `run.end` reads as a run that was killed (§3), so a drop
+        # that arrives too late has to end the run rather than abandon it.
+        journal.start_run(["plan", "generate"], defer=True)
+        journal.note("Querying OpenRouter...")
+        journal.drop_run()
+        self.assertEqual(
+            [r["ev"] for r in self.records()], ["run.start", "note", "run.end"]
+        )
 
     def test_three_lines_in_a_shell_make_four_runs_with_one_parent(self):
         import trainmate_cli
@@ -350,6 +394,25 @@ class TestRunBracket(JournalTestCase):
         for child in children:
             self.assertEqual(child["d"]["parent"], shell["run"])
             self.assertEqual(child["d"]["source"], "repl")
+
+    def test_a_mistyped_line_in_a_shell_leaves_the_shell_run_alone(self):
+        # The drop pops one run off a stack that has the shell under it (§3): the shell
+        # keeps its own bracket, and the lines that never parsed leave nothing.
+        import trainmate_cli
+        typed = iter(["benchmark record", "goal", "help"])
+
+        def _input(_prompt=""):
+            try:
+                return next(typed)
+            except StopIteration:
+                raise EOFError
+
+        with patch("builtins.input", _input), patch.object(sys, "stdout", io.StringIO()), \
+                patch.object(sys, "stderr", io.StringIO()):
+            trainmate_cli.main(["shell"])
+        starts = [r["msg"] for r in journal.iter_records() if r["ev"] == "run.start"]
+        self.assertEqual(sorted(starts), ["help", "shell"])
+        self.assertEqual(journal.current(), None)
 
     def test_a_spawned_process_inherits_the_parent_run_and_its_own_source(self):
         journal.start_run(["tm-bot"], source="bot")

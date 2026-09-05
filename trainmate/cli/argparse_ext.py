@@ -14,6 +14,15 @@ from trainmate.util import (
 )
 
 
+class UsageExit(SystemExit):
+    """A command line that never became a command: argparse printed usage or help and
+    stopped, and nothing else happened.
+
+    A SystemExit subclass, so every handler that already treats an argparse exit as one
+    keeps working; the CLI catches it first to keep the run out of the journal
+    (DESIGN_logging.md §3)."""
+
+
 def _fill(text: str, width: int, initial: str = "", subsequent: str = "") -> str:
     """Wrap ``text`` to ``width``, never splitting an option name at a hyphen
     (DESIGN_cli_noargs.md §e)."""
@@ -154,6 +163,14 @@ class WrapAwareArgumentParser(argparse.ArgumentParser):
         super().__init__(*args, **kwargs)
         self.register("action", "parsers", _DescFromHelpSubParsersAction)
 
+    def exit(self, status=0, message=None):
+        # Every help print and usage error in the tree funnels through argparse's own
+        # `exit`, so this is the one place that can say "only help happened"
+        # (DESIGN_logging.md §3).
+        if message:
+            self._print_message(message, sys.stderr)
+        raise UsageExit(status)
+
     def error(self, message):
         # A missing-required-argument error answers itself with the command's own help,
         # then names what is missing last, where the eye lands — except in chat, where
@@ -252,7 +269,7 @@ def _resolve_subcommand(action, token: str, exact_only: bool = False) -> Optiona
     if matches:
         print(red(f"Ambiguous command '{token}' — matches: " + ", ".join(sorted(matches))),
               file=sys.stderr)
-        sys.exit(2)
+        raise UsageExit(2)
     return None
 
 def _print_command_tree(

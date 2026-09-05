@@ -99,11 +99,30 @@ thing §4 goes out of its way not to do at run start. It also is not known yet: 
 the only place it is ever actually true.
 
 **Three outcomes, because exit codes conflate three things.** `ok` covers a command that
-finished, *including* a domain refusal ("no active plan") and including the exit-1 paths
-where argparse printed help. `cancelled` is `PromptCancelled` — the front-end `/cancel`
-or an idle timeout — which exits 130 today and is explicitly not a failure. `failed` is
-an unhandled exception. Without this, `--failed` would list every `tm goal` typed without
-a sub-command.
+finished, *including* a domain refusal ("no active plan"). `cancelled` is
+`PromptCancelled` — the front-end `/cancel` or an idle timeout — which exits 130 today and
+is explicitly not a failure. `failed` is an unhandled exception. Without this, `--failed`
+would list every command that correctly answered no.
+
+**A line that never became a command is not a run.** `tm benchmark record` is missing a
+required argument, so argparse prints that command's help and exits 2. Nothing happened.
+The same goes for `tm goal` with no sub-command, for bare `tm`, and for every `-h`. Those
+were a fifth of the runs in the journal's first ten days, and they answer no question
+anyone asks of a log — worse, the parse never reached `name_run`, so they are exactly the
+runs §7.1 cannot classify and therefore refuses to hide.
+
+So they are not written at all. The bracket still opens before the parse, because a crash
+*inside* the parse is still a run; what changes is that `run.start` is built there and
+held in memory, and a `UsageExit` — a `SystemExit` subclass raised by the single `exit()`
+every parser in the tree inherits, so one override covers `-h`, `--helpall` and every
+`error()` — drops the run rather than ending it, and nothing reaches the file.
+
+This is the one record in the journal that is written late, and the moment is chosen so
+that costs nothing. `name_run` writes it: the first thing after a successful parse and
+before any database or network work, so a run killed anywhere it could actually be killed
+still left a `run.start` behind and still reads as `?`. A drop arriving after the start
+was written closes the run normally instead — a start with no end means *killed*, and
+faking one of those would be worse than the noise this removes.
 
 **The list view reads the two bracket records and nothing else.** `run.start` supplies the
 id, the time, the source and the command; `run.end` supplies the duration, the rollup and
@@ -639,9 +658,11 @@ line. The screen still shows what was typed — that is what the athlete recogni
 
 A run killed before its parse never got a name, and a run recorded before this existed has
 none either. Both fall back to the words they were typed as, and a word that matches nothing
-is **listed** rather than hidden: never hide what you cannot classify. A bare command group
-(`tm plan`) prints help and is listed for the same reason — the record cannot tell it apart
-from the group acting on its own, and it is too rare to be worth a second mechanism.
+is **listed** rather than hidden: never hide what you cannot classify. The unnameable runs
+this rule used to be awkward about — a bare command group, a mistyped line, an `-h` — are
+no longer written at all (§3), so what still reaches it is only what is genuinely
+unclassifiable. The `-h` test on the typed argv stays regardless: the directory holds up to
+`logging.retain_days` of records written while those runs were still journalled.
 
 ### 7.2 Nothing wraps, and the columns say what they mean
 
@@ -792,7 +813,10 @@ unwritable directory neither raises nor prints more than once.
 temporary journal directory: every `run.start` has a matching `run.end`; a command that
 raises records the traceback and `outcome: failed`; a cancelled command records
 `outcome: cancelled` and not `failed`; and three lines typed into `tm shell` produce four
-runs — one for the shell and one per line, each naming the shell as its parent (§3).
+runs — one for the shell and one per line, each naming the shell as its parent (§3). Then
+the deferred half: a line that only printed usage or help writes nothing at all, a run is
+on disk the moment it is named, and a drop that arrives after the run has spoken closes it
+rather than abandoning it (§3).
 
 **A behavioural test on the answers.** §5.6 turns on a record nothing else writes, so it
 is pinned directly: a declined confirm lands on the run that asked it and the run still

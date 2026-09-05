@@ -19,7 +19,7 @@ from trainmate.util import (
 )
 
 from trainmate.cli.argparse_ext import (
-    WrapAwareArgumentParser,
+    UsageExit, WrapAwareArgumentParser,
     _print_command_tree, translate_dashless_argv, _HelpAllAction,
     sort_command_tree,
 )
@@ -30,6 +30,10 @@ from trainmate.cli.argparse_ext import (
 # Prefix matching leaves no trace in the listings, so both help surfaces say it out
 # loud (DESIGN_cli_noargs.md §d).
 PREFIX_HINT = "Any prefix that matches one command is that command: 'wo li' = 'workout list'."
+
+# The two commands answered from the parser tree itself rather than by a handler, so they
+# are the two that legitimately carry no `func` (`_dispatch`).
+TREE_COMMANDS = ("help", "shell")
 
 COMMAND_ORDER = {
     "": ["status", "workout", "progress", "plan", "goal",
@@ -201,12 +205,18 @@ def run_once(argv, parser, named_subparsers, source=None) -> None:
     anywhere — the bracket notes the exception and re-raises it unchanged (§5.4).
 
     Three outcomes, because an exit code conflates three things: ``ok`` for a command
-    that finished — a domain refusal and argparse's exit-1 help paths included —
-    ``cancelled`` for a deliberate abort, ``failed`` for an unhandled exception.
+    that finished — a domain refusal included — ``cancelled`` for a deliberate abort,
+    ``failed`` for an unhandled exception. A line that only ever printed usage or help
+    gets no outcome at all: it is dropped, which is why the bracket is deferred (§3).
     """
-    journal.start_run(argv, source=source)
+    journal.start_run(argv, source=source, defer=True)
     try:
         _dispatch(argv, parser, named_subparsers)
+    except UsageExit:
+        # Not an outcome: nothing happened but the help now on screen, so the run is
+        # dropped rather than closed (DESIGN_logging.md §3).
+        journal.drop_run()
+        raise
     except SystemExit as exc:
         journal.end_run("ok", exit_code=exc.code if isinstance(exc.code, int) else 0)
         raise
@@ -239,18 +249,29 @@ def _dispatch(argv, parser, named_subparsers) -> None:
 
     if not args.command:
         parser.print_help()
-        sys.exit(1)
+        raise UsageExit(1)
 
     # Aliases and prefixes are resolved to canonical names before argparse sees them
     # (DESIGN_cli_noargs.md §d), so `cmd` is always canonical.
     cmd = args.command.lower()
 
+    # Every command but the two below carries its handler, bound with set_defaults()
+    # next to the sub-parser that defines its flags. The 200-line elif ladder this
+    # replaces had to be edited in step with the parser definitions, and a branch that
+    # fell through simply did nothing.
+    handler = getattr(args, "func", None)
+    if handler is None and cmd not in TREE_COMMANDS:
+        # A command group invoked bare (`tm goal`): show what it offers. Asked before
+        # the run is named, so it drops with the other help-only lines
+        # (DESIGN_logging.md §3).
+        group = named_subparsers.get(cmd)
+        (group or parser).print_help()
+        raise UsageExit(1)
+
     # On the record too, so `journal` can tell a read-only view from a command that
     # changed something whatever prefix was typed (DESIGN_logging.md §7.1).
     journal.name_run(cmd, getattr(args, "subcommand", None))
 
-    # Two commands need the parser tree itself rather than the database, so they are
-    # answered here instead of through a handler.
     if cmd == "help":
         print(bold(parser.description))
         print()
@@ -260,17 +281,6 @@ def _dispatch(argv, parser, named_subparsers) -> None:
     if cmd == "shell":
         _repl(parser, named_subparsers)
         return
-
-    # Every other command carries its handler, bound with set_defaults() next to the
-    # sub-parser that defines its flags. The 200-line elif ladder this replaces had to
-    # be edited in step with the parser definitions, and a branch that fell through
-    # simply did nothing.
-    handler = getattr(args, "func", None)
-    if handler is None:
-        # A command group invoked bare (`tm goal`): show what it offers.
-        group = named_subparsers.get(cmd)
-        (group or parser).print_help()
-        sys.exit(1)
 
     handler(args)
 

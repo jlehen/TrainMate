@@ -76,6 +76,9 @@ class Run:
     llm_tokens: int = 0
     warns: int = 0
     errors: int = 0
+    # This run's own ``run.start``, built and not yet written; None once it is on
+    # disk, which is the usual state (§3).
+    pending: Optional[Tuple[Dict[str, Any], datetime]] = None
 
 
 # The open runs, innermost last. Nesting only ever happens in `tm shell`, and every
@@ -121,8 +124,23 @@ def record(ev: str, msg: str = "", lvl: str = "info", **d: Any) -> None:
 
     Keyword arguments become the record's ``d`` object; a None value is dropped, so a
     caller can pass an optional field unconditionally."""
-    if _LEVEL_RANK.get(lvl, _LEVEL_RANK["info"]) < _min_rank():
+    built = _build(ev, msg, lvl, d)
+    if built is None:
         return
+    _flush_pending()
+    _append(*built)
+
+
+def _build(
+    ev: str, msg: str, lvl: str, d: Dict[str, Any]
+) -> Optional[Tuple[Dict[str, Any], datetime]]:
+    """The record and the file-choosing moment it belongs to, or None when its level is
+    below the configured floor.
+
+    Split out of `record` for one caller: `run.start` is built when the run opens and
+    written only once the run turns out to be real (§3)."""
+    if _LEVEL_RANK.get(lvl, _LEVEL_RANK["info"]) < _min_rank():
+        return None
     run = current()
     if run is not None and lvl == "warn":
         run.warns += 1
@@ -140,7 +158,18 @@ def record(ev: str, msg: str = "", lvl: str = "info", **d: Any) -> None:
     fields = {k: v for k, v in d.items() if v is not None}
     if fields:
         rec["d"] = fields
-    _append(rec, moment)
+    return rec, moment
+
+
+def _flush_pending() -> None:
+    """Writes any held-back ``run.start``, outermost first, before another record lands.
+
+    So a deferred bracket still opens ahead of everything inside it, and `seq` — assigned
+    when the record was built — still reads in order (§3)."""
+    for run in _stack:
+        if run.pending is not None:
+            pending, run.pending = run.pending, None
+            _append(*pending)
 
 
 def note(msg: str, lvl: str = "info", **d: Any) -> None:
@@ -307,13 +336,19 @@ def current_id() -> Optional[str]:
     return run.id if run is not None else None
 
 
-def start_run(argv, source: Optional[str] = None, parent: Optional[str] = None) -> str:
+def start_run(
+    argv, source: Optional[str] = None, parent: Optional[str] = None,
+    defer: bool = False,
+) -> str:
     """Opens a run and writes its ``run.start``. Returns the new run id.
 
     The parent is the run enclosing this one in this process (`tm shell` running a typed
     line), falling back to the id the spawning process passed down in
     TRAINMATE_PARENT_RUN — which is how the bot's morning push and the subprocess it
     launched read as one story (§3).
+
+    ``defer`` holds the ``run.start`` until the parse names the run, so a line that
+    never became a command can be dropped without a trace (§3). Only the CLI passes it.
 
     The model is deliberately absent: reading it builds the database, and the
     ``--llm-model`` override has not been applied yet. It belongs on ``llm.call``, the
@@ -327,25 +362,33 @@ def start_run(argv, source: Optional[str] = None, parent: Optional[str] = None) 
         started=time.monotonic(),
     )
     _stack.append(run)
-    record(
-        "run.start", shlex.join(argv),
+    fields = dict(
         argv=argv, source=run.source, pid=os.getpid(),
         frontend=os.environ.get("TRAINMATE_FRONTEND") or "tty",
         parent=run.parent, config=CONFIG_PATH, db=config.db_path,
     )
+    if defer:
+        run.pending = _build("run.start", shlex.join(argv), "info", fields)
+    else:
+        record("run.start", shlex.join(argv), **fields)
     return run.id
 
 
 def name_run(command: str, subcommand: Optional[str] = None) -> None:
-    """Records which command the parsed argv turned out to be (§7.1).
+    """Records which command the parsed argv turned out to be (§7.1), and writes a
+    deferred ``run.start``.
 
     ``run.start`` keeps what the athlete typed, which may be any unambiguous prefix
     (DESIGN_cli_noargs.md §d); this is the canonical name `journal` filters and groups on.
-    It lands on ``run.end`` because that is the first record written after the parse."""
+    It lands on ``run.end`` because that is the first record written after the parse.
+
+    A deferred ``run.start`` is written here too — the parse has succeeded and nothing has
+    happened yet, which is what keeps §3's `?` row honest."""
     run = current()
     if run is None:
         return
     run.command = " ".join(word for word in (command, subcommand) if word)
+    _flush_pending()
 
 
 def end_run(
@@ -366,6 +409,24 @@ def end_run(
         warns=run.warns, errors=run.errors,
         error=error, traceback=traceback_text,
     )
+    _stack.pop()
+    if not _stack:
+        maybe_prune()
+
+
+def drop_run() -> None:
+    """Closes the innermost run leaving nothing behind, for a command line that never
+    became a command: argparse printed usage or help and stopped (§3).
+
+    Falls back to a normal ``run.end`` when the ``run.start`` is already on disk — a
+    start without one reads as a run that was killed (§3)."""
+    run = current()
+    if run is None:
+        return
+    if run.pending is None:
+        end_run("ok")
+        return
+    run.pending = None
     _stack.pop()
     if not _stack:
         maybe_prune()
