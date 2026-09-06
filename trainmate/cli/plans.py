@@ -222,7 +222,7 @@ def _generate_one_plan(
             if macro:
                 change_reason = staleness.reason(macro)
                 if change_reason and not force:
-                    if staleness.confirm_regenerate(change_reason):
+                    if staleness.confirm_regenerate(change_reason, macro):
                         force = True
                     else:
                         print(wrap_text(staleness.kept_line()))
@@ -579,7 +579,7 @@ def print_plan(next_goal: dict, macrocycle: dict, args: argparse.Namespace) -> N
     if not is_superseded:
         change_reason = staleness.reason(macrocycle)
         if change_reason:
-            staleness.report(change_reason)
+            staleness.report(change_reason, macrocycle)
     print(bold("Mesocycle Timeline:"))
     
     today = _today_date()
@@ -660,7 +660,8 @@ def run_plan_keep(args: argparse.Namespace) -> None:
         notice("This plan already reflects your current inputs — nothing to keep.")
         return
 
-    print(f"\n{bold('Changed since this plan was generated')}: {change_reason}\n")
+    print(f"\n{bold('Changed since this plan was generated')}: {change_reason}")
+    staleness.print_diff(macrocycle)
     print(green(wrap_text(staleness.kept_line())))
     staleness.stamp(macrocycle)
     print(gray(wrap_text(

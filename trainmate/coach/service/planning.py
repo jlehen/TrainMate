@@ -261,6 +261,31 @@ class PlanningMixin:
             return True
         return False
 
+    def plan_reshape_verdict(
+        self, macro: Dict[str, Any], change_reason: str,
+    ) -> Optional[Dict[str, Any]]:
+        """The coach's read on whether `change_reason` would have reshaped `macro`:
+        {"reshaping": bool, "why": str}, or None when no verdict could be had. Fails open
+        on purpose — the staleness question must never hang on the network, so any error
+        or malformed reply leaves the athlete with the question and no verdict (§10)."""
+        from trainmate.openrouter import openrouter_client
+        if getattr(openrouter_client, "show_prompt_only", False):
+            # That flag shows the command's own prompt; this preliminary would print
+            # its prompt instead and exit before the one being asked for.
+            return None
+        try:
+            verdict = self.engine._plan_reshape_verdict(
+                change_reason, self.profile_diff(macro), macro.get('strategy') or "",
+                self._db.get_mesocycles_for_macrocycle(macro['id']),
+            )
+        except Exception as e:
+            aside(f"Could not get the coach's read on this change: {e}")
+            return None
+        reshaping = verdict.get('reshaping') if isinstance(verdict, dict) else None
+        if not isinstance(reshaping, bool):
+            return None
+        return {'reshaping': reshaping, 'why': str(verdict.get('why') or "").strip()}
+
     def plan_generate(
         self, force: bool = False, objective_id: Optional[int] = None,
         auto_apply: bool = True, fresh: bool = False, start_date: Optional[str] = None,

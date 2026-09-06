@@ -2,13 +2,14 @@
 
 `plan show` reports it, `plan keep` dismisses it, `plan generate` and `workout generate`
 each offer to act on it. Wording and re-stamp live here once, closing design smell B-8
-(DESIGN_plan_staleness.md §9).
+(DESIGN_plan_staleness.md §9). What changed is shown as a diff, and the two questions
+carry the coach's read on whether it reshapes the plan (§10).
 """
 
-from typing import Optional
+from typing import Any, Dict, Optional
 
 from trainmate import runtime
-from trainmate.util import cmd, gray, notice, wrap_text
+from trainmate.util import bold, cmd, gray, green, notice, red, wrap_text, yellow
 
 
 def reason(macro: dict) -> Optional[str]:
@@ -43,22 +44,71 @@ def kept_line() -> str:
     )
 
 
-def confirm_regenerate(change_reason: str) -> bool:
-    """The generate-path question: the fact, the guidance, then the ask."""
-    return runtime.prompt.confirm(wrap_text(
+def print_diff(macro: dict, indent: str = "") -> None:
+    """The edit itself, old against new, so the athlete judges the change rather than
+    its field name (§10). Silent when there is nothing field-level to show."""
+    diff = runtime.coach_service.profile_diff(macro)
+    if not diff:
+        return
+    print()
+    for line in diff.splitlines():
+        if line.startswith('+') and not line.startswith('+++'):
+            print(indent + green(line))
+        elif line.startswith('-') and not line.startswith('---'):
+            print(indent + red(line))
+        elif line.startswith('@@'):
+            print(indent + gray(line))
+        else:
+            print(indent + line)
+    print()
+
+
+def verdict_line(verdict: Optional[Dict[str, Any]]) -> Optional[str]:
+    """The coach's read as one line, or None when there was none to report."""
+    if verdict is None:
+        return None
+    label = "re-shaping" if verdict['reshaping'] else "keep the plan"
+    why = f" {verdict['why']}" if verdict['why'] else ""
+    return f"{bold('Coach')}: {yellow(label) if verdict['reshaping'] else green(label)}.{why}"
+
+
+def explain(change_reason: str, macro: dict) -> Optional[bool]:
+    """Everything the athlete gets before either question (§10): the fact, the diff, the
+    §2 test, then the coach's read on it. Returns True when the coach calls it
+    re-shaping, False for keep, None when no verdict could be had."""
+    print(wrap_text(
         f"A plan-shaping input has changed since the last plan generation "
-        f"({change_reason}).\n\n{guidance()}\n\n"
-        "Would you like to regenerate the periodization strategy?"
+        f"({change_reason})."
     ))
+    print_diff(macro)
+    print(wrap_text(guidance()))
+    verdict = runtime.coach_service.plan_reshape_verdict(macro, change_reason)
+    line = verdict_line(verdict)
+    if line:
+        print()
+        print(wrap_text(line))
+    print()
+    return None if verdict is None else verdict['reshaping']
 
 
-def report(change_reason: str) -> None:
-    """The read-only block `plan show` prints under the inputs it contradicts (§9)."""
+def confirm_regenerate(change_reason: str, macro: dict) -> bool:
+    """The generate-path question. The default follows the coach's read: a coach that
+    says "re-shaping" and an app that defaults to No would be two answers (§10)."""
+    reshaping = explain(change_reason, macro)
+    return runtime.prompt.confirm(
+        "Would you like to regenerate the periodization strategy?",
+        default=bool(reshaping),
+    )
+
+
+def report(change_reason: str, macro: dict) -> None:
+    """The read-only block `plan show` prints under the inputs it contradicts (§9). Shows
+    the diff but asks the coach nothing: a read-only command makes no network call."""
     # The reason is itself a sentence ("athlete profile changed: gender, preferences"),
     # so it gets its own line rather than a colon that already has one.
     notice("\n! An input has changed since this plan was generated:")
     notice(f"    {change_reason}")
-    print()
+    print_diff(macro, indent="    ")
     print(wrap_text(f"  {guidance()}"))
     print()
     print(f"  {cmd('plan generate', quote=False)}   {gray('rebuild the periodization')}")

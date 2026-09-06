@@ -1,3 +1,4 @@
+import difflib
 import json
 from datetime import datetime
 from typing import Any, List, Optional, Tuple, Dict
@@ -23,16 +24,50 @@ def _profile_change_reason(snapshot_raw: Optional[str]) -> str:
     Falls back to the bare reason for a plan generated before the snapshot column, and for
     the one-off mismatch every pre-existing plan sees when the plan-shaping partition
     itself changes (§7) — in both cases the fields cannot be attributed honestly."""
-    if not snapshot_raw:
-        return _PROFILE_CHANGED
-    try:
-        old_profile = json.loads(snapshot_raw)
-    except (ValueError, TypeError):
-        return _PROFILE_CHANGED
-    if not isinstance(old_profile, dict):
+    old_profile = _snapshot_profile(snapshot_raw)
+    if old_profile is None:
         return _PROFILE_CHANGED
     fields = changed_plan_profile_fields(old_profile)
     return f"{_PROFILE_CHANGED}: {', '.join(fields)}" if fields else _PROFILE_CHANGED
+
+
+def _snapshot_profile(snapshot_raw: Optional[str]) -> Optional[Dict[str, Any]]:
+    """The plan-time profile a macrocycle carries, or None when it has none it can be
+    held to (pre-snapshot plan, or a snapshot that does not parse)."""
+    if not snapshot_raw:
+        return None
+    try:
+        old_profile = json.loads(snapshot_raw)
+    except (ValueError, TypeError):
+        return None
+    return old_profile if isinstance(old_profile, dict) else None
+
+
+def _profile_field_lines(value: Any) -> List[str]:
+    """One field as lines a diff can work on: prose stays prose, structure becomes
+    sorted JSON so a reordered dict does not read as a change."""
+    if value is None:
+        return []
+    if isinstance(value, str):
+        return value.splitlines()
+    return json.dumps(value, indent=2, sort_keys=True, ensure_ascii=False).splitlines()
+
+
+def profile_diff_text(old_profile: Dict[str, Any]) -> str:
+    """A unified diff per plan-shaping field that differs between `old_profile` and the
+    live config, so the athlete and the coach see the same edit the flag names
+    (DESIGN_plan_staleness.md §10). Empty when nothing differs."""
+    current = plan_profile()
+    chunks = []
+    for field in changed_plan_profile_fields(old_profile):
+        lines = difflib.unified_diff(
+            _profile_field_lines(old_profile.get(field)),
+            _profile_field_lines(current.get(field)),
+            fromfile=f"{field} (when the plan was generated)",
+            tofile=f"{field} (now)", lineterm="", n=1,
+        )
+        chunks.append("\n".join(lines))
+    return "\n\n".join(chunks)
 
 
 class PromptConfigMixin:
@@ -119,6 +154,15 @@ class PromptConfigMixin:
                 pct = (new_val - old_val) / old_val * 100.0
                 return f"{key} changed {old_val:g} → {new_val:g} ({pct:+.1f}%)"
         return None
+
+    def profile_diff(self, macro: Dict[str, Any]) -> str:
+        """What actually changed in the plan-shaping profile since `macro` was generated,
+        as a unified diff — or "" when the drift is elsewhere (thresholds, whose reason
+        already carries the numbers) or the plan predates the snapshot (§10)."""
+        if macro.get('config_hash') == self.engine._get_config_hash():
+            return ""
+        old_profile = _snapshot_profile(macro.get('profile_snapshot'))
+        return profile_diff_text(old_profile) if old_profile is not None else ""
 
     def _get_goals_hash(self, objectives: List[Objective]) -> str:
         return self.engine._get_goals_hash(objectives)

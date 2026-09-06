@@ -230,18 +230,24 @@ def _confirm_out_of_date_plans(
         if not change_reason:
             continue
         warning = (
-            "Caution: a plan-shaping input has "
-            "changed since the active periodization plan was "
-            f"generated ({change_reason}).\n"
-            "Generating workouts using the out-of-date plan might "
-            "result in incorrect training targets.\n\n"
-            f"{staleness.guidance()}\n\n"
-            "It is highly recommended to run "
+            "Generating workouts using the out-of-date plan might result in incorrect "
+            "training targets. It is highly recommended to run "
             + cmd("plan generate") + " first."
         )
         if force:
-            notice(warning + " Proceeding anyway (--force).")
-        elif not runtime.prompt.confirm(yellow(warning + " Proceed anyway?")):
+            notice(
+                f"Caution: a plan-shaping input has changed since the active "
+                f"periodization plan was generated ({change_reason}). {warning} "
+                "Proceeding anyway (--force)."
+            )
+            continue
+        # Same block as `plan generate` asks with, so the two questions cannot drift
+        # (DESIGN_plan_staleness.md §10). Proceeding is the "keep" answer here, so the
+        # default follows the coach's read the other way round.
+        reshaping = staleness.explain(change_reason, macro)
+        if not runtime.prompt.confirm(
+            yellow(warning + " Proceed anyway?"), default=reshaping is False,
+        ):
             notice(
                 "Workout generation cancelled. Please run "
                 + cmd("plan generate") + " first.",

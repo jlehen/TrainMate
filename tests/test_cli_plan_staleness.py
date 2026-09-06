@@ -142,6 +142,128 @@ class TestPlanStalenessSurfaces(unittest.TestCase):
         _code, again, _ = run_cli(["plan", "keep"])
         self.assertIn("already reflects your current inputs", again)
 
+    # --- §10: the diff, and the coach's read ---
+
+    @patch("trainmate.runtime.garmin")
+    def test_plan_show_prints_the_edit_itself(self, _mock_garmin):
+        """Naming the field is not enough to judge a blob like `preferences`: the old
+        and new text are shown, old struck, new added (§10). No network call."""
+        self._seed(stale=True)
+
+        with patch("trainmate.coach.engine.openrouter_client") as client:
+            exit_code, stdout, _ = run_cli(["plan", "show"])
+
+        self.assertEqual(exit_code, 0)
+        self.assertIn("preferences (when the plan was generated)", stdout)
+        self.assertIn("preferences (now)", stdout)
+        self.assertIn("-a sentence that has since been reworded", stdout)
+        client.complete.assert_not_called()
+
+    @patch("trainmate.runtime.garmin")
+    def test_plan_keep_prints_the_edit_it_is_keeping(self, _mock_garmin):
+        self._seed(stale=True)
+
+        _code, stdout, _ = run_cli(["plan", "keep"])
+
+        self.assertIn("-a sentence that has since been reworded", stdout)
+        self.assertIn("preferences (now)", stdout)
+
+    def _macro(self):
+        from trainmate import runtime
+        goal = runtime.db.upcoming_objectives()[0]
+        return runtime.db.get_macrocycle_for_objective(goal['id'])
+
+    def _confirm_regenerate(self, verdict, *, raises=None):
+        """Runs the `plan generate` question against a canned coach reply and returns
+        (default the question was asked with, what was printed, the verdict call)."""
+        import io
+        from contextlib import redirect_stdout
+        from trainmate.cli import staleness
+
+        self._seed(stale=True)
+        macro = self._macro()
+        out = io.StringIO()
+        with patch("trainmate.coach.engine.openrouter_client") as client, \
+                patch("trainmate.runtime.prompt") as prompt, redirect_stdout(out):
+            if raises is not None:
+                client.complete.side_effect = raises
+            else:
+                client.complete.return_value = verdict
+            prompt.confirm.return_value = False
+            staleness.confirm_regenerate("athlete profile changed: preferences", macro)
+        _args, kwargs = prompt.confirm.call_args
+        return kwargs.get("default"), out.getvalue(), client.complete
+
+    def test_the_coach_is_asked_with_the_diff_and_the_plan(self):
+        """The verdict call is small on purpose: the §2 rubric, the diff, and the blocks
+        as they stand — on the coach's own model, under its own journal label."""
+        _default, _out, complete = self._confirm_regenerate(
+            {"reshaping": False, "why": "Wording only."}
+        )
+
+        complete.assert_called_once()
+        system_prompt, user_content = complete.call_args[0][:2]
+        self.assertEqual(complete.call_args[1]["label"], "plan_verdict")
+        self.assertIn("block structure", system_prompt)
+        self.assertIn("-a sentence that has since been reworded", user_content)
+        self.assertIn("Base (", user_content)
+        self.assertIn("strategy", user_content)
+
+    def test_a_keep_verdict_is_shown_and_the_default_stays_no(self):
+        default, out, _ = self._confirm_regenerate(
+            {"reshaping": False, "why": "Wording only; the blocks stand."}
+        )
+
+        self.assertFalse(default)
+        self.assertIn("Coach: keep the plan. Wording only; the blocks stand.", out)
+        self.assertIn("-a sentence that has since been reworded", out)
+
+    def test_a_reshaping_verdict_flips_the_default_to_yes(self):
+        """A coach that says "re-shaping" and a question defaulting to No would be two
+        answers on one screen (§10)."""
+        default, out, _ = self._confirm_regenerate(
+            {"reshaping": True, "why": "The strength block would move earlier."}
+        )
+
+        self.assertTrue(default)
+        self.assertIn("Coach: re-shaping. The strength block would move earlier.", out)
+
+    def test_a_failed_verdict_leaves_the_question_and_no_read(self):
+        """Fail open: the network must never stand between the athlete and the
+        question (§10)."""
+        default, out, _ = self._confirm_regenerate(None, raises=RuntimeError("down"))
+
+        self.assertFalse(default)
+        self.assertNotIn("Coach:", out)
+        self.assertIn("block structure, phase order or volume ramp", " ".join(out.split()))
+
+    def test_a_malformed_verdict_counts_as_none(self):
+        default, out, _ = self._confirm_regenerate({"reshaping": "yes please"})
+
+        self.assertFalse(default)
+        self.assertNotIn("Coach:", out)
+
+    def test_workout_generate_proceeds_by_default_only_when_the_coach_says_keep(self):
+        """Proceeding with the stale plan is the "keep" answer, so its default follows
+        the coach's read the other way round from `plan generate` (§10)."""
+        import io
+        from contextlib import redirect_stdout
+        from trainmate.cli.workouts.generate import _confirm_out_of_date_plans
+
+        self._seed(stale=True)
+        defaults = {}
+        for reshaping in (False, True):
+            with patch("trainmate.coach.engine.openrouter_client") as client, \
+                    patch("trainmate.runtime.prompt") as prompt, \
+                    redirect_stdout(io.StringIO()):
+                client.complete.return_value = {"reshaping": reshaping, "why": "x"}
+                prompt.confirm.return_value = False
+                _confirm_out_of_date_plans(
+                    self._days_out(0), self._days_out(6), None, force=False
+                )
+            defaults[reshaping] = prompt.confirm.call_args[1]["default"]
+        self.assertEqual(defaults, {False: True, True: False})
+
     @patch("trainmate.runtime.garmin")
     def test_plan_keep_reports_when_there_is_no_plan(self, _mock_garmin):
         test_db.add_objective(

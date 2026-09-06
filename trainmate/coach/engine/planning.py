@@ -200,3 +200,57 @@ You MUST respond with a JSON object containing:
             system_prompt, user_content, label="plan_generate"
         )
         return result
+
+    def _plan_reshape_verdict(
+        self, change_reason: str, diff_text: str, strategy: str,
+        mesocycles: List[Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        """Asks the coach whether a changed input would have altered the periodization —
+        the DESIGN_plan_staleness.md §2 test, applied by the model that would do the
+        rebuilding rather than by the athlete alone (§10).
+
+        A small call on purpose: the rubric, the diff, and the plan as it stands. No
+        science file, no history — the question is structural, and a model told to look
+        for a reason to regenerate will find one, so the rubric demands the concrete
+        change it would make and treats "cannot name one" as keep."""
+        blocks = "\n".join(
+            f"- {m['name']} ({m['start_date']} to {m['end_date']}): {m['focus']}"
+            for m in mesocycles
+        )
+        system_prompt = """You are an endurance coach reviewing a periodization plan you built earlier.
+
+## TASK
+One of the inputs the plan was generated from has changed. Decide whether, had the new value
+been in force at generation time, you would have built a structurally different periodization.
+
+"Structurally different" means one of exactly three things: a different block structure
+(number, type or length of blocks), a different phase order, or a different volume ramp.
+Nothing else counts. Changes to wording, tone, motivation, how sessions should be described,
+what to listen to, or which days sessions land on are absorbed by the next workout
+generation and do NOT reshape the plan.
+
+Be strict. Answer "reshaping" only if you can name the specific structural change you would
+make. If you cannot name one, the answer is keep.
+
+## RESPONSE FORMAT
+Return a JSON object with exactly these keys:
+{
+  "reshaping": true or false,
+  "why": "one sentence naming the structural change you would make, or why none is needed"
+}
+"""
+        user_content = f"""## WHAT CHANGED
+{change_reason}
+
+{diff_text or "(no field-level diff available)"}
+
+## THE PLAN AS IT STANDS
+{strategy}
+
+Blocks:
+{blocks}
+"""
+        step("Asking the coach whether this change reshapes the plan...", cyan)
+        return _eng.openrouter_client.complete(
+            system_prompt, user_content, label="plan_verdict"
+        )

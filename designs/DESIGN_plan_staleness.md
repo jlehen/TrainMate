@@ -110,7 +110,8 @@ not recoverable, and writing the *current* profile would erase a genuine pending
 
 ## 8. Deliberately not done
 
-- **`plan diff` does not show profile changes.** The snapshot is now there and a version
+- **`plan diff` does not show profile changes.** (The staleness surfaces now do — §10.)
+  The snapshot is there and a version
   diff could render it beside goals/constraints/thresholds, but that is display surface
   (CLI renderer + web JSON + their tests) and independent of staleness. Natural follow-up.
 - **The web dashboard banner still does not name fields.** `trainmate_web.py` compares
@@ -174,3 +175,57 @@ between them is how they drift.
 companion voice draws nothing — regenerating is operator work, and the companion athlete
 has no shell to run either command in (DESIGN_render_persona.md §5), the same silence
 `runway_hint` already takes.
+
+## 10. Showing the edit, and asking the coach
+
+**Date:** 2026-09-06 · **Branch:** worktree-staleness-diff-verdict
+
+§9 put the §2 test next to the question. The athlete still had to apply it to a field
+name. "preferences changed" is one blob, and the change that triggered this section was
+a rewrite of that blob in which most lines were motivation and one line dropped a
+session-placement preference. Judging that from the word `preferences` is guesswork.
+
+**The diff.** Every surface that names the change now shows it: a unified diff per
+changed plan-shaping field, old against new, rendered from the same `profile_snapshot`
+§5 introduced. Prose fields diff as prose; structured ones (the weekly schedule) as
+sorted JSON, so a reordered dict is not a change. Threshold drift shows no diff — its
+reason already carries the numbers. One renderer in the service (`profile_diff`), one
+printer in `cli/staleness.py`, and `plan show`, `plan keep` and both questions use it.
+
+**The coach's read.** Before either question the coach is asked the §2 test itself: given
+this diff and the plan as it stands, would you have built a structurally different
+periodization? It answers `{"reshaping": bool, "why": str}` and the line prints as
+`Coach: keep the plan. …` or `Coach: re-shaping. …`.
+
+- *Small on purpose.* The rubric, the diff, the strategy text and the block list. No
+  science file, no history, no metrics: the question is structural, and everything the
+  athlete's state would add is already baked into the plan being judged. First run on a
+  real instance: ~5k prompt tokens.
+- *Strict on purpose.* A model told to look for a reason to regenerate finds one. The
+  rubric names the three things that count, lists what does not (wording, tone,
+  motivation, what to listen to, which days), and demands the concrete structural change
+  it would make — "cannot name one" is keep.
+- *On the coach's model, not the router's.* The verdict predicts what the coach would do.
+  The router model exists because bot routing runs on every message and must be cheap;
+  this runs only when an input changed. The gain from using the same model is
+  consistency between the prediction and the regeneration, not accuracy — the model has
+  no memory of building the plan and sees only what the prompt shows it. The decisive
+  reason is simpler: it is the default, so a pinned `--llm-model` applies unchanged and
+  there is no second model to explain.
+- *Fails open.* Any error or malformed reply prints an aside and leaves the athlete with
+  the diff, the guidance and the question, exactly as §9 had it. The network never
+  stands between the athlete and the question.
+- *Advisory, and the default follows it.* The human still answers. But a coach that says
+  "re-shaping" over a question defaulting to No is two answers on one screen, so `plan
+  generate` defaults to Yes on a re-shaping verdict, and `workout generate`'s "proceed
+  anyway?" — where proceeding is the keep answer — defaults to Yes on a keep verdict.
+  No verdict, no change: the old defaults stand.
+
+**Where it is not asked.** `plan show` and `plan keep` print the diff and nothing more: a
+read-only command makes no network call, and `keep` is already the answer. `status` is
+unchanged. The `--show-llm-prompt-only` flag shows the command's own prompt, so the
+verdict steps aside under it rather than printing its prompt and exiting first.
+
+**Deliberately not done.** No caching of the verdict on the macrocycle: both questions
+stamp on "keep", so the same change is asked about once. The web banner still names
+fields only. The bot has no path to this question (§9's companion exemption stands).
