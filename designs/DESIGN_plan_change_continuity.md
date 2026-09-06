@@ -398,8 +398,8 @@ pending change onto the new one; when `plan keep` stamps it, the pending change 
 So whichever way the question went, the next regeneration finds it.
 
 A regeneration whose window is non-empty renders the pending change as the "WHAT CHANGED"
-section (§4.6), attaches `athlete_note` as the change's summary, and clears the pending
-change. A bare generate leaves it alone: nothing the athlete was told about was rewritten,
+section (§4.6), writes `athlete_note` as the change's `note` (§6.3), and clears the
+pending change. A bare generate leaves it alone: nothing the athlete was told about was rewritten,
 so the sentence is not yet true. A newer verdict replaces an older pending change.
 
 ### 6.3 Where the sentence goes
@@ -407,13 +407,26 @@ so the sentence is not yet true. A newer verdict replaces an older pending chang
 **Into the preview.** The operator reads it above §4.5's table and can reject the
 proposal. Nothing branches on it; it is prose from a model.
 
-**Onto the Calendar.** The change summary is what `calendar_lineage.py::_entry` prints as
-`Change:` for earlier revisions. The current revision is rendered by `sync_workout`,
-which today prints `Reason:` for removed and adapted sessions only, so the summary of the
-newest change is never on the event the athlete opens. `sync_workout` gains one line: a
-current revision whose change carried an `athlete_note` prints `Change: {note}` under its
-load line. `Reason:` stays what it is — why *this* session changed — and `Change:` is
-what the whole change was about.
+**Onto the Calendar, under the right label.** Two labels, one sentence each:
+**`Reason:` says why. `Change:` says what changed for the athlete.**
+
+Today `calendar_lineage.py::_entry` prints a revision's own `reason` as `Reason:` and the
+change's `summary` as `Change:`. For an adaptation the summary is the batch's overall
+rationale — "HRV suppressed three mornings running" — which is a second *why*, not a
+*what*, so the label misleads (DESIGN_calendar_lineage.md §3's example shows exactly
+this). And for a regeneration the summary is the coach's four-sentence microcycle
+reasoning, which is neither. So:
+
+- The `athlete_note` gets its own nullable `note` column on `workout_changes`, beside
+  `summary`. It is the only thing ever printed as `Change:`.
+- `_entry` prints the summary, when it differs from the session's own reason, as a second
+  `Reason:` line, not as `Change:`.
+- The current revision is rendered by `sync_workout`, which today prints `Reason:` for
+  removed and adapted sessions only, so the newest change is never described on the
+  event the athlete opens. It gains one line: `Change: {note}` under the load line when
+  the revision's change carries a note.
+
+DESIGN_calendar_lineage.md §3's example is corrected with this change.
 
 **Into the morning push.** DESIGN_plan_staleness.md §9 keeps the companion silent about
 the staleness *flag*, and that stays. A finished, applied change is different: it has
@@ -449,8 +462,11 @@ the window, manual outside the window, coach kind inside, coach kind outside (to
 or sport-changed session updates its event in place.
 
 `tests/test_google_calendar.py` — `[Deleted]` for `rm`/`stand-down`, `[Cancelled]` for
-`generate`/`adapt`, `Change:` printed on a current revision whose change carried a note,
+`generate`/`adapt`, `Change:` printed on a current revision whose change carries a note,
 and not otherwise.
+
+`tests/test_calendar_lineage.py` — a History entry prints the batch summary as a second
+`Reason:` line, and `Change:` only from the change's `note`.
 
 `tests/test_cli_plan_staleness.py` — the verdict's `athlete_note` is stored as a pending
 change on keep and on regenerate; `plan_apply` carries it to the new macrocycle; a bare
@@ -492,7 +508,8 @@ Sessions you were already told about (next 7 days):
 ```
 
 On the calendar, Thursday is untouched. Friday shows "[Cancelled] Rest Day" with the
-reason, beside "Tempo run" whose body carries `Change: Four sessions a week now…`.
+reason, beside "Tempo run" whose body carries `Reason: fourth session of the week` and
+`Change: Four sessions a week now…`.
 Saturday's event updates in place, its History showing the threshold version above the
 easy one. On Thursday morning the push opens with the note.
 
@@ -534,7 +551,7 @@ workout generation" and is correct as a statement about the model; it stays.
 
 **Migration.** Four nullable columns on `macrocycles`: `pending_change_reason`,
 `pending_change_diff`, `pending_change_why`, `pending_change_note`; `schema_version`
-bumped. `workout_changes` needs nothing: the note travels as the change's `summary`.
+bumped. One nullable `note` column on `workout_changes` (§6.3).
 
 **ARCHITECTURE.md** needs `leaves_trace`, the settings row, the pending change and the
 `[Cancelled]` word.
