@@ -2305,6 +2305,30 @@ class TestGenerationSpanIsBounded(unittest.TestCase):
         self.assertNotIn("Inside", live)
         self.assertIn(f"Run {_days_out(31)}", live)
 
+    @patch("trainmate.runtime.calendar_syncer")
+    @patch("trainmate.coach.engine.openrouter_client")
+    def test_an_ordinary_session_written_over_a_test_is_not_a_test(
+        self, mock_client, _mock_calendar
+    ):
+        """The append carries `benchmark_type` forward on a same-slot rewrite, so a
+        regeneration that replaces a scheduled FTP test with an easy run must blank the
+        flag the way adapt does (DESIGN_benchmark_workouts.md §4.2), or the run is
+        silently a test."""
+        save_workout(
+            test_db, date=_days_out(31), sport_type="running", title="LT test",
+            description="[LT test]\n30 mins", duration_minutes=30,
+            benchmark_type="lthr_30min",
+        )
+        mock_client.complete.return_value = self._response(_days_out(31))
+        proposal = coach_service.workout_generate(
+            start_date=_days_out(30), end_date=_days_out(40)
+        )
+        coach_service.workout_generate_apply(proposal)
+
+        written = test_db.get_workout(_days_out(31), "running")
+        self.assertEqual(written["title"], f"Run {_days_out(31)}")
+        self.assertIsNone(written["benchmark_type"])
+
     def test_a_bare_span_opens_after_the_generated_schedule_stops(self):
         """Generation carries the schedule on rather than rewriting days it already
         covers — a run that rewrote them would leave the runway nudge standing (§8)."""

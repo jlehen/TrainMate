@@ -656,15 +656,24 @@ class WorkoutGenMixin:
                 kind="generate", summary=summary, macrocycle_id=span_macro
             ) as change,
         ):
-            for live in self._db.get_workouts(
+            standing = self._db.get_workouts(
                 start_date=proposal.gen_start, end_date=proposal.gen_end or None
-            ):
+            )
+            for live in standing:
                 if (live['date'], canonical_sport(live['sport_type'])) in proposed_slots:
                     continue
                 change.void(
                     date=live['date'], sport_type=live['sport_type'],
                     reason="Not in the regenerated plan",
                 )
+            # The flag belongs to the TEST, not to the slot: a rewrite of a benchmark's
+            # slot that does not re-emit benchmark_type is an ordinary session, and the
+            # carry-forward must not make it a test (DESIGN_benchmark_workouts.md §4.2,
+            # as adapt already does).
+            tested_slots = {
+                (live['date'], canonical_sport(live['sport_type']))
+                for live in standing if live.get('benchmark_type')
+            }
             for w in proposal.workouts:
                 # Claimed above, so it escaped the void; writing it again would churn a
                 # day that did not change (§7.1).
@@ -673,6 +682,7 @@ class WorkoutGenMixin:
                 # The intensity target the coach stated while it still knew the intent
                 # (DESIGN_intensity_distribution.md §9.8) — validated, never rescaled.
                 zone_currency, zone_sec = intensity.parse_planned_zones(w)
+                slot = (w['date'], canonical_sport(w['sport_type']))
                 change.append(
                     date=w['date'],
                     sport_type=w['sport_type'],
@@ -682,6 +692,9 @@ class WorkoutGenMixin:
                     rpe=w.get('rpe'),
                     tss=w.get('tss'),
                     benchmark_type=w.get('benchmark_type'),
+                    clear_benchmark=bool(
+                        slot in tested_slots and not w.get('benchmark_type')
+                    ),
                     macrocycle_id=w.get('macrocycle_id'),
                     planned_zone_currency=zone_currency,
                     planned_zone_sec=zone_sec,
