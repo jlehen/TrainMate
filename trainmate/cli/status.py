@@ -332,7 +332,7 @@ def run_status(args) -> None:
     # fact (DESIGN_model_selection.md §5).
     from trainmate.openrouter import openrouter_client
     print(gray(f"  LLM model:    {openrouter_client.model} · change with "
-               + cmd("model")))
+               + cmd("settings set coach-model")))
 
     if verbose:
         goals = runtime.db.get_objectives()

@@ -22,12 +22,14 @@
 llm:
   # An OPENROUTER_API_KEY environment variable overrides this.
   api_key: "YOUR_OPENROUTER_API_KEY"
-  # Models this install may use. `model list` numbers them in this order; the first entry
-  # is the default until `model set` picks another (DESIGN_model_selection.md §1).
-  # An entry is either a bare identifier or a `model:` mapping, as below.
+  # Models this install may use. `settings list coach-model` numbers them in this order;
+  # the first entry is the default coach until `settings set coach-model` picks another
+  # (DESIGN_model_selection.md §1). An entry is either a bare identifier or a `model:`
+  # mapping, as below. Recommended coach: the most recent Claude Opus (README, "Choosing
+  # a model").
   models:
-    - model: "google/gemini-3.5-flash"
     - model: "anthropic/claude-opus-5"
+    - model: "google/gemini-3.5-flash"
   # Seconds an OpenRouter HTTP request may run before it's aborted. Generation is
   # slow (large plans), so keep this generous. Default 120.
   #request_timeout_seconds: 120
@@ -35,6 +37,7 @@ llm:
   # DESIGN_bot_simple_frontend.md §5.4). Seeds the `router-model` setting; change it
   # live with `settings set router-model`. It must be one of the `models:` entries
   # above — one allowlist for both roles. Absent -> the coaching model routes too.
+  # Recommended: Gemini Flash.
   #router_model: "google/gemini-3.5-flash"
 
 # Where this instance's files live. Every relative path in this file — the database,
@@ -51,7 +54,7 @@ llm:
 
 # The athlete's own sports-science guidelines — the directory whose *.md files are
 # injected into every coaching prompt as the ATHLETE-PROVIDED block (see the README's
-# "Personalizing TrainMate"). A relative path resolves against this config file's
+# "The science directory"). A relative path resolves against this config file's
 # directory; default science/ beside it. Point a second athlete at their own directory
 # so they get their own training philosophy instead of the primary athlete's; point two
 # instances at the same absolute path to share one. The app's built-in guidelines

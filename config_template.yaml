@@ -12,11 +12,15 @@
 llm:
   # An OPENROUTER_API_KEY environment variable overrides this.
   api_key: "YOUR_OPENROUTER_API_KEY"
-  # Models this install may use. `model list` numbers them in this order; the first
-  # entry is the default until `settings set coach-model` picks another.
+  # Models this install may use. `settings list coach-model` numbers them in this order;
+  # the first entry is the default coach until `settings set coach-model` picks another.
+  # Recommended: the most recent Claude Opus as the coach (see README, "Choosing a model").
   models:
-    - model: "google/gemini-3.5-flash"
     - model: "anthropic/claude-opus-5"
+    - model: "google/gemini-3.5-flash"
+  # Cheap model the Telegram companion mode routes free-text messages with (must be one
+  # of the models above). Unset, the coach model routes too. Recommended: Gemini Flash.
+  router_model: "google/gemini-3.5-flash"
 
 google:
   # Service-account JSON used to authenticate to the Google APIs. A relative path
