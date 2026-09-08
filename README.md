@@ -11,9 +11,9 @@ SQLite database. The only outside calls are to Garmin Connect, Google Calendar,
 and an LLM through OpenRouter.
 
 The coaching philosophy is yours as well. The coach plans from Markdown
-guidelines you put in a `science/` directory, and `science.sample/` ships the
-files the author trains with, so you start from a real methodology and change
-what you disagree with.
+guidelines you put in a `science/` directory, and `science.samples/` ships two
+ready-made sets, so you start from a real methodology and change what you
+disagree with.
 
 ```
 $ ./tm status
@@ -90,7 +90,7 @@ after a week you will know your number.
    the default zones on the right basis, once, in Garmin Connect. Why this
    matters is in [One-time Garmin settings](#one-time-garmin-settings).
 4. **Pick a coaching philosophy.** Copy the guideline files you like from
-   `science.sample/` into `science/`, or write your own. Skippable to start,
+   a `science.samples/` set into `science/`, or write your own. Skippable to start,
    since the built-in sports science works alone, but this is where the coach
    learns your methodology
    ([The science directory](#the-science-directory-your-coaching-philosophy)).
@@ -248,8 +248,8 @@ Sat 15 · 🚴 Long Easy Ride — 150 min
 
 - **Your philosophy, not the app's.** The built-in guidelines teach mainstream
   sports science but pick no methodology. Markdown files you drop into
-  `science/` say how you want to be coached, and `science.sample/` ships three
-  worked examples to copy. See
+  `science/` say how you want to be coached, and `science.samples/` ships two
+  worked sets to copy. See
   [The science directory](#the-science-directory-your-coaching-philosophy).
 - **Periodized plans.** From your goals, constraints and profile, TrainMate
   builds a macrocycle (the whole arc to your goal), its mesocycles (blocks of a
@@ -513,8 +513,9 @@ mode bot for someone else: two configs, two bots, no routing code.
 `user_profile:` says who you are. The `science/` directory says how you want to
 be coached, and it is the deepest lever you have on the plans the coach writes.
 
-The quickest start is `science.sample/`: the guideline files the author trains
-with, described at the end of this section. Copy the ones you like into
+The quickest start is `science.samples/`: two ready-made sets, one for an
+endurance athlete who also lifts and one for a woman in menopause training for
+health, described at the end of this section. Copy the files you like into
 `science/` and edit them, or imitate their shape for your own.
 
 Every `.md` file in `science/` (gitignored, empty by default) is injected into
@@ -544,8 +545,11 @@ merely explanatory, before the coach ever sees it.
 - Do not restate the built-ins. Generic zone or periodization theory is already
   there.
 
-**Worked examples.** `science.sample/` holds the files the author actually
-trains with. Copy the ones you like into `science/` and adapt them.
+**Worked examples.** `science.samples/` holds two sets. Copy the files you like
+into `science/` and adapt them.
+
+`cycling_and_strength/` is for an endurance athlete, cyclist first, who also
+lifts, and wants a plan built on one named methodology:
 
 - `sustainable_training.md` is the **prescriptive** methodology the coach plans
   from, summarized from Jem Arnold's
@@ -558,6 +562,14 @@ trains with. Copy the ones you like into `science/` and adapt them.
 - `plan_customization.md` is **reference only**: adjusting a plan around real
   life, from TrainingPeaks'
   [Easy Ways to Customize Your Readymade Endurance Training Plan](https://www.trainingpeaks.com/blog/customize-your-training-plan/).
+
+`menopause_woman_health/` is for a woman in menopause training for health
+rather than a race. Its one file,
+`mary_claire_haver_exercise_prescription.md`, summarizes Dr. Mary Claire
+Haver's "The Exercise Prescription I Give Every Woman in Menopause": weekly
+floors of about 150 minutes of moderate cardio and 100 minutes of strength, why
+both, and the caveats the article itself states. It shows that a set does not
+have to be about performance at all.
 
 ## Steering the plan
 
