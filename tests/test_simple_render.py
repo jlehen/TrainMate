@@ -119,6 +119,39 @@ class DayLinesTest(unittest.TestCase):
         self.assertNotIn("Today", lines[0])
         self.assertIn("2026-08-27", lines[0])
 
+    def test_two_sessions_on_a_day_are_separated_by_a_rule(self):
+        """A prescription has blank lines in it, so a blank line cannot also be what
+        ends one session — without the rule the second header reads as another
+        paragraph of the first one's text (DESIGN_bot_simple_frontend.md §6)."""
+        with patch("trainmate.cli.render._today_str", return_value="2026-08-25"):
+            lines = render.simple_day_lines(
+                [{"sport_type": "cycling", "title": "HIIT 4x5", "date": "2026-08-25",
+                  "duration_minutes": 85,
+                  "description": "Warm up 15 min.\n\nMain set: 4x5 min.\n\nCool down."},
+                 {"sport_type": "strength_training", "title": "Strength",
+                  "date": "2026-08-25", "duration_minutes": 40,
+                  "description": "Squat 3x4.\n\nRDL 3x4."}],
+                "2026-08-25",
+            )
+        text = "\n".join(lines)
+        rule = render.SIMPLE_SESSION_RULE
+        self.assertEqual(text.count(f"\n{rule}\n"), 1, text)
+        head, tail = text.split(rule)
+        self.assertIn("HIIT 4x5", head)
+        self.assertIn("Cool down.", head)
+        self.assertIn("Strength", tail)
+        self.assertNotIn("HIIT 4x5", tail)
+
+    def test_a_lone_session_gets_no_rule(self):
+        """The rule separates sessions; with one session there is nothing to separate."""
+        with patch("trainmate.cli.render._today_str", return_value="2026-08-25"):
+            lines = render.simple_day_lines(
+                [{"sport_type": "running", "title": "Easy run", "date": "2026-08-25",
+                  "duration_minutes": 40, "description": "Conversational pace."}],
+                "2026-08-25",
+            )
+        self.assertNotIn(render.SIMPLE_SESSION_RULE, "\n".join(lines))
+
 
     def _today(self, verdicts=None):
         with patch("trainmate.cli.render._today_str", return_value="2026-08-25"):

@@ -78,6 +78,12 @@ def sport_emoji(sport_type: Optional[str]) -> str:
     return SPORT_EMOJI.get((sport_type or "").strip().lower(), DEFAULT_SPORT_EMOJI)
 
 
+# Where one session's text ends and the next begins. A blank line cannot say it: a
+# prescription and a wording diff both use blank lines inside themselves
+# (DESIGN_bot_simple_frontend.md §6).
+SIMPLE_SESSION_RULE = "———"
+
+
 def simple_session_line(w: Dict[str, Any], lead: Optional[str] = None) -> str:
     """One simple-mode line for a session: '🏃 Today: Easy run — 40 min'.
 
@@ -106,6 +112,8 @@ def simple_day_lines(
     day_word = "Today" if date_str == _today_str() else fmt_date(date_str)
     lines: List[str] = []
     for w in workouts:
+        if lines:
+            lines.append(f"\n{SIMPLE_SESSION_RULE}\n")
         lines.append(simple_session_line(w, lead=day_word))
         status = ((verdicts or {}).get(w.get("id")) or {}).get("status")
         if status in SIMPLE_DONE_STATUSES:
@@ -1055,7 +1063,9 @@ class CompanionRenderer(ExpertRenderer):
 
     def revision_preview(self, proposal: RevisionProposal, heading: str) -> None:
         print(f"\n{heading}")
-        for entry in simple_revision_lines(proposal):
+        for index, entry in enumerate(simple_revision_lines(proposal)):
+            if index:
+                print(f"\n{SIMPLE_SESSION_RULE}")
             print(f"\n{entry}")
 
     # -- goals a tap can reach --

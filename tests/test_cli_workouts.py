@@ -258,6 +258,13 @@ class TestCliWorkouts(unittest.TestCase):
             "Was: Even power beats a good average.\n"
             "Now: Wednesday's execution was exactly right.", stdout,
         )
+        # The wording diff puts blank lines inside a session's own entry, so the day
+        # boundary needs a mark of its own (DESIGN_bot_simple_frontend.md §6).
+        from trainmate.cli.render import SIMPLE_SESSION_RULE
+        before, after = stdout.split(SIMPLE_SESSION_RULE)
+        self.assertIn("Rest Day (was Strength — Deload Volume", before)
+        self.assertNotIn("Climb Threshold", before)
+        self.assertIn("Was: Even power beats a good average.", after)
         self.assertNotIn("PROPOSED WORKOUT ADAPTATIONS", stdout)
         self.assertNotIn("Duration/RPE/TSS", stdout)
         self.assertNotIn("TEXT REVISED", stdout)

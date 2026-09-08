@@ -348,6 +348,23 @@ revision the changed passages as `Was:` / `Now:` pairs (DESIGN_workout_revisions
 words as well. Expert mode keeps the table, whose narrow-client form already stacks
 into records.
 
+**One session ends where the rule is (2026-09-08).** §11.2 said whitespace is the only
+column a phone can draw, and in these two views whitespace had already been spent. A
+session's own text uses blank lines inside itself — a prescription is several
+paragraphs, a wording diff is several `Was:` / `Now:` passages — so the blank line
+between two sessions said exactly what the blank lines within one said. Reading an
+adapt preview of two sessions (observed 2026-09-08), the passages fifteen lines below
+the Wednesday header could have belonged to Wednesday or to a session after it; in the
+day view it was worse, because sessions there ran together with no blank line at all
+and a second session's header read as another paragraph of the first one's
+prescription. Companion mode now puts a rule — `———` on its own line — between one
+session and the next, in the adapt preview and in the day view. It is not a §11.1 glyph
+and carries no meaning of its own: it is punctuation, and the one thing it says is
+"new session". Unconditional, so the reader never has to work out whether this
+particular message earned a separator. The week view needs none — one line per session
+is already one session per line — and expert mode needs none, since its table has
+columns and its wording diff indents under a session header.
+
 **Tone rule** (the "not depressing" requirement): simple rendering leads with what was
 done and what is next, states gaps as neutral facts after the lead, and never opens
 with a miss. A skipped week reads "back on track Thursday — the coach adjusted for the
