@@ -218,6 +218,39 @@ class RouteCommandTest(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertEqual(self._intent(out), "unclear")
 
+    def test_the_router_reads_goal_and_rule_titles_beside_the_message(self):
+        from datetime import date, timedelta
+        soon = (date.fromisoformat(today_str()) + timedelta(days=4)).isoformat()
+        test_db.add_objective(
+            title="Spring 10k", target_date=soon, sport_type="running", status="active",
+        )
+        test_db.add_constraint(
+            title="Klausenpass", start_date=soon, end_date=soon,
+            description="Riding both passes in a day",
+        )
+        with patch(
+            "trainmate.openrouter.OpenRouterClient.complete",
+            return_value={"intent": "coach_message"},
+        ) as complete:
+            run_cli(["bot", "route", "the Klausen ride got bigger"])
+        system, user = complete.call_args.args[:2]
+        # Titles and dates ride with the message; the system prompt stays static, and
+        # ids and descriptions stay the capture call's business (§5.3).
+        self.assertIn('"Spring 10k" on ' + soon, user)
+        self.assertIn('"Klausenpass" from ' + soon, user)
+        self.assertNotIn("Riding both passes", user)
+        self.assertNotIn("Klausenpass", system)
+        self.assertTrue(user.rstrip().endswith("the Klausen ride got bigger"))
+
+    def test_an_empty_database_still_routes(self):
+        with patch(
+            "trainmate.openrouter.OpenRouterClient.complete",
+            return_value={"intent": "show_week"},
+        ) as complete:
+            _, out, _ = run_cli(["bot", "route", "what's on?"])
+        self.assertEqual(self._intent(out), "show_week")
+        self.assertIn("(none)", complete.call_args.args[1])
+
     def test_router_model_role_pins_the_client(self):
         from trainmate.openrouter import openrouter_client
         # The router picks from the same menu the coach does — one allowlist
@@ -704,9 +737,11 @@ class CaptureEditTest(_CaptureCase):
         # appears; the hand-off does (§12.4).
         self.assertIn("Long run", prompt.text)
         self.assertIn("pass it to your coach", prompt.text)
-        # The dropped reading is named: the router's "updating your goal" echo is
-        # still on screen and this line is its correction (§12.4).
+        # The dropped reading is named: the router's "sounds like a change to a goal"
+        # echo is still on screen and this line is its correction — and the line says
+        # what a "yes" sets in motion (§12.4).
         self.assertIn("I don't see a goal for that", prompt.text)
+        self.assertIn("reread the coming days", prompt.text)
         self.assertNotIn(BUTTONS_SENTINEL, out)
         handoff.assert_called_once_with("move my long run to Sunday")
 

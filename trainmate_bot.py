@@ -189,10 +189,12 @@ ROUTER_ECHO = {
     "add_constraint": "noting that rule for your coach",
     "add_signal": "logging that for your coach",
     "show_constraints": "showing what I'm working around",
-    "edit_constraint": "updating that rule",
+    # The two edit echoes are readings, not actions: the capture call that follows may
+    # find the name is a session and hand it to the coach instead (§12.4).
+    "edit_constraint": "sounds like a change to a rule — checking",
     "remove_constraint": "showing your rules — tap the one to drop",
     "add_goal": "setting up a new goal",
-    "edit_goal": "updating your goal",
+    "edit_goal": "sounds like a change to a goal — checking",
     "remove_goal": "showing your goals — tap the one to call off",
     "change_setting": "changing that for you",
 }

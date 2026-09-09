@@ -88,7 +88,8 @@ ROUTER_INTENTS = {
     "show_progress": "the athlete wants to see progress, fitness, stats or a chart",
     "coach_message": (
         "the athlete is telling the coach something about their state or availability "
-        "(tired, sore, sick, busy, travelling, no equipment, ...)"
+        "(tired, sore, sick, busy, travelling, no equipment, ...), or that a planned "
+        "ride, event or session has changed — its size, route or date"
     ),
     "add_constraint": (
         "the athlete states a standing rule or restriction to remember going forward "
@@ -145,11 +146,30 @@ ROUTER_SYSTEM_PROMPT = (
     "or availability right now, add_constraint when it is a standing rule going forward,\n"
     "and add_signal when it is an outside cause that acted on their body on given days;\n"
     "when nothing fits, use unclear.\n\n"
+    "The athlete's goals and rules come with the message. A name in the message that\n"
+    "matches one of those rows means that row, not a new one. A planned ride, event or\n"
+    "session changing in size, route or date is coach_message even when a goal or rule\n"
+    "names it: the coach reads the message and re-plans around it.\n\n"
     "## INTENTS\n\n"
     + "\n".join(f"- {name}: {desc}" for name, desc in ROUTER_INTENTS.items())
     + "\n\n## OUTPUT FORMAT\n\n"
     'Return a JSON object: {"intent": "<one intent name from the table>"}\n'
 )
+
+
+def _router_context(today: str) -> str:
+    """The athlete's goals and rules — titles and dates, no ids — so the router reads
+    "the Klausen ride" against what exists instead of guessing a new event (§5.3)."""
+    goals = _nominate_rows("goal", today)
+    rules = _nominate_rows("constraint", today)
+    lines = ["## THE ATHLETE'S GOALS", ""]
+    lines += [f"- \"{g['title']}\" on {g['target_date']}" for g in goals] or ["(none)"]
+    lines += ["", "## THE ATHLETE'S RULES", ""]
+    lines += [
+        f"- \"{c['title']}\" from {c['start_date']} to {c['end_date'] or 'open'}"
+        for c in rules
+    ] or ["(none)"]
+    return "\n".join(lines) + "\n\n"
 
 
 # --- Pickers (§12.1: the model picks that something should change, the tap picks which) ---
@@ -338,7 +358,8 @@ def run_bot_route(args: argparse.Namespace) -> None:
     intent = "unclear"
     try:
         data = openrouter_client.complete(
-            ROUTER_SYSTEM_PROMPT, "## MESSAGE\n\n" + (args.text or ""),
+            ROUTER_SYSTEM_PROMPT,
+            _router_context(_today_str()) + "## MESSAGE\n\n" + (args.text or ""),
             label="bot_route",
             # This process's stdout is captured by the bot and thrown away but for the
             # last JSON line; a wait notice would reach nobody
@@ -675,9 +696,12 @@ CONSTRAINT_EDIT_FIELDS = (
 # The wrong-domain answer §12.4 replaces a picker with: the ask was coach territory all
 # along, so the preview offers the hand-off instead of listing goals at a question about a
 # session. It says which reading was dropped, so the router's echo a moment earlier
-# ("updating your goal") has its correction on screen.
+# ("sounds like a change to a goal") has its correction on screen, and what a "yes"
+# sets in motion, because the help card is not on screen at that moment.
 SESSION_HANDOFF_ASK = (
-    "I don't see a {noun} for that — it sounds like {named}. Shall I pass it to your coach?"
+    "I don't see a {noun} for that — it sounds like {named}. Shall I pass it to your "
+    "coach? They'll reread the coming days with it in mind and propose changes for you "
+    "to confirm."
 )
 
 

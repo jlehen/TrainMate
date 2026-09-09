@@ -219,6 +219,17 @@ the vocabulary and misroutes are visible immediately. The writes pass (2026-09-0
 widens this table with capture and picker intents; §12.8 is now the authoritative
 table.
 
+**What the router sees (2026-09-09).** The message, and beside it the athlete's goals
+and rules — titles and dates, no ids, no descriptions — in the user content, so the
+system prompt stays static. From wording alone "the Klausen ride got bigger" read as an
+event changing (`edit_goal`) when the only Klausen row was a rule and the ask was
+coach territory. The rows cost a few lines per call; one intent stays the only output.
+Two prompt rules go with them: a name that matches a row means that row, and a
+planned ride, event or session changing in size, route or date is `coach_message`
+whichever row names it. The echoes for the two edit intents are worded as readings
+("→ sounds like a change to a goal — checking") rather than actions, because the
+capture call that follows may overturn them (§12.4).
+
 Routing through a CLI subcommand rather than in-process keeps every OpenRouter call —
 client, retries, exchange logs under `logs/llm_exchanges/` — on the one existing path,
 and keeps the bot importable without LLM plumbing.
@@ -690,7 +701,9 @@ anything plan-shaping, expensive, or irreversible.
 
 ### 12.2 Capture: two calls, both on the router model
 
-`bot route` stays exactly as dumb as it is — one intent, no slots. A write intent then
+`bot route` stays exactly as dumb as it is — one intent, no slots (it reads the goal
+and rule titles beside the message since 2026-09-09, §5.3, and still answers with one
+intent). A write intent then
 runs a second hidden command, `tm bot capture <intent> "<text>"`, whose one LLM call is
 domain-focused: it sees only the fields its intent can fill, plus today's date and
 weekday so "next Friday" resolves, plus (for edits, §12.4) the current rows to nominate
@@ -802,9 +815,10 @@ The call returns the most plausible reading, and each kind lands differently:
   hand-off ("I don't see a goal for that — it sounds like Saturday's long run. Shall
   I pass it to your coach?") and the confirm runs `adapt -m` with her original
   words. The line names the reading it drops, because the router's echo a moment
-  earlier ("→ updating your goal") is still on screen and would otherwise stand
-  uncorrected. The wrong-domain picker this replaces — a list of goals answering a
-  question about a session — never appears.
+  earlier ("→ sounds like a change to a goal — checking") is still on screen, and
+  says what a "yes" sets in motion, because the help card is not. The wrong-domain
+  picker this replaces — a list of goals answering a question about a session —
+  never appears.
 - **Several close candidates, or "no" on the preview** — a picker of the candidate
   rows. A leaf does *not* execute the edit: it re-runs `bot capture <intent> --id <n>
   "<text>"` with the nomination pinned, which re-enters the ordinary preview/confirm.
