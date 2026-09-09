@@ -88,11 +88,18 @@ class TestAdaptationAdd(unittest.TestCase):
         self.assertIn("TSS 85", reason)
         self.assertIn("RPE 8", reason)
         self.assertIn("legs feel cooked", reason)
-        # The replaced session's event is torn down and the new session gets its own: a
-        # new lineage must not inherit the Calendar event of the one it replaced (§4).
-        syncer.delete_workout_event.assert_called_once_with("evt-123")
-        syncer.sync_workout.assert_called_once()
-        # Only one row remains for that date/sport (replace, not double).
+        # The new session gets its own event: a new lineage must not inherit the Calendar
+        # event of the one it replaced (§4). The replaced session's event is kept and
+        # marked rather than torn down — a day the athlete was counting on does not
+        # vanish (DESIGN_plan_change_continuity.md §5.2).
+        syncer.delete_workout_event.assert_not_called()
+        marked = [
+            c.args[0] for c in syncer.sync_workout.call_args_list
+            if c.args[0].get("removed")
+        ]
+        self.assertEqual([w["title"] for w in marked], ["Tempo Intervals"])
+        self.assertIn("Tempo Intervals", marked[0]["removed_reason"])
+        # Only one live row remains for that date/sport (replace, not double).
         self.assertEqual(
             len(test_db.get_workouts(start_date="2026-06-20", end_date="2026-06-20")), 1
         )
@@ -145,11 +152,14 @@ class TestAdaptationAdd(unittest.TestCase):
         self.assertEqual(
             len(test_db.get_workouts(start_date="2026-06-22", end_date="2026-06-22")), 1
         )
-        # Both replaced sessions' events are torn down; the new one gets its own (§4).
-        self.assertEqual(
-            sorted(c.args[0] for c in syncer.delete_workout_event.call_args_list),
-            ["evt-str", "evt-yoga"],
+        # Both replaced sessions keep their events, marked; the new one gets its own
+        # (§4, DESIGN_plan_change_continuity.md §5.2).
+        syncer.delete_workout_event.assert_not_called()
+        marked = sorted(
+            c.args[0]["title"] for c in syncer.sync_workout.call_args_list
+            if c.args[0].get("removed")
         )
+        self.assertEqual(marked, ["Mobility", "Old Lift"])
         # Both replaced sessions are recorded; the other sport is labelled.
         reason = saved["modification_reason"]
         self.assertIn("Old Lift", reason)

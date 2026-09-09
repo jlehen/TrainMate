@@ -251,7 +251,9 @@ def migrate(conn) -> dict:
             created_at    TEXT    NOT NULL,
             kind          TEXT    NOT NULL,
             summary       TEXT,
-            macrocycle_id INTEGER
+            macrocycle_id INTEGER,
+            note            TEXT, -- the coach's line to the athlete (DESIGN_plan_change_continuity.md §6.3)
+            commitment_end  TEXT  -- the window this change ran under (§5.2)
         )
     """)
     cursor.execute("""

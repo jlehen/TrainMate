@@ -4,6 +4,7 @@ from typing import Any, List, Optional, Tuple, Dict
 from trainmate.types import Workout
 from trainmate.calendar_reconcile import no_calendar_sync
 from trainmate.sports import canonical_sport
+import trainmate.coach.service as _svc
 
 
 class WorkoutEditMixin:
@@ -217,8 +218,11 @@ class WorkoutEditMixin:
         session's load, its originals or its Calendar event
         (DESIGN_workout_revisions.md §4). What was overwritten is recorded on the new
         session's note, and therefore on its calendar event: each replaced session's title
-        plus duration/TSS/RPE, mirroring how `adapt` annotates a changed session. The
-        other-sport sessions are voided; the same-sport one is superseded by the append.
+        plus duration/TSS/RPE, mirroring how `adapt` annotates a changed session.
+
+        Every replaced session is voided first, the same-sport one included: a session the
+        coach wrote and the athlete typed over is marked rather than erased, which is the
+        same order `workout generate` uses (DESIGN_plan_change_continuity.md §5.2/§5.3).
 
         Returns (saved_workout, list_of_replaced_workouts).
         """
@@ -242,10 +246,11 @@ class WorkoutEditMixin:
         if reason:
             note = f"{note}. Reason given: {reason}" if note else reason
 
-        with self._db.workout_change(kind="add", summary=reason) as change:
+        with self._db.workout_change(
+            kind="add", summary=reason,
+            commitment_end=self._commitment_window(_svc._today_str()),
+        ) as change:
             for w in existing_all:
-                if canonical_sport(w['sport_type']) == sport_type:
-                    continue
                 change.void(date=date, sport_type=w['sport_type'], reason=note)
             change.append(
                 date=date,

@@ -1274,9 +1274,8 @@ class TestAdaptationAdapt(unittest.TestCase):
         text = format_planned_workouts_detailed(
             [eased, untouched], eval_date="2026-06-20"
         )
-        self.assertIn("ALREADY EASED", text)
-        self.assertIn("2x", text)
+        self.assertIn("eased by a prior adaptation 2x", text)
         self.assertIn("3 days ago", text)
         # The unadapted yoga line carries no such tag.
         yoga_line = [ln for ln in text.splitlines() if "(YOGA)" in ln][0]
-        self.assertNotIn("ALREADY EASED", yoga_line)
+        self.assertNotIn("eased", yoga_line)

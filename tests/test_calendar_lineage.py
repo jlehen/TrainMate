@@ -194,7 +194,10 @@ class TestCalendarLineage(unittest.TestCase):
         self.assertNotIn("Target:", cancelled)
         self.assertNotIn("3h steady endurance.", cancelled)
 
-    def test_the_change_summary_shows_only_when_it_adds_something(self):
+    def test_one_reason_label_and_the_summary_only_stands_in_for_it(self):
+        """The revision's own reason is the `Reason:` line; the batch summary takes that
+        label only when the revision has none, and `Change:` is gone
+        (DESIGN_plan_change_continuity.md §6.4)."""
         lineage = self._plan()
         with self.db.workout_change(kind="adapt", summary="Recovery is lagging") as change:
             change.append(
@@ -202,14 +205,14 @@ class TestCalendarLineage(unittest.TestCase):
                 description="90min easy.", duration_minutes=90, tss=95, rpe=4,
                 lineage_id=lineage, reason="Eased: 180m -> 90m",
             )
-        with self.db.workout_change(kind="adapt", summary="Same note") as change:
-            change.append(
+        with self.db.workout_change(kind="adapt", summary="Holding the easy week") as ch:
+            ch.append(
                 date="2026-08-31", sport_type="cycling", title="Long ride",
                 description="60min easy.", duration_minutes=60, tss=60, rpe=3,
-                lineage_id=lineage, reason="Same note",
+                lineage_id=lineage,
             )
         # One more, so neither of the two under test is the revision being rendered.
-        with self.db.workout_change(kind="adapt", summary="Holding the easy week") as ch:
+        with self.db.workout_change(kind="adapt", summary="Steady now") as ch:
             ch.append(
                 date="2026-08-31", sport_type="cycling", title="Long ride",
                 description="45min easy.", duration_minutes=45, tss=40, rpe=3,
@@ -217,8 +220,12 @@ class TestCalendarLineage(unittest.TestCase):
             )
 
         found = entries(self._description(lineage))
-        self.assertIn("Change: Recovery is lagging", found["[2/4]"])
-        self.assertNotIn("Change:", found["[3/4]"])
+        self.assertIn("Reason: Eased: 180m -> 90m", found["[2/4]"])
+        self.assertNotIn("Recovery is lagging", found["[2/4]"])
+        # No reason of its own, so the batch summary answers under the same label.
+        self.assertIn("Reason: Holding the easy week", found["[3/4]"])
+        for entry in found.values():
+            self.assertNotIn("Change:", entry)
 
     def test_a_long_lineage_is_truncated_and_says_how_much(self):
         lineage = self._plan()

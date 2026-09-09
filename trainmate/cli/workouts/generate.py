@@ -181,7 +181,7 @@ def _confirm_apply(proposal: GenerateProposal) -> bool:
     # exact — and the danger prompt must not overstate the loss.
     kept = sum(1 for w in proposal.workouts if w.get('keep'))
     held = (
-        f" {kept} session(s) a prior adaptation eased are kept exactly as they are."
+        f" {kept} session(s) you were already told about are kept exactly as they are."
         if kept else ""
     )
     displaced = len(proposal.displaced) - kept
@@ -352,6 +352,54 @@ def _warn_span_change(span_start: str, span_end: str) -> None:
     print()
 
 
+def standing_outcome_words(line) -> str:
+    """What this run does to a session the athlete was already told about (§4.5).
+
+    A move names the day it went to, a revision the form it takes, and a removal says so;
+    a session the coach never named says that too, because its being kept is the app's
+    doing and not a decision the coach made."""
+    if line.outcome == 'kept':
+        return "kept" if line.mentioned else "kept (not mentioned by the coach)"
+    if line.outcome == 'moved':
+        return f"→ {fmt_date(line.becomes)}"
+    if line.outcome == 'cancelled':
+        return "→ cancelled"
+    return f"→ {line.becomes}"
+
+
+def print_standing_report(proposal) -> None:
+    """The sessions the athlete was already told about, and what this run writes to each
+    (DESIGN_plan_change_continuity.md §4.5). Silent when the run touches none of them —
+    a bare `workout generate` extends into empty days."""
+    if not proposal.standing:
+        return
+    if proposal.athlete_note:
+        print(f"{bold('Your coach')}: {wrap_text(proposal.athlete_note)}\n")
+    window = (
+        f" (through {fmt_date(proposal.commitment_end)})"
+        if proposal.commitment_end else ""
+    )
+    print(bold(f"Sessions you were already told about{window}:"))
+    rows = [
+        (
+            fmt_date(line.date),
+            line.title,
+            f"{line.duration_minutes}m" if line.duration_minutes else "",
+            standing_outcome_words(line),
+            line.reason,
+        )
+        for line in proposal.standing
+    ]
+    widths = [max(len(r[i]) for r in rows) for i in range(4)]
+    for row in rows:
+        cells = "  ".join(pad_visible(row[i], widths[i]) for i in range(4))
+        line = f"  {cells}"
+        if row[4]:
+            line += f"  {gray(row[4])}"
+        print(line.rstrip())
+    print()
+
+
 def print_generate_preview(proposal) -> bool:
     """The expert `workout generate` preview: the reasoning, then the proposed sessions.
 
@@ -364,6 +412,7 @@ def print_generate_preview(proposal) -> bool:
         notice("The coach proposed no sessions — nothing to apply.")
         return False
 
+    print_standing_report(proposal)
     # The same one-line rendering as `workout list`, so the plan the athlete is asked
     # to accept reads exactly like the plan they will be living with.
     for w in proposal.workouts:

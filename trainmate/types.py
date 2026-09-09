@@ -74,6 +74,7 @@ class Workout(TypedDict):
     modification_reason: Optional[str]  # this revision's note; NULL on a void, where the note is removed_reason
     adaptation_summary: Optional[str]  # the batch rationale of the change that appended this revision
     change_kind: Optional[str]  # what kind of change this session's live form is (§7); replaces modification_state
+    commitment_end: Optional[str]  # last day of the window that change ran under (DESIGN_plan_change_continuity.md §5.2)
     google_event_id: Optional[str]  # set <=> a Calendar event exists (may be stale)
     removed: Optional[bool]  # the live revision is a void: no session this day (§3)
     removed_reason: Optional[str]  # this revision's note, when it is a void
@@ -176,6 +177,8 @@ class Macrocycle(TypedDict):
     constraints_snapshot: Optional[str]
     all_constraints_snapshot: Optional[str]
     created_at: str
+    reshape_verdict: Optional[str]  # the coach's cached read on the pending edit (DESIGN_plan_change_continuity.md §7)
+    reshape_verdict_key: Optional[str]  # the snapshot that verdict was asked about
     status: Optional[str]  # 'active' | 'superseded'
     superseded_at: Optional[str]
 

@@ -3,9 +3,9 @@ from trainmate.config import config
 from trainmate.types import Objective, Constraint, Workout, CompletedActivity
 from trainmate.util import cyan, days_between, step
 from trainmate.coach.formatting import (
-    EASED_DO_NOT_RESTORE, format_metrics_history, format_completed_activities,
-    format_baseline, format_planned_workouts, format_planned_workouts_detailed,
-    format_removed_workouts, format_daily_signals,
+    format_metrics_history, format_completed_activities, format_baseline,
+    format_planned_workouts, format_planned_workouts_detailed,
+    format_removed_workouts, format_daily_signals, format_standing_workouts,
 )
 import trainmate.coach.engine as _eng
 from trainmate.sports import CANONICAL_SPORTS
@@ -56,39 +56,82 @@ it is planned separately, against their metrics as they stand when it is generat
 """
 
 
-def _carried_adaptations_task(carried_workouts: Optional[List[Workout]]) -> str:
-    """The CARRYING OVER section of the generate TASK.
+def _standing_sessions_task(standing_workouts: Optional[List[Workout]]) -> str:
+    """The section of the generate TASK covering the sessions already standing
+    (DESIGN_plan_change_continuity.md §4.5/§4.6).
 
-    A regeneration rewrites the horizon from scratch, so without this the load a prior
-    `workout adapt` took off is handed straight back (DESIGN_workout_revisions.md §7.1).
-    Gated on there being such a session, so a horizon nothing has eased produces the
-    prompt it always did.
+    Gated on there being such a session, so a bare `workout generate` extending the
+    schedule into empty days produces the prompt it always did.
     """
-    if not carried_workouts:
+    if not standing_workouts:
         return ""
     return """
-### CARRYING OVER AN ALREADY-EASED SESSION
-The user content includes a section titled "SESSIONS ALREADY EASED BY AN ADAPTATION": the
-sessions ahead whose current numbers are not the plan's original prescription but the reduced
-form a `workout adapt` already produced, against the athlete's state on the day it ran. Each
-tag says how often and how recently it was eased, the note after it says why, and the
-"Target:" line under it is that session's prescribed time in zone.
+### THE SESSIONS THE ATHLETE IS ALREADY LOOKING AT
+The user content includes a section titled "SESSIONS ALREADY STANDING": the sessions this
+span already holds that the athlete has already been told about, plus every session they
+scheduled themselves. Each one carries its tags:
 
-For each of them, decide one of two things and nothing in between:
+- "[COMMITTED]" — inside the days the athlete has already read and planned around.
+- "[BENCHMARK: ...]" — a scheduled fitness test, and the strongest commitment on the
+  calendar: the athlete arranges to be fresh for it, so moving or dropping one needs a
+  reason that says why the test can wait.
+- "[ADDED BY THE ATHLETE]" — they put this session there themselves.
+- "[REST DAY]" — a day they were told holds no session. Putting work on it is a change
+  like any other, and needs the same reason.
+
+KEEP each of these sessions unless it contradicts the athlete's profile, the plan, or a
+constraint AS THEY STAND TODAY. If it does, name the line it contradicts in the sentence
+you write for the athlete, and make the smallest change that resolves that contradiction.
+Wording is never a contradiction: a session whose day, sport and load still fit, that you
+would merely describe differently, is kept.
+
+Answer for every session in that list with exactly one of these, and nothing in between:
 
 - KEEP it. Return `{"date": ..., "sport_type": ..., "keep": true}` and no other field. The
   session stays exactly as it stands, down to the interval structure and prose you were not
   shown, and the athlete sees no change on that day. Count its target toward the week's
   intensity distribution when you write the days around it, but do not restate it: a KEEP
-  carries no "planned_zone_sec" and anything else attached to one is discarded. This is the
-  default — an easing was a considered answer to the athlete's state, and rewriting the day
-  from the block's targets hands back the exact load adapt took off, silently.
-- REPLACE it. Return it as an ordinary workout, fully written out. Do this when the metrics
-  in this prompt show the moment the easing answered has passed, or when the block's
-  remainder genuinely needs that day for something else — and say which in your reasoning.
+  carries no "planned_zone_sec" and anything else attached to one is discarded.
+- REVISE it. Return it as an ordinary workout in the SAME date and sport, fully written
+  out, with a "change_reason". Its history will show the athlete the form it had before.
+- MOVE it, or CHANGE ITS SPORT. Return the session in its new slot, fully written out,
+  with `"replaces": {"date": ..., "sport_type": ...}` naming the slot it came from, and a
+  "change_reason". The day it left follows the session, so the athlete sees one change and
+  not a disappearance and an arrival.
+- DROP it. Return `{"date": ..., "sport_type": ..., "drop": true, "change_reason": ...}`.
+  The day becomes a rest day carrying your sentence, in place of the session.
 
-You cannot half-do it: there is no way to keep the session and adjust it, because a KEEP
-returns nothing to adjust. If you want the day changed at all, write it out in full.
+A session in that list you do not mention at all is KEPT. So say it when you mean to
+remove one — silence is never how a cancellation is expressed.
+
+"change_reason" is ONE SENTENCE, written for the athlete to read, about that day, naming
+the line it answers: "your profile asks for four sessions a week, so Friday is now a
+session", not "deload, polarised week". It is REQUIRED on a revise, a move and a drop, and
+belongs only to the sessions in that list: every other day of the span is yours to write
+from scratch, the athlete has never seen it, and there is nothing there for a change to be
+FROM.
+
+A session already eased by an adaptation says what it was FIRST prescribed as, alongside
+how often and how recently it was eased. Keep the eased form unless the moment it answered
+has passed — writing the day back at its first numbers hands the athlete the exact load the
+adaptation took off. One thing outranks a fresh easing: a constraint or a profile line the
+session contradicts. An easing answers "how is the athlete today"; a constraint answers
+"what may this athlete do at all", and the second wins.
+"""
+
+
+def _past_constraints_task(past_constraints: Optional[List[Constraint]]) -> str:
+    """The section naming the constraints that ended earlier in this block
+    (DESIGN_plan_change_continuity.md §6.1)."""
+    if not past_constraints:
+        return ""
+    return """
+### WHAT ALREADY HAPPENED IN THIS BLOCK
+The user content includes a section titled "CONSTRAINTS EARLIER IN THIS BLOCK": directives
+whose dates have passed but which fall inside the block the athlete is in. They are not
+yours to work around any more — they explain the block's record. A week that shows far less
+training than it was planned was often a week under one of these, and reading it as the
+athlete failing to train, or as evidence the block is too hard, would be wrong.
 """
 
 
@@ -310,20 +353,47 @@ an accounting identity. HR sessions fill zones 1-5 and leave 6 and 7 null.
 """
 
 
-def _carried_keep_field(carried_workouts: Optional[List[Workout]]) -> str:
-    """The `keep` member of the generate response schema.
+def _standing_answer_fields(standing_workouts: Optional[List[Workout]]) -> str:
+    """The `keep`, `drop`, `replaces` and `change_reason` members of the generate response
+    schema (DESIGN_plan_change_continuity.md §4.5).
 
-    Third region on the same gate as CARRYING OVER and its data section: a schema that
-    offers `keep` where the prompt never explained it is exactly the half-application
+    Third region on the same gate as the TASK section and the data block: a schema that
+    offers these where the prompt never explained them is exactly the half-application
     `tests/test_prompt_gates.py` exists to catch.
     """
-    if not carried_workouts:
+    if not standing_workouts:
         return ""
     return (
         '      "keep": true (OMIT on an ordinary session. Present ONLY on a session listed\n'
-        "        in SESSIONS ALREADY EASED BY AN ADAPTATION that you are keeping as it\n"
-        '        stands — see CARRYING OVER — in which case "date" and "sport_type" are\n'
-        "        the only other fields to give and every other member here is omitted),\n"
+        "        in SESSIONS ALREADY STANDING that you are keeping exactly as it stands —\n"
+        '        see THE SESSIONS THE ATHLETE IS ALREADY LOOKING AT — in which case "date"\n'
+        '        and "sport_type" are the only other fields to give),\n'
+        '      "drop": true (OMIT on an ordinary session. Present ONLY on a session listed\n'
+        "        in SESSIONS ALREADY STANDING that you are removing, in which case\n"
+        '        "date", "sport_type" and "change_reason" are the only other fields to\n'
+        "        give. The date becomes a rest day carrying your sentence),\n"
+        '      "replaces": {"date": "YYYY-MM-DD", "sport_type": "..."} (OMIT unless this\n'
+        "        session takes the place of one listed in SESSIONS ALREADY STANDING that\n"
+        "        stood in a DIFFERENT slot — moved to another day, or changed sport. Names\n"
+        "        the slot it came from, so that day's session follows this one instead of\n"
+        "        vanishing and reappearing),\n"
+        '      "change_reason": "One sentence for the athlete about this day, naming the\n'
+        "        line it answers. REQUIRED on any session listed in SESSIONS ALREADY\n"
+        "        STANDING that you revise, move or drop; omitted on every other session.\",\n"
+    )
+
+
+def _athlete_note_field(standing_workouts: Optional[List[Workout]]) -> str:
+    """The `athlete_note` member: one line about the change as a whole, for the morning
+    push (DESIGN_plan_change_continuity.md §6.3). Same gate as the rest — a run that
+    extends the schedule into empty days changed nothing the athlete had seen."""
+    if not standing_workouts:
+        return ""
+    return (
+        '  "athlete_note": "ONE line for the athlete about this change as a whole, in\n'
+        "    their own language — what moved and why, e.g. \"Four sessions a week now,\n"
+        "    never two hard days in a row.\" Omit it entirely when nothing they would\n"
+        "    notice changed.\",\n"
     )
 
 
@@ -442,13 +512,20 @@ class WorkoutLogicMixin:
         block_has_intensity: bool = False,
         zone_currencies: Optional[Dict[str, str]] = None,
         anchor_history: Optional[str] = None,
-        carried_workouts: Optional[List[Workout]] = None
+        standing_workouts: Optional[List[Workout]] = None,
+        commitment_end: Optional[str] = None,
+        past_constraints: Optional[List[Constraint]] = None
     ) -> Dict[str, Any]:
         """Queries LLM to generate workouts for a given number of days based on active strategy.
 
         `start_str` is the first day to schedule (defaults to today). It is later than
         today when the selectors opened the span there, or when today's session is already
         completed and must be preserved (DESIGN_cli_selectors.md §8).
+
+        `standing_workouts` are the sessions the athlete has already been told about that
+        this span would rewrite, and `commitment_end` the last day of the window they were
+        promised for (DESIGN_plan_change_continuity.md §4.2). `past_constraints` ended
+        earlier in the current block and explain its record (§6.1).
         """
         start_str = start_str or today_str
         starting_phrase = "today" if start_str == today_str else start_str
@@ -501,7 +578,8 @@ class WorkoutLogicMixin:
             "they test), and never put it in a week the athlete's constraints put under full rest.\n"
             + _block_progress_task(block_progress)
             + _block_composition_task(block_progress, block_has_intensity)
-            + _carried_adaptations_task(carried_workouts)
+            + _standing_sessions_task(standing_workouts)
+            + _past_constraints_task(past_constraints)
             + _planned_zone_task(zone_currencies)
             + "\n"
             "## RESPONSE FORMAT\n"
@@ -510,11 +588,12 @@ class WorkoutLogicMixin:
             '  "reasoning": "How this microcycle design serves the active mesocycle focus, in AT\n'
             '    MOST 4 SENTENCES. The sessions themselves are listed below your prose — describe\n'
             '    the shape of the week and why, not each workout in turn.",\n'
+            + _athlete_note_field(standing_workouts)
             # Workout generation is read-only w.r.t. coach learnings (see
             # DESIGN_backward_evaluation.md §11): it consumes the rendered learnings in the
             # system prompt but authors none. Tactical/recent observations are better
             # captured by `adapt`, durable ones by `analyze`. Hence no learning_updates here.
-            '  "workouts": [\n'
+            + '  "workouts": [\n'
             "    {\n"
             '      "date": "YYYY-MM-DD",\n'
             + _SPORT_TYPE_ENUM +
@@ -526,7 +605,7 @@ class WorkoutLogicMixin:
             "      \"rpe\": 6, (Expected Rate of Perceived Exertion, integer 1-10. Use 0 for rest days)\n"
             "      \"tss\": 45, (Expected Training Stress Score, integer. Use 0 for rest days)\n"
             + _planned_zone_fields(zone_currencies)
-            + _carried_keep_field(carried_workouts) +
+            + _standing_answer_fields(standing_workouts) +
             '      "benchmark_type": null (Normally null. Set ONLY on a scheduled fitness\n'
             "        test — see BENCHMARK PLACEMENT — to the test kind, e.g. \"ftp_20min\" |\n"
             '        "ftp_ramp" | "run_threshold_30min" | "run_5k_tt" | "css_400_200" |\n'
@@ -596,18 +675,29 @@ class WorkoutLogicMixin:
                 f"## ACTUAL COMPLETED GARMIN ACTIVITIES IN WINDOW\n{completed_text}"
             )
 
-        # Last, closest to where the model starts writing: unlike the sections above it
-        # is not context about the athlete but a claim on the output. Same gate as
-        # CARRYING OVER above, so the two never disagree about its presence.
-        if carried_workouts:
+        # Why a week in this block went quiet, for a coach that can no longer see the
+        # days themselves — the metrics window does not reach them (§6.1).
+        if past_constraints:
             history_text_parts.append(
-                "## SESSIONS ALREADY EASED BY AN ADAPTATION\n"
-                "These are the only sessions you should try to carry over — every other "
-                "day in this\nwindow is yours to write from scratch, and a date this list "
-                "does not name is not\nspoken for.\n"
-                + format_planned_workouts(
-                    carried_workouts, eval_date=today_str,
-                    easing_closer=EASED_DO_NOT_RESTORE,
+                "## CONSTRAINTS EARLIER IN THIS BLOCK\n"
+                "These have passed — they are not yours to work around. They are why the "
+                "block's record\nreads as it does. See WHAT ALREADY HAPPENED IN THIS "
+                "BLOCK.\n"
+                + self._render_constraints(past_constraints)
+            )
+
+        # Last, closest to where the model starts writing: unlike the sections above it
+        # is not context about the athlete but a claim on the output. Same gate as THE
+        # SESSIONS THE ATHLETE IS ALREADY LOOKING AT above, so the two never disagree
+        # about its presence.
+        if standing_workouts:
+            history_text_parts.append(
+                "## SESSIONS ALREADY STANDING\n"
+                "You must answer for every session listed here — keep it, revise it, move "
+                "it or drop it.\nEvery date this list does not name is yours to write "
+                "from scratch.\n"
+                + format_standing_workouts(
+                    standing_workouts, eval_date=today_str, window_end=commitment_end,
                 )
             )
 

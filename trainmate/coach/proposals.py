@@ -51,6 +51,31 @@ class RevisionProposal:
 
 
 @dataclass(frozen=True)
+class StandingLine:
+    """One row of the report `workout generate` prints for a session the athlete has
+    already been told about (DESIGN_plan_change_continuity.md §4.5).
+
+    `outcome` is what apply will actually do to the session, not what the coach answered:
+    a wording-only revision is suppressed by the no-op rule and a rest constraint removes
+    days no answer mentions, so reporting the answers would tell the operator the wrong
+    thing in both directions.
+
+    `outcome` is one of `kept`, `revised`, `moved` or `cancelled`. `becomes` is the new
+    form for a revision and the ISO date for a move, and is empty otherwise.
+    """
+    date: str
+    sport_type: str
+    title: str
+    duration_minutes: Optional[int]
+    outcome: str
+    becomes: str = ""
+    reason: str = ""
+    # False when no answer named this session at all, so the preview can say that the
+    # coach's silence is what kept it.
+    mentioned: bool = True
+
+
+@dataclass(frozen=True)
 class GenerateProposal:
     """A `workout generate` result, before anything has been written.
 
@@ -72,6 +97,18 @@ class GenerateProposal:
     # `gen_start`/`gen_end` are both in scope, so the proposal carries the resulting ids
     # rather than a range to re-check.
     covered_constraint_ids: Tuple[int, ...] = ()
+    # `(date, sport_type, reason)` per slot this run ends. Decided here so the preview
+    # reports the removals apply will actually make, including the ones no answer
+    # explains (DESIGN_plan_change_continuity.md §5.5).
+    voids: Tuple[Tuple[str, str, str], ...] = ()
+    # The §4.5 report: one line per session the athlete was already told about.
+    standing: Tuple[StandingLine, ...] = ()
+    # The coach's one line to the athlete about the change as a whole, for the morning
+    # push (§6.3). None when nothing they would notice changed.
+    athlete_note: Optional[str] = None
+    # The last day of the commitment window this run answered under, stamped on the
+    # change so a void is judged by the window it was written under (§5.2).
+    commitment_end: Optional[str] = None
 
 
 @dataclass(frozen=True)

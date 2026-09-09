@@ -36,10 +36,18 @@ DRIFT_INSTRUCTIONS = "### CORRECTING EXECUTION DRIFT"
 DRIFT_BRANCH = "measured intensity distribution has diverged from its stated"
 DRIFT_DATA = "## MEASURED INTENSITY DISTRIBUTION OF THE ACTIVE BLOCK"
 
-CARRY_INSTRUCTIONS = "### CARRYING OVER AN ALREADY-EASED SESSION"
-CARRY_SCHEMA_MEMBER = '"keep": true'
-CARRY_DATA = "## SESSIONS ALREADY EASED BY AN ADAPTATION"
-CARRY_SCOPE = "These are the only sessions you should try to carry over"
+STANDING_INSTRUCTIONS = "### THE SESSIONS THE ATHLETE IS ALREADY LOOKING AT"
+STANDING_KEEP_MEMBER = '"keep": true'
+STANDING_DROP_MEMBER = '"drop": true'
+STANDING_REPLACES_MEMBER = '"replaces"'
+STANDING_REASON_MEMBER = '"change_reason"'
+STANDING_NOTE_MEMBER = '"athlete_note"'
+STANDING_RULE = "unless it contradicts the athlete's profile, the plan, or a"
+STANDING_DATA = "## SESSIONS ALREADY STANDING"
+STANDING_SCOPE = "You must answer for every session listed here"
+
+PAST_CONSTRAINTS_INSTRUCTIONS = "### WHAT ALREADY HAPPENED IN THIS BLOCK"
+PAST_CONSTRAINTS_DATA = "## CONSTRAINTS EARLIER IN THIS BLOCK"
 
 BASE = dict(
     history_days=7,
@@ -216,10 +224,10 @@ class TestTheStandingRules(unittest.TestCase):
         self.assertIn(wk._benchmark_task(), system)
 
 
-class TestCarriedAdaptationsGate(unittest.TestCase):
-    """`workout generate` rewrites the horizon from scratch, so a session a prior adapt
-    eased survives only if it is carried in — and the instruction telling the model what
-    to do with the list must arrive with the list."""
+class TestStandingSessionsGate(unittest.TestCase):
+    """`workout generate` must answer for the sessions the athlete has already been told
+    about, so the instruction, the schema members that express an answer and the list
+    itself are one gated region (DESIGN_plan_change_continuity.md §8)."""
 
     EASED = [{
         "date": "2026-06-05", "sport_type": "cycling", "title": "Easy Z2 Spin",
@@ -228,90 +236,135 @@ class TestCarriedAdaptationsGate(unittest.TestCase):
         "planned_zone_currency": "power",
         "planned_zone1_sec": 600, "planned_zone2_sec": 1800,
         "adaptation_count": 1, "adapted_at": "2026-06-01",
+        "original_duration_minutes": 90, "original_rpe": 7, "original_tss": 95,
         "modification_reason": "Cut to easy Z2 to shed intensity.",
     }]
 
-    def test_a_carried_session_reaches_every_region_it_governs(self):
-        system, user = build_generate_prompt(carried_workouts=self.EASED)
-        for region in (CARRY_INSTRUCTIONS, CARRY_SCHEMA_MEMBER):
+    REGIONS_IN_SYSTEM = (
+        STANDING_INSTRUCTIONS, STANDING_RULE, STANDING_KEEP_MEMBER,
+        STANDING_DROP_MEMBER, STANDING_REPLACES_MEMBER, STANDING_REASON_MEMBER,
+        STANDING_NOTE_MEMBER,
+    )
+
+    def test_a_standing_session_reaches_every_region_it_governs(self):
+        system, user = build_generate_prompt(standing_workouts=self.EASED)
+        for region in self.REGIONS_IN_SYSTEM:
             with self.subTest(region=region):
                 self.assertIn(region, system)
-        for region in (CARRY_DATA, CARRY_SCOPE):
+        for region in (STANDING_DATA, STANDING_SCOPE):
             with self.subTest(region=region):
                 self.assertIn(region, user)
         self.assertIn("Easy Z2 Spin", user, "the session itself must be in the data")
 
-    def test_the_list_carries_the_easing_tag_and_its_reason(self):
-        """Load alone does not say the numbers are already reduced — the tag does, and
-        the reason is what lets the model judge whether the easing still applies."""
-        _system, user = build_generate_prompt(carried_workouts=self.EASED)
+    def test_the_list_says_what_the_session_was_first_prescribed_as(self):
+        """Load alone does not say the numbers are already reduced, and "do not compound"
+        could not say from what. The first form can (§4.6)."""
+        _system, user = build_generate_prompt(standing_workouts=self.EASED)
         self.assertIn(
-            "[ALREADY EASED by a prior adaptation (once, most recently 2 days ago)", user
+            "[first prescribed as 90m, RPE 7, TSS 95 — eased once, most recently "
+            "2 days ago]", user
         )
         self.assertIn("Cut to easy Z2 to shed intensity.", user)
 
-    def test_the_tag_closes_on_generates_risk_not_adapts(self):
-        """Both prompts read the same easing tally against opposite risks: adapt may cut
-        the session again, generate may write the day back at its original load. The two
-        closers must not drift back into one (DESIGN_workout_revisions.md §7.1)."""
-        _system, user = build_generate_prompt(carried_workouts=self.EASED)
-        self.assertIn("do not silently restore it", user)
-        self.assertNotIn("do not compound", user)
+    def test_the_committed_tag_follows_the_window(self):
+        """A session inside the window is committed; one past it is in the list because
+        the athlete added it, and must not claim to be committed (§4.6)."""
+        _system, user = build_generate_prompt(
+            standing_workouts=self.EASED, commitment_end="2026-06-05"
+        )
+        self.assertIn("[COMMITTED]", user)
+        _system, user = build_generate_prompt(
+            standing_workouts=self.EASED, commitment_end="2026-06-04"
+        )
+        self.assertNotIn("[COMMITTED]", user)
 
     def test_the_list_carries_the_intensity_target(self):
         """Duration and TSS fold intensity away — 40min steady and 12min hard inside 40min
-        read the same. REPLACE turns on whether the block needs the day for something
-        else, which is a question about zones (DESIGN_workout_revisions.md §7.1)."""
-        _system, user = build_generate_prompt(carried_workouts=self.EASED)
+        read the same, and whether a day still fits the week is a question about zones."""
+        _system, user = build_generate_prompt(standing_workouts=self.EASED)
         self.assertIn("Target: ~10min recovery, ~30min endurance", user)
 
     def test_a_keep_is_told_not_to_restate_the_target(self):
-        """Showing the target invites a revised one back on a KEEP. `_resolve_kept`
+        """Showing the target invites a revised one back on a KEEP. `_resolve_standing`
         discards it, so the only cost is tokens — say so rather than pay it."""
-        system, _user = build_generate_prompt(carried_workouts=self.EASED)
+        system, _user = build_generate_prompt(standing_workouts=self.EASED)
         self.assertIn('carries no "planned_zone_sec"', system)
 
-    def test_the_description_is_not_shipped(self):
-        """A KEEP identifies the session rather than copying it, so the description stays
-        out — sending it would be paying for text the model is told not to reproduce."""
-        _system, user = build_generate_prompt(carried_workouts=self.EASED)
+    def test_a_committed_session_ships_its_description(self):
+        """A revision inside the window should be minimal rather than re-invented, which
+        needs the prose the session already carries (§4.6)."""
+        _system, user = build_generate_prompt(
+            standing_workouts=self.EASED, commitment_end="2026-06-05"
+        )
+        self.assertIn("ERG-locked, no surges.", user)
+
+    def test_a_session_past_the_window_does_not(self):
+        """Past the window the coach answers for the session, it does not rewrite its
+        interval structure — so the prose is not paid for."""
+        _system, user = build_generate_prompt(standing_workouts=self.EASED)
         self.assertNotIn("ERG-locked, no surges.", user)
 
-    def test_without_a_carried_session_none_of_them_appear(self):
+    def test_without_a_standing_session_none_of_them_appear(self):
         system, user = build_generate_prompt()
         whole = system + user
-        for region in (CARRY_INSTRUCTIONS, CARRY_SCHEMA_MEMBER, CARRY_DATA, CARRY_SCOPE):
+        for region in self.REGIONS_IN_SYSTEM + (STANDING_DATA, STANDING_SCOPE):
             with self.subTest(region=region):
                 self.assertNotIn(region, whole)
 
-    def test_an_empty_carry_list_counts_as_none(self):
-        """Nothing eased in the horizon is the ordinary case; it must not open a section
+    def test_an_empty_standing_list_counts_as_none(self):
+        """A bare `workout generate` extends into empty days; it must not open a section
         that would then name no sessions."""
-        system, user = build_generate_prompt(carried_workouts=[])
-        self.assertNotIn(CARRY_INSTRUCTIONS, system + user)
-        self.assertNotIn(CARRY_SCHEMA_MEMBER, system)
+        system, user = build_generate_prompt(standing_workouts=[])
+        self.assertNotIn(STANDING_INSTRUCTIONS, system + user)
+        self.assertNotIn(STANDING_KEEP_MEMBER, system)
 
     def test_the_generate_schema_stays_well_formed_either_way(self):
-        """`keep` is spliced ahead of `benchmark_type`, so its own trailing comma is what
-        a bad splice loses and the block's last member runs on. (The schema mixes two
-        annotation styles — comma after the value, or after the closing paren — so the
-        member ahead of the splice is not asserted against one rule.)"""
-        for carried in ([], self.EASED):
-            with self.subTest(carried=bool(carried)):
-                system, _user = build_generate_prompt(carried_workouts=carried)
+        """The answer members are spliced ahead of `benchmark_type`, so their own trailing
+        comma is what a bad splice loses and the block's last member runs on. (The schema
+        mixes two annotation styles — comma after the value, or after the closing paren —
+        so the member ahead of the splice is not asserted against one rule.)"""
+        for standing in ([], self.EASED):
+            with self.subTest(standing=bool(standing)):
+                system, _user = build_generate_prompt(standing_workouts=standing)
                 self.assertNotIn(",,", system)
                 self.assertNotIn(",\n}", system)
 
-        system, _user = build_generate_prompt(carried_workouts=self.EASED)
+        system, _user = build_generate_prompt(standing_workouts=self.EASED)
         block = system.split('"workouts": [')[1].split("\n    }")[0]
         member = block[block.index('"keep"'):].split('\n      "')[0]
         self.assertTrue(member.rstrip().endswith(","), msg=repr(member))
-        self.assertIn('"benchmark_type"', block.split('"keep"')[1],
-                      "keep must sit ahead of the block's last member")
+        self.assertGreater(
+            block.index('"benchmark_type"'), block.rindex('"change_reason"'),
+            "the answer members must sit ahead of the block's last member",
+        )
+
+
+class TestPastConstraintsGate(unittest.TestCase):
+    """A constraint that ended earlier in the block is why a week went quiet, and the
+    coach cannot see those days any other way (DESIGN_plan_change_continuity.md §6.1)."""
+
+    PAST = [{
+        "id": 4, "title": "Ill", "start_date": "2026-05-25", "end_date": "2026-05-29",
+        "description": "Chest infection.", "rest": 1,
+    }]
+
+    def test_a_past_constraint_reaches_both_regions(self):
+        system, user = build_generate_prompt(past_constraints=self.PAST)
+        self.assertIn(PAST_CONSTRAINTS_INSTRUCTIONS, system)
+        self.assertIn(PAST_CONSTRAINTS_DATA, user)
+        self.assertIn("Ill", user)
+
+    def test_without_one_neither_appears(self):
+        system, user = build_generate_prompt()
+        whole = system + user
+        self.assertNotIn(PAST_CONSTRAINTS_INSTRUCTIONS, whole)
+        self.assertNotIn(PAST_CONSTRAINTS_DATA, whole)
 
 
 # The optional inputs whose regions are asserted above.
-GATES_WITH_A_TEST = {"athlete_message", "intensity_context", "carried_workouts"}
+GATES_WITH_A_TEST = {
+    "athlete_message", "intensity_context", "standing_workouts", "past_constraints",
+}
 
 # The rest of the two builders' optional inputs. Being here is not a claim that an input
 # is harmless — only that nobody has written a gate test for it yet. It is a ledger, so
@@ -323,7 +376,7 @@ GATES_WITHOUT_A_TEST = {
     "signal_earliest_date",
     # generate
     "num_days", "start_str", "metrics", "completed_activities", "baseline",
-    "block_progress", "block_has_intensity", "anchor_history",
+    "block_progress", "block_has_intensity", "anchor_history", "commitment_end",
 }
 
 BUILDERS = ("_workout_adapt_logic", "_workout_generate_logic")

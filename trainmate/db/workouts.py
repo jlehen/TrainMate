@@ -70,14 +70,15 @@ def _eased(revision: Dict[str, Any], previous: Optional[Dict[str, Any]]) -> bool
     )
 
 
-def _resolve_kind(
+def _describing_revision(
     by_id: Dict[int, Dict[str, Any]], revision: Dict[str, Any]
-) -> str:
-    """The kind that describes the *form* a revision holds.
+) -> Dict[str, Any]:
+    """The revision whose change describes the *form* this one holds.
 
     A rollback/restore/reinstate copy re-establishes an earlier prescription, so it reads
     as whatever that prescription was — the same `restored_from` jump the adaptation tally
-    makes (§7). Every other revision reads as its own change kind."""
+    makes (§7). Every other revision describes itself. Both the change kind and the
+    commitment window are read off it (DESIGN_plan_change_continuity.md §5.2)."""
     seen: Set[int] = set()
     current = revision
     while current["restored_from"] is not None and current["id"] not in seen:
@@ -86,7 +87,7 @@ def _resolve_kind(
         if restored is None:
             break
         current = restored
-    return current["kind"]
+    return current
 
 
 def _adaptation_tally(
@@ -345,7 +346,8 @@ class WorkoutsMixin:
     @contextmanager
     def workout_change(
         self, kind: str, summary: Optional[str] = None,
-        macrocycle_id: Optional[int] = None,
+        macrocycle_id: Optional[int] = None, note: Optional[str] = None,
+        commitment_end: Optional[str] = None,
     ) -> Iterator[WorkoutChange]:
         """Opens the single write path onto `workouts` (§6).
 
@@ -353,6 +355,10 @@ class WorkoutsMixin:
         appends nothing — an adapt that looked at the metrics and held is a real event
         (§3). Everything inside shares one transaction; the §8 Calendar reconcile runs
         over the lineages the change touched once that transaction has committed.
+
+        `note` is the coach's line to the athlete about this change and `commitment_end`
+        the last day of the window in force while it ran
+        (DESIGN_plan_change_continuity.md §6.3, §5.2).
         """
         if kind not in CHANGE_KINDS:
             raise ValueError(f"unknown workout change kind: {kind!r}")
@@ -361,9 +367,10 @@ class WorkoutsMixin:
         with self.transaction() as conn:
             cursor = conn.cursor()
             cursor.execute(
-                "INSERT INTO workout_changes (created_at, kind, summary, macrocycle_id) "
-                "VALUES (?, ?, ?, ?)",
-                (created_at, kind, summary, macrocycle_id),
+                "INSERT INTO workout_changes "
+                "(created_at, kind, summary, macrocycle_id, note, commitment_end) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                (created_at, kind, summary, macrocycle_id, note, commitment_end),
             )
             change = WorkoutChange(self, conn, int(cursor.lastrowid), kind, created_at)
             yield change
@@ -401,7 +408,7 @@ class WorkoutsMixin:
         placeholders = ",".join("?" * len(lineage_ids))
         rows = conn.execute(
             "SELECT w.*, c.kind AS kind, c.created_at AS change_created_at, "
-            "       c.summary AS change_summary "
+            "       c.summary AS change_summary, c.commitment_end AS commitment_end "
             "FROM workouts w JOIN workout_changes c ON c.id = w.change_id "
             f"WHERE w.lineage_id IN ({placeholders}) "
             "ORDER BY w.lineage_id ASC, w.id ASC",
@@ -441,6 +448,7 @@ class WorkoutsMixin:
         void = bool(row["void"])
         calendar = calendar or {}
         source_kind = revisions[0]["kind"] if revisions else None
+        describing = _describing_revision(by_id, head) if revisions else head
         return {  # type: ignore[return-value]
             "id": row["lineage_id"],
             "revision_id": row["id"],
@@ -455,7 +463,9 @@ class WorkoutsMixin:
             # change kind says which (§3).
             "modification_reason": None if void else row["reason"],
             "adaptation_summary": head.get("change_summary"),
-            "change_kind": _resolve_kind(by_id, head) if revisions else None,
+            "change_kind": describing.get("kind") if revisions else None,
+            # The window this revision was written under, not the one standing now (§5.2).
+            "commitment_end": describing.get("commitment_end"),
             "google_event_id": calendar.get("google_event_id"),
             "removed": void,
             "removed_reason": row["reason"] if void else None,
@@ -586,6 +596,34 @@ class WorkoutsMixin:
                 return None
             hydrated = self._hydrate(conn, [dict(row)])
             return hydrated[0] if hydrated else None
+
+    def get_lineage_head(self, lineage_id: int) -> Optional[Workout]:
+        """A lineage's newest revision, whether or not it still owns its slot.
+
+        `get_workout_by_id` above answers "what session does this lineage hold now?" and
+        returns nothing once another session has been appended over its slot. The Calendar
+        reconcile asks a different question — "what is the last thing that happened to this
+        session?" — because a void written and then covered in the same slot is never the
+        slot's live row, and reading the slot would tear its marker down the instant it was
+        written (DESIGN_plan_change_continuity.md §5.2). `superseded` says which case this
+        is: True when the row no longer owns its slot.
+        """
+        with self._get_connection() as conn:
+            row = conn.execute(
+                "SELECT w.*, (w.id = (SELECT MAX(w2.id) FROM workouts w2 "
+                "  WHERE w2.date = w.date AND w2.sport_canonical = w.sport_canonical)) "
+                "  AS slot_live "
+                "FROM workouts w WHERE w.lineage_id = ? ORDER BY w.id DESC LIMIT 1",
+                (lineage_id,),
+            ).fetchone()
+            if not row:
+                return None
+            raw = dict(row)
+            slot_live = bool(raw.pop("slot_live"))
+            hydrated = self._hydrate(conn, [raw])
+            if not hydrated:
+                return None
+            return {**hydrated[0], "superseded": not slot_live}  # type: ignore[return-value]
 
     def get_workout_revision(self, revision_id: int) -> Optional[Dict[str, Any]]:
         """One physical revision, raw — the history reader behind restore and rollback."""

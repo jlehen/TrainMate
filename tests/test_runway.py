@@ -633,7 +633,7 @@ class CoverageInvariantTest(unittest.TestCase):
                 num_days=7, metrics=[], completed_activities=[], baseline=None,
                 pmc_warmup_cutoff=None, pmc_context="", block_progress=None,
                 block_has_intensity=False, zone_currencies={}, anchor_history="",
-                carried_workouts=[],
+                standing_workouts=[],
             )
             system_prompt = client.complete.call_args[0][0]
         self.assertIn("Cover EVERY date of the span", system_prompt)

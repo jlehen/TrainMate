@@ -47,6 +47,7 @@ class TestCalendarSync(unittest.TestCase):
             "description": "Short 20 min recovery jog.",
             "original_description": "Long 60 min intervals.",
             "modification_reason": "Swapped with yoga due to fatigue.",
+            "change_kind": "adapt",
             "duration_minutes": 20,
             "tss": 15,
             "google_event_id": None
@@ -175,6 +176,7 @@ class TestCalendarSync(unittest.TestCase):
             "description": "40 min tempo at threshold.",
             "original_description": "40 min tempo at threshold.",
             "modification_reason": "Swapped from 2026-06-09 to 2026-06-11",
+            "change_kind": "adapt",
             "duration_minutes": 40,
             "tss": 50,
             "google_event_id": None,
@@ -243,6 +245,7 @@ class TestCalendarSync(unittest.TestCase):
             "description": "New 45 min tempo.",
             "original_description": "Old 60 min intervals.",
             "modification_reason": "Manually replaced previous session: Intervals.",
+            "change_kind": "adapt",
             "duration_minutes": 45,
             "tss": 55,
             "google_event_id": None,
@@ -439,6 +442,7 @@ class TestCalendarSync(unittest.TestCase):
             "tss": 15,
             "google_event_id": "evt-removed-123",
             "removed": True,
+            "change_kind": "rm",
             "removed_reason": "Injury flare-up",
         }
 

@@ -91,7 +91,7 @@ class TestRestWindowPrePass(unittest.TestCase):
             {"date": "2026-07-03", "sport_type": "running", "title": "Easy",
              "duration_minutes": 40, "rpe": 3, "tss": 30},
         ]
-        out = coach_service._enforce_rest_windows_generate(
+        out, _reasons = coach_service._enforce_rest_windows_generate(
             workouts, [self._c(rest=1)], "2026-07-02", "2026-07-08"
         )
         by_date = {w["date"]: w for w in out}
@@ -108,7 +108,7 @@ class TestRestWindowPrePass(unittest.TestCase):
             {"date": "2026-07-01", "sport_type": "running", "title": "Easy"},
             {"date": "2026-07-05", "sport_type": "running", "title": "Long"},
         ]
-        out = coach_service._enforce_rest_windows_generate(
+        out, _reasons = coach_service._enforce_rest_windows_generate(
             workouts, [self._c(rest=1, start="2026-07-02", end="2026-07-04")],
             "2026-07-01", "2026-07-07"
         )
@@ -123,7 +123,7 @@ class TestRestWindowPrePass(unittest.TestCase):
         window covering the final days is answered with silence, so bounding by what came
         back would leave exactly those days empty — the gap this pass exists to close."""
         workouts = [{"date": "2026-07-01", "sport_type": "running", "title": "Easy"}]
-        out = coach_service._enforce_rest_windows_generate(
+        out, _reasons = coach_service._enforce_rest_windows_generate(
             workouts, [self._c(rest=1, start="2026-07-02", end="2026-07-03")],
             "2026-07-01", "2026-07-03"
         )
@@ -136,7 +136,7 @@ class TestRestWindowPrePass(unittest.TestCase):
         """Filling is bounded by the requested span: dates before `gen_start` or after
         `gen_end` get no row, however far the constraint itself runs (§6)."""
         workouts = [{"date": "2026-07-03", "sport_type": "running", "title": "Easy"}]
-        out = coach_service._enforce_rest_windows_generate(
+        out, _reasons = coach_service._enforce_rest_windows_generate(
             workouts, [self._c(rest=1, start="2026-07-01", end="2026-07-10")],
             "2026-07-02", "2026-07-04"
         )
@@ -152,7 +152,7 @@ class TestRestWindowPrePass(unittest.TestCase):
             {"date": "2026-07-02", "sport_type": "running", "title": "Run"},
             {"date": "2026-07-02", "sport_type": "strength_training", "title": "Lift"},
         ]
-        out = coach_service._enforce_rest_windows_generate(
+        out, _reasons = coach_service._enforce_rest_windows_generate(
             workouts, [self._c(rest=0)], "2026-07-02", "2026-07-08"
         )
         self.assertEqual(out, workouts)

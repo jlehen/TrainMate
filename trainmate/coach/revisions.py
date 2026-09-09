@@ -52,6 +52,41 @@ def structure_revision(
     ]
 
 
+def prescription_matches(proposed: Dict[str, Any], live: Dict[str, Any]) -> bool:
+    """Whether appending `proposed` over `live` would be suppressed as a no-op.
+
+    The §9 no-op rule lives in the write path (`db.workouts.WorkoutChange._write`), so a
+    preview built from the coach's answers would report a wording-only revision as a
+    change to the day. The proposal step asks this instead, against the standing rows it
+    already loaded (DESIGN_plan_change_continuity.md §4.5). It mirrors `append`'s merge:
+    a field the proposal omits carries forward and is therefore not a change.
+    """
+    from trainmate import intensity
+    if live.get('removed'):
+        return False
+    for field in ('date', 'sport_type', 'title', 'description'):
+        if proposed.get(field) != live.get(field):
+            return False
+    for field in ('duration_minutes', 'rpe', 'tss'):
+        value = proposed.get(field)
+        if value is not None and value != live.get(field):
+            return False
+    benchmark = proposed.get('benchmark_type')
+    # Apply blanks the flag when a test's slot is rewritten without it, so that IS a
+    # change (DESIGN_benchmark_workouts.md §4.2).
+    if benchmark != live.get('benchmark_type') and (benchmark or live.get('benchmark_type')):
+        return False
+    currency, seconds = intensity.parse_planned_zones(proposed)
+    if currency is not None and currency != live.get('planned_zone_currency'):
+        return False
+    zones = list(seconds or [])[:7]
+    zones += [None] * (7 - len(zones))
+    for index, value in enumerate(zones, start=1):
+        if value is not None and value != live.get(f'planned_zone{index}_sec'):
+            return False
+    return True
+
+
 def normalize_load_fields(workouts: List[Dict[str, Any]]) -> None:
     """Rounds the model's load fields to the integers the plan columns store.
 
