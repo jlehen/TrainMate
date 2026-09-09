@@ -321,7 +321,7 @@ class WorkoutGenMixin:
     def _resolve_standing(
         cls, workouts: List[Dict[str, Any]], standing: List[Workout],
         gen_start: str, gen_end: str
-    ) -> List[Dict[str, Any]]:
+    ) -> Tuple[List[Dict[str, Any]], Dict[Tuple[str, str], str]]:
         """Maps the coach's answers onto the standing block, so every pass after this one
         sees a uniform list of full sessions
         (DESIGN_plan_change_continuity.md §4.5, §7).
@@ -331,6 +331,10 @@ class WorkoutGenMixin:
         day whether the coach said so or not. What an entry takes the place of travels on
         it as `replaces_slot`/`replaces_lineage`, which apply turns into a void plus an
         append on the same lineage. A standing session no answer names is kept.
+
+        Returns the sessions and `{slot: reason}` for the standing sessions an answer ends
+        without leaving a session in their place — the coach's own sentence, so the void
+        the athlete meets says what the coach said (§5.5).
         """
         rest_sport = canonical_sport('rest')
         by_slot = {(w['date'], canonical_sport(w['sport_type'])): w for w in standing}
@@ -389,6 +393,17 @@ class WorkoutGenMixin:
         out: List[Dict[str, Any]] = []
         answered: set = set()        # standing slots an accepted entry has spoken for
         taken: set = set()           # destination slots an accepted entry has claimed
+        void_reasons: Dict[Tuple[str, str], str] = {}
+
+        def ends(source: Tuple[str, str], entry: Dict[str, Any]) -> None:
+            """The entry cannot be written, but it still answered for its source: the
+            session ends, and the coach's sentence goes on the void rather than the
+            fallback (§5.5)."""
+            void_reasons[source] = (
+                str(entry.get('change_reason') or '').strip() or REPLACED_DAY_REASON
+            )
+            answered.add(source)
+
         for entry in entries:
             slot = (entry.get('date'), canonical_sport(entry.get('sport_type', '')))
             if entry.get('keep'):
@@ -399,13 +414,17 @@ class WorkoutGenMixin:
                 answered.add(slot)
                 taken.add(slot)
                 continue
+            source = source_of(entry)
             if slot in taken:
                 notice(
                     f"Two sessions came back for {slot[0]} ({entry.get('sport_type', '')})"
                     f" — keeping the first and dropping the rest.",
                 )
+                # Two sessions on one date, both dropped: the second rest day has nowhere
+                # to land, but the session it stood for is still gone.
+                if source in by_slot and source not in answered:
+                    ends(source, entry)
                 continue
-            source = source_of(entry)
             if source is not None and source not in by_slot:
                 notice(
                     f"The coach said this {entry.get('date')} session replaces one on "
@@ -451,12 +470,30 @@ class WorkoutGenMixin:
             out.append(entry)
             taken.add(slot)
 
+        # A rest day and a session on the same date cannot both be true (§4.5). A drop's
+        # rest day is the one that can collide — another answer may put work on the day it
+        # emptied — and the work wins; the coach's sentence travels to the void the drop
+        # leaves behind, which is what the athlete then meets as a `[Cancelled]` marker.
+        worked_dates = {
+            w['date'] for w in out
+            if canonical_sport(w.get('sport_type', '')) != rest_sport
+        }
+        standing_only: List[Dict[str, Any]] = []
+        for entry in out:
+            replaced = entry.get('replaces_slot')
+            if (replaced and entry['date'] in worked_dates
+                    and canonical_sport(entry.get('sport_type', '')) == rest_sport):
+                ends((replaced[0], canonical_sport(replaced[1])), entry)
+                continue
+            standing_only.append(entry)
+        out = standing_only
+
         # Silence is how a JSON-mode model fails, and a cancellation has to be said (§4.5).
         for slot, live in by_slot.items():
             if slot in answered:
                 continue
             out.append({**live, 'keep': True, 'unmentioned': True})
-        return out
+        return out, void_reasons
 
     @staticmethod
     def _generate_voids(
@@ -486,21 +523,32 @@ class WorkoutGenMixin:
             voids.append((replaced[0], replaced[1], reason))
         for live in standing:
             slot = (live['date'], canonical_sport(live['sport_type']))
-            if slot in seen:
+            if slot in seen or slot in kept:
                 continue
-            if slot in final:
-                # Written over where it stands. Only a session the athlete added needs a
-                # void: it is what keeps its Calendar event, marked, instead of the event
-                # being torn down with no trace (§5.3). A coach session is simply
-                # superseded by the append.
-                if live.get('source') != 'manual' or slot in kept:
-                    continue
+            explicit = void_reasons.get(slot)
+            # Written over where it stands, and superseded by the append: a void is only
+            # needed when the removal has to leave a trace of its own — a session the
+            # athlete added (§5.3), or one an answer ended before something else took its
+            # slot (§5.1).
+            if slot in final and explicit is None and live.get('source') != 'manual':
+                continue
             seen.add(slot)
             voids.append((
-                live['date'], live['sport_type'],
-                void_reasons.get(slot) or REPLACED_DAY_REASON,
+                live['date'], live['sport_type'], explicit or REPLACED_DAY_REASON,
             ))
         return tuple(voids)
+
+    @staticmethod
+    def _standing_line(
+        live: Workout, outcome: str, becomes: str = "", reason: str = "",
+        mentioned: bool = True,
+    ) -> StandingLine:
+        """One report row about `live`, whatever this run decided for it."""
+        return StandingLine(
+            date=live['date'], sport_type=live['sport_type'], title=live['title'],
+            duration_minutes=live.get('duration_minutes'), outcome=outcome,
+            becomes=becomes, reason=reason, mentioned=mentioned,
+        )
 
     @staticmethod
     def _becomes(entry: Dict[str, Any], live: Workout) -> Tuple[str, str]:
@@ -531,31 +579,27 @@ class WorkoutGenMixin:
         lines: List[StandingLine] = []
         for live in block:
             slot = (live['date'], canonical_sport(live['sport_type']))
+            # What this session became, wherever it went: a move, a sport change and the
+            # rest day of a drop all carry it out of its slot.
+            target = by_source.get(slot)
             entry = by_slot.get(slot)
-            if entry is not None and (
-                entry.get('keep') or prescription_matches(entry, live)
-            ):
-                lines.append(StandingLine(
-                    date=live['date'], sport_type=live['sport_type'],
-                    title=live['title'],
-                    duration_minutes=live.get('duration_minutes'),
-                    outcome='kept', mentioned=not entry.get('unmentioned'),
-                ))
-                continue
-            target = entry if entry is not None else by_source.get(slot)
+            # An entry that takes another session's place is a different session arriving,
+            # not this one continuing — so this one was displaced, not revised.
+            if target is None and entry is not None and not entry.get('replaces_slot'):
+                if entry.get('keep') or prescription_matches(entry, live):
+                    lines.append(cls._standing_line(
+                        live, 'kept', mentioned=not entry.get('unmentioned')
+                    ))
+                    continue
+                target = entry
             if target is None:
-                lines.append(StandingLine(
-                    date=live['date'], sport_type=live['sport_type'],
-                    title=live['title'],
-                    duration_minutes=live.get('duration_minutes'),
-                    outcome='cancelled', reason=reasons.get(slot, ''),
+                lines.append(cls._standing_line(
+                    live, 'cancelled', reason=reasons.get(slot, '')
                 ))
                 continue
             outcome, becomes = cls._becomes(target, live)
-            lines.append(StandingLine(
-                date=live['date'], sport_type=live['sport_type'], title=live['title'],
-                duration_minutes=live.get('duration_minutes'),
-                outcome=outcome, becomes=becomes,
+            lines.append(cls._standing_line(
+                live, outcome, becomes=becomes,
                 reason=str(target.get('change_reason') or '').strip(),
             ))
         return tuple(lines)
@@ -859,7 +903,7 @@ class WorkoutGenMixin:
         # Every answer becomes a full session, so each pass below sees one kind of entry
         # and the void loop has nothing to void in the standing block
         # (DESIGN_plan_change_continuity.md §7).
-        workouts = self._resolve_standing(
+        workouts, void_reasons = self._resolve_standing(
             workouts, standing_block, gen_start_str, gen_end_str
         )
         athlete_note = str(plan_data.get("athlete_note") or "").strip() or None
@@ -883,9 +927,11 @@ class WorkoutGenMixin:
         # constraint forces its dates to rest regardless of what the LLM produced. Every
         # other constraint is advisory and left to the model. Applied after generation so
         # the guarantee holds even if the model ignores the constraint block it was shown.
-        workouts, void_reasons = self._enforce_rest_windows_generate(
+        workouts, forced_reasons = self._enforce_rest_windows_generate(
             workouts, constraints, gen_start_str, gen_end_str, standing
         )
+        # The constraint wins on its own dates, so its title is the reason there.
+        void_reasons.update(forced_reasons)
 
         # Boundary-week benchmark post-check (§4.1): warn (don't auto-insert) if a covered
         # block boundary lacks a fitness test. Runs after the rest pass so a rest-covered

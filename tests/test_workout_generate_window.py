@@ -394,6 +394,31 @@ class TestTheConflictRules(WindowTestCase):
         # The moved session brought its own lineage with it.
         self.assertEqual(landed["id"], ride)
 
+    def test_the_displaced_occupants_void_carries_its_own_reason(self):
+        """A rest day and a session on the same date cannot both be true, so the drop's
+        rest day gives way to the work — and its sentence goes on the void the athlete
+        meets instead (§4.5/§5.1)."""
+        self.ride(_days_out(2))
+        self.long_run(_days_out(4))
+        proposal = self.generate(
+            self.session(_days_out(4), sport="running", title="Moved ride",
+                         replaces={"date": _days_out(2), "sport_type": "cycling"},
+                         change_reason="moved to Sunday"),
+            {"date": _days_out(4), "sport_type": "running", "drop": True,
+             "change_reason": "the long run goes"},
+        )
+        voided = dict(((d, s), r) for (d, s, r) in proposal.voids)
+        self.assertEqual(voided[(_days_out(4), "running")], "the long run goes")
+        # And the day holds exactly the one session, not a rest day beside it.
+        self.assertEqual(
+            [w["title"] for w in self.live(_days_out(4))], ["Moved ride"]
+        )
+        # The report says the run was cancelled, in the run's own words — not that it
+        # "became" the ride that happened to land in its slot.
+        run_line = [l for l in proposal.standing if l.sport_type == "running"][0]
+        self.assertEqual(run_line.outcome, "cancelled")
+        self.assertEqual(run_line.reason, "the long run goes")
+
 
 class TestTheDeterministicPasses(WindowTestCase):
     """Removals no answer explains still carry a real reason (§5.5)."""
