@@ -532,17 +532,27 @@ class PeriodizationMixin:
     def update_macrocycle_config_hash(
         self, macrocycle_id: int, config_hash: str,
         config_snapshot: Optional[str] = None,
-        profile_snapshot: Optional[str] = None
+        profile_snapshot: Optional[str] = None,
+        goals_hash: Optional[str] = None,
+        goals_snapshot: Optional[str] = None,
+        constraints_hash: Optional[str] = None,
+        constraints_snapshot: Optional[str] = None,
     ) -> None:
         """Updates the config hash (and, when provided, the threshold and profile
-        snapshots) for a specific macrocycle — the "keep current plan, accept new config"
-        path.
+        snapshots, the goals and the plan-shaping constraints) for a specific macrocycle —
+        the "keep current plan, accept new inputs" path.
 
-        A snapshot left as None is not written, so a caller re-stamping only the hash
-        cannot blank out what the plan was generated against."""
+        The stamp has to clear everything the staleness check flags, or a kept plan flags
+        again tomorrow (DESIGN_plan_change_continuity.md §6.5). A value left as None is
+        not written, so a caller re-stamping only the hash cannot blank out what the plan
+        was generated against."""
         sets, params = ["config_hash = ?"], [config_hash]
         for column, value in (('config_snapshot', config_snapshot),
-                              ('profile_snapshot', profile_snapshot)):
+                              ('profile_snapshot', profile_snapshot),
+                              ('goals_hash', goals_hash),
+                              ('goals_snapshot', goals_snapshot),
+                              ('constraints_hash', constraints_hash),
+                              ('constraints_snapshot', constraints_snapshot)):
             if value is not None:
                 sets.append(f"{column} = ?")
                 params.append(value)
@@ -551,6 +561,20 @@ class PeriodizationMixin:
             cursor.execute(
                 f"UPDATE macrocycles SET {', '.join(sets)} WHERE id = ?",
                 (*params, macrocycle_id)
+            )
+            conn.commit()
+
+    def save_reshape_verdict(
+        self, macrocycle_id: int, key: str, verdict: Optional[str]
+    ) -> None:
+        """Caches the coach's re-shaping read against the edit it was asked about, so
+        `plan show` asks once per edit rather than on every read
+        (DESIGN_plan_change_continuity.md §7)."""
+        with self._get_connection() as conn:
+            conn.execute(
+                "UPDATE macrocycles SET reshape_verdict = ?, reshape_verdict_key = ? "
+                "WHERE id = ?",
+                (verdict, key, macrocycle_id),
             )
             conn.commit()
 

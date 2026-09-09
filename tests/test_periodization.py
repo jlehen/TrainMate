@@ -1305,9 +1305,16 @@ class TestPeriodization(unittest.TestCase):
                 title="Snapshot round trip", target_date=GOAL_DATE,
                 sport_type="cycling",
             )
+            # Real fingerprints: goals and the plan-shaping constraints flag the plan
+            # too now, so a placeholder hash would read as a moved goal
+            # (DESIGN_plan_change_continuity.md §6.5).
             test_db.save_macrocycle(
-                objective_id=obj_id, strategy="Build", goals_hash="g",
-                constraints_hash="c", mesocycles=[],
+                objective_id=obj_id, strategy="Build",
+                goals_hash=coach_service._get_goals_hash(
+                    test_db.upcoming_objectives()
+                ),
+                constraints_hash=coach_service._get_constraints_hash([]),
+                mesocycles=[],
                 config_hash=coach_service._get_config_hash(),
                 config_snapshot=coach_service._get_config_snapshot(),
                 profile_snapshot=coach_service._get_profile_snapshot(),

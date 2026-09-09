@@ -16,6 +16,7 @@ class PlanStrategyMixin:
         history_summary: Optional[str] = None, prior_training_text: Optional[str] = None,
         learnings: Optional[str] = None,
         current_block: Optional[Dict[str, Any]] = None,
+        changed_inputs: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Queries LLM to determine the overall macrocycle strategy and mesocycle blocks.
 
@@ -25,7 +26,11 @@ class PlanStrategyMixin:
 
         Builds its own system prompt rather than calling `_build_system_prompt`: that one
         states the ACTIVE strategy and blocks as settled fact, which is the very thing this
-        call produces (DESIGN_backward_evaluation.md §10.1)."""
+        call produces (DESIGN_backward_evaluation.md §10.1).
+
+        `changed_inputs` is the staleness reason and its diff, when this run is answering
+        one: the coach may open the strategy text with a paragraph saying what moved
+        (DESIGN_plan_change_continuity.md §6.2)."""
         plan_start = plan_start_str or today_str
         # The date-as-event framing is structural — repeated in the task, the response
         # format, and the user message — so a horizon goal has to branch it here; prose
@@ -97,6 +102,18 @@ emphasis, extending/shortening specific cycles), while continuing to respect ove
 science principles and guidelines.
 """
 
+        if changed_inputs:
+            custom_task += """
+### SAYING WHAT MOVED
+This replanning is answering a change to one of the inputs the previous plan was built
+from; the change is given above as its own section, with the edit itself. You may open
+your "strategy" text with ONE paragraph saying what moved and why the plan is now shaped
+as it is — written for the athlete, in their language, naming the line that changed
+rather than the field it lives in. If the change did not actually reshape anything,
+write no such paragraph: an opening that announces a change the blocks do not show is
+worse than none. Everything after that paragraph is the strategy as usual.
+"""
+
         if previous_strategy_text:
             custom_task += """
 ### CONTINUITY WITH THE PREVIOUS PLAN
@@ -166,6 +183,13 @@ You MUST respond with a JSON object containing:
                 "Weigh these when shaping the blocks — a higher confidence means more weeks "
                 "of evidence\nbehind the observation. They are input only here: authoring "
                 "and revising them belongs\nto the analysis flow.\n"
+            )
+        if changed_inputs:
+            system_prompt += (
+                "\n## WHAT CHANGED SINCE THE PREVIOUS PLAN\n"
+                "The input that flagged this plan out of date, and the edit itself. "
+                "See SAYING WHAT MOVED.\n"
+                f"{changed_inputs}\n"
             )
         system_prompt += (
             f"\n## ACTIVE ATHLETE GOALS (CHRONOLOGICAL)\n"

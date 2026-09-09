@@ -781,6 +781,40 @@ class WorkoutsMixin:
             ).fetchone()
             return int(row["c"]) if row and row["c"] is not None else None
 
+    def newest_change_with_note(self) -> Optional[Dict[str, Any]]:
+        """The newest change carrying a line written for the athlete, or None.
+
+        Only `workout generate` writes one, and only when something the athlete would
+        notice changed — so a run that merely extended the schedule is not here
+        (DESIGN_plan_change_continuity.md §6.3)."""
+        with self._get_connection() as conn:
+            row = conn.execute(
+                "SELECT * FROM workout_changes WHERE note IS NOT NULL AND note != '' "
+                "ORDER BY id DESC LIMIT 1"
+            ).fetchone()
+            return dict(row) if row else None
+
+    def newest_change_of_kind(
+        self, kind: str, after_id: int = 0
+    ) -> Optional[Dict[str, Any]]:
+        """The newest change of one kind made after `after_id`, or None."""
+        with self._get_connection() as conn:
+            row = conn.execute(
+                "SELECT * FROM workout_changes WHERE kind = ? AND id > ? "
+                "ORDER BY id DESC LIMIT 1",
+                (kind, after_id),
+            ).fetchone()
+            return dict(row) if row else None
+
+    def change_has_live_revisions(self, change_id: int) -> bool:
+        """Whether anything this change wrote is still the live revision of its slot —
+        that is, whether the change still stands (§6.4)."""
+        with self._get_connection() as conn:
+            row = conn.execute(
+                "SELECT 1 FROM live_workouts WHERE change_id = ? LIMIT 1", (change_id,)
+            ).fetchone()
+            return row is not None
+
     def next_change_after(self, change_id: int) -> Optional[int]:
         """The change that ran immediately after `change_id`, if any."""
         with self._get_connection() as conn:
