@@ -41,6 +41,18 @@ from trainmate.util import step, today_str as _today_str, wrap_text
 # (DESIGN_bot_simple_frontend.md §4.2).
 MORNING_MARKER = "push_morning_last"
 
+# The change whose line to the athlete the push last delivered. A date is enough for
+# per-day idempotency and not enough here: a forced re-run would repeat the line, and the
+# push's one silent early return stamps the date without sending
+# (DESIGN_plan_change_continuity.md §6.4).
+NOTE_MARKER = "push_note_last"
+
+# The fixed half of the week line. English, as every fixed string in the companion is
+# (DESIGN_bot_simple_frontend.md); the coach's own sentence follows it in the athlete's
+# language.
+PUSH_CHANGE_LEAD = "Your coach changed your week:"
+PUSH_CHANGE_UNDONE = "The change to your week was undone."
+
 # What the morning push offers (§4.1/§4.4): the CLI owns WHAT to offer, the bot only
 # renders. Each `send` is a canned utterance the bot feeds back through its normal
 # command pipeline when the button is tapped; `ack` runs nothing; `menu` nests a
@@ -283,6 +295,42 @@ def _trained_today(date_str: str) -> Dict[int, Dict[str, Any]]:
         return {}
 
 
+def _delivered_change_id() -> int:
+    """The change whose line the push last delivered, 0 when it has delivered none."""
+    from trainmate import runtime
+    try:
+        return int(runtime.db.get_setting(NOTE_MARKER) or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def pending_week_note() -> Optional[Tuple[str, int]]:
+    """The line the push opens with and the change id sending it consumes, or None.
+
+    A finished, applied change has already happened to the athlete's week, so unlike the
+    staleness flag it is theirs to hear about (DESIGN_plan_change_continuity.md §6.4). A
+    bare `workout generate` that extended the schedule carries no line, so it neither
+    speaks nor silences an older one; a rollback that undid a delivered change says so,
+    once, however many batches it covered; and a rollback before the line was ever sent
+    says nothing, because the athlete never heard of the change.
+    """
+    from trainmate import runtime
+    delivered = _delivered_change_id()
+    noted = runtime.db.newest_change_with_note()
+    if noted and noted["id"] > delivered:
+        # Undone before it was ever sent: the athlete never heard of the change, so
+        # there is nothing to announce and nothing to take back.
+        if not runtime.db.change_has_live_revisions(noted["id"]):
+            return None
+        return f"{PUSH_CHANGE_LEAD} {noted['note']}", noted["id"]
+    if not delivered:
+        return None
+    undo = runtime.db.newest_change_of_kind("rollback", after_id=delivered)
+    if undo and not runtime.db.change_has_live_revisions(delivered):
+        return PUSH_CHANGE_UNDONE, undo["id"]
+    return None
+
+
 def run_bot_morning(args: argparse.Namespace) -> None:
     """Renders the §4.1 morning message for today and emits its button row.
 
@@ -308,6 +356,9 @@ def run_bot_morning(args: argparse.Namespace) -> None:
         runtime.db.set_setting(MORNING_MARKER, today)
         return
 
+    # Read before the adaptation, so the line is about the change the athlete's week
+    # actually carries rather than one this run is about to make (§6.4).
+    week_note = pending_week_note()
     adapt_note = _auto_adapt_note(today) if settings.adapt_first() else None
     # After the adaptation, so the verdicts grade the sessions this push is about to show.
     workouts = runtime.db.get_workouts(start_date=today, end_date=today)
@@ -317,6 +368,9 @@ def run_bot_morning(args: argparse.Namespace) -> None:
         if (verdicts.get(w.get("id")) or {}).get("status") not in SIMPLE_DONE_STATUSES
     ]
 
+    # First: it is what the rest of the message is now different because of.
+    if week_note:
+        print(wrap_text(week_note[0]))
     if workouts and not ahead:
         print(PUSH_ALL_DONE_LINE)
     elif not workouts and runway is not None and runway["days_left"] < 0:
@@ -335,6 +389,9 @@ def run_bot_morning(args: argparse.Namespace) -> None:
     if buttons:
         emit_buttons(buttons)
     runtime.db.set_setting(MORNING_MARKER, today)
+    # Consumed only now, when the line has actually been sent.
+    if week_note:
+        runtime.db.set_setting(NOTE_MARKER, str(week_note[1]))
 
 
 def _use_router_model(args: argparse.Namespace) -> None:

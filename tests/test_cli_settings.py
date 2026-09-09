@@ -357,6 +357,7 @@ class TestRegistryShape(SettingsTestCase):
             settings.MORNING_TIME: "06:45",
             settings.MORNING_DEADLINE: "11:15",
             settings.ADAPT_FIRST: "on",
+            settings.COMMITMENT_DAYS: "10",
         }
         self.assertEqual(sorted(samples), sorted(settings.names()),
                          "a new setting needs a sample value here")

@@ -166,9 +166,11 @@ class TestTheGuardSurvivesASwap(unittest.TestCase):
         self.assertEqual(moved["adaptation_count"], 2)
 
         rendered = format_planned_workouts_detailed([moved], eval_date="2026-09-03")
-        self.assertIn("ALREADY EASED", rendered)
-        self.assertIn("2x", rendered)
-        self.assertIn("do not compound", rendered)
+        # What it was first prescribed as, and how often it has been eased since — the
+        # numbers that replaced the flat "do not compound" rule
+        # (DESIGN_plan_change_continuity.md §4.6).
+        self.assertIn("first prescribed as 90m", rendered)
+        self.assertIn("eased 2x", rendered)
 
     def test_the_marker_reflects_the_latest_change_and_the_count_stands_beside_it(self):
         """No precedence rule any more: a session eased twice and then swapped renders

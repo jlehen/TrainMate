@@ -47,6 +47,7 @@ _VOID_LABELS = {
     "generate": "Dropped from the plan",
     "adapt": "Dropped by the adaptation",
     "swap": "Moved away",
+    "add": "Replaced by hand",
     "rm": "Cancelled",
     "rollback": "Undone",
     "stand-down": "Goal stood down",
@@ -73,7 +74,8 @@ def _load(revision: Dict[str, Any]) -> Optional[str]:
 
 
 def _entry(revision: Dict[str, Any], position: int, total: int) -> str:
-    """One revision as a labelled block (§3).
+    """One revision as a labelled block (§3), with one `Reason:` line and no `Change:`
+    (DESIGN_plan_change_continuity.md §6.4).
 
     A void is rendered lean — it carries the departing session's columns forward, and
     printing them would state a prescription for a day that holds no session."""
@@ -87,12 +89,14 @@ def _entry(revision: Dict[str, Any], position: int, total: int) -> str:
         for line in (_load(revision), intensity.format_planned_zones(revision)):
             if line:
                 lines.append(line)
+    # One label, one meaning (DESIGN_plan_change_continuity.md §6.4): the batch summary
+    # is a second *why*, not a *what*, so it stands in for a missing reason rather than
+    # printing beside it under a label that promised the edit.
     reason = (revision.get("reason") or "").strip()
+    if not reason:
+        reason = (revision.get("change_summary") or "").strip()
     if reason:
         lines.append(f"Reason: {reason}")
-    summary = (revision.get("change_summary") or "").strip()
-    if summary and summary != reason:
-        lines.append(f"Change: {summary}")
     body = (revision.get("description") or "").strip()
     if body and not void:
         lines.append(body)

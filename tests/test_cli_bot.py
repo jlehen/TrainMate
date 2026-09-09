@@ -15,7 +15,10 @@ import trainmate.db
 import trainmate_cli
 
 from trainmate import runtime
-from trainmate.cli.bot import MORNING_MARKER, PUSH_ALL_DONE_LINE
+from trainmate.cli.bot import (
+    MORNING_MARKER, NOTE_MARKER, PUSH_ALL_DONE_LINE, PUSH_CHANGE_LEAD,
+    PUSH_CHANGE_UNDONE,
+)
 from trainmate.cli.render import SIMPLE_DONE_LINE
 from trainmate.config import config
 from trainmate.prompt import BUTTONS_SENTINEL
@@ -34,6 +37,92 @@ def tearDownModule():
         os.remove(TEST_DB_PATH)
     except OSError:
         pass
+
+
+class TheWeekLineTest(unittest.TestCase):
+    """The push opens with the coach's line about the change to the athlete's week
+    (DESIGN_plan_change_continuity.md §6.4)."""
+
+    def setUp(self):
+        rebind_test_db(test_db)
+        clear_all_tables(test_db)
+        garmin = patch.object(runtime, "garmin", MagicMock(), create=True)
+        garmin.start()
+        self.addCleanup(garmin.stop)
+        # A session today, so the push has something to open ABOUT.
+        save_workout(
+            test_db, today_str(), "running", "Easy run", description="40 min.",
+            duration_minutes=40,
+        )
+
+    def _noted(self, note="Four sessions a week now."):
+        """A `workout generate` that carried a line, and the change id it wrote."""
+        with test_db.workout_change(kind="generate", note=note) as change:
+            change.append(
+                date=today_str(), sport_type="cycling", title="Ride",
+                description="60 min.", duration_minutes=60,
+            )
+            return change.id
+
+    def test_the_line_opens_the_push_once(self):
+        self._noted()
+        _code, first, _ = run_cli(["bot", "morning"])
+        self.assertIn(f"{PUSH_CHANGE_LEAD} Four sessions a week now.", first)
+        self.assertTrue(
+            first.index(PUSH_CHANGE_LEAD) < first.index("Easy run"),
+            "the week line opens the message",
+        )
+        # A forced second push the same day does not repeat it.
+        _code, again, _ = run_cli(["bot", "morning", "--force"])
+        self.assertNotIn(PUSH_CHANGE_LEAD, again)
+
+    def test_a_generate_that_carried_no_line_does_not_silence_an_older_one(self):
+        self._noted()
+        with test_db.workout_change(kind="generate") as change:
+            change.append(
+                date=today_str(), sport_type="swimming", title="Swim",
+                description="30 min.", duration_minutes=30,
+            )
+        _code, out, _ = run_cli(["bot", "morning"])
+        self.assertIn(PUSH_CHANGE_LEAD, out)
+
+    def test_a_push_that_returns_silently_does_not_consume_it(self):
+        """An exhausted schedule with nothing on today sends nothing at all, and must not
+        eat the line while it is at it (§6.4)."""
+        self._noted()
+        # Today's session removed, and the schedule already run out: the one silent path.
+        with test_db.workout_change(kind="rm") as change:
+            change.void(date=today_str(), sport_type="running", reason="gone")
+            change.void(date=today_str(), sport_type="cycling", reason="gone")
+        with patch("trainmate.cli.bot.schedule_exhausted", return_value=True), \
+                patch("trainmate.cli.bot.current_runway", return_value=None):
+            _code, out, _ = run_cli(["bot", "morning"])
+
+        self.assertNotIn(PUSH_CHANGE_LEAD, out)
+        self.assertIsNone(test_db.get_setting(NOTE_MARKER))
+        self.assertEqual(test_db.get_setting(MORNING_MARKER), today_str())
+
+    def test_it_says_the_change_was_undone_after_a_rollback(self):
+        change_id = self._noted()
+        run_cli(["bot", "morning"])
+        self.assertEqual(test_db.get_setting(NOTE_MARKER), str(change_id))
+
+        with patch("trainmate.runtime.calendar_syncer"):
+            test_db.rollback_to_change(change_id, today_str(), summary="undo")
+        _code, out, _ = run_cli(["bot", "morning", "--force"])
+        self.assertIn(PUSH_CHANGE_UNDONE, out)
+        # And once only.
+        _code, again, _ = run_cli(["bot", "morning", "--force"])
+        self.assertNotIn(PUSH_CHANGE_UNDONE, again)
+
+    def test_a_rollback_before_the_line_was_sent_says_nothing(self):
+        """The athlete never heard of the change (§6.4)."""
+        change_id = self._noted()
+        with patch("trainmate.runtime.calendar_syncer"):
+            test_db.rollback_to_change(change_id, today_str(), summary="undo")
+        _code, out, _ = run_cli(["bot", "morning"])
+        self.assertNotIn(PUSH_CHANGE_UNDONE, out)
+        self.assertNotIn(PUSH_CHANGE_LEAD, out)
 
 
 class MorningPushTest(unittest.TestCase):

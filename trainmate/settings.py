@@ -25,6 +25,7 @@ PUSH = "push"
 MORNING_TIME = "morning-time"
 MORNING_DEADLINE = "morning-deadline"
 ADAPT_FIRST = "adapt-first"
+COMMITMENT_DAYS = "commitment-days"
 
 
 def parse_hhmm(token: Any) -> str:
@@ -39,6 +40,16 @@ def parse_hhmm(token: Any) -> str:
     return f"{hour:02d}:{minute:02d}"
 
 
+def parse_days(token: Any) -> str:
+    """A whole number of days, zero or more, stored as its decimal spelling."""
+    raw = str(token if token is not None else "").strip()
+    if not re.fullmatch(r"\d+", raw):
+        raise ValueError(
+            f"'{raw}' is not a number of days — write a whole number, 0 or more, e.g. 7."
+        )
+    return str(int(raw))
+
+
 def parse_switch(token: Any) -> str:
     """An on/off knob, stored as the word itself so a stored value reads as it displays."""
     raw = str(token if token is not None else "").strip().lower()
@@ -51,6 +62,10 @@ def parse_switch(token: Any) -> str:
 
 def _is_on(stored: Optional[str]) -> bool:
     return stored == "on"
+
+
+def _as_int(stored: Optional[str]) -> Optional[int]:
+    return None if stored is None else int(stored)
 
 
 @dataclass(frozen=True)
@@ -144,6 +159,17 @@ SETTINGS: List[Setting] = [
         # (DESIGN_user_timezone.md §3).
         unset_label="(this machine)",
         on_change=clock.reset_cache,
+    ),
+    Setting(
+        name=COMMITMENT_DAYS,
+        key="workout_commitment_days",
+        group="Schedule",
+        summary="Days ahead the coach treats as already promised to the athlete",
+        value_hint="DAYS",
+        parse=parse_days,
+        config_path=("coach", "workout_commitment_days"),
+        fallback="7",
+        coerce=_as_int,
     ),
     Setting(
         name=PUSH,
@@ -282,6 +308,12 @@ def clear(name: str) -> bool:
 # --- Named readers, one per knob with no home module of its own ---
 # `coach-model` and `timezone` are read through llm_models/clock, which own the rest of
 # their behaviour; the morning-push knobs and the router role have no such module.
+
+def commitment_days() -> int:
+    """How many days from today the coach must account for session by session
+    (DESIGN_plan_change_continuity.md §4.1). Operator-only: not in ROUTABLE_SETTINGS."""
+    return value(COMMITMENT_DAYS)
+
 
 def push_enabled() -> bool:
     """Whether the bot sends the morning push (DESIGN_bot_simple_frontend.md §4.3)."""

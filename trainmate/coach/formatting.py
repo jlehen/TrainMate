@@ -9,25 +9,36 @@ from trainmate.adherence import Performed
 from trainmate import intensity
 
 
-# The tag's closing clause names the risk the reading command runs, and the two commands
-# run opposite ones: `adapt` may cut the session again, `generate` may write the day back
-# at its original load (DESIGN_workout_revisions.md §7.1).
-EASED_DO_NOT_COMPOUND = "do not compound"
-EASED_DO_NOT_RESTORE = "do not silently restore it"
+def _first_form(workout: Workout) -> str:
+    """The load this session was first prescribed with, as the tag states it.
+
+    Read off the lineage's first revision, which hydration already carries
+    (DESIGN_plan_change_continuity.md §4.6). Empty when the numbers are not on record."""
+    parts = []
+    for field, label, suffix in (
+        ("original_duration_minutes", "", "m"),
+        ("original_rpe", "RPE ", ""),
+        ("original_tss", "TSS ", ""),
+    ):
+        value = workout.get(field)
+        if value is not None:
+            parts.append(f"{label}{value}{suffix}")
+    return ", ".join(parts)
 
 
-def _easing_recency_tag(
-    workout: Workout, eval_date: Optional[str],
-    closer: str = EASED_DO_NOT_COMPOUND,
-) -> str:
-    """Tags an already-eased session with how recently and how often it was eased.
+def _easing_recency_tag(workout: Workout, eval_date: Optional[str]) -> str:
+    """Tags an already-eased session with what it was first prescribed as, and how
+    recently and how often it was eased.
 
     Gated on the derived tally, NOT on the kind of the latest change: under revisions the
     marker reflects the latest change, so an adapted-then-swapped session reads `swapped`,
     and a kind gate would silence this tag in exactly the scenario the lineage exists to
-    protect (DESIGN_workout_revisions.md §7). Shared by the adaptation and generation
-    prompts, which read the same recency signal against opposite risks — `closer` is the
-    one clause that differs."""
+    protect (DESIGN_workout_revisions.md §7).
+
+    Both prompts read the same tag. It used to close with an instruction — "do not
+    compound" for `adapt`, "do not silently restore it" for `generate` — because neither
+    was shown the form the numbers were reduced FROM, so the rule had to be flat. The
+    first form replaces it (DESIGN_plan_change_continuity.md §4.6)."""
     count = workout.get("adaptation_count") or 0
     if count < 1:
         return ""
@@ -49,10 +60,13 @@ def _easing_recency_tag(
                 when = f", most recently {days} days ago"
         except (ValueError, TypeError):
             when = ""
-    return (
-        f" [ALREADY EASED by a prior adaptation ({times}{when}) — current form is the "
-        f"reduced plan, not the original; {closer}]"
+    first = _first_form(workout)
+    opener = (
+        f"first prescribed as {first} — eased {times}" if first
+        else f"eased by a prior adaptation {times}"
     )
+    tail = "" if first else " — current form is the reduced plan, not the original"
+    return f" [{opener}{when}{tail}]"
 
 
 def format_metrics_history(
@@ -161,7 +175,7 @@ def format_completed_activities(completed_activities: List[CompletedActivity]) -
 
 
 def _planned_summary(
-    w: Workout, eval_date: Optional[str], easing_closer: str, markers: str = "",
+    w: Workout, eval_date: Optional[str], markers: str = "",
 ) -> str:
     """What both planned-workout renderings share: identity, load, why it was last
     changed, and the intensity target under it.
@@ -176,7 +190,7 @@ def _planned_summary(
         f"RPE: {w.get('rpe')}, TSS: {w.get('tss')}"
         f"{markers}"
     )
-    line += _easing_recency_tag(w, eval_date, easing_closer)
+    line += _easing_recency_tag(w, eval_date)
     mod_reason = w.get('modification_reason')
     if mod_reason:
         line += f" — {mod_reason}"
@@ -191,18 +205,53 @@ def _planned_summary(
 
 def format_planned_workouts(
     planned_workouts: List[Workout], eval_date: Optional[str] = None,
-    easing_closer: str = EASED_DO_NOT_COMPOUND,
 ) -> str:
     """Formats planned workouts to a readable block for LLM prompts.
 
-    `eval_date` adds the "[ALREADY EASED ...]" tag dated against it, closed by
-    `easing_closer`. Used where the model is asked to weigh a session rather than rewrite
-    it, so it carries the intensity target but not the description
+    `eval_date` dates the easing tag. Used where the model is asked to weigh a session
+    rather than rewrite it, so it carries the intensity target but not the description
     :func:`format_planned_workouts_detailed` adds.
     """
-    return "\n".join(
-        _planned_summary(w, eval_date, easing_closer) for w in planned_workouts
-    )
+    return "\n".join(_planned_summary(w, eval_date) for w in planned_workouts)
+
+
+def _standing_markers(w: Workout, window_end: Optional[str]) -> str:
+    """The tags a standing session carries into the generate prompt (§4.6). Each says
+    what kind of commitment the session is, so the model sees it once rather than in a
+    section of its own."""
+    markers = ""
+    if window_end and w['date'] <= window_end:
+        markers += " [COMMITTED]"
+    if w.get('benchmark_type'):
+        markers += f" [BENCHMARK: {w['benchmark_type']}]"
+    if w.get('source') == 'manual':
+        markers += " [ADDED BY THE ATHLETE]"
+    if canonical_sport(w.get('sport_type', '')) == canonical_sport('rest'):
+        markers += " [REST DAY]"
+    return markers
+
+
+def format_standing_workouts(
+    standing: List[Workout], eval_date: Optional[str] = None,
+    window_end: Optional[str] = None,
+) -> str:
+    """The SESSIONS ALREADY STANDING block of the generate prompt
+    (DESIGN_plan_change_continuity.md §4.6).
+
+    A committed session also carries its full description, so a revision can be minimal
+    rather than re-invented; one past the window is listed to be answered for, not
+    rewritten in detail, so its one-line form is enough."""
+    blocks = []
+    for w in standing:
+        committed = bool(window_end and w['date'] <= window_end)
+        header = _planned_summary(w, eval_date, _standing_markers(w, window_end))
+        desc = (w.get('description') or '').strip() if committed else ''
+        if not desc:
+            blocks.append(header)
+            continue
+        indented = "\n".join("    " + ln for ln in desc.splitlines())
+        blocks.append(f"{header}\n  Full description:\n{indented}")
+    return "\n\n".join(blocks)
 
 
 def _performed_marker(p: Performed) -> str:
@@ -229,7 +278,6 @@ def format_planned_workouts_detailed(
     planned_workouts: List[Workout],
     performed: Optional[Dict[Tuple[str, str], Performed]] = None,
     eval_date: Optional[str] = None,
-    easing_closer: str = EASED_DO_NOT_COMPOUND,
 ) -> str:
     """Like format_planned_workouts but includes each session's full description.
 
@@ -247,9 +295,10 @@ def format_planned_workouts_detailed(
     tagged "[COMPLETED — locked history, not adaptable]"; one only partly performed says
     so and reports what was actually done, and on the evaluation date stays adaptable.
 
-    Sessions a prior `workout adapt` already eased are tagged "[ALREADY EASED …]" with
-    how recently and how many times (relative to `eval_date`), so a re-run does not stack
-    a second reduction on a session whose current form is already the reduced plan.
+    Sessions a prior `workout adapt` already eased are tagged with what they were first
+    prescribed as and how recently and how many times they were eased (relative to
+    `eval_date`), so a re-run does not stack a second reduction on a session whose current
+    form is already the reduced plan.
     """
     performed = performed or {}
     blocks = []
@@ -264,7 +313,7 @@ def format_planned_workouts_detailed(
         # adapt prompt's PROTECTING A BENCHMARK rule (DESIGN_benchmark_workouts.md §4.2).
         if w.get('benchmark_type'):
             markers += f" [BENCHMARK: {w['benchmark_type']} — if changed at all, move intact; never dilute]"
-        header = _planned_summary(w, eval_date, easing_closer, markers)
+        header = _planned_summary(w, eval_date, markers)
         desc = (w.get('description') or '').strip()
         if desc:
             indented = "\n".join("    " + ln for ln in desc.splitlines())

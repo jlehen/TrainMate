@@ -287,6 +287,12 @@ coach:
   #goals_lookback_days: 90
   # How many days of sessions `workout generate` writes when you don't say.
   #workout_generation_span_days: 28
+  # Days from today the athlete is treated as already committed to: the sessions
+  # standing in that window reach the `workout generate` prompt and the coach must
+  # account for each one, and a session it removes there keeps its Calendar event,
+  # marked (DESIGN_plan_change_continuity.md §4.1). 0 disables both. Also a setting:
+  # `settings set commitment-days N`.
+  #workout_commitment_days: 7
   # The last few days of a block are its terminal window: an adaptation made there has no
   # time left to rebound from, and the next block is not yet in reach. Inside it the coach
   # is told to hold the planned load rather than shuffle it (DESIGN_block_boundary.md §3).

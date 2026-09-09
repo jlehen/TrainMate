@@ -697,6 +697,45 @@ class TestCliWorkouts(unittest.TestCase):
         self.assertIn("No orphaned Calendar events", stdout)
         mock_calendar.delete_event.assert_not_called()
 
+    @patch("trainmate.runtime.calendar_syncer")
+    def test_workout_prune_calendar_keeps_a_marker_covered_in_its_slot(self, mock_calendar):
+        """A marker is not an orphan just because a session took its slot
+        (DESIGN_plan_change_continuity.md §5.6)."""
+        from trainmate.calendar_reconcile import no_calendar_sync
+        # The reconcile is suppressed so the ownership rows stay as written: this test
+        # asks what `prune-calendar` reads, not what the sync would have done first.
+        with no_calendar_sync():
+            save_workout(test_db,
+                date="2026-06-02", sport_type="running", title="Club run",
+                description="45 mins", source="manual", google_event_id="ge_marker",
+            )
+            with test_db.workout_change(
+                kind="generate", commitment_end="2026-06-08"
+            ) as change:
+                change.void(date="2026-06-02", sport_type="running", reason="replaced")
+            with test_db.workout_change(
+                kind="generate", commitment_end="2026-06-08"
+            ) as change:
+                change.append(
+                    date="2026-06-02", sport_type="running", title="Tempo 6x800",
+                    description="intervals", duration_minutes=60, rpe=7, tss=70,
+                )
+            covering = test_db.get_workout("2026-06-02", "running")
+            test_db.mark_workout_pushed(covering["id"], "ge_new", "sig")
+
+        mock_calendar.list_workout_events.return_value = [
+            {"id": "ge_marker", "summary": "[Cancelled] Club run",
+             "start": {"date": "2026-06-02"}},
+            {"id": "ge_new", "summary": "Tempo 6x800", "start": {"date": "2026-06-02"}},
+            {"id": "ge_orphan", "summary": "Old Swim", "start": {"date": "2026-06-10"}},
+        ]
+        mock_calendar.delete_event.return_value = True
+
+        exit_code, stdout, _ = self.run_cli(["workout", "prune-calendar", "-y"])
+        self.assertEqual(exit_code, 0)
+        self.assertNotIn("Club run", stdout)
+        mock_calendar.delete_event.assert_called_once_with("ge_orphan")
+
     @patch("trainmate.runtime.coach_service")
     def test_workout_add_echoes_list_line(self, mock_coach):
         """`add` echoes the new session in the exact 'workout list' rendering."""

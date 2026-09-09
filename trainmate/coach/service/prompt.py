@@ -53,6 +53,33 @@ def _profile_field_lines(value: Any) -> List[str]:
     return json.dumps(value, indent=2, sort_keys=True, ensure_ascii=False).splitlines()
 
 
+def _snapshot_records(snapshot_raw: Optional[str]) -> Optional[List[Dict[str, Any]]]:
+    """The goal or constraint list a macrocycle carries, or None when it has none it can
+    be held to (DESIGN_plan_change_continuity.md §6.5)."""
+    if not snapshot_raw:
+        return None
+    try:
+        records = json.loads(snapshot_raw)
+    except (ValueError, TypeError):
+        return None
+    return records if isinstance(records, list) else None
+
+
+def records_diff_text(
+    old_records: List[Dict[str, Any]], new_records: List[Dict[str, Any]], label: str
+) -> str:
+    """A unified diff of two cleaned record lists, so a moved race date reads as the edit
+    it is rather than as the word "goals" (§6.5). Empty when nothing differs."""
+    if old_records == new_records:
+        return ""
+    lines = difflib.unified_diff(
+        _profile_field_lines(old_records), _profile_field_lines(new_records),
+        fromfile=f"{label} (when the plan was generated)", tofile=f"{label} (now)",
+        lineterm="", n=1,
+    )
+    return "\n".join(lines)
+
+
 def profile_diff_text(old_profile: Dict[str, Any]) -> str:
     """A unified diff per plan-shaping field that differs between `old_profile` and the
     live config, so the athlete and the coach see the same edit the flag names
@@ -113,35 +140,28 @@ class PromptConfigMixin:
         config_changed() can name which field moved (DESIGN_plan_staleness.md §5)."""
         return json.dumps(plan_profile(), sort_keys=True)
 
-    def config_changed(self, macro: Dict[str, Any]) -> Optional[str]:
-        """Whether config.yaml has drifted plan-shapingly since `macro` was generated.
+    def _threshold_reasons(self, macro: Dict[str, Any]) -> List[str]:
+        """Every threshold anchor that has drifted past `coach.threshold_replan_pct`
+        since `macro` was generated — a small FTP/LTHR retest correction feeds the next
+        workout generation without invalidating the periodization strategy (§3.3).
 
-        Returns a human-readable reason, or None when the plan is still current. Two axes
-        (see engine._clean_profile): the fingerprint over plan-shaping profile fields, and
-        the effective threshold anchors (§3.3), which only count as drift past
-        `coach.threshold_replan_pct` relative change — a small FTP/LTHR retest correction
-        feeds the next workout generation without invalidating the periodization strategy.
-        The reason names the fields that moved (DESIGN_plan_staleness.md §5).
-
-        Every anchor kind on record joins the snapshot uniformly (§3.5). A kind absent from
-        the OLD snapshot is a *newly recorded* one, so it is skipped rather than read as
-        instant drift; a kind that *disappears* is real drift. `e1rm` is the one exclusion:
-        it collides across lifts, so a squat PR would invalidate a whole periodization
-        (DESIGN_intensity_distribution.md §10). It still feeds the prompt, never a replan.
-        """
-        if macro.get('config_hash') != self.engine._get_config_hash():
-            return _profile_change_reason(macro.get('profile_snapshot'))
-
+        Every anchor kind on record joins the snapshot uniformly (§3.5). A kind absent
+        from the OLD snapshot is a *newly recorded* one, so it is skipped rather than read
+        as instant drift; a kind that *disappears* is real drift. `e1rm` is the one
+        exclusion: it collides across lifts, so a squat PR would invalidate a whole
+        periodization (DESIGN_intensity_distribution.md §10). It still feeds the prompt,
+        never a replan."""
         snapshot_raw = macro.get('config_snapshot')
         if not snapshot_raw:
-            return None
+            return []
         try:
             old_thresholds = json.loads(snapshot_raw)
         except (ValueError, TypeError):
-            return None
+            return []
 
         current = self.effective_thresholds()
         tolerance = config.threshold_replan_pct / 100.0
+        reasons: List[str] = []
         for key in sorted(set(old_thresholds) | set(current)):
             if key == 'e1rm':
                 continue
@@ -149,11 +169,58 @@ class PromptConfigMixin:
             if old_val is None:
                 continue  # newly recorded kind — joins drift-checking from the next plan
             if new_val is None:
-                return f"{key} was removed"
+                reasons.append(f"{key} was removed")
+                continue
             if old_val and abs(new_val - old_val) / abs(old_val) > tolerance:
                 pct = (new_val - old_val) / old_val * 100.0
-                return f"{key} changed {old_val:g} → {new_val:g} ({pct:+.1f}%)"
-        return None
+                reasons.append(f"{key} changed {old_val:g} → {new_val:g} ({pct:+.1f}%)")
+        return reasons
+
+    def config_changed(self, macro: Dict[str, Any]) -> Optional[str]:
+        """Whether a plan-shaping input has drifted since `macro` was generated.
+
+        Returns a human-readable reason, or None when the plan is still current. Four
+        axes: the fingerprint over plan-shaping profile fields (see engine._clean_profile),
+        the effective threshold anchors, the goals, and the `replan = 1` constraints. A
+        moved race date is the largest reshaper there is, and both it and the constraints
+        were fingerprinted for `plan generate`'s strategy-reuse check alone
+        (DESIGN_plan_change_continuity.md §6.5).
+
+        EVERY reason is collected, not the first one found. Returning early let a profile
+        edit swallow a concurrent threshold move: `plan show` named one of them, the
+        coach's verdict never learned about the other, and `plan keep` stamped both away.
+        """
+        reasons: List[str] = []
+        if macro.get('config_hash') != self.engine._get_config_hash():
+            reasons.append(_profile_change_reason(macro.get('profile_snapshot')))
+        reasons.extend(self._threshold_reasons(macro))
+        reasons.extend(self._plan_input_reasons(macro))
+        return "; ".join(reasons) if reasons else None
+
+    def _plan_input_reasons(self, macro: Dict[str, Any]) -> List[str]:
+        """Whether the goals or the plan-shaping constraints have moved since `macro` was
+        generated (DESIGN_plan_change_continuity.md §6.5).
+
+        `all_constraints_snapshot` is deliberately not read here: it holds every active
+        constraint, tactical ones included, and exists so `plan show` can list what the
+        coach saw. Flagging on it would make the companion athlete's "not Wednesday next
+        week" restage the operator's plan."""
+        reasons: List[str] = []
+        objectives = self._db.upcoming_objectives()
+        # A hash the plan does not carry cannot be held to: there is nothing to compare
+        # against, the same reading the profile snapshot gets above.
+        stored_goals = macro.get('goals_hash')
+        if stored_goals and stored_goals != self.engine._get_goals_hash(objectives):
+            reasons.append("goals changed")
+        replan_constraints = [
+            c for c in self._db.get_constraints(_svc._today_str())
+            if c.get('replan')
+        ]
+        stored_constraints = macro.get('constraints_hash')
+        if (stored_constraints and stored_constraints
+                != self.engine._get_constraints_hash(replan_constraints)):
+            reasons.append("plan-shaping constraints changed")
+        return reasons
 
     def profile_diff(self, macro: Dict[str, Any]) -> str:
         """What actually changed in the plan-shaping profile since `macro` was generated,
@@ -163,6 +230,34 @@ class PromptConfigMixin:
             return ""
         old_profile = _snapshot_profile(macro.get('profile_snapshot'))
         return profile_diff_text(old_profile) if old_profile is not None else ""
+
+    def staleness_diff(self, macro: Dict[str, Any]) -> str:
+        """Every edit the staleness reason names, as diffs the athlete can judge: the
+        profile fields, the goals, and the plan-shaping constraints
+        (DESIGN_plan_change_continuity.md §6.5).
+
+        A snapshot the plan does not carry contributes nothing — it cannot be attributed
+        honestly — and the threshold reasons already carry their own numbers."""
+        chunks = [self.profile_diff(macro)]
+
+        old_goals = _snapshot_records(macro.get('goals_snapshot'))
+        if old_goals is not None:
+            chunks.append(records_diff_text(
+                old_goals, self.engine._clean_goals(self._db.upcoming_objectives()),
+                "goals",
+            ))
+
+        old_constraints = _snapshot_records(macro.get('constraints_snapshot'))
+        if old_constraints is not None:
+            replan = [
+                c for c in self._db.get_constraints(_svc._today_str())
+                if c.get('replan')
+            ]
+            chunks.append(records_diff_text(
+                old_constraints, self.engine._clean_constraints(replan),
+                "plan-shaping constraints",
+            ))
+        return "\n\n".join(chunk for chunk in chunks if chunk)
 
     def _get_goals_hash(self, objectives: List[Objective]) -> str:
         return self.engine._get_goals_hash(objectives)

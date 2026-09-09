@@ -22,6 +22,24 @@ CALENDAR_SYNC_PAGE_SIZE = 250
 # once the rows that referenced the events are gone (see `list_workout_events`).
 WORKOUT_EVENT_TAG = "TrainMate"
 
+# The bracketed word a changed session's title carries, read off the change kind rather
+# than off "does it have a reason" (DESIGN_plan_change_continuity.md §5.1). A `generate`
+# revision is absent on purpose: it is the plan being written, not a decision about the
+# athlete's state, so it renders plainly. `[Manual]` is a source, not a kind, and is
+# composed separately below.
+_REVISION_LABELS = {"adapt": "[Adapted]"}
+
+
+def _void_label(change_kind: Optional[str]) -> str:
+    """`[Deleted]` when the athlete ended the session, `[Cancelled]` when the coach did
+    (DESIGN_plan_change_continuity.md §5.1)."""
+    from trainmate.db.workouts import ATHLETE_VOID_KINDS
+    # `add` joins the athlete's kinds for the word and nowhere else: typing over a session
+    # is the athlete's own decision, but it does not leave the day empty the way `rm`
+    # does, which is the question ATHLETE_VOID_KINDS answers for its other callers (§5.1).
+    athlete = ATHLETE_VOID_KINDS + ("add",)
+    return "[Deleted]" if change_kind in athlete else "[Cancelled]"
+
 
 # Whether each event write announces itself. Callers that push a whole batch render a
 # count and a progress bar instead, and silence the per-event lines with `quiet_events()`.
@@ -100,16 +118,21 @@ class CalendarSyncer:
         # Format Summary and Description. The body is the session's CURRENT form only;
         # every earlier form is rendered by the history block below
         # (DESIGN_calendar_lineage.md §5).
-        is_modified = bool(mod_reason)
         is_manual = workout.get('source') == 'manual'
+        change_kind = workout.get('change_kind')
         if workout.get('removed'):
-            summary = f"[Deleted] {title}"
+            summary = f"{_void_label(change_kind)} {title}"
             event_description = description or ""
             removed_reason = workout.get('removed_reason')
             if removed_reason:
                 event_description = f"{event_description}\n\nReason:\n{removed_reason}"
-        elif is_modified:
-            summary = f"[Adapted] {title}"
+        elif mod_reason:
+            # The word comes off the change kind, not off the presence of a reason: a
+            # `workout generate` revision now carries one too, and "[Adapted]" means the
+            # coach eased this because of how the athlete was doing
+            # (DESIGN_plan_change_continuity.md §5.1).
+            label = _REVISION_LABELS.get(change_kind)
+            summary = f"{label} {title}" if label else title
             event_description = f"{description or ''}\n\nReason:\n{mod_reason}"
         else:
             summary = title

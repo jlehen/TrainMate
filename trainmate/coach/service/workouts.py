@@ -5,8 +5,9 @@ from trainmate.config import config
 from trainmate.types import Constraint, Workout
 from trainmate.adherence import analyze_adherence
 from trainmate.coach import honoring
-from trainmate.coach.proposals import GenerateProposal
-from trainmate.coach.revisions import normalize_load_fields
+from trainmate.coach.proposals import GenerateProposal, StandingLine
+from trainmate.coach.revisions import normalize_load_fields, prescription_matches
+from trainmate import settings
 from trainmate.sports import canonical_sport
 from trainmate.benchmarks import MIN_RETEST_DAYS
 from trainmate.calendar_reconcile import verbose_events
@@ -15,8 +16,42 @@ from trainmate.util import green, cmd, notice, keep_whole
 import trainmate.coach.service as _svc
 
 
+# What a void says when nothing the coach answered explains it: the second and later
+# sessions on a date a rest constraint clears carry the constraint's own title, and
+# everything else at least names who did it (DESIGN_plan_change_continuity.md §5.5).
+REPLACED_DAY_REASON = "Your coach replaced this day."
+
+
 class WorkoutGenMixin:
     """Part of :class:`CoachService` — see coach/service/__init__.py."""
+
+    @staticmethod
+    def _commitment_window(today_str: str) -> Optional[str]:
+        """The last day of the commitment window, or None when it is empty (§4.1).
+
+        `N` days starting today, so `1` covers today alone and `0` covers nothing."""
+        days = settings.commitment_days() or 0
+        if days <= 0:
+            return None
+        opened = datetime.strptime(today_str, "%Y-%m-%d").date()
+        return (opened + timedelta(days=days - 1)).strftime("%Y-%m-%d")
+
+    @staticmethod
+    def _standing_block(
+        standing: List[Workout], window_end: Optional[str]
+    ) -> List[Workout]:
+        """The sessions the coach must answer for (§4.2): the ones inside the commitment
+        window, plus every session the athlete added by hand anywhere in the span.
+
+        Both are already bounded by the span, because `standing` is read from it — which
+        is the second bound the intersection needs, or a forward-selected run would ask
+        the coach about days it cannot write and the preview would lie."""
+        block = [
+            w for w in standing
+            if (window_end is not None and w['date'] <= window_end)
+            or w.get('source') == 'manual'
+        ]
+        return sorted(block, key=lambda w: (w['date'], canonical_sport(w['sport_type'])))
 
     def _today_workout_completed(
         self, today_str: str, completed_activities: List[Dict[str, Any]]
@@ -87,8 +122,8 @@ class WorkoutGenMixin:
     @classmethod
     def _enforce_rest_windows_generate(
         cls, workouts: List[Dict[str, Any]], constraints: List[Constraint], gen_start: str,
-        gen_end: str
-    ) -> List[Dict[str, Any]]:
+        gen_end: str, standing: Optional[List[Workout]] = None
+    ) -> Tuple[List[Dict[str, Any]], Dict[Tuple[str, str], str]]:
         """Forces `rest` constraints onto a freshly generated workout list (§6): every rest
         date inside the generated span becomes a single rest, deterministically, bypassing
         the LLM for that date entirely. Every other constraint is advisory only — left to
@@ -98,10 +133,15 @@ class WorkoutGenMixin:
         absent row and an explicit rest day mean different things to adherence (§6). The
         span is the *requested* `gen_start`..`gen_end`, not what the model happened to
         return — a rest window at the tail of the range is exactly the case the model
-        answers with silence, so bounding by its last date would reopen the gap (§6)."""
+        answers with silence, so bounding by its last date would reopen the gap (§6).
+
+        The rest row continues the first standing session on the date, so that day keeps
+        one event and the constraint's own title is the reason on it; any further standing
+        session there is voided under the same reason, which is what the returned
+        `{slot: reason}` map carries (DESIGN_plan_change_continuity.md §5.5)."""
         full_rest = cls._hard_rest_windows(constraints)
         if not full_rest:
-            return workouts
+            return workouts, {}
 
         span_end = gen_end
         forced: Dict[str, str] = {}          # date -> constraint title
@@ -112,14 +152,38 @@ class WorkoutGenMixin:
                 forced.setdefault(day.strftime("%Y-%m-%d"), title)
                 day += timedelta(days=1)
         if not forced:
-            return workouts
+            return workouts, {}
+
+        rest_sport = canonical_sport('rest')
+        by_date: Dict[str, List[Workout]] = {}
+        for live in standing or []:
+            by_date.setdefault(live['date'], []).append(live)
 
         out = [w for w in workouts if w.get('date', '') not in forced]
-        out.extend(
-            cls._rest_workout(day, f"constraint '{title}'")
-            for day, title in sorted(forced.items())
-        )
-        return out
+        void_reasons: Dict[Tuple[str, str], str] = {}
+        for day, title in sorted(forced.items()):
+            rest = cls._rest_workout(day, f"constraint '{title}'")
+            rows = sorted(
+                by_date.get(day, []), key=lambda w: canonical_sport(w['sport_type'])
+            )
+            # A rest day already standing on the date is the slot the rest row lands in,
+            # so it is revised in place and no lineage is carried across.
+            carrier = None
+            standing_sports = {canonical_sport(r['sport_type']) for r in rows}
+            if rest_sport not in standing_sports and rows:
+                carrier = rows[0]
+            if carrier is not None:
+                rest['replaces_slot'] = (carrier['date'], carrier['sport_type'])
+                rest['replaces_lineage'] = (
+                    None if carrier.get('source') == 'manual' else carrier['id']
+                )
+            for row in rows:
+                slot = (row['date'], canonical_sport(row['sport_type']))
+                if row is carrier or slot[1] == rest_sport:
+                    continue
+                void_reasons[slot] = rest['change_reason']
+            out.append(rest)
+        return out, void_reasons
 
     @classmethod
     def _fill_coverage_gaps(
@@ -233,34 +297,312 @@ class WorkoutGenMixin:
         return out
 
     @staticmethod
-    def _resolve_kept(
-        workouts: List[Dict[str, Any]], carried: List[Workout]
-    ) -> List[Dict[str, Any]]:
-        """Swaps each `keep` entry for the session it names, so every pass after this one
-        sees a uniform list of full sessions (DESIGN_workout_revisions.md §7.1).
+    def _dropped_rest(answer: Dict[str, Any], source: Workout) -> Dict[str, Any]:
+        """A `drop` as the rest day that takes the session's place (§4.5/§5.4).
 
-        A KEEP naming a slot no carried session occupies is dropped, and an explicit
-        session for the same slot beats a KEEP of it. The marker rides on the resolved
-        dict, so a pass that replaces the session drops the marker with it.
+        There is one path through apply for every answer but `keep`, and a dropped ride
+        leaves exactly what an adapted one does: one event on the day, now titled "Rest
+        Day", with the ride underneath it in History and the coach's sentence on it."""
+        reason = str(answer.get('change_reason') or '').strip()
+        body = reason or f"{source['title']} cancelled by your coach."
+        return {
+            'date': source['date'],
+            'sport_type': 'rest',
+            'title': 'Rest Day',
+            'description': f"[Rest Day]\n{body}",
+            'duration_minutes': 0,
+            'rpe': 0,
+            'tss': 0,
+            'change_reason': reason,
+            'replaces': {'date': source['date'], 'sport_type': source['sport_type']},
+        }
+
+    @classmethod
+    def _resolve_standing(
+        cls, workouts: List[Dict[str, Any]], standing: List[Workout],
+        gen_start: str, gen_end: str
+    ) -> Tuple[List[Dict[str, Any]], Dict[Tuple[str, str], str]]:
+        """Maps the coach's answers onto the standing block, so every pass after this one
+        sees a uniform list of full sessions
+        (DESIGN_plan_change_continuity.md §4.5, §7).
+
+        `keep` becomes the session it names, `drop` becomes a rest day replacing it, and a
+        full entry on a date whose only standing session is a rest day replaces that rest
+        day whether the coach said so or not. What an entry takes the place of travels on
+        it as `replaces_slot`/`replaces_lineage`, which apply turns into a void plus an
+        append on the same lineage. A standing session no answer names is kept.
+
+        Returns the sessions and `{slot: reason}` for the standing sessions an answer ends
+        without leaving a session in their place — the coach's own sentence, so the void
+        the athlete meets says what the coach said (§5.5).
         """
-        by_slot = {
-            (w['date'], canonical_sport(w['sport_type'])): w for w in carried
+        rest_sport = canonical_sport('rest')
+        by_slot = {(w['date'], canonical_sport(w['sport_type'])): w for w in standing}
+        per_date: Dict[str, List[Workout]] = {}
+        for live in standing:
+            per_date.setdefault(live['date'], []).append(live)
+        # A rest day and a session on the same date cannot both be true, so the coach is
+        # not offered the choice: a full entry there replaces the rest day (§4.5).
+        rest_only = {
+            day: rows[0] for day, rows in per_date.items()
+            if len(rows) == 1 and canonical_sport(rows[0]['sport_type']) == rest_sport
+        }
+
+        entries: List[Dict[str, Any]] = []
+        for w in workouts:
+            if not w.get('drop'):
+                entries.append(w)
+                continue
+            slot = (w.get('date'), canonical_sport(w.get('sport_type', '')))
+            source = by_slot.get(slot)
+            if source is None or slot[1] == rest_sport:
+                notice(
+                    f"The coach dropped {w.get('sport_type', '')} on {w.get('date')}, "
+                    f"but no session of yours stands there — ignoring it.",
+                )
+                continue
+            entries.append(cls._dropped_rest(w, source))
+
+        def source_of(entry: Dict[str, Any]) -> Optional[Tuple[str, str]]:
+            """The standing slot an entry takes a session out of, or None."""
+            slot = (entry.get('date'), canonical_sport(entry.get('sport_type', '')))
+            replaces = entry.get('replaces')
+            if isinstance(replaces, dict) and replaces.get('date'):
+                named = (
+                    replaces['date'], canonical_sport(replaces.get('sport_type', ''))
+                )
+                return None if named == slot else named
+            rest = rest_only.get(entry.get('date'))
+            if rest is None:
+                return None
+            rest_slot = (rest['date'], rest_sport)
+            return None if rest_slot == slot else rest_slot
+
+        # Read before any entry is resolved, so a destination is judged against what the
+        # occupant's OWN answer does with it (§4.5).
+        vacated = {
+            source for source in
+            (source_of(e) for e in entries if not e.get('keep'))
+            if source is not None
         }
         written = {
             (w.get('date'), canonical_sport(w.get('sport_type', '')))
-            for w in workouts if not w.get('keep')
+            for w in entries if not w.get('keep')
         }
+
         out: List[Dict[str, Any]] = []
+        answered: set = set()        # standing slots an accepted entry has spoken for
+        taken: set = set()           # destination slots an accepted entry has claimed
+        void_reasons: Dict[Tuple[str, str], str] = {}
+
+        def ends(source: Tuple[str, str], entry: Dict[str, Any]) -> None:
+            """The entry cannot be written, but it still answered for its source: the
+            session ends, and the coach's sentence goes on the void rather than the
+            fallback (§5.5)."""
+            void_reasons[source] = (
+                str(entry.get('change_reason') or '').strip() or REPLACED_DAY_REASON
+            )
+            answered.add(source)
+
+        for entry in entries:
+            slot = (entry.get('date'), canonical_sport(entry.get('sport_type', '')))
+            if entry.get('keep'):
+                live = by_slot.get(slot)
+                if live is None or slot in written or slot in taken:
+                    continue
+                out.append({**live, 'keep': True})
+                answered.add(slot)
+                taken.add(slot)
+                continue
+            source = source_of(entry)
+            if slot in taken:
+                notice(
+                    f"Two sessions came back for {slot[0]} ({entry.get('sport_type', '')})"
+                    f" — keeping the first and dropping the rest.",
+                )
+                # Two sessions on one date, both dropped: the second rest day has nowhere
+                # to land, but the session it stood for is still gone.
+                if source in by_slot and source not in answered:
+                    ends(source, entry)
+                continue
+            if source is not None and source not in by_slot:
+                notice(
+                    f"The coach said this {entry.get('date')} session replaces one on "
+                    f"{source[0]} that is not among the sessions it was shown — writing "
+                    f"it where it stands and leaving that day alone.",
+                )
+                source = None
+            if source is not None:
+                if not (gen_start <= (entry.get('date') or '') <= gen_end):
+                    notice(
+                        f"The coach moved the {source[0]} session to "
+                        f"{entry.get('date')}, outside the days this run writes — "
+                        f"leaving it where it is.",
+                    )
+                    continue
+                if source in answered:
+                    notice(
+                        f"Two answers came back for the {source[0]} session — keeping "
+                        f"the first.",
+                    )
+                    continue
+                if slot in by_slot and slot not in vacated:
+                    notice(
+                        f"The coach moved the {source[0]} session onto "
+                        f"{entry.get('date')}, where a session it is keeping already "
+                        f"stands — leaving both where they are.",
+                    )
+                    continue
+                occupant = by_slot[source]
+                entry = {
+                    **entry,
+                    'replaces_slot': (occupant['date'], occupant['sport_type']),
+                    # A session the athlete added keeps its own lineage: the coach's
+                    # replacement starts a new one, or the event would read "[Manual]"
+                    # (§5.3).
+                    'replaces_lineage': (
+                        None if occupant.get('source') == 'manual' else occupant['id']
+                    ),
+                }
+                answered.add(source)
+            elif slot in by_slot:
+                answered.add(slot)
+            out.append(entry)
+            taken.add(slot)
+
+        # A rest day and a session on the same date cannot both be true (§4.5). A drop's
+        # rest day is the one that can collide — another answer may put work on the day it
+        # emptied — and the work wins; the coach's sentence travels to the void the drop
+        # leaves behind, which is what the athlete then meets as a `[Cancelled]` marker.
+        worked_dates = {
+            w['date'] for w in out
+            if canonical_sport(w.get('sport_type', '')) != rest_sport
+        }
+        standing_only: List[Dict[str, Any]] = []
+        for entry in out:
+            replaced = entry.get('replaces_slot')
+            if (replaced and entry['date'] in worked_dates
+                    and canonical_sport(entry.get('sport_type', '')) == rest_sport):
+                ends((replaced[0], canonical_sport(replaced[1])), entry)
+                continue
+            standing_only.append(entry)
+        out = standing_only
+
+        # Silence is how a JSON-mode model fails, and a cancellation has to be said (§4.5).
+        for slot, live in by_slot.items():
+            if slot in answered:
+                continue
+            out.append({**live, 'keep': True, 'unmentioned': True})
+        return out, void_reasons
+
+    @staticmethod
+    def _generate_voids(
+        workouts: List[Dict[str, Any]], standing: List[Workout],
+        void_reasons: Dict[Tuple[str, str], str]
+    ) -> Tuple[Tuple[str, str, str], ...]:
+        """Every slot this run ends, with the reason it will carry (§5.5).
+
+        Decided here rather than inside apply so the preview reports the removals that
+        will actually happen, including the ones no answer explains."""
+        final = {(w['date'], canonical_sport(w['sport_type'])) for w in workouts}
+        kept = {
+            (w['date'], canonical_sport(w['sport_type']))
+            for w in workouts if w.get('keep')
+        }
+        voids: List[Tuple[str, str, str]] = []
+        seen: set = set()
         for w in workouts:
-            if not w.get('keep'):
-                out.append(w)
+            replaced = w.get('replaces_slot')
+            if not replaced:
                 continue
-            slot = (w.get('date'), canonical_sport(w.get('sport_type', '')))
-            live = by_slot.get(slot)
-            if live is None or slot in written:
+            slot = (replaced[0], canonical_sport(replaced[1]))
+            if slot in seen:
                 continue
-            out.append({**live, 'keep': True})
-        return out
+            seen.add(slot)
+            reason = str(w.get('change_reason') or '').strip() or REPLACED_DAY_REASON
+            voids.append((replaced[0], replaced[1], reason))
+        for live in standing:
+            slot = (live['date'], canonical_sport(live['sport_type']))
+            if slot in seen or slot in kept:
+                continue
+            explicit = void_reasons.get(slot)
+            # Written over where it stands, and superseded by the append: a void is only
+            # needed when the removal has to leave a trace of its own — a session the
+            # athlete added (§5.3), or one an answer ended before something else took its
+            # slot (§5.1).
+            if slot in final and explicit is None and live.get('source') != 'manual':
+                continue
+            seen.add(slot)
+            voids.append((
+                live['date'], live['sport_type'], explicit or REPLACED_DAY_REASON,
+            ))
+        return tuple(voids)
+
+    @staticmethod
+    def _standing_line(
+        live: Workout, outcome: str, becomes: str = "", reason: str = "",
+        mentioned: bool = True,
+    ) -> StandingLine:
+        """One report row about `live`, whatever this run decided for it."""
+        return StandingLine(
+            date=live['date'], sport_type=live['sport_type'], title=live['title'],
+            duration_minutes=live.get('duration_minutes'), outcome=outcome,
+            becomes=becomes, reason=reason, mentioned=mentioned,
+        )
+
+    @staticmethod
+    def _becomes(entry: Dict[str, Any], live: Workout) -> Tuple[str, str]:
+        """`(outcome, becomes)` for one standing session the run rewrites (§4.5)."""
+        if entry.get('date') != live['date']:
+            return 'moved', entry['date']
+        duration = entry.get('duration_minutes')
+        title = entry.get('title') or ''
+        becomes = f"{title} {duration}m" if duration else title
+        return 'revised', becomes
+
+    @classmethod
+    def _standing_lines(
+        cls, workouts: List[Dict[str, Any]], block: List[Workout],
+        voids: Tuple[Tuple[str, str, str], ...]
+    ) -> Tuple[StandingLine, ...]:
+        """The §4.5 report, built from what apply will write rather than from what the
+        coach answered: the no-op rule silently suppresses a revision whose prescription
+        did not move, and the deterministic passes remove sessions no answer mentions."""
+        by_slot = {(w['date'], canonical_sport(w['sport_type'])): w for w in workouts}
+        by_source: Dict[Tuple[str, str], Dict[str, Any]] = {}
+        for w in workouts:
+            replaced = w.get('replaces_slot')
+            if replaced:
+                by_source[(replaced[0], canonical_sport(replaced[1]))] = w
+        reasons = {(d, canonical_sport(sp)): r for (d, sp, r) in voids}
+
+        lines: List[StandingLine] = []
+        for live in block:
+            slot = (live['date'], canonical_sport(live['sport_type']))
+            # What this session became, wherever it went: a move, a sport change and the
+            # rest day of a drop all carry it out of its slot.
+            target = by_source.get(slot)
+            entry = by_slot.get(slot)
+            # An entry that takes another session's place is a different session arriving,
+            # not this one continuing — so this one was displaced, not revised.
+            if target is None and entry is not None and not entry.get('replaces_slot'):
+                if entry.get('keep') or prescription_matches(entry, live):
+                    lines.append(cls._standing_line(
+                        live, 'kept', mentioned=not entry.get('unmentioned')
+                    ))
+                    continue
+                target = entry
+            if target is None:
+                lines.append(cls._standing_line(
+                    live, 'cancelled', reason=reasons.get(slot, '')
+                ))
+                continue
+            outcome, becomes = cls._becomes(target, live)
+            lines.append(cls._standing_line(
+                live, outcome, becomes=becomes,
+                reason=str(target.get('change_reason') or '').strip(),
+            ))
+        return tuple(lines)
 
     def _event_date_for_macrocycle(self, macrocycle_id: int) -> Optional[date]:
         """The event date a macrocycle's boundary tests must keep clear of — None when
@@ -466,7 +808,18 @@ class WorkoutGenMixin:
             num_days = config.workout_generation_span_days
             gen_end_str = (gen_start_obj + timedelta(days=num_days - 1)).strftime("%Y-%m-%d")
 
-        constraints = self._db.get_constraints(gen_start_str)
+        # Back to the start of the block the athlete is in, not to the span: a constraint
+        # that ended last week is why three sessions are missing from the block's record,
+        # and the coach cannot see the days themselves (§6.1). Only the ones still live
+        # are worked around; the rest are context, and are kept out of the honoring and
+        # rest-window passes below.
+        block_now = self._db.get_covering_mesocycle(today_str)
+        constraint_floor = min(
+            (block_now or {}).get('start_date') or gen_start_str, gen_start_str
+        )
+        all_constraints = self._db.get_constraints(constraint_floor)
+        constraints = [c for c in all_constraints if c['end_date'] >= gen_start_str]
+        past_constraints = [c for c in all_constraints if c['end_date'] < gen_start_str]
         self._maybe_nudge_no_threshold()
 
         # The blocks governing the days about to be written — the whole periodization
@@ -507,14 +860,14 @@ class WorkoutGenMixin:
         block_progress, block_has_intensity = self._block_progress_context(
             today_str, gen_start_str
         )
-        # What a prior `workout adapt` already eased, so the regeneration does not hand
-        # back the load adapt took off (DESIGN_workout_revisions.md §7.1).
-        carried = [
-            w for w in self._db.get_workouts(
-                start_date=gen_start_str, end_date=gen_end_str
-            )
-            if (w.get('adaptation_count') or 0) > 0
-        ]
+        # The plan this run would rewrite, and the part of it the athlete has already
+        # been told about (DESIGN_plan_change_continuity.md §4.2). Read once and used by
+        # the prompt, the resolver, the void set and the report.
+        standing = self._db.get_workouts(
+            start_date=gen_start_str, end_date=gen_end_str
+        )
+        window_end = self._commitment_window(today_str)
+        standing_block = self._standing_block(standing, window_end)
         plan_data = self.engine._workout_generate_logic(
             objectives=objectives,
             constraints=constraints,
@@ -535,7 +888,9 @@ class WorkoutGenMixin:
             block_has_intensity=block_has_intensity,
             zone_currencies=self._planning_zone_currencies(today_str),
             anchor_history=self._anchor_history_text(gen_start_str),
-            carried_workouts=carried
+            standing_workouts=standing_block,
+            commitment_end=window_end,
+            past_constraints=past_constraints,
         )
 
         # NOTE: workout generation is read-only w.r.t. coach learnings (see
@@ -545,9 +900,13 @@ class WorkoutGenMixin:
         # Save workouts to database
         workouts = plan_data.get("workouts", [])
 
-        # Each `keep` becomes the session it names, so every pass below sees one kind of
-        # entry (DESIGN_workout_revisions.md §7.1).
-        workouts = self._resolve_kept(workouts, carried)
+        # Every answer becomes a full session, so each pass below sees one kind of entry
+        # and the void loop has nothing to void in the standing block
+        # (DESIGN_plan_change_continuity.md §7).
+        workouts, void_reasons = self._resolve_standing(
+            workouts, standing_block, gen_start_str, gen_end_str
+        )
+        athlete_note = str(plan_data.get("athlete_note") or "").strip() or None
 
         # Integers, before the preview and the save both read these numbers.
         normalize_load_fields(workouts)
@@ -568,9 +927,11 @@ class WorkoutGenMixin:
         # constraint forces its dates to rest regardless of what the LLM produced. Every
         # other constraint is advisory and left to the model. Applied after generation so
         # the guarantee holds even if the model ignores the constraint block it was shown.
-        workouts = self._enforce_rest_windows_generate(
-            workouts, constraints, gen_start_str, gen_end_str
+        workouts, forced_reasons = self._enforce_rest_windows_generate(
+            workouts, constraints, gen_start_str, gen_end_str, standing
         )
+        # The constraint wins on its own dates, so its title is the reason there.
+        void_reasons.update(forced_reasons)
 
         # Boundary-week benchmark post-check (§4.1): warn (don't auto-insert) if a covered
         # block boundary lacks a fitness test. Runs after the rest pass so a rest-covered
@@ -607,6 +968,7 @@ class WorkoutGenMixin:
         displaced = self._db.get_workouts(
             start_date=gen_start_str, end_date=gen_end_str, include_removed=True
         )
+        voids = self._generate_voids(workouts, standing, void_reasons)
 
         return GenerateProposal(
             reasoning=plan_data.get("reasoning", "Plan generated."),
@@ -619,6 +981,10 @@ class WorkoutGenMixin:
             covered_constraint_ids=honoring.covered_ids(
                 constraints, gen_start_str, gen_end_str
             ),
+            voids=voids,
+            standing=self._standing_lines(workouts, standing_block, voids),
+            athlete_note=athlete_note,
+            commitment_end=window_end,
         )
 
     def workout_generate_apply(
@@ -635,14 +1001,17 @@ class WorkoutGenMixin:
         anything else can take its slot (§8). Calendar follows from the change handle's
         reconcile pass, so nothing here pushes.
 
+        Which slots are voided and why was decided at proposal time, so the report the
+        operator accepted and the write are the same set
+        (DESIGN_plan_change_continuity.md §5.5). A session that takes another's place —
+        a move, a sport change, a drop — carries that session's lineage, so the day keeps
+        one Calendar event rather than losing one and gaining another (§4.5).
+
         The span is `gen_start`..`gen_end`, so sessions outside it survive a bounded
         regeneration untouched (DESIGN_cli_selectors.md §8).
 
         Returns the sessions the plan now holds in the slots it proposed.
         """
-        proposed_slots = {
-            (w['date'], canonical_sport(w['sport_type'])) for w in proposal.workouts
-        }
         summary = proposal.reasoning
         # The plan version governing the span's start — context for `workout batches`,
         # while each row keeps the per-date tag every scoping read uses (§3).
@@ -653,18 +1022,32 @@ class WorkoutGenMixin:
         with (
             verbose_events() if verbose else nullcontext(),
             self._db.workout_change(
-                kind="generate", summary=summary, macrocycle_id=span_macro
+                kind="generate", summary=summary, macrocycle_id=span_macro,
+                note=proposal.athlete_note,
+                commitment_end=proposal.commitment_end,
             ) as change,
         ):
-            for live in self._db.get_workouts(
+            standing = self._db.get_workouts(
                 start_date=proposal.gen_start, end_date=proposal.gen_end or None
-            ):
-                if (live['date'], canonical_sport(live['sport_type'])) in proposed_slots:
-                    continue
-                change.void(
-                    date=live['date'], sport_type=live['sport_type'],
-                    reason="Not in the regenerated plan",
-                )
+            )
+            voided_slots = {
+                (day, canonical_sport(sport)) for (day, sport, _r) in proposal.voids
+            }
+            replaced_manual = [
+                live for live in standing
+                if live.get('source') == 'manual'
+                and (live['date'], canonical_sport(live['sport_type'])) in voided_slots
+            ]
+            for (day, sport_type, reason) in proposal.voids:
+                change.void(date=day, sport_type=sport_type, reason=reason)
+            # The flag belongs to the TEST, not to the slot: a rewrite of a benchmark's
+            # slot that does not re-emit benchmark_type is an ordinary session, and the
+            # carry-forward must not make it a test (DESIGN_benchmark_workouts.md §4.2,
+            # as adapt already does).
+            tested_slots = {
+                (live['date'], canonical_sport(live['sport_type']))
+                for live in standing if live.get('benchmark_type')
+            }
             for w in proposal.workouts:
                 # Claimed above, so it escaped the void; writing it again would churn a
                 # day that did not change (§7.1).
@@ -673,6 +1056,7 @@ class WorkoutGenMixin:
                 # The intensity target the coach stated while it still knew the intent
                 # (DESIGN_intensity_distribution.md §9.8) — validated, never rescaled.
                 zone_currency, zone_sec = intensity.parse_planned_zones(w)
+                slot = (w['date'], canonical_sport(w['sport_type']))
                 change.append(
                     date=w['date'],
                     sport_type=w['sport_type'],
@@ -681,12 +1065,18 @@ class WorkoutGenMixin:
                     duration_minutes=w.get('duration_minutes'),
                     rpe=w.get('rpe'),
                     tss=w.get('tss'),
+                    # The coach's sentence to the athlete about this day, which is what
+                    # puts it on the Calendar's `Reason:` line (§4.5).
+                    reason=str(w.get('change_reason') or '').strip() or None,
                     benchmark_type=w.get('benchmark_type'),
+                    clear_benchmark=bool(
+                        slot in tested_slots and not w.get('benchmark_type')
+                    ),
                     macrocycle_id=w.get('macrocycle_id'),
+                    lineage_id=w.get('replaces_lineage'),
                     planned_zone_currency=zone_currency,
                     planned_zone_sec=zone_sec,
                 )
-            replaced_manual = list(change.replaced_manual)
             change_id = change.id
 
         # The plan owns the horizon, so a regeneration may replace a session the athlete

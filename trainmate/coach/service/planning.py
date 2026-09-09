@@ -261,6 +261,19 @@ class PlanningMixin:
             return True
         return False
 
+    def _changed_inputs_text(
+        self, macro: Optional[Dict[str, Any]]
+    ) -> Optional[str]:
+        """The staleness reason and its diff for the plan being replaced, or None when
+        there is no plan, or it was current (DESIGN_plan_change_continuity.md §6.2)."""
+        if not macro:
+            return None
+        change_reason = self.config_changed(macro)
+        if not change_reason:
+            return None
+        diff = self.staleness_diff(macro)
+        return f"{change_reason}\n\n{diff}" if diff else change_reason
+
     def plan_reshape_verdict(
         self, macro: Dict[str, Any], change_reason: str,
     ) -> Optional[Dict[str, Any]]:
@@ -275,7 +288,7 @@ class PlanningMixin:
             return None
         try:
             verdict = self.engine._plan_reshape_verdict(
-                change_reason, self.profile_diff(macro), macro.get('strategy') or "",
+                change_reason, self.staleness_diff(macro), macro.get('strategy') or "",
                 self._db.get_mesocycles_for_macrocycle(macro['id']),
             )
         except Exception as e:
@@ -548,6 +561,7 @@ class PlanningMixin:
                 prior_training_text=prior_training_text,
                 learnings=learnings,
                 current_block=current_block,
+                changed_inputs=self._changed_inputs_text(prev_macro),
             )
             strategy = macro_data.get("strategy", "Endurance preparation strategy.")
             mesocycles = macro_data.get("mesocycles", [])

@@ -55,9 +55,9 @@ def verbose_events() -> Iterator[None]:
 def reconcile(db, lineage_ids: Sequence[int]) -> None:
     """Pushes, moves or tears down the Calendar events of the given lineages.
 
-    Keyed on each lineage's newest LIVE revision, not on a slot: a swap leaves the moved
-    session with a live void where it left and a live copy where it landed, and the copy
-    must speak for the lineage or this would delete an event it should move (§8).
+    Keyed on each lineage's newest revision, not on a slot: a swap leaves the moved
+    session with a void where it left and a copy where it landed, and the copy must speak
+    for the lineage or this would delete an event it should move (§8).
 
     Decided first and executed second, so one batch of Calendar round-trips renders as one
     summary line and a bar rather than a page of per-event chatter.
@@ -92,31 +92,57 @@ def _framing(total: int) -> Iterator[Progress]:
         yield bar
 
 
+def leaves_trace(head: Dict[str, Any]) -> bool:
+    """Whether a void keeps its Calendar event, retitled, rather than the event being
+    torn down (DESIGN_plan_change_continuity.md §5.2).
+
+    A day the athlete was counting on does not disappear: it is marked, with a reason.
+    Which days those are is the void's own three clauses — the athlete asked for it, it
+    was a session they added, or it fell inside the commitment window the change that
+    removed it ran under.
+    """
+    if head["change_kind"] in ATHLETE_VOID_KINDS:
+        return True
+    if head.get("source") == "manual":
+        return True
+    commitment_end = head.get("commitment_end")
+    return commitment_end is not None and head["date"] <= commitment_end
+
+
 def _plan(
     db, lineage_ids: Sequence[int]
 ) -> Tuple[List[Dict[str, Any]], List[Tuple[int, Optional[str]]]]:
-    """What each lineage needs: a push, a teardown, or nothing."""
+    """What each lineage needs: a push, a teardown, or nothing.
+
+    Read from the lineage's newest revision rather than from its slot: a void covered by
+    a new session in the same slot is never the slot's live row, and a marker written and
+    then covered in one run would be torn down the instant it was written (§5.2).
+    """
     pushes: List[Dict[str, Any]] = []
     teardowns: List[Tuple[int, Optional[str]]] = []
     for lineage_id in lineage_ids:
-        head = db.get_workout_by_id(lineage_id)
+        head = db.get_lineage_head(lineage_id)
         state = db.get_calendar_state(lineage_id)
         event_id = (state or {}).get("google_event_id")
         if head is None:
-            # The lineage no longer holds a slot: a `generate` or an `add` appended a
-            # different session over it, so its event belongs to nothing.
             if state:
                 teardowns.append((lineage_id, event_id))
             continue
         if not head["removed"]:
+            # A session, but not its slot's live one: something was appended over it, so
+            # the lineage was superseded and its event belongs to nothing.
+            if head.get("superseded"):
+                if state:
+                    teardowns.append((lineage_id, event_id))
+                continue
             if calendar_status(head) != "synced":
                 pushes.append(head)
             continue
-        # A void the athlete asked for keeps its event, retitled "[Deleted]" —
-        # `workout prune-calendar` relies on that. Every other void means the session is
-        # gone or moved, and the event goes with it (§8).
-        if head["change_kind"] in ATHLETE_VOID_KINDS:
-            if event_id and calendar_status(head) != "synced":
+        # A void that leaves a trace keeps its event, retitled — and gets one when it
+        # never had one, or a session written and dropped between two syncs would leave
+        # no trace at all (§5.2).
+        if leaves_trace(head):
+            if calendar_status(head) != "synced":
                 pushes.append(head)
             continue
         if state:

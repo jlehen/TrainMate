@@ -9,7 +9,7 @@ from trainmate.config import config
 # migrations are idempotent, so this is a "skip the work" marker rather than a ledger of
 # steps to replay — TrainMate has one user and one database, and the alternative (a
 # numbered migration framework) would be more machinery than that warrants.
-SCHEMA_VERSION = 10
+SCHEMA_VERSION = 11
 
 
 # How long a connection waits for a writer to finish before raising "database is
@@ -320,6 +320,21 @@ class BaseDB:
                 )
             """)
 
+            # The coach's one line to the athlete about this change, for the morning push
+            # (DESIGN_plan_change_continuity.md §6.3). NULL on a change with nothing the
+            # athlete would notice, which is most of them.
+            self._add_column(
+                cursor, "workout_changes", "note",
+                "ALTER TABLE workout_changes ADD COLUMN note TEXT"
+            )
+            # The last day of the commitment window in force when this change ran, so a
+            # void is judged by the window it was written under rather than by the one
+            # standing whenever the Calendar sync happens to run (§5.2).
+            self._add_column(
+                cursor, "workout_changes", "commitment_end",
+                "ALTER TABLE workout_changes ADD COLUMN commitment_end TEXT"
+            )
+
             # Calendar sync bookkeeping, keyed by lineage (§8). Off the row because a
             # successful push is not a prescription change: leaving it there would make
             # `workout push -f` append a revision per session.
@@ -582,6 +597,18 @@ class BaseDB:
                     "ALTER TABLE macrocycles "
                     "RENAME COLUMN lifeevents_snapshot TO constraints_snapshot"
                 )
+            # The coach's re-shaping read, cached against the snapshot it was asked
+            # about, so `plan show` asks once per edit rather than on every read
+            # (DESIGN_plan_change_continuity.md §7).
+            self._add_column(
+                cursor, "macrocycles", "reshape_verdict",
+                "ALTER TABLE macrocycles ADD COLUMN reshape_verdict TEXT"
+            )
+            self._add_column(
+                cursor, "macrocycles", "reshape_verdict_key",
+                "ALTER TABLE macrocycles ADD COLUMN reshape_verdict_key TEXT"
+            )
+
             cursor.execute("PRAGMA table_info(macrocycles)")
             columns = [row['name'] for row in cursor.fetchall()]
             if 'config_hash' not in columns:
