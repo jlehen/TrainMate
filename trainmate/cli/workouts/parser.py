@@ -12,9 +12,29 @@ from trainmate.cli.workouts.edit import (
 )
 from trainmate.cli.workouts.generate import (
     run_workout_adapt, run_workout_batches, run_workout_compare,
-    run_workout_generate, run_workout_list, run_workout_rollback,
+    run_workout_generate, run_workout_list, run_workout_rollback, run_workout_show,
 )
 
+
+def _add_listing_args(parser):
+    """The targets, selectors and filters `workout list` and `workout show` share: one
+    listing, and only the per-workout detail block differs (`show` always prints it)."""
+    parser.add_argument(
+        "targets", nargs="*", metavar="TARGET", type=parse_target,
+        help="Workout IDs and/or date selectors to show (e.g. '12 15', '2026-06-01..')"
+    )
+    add_selector_args(
+        parser, meso=True, macro=True, goal=True, sport=True,
+        direction="forward", default="7d",
+    )
+    parser.add_argument(
+        "--removed", action="store_true",
+        help="Include soft-removed workouts (e.g. to find their ID for restoring)"
+    )
+    parser.add_argument(
+        "--link", "-l", action="store_true",
+        help="Show each synced workout's Google Calendar event link"
+    )
 
 
 def add_workout_parser(subparsers, pull_bypass_parser, llm_debug_parser):
@@ -44,28 +64,31 @@ def add_workout_parser(subparsers, pull_bypass_parser, llm_debug_parser):
         )
     )
     w_list.set_defaults(func=run_workout_list)
-    w_list.add_argument(
-        "targets", nargs="*", metavar="TARGET", type=parse_target,
-        help="Workout IDs and/or date selectors to show (e.g. '12 15', '2026-06-01..')"
-    )
-    add_selector_args(
-        w_list, meso=True, macro=True, goal=True, sport=True,
-        direction="forward", default="7d",
-    )
-    w_list.add_argument(
-        "--removed", action="store_true",
-        help="Include soft-removed workouts (e.g. to find their ID for restoring)"
-    )
+    _add_listing_args(w_list)
     w_list.add_argument(
         "--verbose", "-v", action="store_true",
         help="Show full detail per workout (description, lifecycle, adapt notes) "
              "instead of one line each"
     )
-    w_list.add_argument(
-        "--link", "-l", action="store_true",
-        help="Show each synced workout's Google Calendar event link"
+
+    # workout show
+    w_show = workout_subparsers.add_parser(
+        "show",
+        parents=[pull_bypass_parser],
+        help="Show named workouts in full detail",
+        description=(
+            "Show workouts with the full detail block: the description, when the session "
+            "was planned and last adapted, the effort a past session was graded against, "
+            f"and any adapt notes. Same output as '{green('workout list')} -v', under a "
+            "name that says what it does. Name workout IDs or dates as arguments "
+            f"('{green('workout show')} 12'), and every filter '{green('workout list')}' "
+            "takes works here too. With no argument at all, it details the same 7-day "
+            "window that command lists."
+        )
     )
-    
+    w_show.set_defaults(func=run_workout_show)
+    _add_listing_args(w_show)
+
     # workout compare
     w_cmp = workout_subparsers.add_parser(
         "compare",

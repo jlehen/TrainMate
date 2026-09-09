@@ -656,6 +656,13 @@ def run_workout_list(args: argparse.Namespace) -> None:
     )
 
 
+def run_workout_show(args: argparse.Namespace) -> None:
+    """`workout show ID` is `workout list -v ID`: the same listing with the per-workout
+    detail block always on."""
+    args.verbose = True
+    run_workout_list(args)
+
+
 def print_workout_table(
     workouts: list, verdicts: dict, args: argparse.Namespace, *,
     start_date: Optional[str], end_date: Optional[str], ids: list, names_a_range: bool,

@@ -2,7 +2,7 @@
 ``from trainmate.cli.workouts import run_workout_*`` keeps working."""
 from trainmate.cli.workouts._helpers import _resolve_swap_ops
 from trainmate.cli.workouts.generate import (run_workout_adapt,
-    run_workout_generate, run_workout_list, run_workout_compare, run_workout_batches,
-    run_workout_rollback)
+    run_workout_generate, run_workout_list, run_workout_show, run_workout_compare,
+    run_workout_batches, run_workout_rollback)
 from trainmate.cli.workouts.edit import run_workout_push, run_workout_rm, run_workout_restore, run_workout_swap, run_workout_add, run_workout_wipe, run_workout_prune_calendar
 from trainmate.cli.workouts.parser import add_workout_parser

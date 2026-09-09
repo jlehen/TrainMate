@@ -880,6 +880,34 @@ class TestCliWorkouts(unittest.TestCase):
         self.assertIn("Tomorrow Ride", stdout)
         self.assertIn("Future Lift", stdout)
 
+    def test_workout_show_is_workout_list_v(self):
+        """`workout show 12` prints exactly what `workout list -v 12` prints.
+
+        The two commands are one handler with the detail flag pinned on, so the test
+        compares the whole output rather than sampling it: that is what keeps the second
+        parser from drifting away from the first."""
+        today_str = datetime.now(timezone.utc).date().strftime("%Y-%m-%d")
+        workout_id = save_workout(test_db,
+            date=today_str, sport_type="running", title="Today Run",
+            description="30 mins easy",
+        )
+
+        code_show, show_out, _ = self.run_cli(
+            ["workout", "show", str(workout_id), "--no-pull"])
+        code_list, list_out, _ = self.run_cli(
+            ["workout", "list", "-v", str(workout_id), "--no-pull"])
+        self.assertEqual(code_show, 0)
+        self.assertEqual(code_list, 0)
+        self.assertIn("Description:", show_out)
+        self.assertEqual(show_out, list_out)
+
+        # The selectors and filters come with it: a date window details that window.
+        code_span, span_out, _ = self.run_cli(
+            ["workout", "show", "-d", f"{today_str}..{today_str}", "--no-pull"])
+        self.assertEqual(code_span, 0)
+        self.assertIn("Today Run", span_out)
+        self.assertIn("30 mins easy", span_out)
+
     def test_workout_list_shows_repeat_adapt_count(self):
         """A session eased once reads [ADAPTED]; eased again reads [ADAPTED ×2].
 

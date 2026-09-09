@@ -831,6 +831,7 @@ change after the restored version's newest write.
 | Command | What it does |
 |---|---|
 | `workout list` | Show planned sessions. Default 7-day forward window. `-v` shows each session's lifecycle. |
+| `workout show` | The same listing with `-v` always on: `workout show 12` details one session. |
 | `workout compare` | Planned vs completed, with misses, rest violations and unplanned high load. Today's untrained sessions read *"not yet"* and are **not** misses. |
 | `workout generate` | Write the sessions for a span, from the blocks governing those days (details in §7). |
 | `workout adapt` | Daily readiness adjustment, within the current block only. `-m "note"` passes a free-text note in the same call. |
