@@ -112,6 +112,12 @@ class TestTheDetailView(SettingsTestCase):
             self.assertIn(model, stdout)
         self.assertIn("llm.models (first entry)", stdout)
 
+    def test_the_router_model_detail_is_the_same_menu(self):
+        exit_code, stdout, _ = self.run_cli(["settings", "list", "router-model"])
+        self.assertEqual(exit_code, 0)
+        for model in self.MODELS:
+            self.assertIn(model, stdout)
+
     def test_the_detail_names_the_config_key_behind_the_setting(self):
         _, stdout, _ = self.run_cli(["settings", "list", "morning-time"])
         self.assertIn("telegram.push.morning_time", stdout)

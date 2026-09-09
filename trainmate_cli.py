@@ -119,7 +119,8 @@ def build_parser():
     )
     parser.add_argument(
         "--llm-model", dest="llm_model",
-        help="Override the OpenRouter model identifier"
+        help="Override the coach model for this run; 'settings list coach-model' "
+             "shows the menu"
     )
     parser.add_argument(
         "--helpall", action=_HelpAllAction,

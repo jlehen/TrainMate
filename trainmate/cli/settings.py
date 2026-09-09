@@ -98,7 +98,8 @@ def run_settings_list(args: argparse.Namespace) -> None:
 
     aside(f"\nChange one with {cmd('settings set <name> <value>')}, or "
           f"{cmd('settings reset <name>')} to fall back to config.yaml. "
-          f"{cmd('settings list <name>')} explains one setting.")
+          f"{cmd('settings list <name>')} explains one setting; "
+          f"{cmd('settings list coach-model')} shows the model menu.")
 
 
 def _print_detail(name: str) -> None:
@@ -137,8 +138,8 @@ def _config_line(setting: settings.Setting) -> str:
     return from_config if from_config is not None else dim("not set")
 
 
-def _detail_coach_model() -> None:
-    """The numbered menu `settings set coach-model <n>` picks from
+def _detail_model_menu() -> None:
+    """The numbered menu both model roles pick from, with each role's holder marked
     (DESIGN_model_selection.md §4.1)."""
     print()
     router = settings.router_model()
@@ -169,7 +170,8 @@ def _detail_timezone() -> None:
 # Settings whose detail view carries more than the generic block — a menu to pick from,
 # a clock to check. Keyed by name so the registry stays free of display code.
 DETAIL_EXTRAS = {
-    settings.COACH_MODEL: _detail_coach_model,
+    settings.COACH_MODEL: _detail_model_menu,
+    settings.ROUTER_MODEL: _detail_model_menu,
     settings.TIMEZONE: _detail_timezone,
 }
 
