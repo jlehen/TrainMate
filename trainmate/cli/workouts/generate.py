@@ -46,14 +46,14 @@ def _resolve_ambiguous_matches(date_str: str, auto: bool) -> None:
 
     for q in questions:
         planned, act = q["planned"], q["completed"]
-        actual_min = round((act.get("duration_sec") or 0) / 60.0)
         # The pairing travels *inside* the question, not in a preceding `step`: an aside is
         # suppressed on the chat front-end, which left Telegram asking "was that the
         # session, cut short?" about nothing at all (DESIGN_output_verbosity.md §3.4).
+        # Each side is rendered by its own surface formatter, so the two lines are read in
+        # the same units: a hand-rolled "at 66m" was read as GPS distance, not minutes.
         accepted = runtime.prompt.confirm(
             f"\nPlanned: {workout_line(planned)}\n"
-            f"Only matching activity is {act.get('activity_name')!r} "
-            f"({act.get('activity_type')}) at {actual_min}m — far short of it.\n"
+            f"Only matching activity: {format_actual(act)} — far short of it.\n"
             "Was that the session, cut short? (No = it was something else, "
             "e.g. a warm-up to discard)", default=False
         )

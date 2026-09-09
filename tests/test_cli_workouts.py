@@ -1681,7 +1681,7 @@ class TestCliWorkouts(unittest.TestCase):
             },
             "completed": {
                 "activity_name": "Warm-up", "activity_type": "indoor_cardio",
-                "duration_sec": 600.0,
+                "duration_sec": 600.0, "tss": 8.0,
             },
         }]
         mock_prompt.confirm.return_value = False
@@ -1692,8 +1692,14 @@ class TestCliWorkouts(unittest.TestCase):
 
         asked = " ".join(mock_prompt.confirm.call_args[0][0].split())
         self.assertIn("Full-Body Strength", asked)
-        self.assertIn("'Warm-up'", asked)
-        self.assertIn("10m", asked)
+        self.assertIn("Warm-up", asked)
+        # Both sides in the same units: a bare "10m" was read as GPS distance, so the
+        # activity carries the same duration/load shape as the planned line beside it.
+        self.assertIn("65min", asked)
+        self.assertIn("TSS 30", asked)
+        self.assertIn("10min", asked)
+        self.assertIn("TSS 8", asked)
+        self.assertNotIn("at 10m", asked)
         self.assertIn("Was that the session, cut short?", asked)
         mock_coach.record_match_decision.assert_called_once_with(
             "act_warmup", "strength_training", False
