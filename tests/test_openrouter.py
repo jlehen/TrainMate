@@ -280,7 +280,9 @@ class TestChatFlush(unittest.TestCase):
 
     def test_the_wait_notice_is_inside_the_message_the_flush_sends(self):
         # Printed after the flush it would be stranded in the buffer until the answer
-        # arrived, which is the one message it exists to precede (§8).
+        # arrived, which is the one message it exists to precede (§8). That message is
+        # also what carries the chat's Stop button, so an empty flush leaves the athlete
+        # nothing to tap (DESIGN_bot_stop_button.md §4).
         out = self._complete_capturing_stdout("json")
         self.assertLess(out.index("Working on it"), out.index(FLUSH_SENTINEL))
 

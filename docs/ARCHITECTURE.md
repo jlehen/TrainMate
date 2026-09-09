@@ -119,14 +119,19 @@ classes themselves.
     stale taps. `/cancel` and an idle `telegram.prompt_timeout_seconds` send a
     cancellation the CLI turns into a clean abort; a between-output
     `telegram.command_timeout_seconds` kills a silent runaway.
-  - **Polling is paused mid-command.** `_serve()` drives the Application/Updater
-    lifecycle by hand instead of `Application.run_polling()`, so `_pause_polling` /
-    `_resume_polling` can stop `getUpdates` for the silent-compute span of a command and
-    restart it while idle or while a prompt is open (`_drive`). Consequence for
-    `/cancel`: a `/cancel` sent while a command is *silently computing* is not delivered
-    until that command finishes or opens a prompt — the `telegram.command_timeout_seconds`
-    watchdog, not `/cancel`, is what recovers a stuck silent run
-    (DESIGN_bot_restart.md §5.1).
+  - **Polling runs continuously**, a command in flight or not, so a `✋ Stop` tap,
+    `/cancel` or `/restart` reaches the bot while a command is computing. `_serve()`
+    still drives the Application/Updater lifecycle by hand instead of
+    `Application.run_polling()`, but only so `_pause_polling` can close the long-poll
+    from inside the `/restart` handler before its hard exit. This reverses the
+    mid-command pause of DESIGN_bot_restart.md §5.1 (DESIGN_bot_stop_button.md §5).
+  - **Stopping a coach call.** Every LLM command emits `TM-FLUSH` right after its
+    "Working on it — this usually takes about 40s." notice; the bot attaches a `✋ Stop`
+    inline button to the message that flush sends, with `callback_data` `stop:{nonce}`
+    naming the running command. Tapping it kills the subprocess (the same kill
+    `/cancel` does) and replies "Stopped."; the button is retired by the next output, by
+    the command ending, or by the tap itself, and a tap on a retired one is told the
+    command already finished (DESIGN_bot_stop_button.md).
   - **Self-restart.** `./tm-bot` is a **supervisor**, not just the venv bootstrap: it
     selects its mode from the `TM_BOT_SUPERVISED` env var it sets on itself — default
     invocation = a loop that relaunches a child of itself, `TM_BOT_SUPERVISED=1` = the

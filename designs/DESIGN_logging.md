@@ -736,16 +736,17 @@ was clipped, so `-v` is never something to guess at.
 ## 8. The bot
 
 `trainmate_bot.py` already has a private logger: `_log(chat_id, direction, msg)`,
-eighteen call sites, `print()` to the process's stdout. Where that stdout goes depends
-entirely on how `./tm-bot` was launched, which means in practice it goes nowhere.
+called from every send, tap and command start, `print()` to the process's stdout. Where
+that stdout goes depends entirely on how `./tm-bot` was launched, which means in practice
+it goes nowhere.
 
-Those eighteen calls also become `bot.event` records — *also*, not instead: they keep
-printing, so an operator watching `./tm-bot` in a terminal keeps the live view they have
-today. The bot process opens one long-lived run at startup, so its own lifetime — polling
-paused and resumed, a `/restart`, a prompt that timed out, a command killed by the
-watchdog, the morning push firing — is a readable timeline. Each spawned CLI subprocess is
-a run of its own with the bot's run id as its parent, and `tm journal <bot-run>` walks into
-the children.
+Those calls also become `bot.event` records — *also*, not instead: they keep printing, so
+an operator watching `./tm-bot` in a terminal keeps the live view they have today. The
+bot process opens one long-lived run at startup, so its own lifetime — a `/restart`, a
+prompt that timed out, a Stop button raised over a coach call and the tap that took it, a
+command killed by the watchdog, the morning push firing — is a readable timeline. Each
+spawned CLI subprocess is a run of its own with the bot's run id as its parent, and
+`tm journal <bot-run>` walks into the children.
 
 That long-lived run is why §3 needs the `?` outcome and §10 needs its own trigger. It has
 no `run.end` for as long as it is up, and none at all if the supervisor kills it — which

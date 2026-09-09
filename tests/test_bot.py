@@ -647,6 +647,63 @@ class UiCallbackTest(unittest.TestCase):
         self.assertEqual(rows[1][0][1], bot.ui_callback_data("t", "3"))
 
 
+def _nested_functions() -> dict:
+    """Every function defined inside `trainmate_bot.py`, name → source text. The bot's
+    command loop lives in closures inside `main()`, so an invariant about it is read
+    from the source rather than called."""
+    source = pathlib.Path(bot.__file__).read_text()
+    found = {}
+    for node in ast.walk(ast.parse(source)):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            found[node.name] = ast.get_source_segment(source, node)
+    return found
+
+
+class StopButtonTest(unittest.TestCase):
+    """The ✋ Stop button raised over a coach call (DESIGN_bot_stop_button.md)."""
+
+    def test_callback_roundtrips(self):
+        self.assertEqual(bot.decode_stop_callback(bot.stop_callback_data("a1b2")), "a1b2")
+
+    def test_rejects_malformed_and_foreign_namespaces(self):
+        for data in ("", "stop", "stop:", "ui:tok:2", "nonce:p1:y", "stop:a:b"):
+            self.assertIsNone(bot.decode_stop_callback(data), data)
+
+    def test_a_stop_tap_is_never_read_as_a_prompt_answer(self):
+        """§7: the two namespaces share one callback channel, so neither may decode the
+        other's data into something actionable."""
+        data = bot.stop_callback_data("a1b2")
+        self.assertIsNone(bot.decode_callback(data))
+        self.assertIsNone(bot.decode_ui_callback(data))
+
+    def test_a_prompt_answer_is_never_read_as_a_stop_tap(self):
+        rows = bot.prompt_buttons({"id": "p1", "type": "confirm"}, "nonce")
+        for _label, data in rows[0]:
+            self.assertIsNone(bot.decode_stop_callback(data), data)
+
+    def test_fits_telegrams_64_byte_callback_cap(self):
+        data = bot.stop_callback_data("aabbccdd")  # secrets.token_hex(4) width
+        self.assertLessEqual(len(data.encode()), 64, data)
+
+
+class PollingModelTest(unittest.TestCase):
+    """Polling stays live while a command computes — the condition for a Stop tap or
+    /cancel to reach a command waiting on the coach (DESIGN_bot_stop_button.md §5)."""
+
+    def test_the_command_loop_never_stops_polling(self):
+        self.assertNotIn("_pause_polling", _nested_functions()["_drive"])
+
+    def test_only_the_restart_handler_stops_polling(self):
+        """The long-poll is closed for exactly one reason: /restart is about to exit the
+        process (DESIGN_bot_restart.md §5.2). Anything else that stops it strands the
+        chat with a bot that has gone deaf."""
+        callers = sorted(
+            name for name, source in _nested_functions().items()
+            if "_pause_polling" in source and name not in ("main", "_pause_polling")
+        )
+        self.assertEqual(callers, ["_restart"])
+
+
 class PushScheduleTest(unittest.TestCase):
     """`next_push_delay` — the §4.3 send/catch-up window arithmetic."""
 

@@ -18,8 +18,9 @@ inside ``main``.
 ``telegram.ui: simple`` swaps in the companion persona — reply keyboard, intent router,
 morning scheduler, prose replies; ``/ui`` flips it per-process
 (DESIGN_bot_simple_frontend.md). ``tm-bot`` supervises this process and relaunches it on
-``RESTART_EXIT_CODE``, which is what ``/restart`` exits with; polling is paused only
-while a command computes with no prompt open (DESIGN_bot_restart.md §5.1).
+``RESTART_EXIT_CODE``, which is what ``/restart`` exits with. Polling runs from start to
+shutdown, including while a command computes, which is what lets a ✋ Stop tap or
+``/cancel`` reach a command waiting on the coach (DESIGN_bot_stop_button.md §5).
 
 Run with: ``./tm-bot`` (or ``venv/bin/python trainmate_bot.py``). Configure the token +
 allowlist under a ``telegram:`` block in config.yaml (see config_template.yaml).
@@ -207,6 +208,14 @@ CAPTURE_RESCUE_ECHO = "noting that for your coach"
 
 # What a tap on a row a newer one replaced gets back (§12.3).
 UI_STALE_TAP = "That offer expired — just send it again."
+
+# --- The Stop button raised over an LLM wait (DESIGN_bot_stop_button.md §3) ---
+# One button, one meaning, the same in both personas: end the command the athlete is
+# watching wait. "Stopped." is all the reply claims, because a command that already
+# wrote something before this call keeps what it wrote (§6).
+STOP_LABEL = "✋ Stop"
+STOP_DONE = "Stopped."
+STOP_ALREADY_DONE = "That's already finished — nothing to stop."
 
 # Simple mode trims the Telegram command menu to what the athlete needs; every CLI
 # command still works when typed with a leading slash.
@@ -404,6 +413,22 @@ def decode_ui_callback(data: str) -> Optional[Tuple[str, str]]:
     return parts[1], parts[2]
 
 
+def stop_callback_data(nonce: str) -> str:
+    """callback_data for the §3 Stop button: ``"stop:{nonce}"``. The nonce is the
+    running command's own token, so a tap that arrives after it ended cannot stop
+    whatever started since (DESIGN_bot_stop_button.md §7)."""
+    return f"stop:{nonce}"
+
+
+def decode_stop_callback(data: str) -> Optional[str]:
+    """The nonce inside ``"stop:{nonce}"``, or None if it isn't a stop-namespace
+    callback or is malformed."""
+    parts = (data or "").split(":")
+    if len(parts) != 2 or parts[0] != "stop" or not parts[1]:
+        return None
+    return parts[1]
+
+
 def resolve_ui_action(buttons: List[Any], path: str) -> Optional[dict]:
     """The button dict a callback path names: "2" is buttons[2], "2.1" entry 1 of its
     menu. None when the path doesn't resolve (malformed, stale, or hostile data)."""
@@ -544,6 +569,10 @@ class _Session:
         self.sent = False                         # whether anything was sent to the chat
         self.quiet = quiet                        # scheduler-run: silence "(no output)"
         self.last_message_id: Optional[int] = None  # anchor for a TM-BUTTONS row
+        # The message carrying this command's live ✋ Stop button, if any: one at a
+        # time, retired when the next wait starts or the command ends
+        # (DESIGN_bot_stop_button.md §7).
+        self.stop_message_id: Optional[int] = None
 
 
 async def _exited_within_grace(proc) -> bool:
@@ -654,29 +683,40 @@ def main() -> None:
     bot = application.bot
     updater = application.updater
 
-    # Polling (getUpdates) runs continuously except while a command subprocess is
-    # silently computing with no prompt open — see the module docstring and
-    # DESIGN_bot_restart.md §5.1. _drive() calls these around that phase; the lock
-    # just guards against overlapping pause/resume calls, since start_polling()/
-    # stop() aren't safe to double-call concurrently.
+    # Polling (getUpdates) runs from startup to shutdown, a command in flight or not:
+    # a ✋ Stop tap and /cancel are only worth offering if the bot is listening while
+    # the coach thinks (DESIGN_bot_stop_button.md §5). The one remaining stop is
+    # /restart's, which closes the long-poll before the process exits
+    # (DESIGN_bot_restart.md §5.2); the lock guards against a stop racing _serve's own.
     _polling_lock = asyncio.Lock()
-    restarting = False  # latched by /restart: nothing may reopen the long-poll (§5.2)
 
     async def _pause_polling() -> None:
         async with _polling_lock:
             if updater.running:
                 await updater.stop()
 
-    async def _resume_polling() -> None:
-        async with _polling_lock:
-            if restarting or updater.running:
-                return
-            await updater.start_polling(allowed_updates=Update.ALL_TYPES)
+    async def _retire_stop(session: "_Session") -> None:
+        """Drops the live Stop button, if there is one: the wait it belonged to is
+        over (DESIGN_bot_stop_button.md §7)."""
+        message_id, session.stop_message_id = session.stop_message_id, None
+        if message_id is None:
+            return
+        try:
+            await bot.edit_message_reply_markup(
+                chat_id=session.chat_id, message_id=message_id, reply_markup=None
+            )
+        except Exception as exc:
+            journal.debug("bot.event", f"stop button not dropped: {exc}")
 
-    async def _flush_output(session: "_Session", buf: List[str]) -> None:
+    async def _flush_output(session: "_Session", buf: List[str]) -> bool:
+        """Sends the buffered output; True when something went out, so the caller knows
+        whether `session.last_message_id` is a fresh anchor to attach buttons to.
+
+        Anything arriving is the end of a wait, so it also retires a live Stop button —
+        the flush marker raises the next one (DESIGN_bot_stop_button.md §7)."""
         text = "\n".join(buf).strip()
         if not text:
-            return
+            return False
         session.sent = True
         for part in format_reply(text, simple=simple_ui):
             sent = await bot.send_message(
@@ -685,6 +725,27 @@ def main() -> None:
             )
             session.last_message_id = sent.message_id
         _log(session.chat_id, "<<", f"{text.count(chr(10)) + 1} line(s)")
+        await _retire_stop(session)
+        return True
+
+    async def _offer_stop(session: "_Session") -> None:
+        """Hangs a ✋ Stop button off the message the flush just sent — the "Working on
+        it..." notice that precedes every coach call (DESIGN_bot_stop_button.md §4)."""
+        stop = InlineKeyboardButton(
+            STOP_LABEL, callback_data=stop_callback_data(session.nonce)
+        )
+        keyboard = InlineKeyboardMarkup([[stop]])
+        try:
+            await bot.edit_message_reply_markup(
+                chat_id=session.chat_id, message_id=session.last_message_id,
+                reply_markup=keyboard,
+            )
+        except Exception as exc:
+            # The wait still happens; it just can't be tapped away (/cancel still can).
+            journal.debug("bot.event", f"stop button not attached: {exc}")
+            return
+        session.stop_message_id = session.last_message_id
+        _log(session.chat_id, "<<", "stop button")
 
     async def _send_ui_buttons(session: "_Session", req: dict) -> None:
         """Attaches a TM-BUTTONS row to the output just flushed (§4.4). Non-blocking:
@@ -774,13 +835,9 @@ def main() -> None:
         """Reads the CLI's stdout, streaming prose to the chat and handling each
         prompt request inline, until the process exits.
 
-        Polling is paused for the silent-compute span (no prompt open) and resumed
-        around each prompt, so the athlete can still reach /cancel, /restart, or
-        answer a prompt while a subprocess is blocked on stdin, but sending
-        anything during silent compute just queues at Telegram until polling
-        resumes (§5.1)."""
+        Polling stays live throughout, so a ✋ Stop tap, /cancel or /restart reaches the
+        bot while the subprocess is computing (DESIGN_bot_stop_button.md §5)."""
         buf: List[str] = []
-        await _pause_polling()
         try:
             while True:
                 # Inactivity watchdog over the compute phase: a command that goes
@@ -814,8 +871,11 @@ def main() -> None:
                     continue
                 if is_flush_request(raw):
                     # Nothing to render: the marker's whole job is to end the message
-                    # here, before the CLI goes quiet for an LLM call (§7).
-                    await _flush_output(session, buf)
+                    # here, before the CLI goes quiet for an LLM call (§7). That message
+                    # is the wait notice, and it carries the Stop button
+                    # (DESIGN_bot_stop_button.md §4) — no message, nothing to hang it on.
+                    if await _flush_output(session, buf):
+                        await _offer_stop(session)
                     buf = []
                     continue
                 req = parse_prompt_request(raw)
@@ -826,9 +886,7 @@ def main() -> None:
                 if req is not None:
                     await _flush_output(session, buf)
                     buf = []
-                    await _resume_polling()
                     response = await _present_prompt(session, req)
-                    await _pause_polling()
                     try:
                         session.proc.stdin.write((json.dumps(response) + "\n").encode())
                         await session.proc.stdin.drain()
@@ -852,7 +910,9 @@ def main() -> None:
                     session.proc.kill()
                 except ProcessLookupError:
                     pass
-            await _resume_polling()  # back to idle: always end this session live
+            # A command that ends without a last message — killed, or answered with a
+            # photo — would otherwise leave a Stop button nothing can act on.
+            await _retire_stop(session)
 
     async def _start_command(
         chat_id: int, argv: List[str], quiet: bool = False, source: str = "bot"
@@ -999,8 +1059,6 @@ def main() -> None:
     async def _restart(chat_id: int) -> None:
         """Tears down, replies, then hard-exits with RESTART_EXIT_CODE for the tm-bot
         supervisor to relaunch us. See DESIGN_bot_restart.md §5.2."""
-        nonlocal restarting
-        restarting = True
         await restart_teardown(sessions.get(chat_id), _pause_polling)
         await bot.send_message(chat_id=chat_id, text="Restarting…")
         os._exit(RESTART_EXIT_CODE)
@@ -1167,6 +1225,24 @@ def main() -> None:
         await bot.send_chat_action(chat_id=chat_id, action="typing")
         await _start_command(chat_id, argv)
 
+    async def _handle_stop_callback(query, chat_id: int, data: str) -> None:
+        """A tap on the §3 Stop button: ends the command it was raised for, the same
+        kill /cancel does. A tap left over from a command that already finished says so
+        rather than reaching whatever started since (DESIGN_bot_stop_button.md §7)."""
+        nonce = decode_stop_callback(data)
+        session = sessions.get(chat_id)
+        if nonce is None or session is None or session.nonce != nonce:
+            try:  # the command is over: drop the dead button
+                await query.edit_message_reply_markup(reply_markup=None)
+            except Exception as exc:
+                journal.debug("bot.event", f"stale stop button not dropped: {exc}")
+            await bot.send_message(chat_id=chat_id, text=STOP_ALREADY_DONE)
+            return
+        _log(chat_id, "  ", "stop tap")
+        await _retire_stop(session)
+        await _cancel(chat_id)  # its reply line is /cancel's wording; a tap gets §6's
+        await bot.send_message(chat_id=chat_id, text=STOP_DONE, reply_markup=_keyboard())
+
     async def on_callback(update: "Update", context) -> None:
         query = update.callback_query
         chat = update.effective_chat
@@ -1178,6 +1254,9 @@ def main() -> None:
         data = query.data or ""
         if data.startswith("ui:"):
             await _handle_ui_callback(query, chat.id, data)
+            return
+        if data.startswith("stop:"):
+            await _handle_stop_callback(query, chat.id, data)
             return
         decoded = decode_callback(query.data or "")
         if decoded is None:
@@ -1245,12 +1324,11 @@ def main() -> None:
             await asyncio.sleep(min(max(delay, 60), 300))
 
     async def _serve() -> None:
-        """Runs the bot until SIGINT/SIGTERM. Equivalent to
-        Application.run_polling(), but with polling started/stopped explicitly
-        (via the Updater directly) instead of being wired to the Application's own
-        lifetime — run_polling() doesn't expose a way to pause fetching without
-        tearing the whole thing down, and _pause_polling/_resume_polling need to
-        do exactly that mid-session (§5.1)."""
+        """Runs the bot until SIGINT/SIGTERM. Equivalent to Application.run_polling(),
+        but with the Updater started and stopped explicitly instead of being wired to
+        the Application's own lifetime: /restart has to close the long-poll from inside
+        a handler, before its hard exit, and run_polling() doesn't expose that
+        (DESIGN_bot_restart.md §5.2 and §7)."""
         stop_event = asyncio.Event()
         loop = asyncio.get_running_loop()
         for sig in (signal.SIGINT, signal.SIGTERM):

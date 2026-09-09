@@ -110,6 +110,12 @@ Concretely:
 
 ### 5.1 Polling model
 
+> **Superseded (2026-09-09) by `DESIGN_bot_stop_button.md` §5.** The mid-command pause
+> described below is gone: polling now runs from startup to shutdown, so a `✋ Stop`
+> tap and `/cancel` reach a command that is waiting on the coach. What survives is the
+> explicit Updater lifecycle in `_serve()`, which `/restart` still needs (§5.2, §7).
+> The rest of this section is kept as the record of why the pause existed.
+
 To keep this simple with a single authorized chat (§2), `tm-bot` only polls
 Telegram (`getUpdates`) while there's nothing to compute: idle, or blocked on
 the athlete's answer to an open prompt. It stops polling for the span where a
@@ -223,6 +229,9 @@ logged and stepped over, never allowed to prevent the exit.
   computing; the `telegram.command_timeout` watchdog already bounds that case, and
   the single-athlete deployment (§2) makes a few extra seconds of a doomed command
   cheap. Revisit only if the pause window grows beyond one command's runtime.
+  **Revisited and reversed** on 2026-09-09: the window is a coach call, which is most
+  of a minute, and the athlete who changes their mind ten seconds in had no way out.
+  `DESIGN_bot_stop_button.md` §5 removes the pause and puts a Stop button on the wait.
 - **`/restart` tears down whatever session is live**, prompt-open or
   mid-compute. The original design said "an open prompt's subprocess only,
   because polling is paused during compute" — true in the steady state, but a
