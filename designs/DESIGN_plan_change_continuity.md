@@ -441,6 +441,7 @@ carries the kind of the change that made it:
 |---|---|---|
 | `rm` | the athlete cancelled it | `[Deleted]` |
 | `stand-down` | the athlete called the goal off | `[Deleted]` |
+| `add` | the athlete typed over it | `[Deleted]` |
 | `generate` | the coach did not keep it | `[Cancelled]` |
 | `adapt` | the coach dropped it | `[Cancelled]` |
 | `swap` | it moved (void where it left, copy where it landed) | none: the event moves |
@@ -456,7 +457,8 @@ the coach writes over in its own slot (§5.3), a standing session displaced from
 moved session lands in (§4.5), and the second and later sessions on a date a `rest`
 constraint clears (§5.5). Each is one event beside another, and each is explicable in a
 sentence: "the session you were told about is marked cancelled; the one that replaced the
-day is next to it".
+day is next to it". `workout add` leaves a fourth (§5.2), but the athlete made that one,
+so it reads `[Deleted]` and its History entry says "Replaced by hand".
 
 **The label comes off the change kind, for a surviving session too.** `sync_workout`
 decides today with one line: `is_modified = bool(mod_reason)`, and a session with a reason
@@ -474,12 +476,14 @@ above already are:
 
 ### 5.2 Which voids keep their event
 
-`ATHLETE_VOID_KINDS = ("rm", "stand-down")` has two consumers asking different questions.
-`coach/service/adaptation.py::workout_adapt` asks **who asked for this?** — so the coach
-is not told the athlete cancelled a day the plan merely stopped scheduling. That is about
-authorship, and the constant stays as it is for that job. `calendar_reconcile.py::_plan`
-asks **should this day leave a trace?**, and borrowed the authorship set because the two
-happened to coincide. They no longer do:
+`ATHLETE_VOID_KINDS = ("rm", "stand-down")` has three consumers asking different
+questions. `coach/service/adaptation.py::workout_adapt` asks **who asked for this?** — so
+the coach is not told the athlete cancelled a day the plan merely stopped scheduling. That
+is about authorship, and the constant stays as it is for that job.
+`google_calendar.py::_void_label` asks **whose decision does the word report?**, which is
+the athlete's for `add` as well, so it adds that kind and no other caller does.
+`calendar_reconcile.py::_plan` asks **should this day leave a trace?**, and borrowed the
+authorship set because the three happened to coincide. They no longer do:
 
 ```python
 def leaves_trace(void, change) -> bool:
@@ -507,7 +511,12 @@ the lineage's newest revision. When that row is a void, `leaves_trace` decides. 
 is a session but not the slot's live row, the lineage was superseded and the event is
 torn down as today. `workout add` supersedes a same-sport session the same way
 `workout generate` does, and gets the same void-first order (§5.3) so that a session the
-coach wrote and the athlete typed over is marked rather than erased.
+coach wrote and the athlete typed over is marked rather than erased. It needs the window
+stamp as well as the order: without one, `leaves_trace` is false, the void is torn down as
+before and re-ordering the writes changes nothing the athlete can see. So `workout add`
+stamps the window too, and `workout add --replace-day` over three sessions leaves three
+`[Deleted]` markers beside the new one. Past the window it deletes as it always did: a day
+three weeks out is not one the athlete was counting on.
 
 **The window is stamped on the change, not re-read at sync time.** Rev. 2 had
 `window_end` reach `_plan()` as a settings read. That makes the answer depend on *when the
@@ -580,7 +589,19 @@ names who did it.
 
 The first draft swept markers dated before today. That is dropped: a marker is the
 athlete's record that a decision was made on that day, and a past `[Deleted]` already
-stays forever. `workout prune-calendar` continues to keep every event a row still claims.
+stays forever. `workout prune-calendar` continues to keep every event a lineage still
+claims.
+
+**Ownership is read from `workout_calendar_state`, not from the live rows.**
+`prune-calendar` builds its keep-list by walking `get_workouts(include_removed=True)` for
+`google_event_id`. That walk returns one row per *slot*, so it misses exactly the rows
+§5.2 exists to protect: a void that keeps its event and is then covered in its own slot —
+§5.3's manual session, §4.5's displaced occupant — is not the slot's live row and does
+not appear. The first `prune-calendar` after a `workout generate` would delete the very
+marker that run had just written. So the keep-list comes from `workout_calendar_state`
+instead, which is the ownership record: the reconcile clears a lineage's row when it
+tears that lineage's event down, so a row still standing means the event is still
+claimed. `db/workouts.py::claimed_calendar_event_ids` reads it.
 
 Repeated `workout generate` runs on the same day do not stack markers: every answer but
 `keep` lands on the session's own lineage (§4.5), so a day re-decided in a later run is
@@ -893,6 +914,9 @@ rollback preceded the first push.
 
 `tests/test_periodization.py` — an easy run written over a scheduled test is not a test
 (landed, `c2d11f9`).
+
+`tests/test_cli_workouts.py` — `prune-calendar` keeps a marker whose slot a later session
+has taken, and still deletes an event no lineage claims (§5.6).
 
 ## 9. Worked example
 

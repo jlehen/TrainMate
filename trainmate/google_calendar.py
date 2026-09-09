@@ -34,7 +34,11 @@ def _void_label(change_kind: Optional[str]) -> str:
     """`[Deleted]` when the athlete ended the session, `[Cancelled]` when the coach did
     (DESIGN_plan_change_continuity.md §5.1)."""
     from trainmate.db.workouts import ATHLETE_VOID_KINDS
-    return "[Deleted]" if change_kind in ATHLETE_VOID_KINDS else "[Cancelled]"
+    # `add` joins the athlete's kinds for the word and nowhere else: typing over a session
+    # is the athlete's own decision, but it does not leave the day empty the way `rm`
+    # does, which is the question ATHLETE_VOID_KINDS answers for its other callers (§5.1).
+    athlete = ATHLETE_VOID_KINDS + ("add",)
+    return "[Deleted]" if change_kind in athlete else "[Cancelled]"
 
 
 # Whether each event write announces itself. Callers that push a whole batch render a

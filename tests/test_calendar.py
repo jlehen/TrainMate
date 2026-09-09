@@ -839,7 +839,7 @@ class TestARemovalLeavesATrace(unittest.TestCase):
             "description": "90 min.", "removed": True, "removed_reason": "because",
         }
         for kind, word in (
-            ("rm", "[Deleted]"), ("stand-down", "[Deleted]"),
+            ("rm", "[Deleted]"), ("stand-down", "[Deleted]"), ("add", "[Deleted]"),
             ("generate", "[Cancelled]"), ("adapt", "[Cancelled]"),
         ):
             with self.subTest(kind=kind):

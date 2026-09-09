@@ -194,6 +194,25 @@ class TestCalendarLineage(unittest.TestCase):
         self.assertNotIn("Target:", cancelled)
         self.assertNotIn("3h steady endurance.", cancelled)
 
+    def test_a_void_the_athlete_typed_over_says_so(self):
+        """A `workout add` void is the athlete replacing the day, not the coach dropping
+        it, so the entry has its own word rather than the raw change kind
+        (DESIGN_plan_change_continuity.md §5.1)."""
+        lineage = self._plan()
+        with self.db.workout_change(kind="add") as change:
+            change.void(
+                date="2026-08-31", sport_type="cycling", reason="Club run instead",
+            )
+        # While the void is the head the word is the event's title; it reaches the History
+        # once the lineage carries on, which is what a rollback of the `add` does.
+        revision = self.db.revision_before_live_void(lineage)
+        with self.db.workout_change(kind="restore") as change:
+            change.restore(revision)
+
+        entry = entries(self._description(lineage))["[2/3]"]
+        self.assertIn("Replaced by hand", entry)
+        self.assertNotIn("Dropped from the plan", entry)
+
     def test_one_reason_label_and_the_summary_only_stands_in_for_it(self):
         """The revision's own reason is the `Reason:` line; the batch summary takes that
         label only when the revision has none, and `Change:` is gone
