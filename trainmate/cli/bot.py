@@ -318,6 +318,10 @@ def pending_week_note() -> Optional[Tuple[str, int]]:
     delivered = _delivered_change_id()
     noted = runtime.db.newest_change_with_note()
     if noted and noted["id"] > delivered:
+        # Undone before it was ever sent: the athlete never heard of the change, so
+        # there is nothing to announce and nothing to take back.
+        if not runtime.db.change_has_live_revisions(noted["id"]):
+            return None
         return f"{PUSH_CHANGE_LEAD} {noted['note']}", noted["id"]
     if not delivered:
         return None

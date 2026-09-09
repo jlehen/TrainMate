@@ -651,5 +651,218 @@ class TestCalendarSync(unittest.TestCase):
         self.assertIn("evt-c", loud_print.call_args.args[0])
 
 
+class TestARemovalLeavesATrace(unittest.TestCase):
+    """Which voids keep their Calendar event, and what the athlete reads on it
+    (DESIGN_plan_change_continuity.md §5.1/§5.2)."""
+
+    TODAY = "2026-09-09"
+
+    @classmethod
+    def setUpClass(cls):
+        if os.path.exists(TEST_DB_PATH):
+            os.remove(TEST_DB_PATH)
+        global test_db
+        test_db = Database(db_path=TEST_DB_PATH)
+        rebind_test_db(test_db)
+
+    @classmethod
+    def tearDownClass(cls):
+        if os.path.exists(TEST_DB_PATH):
+            try:
+                os.remove(TEST_DB_PATH)
+            except OSError:
+                pass
+
+    def setUp(self):
+        from tests.helpers import clear_all_tables, pin_clock
+        clear_all_tables(test_db)
+        pin_clock(self, self.TODAY)
+
+    # --- fixtures ----------------------------------------------------------------
+
+    def _session(self, date_str, *, kind="generate", commitment_end=None, sport="cycling"):
+        """One session, written under a change carrying the given window stamp.
+
+        The automatic reconcile is suppressed throughout this class: these tests ask what
+        `_plan` decides, so letting the write path act on that decision first would leave
+        nothing to decide."""
+        from trainmate.calendar_reconcile import no_calendar_sync
+        with no_calendar_sync():
+            with test_db.workout_change(
+                kind=kind, commitment_end=commitment_end
+            ) as change:
+                change.append(
+                    date=date_str, sport_type=sport, title="Long ride",
+                    description="90 min steady.", duration_minutes=90, rpe=5, tss=95,
+                )
+        session = test_db.get_workout(date_str, sport)
+        test_db.mark_workout_pushed(session["id"], f"evt-{session['id']}", "sig")
+        return session["id"]
+
+    def _void(self, date_str, *, kind, commitment_end=None, sport="cycling"):
+        from trainmate.calendar_reconcile import no_calendar_sync
+        with no_calendar_sync():
+            with test_db.workout_change(
+                kind=kind, commitment_end=commitment_end
+            ) as change:
+                change.void(date=date_str, sport_type=sport, reason="because")
+
+    def _plan(self, lineage):
+        from trainmate.calendar_reconcile import _plan
+        return _plan(test_db, [lineage])
+
+    # --- leaves_trace, clause by clause -------------------------------------------
+
+    def test_an_athlete_void_keeps_its_event_outside_the_window(self):
+        lineage = self._session("2026-10-20")
+        self._void("2026-10-20", kind="rm")
+        pushes, teardowns = self._plan(lineage)
+        self.assertEqual([w["id"] for w in pushes], [lineage])
+        self.assertEqual(teardowns, [])
+
+    def test_a_manual_session_keeps_its_event_outside_the_window(self):
+        lineage = self._session("2026-10-20", kind="add")
+        self._void("2026-10-20", kind="generate")
+        pushes, teardowns = self._plan(lineage)
+        self.assertEqual([w["id"] for w in pushes], [lineage])
+        self.assertEqual(teardowns, [])
+
+    def test_a_coach_void_inside_the_window_keeps_its_event(self):
+        lineage = self._session("2026-09-11")
+        self._void("2026-09-11", kind="generate", commitment_end="2026-09-15")
+        pushes, teardowns = self._plan(lineage)
+        self.assertEqual([w["id"] for w in pushes], [lineage])
+        self.assertEqual(teardowns, [])
+
+    def test_a_coach_void_outside_the_window_is_torn_down(self):
+        lineage = self._session("2026-09-30")
+        self._void("2026-09-30", kind="generate", commitment_end="2026-09-15")
+        pushes, teardowns = self._plan(lineage)
+        self.assertEqual(pushes, [])
+        self.assertEqual([t[0] for t in teardowns], [lineage])
+
+    def test_an_empty_window_leaves_no_trace(self):
+        lineage = self._session("2026-09-09")
+        self._void("2026-09-09", kind="generate", commitment_end=None)
+        pushes, teardowns = self._plan(lineage)
+        self.assertEqual(pushes, [])
+        self.assertEqual([t[0] for t in teardowns], [lineage])
+
+    def test_the_window_is_read_from_the_change_not_from_the_clock(self):
+        """Write with --no-sync and push a fortnight later: the answer must be the one the
+        removal had when it was written (§5.2)."""
+        from tests.helpers import pin_clock
+        lineage = self._session("2026-09-11")
+        self._void("2026-09-11", kind="generate", commitment_end="2026-09-15")
+        pin_clock(self, "2026-09-30")
+        pushes, _teardowns = self._plan(lineage)
+        self.assertEqual([w["id"] for w in pushes], [lineage])
+
+    def test_a_rollbacks_restored_copy_reads_the_original_changes_stamp(self):
+        from trainmate.calendar_reconcile import no_calendar_sync
+        lineage = self._session("2026-09-11")
+        self._void("2026-09-11", kind="generate", commitment_end="2026-09-15")
+        void_revision = test_db.get_lineage_revisions(lineage)[-1]
+        with no_calendar_sync():
+            with test_db.workout_change(kind="rollback") as change:
+                change.restore(void_revision)
+        head = test_db.get_lineage_head(lineage)
+        self.assertEqual(head["change_kind"], "generate")
+        self.assertEqual(head["commitment_end"], "2026-09-15")
+
+    # --- the lineage read ---------------------------------------------------------
+
+    def test_a_void_covered_in_the_same_slot_still_keeps_its_event(self):
+        """`live_workouts` is "highest id in the slot", so a marker written and then
+        covered is never the slot's live row — read it from its lineage (§5.2)."""
+        from trainmate.calendar_reconcile import no_calendar_sync
+        manual = self._session("2026-09-11", kind="add")
+        with no_calendar_sync():
+            with test_db.workout_change(kind="generate") as change:
+                change.void(date="2026-09-11", sport_type="cycling", reason="replaced")
+                change.append(
+                    date="2026-09-11", sport_type="cycling", title="Coach's ride",
+                    description="60 min.", duration_minutes=60,
+                )
+        pushes, teardowns = self._plan(manual)
+        self.assertEqual([w["id"] for w in pushes], [manual])
+        self.assertEqual(teardowns, [])
+
+    def test_a_lineage_superseded_in_place_is_still_torn_down(self):
+        from trainmate.calendar_reconcile import no_calendar_sync
+        lineage = self._session("2026-09-11")
+        with no_calendar_sync():
+            with test_db.workout_change(kind="add") as change:
+                change.void(date="2026-09-11", sport_type="cycling", reason="mine now")
+                change.append(
+                    date="2026-09-11", sport_type="cycling", title="My ride",
+                    description="60 min.", duration_minutes=60,
+                )
+        # Its own void is outside nobody's window, so the coach's session goes.
+        pushes, teardowns = self._plan(lineage)
+        self.assertEqual(pushes, [])
+        self.assertEqual([t[0] for t in teardowns], [lineage])
+
+    def test_a_trace_keeping_void_with_no_event_gets_one(self):
+        """A session written and dropped between two syncs never had an event, and would
+        otherwise leave no trace at all (§5.2)."""
+        from trainmate.calendar_reconcile import no_calendar_sync
+        with no_calendar_sync():
+            with test_db.workout_change(kind="generate") as change:
+                change.append(
+                    date="2026-09-11", sport_type="cycling", title="Long ride",
+                    description="90 min.", duration_minutes=90,
+                )
+        lineage = test_db.get_workout("2026-09-11", "cycling")["id"]
+        self._void("2026-09-11", kind="generate", commitment_end="2026-09-15")
+        pushes, teardowns = self._plan(lineage)
+        self.assertEqual([w["id"] for w in pushes], [lineage])
+        self.assertEqual(teardowns, [])
+
+    # --- the words --------------------------------------------------------------
+
+    def _summary(self, workout):
+        mock_service = MagicMock()
+        mock_service.events().insert().execute.return_value = {"id": "evt-x"}
+        with patch.object(calendar_syncer, "service", mock_service):
+            calendar_syncer.sync_workout(workout)
+        body = [
+            call.kwargs["body"]
+            for call in mock_service.events().insert.call_args_list
+            if call.kwargs.get("body")
+        ][-1]
+        return body["summary"]
+
+    def test_the_void_word_comes_off_the_change_kind(self):
+        base = {
+            "date": "2026-09-11", "sport_type": "cycling", "title": "Long ride",
+            "description": "90 min.", "removed": True, "removed_reason": "because",
+        }
+        for kind, word in (
+            ("rm", "[Deleted]"), ("stand-down", "[Deleted]"),
+            ("generate", "[Cancelled]"), ("adapt", "[Cancelled]"),
+        ):
+            with self.subTest(kind=kind):
+                self.assertEqual(
+                    self._summary({**base, "change_kind": kind}),
+                    f"{word} Long ride",
+                )
+
+    def test_a_generate_revision_with_a_reason_is_not_titled_adapted(self):
+        """"[Adapted]" means the coach eased this because of how the athlete was doing;
+        a `workout generate` revision is the plan being written (§5.1)."""
+        base = {
+            "date": "2026-09-11", "sport_type": "cycling", "title": "Easy spin",
+            "description": "60 min.",
+            "modification_reason": "never two hard days in a row",
+        }
+        self.assertEqual(
+            self._summary({**base, "change_kind": "generate"}), "Easy spin"
+        )
+        self.assertEqual(
+            self._summary({**base, "change_kind": "adapt"}), "[Adapted] Easy spin"
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
