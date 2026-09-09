@@ -674,8 +674,11 @@ CONSTRAINT_EDIT_FIELDS = (
 
 # The wrong-domain answer §12.4 replaces a picker with: the ask was coach territory all
 # along, so the preview offers the hand-off instead of listing goals at a question about a
-# session.
-SESSION_HANDOFF_ASK = "shall I pass it to your coach?"
+# session. It says which reading was dropped, so the router's echo a moment earlier
+# ("updating your goal") has its correction on screen.
+SESSION_HANDOFF_ASK = (
+    "I don't see a {noun} for that — it sounds like {named}. Shall I pass it to your coach?"
+)
 
 
 def _nominate_rows(domain: str, today: str) -> List[Dict[str, Any]]:
@@ -776,7 +779,7 @@ def _edit_capture(domain: str, text: str, pinned_id: Optional[int]) -> None:
         row_id = _row_id(data.get("id"), by_id)
 
     if kind == "session" and pinned_id is None:
-        _offer_session_handoff(data, sessions, text, today)
+        _offer_session_handoff(domain, data, sessions, text, today)
         return
     if kind != domain or row_id is None:
         _no_find(text)
@@ -813,7 +816,7 @@ def _edit_capture(domain: str, text: str, pinned_id: Optional[int]) -> None:
 
 
 def _offer_session_handoff(
-    data: dict, sessions: Sequence[Dict[str, Any]], text: str, today: str
+    domain: str, data: dict, sessions: Sequence[Dict[str, Any]], text: str, today: str
 ) -> None:
     """A nomination that landed on a session: the ask was coach territory all along, so
     the preview offers the hand-off and the confirm runs `adapt -m` with her own words."""
@@ -826,7 +829,8 @@ def _offer_session_handoff(
         _no_find(text)
         return
     named = simple_session_line(session, lead=simple_day_word(session["date"], today))
-    if not runtime.prompt.confirm(f"That sounds like {named} — {SESSION_HANDOFF_ASK}"):
+    noun = "goal" if domain == "goal" else "rule"
+    if not runtime.prompt.confirm(SESSION_HANDOFF_ASK.format(noun=noun, named=named)):
         print("Okay — I'll leave it.")
         return
     _hand_off_to_coach(text)

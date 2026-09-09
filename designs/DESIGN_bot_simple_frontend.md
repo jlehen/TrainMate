@@ -799,10 +799,12 @@ The call returns the most plausible reading, and each kind lands differently:
 
 - **A goal or constraint, nominated cleanly** — the ordinary preview/confirm.
 - **A session** — the ask was coach territory all along: the preview offers the
-  hand-off ("That sounds like Saturday's long run — shall I pass it to your coach?")
-  and the confirm runs `adapt -m` with her original words. The wrong-domain picker
-  this replaces — a list of goals answering a question about a session — never
-  appears.
+  hand-off ("I don't see a goal for that — it sounds like Saturday's long run. Shall
+  I pass it to your coach?") and the confirm runs `adapt -m` with her original
+  words. The line names the reading it drops, because the router's echo a moment
+  earlier ("→ updating your goal") is still on screen and would otherwise stand
+  uncorrected. The wrong-domain picker this replaces — a list of goals answering a
+  question about a session — never appears.
 - **Several close candidates, or "no" on the preview** — a picker of the candidate
   rows. A leaf does *not* execute the edit: it re-runs `bot capture <intent> --id <n>
   "<text>"` with the nomination pinned, which re-enters the ordinary preview/confirm.

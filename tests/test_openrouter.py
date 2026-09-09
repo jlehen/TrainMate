@@ -165,6 +165,59 @@ class TestOpenRouterClient(unittest.TestCase):
         self.assertIn("Empty completion", str(ctx.exception))
 
     @patch("trainmate.openrouter.requests.post")
+    def test_an_error_inside_the_choice_surfaces_as_the_providers_words(self, mock_post):
+        # A provider that dies after generation began still answers 200, with the
+        # error beside the partial content — a lone "{" with no usage this morning.
+        resp = _ok_response("{")
+        resp.json.return_value = {"choices": [{
+            "message": {"content": "{"}, "finish_reason": "error",
+            "error": {"code": 502, "message": "Provider disconnected mid-stream"},
+        }]}
+        mock_post.return_value = resp
+
+        with patch.object(self.client, "_log_exchange") as log, \
+                patch.object(self.client, "_record_call") as rec:
+            with self.assertRaises(ValueError) as ctx:
+                self.client.complete("s", "u", label="test")
+
+        self.assertIn("Provider disconnected mid-stream", str(ctx.exception))
+        self.assertNotIn("Expecting", str(ctx.exception))
+        self.assertEqual(log.call_count, 1)
+        self.assertIn("Provider disconnected", log.call_args.kwargs["error_msg"])
+        self.assertIs(rec.call_args.args[2], False)
+
+    @patch("trainmate.openrouter.requests.post")
+    def test_an_unreadable_reply_is_a_failed_call_that_names_its_finish_reason(
+        self, mock_post
+    ):
+        resp = _ok_response("{")
+        resp.json.return_value["choices"][0]["finish_reason"] = "length"
+        mock_post.return_value = resp
+
+        with patch.object(self.client, "_log_exchange") as log, \
+                patch.object(self.client, "_record_call") as rec:
+            with self.assertRaises(ValueError) as ctx:
+                self.client.complete("s", "u", label="test")
+
+        self.assertIn("finish_reason: 'length'", str(ctx.exception))
+        # Logged once, as a failure: the journal used to say ok before parsing.
+        self.assertEqual(log.call_count, 1)
+        self.assertIn("not readable JSON", log.call_args.kwargs["error_msg"])
+        self.assertIs(rec.call_args.args[2], False)
+
+    @patch("trainmate.openrouter.requests.post")
+    def test_a_readable_reply_is_recorded_once_as_ok(self, mock_post):
+        mock_post.return_value = _ok_response('{"ok": true}')
+
+        with patch.object(self.client, "_log_exchange") as log, \
+                patch.object(self.client, "_record_call") as rec:
+            self.client.complete("s", "u", label="test")
+
+        self.assertEqual(log.call_count, 1)
+        self.assertNotIn("error_msg", log.call_args.kwargs)
+        self.assertIs(rec.call_args.args[2], True)
+
+    @patch("trainmate.openrouter.requests.post")
     def test_request_carries_auth_json_mode_and_timeout(self, mock_post):
         mock_post.return_value = _ok_response('{"ok": true}')
 

@@ -704,6 +704,9 @@ class CaptureEditTest(_CaptureCase):
         # appears; the hand-off does (§12.4).
         self.assertIn("Long run", prompt.text)
         self.assertIn("pass it to your coach", prompt.text)
+        # The dropped reading is named: the router's "updating your goal" echo is
+        # still on screen and this line is its correction (§12.4).
+        self.assertIn("I don't see a goal for that", prompt.text)
         self.assertNotIn(BUTTONS_SENTINEL, out)
         handoff.assert_called_once_with("move my long run to Sunday")
 

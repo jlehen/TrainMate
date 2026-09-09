@@ -101,16 +101,23 @@ class OpenRouterClient:
                     )
             
             content_str = ""
+            finish_str = "N/A"
             if response_data:
                 choices = response_data.get("choices", [])
                 if choices:
                     content_str = choices[0].get("message", {}).get("content", "")
-            
+                    # Why the reply stopped: the clue a lone "{" does not carry itself.
+                    finish_str = str(choices[0].get("finish_reason") or "N/A")
+                    native = choices[0].get("native_finish_reason")
+                    if native and native != finish_str:
+                        finish_str += f" ({native})"
+
             lines = [
                 f"# LLM Exchange: {label.replace('_', ' ').title()}",
                 f"- **Timestamp**: {datetime.now(timezone.utc).isoformat()}",
                 f"- **Model**: {self.model}",
                 f"- **Token Usage**: {usage_str}",
+                f"- **Finish**: {finish_str}",
                 ""
             ]
             
@@ -181,6 +188,23 @@ class OpenRouterClient:
             total_tokens=usage.get("total_tokens"),
             path=path, error=error,
         )
+
+    def _api_error(
+        self, label: str, started: float, system_content: str, user_content: str,
+        resp_data: dict[str, Any], err_obj: Any,
+    ) -> ValueError:
+        """An error the API reported inside a 200 body, top-level or in the choice:
+        printed, logged and journalled as a failed call; the caller raises it."""
+        err_msg = err_obj.get("message") if isinstance(err_obj, dict) else str(err_obj)
+        print(f"OpenRouter API error: {err_msg}")
+        path = self._log_exchange(
+            label, system_content, user_content,
+            response_data=resp_data, error_msg=f"OpenRouter Error: {err_msg}"
+        )
+        self._record_call(
+            label, started, False, resp_data, path, f"OpenRouter Error: {err_msg}"
+        )
+        return ValueError(f"OpenRouter API error: {err_msg}")
 
     def _wait_estimate(self, label: str) -> Optional[float]:
         """How long past calls of this kind took, in seconds, or None with no history.
@@ -356,18 +380,11 @@ class OpenRouterClient:
             resp_data = response.json()
 
             if "error" in resp_data:
-                err_obj = resp_data["error"]
-                err_msg = err_obj.get("message") if isinstance(err_obj, dict) else str(err_obj)
-                print(f"OpenRouter API error: {err_msg}")
-                path = self._log_exchange(
-                    label, system_content, user_content,
-                    response_data=resp_data, error_msg=f"OpenRouter Error: {err_msg}"
-                )
-                self._record_call(
-                    label, started, False, resp_data, path, f"OpenRouter Error: {err_msg}"
-                )
                 logged = True
-                raise ValueError(f"OpenRouter API error: {err_msg}")
+                raise self._api_error(
+                    label, started, system_content, user_content, resp_data,
+                    resp_data["error"],
+                )
 
             # Token usage, for prompt-caching verification — a terminal-only aside
             # (DESIGN_output_verbosity.md §3).
@@ -378,19 +395,38 @@ class OpenRouterClient:
                 f"Total: {usage.get('total_tokens')}"
             )
             
-            # Log successful exchange
+            choices = resp_data.get("choices", [])
+            if not choices:
+                raise ValueError("Empty completion returned from OpenRouter.")
+            choice = choices[0]
+            # A provider that fails after generation began still answers 200: the error
+            # rides inside the choice, next to whatever partial content came through
+            # (OpenRouter API reference, "Errors"). Read as JSON that fragment is a
+            # decoder complaint about nothing; read here it is the provider's own words.
+            if choice.get("error") or choice.get("finish_reason") == "error":
+                logged = True
+                raise self._api_error(
+                    label, started, system_content, user_content, resp_data,
+                    choice.get("error") or "provider stopped mid-generation",
+                )
+
+            content = choice.get("message", {}).get("content", "")
+            try:
+                parsed = self._parse_json_content(content)
+            except json.JSONDecodeError as e:
+                # The finish reason is the one clue a truncated reply leaves behind.
+                raise ValueError(
+                    f"The model's reply was not readable JSON ({e}); "
+                    f"finish_reason: {choice.get('finish_reason')!r}"
+                ) from e
+
+            # A reply that does not parse is a failed call in the journal, not a fed one.
             path = self._log_exchange(
                 label, system_content, user_content, response_data=resp_data
             )
             self._record_call(label, started, True, resp_data, path)
             logged = True
-
-            choices = resp_data.get("choices", [])
-            if not choices:
-                raise ValueError("Empty completion returned from OpenRouter.")
-                
-            content = choices[0].get("message", {}).get("content", "")
-            return self._parse_json_content(content)
+            return parsed
 
         except requests.exceptions.HTTPError as he:
             print(f"HTTP Error calling OpenRouter: {he}")
