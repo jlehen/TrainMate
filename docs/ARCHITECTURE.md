@@ -90,8 +90,12 @@ classes themselves.
   existing error boundaries, so a failed command records its own traceback with no new
   handler anywhere (DESIGN_logging.md §3/§5.4).
 - **`trainmate/cli/`** — per-command-family handler modules (`run_*()`): `status`,
-  `progress`, `goals`, `constraints`, `benchmarks`, `signal`, `learnings`,
-  `plans`, `data`, `models`, `journal`, the `workouts/` package, plus shared `common`
+  `progress`, `goals`, `constraints`, `benchmarks`, `signals`, `learnings`,
+  `plans`, `data`, `settings`, `journal`, `bot`, the `workouts/` package
+  (`parser`/`generate`/`edit`/`revisions`/`_helpers`), plus the shared modules:
+  `common` (renderers and the adherence pairing), `selectors` (the range grammar),
+  `argparse_ext` (parser/help extensions), `render` (the two voices, [§6](#6-singletons)),
+  `candidates` (the note-capture confirm loops), `staleness` (the changed-input wording)
   and `runway` (the end-of-schedule nudge every daily surface draws — the db-reads
   wrapper around `progression.runway` plus the wordings, DESIGN_runway_nudge.md §3).
 - **`trainmate_web.py`** — Flask REST API behind the dashboard. **Read-only**: GET
@@ -112,14 +116,15 @@ classes themselves.
     so the command resumes.
   - **State / safety:** one in-flight `_Session` per chat holds the process +
     pending-prompt state; a per-prompt `nonce` (in the button `callback_data`) rejects
-    stale taps. `/cancel` and an idle `prompt_timeout` send a cancellation the CLI
-    turns into a clean abort; a between-output `command_timeout` kills a silent runaway.
+    stale taps. `/cancel` and an idle `telegram.prompt_timeout_seconds` send a
+    cancellation the CLI turns into a clean abort; a between-output
+    `telegram.command_timeout_seconds` kills a silent runaway.
   - **Polling is paused mid-command.** `_serve()` drives the Application/Updater
     lifecycle by hand instead of `Application.run_polling()`, so `_pause_polling` /
     `_resume_polling` can stop `getUpdates` for the silent-compute span of a command and
     restart it while idle or while a prompt is open (`_drive`). Consequence for
     `/cancel`: a `/cancel` sent while a command is *silently computing* is not delivered
-    until that command finishes or opens a prompt — the `telegram.command_timeout`
+    until that command finishes or opens a prompt — the `telegram.command_timeout_seconds`
     watchdog, not `/cancel`, is what recovers a stuck silent run
     (DESIGN_bot_restart.md §5.1).
   - **Self-restart.** `./tm-bot` is a **supervisor**, not just the venv bootstrap: it
@@ -254,7 +259,7 @@ classes themselves.
 
 | File                 | Class / Singleton    | Purpose                                          |
 |----------------------|----------------------|--------------------------------------------------|
-| `types.py`           | —                    | TypedDicts: `Objective`, `Constraint`, `LifeEvent` (legacy), `Workout` (the hydrated session, not a table row — §5), `CompletedActivity` (incl. `bike_avg_watts`, `zone1_sec`–`zone5_sec`), `AthleteMetric`, `AthleteBaseline`, `Macrocycle`, `Mesocycle` |
+| `types.py`           | —                    | TypedDicts: `Objective`, `Constraint`, `DailySignal`, `Workout` (the hydrated session, not a table row — §5), `CompletedActivity` (incl. `bike_avg_watts`, `zone1_sec`–`zone5_sec`, `power_zone1_sec`–`power_zone7_sec`), `AthleteMetric`, `AthleteBaseline`, `Macrocycle`, `Mesocycle`, `PlanFeedback`, `PlanProposal` |
 | `config.py`          | `config`             | Reads `config.yaml`; exposes typed properties.   |
 | `prompt.py`          | (`cli.prompt`)       | Front-end-agnostic prompt broker: `confirm`/`choose`/`ask_text` over `TtyPrompt` (`input()`) or `JsonPrompt` (chat/web). Journals every answer on the asking run (DESIGN_logging.md §5.6). See [§6](#6-singletons). |
 | `db/`                | `db`                 | SQLite wrapper; `Database` composed from         |
@@ -586,7 +591,7 @@ default the user layer overrides.
   staleness reason can name what moved (`"athlete profile changed: sport_preferences"`)
   rather than only that something did (`DESIGN_plan_staleness.md` §5).
 - **`_plan_generate_strategy(...)`** — LLM call → `{strategy, mesocycles}` covering the
-  plan start through the goal date, whatever the horizon. Label `periodization_plan`.
+  plan start through the goal date, whatever the horizon. Label `plan_generate`.
   Branches on the goal's `date_type`: a `horizon` goal's task forbids pinning a
   peak/taper/realization phase to the date and drops the `Peak & Taper, Race/Event`
   phase examples ([§15](#goal-dates-event-vs-training-horizon)).
@@ -602,6 +607,10 @@ default the user layer overrides.
   for that reason: the shared builder's `COACH LEARNINGS` section is the one part it does
   want, and without the argument this was the only coach call blind to the observations
   the analysis flow authors (DESIGN_backward_evaluation.md §10.1).
+- **`_plan_reshape_verdict(change_reason, diff_text, strategy, mesocycles)`** — the
+  cheap preliminary behind the staleness question: given what changed and the plan in
+  force, would the coach reshape the periodization? → `{reshaping, why}`. Label
+  `plan_verdict`. Called only through `CoachService.plan_reshape_verdict` (below).
 - **`_workout_generate_logic(...)`** — LLM call → `{reasoning, workouts[]}`. Accepts
   `num_days` (default 28) driving the horizon and `start_str` (defaults to today) for
   the first day to schedule — the prompt tells the model to begin there. When
@@ -617,7 +626,7 @@ default the user layer overrides.
   or the athlete is off, and re-shaping the block around a mis-execution is forbidden by
   name. The flag rides separately from `block_progress` because that section quotes the
   zone tables and must not be promised when they have no rows. **Read-only** w.r.t.
-  learnings. Label `workout_generation`.
+  learnings. Label `workout_generate`.
   Its TASK also states the coverage invariant — every date of the span carries an entry,
   a rest day explicitly (DESIGN_runway_nudge.md §2.1) — and
   `coach/service/workouts.py:_fill_coverage_gaps` backstops it deterministically, so the
@@ -632,7 +641,7 @@ default the user layer overrides.
   there cannot rebound (DESIGN_block_boundary.md §3). There is **no separate
   classification pass** for `--message`: the same call also extracts any
   constraint-shaped directives from the note and returns them as `new_constraints`
-  (DESIGN_constraints.md §8). Label `workout_adaptation`.
+  (DESIGN_constraints.md §8). Label `workout_adapt`.
 - **`_data_analyze_logic(...)`** — LLM call → `{macrocycle_summary,
   inferred_macrocycle, inferred_mesocycles[], physiological_insights[],
   learning_updates[]}`. Reverse-engineers cycles from weekly summaries. Label
@@ -674,7 +683,7 @@ floor, without which every freshly added learning would be proposed for retireme
 its first recompute. **Upgrades auto-apply; downgrades are proposed, not applied** —
 `db._recompute_confidence()` writes the lower level to `proposed_confidence` and
 leaves the live `confidence` intact. Re-citing counted weeks is a structural
-no-op (the `UNIQUE(learning_id, week, polarity)` constraint), so re-running /
+no-op (the `UNIQUE(learning_id, week_commencing, polarity)` constraint), so re-running /
 `--force` / overlapping windows cannot inflate confidence. `last_reinforced_at`
 refreshes only when a *new* supporting week lands (or on a staleness demotion).
 
@@ -718,9 +727,10 @@ recompute does not silently demote them (see [§15](#15-design-rationale--histor
 **Orchestrator — owns all DB and calendar access.** Exposes the public API
 called by the UIs.
 
-- **`plan_generate(force, objective_id, auto_apply, fresh)`** — fetches objectives/constraints,
-  checks hashes (constraints hash covers only the plan-shaping `replan=1` rows), calls
-  `CoachEngine._plan_generate_strategy()`, returns a `PlanProposal`. Saves to DB only
+- **`plan_generate(force, objective_id, auto_apply, fresh, start_date, show_context)`** —
+  fetches objectives/constraints, checks hashes (constraints hash covers only the
+  plan-shaping `replan=1` rows), calls `CoachEngine._plan_generate_strategy()`, returns a
+  `PlanProposal`. Saves to DB only
   under `auto_apply`; otherwise the caller passes the proposal to `plan_apply()` once
   the athlete accepts. The plan window has no minimum or maximum length (§10, step 5).
   `fresh` (CLI `--fresh`) withholds the `PREVIOUS PERIODIZATION STRATEGY` block and its
@@ -730,15 +740,17 @@ called by the UIs.
   planned-vs-actual review still covers the replaced plan's elapsed blocks, as do the
   history summary, the learnings and the athlete's plan feedback
   (DESIGN_backward_evaluation.md §6.1).
-- **`workout_generate(end_date, prefer_macro_id)`** — requires an existing macrocycle.
+- **`workout_generate(start_date, end_date, prefer_macro_id)`** — requires an existing
+  macrocycle.
   Writes nothing: it returns a `GenerateProposal` (reasoning, the proposed sessions
   already tagged with their date's `macrocycle_id`, the live plan they would displace,
   and `gen_start`), which the caller previews and hands back to
   `workout_generate_apply()` once the athlete accepts — the same
   propose-then-apply split as `plan_generate`/`plan_apply`.
   Applies the deterministic rest-window pre-pass to the generated workouts
-  (`_enforce_rest_windows_generate(workouts, constraints, gen_start)`: every `rest = 1`
-  date in `[gen_start, max returned date]` becomes a single rest session, **including
+  (`_enforce_rest_windows_generate(workouts, constraints, gen_start, gen_end)`: every
+  `rest = 1` date in the *requested* span `[gen_start, gen_end]` — not the span the model
+  happened to return — becomes a single rest session, **including
   dates the model returned nothing for** — an absent row and an explicit rest day mean
   different things to adherence. Every other constraint is advisory, left to the model)
   before proposing, so the forced rest days are visible in the preview.
@@ -763,8 +775,9 @@ called by the UIs.
   made between generating and accepting as though the strategy had been built from it —
   exactly the drift the staleness detector exists to catch. Only callers applying a plan
   they did not just generate should leave it unset.
-- **`replan(force, objective_id)`** — convenience: `plan_generate` then
-  `workout_generate`.
+- **`replan(force, objective_id)`** — convenience: `plan_generate` (auto-applied) then
+  `workout_generate` + `workout_generate_apply`, with no preview — the unattended path
+  ([§11](#11-terminology-plans-vs-workouts)).
 - **`workout_adapt(target_date_str, message=None)`** — fetches metrics + workouts in
   the rolling window, calls `CoachEngine._workout_adapt_logic()`, returns a
   `RevisionProposal` (`coach/proposals.py`) carrying `reason`, `workouts`, `pairs`/
@@ -816,13 +829,19 @@ called by the UIs.
     it still counts as proposed on its date, so the displacement rule cannot void the
     session the re-list was protecting. Held slots travel on `RevisionProposal.held`, which
     both the preview and apply union into the date's proposed sports (§9.1).
-- **`workout_adapt_apply(proposed, reason, start, end)`** — deletes overridden
-  workouts (+ calendar events), saves adapted workouts, syncs to Calendar. Each
-  session keeps its short per-workout `change_reason` in `modification_reason`; the
-  long batch `reason` is stamped on every session's `adaptation_summary`. One UTC
-  timestamp for the run is stamped on every eased session's `adapted_at` and bumps its
-  `adaptation_count`, giving a later re-run the recency signal it needs to avoid
-  compounding the cut.
+- **`workout_revision_apply(proposal)`** — the accepted half of `workout_adapt`. Opens
+  one `adapt` change: a session the pass drops becomes a **void** revision (never a
+  `DELETE`), a cross-sport substitution is a void at the source plus a revision at the
+  destination on the same lineage, and every revised session appends with its own
+  `modification_reason`; the batch `reason` lands on the `workout_changes` row. Voids go
+  first. Touches no Calendar code — the change handle's reconcile pass does — and stamps
+  `honored_at` on the constraints the proposal covered (`honoring.stamp`). Nothing is
+  stamped on the row for recency: whether a revision counts as an easing is derived at
+  read time from the lineage ([§5](#workout-state--three-orthogonal-axes-not-one-enum)).
+- **`workout_revision_record_no_change(proposal)`** — the other outcome. An adapt that
+  looked at the metrics and held still writes its `workout_changes` row (appending
+  nothing) and stamps `honored_at`, so "no adaptation needed" is a recorded event and a
+  valid honoring claim ([§10](#daily-adaptation-workout-adapt), step 6).
 - **`workout_add(date, sport_type, title, description, …, replace_day=False)`** —
   manually schedules a workout (deterministic, no LLM), **replacing** any same-sport
   session that day — or every session that day with `replace_day`. A manual session is a
@@ -903,6 +922,12 @@ called by the UIs.
   judge on the fingerprint alone. The profile half of the reason names the fields that
   moved when the macrocycle carries a `profile_snapshot`, and degrades to a bare
   "athlete profile changed" when it does not (`DESIGN_plan_staleness.md` §5).
+- **`plan_reshape_verdict(macro, change_reason)`** — the coach's read on whether the
+  change `config_changed` reported would have reshaped `macro`: `{reshaping, why}`, or
+  `None`. Reached from `cli/staleness.py` when the changed-input question is put to the
+  athlete. Fails open on purpose — any error, a malformed reply, or `--show-llm-prompt-only`
+  leaves the athlete with the question and no verdict, since the staleness question must
+  never hang on the network (`DESIGN_plan_staleness.md` §10).
 - **`_get_coach_system_prompt(objectives, constraints, ...)`** — builds the system
   prompt without making an LLM call (used by tests).
 
@@ -920,8 +945,9 @@ from trainmate.coach import coach_service
 
 `Database` is composed from per-domain mixins — `base.py` (`BaseDB`:
 connection + schema setup), `objectives.py`, `constraints.py`,
-`signals.py`, `workouts.py`, `activities.py`, `learnings.py`, `analysis.py`,
-`periodization.py`, `wipes.py` — all re-exported from `__init__.py` so
+`signals.py`, `benchmarks.py`, `workouts.py`, `activities.py`, `learnings.py`,
+`analysis.py`, `periodization.py`, `settings.py`, `wipes.py` — all re-exported from
+`__init__.py` so
 `from trainmate.db import ...` is unchanged.
 
 - Every method opens a fresh `sqlite3` connection (context manager), commits,
@@ -943,9 +969,8 @@ connection + schema setup), `objectives.py`, `constraints.py`,
   and the append path key on `sport_canonical`, so a canonical lookup or write resolves
   an aliased session instead of reporting it missing or inserting a duplicate; the stored
   `sport_type` keeps the spelling as written. Adaptation's override check compares
-  canonically too. `adherence.py` re-exports
-  `SPORT_MAPPING` from `trainmate/sports.py` (kept dependency-free to avoid the
-  `adherence → garmin → trainmate.db` import cycle).
+  canonically too. `adherence.py` imports `canonical_sport` from `trainmate/sports.py`
+  (kept dependency-free to avoid the `adherence → garmin → trainmate.db` import cycle).
 - **The canonical sports are** `running`, `cycling`, `hiking`, `strength_training`,
   `yoga`, `ski_touring`, `rowing` and `downhill_skiing`. `downhill_skiing` covers
   lift-served skiing *and* snowboarding (Garmin files both under one resort type) and is
@@ -1340,6 +1365,21 @@ tells them apart, and it is what decides whether the Calendar event is kept or t
 | `zone1_sec`–`zone5_sec`     | INTEGER | Time in each HR zone (seconds); NULL if missing |
 | `power_zone1_sec`–`power_zone7_sec` | INTEGER | Time in each Coggan power zone (seconds); NULL unless a power meter recorded |
 
+### activity_match_decisions
+The athlete's answer to a planned-vs-completed pairing the matcher had to guess at
+([§15](#a-pairing-the-matcher-had-to-guess-at-is-a-question-not-a-fact)). Keyed by
+activity and sport rather than workout id, because workout rows are replaced on every
+revision and the athlete must not be asked again. Written by
+`CoachService.record_match_decision`; every adherence surface passes
+`db.get_rejected_matches()` into `analyze_adherence`.
+
+| Column            | Type       | Notes                                              |
+|-------------------|------------|----------------------------------------------------|
+| `activity_id`     | TEXT       | PK together with `sport_canonical`                 |
+| `sport_canonical` | TEXT       | The planned session's slot sport                   |
+| `accepted`        | INTEGER    | 0/1 — 0 = the pairing is discarded and the session reads not done |
+| `decided_at`      | TEXT       | UTC ISO                                            |
+
 ### athlete_metrics_cache
 | Column            | Type    | Notes                  |
 |-------------------|---------|------------------------|
@@ -1677,11 +1717,13 @@ through `cli.prompt.confirm(message, danger=…)` / `cli.prompt.choose(message, 
 default=…)` / `cli.prompt.ask_text(...)`. `JsonPrompt` writes one sentinel-framed
 request line (`\x1eTM-PROMPT {json}`, fields `v/id/type/message/default/danger/choices`)
 to stdout and blocks reading one JSON answer line (`{v,id,answer}` or `{v,id,cancelled}`)
-from stdin. A cancellation raises `PromptCancelled` — deliberately a `BaseException`
-(like `KeyboardInterrupt`) so the handlers' broad `except Exception` can't mistake an
-abort for a command error; `trainmate_cli.main`'s `__main__` guard catches it and prints
-`Cancelled.`. Garmin MFA (`garmin/client.py`) stays outside the broker: it's gated by
-`sys.stdin.isatty()` and raises `GarminAuthRequired` off a TTY, so it never hangs the bot.
+from stdin. A cancellation raises `PromptCancelled`, an ordinary `Exception`. It once
+subclassed `BaseException` so the handlers' broad `except Exception` nets could not
+mistake a deliberate abort for a command error; those nets are gone, a structural test
+fails on any `except Exception` enclosing a prompt call, and `run_once` catches it before
+its own error boundary — `main` prints `Cancelled.`. Garmin MFA (`garmin/client.py`)
+stays outside the broker: it's gated by `sys.stdin.isatty()` and raises
+`GarminAuthRequired` off a TTY, so it never hangs the bot.
 
 The broker is also where an answer is **journalled**, in `_record_answer` — one `info`
 `note` reading `<question> → yes|no`, with `d.answer` for querying. It goes here and not
@@ -1734,14 +1776,17 @@ Invoked as `python trainmate_cli.py [--llm-model MODEL] <command> [subcommand] [
 patchable singletons; the handler functions, named
 `run_<command>_<subcommand>()`, live in the `trainmate/cli/` package
 (one module per command family: `status`, `progress`, `goals`, `constraints`,
-`benchmarks`, `signal`, `learnings`, `plans`, `data`, `models`, `journal`, `bot` (hidden:
-`bot morning`/`route`/`constraints`/`goals`/`capture`, spawned by the Telegram bot —
+`benchmarks`, `signals`, `learnings`, `plans`, `data`, `settings`, `journal`, `bot`
+(hidden: `bot morning`/`route`/`constraints`/`goals`/`block`/`capture`, spawned by the
+Telegram bot —
 DESIGN_bot_simple_frontend.md; `candidates.py` holds the confirm loops that turn a
 note's extracted constraints and signals into rows, shared by `workout adapt -m` and
 `bot capture note` so both inboxes ask the same questions),
 plus the
-`workouts/` **package** — `parser`/`generate`/`edit`/`_helpers`; `selectors.py` holds the
-shared range grammar and `argparse_ext.py` the parser/help extensions). `help` is the one
+`workouts/` **package** — `parser`/`generate`/`edit`/`revisions`/`_helpers`;
+`selectors.py` holds the shared range grammar, `argparse_ext.py` the parser/help
+extensions, `render.py` the two voices ([§6](#6-singletons)) and `staleness.py` the
+changed-input wording). `help` is the one
 exception — it just introspects the parser tree (`_print_command_tree` in
 `trainmate_cli.py`), so it has no handler of its own.
 
@@ -1750,13 +1795,18 @@ command at its level *is* that command — `pl g` is `plan generate`, `constr ed
 `constraint edit` — so the "Short form" column below lists examples, not a closed
 set. An ambiguous prefix (`p` → `plan`/`progress`)
 is refused, naming the candidates. Only shorthands that are *not* prefixes
-(`lm`, `df`, `rb`, `sm`, `sa`, `use`) or that pick a winner among an
+(`lm`, `df`, `rb`, `sm`, `sa`, `san`, `use`) or that pick a winner among an
 ambiguous set (`s` → `status`, `workout a` → `adapt`, `workout p` → `push`,
 `signal l` → `list`, `data b` → `bootstrap`) stay registered as real aliases.
 `rm` deliberately gets no winner — `r` stays ambiguous rather than shortening the
 destructive command. Anything in the column that is *not* in those two registered
 sets is a prefix, and a prefix silently breaks the day a sibling with the same first
 letters lands; DESIGN_cli_noargs.md §d is the canonical authority on the distinction.
+
+**LLM commands share two flags** the table omits: `--show-llm-prompt-only` prints the
+prompt the command would send and exits before the call (`plan generate`, `workout
+generate`/`adapt`/`swap`, `data bootstrap`/`reflect`), and the root `--llm-model MODEL`
+pins the coaching model for one invocation ([§6](#6-singletons)).
 
 **Range filters** (DESIGN_cli_selectors.md): every command that filters by span takes the
 same four selectors — `-d/--date`, `-m/--mesocycle`, `-M/--macrocycle`, `-g/--goal` — over
@@ -1786,6 +1836,7 @@ single read-only view that is its whole state (`settings`), which acts bare inst
 | Command      | Subcommand   | Short form | Description                                                            |
 |--------------|--------------|----------|--------------------------------------------------------------------------|
 | `help`       | —            | —        | Print every command and sub-command with its one-line help, recursing through the whole sub-parser tree (unlike `--help`, which only shows one level) |
+| `shell`      | —            | —        | The REPL (`_repl` in `trainmate_cli.py`): reads command lines until EOF and runs each through `run_once`, so every line is its own journal run under one parent run |
 | `status`     | —            | `s`      | Show active goals, recent metrics, coach learnings. Also names the end of the scheduled workouts when it is near or just behind, with the exact command that extends it — printed outside the goal branch, so the "nothing is planned beyond it" case reaches the athlete who has no goal on record (DESIGN_runway_nudge.md §4) |
 | `goal`       | `add`        | `g a`    | Add objective (`TITLE DATE SPORT…` positional, `--desc`, `--date-type`)  |
 | `goal`       | `edit`       | `g e`    | Edit objective by ID. `--status archived` calls the goal off: it stands its upcoming sessions down and clears their Calendar events, keeping the plan, its versions and its feedback. `--status active` reinstates the goal and offers those sessions back, floored at today (DESIGN_backward_evaluation.md §14) |
@@ -1798,6 +1849,10 @@ single read-only view that is its whole state (`settings`), which acts bare inst
 | `constraint` | `list`       | `cons l` | List directives from the current mesocycle onward (`-a`/`--all`, `-v`, selectors `-d`/`-m`/`-M`/`-g`; default anchor: active mesocycle start, else show all) |
 | `constraint` | `show`       | `cons s` | Show a directive in detail (incl. plan-shaping status and whether a coach pass has honored it) |
 | `constraint` | `wipe`       | —        | Delete all constraints                                                  |
+| `benchmark`  | `record`     | `be rec` | Log a fitness-test result to the `benchmark_results` logbook: positional `SPORT` plus one anchor flag (`--ftp`, `--lthr`, `--threshold-pace`, `--css`, `--e1rm`, `--mas`), `-d/--date` (default today), `--note`, `--source` (`test` default). An implausible sport/anchor pair (`SPORT_ANCHORS`) warns and asks; `-y` skips that prompt ([§5](#benchmark_results)). `b` alone is ambiguous with `bot` |
+| `benchmark`  | `list`       | `be l`   | The logbook newest first, each row with its delta against the previous row of the same kind |
+| `benchmark`  | `rm`         | `be rm`  | Delete one logbook row by ID                                            |
+| `benchmark`  | `wipe`       | —        | Delete the whole logbook (hidden; `-y`)                                 |
 | `signal`     | `add`        | `sig a`  | Author daily signal(s) (positional `METRIC [TEXT…]` or `-l/--label`, `--value N`, `-d RANGE` — no `-m`/`-M`, a signal spans days not blocks; one tagged all-day event per day) |
 | `signal`     | `rm`         | `sig r`  | Remove signal(s) by positional ID(s) or metric, and/or selectors `-d`/`-m`/`-M`/`-g` (deletes calendar event + local row) |
 | `signal`     | `list`       | `sig l`  | List signals (positional `METRIC` or `--metric`, selectors `-d`/`-m`/`-M`/`-g`; default window `metrics_lookback_days`) |
@@ -1809,7 +1864,7 @@ single read-only view that is its whole state (`settings`), which acts bare inst
 | `learnings`  | `demote`     | —        | Accept a pending confidence downgrade by ID                            |
 | `learnings`  | `keep`       | —        | Dismiss + affirm a pending downgrade by ID                             |
 | `learnings`  | `wipe`       | —        | Delete all coach learnings                                             |
-| `plan`       | `generate`   | `pl g`   | Generate/reuse macrocycle+mesocycles (`-f` to force, `--fresh` for a clean slate that withholds the plan in place from the prompt, `--show-llm-context` to also print the planned-vs-actual review the prompt carries — off by default, DESIGN_output_verbosity.md §7). `-g/--goal [RANGE]` takes the shared range grammar: one ID plans that goal alone, bounded to its own span (opening the day after the goal before it); a range plans every upcoming goal it covers, in date order, one strategy call each — `-g ..2` is everything through goal 2 (DESIGN_cli_selectors.md §9) |
+| `plan`       | `generate`   | `pl g`   | Generate/reuse macrocycle+mesocycles (`-f` to force, `-y/--auto` to apply without the preview, `--fresh` for a clean slate that withholds the plan in place from the prompt, `--show-llm-context` to also print the planned-vs-actual review the prompt carries — off by default, DESIGN_output_verbosity.md §7). `-g/--goal [RANGE]` takes the shared range grammar: one ID plans that goal alone, bounded to its own span (opening the day after the goal before it); a range plans every upcoming goal it covers, in date order, one strategy call each — `-g ..2` is everything through goal 2 (DESIGN_cli_selectors.md §9) |
 | `plan`       | `show`       | `pl s`   | Show a periodization plan: strategy, snapshotted inputs (goals, constraints, threshold anchors), mesocycle timeline with each block's workout count/duration/load. Also flags any of those inputs that have changed since the plan was generated, with the test to judge it by and both routes out — `plan generate` or `plan keep` (DESIGN_plan_staleness.md §9); a superseded version is never flagged. Flags: `-g/--goal ID` (any status, not just active), `-M/--macrocycle ID` for a superseded version — each plan version IS a macrocycle, `-a/--all` for every goal that has a plan, `-w/--workouts` to list each mesocycle's sessions |
 | `plan`       | `keep`       | —        | Record the current profile/goals/thresholds against the active plan **without** regenerating it (`-g/--goal ID`), clearing the changed-input flag `plan show` raises. The dismiss half of staleness: same write as declining at the `plan generate` prompt, reachable without spending a strategy call (DESIGN_plan_staleness.md §9) |
 | `plan`       | `versions`   | `pl v`   | List a goal's kept plan versions — active + superseded — with IDs and dates (`-g/--goal ID`) |
@@ -1818,15 +1873,16 @@ single read-only view that is its whole state (`settings`), which acts bare inst
 | `plan`       | `rm`         | `pl rm`  | Delete plan for a goal ID. The old `pl d` alias is gone — `d` now prefixes `diff` |
 | `plan`       | `feedback`   | `pl f`   | Append a note about the plan to its append-only log — bare text is plan-level, `-m [ATOM]` files it to one block by name-infix / date / mesocycle ID (bare `-m` = the current block). Bare run lists what is pending, `--rm ID [-y]` deletes one, `--replan` regenerates straight away, `-g/--goal ID` targets another goal's plan. No LLM at capture; the next `plan generate` reads the whole log and must address every note (DESIGN_plan_feedback.md) |
 | `plan`       | `wipe`       | —        | Delete all plans                                                         |
-| `progress`   | `[SPORT ...]` | `pr`    | Show the progress timeline: measured load to date, plan-projected forward (CTL/ATL/TSB), weekly planned-vs-actual bars (`-w/--weeks N`, `--chart [PATH]` for a PNG; DESIGN_progress_timeline.md). `-z`/`--zones` (implied by naming a sport) adds one weekly time-in-zone table per sport — measured behind today, prescribed ahead of it (`--blocks` for block grain, `--power`/`--hr` to force the currency; DESIGN_intensity_distribution.md §9.6/§9.8). The sport argument scopes the **zone tables only**: CTL/ATL/TSB, the projection and the load table stay whole-athlete |
-| `workout`    | `list`       | `w l`    | Show planned workouts. Defaults to a 7-day window from today. Positional `TARGET…` (workout IDs and/or date selectors, e.g. `wo li 12 15 -v`) plus the shared selectors `-d`/`-m`/`-M`/`-g` and `-t/--type TYPE`, `--removed` (DESIGN_cli_selectors.md). Every listed session dated **today or earlier** also carries its adherence verdict — `[DONE]`/`[PARTIAL]`/`[MISSED]`/`[REST OK]`/`[REST BROKEN]`, or `[NOT YET]` for one still ahead today — and `-v` adds the matched activity and the mismatch behind a `[PARTIAL]`. Freshens Garmin over that past span unless `--no-pull` ([§5](#workout-state--three-orthogonal-axes-not-one-enum)). A listing whose range runs past the last scheduled session ends on one gray marker naming that — unconditional, a fact of the listing rather than a warning; an empty listing renders it alone (DESIGN_runway_nudge.md §4). |
+| `progress`   | `[SPORT ...]` | `pr`    | Show the progress timeline: measured load to date, plan-projected forward (CTL/ATL/TSB), weekly planned-vs-actual bars (`-w/--weeks N`, `--chart [PATH]` for a PNG, `--explain` for the TSB-lag note; DESIGN_progress_timeline.md). `-z`/`--zones` (implied by naming a sport) adds one weekly time-in-zone table per sport — measured behind today, prescribed ahead of it (`--blocks` for block grain, `--power`/`--hr` to force the currency; DESIGN_intensity_distribution.md §9.6/§9.8). The sport argument scopes the **zone tables only**: CTL/ATL/TSB, the projection and the load table stay whole-athlete |
+| `workout`    | `list`       | `w l`    | Show planned workouts. Defaults to a 7-day window from today. Positional `TARGET…` (workout IDs and/or date selectors, e.g. `wo li 12 15 -v`) plus the shared selectors `-d`/`-m`/`-M`/`-g` and `-t/--type TYPE`, `--removed`, `-l/--link` (each synced session's Calendar event link) (DESIGN_cli_selectors.md). Every listed session dated **today or earlier** also carries its adherence verdict — `[DONE]`/`[PARTIAL]`/`[MISSED]`/`[REST OK]`/`[REST BROKEN]`, or `[NOT YET]` for one still ahead today — and `-v` adds the matched activity and the mismatch behind a `[PARTIAL]`. Freshens Garmin over that past span unless `--no-pull` ([§5](#workout-state--three-orthogonal-axes-not-one-enum)). A listing whose range runs past the last scheduled session ends on one gray marker naming that — unconditional, a fact of the listing rather than a warning; an empty listing renders it alone (DESIGN_runway_nudge.md §4). |
 | `workout`    | `compare`    | `w c`    | Compare planned vs completed (`analyze_adherence()`): prints PLANNED/ACTUAL per day, flags misses (red), rest violations (red), unplanned high-load (yellow), then a discrepancy summary. Today's untrained sessions read `(not yet — still ahead today)` and are not misses (`pending_from`, [§10](#10-key-data-flows)). Same selectors as `workout list`; default 14-day lookback; a bare span (`-d 7d`) looks *back*; end capped at today. |
 | `workout`    | `generate`   | `w g`    | Generate workouts from the plan blocks covering the days generated (the dates pick the plan, not a goal — DESIGN_cli_selectors.md §8). No selector → from the day after the schedule stops (today once it has run out) for `config.workout_generation_span_days` (28 default), so a run adds days rather than rewriting covered ones; refused when the plan is already covered to its last day. Span flags (mutually exclusive, **both** ends of the resolved window are used, and a span never opens before today): `-g/--goal [ID]` = the goal's whole plan span; `-d`; `-m` = that block's own days; `-M` (which also settles which plan to follow where two cover the same days). Lists the proposed sessions the way `workout list` renders them and asks before writing; on a `y` it archives the span's existing workouts, leaves the days outside it alone, and pushes the new ones to Calendar immediately. `-f/-y` skips both prompts. |
+| `workout`    | `add`        | `w add`  | Schedule one session by hand, no LLM (`DATE SPORT TITLE` positional, `--desc`, `--duration`, `--rpe`, `--tss`, `--reason`). Replaces any same-sport session that day — every session with `--replace-day` — and names what it replaced on the new session's note ([§11](#11-terminology-plans-vs-workouts)). `w a` is `adapt`, so this one needs the full word |
 | `workout`    | `rm`         | `w rm`   | Soft-remove by ID (`ID REASON`, both positional): marks `removed`, marks the Calendar event deleted; kept in DB, hidden from list/compare, shown to coach as a cancellation. |
 | `workout`    | `restore`    | `w res`  | Bring a cancelled session back by ID: appends a copy of the revision its void ended, and the reconcile removes the `[Deleted]` mark. Unrelated to `workout rollback`, which undoes a whole change. |
 | `workout`    | `rollback`   | `w rb`   | Undo a workout change **and every change after it**, putting the sessions back the way they were the moment before it ran (`--batch N` per `workout batches`, default #1 the newest; `-y`). Any change qualifies, an adapt included. Leaves the active plan version alone — unlike `plan rollback` (DESIGN_workout_revisions.md §10). Unrelated to `workout restore`. |
 | `workout`    | `batches`    | `w b`    | List every command that wrote workouts, newest first: positional `#N`, when, kind, revision count, date span, plan version. A pass that appended nothing reads `(held)`. Every entry is undoable, including the newest — there is no separate unnumbered `live` row, because the change that wrote the plan in force is itself in the list (DESIGN_workout_revisions.md §10) |
-| `workout`    | `adapt`      | `w a`    | Run daily adaptation check (`-d/--date` one day: `YYYY-MM-DD`, `today`, `-1d`; `-m` athlete note — kept, since adapt takes no block selector; `-y` auto-apply). Draws the same end-of-schedule hint `status` does, and **refuses** outright when every block of the plan is behind today — there is nothing to adapt towards, and it used to close with a green all-clear over an empty calendar (DESIGN_runway_nudge.md §4) |
+| `workout`    | `adapt`      | `w a`    | Run daily adaptation check (`-d/--date` one day: `YYYY-MM-DD`, `today`, `-1d`; `-m` athlete note — kept, since adapt takes no block selector; `--lookback DAYS` overrides `metrics_lookback_days` for this run; `-y` auto-apply). Draws the same end-of-schedule hint `status` does, and **refuses** outright when every block of the plan is behind today — there is nothing to adapt towards, and it used to close with a green all-clear over an empty calendar (DESIGN_runway_nudge.md §4) |
 | `workout`    | `push`       | `w p`    | Sync planned workouts to Google Calendar. Defaults to today onward; pushes only unsynced unless `-f`/`--force` re-pushes already-synced ones. |
 | `workout`    | `swap`       | `w s`    | Swap two workouts by dates (`<date> <date>`) or IDs (`<id> <id>`), same kind on both sides, plus a mandatory positional `REASON`. Runs recovery checks (consecutive hard days, load spikes, mesocycle crossings), prompts on warnings unless `-f`; syncs unless `--no-sync`; the reason is folded into `modification_reason`. |
 | `workout`    | `wipe`       | —        | Delete all workouts                                                      |
@@ -1884,7 +1940,8 @@ The **front-end** (`static/index.html` + `static/app.js`) is organized into six
 top-level tabs, all lazy-loaded on first show:
 
 - **Dashboard** — status, recovery/load metrics, sync freshness, coach-memory summary,
-  objective and constraint listings, the active LLM (`model list`), and the strategy card
+  objective and constraint listings, the active LLM (`settings list coach-model`), and the
+  strategy card
   (philosophy, the goals/constraints snapshot the plan was generated from, the pending
   feedback log, the mesocycle timeline — a block's own notes appear in its details panel
   — and a "Plan versions & compare" disclosure whose
@@ -1969,46 +2026,53 @@ athletes sharing one store would silently pull one Garmin account's data. Two at
 share one set of guidelines only by pointing `science_dir:` at the same absolute path,
 never by default.
 
-Required fields:
+Keys — dotted names are nested blocks (`llm.api_key` is `llm:` → `api_key:`). Everything
+but the credentials is optional and falls back to the default shown:
 
 | Key                    | Type | Description                                                   |
 |------------------------|------|---------------------------------------------------------------|
-| `openrouter_api_key`   | str  | Also readable from `OPENROUTER_API_KEY` env var               |
+| `llm.api_key`          | str  | OpenRouter key; the `OPENROUTER_API_KEY` env var wins when set |
 | `llm.models`           | list | Models both model roles pick from, in display order; the first entry is the default until `settings set coach-model` picks another. Absent/empty → `google/gemini-3.5-flash` alone (DESIGN_model_selection.md §1) |
-| `google_calendar_id`   | str  | Target calendar ID                                            |
-| `garmin_email` / `garmin_password` | str | Garmin login; config.yaml only (kept out of the environment) |
-| `data_refresh_minutes` | int | Throttle window shared by Garmin pulls **and** Calendar-signal syncs; reads inside it reuse the cache. Top-level config key `refresh_minutes` (default 120) |
-| `garmin_mutable_days` / `garmin_backfill_prompt_days` / `garmin_initial_backfill_days` / `garmin_throttle_seconds` | — | Auto-ensure tuning (see [§10 Data Pull](#data-pull-data-pull-and-auto-ensure)) |
-| `service_account_file` | str  | Path to service account JSON (default:                        |
-|                        |      | `service_account.json`)                                       |
+| `google.calendar_id`   | str  | Target calendar ID                                            |
+| `garmin.email` / `garmin.password` | str | Garmin login; config.yaml only (kept out of the environment) |
+| `garmin.token_dir`     | str  | Garmin token store (default `.garminconnect` beside the config, or under `data_dir:`) |
+| `refresh_minutes`      | int | Throttle window shared by Garmin pulls **and** Calendar-signal syncs; reads inside it reuse the cache. Top-level, default 120; read as `config.data_refresh_minutes` |
+| `garmin.mutable_days` / `garmin.backfill_prompt_days` / `garmin.initial_backfill_days` / `garmin.throttle_seconds` | — | Auto-ensure tuning (defaults 3 / 30 / 90 / 0.2; see [§10 Data Pull](#data-pull-data-pull-and-auto-ensure)) |
+| `garmin.pmc_ctl_days` / `garmin.pmc_atl_days` | int | PMC time constants (42 / 7 — the supported configuration, [§12](#fitnessfatigueform-pmc-model)) |
+| `garmin.hr_zone_coverage_min` / `garmin.zone_min_activity_minutes` / `garmin.zone_coverage_display_min` / `garmin.zone_coverage_display_min_by_sport` | — | Load-model coverage gate (0.5), the too-short-to-judge cut-off (20 min) and the display coverage bars (0.8, per canonical sport) — [§12](#load-model-per-activity), DESIGN_intensity_distribution.md |
+| `google.service_account_file` | str | Path to service account JSON (default: `service_account.json`) |
 | `data_dir`             | str  | Directory every relative path key below resolves against, replacing the config file's directory as the base; itself config-file-relative. Absent → the config file's directory (the pre-`data_dir` rule) |
 | `database`             | str  | SQLite file this instance operates on; a relative value resolves against the config file's directory / `data_dir:` (default: `trainmate.db`) |
 | `science_dir`          | str  | Directory whose `*.md` files become the ATHLETE-PROVIDED science block in every coaching prompt (`coach/formatting.py:_load_science_guidelines`); a relative value resolves against the config file's directory (default: `science`). The app's own `trainmate/science/` is not configurable |
 | `logging.dir`          | str  | Root of the two operator log directories — `runs/` (the journal, read with `tm journal`) and `llm_exchanges/` (the full prompts). Relative to the config file's directory, like `database:` (default: `logs`). DESIGN_logging.md §6 |
 | `logging.level`        | str  | Lowest level that reaches the journal file: `debug`\|`info`\|`warn`\|`error` (default `info`). `debug` turns on the records for exceptions the app deliberately swallows on screen |
 | `logging.retain_days` / `logging.retain_exchange_days` | int | Days each directory keeps (default 90 each). The sweep runs at most once a UTC day, off the first command to finish; `tm journal prune` forces one |
-| `llm.router_model`     | str  | Cheaper model the bot's free-text router (`tm bot route`) and its capture extractions (`tm bot capture`) use; a role, not a `model list` entry. Absent → the active coaching model (DESIGN_bot_simple_frontend.md §5.4, §12.2) |
+| `llm.router_model`     | str  | Cheaper model the bot's free-text router (`tm bot route`) and its capture extractions (`tm bot capture`) use; a role, not a `settings list coach-model` entry. Absent → the active coaching model (DESIGN_bot_simple_frontend.md §5.4, §12.2) |
 | `telegram.ui`          | str  | Bot persona: `expert` (default) or `simple` — the companion mode (DESIGN_bot_simple_frontend.md §3) |
 | `telegram.operator_name` | str | What the companion calls the human who runs the CLI. "Coach" is already the app in the athlete's vocabulary, so the operator gets a word of their own; absent → "the person who set this up for you" (DESIGN_render_persona.md §5) |
 | `telegram.push.*`      | —    | Morning push (simple ui only): `enabled` (default true), `morning_time` (`08:00`), `morning_deadline` (`15:00`), `adapt_first` (default false → run `workout adapt -y` before rendering) |
-| `metrics_lookback_days`  | int  | Rolling window for adaptation (default: 15)                  |
-| `adapt_terminal_window_days` | int | How close to a block's end counts as its terminal window (default: 3). Gates what the coach **model** is told (`THIS BLOCK IS ENDING`); the CLI's end-of-schedule hint runs on the knob below. Under `coach:` |
-| `runway_warning_days`    | int  | How many days ahead the daily surfaces announce that the scheduled workouts run out — and how many days past the end they keep saying so before going quiet (default: 7). Under `coach:`, DESIGN_runway_nudge.md §7 |
-| `workout_generation_span_days` | int  | Default span length for `workout generate` (default: 28)     |
-| `minor_activity_load_threshold`    | float| Workload score below which an activity is "minor"            |
+| `telegram.bot_token` / `telegram.allowed_chat_ids` | — | The bot's token (or the `TELEGRAM_BOT_TOKEN` env var) and the numeric chat-id allowlist ([§2](#entry-points)) |
+| `telegram.command_timeout_seconds` / `telegram.prompt_timeout_seconds` / `telegram.wrap_width` | — | The silent-run watchdog (180), the idle-prompt cancel (300) and the chat wrap width (48) |
+| `web.host` / `web.port` / `web.debug` | — | Where the dashboard binds (`127.0.0.1` / 5000 / false) |
+| `coach.metrics_lookback_days` | int | Rolling window for adaptation (default: 15)                  |
+| `coach.adapt_terminal_window_days` | int | How close to a block's end counts as its terminal window (default: 3). Gates what the coach **model** is told (`THIS BLOCK IS ENDING`); the CLI's end-of-schedule hint runs on the knob below |
+| `coach.runway_warning_days` | int | How many days ahead the daily surfaces announce that the scheduled workouts run out — and how many days past the end they keep saying so before going quiet (default: 7). DESIGN_runway_nudge.md §7 |
+| `coach.workout_generation_span_days` | int | Default span length for `workout generate` (default: 28)     |
+| `coach.replan_displaced_load_pct` / `coach.replan_rest_span_days` | — | The two constraint-magnitude triggers behind the `constraint add`/`edit` replan proposal (defaults 50 % / 3 days; [§3](#coachservice)) |
+| `coach.minor_activity_load_threshold` | float| Workload score below which an activity is "minor"            |
 |                         |      | (default: 25). Controls rest-day violations and unplanned    |
 |                         |      | activity visibility (shown as gray/minor if below threshold,  |
 |                         |      | yellow/unplanned if above). Mismatch tolerance for planned   |
 |                         |      | workouts is dynamically computed from expected workload.     |
-| `rpe_divergence_ratio`  | float| sRPE-load ÷ measured-load above which a session is flagged   |
+| `coach.rpe_divergence_ratio` | float| sRPE-load ÷ measured-load above which a session is flagged   |
 |                         |      | to the coach as "felt harder than measured" (default: 1.5;   |
 |                         |      | set very high to disable)                                    |
 | `learning_confidence_thresholds` | dict | Distinct net supporting weeks to reach each confidence |
 |                         |      | level: `{moderate: 3, established: 5}` (defaults). Tentative ≥1 |
 |                         |      | and proposed-retirement ≤0 are fixed. Re-levels on recompute. |
-| `threshold_replan_pct`  | float| Relative drift (%) a physiological threshold may move from   |
+| `coach.threshold_replan_pct` | float| Relative drift (%) a physiological threshold may move from   |
 |                         |      | the plan-generation value before the plan is flagged stale   |
-|                         |      | (default: 5). Under `coach:`.                                |
+|                         |      | (default: 5).                                                |
 | `user_profile`          | dict | Athlete profile block (see below); no threshold required     |
 
 `user_profile` keys: `name`, `birth_year`, `gender`, `max_hr`, `weekly_target_hours`,
@@ -2181,8 +2245,8 @@ event-day TSB over the plan's own workouts — is a deferred Phase 2 follow-up.
    [§3](#3-coach-package-architecture)).
 5. Drops any proposal dated past the adaptation range end (the block firewall's write
    side) and any targeting an already-completed session, then returns
-   `(reason, proposed_workouts, new_constraints)` — caller decides whether to apply, and
-   confirms each extracted constraint candidate before persisting it.
+   a `RevisionProposal` ([§3](#coachservice)) — caller decides whether to apply, and
+   confirms each extracted constraint and signal candidate before persisting it.
 6. If applied: `workout_revision_apply()` opens one `adapt` change. A session the pass
    overrides with nothing becomes a **void** — this path used to `DELETE` the row, with no
    way back. A session it substitutes cross-sport becomes a void at the source plus a
@@ -2376,7 +2440,8 @@ fallback — methods are never blended or max-ed:
    recorded — `TSS/s = IF² × 100 / 3600` per zone (Z6/Z7 extrapolated, Z7 IF
    capped at 1.60).
 2. **hrTSS** (Friel 5-zone, `HR_ZONE_TSS_PER_SEC`) when HR-zone coverage
-   ≥ `HR_ZONE_COVERAGE_MIN` (0.5). Coverage = Σ(HR-zone secs)/duration; guards
+   ≥ `config.hr_zone_coverage_min` (`garmin.hr_zone_coverage_min`, default 0.5).
+   Coverage = Σ(HR-zone secs)/duration; guards
    against Garmin's HR zone-1 floor zeroing out low-intensity work (yoga, easy
    walks, lift-served skiing).
 3. **Session RPE** (Foster sRPE = `RPE × 10 × hours`) when the user entered an
@@ -2461,9 +2526,10 @@ all three; only the delivery differs.
 
 ### Science Guidelines Files
 - `trainmate/science/` — built-in: `benchmarks.md`, `periodization.md`,
-  `recovery_metrics.md`, `training_load.md`
-- `science/` — user-provided; empty by default; any `.md` files added here are
-  injected into every LLM prompt.
+  `recovery_metrics.md`, `training_load.md`, `zones.md`
+- `science/` (`science_dir`, gitignored) — user-provided; empty by default; any `.md`
+  files added here are injected into every LLM prompt. `science.samples/` holds
+  ready-made sets to copy from, one directory per training philosophy (see README).
 - The two are layered — built-in owns measurement and vocabulary, user owns
   prescription, and the citation only runs one way. Contract in
   [§3](#_load_science_guidelinesapp_science_dir-science_dir--str).
@@ -2593,7 +2659,12 @@ venv/bin/python -m unittest discover -s tests -p "test_*.py"
 |                                | 10h+ Z2, `—`/`!`/`+` as three distinct facts, the display        |
 |                                | coverage bar distinct from `hr_zone_coverage_min`, sport         |
 |                                | selection in config order, the orphan-week note, and the         |
-|                                | `hr_sparse` week the load table now marks                        |
+|                                | `hr_sparse` week the load table now marks; plus the formatting   |
+|                                | helpers and `render_progress`: sparkline/bar scaling, label      |
+|                                | truncation, weekly-row rendering (past/in-progress/future/       |
+|                                | uncovered), plan-gap vs per-objective projection, lapsed/no-plan/|
+|                                | still-warming banners, the part-week marker, and the 48-column   |
+|                                | width budget (via `visible_len`)                                 |
 | `tests/test_periodization.py`  | `plan_generate`, `workout_generate`, hash logic, |
 |                                | system-prompt building                                          |
 | `tests/test_garmin.py`         | Garmin transforms (load model), zone parsing, watermark/         |
@@ -2614,11 +2685,6 @@ venv/bin/python -m unittest discover -s tests -p "test_*.py"
 |                                | list`'s marker, the morning push's line/button/silence — plus the |
 |                                | §2.1 coverage invariant and a structural check that nothing       |
 |                                | outside `cli/runway.py` builds the wording again                  |
-| `tests/test_cli_progress.py`   | `cli/progress.py` formatting helpers + `render_progress`: sparkline/|
-|                                | bar scaling, label truncation, weekly-row rendering (past/in-      |
-|                                | progress/future/uncovered), plan-gap vs per-objective projection, |
-|                                | lapsed/no-plan/still-warming banners, the part-week marker,   |
-|                                | and the 48-column width budget (via `visible_len`)               |
 | `tests/test_pmc.py`            | `compute_pmc` (also): `seed=(0,0)` reproduces from-zero, split/re- |
 |                                | fold reproduces the unsplit series exactly, full-precision output |
 | `tests/test_web.py`            | (also) the read-only invariant (every route GET-only, mutating   |
@@ -2633,7 +2699,7 @@ venv/bin/python -m unittest discover -s tests -p "test_*.py"
 | `tests/test_clock.py`          | the athlete timezone: how a name resolves, that `today_date`     |
 |                                | reads the stored zone (two zones 26h apart never share a         |
 |                                | calendar date), that stored UTC instants render local, and the   |
-|                                | `timezone` command (DESIGN_user_timezone.md)                     |
+|                                | `settings set timezone` path (DESIGN_user_timezone.md)           |
 | `tests/test_journal.py`        | the run journal (DESIGN_logging.md §11): the writer (one line    |
 |                                | per record, the 8 KB bound, a traceback elided in the middle, an |
 |                                | unwritable directory that neither raises nor repeats itself),    |
@@ -2648,8 +2714,9 @@ venv/bin/python -m unittest discover -s tests -p "test_*.py"
 |                                | failing on any broad `except` whose body is a bare `pass`, one   |
 |                                | on any bare `input()` under `cli/` or `coach/`                   |
 
-Tests inject a fresh in-memory SQLite DB by assigning `test_db` to module-level
-`db` variables *before* importing the singletons. `openrouter_client` is mocked
+Tests get a fresh SQLite file per module (`tests.test_db_path`, below) and bind it
+through `tests.helpers.rebind_test_db` / `bind_test_db`, which set `runtime.db` and the
+remaining by-value sites in one call ([§6](#6-singletons)). `openrouter_client` is mocked
 via `@patch`.
 
 `tests/__init__.py` installs two suite-wide guards at import time, before any test
