@@ -949,6 +949,22 @@ class WorkoutsMixin:
 
     # ------------------------------------------------------------------ calendar
 
+    def claimed_calendar_event_ids(self) -> Set[str]:
+        """Every Calendar event a lineage still owns.
+
+        The state table is the ownership record: the reconcile clears a row when it tears
+        an event down, so a row that is still there means the event is still claimed. Read
+        here rather than off the live rows because a void that keeps its event is not
+        always its slot's live row — a marker written and then covered would otherwise
+        read as an orphan (DESIGN_plan_change_continuity.md §5.2/§5.6)."""
+        with self._get_connection() as conn:
+            return {
+                row["google_event_id"] for row in conn.execute(
+                    "SELECT google_event_id FROM workout_calendar_state "
+                    "WHERE google_event_id IS NOT NULL"
+                )
+            }
+
     def get_calendar_state(self, lineage_id: int) -> Optional[Dict[str, Any]]:
         with self._get_connection() as conn:
             row = conn.execute(

@@ -11,6 +11,7 @@ from trainmate.util import (
     format_labeled_block, today_str as _today_str, today_date as _today_date, days_between,
     fmt_date, fmt_span, fmt_timestamp, notice, keep_whole, warn,
 )
+from trainmate import settings
 from trainmate.cli import staleness
 from trainmate.cli.candidates import confirm_new_constraints, confirm_new_signals
 from trainmate.cli.common import (
@@ -162,13 +163,21 @@ def _confirm_regeneration(span_start: str, span_end: str) -> bool:
 
     manual = sum(1 for w in live if w.get('source') == 'manual')
     hand_edited = f", {manual} added by hand" if manual else ""
+    days = settings.commitment_days()
+    # The coach has to account for the near days one by one, so a rewrite of them is not
+    # the blanket archive the rest of the span is (DESIGN_plan_change_continuity.md §4).
+    committed = (
+        f" The next {days} day(s) are yours: the coach must answer for each session "
+        f"standing in them, and you see what it did before anything is written."
+        if days else ""
+    )
     return runtime.prompt.confirm(
         wrap_text(
             f"You already have {len(live)} workout(s) planned in this span "
             f"({fmt_date(live[0]['date'])} → {fmt_date(live[-1]['date'])}{hand_edited}). "
             f"Regenerating rebuilds {fmt_date(span_start)} → {fmt_date(span_end)} at the "
-            f"cost of one LLM call, and archives all of them if you accept the result; "
-            f"{cmd('workout rollback')} restores them. Regenerate?"
+            f"cost of one LLM call, and archives them if you accept the result; "
+            f"{cmd('workout rollback')} restores them.{committed} Regenerate?"
         ),
         danger=True,
     )

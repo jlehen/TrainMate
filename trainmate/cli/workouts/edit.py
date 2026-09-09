@@ -225,15 +225,12 @@ def run_workout_prune_calendar(args: argparse.Namespace) -> None:
         notice(f"Error reading Google Calendar: {e}", red)
         sys.exit(1)
 
-    # Every id any row still claims, removed rows included: a soft-removed workout
-    # keeps its "[Deleted]" event on purpose, and the window must not orphan it.
-    # Read *after* the calendar, so a workout pushed mid-command lands in `known`
-    # rather than in a stale event list — the race then errs towards keeping.
-    known = {
-        w['google_event_id']
-        for w in runtime.db.get_workouts(include_removed=True)
-        if w.get('google_event_id')
-    }
+    # Every id a lineage still claims — the ownership record, so a removal that keeps
+    # its event on purpose ("[Deleted]", "[Cancelled]") is never read as an orphan, even
+    # when another session has since taken its slot. Read *after* the calendar, so a
+    # workout pushed mid-command lands in `known` rather than in a stale event list —
+    # the race then errs towards keeping.
+    known = runtime.db.claimed_calendar_event_ids()
 
     orphans = []
     for event in events:
