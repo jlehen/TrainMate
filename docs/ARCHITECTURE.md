@@ -315,9 +315,11 @@ classes themselves.
 |                      |                      | (inbound — `sync_calendar_signals`, see §13).    |
 | `calendar_reconcile.py` | —                 | The pass that makes Calendar agree with the      |
 |                      |                      | workouts log after a change commits: per lineage, |
-|                      |                      | push, retitle `[Deleted]`, or tear the event down |
-|                      |                      | (DESIGN_workout_revisions.md §8). Scheduled by    |
-|                      |                      | the change handle, attached in `runtime`, so no   |
+|                      |                      | push, retitle `[Deleted]`/`[Cancelled]`, or tear  |
+|                      |                      | the event down (DESIGN_workout_revisions.md §8).  |
+|                      |                      | `leaves_trace` is which removals keep their event |
+|                      |                      | (DESIGN_plan_change_continuity.md §5.2). Scheduled|
+|                      |                      | by the change handle, attached in `runtime`, so no|
 |                      |                      | command carries Calendar code.                    |
 | `calendar_lineage.py` | —                   | Renders a session's revision history as the      |
 |                      |                      | `History` block of its Calendar event: every      |
@@ -464,6 +466,7 @@ flow for each lives in [§10](#10-key-data-flows).
 | Plan version comparison / display | `trainmate/plan_diff.py` (comparison + snapshot parsing), `cli/plans.py` (text rendering), `/api/plan/diff` in `trainmate_web.py`, `loadPlanDiff()`/`render*` in `static/app.js` |
 | Plan feedback (the athlete's notes on the plan) | `db/periodization.py` (`add_/list_/get_/rm_plan_feedback` over the `plan_feedback` table), `cli/plans.py:run_plan_feedback` + `cli/selectors.py:resolve_meso_atom` (the `-m` atom), `coach/service/planning.py` (the regen gate disjunct + prompt assembly), `coach/engine/planning.py` (the prompt section), DESIGN_plan_feedback.md |
 | Workout generation span          | `coach/service/workouts.py:workout_generate`, `cli/workouts/generate.py:_resolve_span`, `cli/workouts/parser.py` (flag parsing), `config.workout_generation_span_days` |
+| Commitment window                | `settings.commitment_days`, `coach/service/workouts.py:_commitment_window`/`_standing_block`/`_resolve_standing`, `coach/formatting.py:format_standing_workouts`, `calendar_reconcile.py:leaves_trace`, `workout_changes.commitment_end` |
 | Telling the athlete a plan-shaping input changed since the plan was built | `config.py` (`plan_profile`/`changed_plan_profile_fields`/`plan_config_hash` — the partition and the fields that moved), `coach/service/prompt.py:config_changed` (the judgment, both axes), **`cli/staleness.py`** (canonical for everything the athlete sees: the reason, the §2 test said out loud, the re-stamp, and the four surfaces' shared wording), and the surfaces that draw it: `cli/plans.py` (`plan show` reports, `plan keep` dismisses, `plan generate` offers), `cli/workouts/generate.py`, `cli/status.py` (a pointer to `plan show`, nothing more), `trainmate_web.py` (a read-only banner off `plan_config_hash()`, deliberately not through the engine — §8). Built in **one** place for the same reason the runway nudge is: three call sites each phrasing a two-sentence explanation is how they drift (DESIGN_plan_staleness.md §9) |
 | Telling the athlete the schedule is running out | `progression.py` (`coverage_end`, `runway` — the pure detector and its four kinds), `cli/runway.py` (the row fetch, every wording, the morning-push button), and the four surfaces that draw it: `cli/workouts/generate.py` (`workout adapt`'s hint and refusal, `workout list`'s marker), `cli/status.py`, `cli/bot.py:run_bot_morning`, `config.runway_warning_days`, DESIGN_runway_nudge.md. The wording is built in **one** place on purpose — the hint used to live on `workout adapt` alone, which is how `status` came to answer differently on the same morning (§3 of that doc) |
 | Generation covering every date of its span | `coach/engine/workouts.py` (the TASK sentence), `coach/service/workouts.py:_fill_coverage_gaps` (the deterministic backstop, over the same `_rest_workout` factory the rest-window pre-pass uses), DESIGN_runway_nudge.md §2.1. The invariant is what lets the end of the schedule be read straight off the rows, with no margin |
@@ -1228,6 +1231,8 @@ nothing, because an adapt that looked at the metrics and held is a real event.
 | `kind`          | TEXT       | `generate` · `adapt` · `swap` · `add` · `rm` · `restore` · `rollback` · `stand-down` · `reinstate`. Fixed at write time; one invocation has exactly one kind. |
 | `summary`       | TEXT       | The batch rationale — what `adaptation_summary` used to copy onto every row. |
 | `macrocycle_id` | INTEGER    | The plan version in force when this ran: context for `workout batches`, distinct from the per-row tag. |
+| `note`          | TEXT       | The coach's one line to the athlete about this change, for the morning push. NULL on a change with nothing they would notice — which is most of them (DESIGN_plan_change_continuity.md §6.3). |
+| `commitment_end`| TEXT       | Last day of the commitment window in force when this ran, so a removal is judged by the window it was written under rather than by the one standing when the Calendar sync happens to run (§5.2). |
 
 ### workout_calendar_state
 
@@ -1292,15 +1297,20 @@ no precedence rule — the kind was recorded when the change ran:
   - **Who keeps the Calendar true.** Every workout change ends with one **reconcile pass**
     over the lineages it touched, after commit (`trainmate/calendar_reconcile.py`). The
     change handle schedules it, so the only way to write workouts already schedules the
-    reconcile, and no command carries Calendar code. Per lineage, keyed on its newest
-    *live* revision: a live non-void whose signature differs is pushed; a live void from
-    `rm`/`stand-down` keeps its event, retitled `[Deleted]`; any other live void, or a
-    lineage no longer live anywhere, has its event deleted and its state row dropped.
+    reconcile, and no command carries Calendar code. Per lineage, keyed on its **newest
+    revision**, live in its slot or not (`get_lineage_head`): a session that still owns
+    its slot and whose signature differs is pushed; one that no longer owns it was
+    superseded, and its event goes. A void is decided by `leaves_trace`
+    (DESIGN_plan_change_continuity.md §5.2) — the athlete's own removal, a session they
+    added, or one removed inside the commitment window the change ran under keeps its
+    event, retitled, and gets one if it never had one; every other void's event is
+    deleted and its state row dropped. Reading the lineage rather than the slot is what
+    lets a marker written and then covered in the same run survive the run that wrote it.
   - **What the event says.** Title tags first (`[Done]`/`[Manual]`/`[Adapted]`/
-    `[Deleted]`), then the body: the current load line, the current description, its
-    `Reason:`, the intensity target, the **`History` block** — every earlier revision of
-    the lineage, newest first, each with its date, load, target, reason and body
-    (`calendar_lineage.py`, DESIGN_calendar_lineage.md) — and last the
+    `[Deleted]`/`[Cancelled]`), then the body: the current load line, the current
+    description, its `Reason:`, the intensity target, the **`History` block** — every
+    earlier revision of the lineage, newest first, each with its date, load, target,
+    reason and body (`calendar_lineage.py`, DESIGN_calendar_lineage.md) — and last the
     `Planned: … · Last adapted: … · Adapted ×N` lifecycle line over the goal/macro/meso/
     workout ids. A session that has never been revised has no history block and renders
     exactly as before.
@@ -1442,10 +1452,14 @@ key/value store, so the next single-value preference needs no schema change.
 Untouched by every `wipe` (a data wipe is about training history). Every athlete-facing
 key is one entry in the `trainmate/settings.py` registry, written only by `settings set`
 (DESIGN_settings.md): `llm_model` and `router_llm_model`, the coaching and routing model
-identifiers; `timezone`, the IANA zone every date is computed in; `push_enabled`,
-`push_morning_time`, `push_morning_deadline` and `push_adapt_first`, the morning-push
-window and its switches. `push_morning_last` is the exception — an internal
-idempotency marker, not a preference (`DESIGN_bot_simple_frontend.md` §4.3).
+identifiers; `timezone`, the IANA zone every date is computed in;
+`workout_commitment_days` (`commitment-days`), how many days from today the athlete is
+treated as already committed to; `push_enabled`, `push_morning_time`,
+`push_morning_deadline` and `push_adapt_first`, the morning-push window and its switches.
+Two internal markers are the exception, not preferences: `push_morning_last`, the
+per-day idempotency stamp (`DESIGN_bot_simple_frontend.md` §4.3), and `push_note_last`,
+the id of the last change whose line to the athlete the push delivered
+(DESIGN_plan_change_continuity.md §6.4).
 
 | Column       | Type    | Notes                                              |
 |--------------|---------|----------------------------------------------------|
@@ -1876,8 +1890,8 @@ single read-only view that is its whole state (`settings`), which acts bare inst
 | `progress`   | `[SPORT ...]` | `pr`    | Show the progress timeline: measured load to date, plan-projected forward (CTL/ATL/TSB), weekly planned-vs-actual bars (`-w/--weeks N`, `--chart [PATH]` for a PNG, `--explain` for the TSB-lag note; DESIGN_progress_timeline.md). `-z`/`--zones` (implied by naming a sport) adds one weekly time-in-zone table per sport — measured behind today, prescribed ahead of it (`--blocks` for block grain, `--power`/`--hr` to force the currency; DESIGN_intensity_distribution.md §9.6/§9.8). The sport argument scopes the **zone tables only**: CTL/ATL/TSB, the projection and the load table stay whole-athlete |
 | `workout`    | `list`       | `w l`    | Show planned workouts. Defaults to a 7-day window from today. Positional `TARGET…` (workout IDs and/or date selectors, e.g. `wo li 12 15 -v`) plus the shared selectors `-d`/`-m`/`-M`/`-g` and `-t/--type TYPE`, `--removed`, `-l/--link` (each synced session's Calendar event link) (DESIGN_cli_selectors.md). Every listed session dated **today or earlier** also carries its adherence verdict — `[DONE]`/`[PARTIAL]`/`[MISSED]`/`[REST OK]`/`[REST BROKEN]`, or `[NOT YET]` for one still ahead today — and `-v` adds the matched activity and the mismatch behind a `[PARTIAL]`. Freshens Garmin over that past span unless `--no-pull` ([§5](#workout-state--three-orthogonal-axes-not-one-enum)). A listing whose range runs past the last scheduled session ends on one gray marker naming that — unconditional, a fact of the listing rather than a warning; an empty listing renders it alone (DESIGN_runway_nudge.md §4). |
 | `workout`    | `compare`    | `w c`    | Compare planned vs completed (`analyze_adherence()`): prints PLANNED/ACTUAL per day, flags misses (red), rest violations (red), unplanned high-load (yellow), then a discrepancy summary. Today's untrained sessions read `(not yet — still ahead today)` and are not misses (`pending_from`, [§10](#10-key-data-flows)). Same selectors as `workout list`; default 14-day lookback; a bare span (`-d 7d`) looks *back*; end capped at today. |
-| `workout`    | `generate`   | `w g`    | Generate workouts from the plan blocks covering the days generated (the dates pick the plan, not a goal — DESIGN_cli_selectors.md §8). No selector → from the day after the schedule stops (today once it has run out) for `config.workout_generation_span_days` (28 default), so a run adds days rather than rewriting covered ones; refused when the plan is already covered to its last day. Span flags (mutually exclusive, **both** ends of the resolved window are used, and a span never opens before today): `-g/--goal [ID]` = the goal's whole plan span; `-d`; `-m` = that block's own days; `-M` (which also settles which plan to follow where two cover the same days). Lists the proposed sessions the way `workout list` renders them and asks before writing; on a `y` it archives the span's existing workouts, leaves the days outside it alone, and pushes the new ones to Calendar immediately. `-f/-y` skips both prompts. |
-| `workout`    | `add`        | `w add`  | Schedule one session by hand, no LLM (`DATE SPORT TITLE` positional, `--desc`, `--duration`, `--rpe`, `--tss`, `--reason`). Replaces any same-sport session that day — every session with `--replace-day` — and names what it replaced on the new session's note ([§11](#11-terminology-plans-vs-workouts)). `w a` is `adapt`, so this one needs the full word |
+| `workout`    | `generate`   | `w g`    | Generate workouts from the plan blocks covering the days generated (the dates pick the plan, not a goal — DESIGN_cli_selectors.md §8). No selector → from the day after the schedule stops (today once it has run out) for `config.workout_generation_span_days` (28 default), so a run adds days rather than rewriting covered ones; refused when the plan is already covered to its last day. Span flags (mutually exclusive, **both** ends of the resolved window are used, and a span never opens before today): `-g/--goal [ID]` = the goal's whole plan span; `-d`; `-m` = that block's own days; `-M` (which also settles which plan to follow where two cover the same days). Lists the proposed sessions the way `workout list` renders them and asks before writing; on a `y` it archives the span's existing workouts, leaves the days outside it alone, and pushes the new ones to Calendar immediately. `-f/-y` skips both prompts, but the report of what changed for the sessions inside the commitment window still prints (DESIGN_plan_change_continuity.md §4.4). |
+| `workout`    | `add`        | `w add`  | Schedule one session by hand, no LLM (`DATE SPORT TITLE` positional, `--desc`, `--duration`, `--rpe`, `--tss`, `--reason`). Replaces any same-sport session that day — every session with `--replace-day` — and names what it replaced on the new session's note ([§11](#11-terminology-plans-vs-workouts)). Inside the commitment window the replaced session keeps its Calendar event, marked `[Deleted]` — the athlete's own hand (DESIGN_plan_change_continuity.md §5.1/§5.2). `w a` is `adapt`, so this one needs the full word |
 | `workout`    | `rm`         | `w rm`   | Soft-remove by ID (`ID REASON`, both positional): marks `removed`, marks the Calendar event deleted; kept in DB, hidden from list/compare, shown to coach as a cancellation. |
 | `workout`    | `restore`    | `w res`  | Bring a cancelled session back by ID: appends a copy of the revision its void ended, and the reconcile removes the `[Deleted]` mark. Unrelated to `workout rollback`, which undoes a whole change. |
 | `workout`    | `rollback`   | `w rb`   | Undo a workout change **and every change after it**, putting the sessions back the way they were the moment before it ran (`--batch N` per `workout batches`, default #1 the newest; `-y`). Any change qualifies, an adapt included. Leaves the active plan version alone — unlike `plan rollback` (DESIGN_workout_revisions.md §10). Unrelated to `workout restore`. |
@@ -2058,6 +2072,7 @@ but the credentials is optional and falls back to the default shown:
 | `coach.adapt_terminal_window_days` | int | How close to a block's end counts as its terminal window (default: 3). Gates what the coach **model** is told (`THIS BLOCK IS ENDING`); the CLI's end-of-schedule hint runs on the knob below |
 | `coach.runway_warning_days` | int | How many days ahead the daily surfaces announce that the scheduled workouts run out — and how many days past the end they keep saying so before going quiet (default: 7). DESIGN_runway_nudge.md §7 |
 | `coach.workout_generation_span_days` | int | Default span length for `workout generate` (default: 28)     |
+| `coach.workout_commitment_days` | int | Days from today the athlete is treated as already committed to: the sessions standing there reach the `workout generate` prompt to be answered for one by one, and a removal there keeps its Calendar event, marked (default: 7; 0 disables both). Also a setting (`settings set commitment-days N`). DESIGN_plan_change_continuity.md §4.1 |
 | `coach.replan_displaced_load_pct` / `coach.replan_rest_span_days` | — | The two constraint-magnitude triggers behind the `constraint add`/`edit` replan proposal (defaults 50 % / 3 days; [§3](#coachservice)) |
 | `coach.minor_activity_load_threshold` | float| Workload score below which an activity is "minor"            |
 |                         |      | (default: 25). Controls rest-day violations and unplanned    |
@@ -2179,23 +2194,51 @@ event-day TSB over the plan's own workouts — is a deferred Phase 2 follow-up.
    is emitted when today falls outside every block, when `gen_start` is on/before the block's
    first day (generate is writing the whole block), or when nothing is banked — the prompt is
    then byte-identical to before.
+3c. **The commitment window** (`commitment-days`, default 7, DESIGN_plan_change_continuity.md
+   §4). The sessions already standing in the span that the athlete has read — today
+   through `today + N − 1` — plus every session they added by hand anywhere in the span,
+   reach the prompt as "SESSIONS ALREADY STANDING", each tagged `[COMMITTED]`,
+   `[BENCHMARK: …]`, `[ADDED BY THE ATHLETE]` or `[REST DAY]`, with what it was first
+   prescribed as when an adaptation has eased it. Both bounds matter: a bare run extends
+   into empty days and sees an empty block, and a forward-selected run must not be asked
+   about days it cannot write. The coach also gets the constraints that ended earlier in
+   the current block, marked past — they are why a week in the block's record went quiet
+   (§6.1).
 4. Calls `CoachEngine._workout_generate_logic(num_days=...)` → LLM →
-   `{reasoning, workouts[]}`. **Read-only** w.r.t. coach learnings (see
+   `{reasoning, athlete_note?, workouts[]}`. **Read-only** w.r.t. coach learnings (see
    [§3](#3-coach-package-architecture)).
+4b. `_resolve_standing` maps the answers onto that block: `keep` becomes the session it
+   names, `drop` becomes a rest day replacing it, a full entry on a rest-only date
+   replaces the rest day whether or not the coach said so, and a standing session no
+   answer mentions is kept. What an entry takes the place of travels on it as
+   `replaces_slot`/`replaces_lineage`. A `replaces` is refused — with a notice, both
+   sessions left standing — when its destination is outside the span, its source is not
+   in the block, its target is claimed twice, or its destination is occupied by a session
+   that stands (§4.5). The deterministic passes run after: a `rest` constraint's row
+   continues the first standing session on the date and voids any other under the
+   constraint's own title (§5.5).
 5. `workout_generate` returns the sessions as a `GenerateProposal` — nothing written yet.
-   The CLI prints them one per line through the *same* `workout_line` renderer as
-   `workout list` (which drops the `ID:` column when there is no row yet), so the plan
-   being accepted reads exactly like the plan that will be listed afterwards, then asks.
-   Declining leaves the live plan untouched; `-f/-y` accepts without asking.
-6. On a `y`, `workout_generate_apply(proposal)` opens one `generate` change. Every day
-   from the generation start that the new plan does not fill gets a **void** revision;
-   every day it does fill gets a revision tagged with the `macrocycle_id` the proposal
-   carries — unless the prescription is identical to what is already live, in which case
-   nothing is written and the day is left alone. The voids go first, so a session the plan
-   drops is ended before anything else can take its slot. Calendar follows from the change
-   handle's reconcile pass, not from the command. A session the athlete added by hand that
-   the plan replaced is named, with the change id to undo it. Undoable via
-   `workout rollback`, or `plan rollback` to step the strategy back with it
+   It carries the voids this run will make, with their reasons, and a `StandingLine` per
+   session the athlete was already told about, computed from what apply *will* write
+   rather than from what the coach answered: the no-op rule silently suppresses a
+   wording-only revision, and the deterministic passes remove days no answer mentions.
+   The CLI prints that report, then the sessions one per line through the *same*
+   `workout_line` renderer as `workout list` (which drops the `ID:` column when there is
+   no row yet), so the plan being accepted reads exactly like the plan that will be listed
+   afterwards, then asks. Declining leaves the live plan untouched; `-f/-y` accepts
+   without asking but still prints the report.
+6. On a `y`, `workout_generate_apply(proposal)` opens one `generate` change, stamped with
+   the coach's line to the athlete (`note`) and the window in force (`commitment_end`).
+   The proposal's voids go first, so a session the plan drops is ended before anything
+   else can take its slot — and so a session the athlete added is marked rather than
+   erased. Then every day the plan fills gets a revision tagged with the `macrocycle_id`
+   the proposal carries, its `change_reason` in the row's `reason` column, and the lineage
+   of the session it replaces when it replaces one — unless the prescription is identical
+   to what is already live, in which case nothing is written and the day is left alone. A
+   day the plan KEEPS is spared both. Calendar follows from the change handle's reconcile
+   pass, not from the command. A session the athlete added by hand that the plan removed
+   is named, with the change id to undo it. Undoable via `workout rollback`, or
+   `plan rollback` to step the strategy back with it
    (see [§3](#3-coach-package-architecture)).
 
 ### Daily Adaptation (`workout adapt`)

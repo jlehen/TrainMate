@@ -436,6 +436,7 @@ same command works from Telegram, which is the point: the phone has no editor.
 ./tm settings set coach-model 2           # switch the LLM behind the coach
 ./tm settings set timezone Europe/Paris   # what "today" means
 ./tm settings set morning-time 07:00      # when the bot opens your day
+./tm settings set commitment-days 7       # how far ahead the week is settled
 ./tm settings reset morning-time          # back to what config.yaml says
 ```
 
@@ -591,7 +592,7 @@ by hand. Adaptation treats a hand-added session as deliberate intent and
 rebalances around it, though it can still ease one if your recovery demands it.
 Only completed sessions are locked history.
 
-Two things to know when you regenerate:
+Three things to know when you regenerate:
 
 - **A regen is not a cold start.** The new plan is fed your previous strategy, a
   planned-versus-actual review of the blocks you already trained, and your coach
@@ -606,6 +607,16 @@ Two things to know when you regenerate:
   the coach's proposal in front of you. `-f` skips both for unattended runs. So
   make strategic changes first (constraint, `plan generate`, `workout
   generate`), then layer manual tweaks on top, not the other way around.
+- **The next week does not move under the athlete's feet.** The days they have
+  already read — the next 7 by default, `settings set commitment-days N` — are
+  not rewritten blind. The coach is shown every session standing there, plus
+  every hand-added session anywhere in the span, and has to account for each
+  one: keep it, revise it, move it or drop it, each with a sentence written for
+  the athlete. A session it does not mention is kept. `workout generate` prints
+  what it will do to each of them before you accept, and prints that report
+  under `-f` too. A session it removes in there keeps its Calendar event,
+  marked with the reason, rather than vanishing overnight. Past the window, a
+  rebuild is a rebuild.
 
 ## Choosing a model
 

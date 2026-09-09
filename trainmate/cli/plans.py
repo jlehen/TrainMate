@@ -1029,8 +1029,8 @@ def run_plan_rollback(args: argparse.Namespace) -> None:
         f"(was {result['from']['id']})."
     ))
     print(
-        f"Restored {result['restored_workouts']} workout(s) and archived "
-        f"{result['archived_workouts']} from the superseded plan; Google Calendar updated."
+        f"Restored {result['restored_workouts']} workout(s) from the superseded plan; "
+        "Google Calendar updated."
     )
     report_unhonored(result['unhonored'])
     print(green(f"Run {cmd('plan show')} to review the restored strategy."))
