@@ -85,9 +85,10 @@ class Config:
 
     @property
     def llm_models(self) -> list[str]:
-        """The OpenRouter models this install may use, in `model list` display order
-        (DESIGN_model_selection.md §1). Entries are either a bare identifier or a
-        `model:` mapping, so a list can carry per-entry keys later without a reformat.
+        """The OpenRouter models this install may use, in `settings list coach-model`
+        display order (DESIGN_model_selection.md §1). Entries are either a bare
+        identifier or a `model:` mapping, so a list can carry per-entry keys later
+        without a reformat.
         An absent/empty `llm.models` yields the built-in default alone, so a bare
         config still runs."""
         models = []
